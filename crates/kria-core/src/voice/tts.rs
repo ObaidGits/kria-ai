@@ -127,12 +127,15 @@ impl TextToSpeech {
                     &output_path.to_string_lossy(),
                     // Slightly faster tempo (0.95×) sounds more natural than the
                     // piper default (1.0×) for conversational responses.
-                    "--length-scale", "0.95",
+                    "--length-scale",
+                    "0.95",
                     // Increased generator noise adds natural pitch micro-variation.
-                    "--noise-scale", "0.8",
+                    "--noise-scale",
+                    "0.8",
                     // Reduced phoneme-duration noise keeps rhythm stable while
                     // still avoiding the robotic fixed-cadence feel.
-                    "--noise-w", "0.6",
+                    "--noise-w",
+                    "0.6",
                 ])
                 .stdin(std::process::Stdio::piped())
                 .spawn()?;

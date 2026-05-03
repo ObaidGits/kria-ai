@@ -106,9 +106,7 @@ where
     F: Fn(DownloadProgress) + Send + Sync,
 {
     let asset_name = platform_asset_name()?;
-    let url = format!(
-        "https://github.com/{LLAMA_CPP_REPO}/releases/latest/download/{asset_name}"
-    );
+    let url = format!("https://github.com/{LLAMA_CPP_REPO}/releases/latest/download/{asset_name}");
 
     let bin_dir = os::ensure_bin_dir()?;
     let client = DownloadClient::new(DownloadClientConfig::default())?;
@@ -151,7 +149,10 @@ fn platform_asset_name() -> anyhow::Result<String> {
 /// Extract `llama-server` binary from a downloaded archive.
 ///
 /// Uses CLI tools (`tar`, `unzip`) for extraction — avoids extra crate deps.
-fn extract_llama_server(archive_path: &std::path::Path, dest_dir: &std::path::Path) -> anyhow::Result<PathBuf> {
+fn extract_llama_server(
+    archive_path: &std::path::Path,
+    dest_dir: &std::path::Path,
+) -> anyhow::Result<PathBuf> {
     let archive_name = archive_path
         .file_name()
         .unwrap_or_default()

@@ -50,7 +50,9 @@ fn classify_tier_high() {
 fn tier_from_str_roundtrip() {
     use kria_core::platform::detect::HardwareTier;
     for name in &["lite", "standard", "performance", "high"] {
-        let tier = name.parse::<HardwareTier>().unwrap_or(HardwareTier::Standard);
+        let tier = name
+            .parse::<HardwareTier>()
+            .unwrap_or(HardwareTier::Standard);
         assert_eq!(tier.as_str(), *name);
     }
 }

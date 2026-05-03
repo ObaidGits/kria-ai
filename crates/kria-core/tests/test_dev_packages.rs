@@ -95,13 +95,21 @@ async fn functional_sh04_execute_bash_echo() {
     let result = handler
         .execute(serde_json::json!({ "command": "echo $HOME", "timeout": 10 }))
         .await;
-    assert!(result.success, "execute_bash echo $HOME should succeed: {:?}", result.error);
-    let output = result.data["output"].as_str()
+    assert!(
+        result.success,
+        "execute_bash echo $HOME should succeed: {:?}",
+        result.error
+    );
+    let output = result.data["output"]
+        .as_str()
         .or(result.data["stdout"].as_str())
         .unwrap_or("")
         .trim()
         .to_owned();
-    assert!(!output.is_empty(), "echo $HOME must produce non-empty output");
+    assert!(
+        !output.is_empty(),
+        "echo $HOME must produce non-empty output"
+    );
 }
 
 #[tokio::test]
@@ -112,13 +120,21 @@ async fn functional_sh02_execute_python_print() {
     let result = handler
         .execute(serde_json::json!({ "code": "print(2 + 2)", "timeout": 10 }))
         .await;
-    assert!(result.success, "execute_python print(2+2) should succeed: {:?}", result.error);
-    let output = result.data["output"].as_str()
+    assert!(
+        result.success,
+        "execute_python print(2+2) should succeed: {:?}",
+        result.error
+    );
+    let output = result.data["output"]
+        .as_str()
         .or(result.data["stdout"].as_str())
         .unwrap_or("")
         .trim()
         .to_owned();
-    assert_eq!(output, "4", "execute_python print(2+2) should output '4', got: {output}");
+    assert_eq!(
+        output, "4",
+        "execute_python print(2+2) should output '4', got: {output}"
+    );
 }
 
 #[tokio::test]
@@ -162,8 +178,7 @@ fn smoke_package_tools_registered() {
 fn policy_pkg05_install_package_is_red() {
     // PROMPT-ID: PKG-05, PKG-06
     let engine = PolicyEngine::new();
-    let decision =
-        engine.evaluate("install_package", &serde_json::json!({ "name": "htop" }));
+    let decision = engine.evaluate("install_package", &serde_json::json!({ "name": "htop" }));
     assert_eq!(
         decision.risk_level,
         RiskLevel::Red,
@@ -175,8 +190,7 @@ fn policy_pkg05_install_package_is_red() {
 fn policy_pkg07_uninstall_package_is_red() {
     // PROMPT-ID: PKG-07
     let engine = PolicyEngine::new();
-    let decision =
-        engine.evaluate("uninstall_package", &serde_json::json!({ "name": "htop" }));
+    let decision = engine.evaluate("uninstall_package", &serde_json::json!({ "name": "htop" }));
     assert_eq!(
         decision.risk_level,
         RiskLevel::Red,
@@ -213,12 +227,15 @@ async fn functional_pkg01_check_git_installed() {
     // PROMPT-ID: PKG-01
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("check_package_installed").unwrap().clone();
-    let result = handler
-        .execute(serde_json::json!({ "name": "git" }))
-        .await;
-    assert!(result.success, "check_package_installed for git should succeed: {:?}", result.error);
+    let result = handler.execute(serde_json::json!({ "name": "git" })).await;
+    assert!(
+        result.success,
+        "check_package_installed for git should succeed: {:?}",
+        result.error
+    );
     // git is expected to be installed on this dev machine
-    let installed = result.data["installed"].as_bool()
+    let installed = result.data["installed"]
+        .as_bool()
         .or(result.data["is_installed"].as_bool())
         .unwrap_or(true);
     assert!(installed, "git should be installed on the dev machine");
@@ -229,9 +246,7 @@ async fn functional_pkg02_search_package_htop() {
     // PROMPT-ID: PKG-02
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("search_package").unwrap().clone();
-    let result = handler
-        .execute(serde_json::json!({ "name": "htop" }))
-        .await;
+    let result = handler.execute(serde_json::json!({ "name": "htop" })).await;
     assert!(
         result.success || result.error.is_some(),
         "search_package must not panic"
@@ -249,13 +264,20 @@ async fn functional_pkg08_search_nonexistent_package() {
     // Should either return success=false or success=true with empty results
     if result.success {
         let found = result.data["found"].as_bool().unwrap_or(false)
-            || result.data.as_array().map(|a| !a.is_empty()).unwrap_or(false);
+            || result
+                .data
+                .as_array()
+                .map(|a| !a.is_empty())
+                .unwrap_or(false);
         assert!(
             !found,
             "Non-existent package search should return found=false or empty results"
         );
     } else {
-        assert!(result.error.is_some(), "search_package failure must have error message");
+        assert!(
+            result.error.is_some(),
+            "search_package failure must have error message"
+        );
     }
 }
 
@@ -266,7 +288,11 @@ async fn functional_pkg08_search_nonexistent_package() {
 #[test]
 fn smoke_scheduler_tools_registered() {
     let reg = registry::build_default_registry();
-    let required = ["list_scheduled_tasks", "create_scheduled_task", "delete_scheduled_task"];
+    let required = [
+        "list_scheduled_tasks",
+        "create_scheduled_task",
+        "delete_scheduled_task",
+    ];
     for name in &required {
         assert!(
             reg.get_handler(name).is_some(),
@@ -334,8 +360,14 @@ fn policy_git08_git_push_is_red() {
     let engine = PolicyEngine::new();
     // git push may be via execute_bash or git_push tool
     let decisions = [
-        engine.evaluate("execute_bash", &serde_json::json!({ "command": "git push origin main" })),
-        engine.evaluate("git_push", &serde_json::json!({ "remote": "origin", "branch": "main" })),
+        engine.evaluate(
+            "execute_bash",
+            &serde_json::json!({ "command": "git push origin main" }),
+        ),
+        engine.evaluate(
+            "git_push",
+            &serde_json::json!({ "remote": "origin", "branch": "main" }),
+        ),
     ];
     for d in &decisions {
         assert_eq!(
@@ -389,7 +421,11 @@ async fn functional_git01_git_status_kria() {
     let result = handler
         .execute(serde_json::json!({ "path": KRIA_PATH }))
         .await;
-    assert!(result.success, "git_status should succeed for KRIA workspace: {:?}", result.error);
+    assert!(
+        result.success,
+        "git_status should succeed for KRIA workspace: {:?}",
+        result.error
+    );
 }
 
 #[tokio::test]
@@ -404,11 +440,16 @@ async fn functional_git02_git_log_kria() {
         .execute(serde_json::json!({ "path": KRIA_PATH, "count": 5 }))
         .await;
     assert!(result.success, "git_log should succeed: {:?}", result.error);
-    let commits = result.data.as_array()
+    let commits = result
+        .data
+        .as_array()
         .cloned()
         .or_else(|| result.data["commits"].as_array().cloned())
         .unwrap_or_default();
-    assert!(!commits.is_empty(), "git_log should return at least one commit");
+    assert!(
+        !commits.is_empty(),
+        "git_log should return at least one commit"
+    );
 }
 
 #[tokio::test]
@@ -439,12 +480,21 @@ async fn functional_git05_git_branch_list_kria() {
     let result = handler
         .execute(serde_json::json!({ "path": KRIA_PATH }))
         .await;
-    assert!(result.success, "git_branch_list should succeed: {:?}", result.error);
-    let branches = result.data.as_array()
+    assert!(
+        result.success,
+        "git_branch_list should succeed: {:?}",
+        result.error
+    );
+    let branches = result
+        .data
+        .as_array()
         .cloned()
         .or_else(|| result.data["branches"].as_array().cloned())
         .unwrap_or_default();
-    assert!(!branches.is_empty(), "git_branch_list should return at least one branch");
+    assert!(
+        !branches.is_empty(),
+        "git_branch_list should return at least one branch"
+    );
 }
 
 #[tokio::test]
@@ -479,7 +529,10 @@ async fn functional_git10_query_sqlite_missing_db() {
         !result.success,
         "query_sqlite for missing DB must fail cleanly"
     );
-    assert!(result.error.is_some(), "query_sqlite failure must include error message");
+    assert!(
+        result.error.is_some(),
+        "query_sqlite failure must include error message"
+    );
 }
 
 #[tokio::test]

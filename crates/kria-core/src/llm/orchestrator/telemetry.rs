@@ -85,24 +85,22 @@ struct NvmlSampler {
 impl NvmlSampler {
     fn try_new(device_index: u32) -> Option<Self> {
         match nvml_wrapper::Nvml::init() {
-            Ok(nvml) => {
-                match nvml.device_by_index(device_index) {
-                    Ok(dev) => {
-                        if let Ok(info) = dev.memory_info() {
-                            tracing::info!(
-                                device = device_index,
-                                total_mb = info.total / (1024 * 1024),
-                                "telemetry: NVML sampler initialised"
-                            );
-                        }
-                        Some(Self { nvml, device_index })
+            Ok(nvml) => match nvml.device_by_index(device_index) {
+                Ok(dev) => {
+                    if let Ok(info) = dev.memory_info() {
+                        tracing::info!(
+                            device = device_index,
+                            total_mb = info.total / (1024 * 1024),
+                            "telemetry: NVML sampler initialised"
+                        );
                     }
-                    Err(e) => {
-                        tracing::warn!(?e, "telemetry: NVML device {} unavailable", device_index);
-                        None
-                    }
+                    Some(Self { nvml, device_index })
                 }
-            }
+                Err(e) => {
+                    tracing::warn!(?e, "telemetry: NVML device {} unavailable", device_index);
+                    None
+                }
+            },
             Err(e) => {
                 tracing::warn!(?e, "telemetry: NVML init failed");
                 None
@@ -366,10 +364,7 @@ impl CliTelemetry {
 #[async_trait]
 impl GpuTelemetry for CliTelemetry {
     async fn snapshot(&self) -> TelemetrySnapshot {
-        let result = tokio::task::spawn_blocking(|| {
-            CliBlockingSampler.sample()
-        })
-        .await;
+        let result = tokio::task::spawn_blocking(|| CliBlockingSampler.sample()).await;
 
         result.unwrap_or(TelemetrySnapshot {
             free_vram_mb: 0,
@@ -398,10 +393,7 @@ impl RamTelemetry {
 impl GpuTelemetry for RamTelemetry {
     async fn snapshot(&self) -> TelemetrySnapshot {
         // Each call creates a fresh System — avoids mutex + blocking on /proc.
-        let result = tokio::task::spawn_blocking(|| {
-            RamSampler::new().sample()
-        })
-        .await;
+        let result = tokio::task::spawn_blocking(|| RamSampler::new().sample()).await;
 
         result.unwrap_or(TelemetrySnapshot {
             free_vram_mb: 0,

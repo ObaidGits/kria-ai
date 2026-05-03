@@ -132,7 +132,11 @@ fn routing_net03_check_url_status_routes_correctly() {
 #[test]
 fn routing_net04_get_public_ip_routes_correctly() {
     // PROMPT-ID: NET-04
-    let prompts = ["What is my public IP?", "public IP address", "mera IP kya hai"];
+    let prompts = [
+        "What is my public IP?",
+        "public IP address",
+        "mera IP kya hai",
+    ];
     for p in &prompts {
         let r = IntentRouter::classify(p);
         assert!(
@@ -214,12 +218,25 @@ async fn functional_net10_get_current_time() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("get_current_time").unwrap().clone();
     let result = handler.execute(serde_json::json!({})).await;
-    assert!(result.success, "get_current_time should succeed: {:?}", result.error);
+    assert!(
+        result.success,
+        "get_current_time should succeed: {:?}",
+        result.error
+    );
     // Must include some time-like field
-    let has_time = result.data.get("time").or(result.data.get("datetime"))
-        .or(result.data.get("current_time")).or(result.data.get("iso"))
-        .is_some() || result.data.is_string();
-    assert!(has_time, "get_current_time must return a time field: {}", result.data);
+    let has_time = result
+        .data
+        .get("time")
+        .or(result.data.get("datetime"))
+        .or(result.data.get("current_time"))
+        .or(result.data.get("iso"))
+        .is_some()
+        || result.data.is_string();
+    assert!(
+        has_time,
+        "get_current_time must return a time field: {}",
+        result.data
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -259,10 +276,14 @@ async fn functional_net04_get_public_ip() {
         "get_public_ip must not panic"
     );
     if result.success {
-        let ip = result.data["ip"].as_str()
+        let ip = result.data["ip"]
+            .as_str()
             .or(result.data["address"].as_str())
             .unwrap_or("");
-        assert!(!ip.is_empty(), "get_public_ip must return a non-empty IP address");
+        assert!(
+            !ip.is_empty(),
+            "get_public_ip must return a non-empty IP address"
+        );
     }
 }
 
@@ -301,7 +322,8 @@ async fn functional_net03_check_url_status_google() {
         "check_url_status must not panic"
     );
     if result.success {
-        let status = result.data["status_code"].as_u64()
+        let status = result.data["status_code"]
+            .as_u64()
             .or(result.data["code"].as_u64())
             .unwrap_or(0);
         assert!(
@@ -326,11 +348,19 @@ async fn functional_net02_fetch_webpage_rust_lang() {
             "max_chars": 3000
         }))
         .await;
-    assert!(result.success, "fetch_webpage rust-lang.org should succeed: {:?}", result.error);
-    let content = result.data["content"].as_str()
+    assert!(
+        result.success,
+        "fetch_webpage rust-lang.org should succeed: {:?}",
+        result.error
+    );
+    let content = result.data["content"]
+        .as_str()
         .or(result.data["text"].as_str())
         .unwrap_or(result.data.as_str().unwrap_or(""));
-    assert!(!content.is_empty(), "fetch_webpage must return non-empty content");
+    assert!(
+        !content.is_empty(),
+        "fetch_webpage must return non-empty content"
+    );
     assert!(
         content.len() <= 30000,
         "fetch_webpage must respect max_chars ceiling"
@@ -364,11 +394,16 @@ async fn functional_net01_web_search() {
         "web_search must not panic"
     );
     if result.success {
-        let results = result.data.as_array()
+        let results = result
+            .data
+            .as_array()
             .cloned()
             .or_else(|| result.data["results"].as_array().cloned())
             .unwrap_or_default();
-        assert!(!results.is_empty(), "web_search should return at least one result");
+        assert!(
+            !results.is_empty(),
+            "web_search should return at least one result"
+        );
     }
 }
 
@@ -415,5 +450,8 @@ async fn functional_doc01_parse_document_missing_file() {
         !result.success,
         "parse_document for missing file must fail cleanly"
     );
-    assert!(result.error.is_some(), "parse_document failure must include error message");
+    assert!(
+        result.error.is_some(),
+        "parse_document failure must include error message"
+    );
 }

@@ -11,7 +11,10 @@
 //! before spawning a fresh one.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, atomic::{AtomicU8, Ordering}};
+use std::sync::{
+    atomic::{AtomicU8, Ordering},
+    Arc,
+};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Child;
@@ -159,7 +162,10 @@ impl ComfySidecar {
         //   venv_dir = ~/.kria/comfyui/.venv  →  parent = ~/.kria/comfyui/
         //   ComfyUI app is one level deeper at  ~/.kria/comfyui/ComfyUI/
         let comfy_app_dir = {
-            let parent = self.config.venv_dir.parent()
+            let parent = self
+                .config
+                .venv_dir
+                .parent()
                 .unwrap_or(Path::new("."))
                 .to_path_buf();
             let candidate = parent.join("ComfyUI");
@@ -220,7 +226,10 @@ impl ComfySidecar {
         let mut cmd = tokio::process::Command::new(python);
         cmd.args(&args)
             .current_dir(&comfy_app_dir)
-            .env("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True,max_split_size_mb:512")
+            .env(
+                "PYTORCH_CUDA_ALLOC_CONF",
+                "expandable_segments:True,max_split_size_mb:512",
+            )
             .env("PYTHONUNBUFFERED", "1") // Flush prints/tracebacks immediately
             .env("X-KRIA-OWNED", "1")
             .stdout(std::process::Stdio::piped())
@@ -294,7 +303,8 @@ impl ComfySidecar {
     async fn log_tail_snapshot(&self) -> String {
         let buf = self.log_tail.lock().await;
         if buf.is_empty() {
-            "(no output captured from ComfyUI; check that python and the venv are valid)".to_string()
+            "(no output captured from ComfyUI; check that python and the venv are valid)"
+                .to_string()
         } else {
             buf.iter().cloned().collect::<Vec<_>>().join("\n")
         }
@@ -307,7 +317,8 @@ impl ComfySidecar {
         let mut guard = self.process.lock().await;
         if let Some(mut child) = guard.take() {
             // Attempt graceful /interrupt first.
-            let _ = self.client
+            let _ = self
+                .client
                 .post(format!("{}/interrupt", self.base_url()))
                 .send()
                 .await;
@@ -330,7 +341,7 @@ impl ComfySidecar {
         let deadline = tokio::time::Instant::now()
             + Duration::from_secs(self.config.health_check_timeout_secs);
         let stats_url = format!("{}/system_stats", self.base_url());
-        let info_url  = format!("{}/object_info", self.base_url());
+        let info_url = format!("{}/object_info", self.base_url());
 
         // Phase 1: wait for /system_stats
         loop {
@@ -425,7 +436,8 @@ impl ComfySidecar {
             "client_id": client_id,
         });
 
-        let resp = self.client
+        let resp = self
+            .client
             .post(format!("{}/prompt", self.base_url()))
             .json(&payload)
             .send()
@@ -446,7 +458,10 @@ impl ComfySidecar {
             .ok_or_else(|| ComfyError::QueueFailed { body: body.clone() })?
             .to_string();
 
-        Ok(QueuedJob { prompt_id, client_id })
+        Ok(QueuedJob {
+            prompt_id,
+            client_id,
+        })
     }
 
     /// Tell ComfyUI to unload all models from VRAM (idle release).
@@ -500,7 +515,8 @@ impl ComfySidecar {
         // Verify the process is still alive by probing /system_stats then /object_info.
         // We don't check ownership header here — we just probe; if both answer
         // on our expected port, we adopt it.
-        let stats_ok = self.client
+        let stats_ok = self
+            .client
             .get(format!("{}/system_stats", self.base_url()))
             .timeout(Duration::from_secs(2))
             .send()
@@ -509,7 +525,8 @@ impl ComfySidecar {
             .unwrap_or(false);
 
         if stats_ok {
-            let info_ok = self.client
+            let info_ok = self
+                .client
                 .get(format!("{}/object_info", self.base_url()))
                 .timeout(Duration::from_secs(5))
                 .send()

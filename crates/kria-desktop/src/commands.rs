@@ -12,6 +12,7 @@ use kria_core::agent::loop_engine::{
 use kria_core::agent::AgentLoop;
 use kria_core::automation::{AutomationScheduler, MacroRecorder, WorkflowEngine};
 use kria_core::config::{ColabConfig, KriaConfig};
+use kria_core::image::ImageOrchestrator;
 use kria_core::infra::health::{HealthRegistry, ServiceStatus};
 use kria_core::infra::EventBus;
 use kria_core::llm::model_router::RoutingMode;
@@ -34,7 +35,6 @@ use kria_core::tools::google_workspace as gw;
 use kria_core::tools::google_workspace_contract as gw_contract;
 use kria_core::tools::mount_manager;
 use kria_core::tools::registry::{self, ToolRegistry};
-use kria_core::image::ImageOrchestrator;
 use kria_core::voice::{
     default_input_device_name, default_output_device_name, list_input_devices, list_output_devices,
     SpeechToText, TextToSpeech, VoicePipeline, VoicePipelineEvent, VoicePipelineState,
@@ -61,6 +61,8 @@ const COLAB_LEGACY_NPX_PACKAGE: &str = "@googlecolab/colab-mcp";
 const COLAB_OFFICIAL_COMMAND: &str = "uvx";
 const COLAB_OFFICIAL_SOURCE: &str = "git+https://github.com/googlecolab/colab-mcp";
 const COLAB_BROWSER_BOOTSTRAP_TOOL: &str = "open_colab_browser_connection";
+const HISTORY_ITEM_CHAR_CAP: usize = 900;
+const HISTORY_TOTAL_CHAR_BUDGET: usize = 3_200;
 
 fn is_colab_bootstrap_tool_name(tool_name: &str) -> bool {
     tool_name
@@ -80,9 +82,79 @@ fn is_likely_local_llm_transport_error(error: &str) -> bool {
         || lower.contains("broken pipe")
 }
 
-async fn touch_orchestrator_activity(
-    last_activity: &Arc<tokio::sync::Mutex<std::time::Instant>>,
-) {
+fn is_transient_llm_error_text(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("⚠️ llm error")
+        || lower.contains("context too large for model")
+        || lower.contains("local llm transport error")
+        || lower.contains("error sending request for url")
+        || lower.contains("local llm unavailable")
+        || lower.contains("circuit open")
+}
+
+fn should_skip_history_turn_for_llm(turn: &ConversationTurn) -> bool {
+    turn.role.eq_ignore_ascii_case("assistant") && is_transient_llm_error_text(&turn.content)
+}
+
+fn truncate_history_content_for_llm(role: &str, content: &str) -> String {
+    let max_chars = match role.to_ascii_lowercase().as_str() {
+        "assistant" => HISTORY_ITEM_CHAR_CAP,
+        "user" => 1_200,
+        "tool" => 700,
+        "system" => 1_000,
+        _ => HISTORY_ITEM_CHAR_CAP,
+    };
+
+    let char_count = content.chars().count();
+    if char_count <= max_chars {
+        return content.to_string();
+    }
+    if max_chars <= 32 {
+        return content.chars().take(max_chars).collect();
+    }
+
+    let keep = max_chars.saturating_sub(26);
+    let head: String = content.chars().take(keep).collect();
+    let omitted = char_count.saturating_sub(keep);
+    format!("{head}\n...[truncated {omitted} chars]")
+}
+
+fn append_recent_turns_for_llm(messages: &mut Vec<ChatMessage>, recent_turns: &[ConversationTurn]) {
+    let mut inserted_indices: Vec<usize> = Vec::new();
+
+    for turn in recent_turns {
+        if should_skip_history_turn_for_llm(turn) {
+            continue;
+        }
+        messages.push(ChatMessage {
+            role: turn.role.clone(),
+            content: truncate_history_content_for_llm(&turn.role, &turn.content),
+            name: turn.tool_name.clone(),
+            images: None,
+        });
+        inserted_indices.push(messages.len() - 1);
+    }
+
+    let mut total_history_chars: usize = inserted_indices
+        .iter()
+        .map(|idx| messages[*idx].content.chars().count())
+        .sum();
+
+    while total_history_chars > HISTORY_TOTAL_CHAR_BUDGET && !inserted_indices.is_empty() {
+        let remove_idx = inserted_indices.remove(0);
+        let removed_chars = messages[remove_idx].content.chars().count();
+        messages.remove(remove_idx);
+        total_history_chars = total_history_chars.saturating_sub(removed_chars);
+
+        for idx in &mut inserted_indices {
+            if *idx > remove_idx {
+                *idx -= 1;
+            }
+        }
+    }
+}
+
+async fn touch_orchestrator_activity(last_activity: &Arc<tokio::sync::Mutex<std::time::Instant>>) {
     let mut lock = last_activity.lock().await;
     *lock = std::time::Instant::now();
 }
@@ -253,7 +325,11 @@ async fn enforce_colab_dispatch_requirements(
     }
 }
 
-fn build_tool_only_fallback_message(name: &str, success: bool, result: &serde_json::Value) -> String {
+fn build_tool_only_fallback_message(
+    name: &str,
+    success: bool,
+    result: &serde_json::Value,
+) -> String {
     let metadata = compute_tool_result_metadata(name, result);
     let summary = summarize_tool_turn_for_history(name, success, result, &metadata);
 
@@ -262,13 +338,12 @@ fn build_tool_only_fallback_message(name: &str, success: bool, result: &serde_js
             "{summary}\n\n⚠️ Local model became unavailable while preparing the final response. Tool output above is complete."
         )
     } else {
-        format!(
-            "{summary}\n\n⚠️ Local model became unavailable after a tool failure."
-        )
+        format!("{summary}\n\n⚠️ Local model became unavailable after a tool failure.")
     }
 }
 
-// 1x1 white PPM probe image used for sidecar OCR capability checks.
+// Tiny probe image used by unit tests that validate native image thumbnail fallback.
+#[cfg(test)]
 const OCR_HEALTH_PROBE_IMAGE_BYTES: &[u8] = b"P3\n1 1\n255\n255 255 255\n";
 
 #[derive(Debug)]
@@ -339,7 +414,10 @@ fn build_native_preprocessed_attachment(path: &str) -> Option<ImageAttachment> {
     build_native_preprocessed_attachment_with_max(path, 768)
 }
 
-fn build_native_preprocessed_attachment_with_max(path: &str, max_dim: u32) -> Option<ImageAttachment> {
+fn build_native_preprocessed_attachment_with_max(
+    path: &str,
+    max_dim: u32,
+) -> Option<ImageAttachment> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
         return None;
@@ -406,10 +484,8 @@ fn build_tool_descriptions_for_prompt(tool_defs: &[registry::ToolDef]) -> String
     normal_defs.sort_by(|a, b| a.category.cmp(&b.category).then(a.name.cmp(&b.name)));
 
     let total = tool_defs.len();
-    let visible_defs: Vec<registry::ToolDef> = normal_defs
-        .into_iter()
-        .take(MAX_TOOL_LINES)
-        .collect();
+    let visible_defs: Vec<registry::ToolDef> =
+        normal_defs.into_iter().take(MAX_TOOL_LINES).collect();
     let omitted = total.saturating_sub(
         visible_defs.len() + collapsed_groups.values().map(|v| v.len()).sum::<usize>(),
     );
@@ -1115,11 +1191,7 @@ fn summarize_tool_turn_for_history(
         for (k, v) in obj.iter() {
             if let Some(arr) = v.as_array() {
                 if !arr.is_empty() {
-                    return format!(
-                        "Tool '{name}' returned {} {} entry/entries.",
-                        arr.len(),
-                        k
-                    );
+                    return format!("Tool '{name}' returned {} {} entry/entries.", arr.len(), k);
                 }
             }
         }
@@ -1380,56 +1452,53 @@ async fn refresh_ocr_dependency_health(health: &HealthRegistry, sidecar: &Sideca
         probe_state.in_flight = true;
     }
 
-    let probe_path = std::env::temp_dir().join("kria_ocr_probe.ppm");
-    if let Err(e) = std::fs::write(&probe_path, OCR_HEALTH_PROBE_IMAGE_BYTES) {
-        health.update(
-            "ocr_dependency",
-            ServiceStatus::Degraded,
-            Some(format!("Failed to write OCR probe image: {e}")),
-        );
-        finalize_ocr_probe_schedule(false).await;
-        return;
-    }
-
-    let payload = serde_json::json!({
-        "file": probe_path.to_string_lossy().to_string(),
-        "operations": ["ocr", "thumbnail"],
-        "intent": "text_reading",
-    });
-
     let response = tokio::time::timeout(
         std::time::Duration::from_secs(8),
-        sidecar.request("image.analyze", payload),
+        sidecar.request("image.ocr_health", serde_json::json!({})),
     )
     .await;
-
-    let _ = std::fs::remove_file(&probe_path);
-
     let mut probe_success = false;
 
     match response {
         Ok(Ok(result)) => {
-            probe_success = true;
+            let enabled_for_tier = result
+                .get("ocr_enabled_for_tier")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            let available = result
+                .get("available")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             let engine = result
-                .get("ocr")
-                .and_then(|v| v.get("engine"))
+                .get("effective_engine")
                 .and_then(|v| v.as_str())
                 .unwrap_or("none");
+            let detail = result
+                .get("detail")
+                .and_then(|v| v.as_str())
+                .unwrap_or("OCR probe did not include diagnostic detail");
 
-            if engine.eq_ignore_ascii_case("none") {
+            if !enabled_for_tier {
+                probe_success = true;
                 health.update(
                     "ocr_dependency",
-                    ServiceStatus::Degraded,
-                    Some(
-                        "OCR unavailable in sidecar runtime (engine: none). Image analysis still works via visual path."
-                            .into(),
-                    ),
+                    ServiceStatus::Healthy,
+                    Some("OCR disabled for current sidecar tier (expected behavior)".into()),
                 );
-            } else {
+            } else if available && !engine.eq_ignore_ascii_case("none") {
+                probe_success = true;
                 health.update(
                     "ocr_dependency",
                     ServiceStatus::Healthy,
                     Some(format!("OCR engine ready in sidecar: {engine}")),
+                );
+            } else {
+                health.update(
+                    "ocr_dependency",
+                    ServiceStatus::Degraded,
+                    Some(format!(
+                        "OCR unavailable in sidecar runtime (engine: {engine}). {detail}"
+                    )),
                 );
             }
         }
@@ -1703,10 +1772,11 @@ pub struct AppState {
     /// Telemetry receiver for the v2 pipeline (when active). `None` while
     /// running v1. Wrapped in a Mutex so the background driver task can
     /// take it without dropping the AppState lock.
-    pub voice_v2_telemetry:
-        Arc<tokio::sync::Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<
-            kria_core::voice::v2::VoiceTelemetry,
-        >>>>,
+    pub voice_v2_telemetry: Arc<
+        tokio::sync::Mutex<
+            Option<tokio::sync::mpsc::UnboundedReceiver<kria_core::voice::v2::VoiceTelemetry>>,
+        >,
+    >,
     pub health: Arc<HealthRegistry>,
     pub scheduler: Arc<RwLock<AutomationScheduler>>,
     pub macro_recorder: Arc<RwLock<MacroRecorder>>,
@@ -1813,7 +1883,11 @@ fn build_voice_pipeline(
             wake_dir.join("hey_ria.onnx")
         } else {
             let p = std::path::PathBuf::from(&config.voice.wake_word.model_path);
-            if p.is_absolute() { p } else { wake_dir.join(p.file_name().unwrap_or_default()) }
+            if p.is_absolute() {
+                p
+            } else {
+                wake_dir.join(p.file_name().unwrap_or_default())
+            }
         };
         let detector = kria_core::voice::v2::WakeWordDetector::try_load(
             wake_path.clone(),
@@ -1850,9 +1924,8 @@ fn build_voice_pipeline(
     let tts = TextToSpeech::new(tts_model_path, piper_bin);
     let vad_model_path = paths.models_dir.join("vad").join("silero_vad.onnx");
 
-    let pipeline = Arc::new(
-        VoicePipeline::new(config.voice.clone(), stt, tts).with_vad_model(vad_model_path),
-    );
+    let pipeline =
+        Arc::new(VoicePipeline::new(config.voice.clone(), stt, tts).with_vad_model(vad_model_path));
 
     // Pre-warm whisper at startup: page-cache the model file + (on CUDA/metal)
     // trigger the one-time GPU layer init *before* the first user utterance.
@@ -1957,7 +2030,11 @@ fn build_v2_pipeline(
 async fn start_voice_v2_loop(
     v2: Arc<kria_core::voice::v2::VoicePipelineV2>,
     voice_active: Arc<std::sync::atomic::AtomicBool>,
-    telemetry_slot: Arc<tokio::sync::Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<kria_core::voice::v2::VoiceTelemetry>>>>,
+    telemetry_slot: Arc<
+        tokio::sync::Mutex<
+            Option<tokio::sync::mpsc::UnboundedReceiver<kria_core::voice::v2::VoiceTelemetry>>,
+        >,
+    >,
     router: Arc<ModelRouter>,
     session_id_lock: Arc<RwLock<String>>,
     config: Arc<RwLock<KriaConfig>>,
@@ -1966,8 +2043,8 @@ async fn start_voice_v2_loop(
     tool_registry: Arc<kria_core::tools::registry::ToolRegistry>,
     app: AppHandle,
 ) {
-    use kria_core::voice::v2::VoiceSessionState;
     use kria_core::voice::capture::AudioCapture;
+    use kria_core::voice::v2::VoiceSessionState;
 
     // 1. Wire the AudioPlayer to the pipeline.
     {
@@ -1982,7 +2059,8 @@ async fn start_voice_v2_loop(
 
     // 2. Start AudioCapture and forward to a broadcast channel, gating chunks
     //    when the pipeline is Speaking so the mic doesn't pick up KRIA's voice.
-    let (broadcast_tx, _) = tokio::sync::broadcast::channel::<kria_core::voice::capture::AudioChunk>(128);
+    let (broadcast_tx, _) =
+        tokio::sync::broadcast::channel::<kria_core::voice::capture::AudioChunk>(128);
     let broadcast_tx_arc = Arc::new(broadcast_tx);
     {
         let capture_cfg = config.read().await;
@@ -2002,7 +2080,10 @@ async fn start_voice_v2_loop(
             Ok(pair) => pair,
             Err(e) => {
                 tracing::error!("v2 audio capture failed to start: {e}");
-                let _ = app.emit("voice:error", serde_json::json!({ "error": format!("Mic start failed: {e}") }));
+                let _ = app.emit(
+                    "voice:error",
+                    serde_json::json!({ "error": format!("Mic start failed: {e}") }),
+                );
                 voice_active.store(false, std::sync::atomic::Ordering::Relaxed);
                 return;
             }
@@ -2019,7 +2100,9 @@ async fn start_voice_v2_loop(
                 let st = *v2_state.borrow();
                 if matches!(
                     st,
-                    VoiceSessionState::Speaking | VoiceSessionState::Thinking | VoiceSessionState::BargeIn
+                    VoiceSessionState::Speaking
+                        | VoiceSessionState::Thinking
+                        | VoiceSessionState::BargeIn
                 ) {
                     // Discard — KRIA is generating/speaking; skip to prevent echo.
                     continue;
@@ -2088,7 +2171,9 @@ async fn start_voice_v2_loop(
                 let backend = match router_turn.route("voice").await {
                     Some(b) => b,
                     None => {
-                        let _ = tx.send("(No LLM backend — check model config)".into()).await;
+                        let _ = tx
+                            .send("(No LLM backend — check model config)".into())
+                            .await;
                         return rx;
                     }
                 };
@@ -2104,32 +2189,51 @@ async fn start_voice_v2_loop(
                     .unwrap_or_else(|| "User".to_string());
                 let memory_context = match memory_turn.search_facts(&user_text, 5) {
                     Ok(facts) if !facts.is_empty() => {
-                        let lines: Vec<String> = facts.iter().map(|f| format!("- {}", f.text)).collect();
+                        let lines: Vec<String> =
+                            facts.iter().map(|f| format!("- {}", f.text)).collect();
                         format!("Known facts:\n{}", lines.join("\n"))
                     }
                     _ => String::new(),
                 };
                 let system_prompt = kria_core::agent::prompts::build_system_prompt(
-                    &tool_descriptions, &user_name, std::env::consts::OS, hw_tier,
-                    "auto", &memory_context,
+                    &tool_descriptions,
+                    &user_name,
+                    std::env::consts::OS,
+                    hw_tier,
+                    "auto",
+                    &memory_context,
                 );
                 drop(cfg);
-                let recent_turns = memory_turn.get_recent_turns(&session_id, 20).unwrap_or_default();
+                let recent_turns = memory_turn
+                    .get_recent_turns(&session_id, 5)
+                    .unwrap_or_default();
                 let mut messages = Vec::with_capacity(recent_turns.len() + 2);
-                messages.push(ChatMessage { role: "system".into(), content: system_prompt, name: None, images: None });
-                for t in &recent_turns {
-                    messages.push(ChatMessage { role: t.role.clone(), content: t.content.clone(), name: None, images: None });
-                }
-                messages.push(ChatMessage { role: "user".into(), content: user_text, name: None, images: None });
+                messages.push(ChatMessage {
+                    role: "system".into(),
+                    content: system_prompt,
+                    name: None,
+                    images: None,
+                });
+                append_recent_turns_for_llm(&mut messages, &recent_turns);
+                messages.push(ChatMessage {
+                    role: "user".into(),
+                    content: user_text,
+                    name: None,
+                    images: None,
+                });
                 tokio::spawn(async move {
                     use futures::StreamExt;
                     match backend.chat_stream(&messages, None, 0.7, 512).await {
                         Ok(mut stream) => {
                             while let Some(tok) = stream.next().await {
-                                if tx.send(tok).await.is_err() { break; }
+                                if tx.send(tok).await.is_err() {
+                                    break;
+                                }
                             }
                         }
-                        Err(e) => { let _ = tx.send(format!("(LLM error: {e})")).await; }
+                        Err(e) => {
+                            let _ = tx.send(format!("(LLM error: {e})")).await;
+                        }
                     }
                 });
                 rx
@@ -2153,8 +2257,10 @@ async fn start_voice_v2_loop(
 
 /// Map a `VoiceTelemetry` variant to the canonical Tauri event name + JSON
 /// payload that the existing UI listeners already handle.
-fn v2_telemetry_to_event(ev: &kria_core::voice::v2::VoiceTelemetry) -> (&'static str, serde_json::Value) {
-    use kria_core::voice::v2::{VoiceTelemetry, VoiceSessionState};
+fn v2_telemetry_to_event(
+    ev: &kria_core::voice::v2::VoiceTelemetry,
+) -> (&'static str, serde_json::Value) {
+    use kria_core::voice::v2::{VoiceSessionState, VoiceTelemetry};
     match ev {
         VoiceTelemetry::State { state } => {
             let s = match state {
@@ -2170,15 +2276,21 @@ fn v2_telemetry_to_event(ev: &kria_core::voice::v2::VoiceTelemetry) -> (&'static
             "voice:partial_transcript",
             serde_json::json!({ "text": text, "confidence": 0.7, "language": "auto", "stability": 0.5, "engine": engine }),
         ),
-        VoiceTelemetry::Final { text, confidence, engine } => (
+        VoiceTelemetry::Final {
+            text,
+            confidence,
+            engine,
+        } => (
             "voice:transcript",
             serde_json::json!({ "text": text, "confidence": confidence, "language": "auto", "stability": 1.0, "engine": engine }),
         ),
-        VoiceTelemetry::Error { message } => (
-            "voice:error",
-            serde_json::json!({ "error": message }),
+        VoiceTelemetry::Error { message } => {
+            ("voice:error", serde_json::json!({ "error": message }))
+        }
+        _ => (
+            "voice:v2_telemetry",
+            serde_json::to_value(ev).unwrap_or_default(),
         ),
-        _ => ("voice:v2_telemetry", serde_json::to_value(ev).unwrap_or_default()),
     }
 }
 
@@ -2333,55 +2445,62 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     // The user can override the selection by setting `[llm].active_model` to
     // a model name from `[[llm.models]]`; that override is honoured iff the
     // GGUF file actually exists on disk.
-    let (orch_model_path, orch_mmproj_path, orch_config, orch_enabled, selected_model_name) = if config.orchestrator.enabled {
-        use kria_core::llm::orchestrator::tier_strategy::{
-            derive_model_profile, select_model_for_tier, SelectionReason,
-        };
+    let (orch_model_path, orch_mmproj_path, orch_config, orch_enabled, selected_model_name) =
+        if config.orchestrator.enabled {
+            use kria_core::llm::orchestrator::tier_strategy::{
+                derive_model_profile, select_model_for_tier, SelectionReason,
+            };
 
-        let model_exists = |file: &str| -> bool {
-            let resolved = resolve_model_file(file);
-            std::path::Path::new(&resolved).exists()
-        };
+            let model_exists = |file: &str| -> bool {
+                let resolved = resolve_model_file(file);
+                std::path::Path::new(&resolved).exists()
+            };
 
-        let choice = select_model_for_tier(
-            hardware_info.tier,
-            hardware_info.total_ram_mb,
-            hardware_info.vram_mb,
-            &config.llm.active_model,
-            &config.llm.models,
-            model_exists,
-        );
+            let choice = select_model_for_tier(
+                hardware_info.tier,
+                hardware_info.total_ram_mb,
+                hardware_info.vram_mb,
+                &config.llm.active_model,
+                &config.llm.models,
+                model_exists,
+            );
 
-        match choice {
-            None => {
-                tracing::warn!(
-                    "orchestrator: no models defined in `[[llm.models]]` — \
+            match choice {
+                None => {
+                    tracing::warn!(
+                        "orchestrator: no models defined in `[[llm.models]]` — \
                      skipping background startup. Add a model entry in \
                      ~/.kria/config.toml or run `scripts/download_models.py`."
-                );
-                let _ = handle.emit(
-                    "orchestrator:disabled",
-                    serde_json::json!({
-                        "reason": "no_models_configured",
-                        "message": "No LLM models are defined in config.toml.",
-                    }),
-                );
-                (String::new(), None, config.orchestrator.clone(), false, String::new())
-            }
-            Some(c) if matches!(c.reason, SelectionReason::NoModels) => {
-                let searched: Vec<String> = config
-                    .llm
-                    .models
-                    .iter()
-                    .map(|m| resolve_model_file(&m.file))
-                    .collect();
-                tracing::error!(
-                    tier = %hardware_info.tier.as_str(),
-                    searched = ?searched,
-                    "orchestrator: no GGUF model files found on disk — skipping startup. \
-                     Run `scripts/download_models.py` or place the GGUF in ~/.kria/models/llm/"
-                );
-                let _ = handle.emit(
+                    );
+                    let _ = handle.emit(
+                        "orchestrator:disabled",
+                        serde_json::json!({
+                            "reason": "no_models_configured",
+                            "message": "No LLM models are defined in config.toml.",
+                        }),
+                    );
+                    (
+                        String::new(),
+                        None,
+                        config.orchestrator.clone(),
+                        false,
+                        String::new(),
+                    )
+                }
+                Some(c) if matches!(c.reason, SelectionReason::NoModels) => {
+                    let searched: Vec<String> = config
+                        .llm
+                        .models
+                        .iter()
+                        .map(|m| resolve_model_file(&m.file))
+                        .collect();
+                    tracing::error!(
+                        tier = %hardware_info.tier.as_str(),
+                        searched = ?searched,
+                        "orchestrator: no GGUF model files found on disk — skipping startup. \
+                         Run `scripts/download_models.py` or place the GGUF in ~/.kria/models/llm/"
+                    );
+                    let _ = handle.emit(
                     "orchestrator:disabled",
                     serde_json::json!({
                         "reason": "model_files_missing",
@@ -2390,99 +2509,111 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
                         "message": "No GGUF model files found. Download models or update config.",
                     }),
                 );
-                (String::new(), None, config.orchestrator.clone(), false, String::new())
+                    (
+                        String::new(),
+                        None,
+                        config.orchestrator.clone(),
+                        false,
+                        String::new(),
+                    )
+                }
+                Some(c) => {
+                    let model_path = resolve_model_file(&c.model.file);
+                    let mmproj_path = c
+                        .model
+                        .mmproj_file
+                        .as_ref()
+                        .filter(|_| !c.vision_disabled)
+                        .map(|f| resolve_model_file(f));
+
+                    tracing::info!(
+                        tier = %hardware_info.tier.as_str(),
+                        model = %c.model.name,
+                        file = %c.model.file,
+                        resolved = %model_path,
+                        reason = ?c.reason,
+                        vision_disabled = c.vision_disabled,
+                        mmproj = ?mmproj_path,
+                        "orchestrator: tier-aware model selection complete"
+                    );
+
+                    // Override active_model so the model_router and other subsystems
+                    // agree on which model is actually loaded.
+                    config.llm.active_model = c.model.name.clone();
+
+                    // Derive a tier-appropriate ModelProfile and substitute it
+                    // into the orchestrator config. This way each model gets its
+                    // own VRAM-budget calculation (layer count, mmproj size, …).
+                    let mut orch_cfg = config.orchestrator.clone();
+                    orch_cfg.model_profile =
+                        derive_model_profile(&c.model, &config.orchestrator.model_profile);
+
+                    // Hardware-tier safety pass: clamps mlock / flash_attention /
+                    // batch_size / safety_margin to values the detected machine
+                    // can actually handle. Without this, defaults like
+                    // `mlock=true` + a 5GB Qwen2.5-VL on a 16GB laptop will OOM
+                    // and freeze the system at startup.
+                    let model_size_mb = std::fs::metadata(&model_path)
+                        .map(|m| m.len() / (1024 * 1024))
+                        .unwrap_or((c.model.vram_estimate_gb as u64) * 1024);
+                    orch_cfg.tune_for_tier(
+                        hardware_info.tier,
+                        hardware_info.total_ram_mb,
+                        hardware_info.vram_mb,
+                        model_size_mb,
+                    );
+
+                    tracing::info!(
+                        tier = %hardware_info.tier.as_str(),
+                        ram_mb = hardware_info.total_ram_mb,
+                        vram_mb = ?hardware_info.vram_mb,
+                        model_size_mb,
+                        mlock = orch_cfg.mlock,
+                        flash_attention = orch_cfg.flash_attention,
+                        batch_size = orch_cfg.batch_size,
+                        safety_margin_mb = orch_cfg.safety_margin_mb,
+                        "orchestrator: tuned config for detected hardware tier"
+                    );
+
+                    tracing::info!(
+                        total_layers = orch_cfg.model_profile.total_layers,
+                        per_layer_vram_mb = orch_cfg.model_profile.per_layer_vram_mb,
+                        has_vision = orch_cfg.model_profile.has_vision_projector,
+                        mmproj_vram_mb = orch_cfg.model_profile.mmproj_vram_mb,
+                        max_context = orch_cfg.model_profile.max_context,
+                        "orchestrator: derived model profile"
+                    );
+
+                    let _ = handle.emit(
+                        "orchestrator:selected",
+                        serde_json::json!({
+                            "tier": hardware_info.tier.as_str(),
+                            "model": c.model.name,
+                            "display_name": c.model.display_name,
+                            "vram_estimate_gb": c.model.vram_estimate_gb,
+                            "vision_enabled": !c.vision_disabled
+                                && c.model.capabilities.iter().any(|x| x == "vision"),
+                        }),
+                    );
+
+                    let model_name = c.model.name.clone();
+                    (model_path, mmproj_path, orch_cfg, true, model_name)
+                }
             }
-            Some(c) => {
-                let model_path = resolve_model_file(&c.model.file);
-                let mmproj_path = c
-                    .model
-                    .mmproj_file
-                    .as_ref()
-                    .filter(|_| !c.vision_disabled)
-                    .map(|f| resolve_model_file(f));
-
-                tracing::info!(
-                    tier = %hardware_info.tier.as_str(),
-                    model = %c.model.name,
-                    file = %c.model.file,
-                    resolved = %model_path,
-                    reason = ?c.reason,
-                    vision_disabled = c.vision_disabled,
-                    mmproj = ?mmproj_path,
-                    "orchestrator: tier-aware model selection complete"
-                );
-
-                // Override active_model so the model_router and other subsystems
-                // agree on which model is actually loaded.
-                config.llm.active_model = c.model.name.clone();
-
-                // Derive a tier-appropriate ModelProfile and substitute it
-                // into the orchestrator config. This way each model gets its
-                // own VRAM-budget calculation (layer count, mmproj size, …).
-                let mut orch_cfg = config.orchestrator.clone();
-                orch_cfg.model_profile =
-                    derive_model_profile(&c.model, &config.orchestrator.model_profile);
-
-                // Hardware-tier safety pass: clamps mlock / flash_attention /
-                // batch_size / safety_margin to values the detected machine
-                // can actually handle. Without this, defaults like
-                // `mlock=true` + a 5GB Qwen2.5-VL on a 16GB laptop will OOM
-                // and freeze the system at startup.
-                let model_size_mb = std::fs::metadata(&model_path)
-                    .map(|m| m.len() / (1024 * 1024))
-                    .unwrap_or((c.model.vram_estimate_gb as u64) * 1024);
-                orch_cfg.tune_for_tier(
-                    hardware_info.tier,
-                    hardware_info.total_ram_mb,
-                    hardware_info.vram_mb,
-                    model_size_mb,
-                );
-
-                tracing::info!(
-                    tier = %hardware_info.tier.as_str(),
-                    ram_mb = hardware_info.total_ram_mb,
-                    vram_mb = ?hardware_info.vram_mb,
-                    model_size_mb,
-                    mlock = orch_cfg.mlock,
-                    flash_attention = orch_cfg.flash_attention,
-                    batch_size = orch_cfg.batch_size,
-                    safety_margin_mb = orch_cfg.safety_margin_mb,
-                    "orchestrator: tuned config for detected hardware tier"
-                );
-
-                tracing::info!(
-                    total_layers = orch_cfg.model_profile.total_layers,
-                    per_layer_vram_mb = orch_cfg.model_profile.per_layer_vram_mb,
-                    has_vision = orch_cfg.model_profile.has_vision_projector,
-                    mmproj_vram_mb = orch_cfg.model_profile.mmproj_vram_mb,
-                    max_context = orch_cfg.model_profile.max_context,
-                    "orchestrator: derived model profile"
-                );
-
-                let _ = handle.emit(
-                    "orchestrator:selected",
-                    serde_json::json!({
-                        "tier": hardware_info.tier.as_str(),
-                        "model": c.model.name,
-                        "display_name": c.model.display_name,
-                        "vram_estimate_gb": c.model.vram_estimate_gb,
-                        "vision_enabled": !c.vision_disabled
-                            && c.model.capabilities.iter().any(|x| x == "vision"),
-                    }),
-                );
-
-                let model_name = c.model.name.clone();
-                (model_path, mmproj_path, orch_cfg, true, model_name)
-            }
-        }
-    } else {
-        tracing::info!("orchestrator: disabled in config (orchestrator.enabled = false)");
-        let _ = handle.emit(
-            "orchestrator:disabled",
-            serde_json::json!({ "reason": "config_disabled" }),
-        );
-        (String::new(), None, config.orchestrator.clone(), false, String::new())
-    };
+        } else {
+            tracing::info!("orchestrator: disabled in config (orchestrator.enabled = false)");
+            let _ = handle.emit(
+                "orchestrator:disabled",
+                serde_json::json!({ "reason": "config_disabled" }),
+            );
+            (
+                String::new(),
+                None,
+                config.orchestrator.clone(),
+                false,
+                String::new(),
+            )
+        };
 
     let _ = selected_model_name; // currently used only for logging above
 
@@ -2601,6 +2732,28 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         512, // max storage MB
     ));
 
+    let routing_config = config.routing.clone();
+    let mut router_tool_descriptions: Vec<(String, String, String)> = tool_registry
+        .list_defs()
+        .into_iter()
+        .map(|def| (def.name, def.description, def.category))
+        .collect();
+    router_tool_descriptions.sort_by(|a, b| a.0.cmp(&b.0));
+    let routing_cache_dir = {
+        let configured = PathBuf::from(&routing_config.cache_dir);
+        if configured.is_absolute() {
+            configured
+        } else {
+            paths.data_dir.join(configured)
+        }
+    };
+    let (semantic_router, _router_event_tx) = kria_core::routing::Router::new(
+        routing_config,
+        routing_cache_dir,
+        router_tool_descriptions,
+    )
+    .await;
+
     // Build the agent loop
     let max_tool_rounds = config.agent.max_tool_rounds.max(1);
     let min_confidence_to_act = config.agent.min_confidence_to_act;
@@ -2615,6 +2768,7 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
             audit_logger,
             rollback_mgr,
         )
+        .with_semantic_router(semantic_router)
         .with_max_tool_rounds(max_tool_rounds)
         .with_confidence_thresholds(min_confidence_to_act, clarify_threshold)
         .with_hardware_tier(hardware_info.tier.as_str()),
@@ -2800,7 +2954,8 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
 
     let voice_active = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let orchestrator_active_turns = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let orchestrator_last_activity_at = Arc::new(tokio::sync::Mutex::new(std::time::Instant::now()));
+    let orchestrator_last_activity_at =
+        Arc::new(tokio::sync::Mutex::new(std::time::Instant::now()));
 
     let (colab_enabled, colab_server_name) = {
         let cfg = config.read().await;
@@ -2908,15 +3063,19 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
                     );
 
                     // Publish to the UI that the LLM runtime is up.
-                    let _ = handle_bg.emit("orchestrator:ready", serde_json::json!({
-                        "api_url": orch.api_url(),
-                        "backend": format!("{:?}", orch.backend),
-                    }));
+                    let _ = handle_bg.emit(
+                        "orchestrator:ready",
+                        serde_json::json!({
+                            "api_url": orch.api_url(),
+                            "backend": format!("{:?}", orch.backend),
+                        }),
+                    );
 
                     // Start idle-release monitor if enabled.
                     if orch.config.idle_release_enabled {
                         let idle_after_secs = orch.config.idle_release_after_secs.max(30);
-                        let check_interval_secs = orch.config.idle_release_check_interval_secs.max(1);
+                        let check_interval_secs =
+                            orch.config.idle_release_check_interval_secs.max(1);
                         let active_turns = active_turns_bg.clone();
                         let last_activity = last_activity_bg.clone();
                         let voice_active_idle = voice_active_bg.clone();
@@ -2931,7 +3090,8 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
 
                         tokio::spawn(async move {
                             let idle_after = std::time::Duration::from_secs(idle_after_secs);
-                            let check_interval = std::time::Duration::from_secs(check_interval_secs);
+                            let check_interval =
+                                std::time::Duration::from_secs(check_interval_secs);
                             loop {
                                 tokio::time::sleep(check_interval).await;
                                 if voice_active_idle.load(std::sync::atomic::Ordering::Relaxed) {
@@ -2963,7 +3123,10 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
                                     }
                                     Ok(false) => {}
                                     Err(e) => {
-                                        tracing::warn!(?e, "orchestrator: idle release attempt failed");
+                                        tracing::warn!(
+                                            ?e,
+                                            "orchestrator: idle release attempt failed"
+                                        );
                                         touch_orchestrator_activity(&last_activity).await;
                                     }
                                 }
@@ -2979,7 +3142,11 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
                             use kria_core::infra::event_bus::KriaEvent;
                             loop {
                                 match rx.recv().await {
-                                    Ok(KriaEvent::LlmSwapStarted { from_ngl, to_ngl, emergency }) => {
+                                    Ok(KriaEvent::LlmSwapStarted {
+                                        from_ngl,
+                                        to_ngl,
+                                        emergency,
+                                    }) => {
                                         let _ = handle_orch.emit(
                                             "orchestrator:swap_started",
                                             serde_json::json!({
@@ -2989,7 +3156,11 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
                                             }),
                                         );
                                     }
-                                    Ok(KriaEvent::LlmSwapCompleted { new_ngl, new_context, duration_ms }) => {
+                                    Ok(KriaEvent::LlmSwapCompleted {
+                                        new_ngl,
+                                        new_context,
+                                        duration_ms,
+                                    }) => {
                                         let _ = handle_orch.emit(
                                             "orchestrator:swap_completed",
                                             serde_json::json!({
@@ -3019,7 +3190,9 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
                                     }
                                     Ok(_) => {}
                                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                                        tracing::debug!("orchestrator event forwarder lagged by {n}");
+                                        tracing::debug!(
+                                            "orchestrator event forwarder lagged by {n}"
+                                        );
                                     }
                                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                                 }
@@ -3039,7 +3212,10 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
                         ServiceStatus::Degraded,
                         Some(format!("{e}")),
                     );
-                    let _ = handle_bg.emit("orchestrator:error", serde_json::json!({ "error": e.to_string() }));
+                    let _ = handle_bg.emit(
+                        "orchestrator:error",
+                        serde_json::json!({ "error": e.to_string() }),
+                    );
                 }
             }
         });
@@ -3241,7 +3417,9 @@ async fn send_message_with_profile(
             None,
         );
     }
-    if let Err(e) = ensure_orchestrator_ready_for_turn(orchestrator_snapshot.as_ref(), "ui_turn").await {
+    if let Err(e) =
+        ensure_orchestrator_ready_for_turn(orchestrator_snapshot.as_ref(), "ui_turn").await
+    {
         emit_agent_stage(
             &app,
             "failed",
@@ -3388,7 +3566,7 @@ async fn send_message_with_profile(
 
     // Build conversation messages (system + recent history + current message)
     let recent_turns = memory_store
-        .get_recent_turns(&session_id, 20)
+        .get_recent_turns(&session_id, 5)
         .unwrap_or_default();
 
     let mut messages = Vec::with_capacity(recent_turns.len() + 2);
@@ -3399,15 +3577,8 @@ async fn send_message_with_profile(
         images: None,
     });
 
-    // Add recent conversation history
-    for turn in &recent_turns {
-        messages.push(ChatMessage {
-            role: turn.role.clone(),
-            content: turn.content.clone(),
-            name: turn.tool_name.clone(),
-            images: None,
-        });
-    }
+    // Add recent conversation history (with compact shaping for 4K context servers)
+    append_recent_turns_for_llm(&mut messages, &recent_turns);
 
     // Add current user message
     messages.push(ChatMessage {
@@ -3660,7 +3831,11 @@ async fn send_message_with_profile(
                         timestamp: Utc::now(),
                     });
                 }
-                StreamEvent::ToolProgress { call_id, message, percent } => {
+                StreamEvent::ToolProgress {
+                    call_id,
+                    message,
+                    percent,
+                } => {
                     let _ = app_handle.emit(
                         "kria:tool-progress",
                         serde_json::json!({
@@ -3671,7 +3846,12 @@ async fn send_message_with_profile(
                         }),
                     );
                 }
-                StreamEvent::ToolPayloadChunk { call_id, seq, is_final, data } => {
+                StreamEvent::ToolPayloadChunk {
+                    call_id,
+                    seq,
+                    is_final,
+                    data,
+                } => {
                     let _ = app_handle.emit(
                         "kria:tool-payload-chunk",
                         serde_json::json!({
@@ -3804,50 +3984,87 @@ async fn send_message_with_profile(
                         );
 
                         if let Some(orchestrator) = orchestrator_for_recovery.as_ref() {
-                            match orchestrator.restart("transport_failure").await {
-                                Ok(()) => {
-                                    emit_agent_stage(
-                                        &app_handle,
-                                        "llm_transport_error_recovery_succeeded",
-                                        "Orchestrator recovered; retrying this turn once",
-                                        None,
-                                    );
+                            let mut recovered = false;
 
-                                    let (retry_tx, retry_rx) =
-                                        tokio::sync::mpsc::unbounded_channel::<StreamEvent>();
-                                    let mut retry_messages = retry_messages_seed.clone();
-                                    let retry_agent_clone = retry_agent.clone();
-                                    let retry_sid_clone = retry_session_id.clone();
-                                    let retry_profile_clone = retry_execution_profile.clone();
-
-                                    tauri::async_runtime::spawn(async move {
-                                        retry_agent_clone
-                                            .run_with_profile(
-                                                &retry_sid_clone,
-                                                &mut retry_messages,
-                                                retry_tx,
-                                                Some(retry_profile_clone),
-                                            )
-                                            .await;
-                                    });
-
-                                    active_rx = retry_rx;
-                                    continue;
+                            if orchestrator.server_manager.is_swapping() {
+                                emit_agent_stage(
+                                    &app_handle,
+                                    "llm_transport_error_waiting_for_swap",
+                                    "LLM transport failed during active swap; waiting for runtime to become ready",
+                                    None,
+                                );
+                                let _ = orchestrator
+                                    .server_manager
+                                    .wait_for_swap_done(std::time::Duration::from_secs(45))
+                                    .await;
+                                match ensure_orchestrator_ready_for_turn(
+                                    Some(orchestrator),
+                                    "transport_failure_wait_for_swap",
+                                )
+                                .await
+                                {
+                                    Ok(()) => {
+                                        recovered = true;
+                                    }
+                                    Err(wait_err) => {
+                                        tracing::warn!(
+                                            error = %wait_err,
+                                            "runtime still not ready after swap wait; escalating to restart"
+                                        );
+                                    }
                                 }
-                                Err(restart_err) => {
-                                    tracing::error!(
-                                        ?restart_err,
-                                        "orchestrator restart failed after transport error"
-                                    );
-                                    emit_agent_stage(
-                                        &app_handle,
-                                        "llm_transport_error_recovery_failed",
-                                        "Orchestrator recovery failed; falling back to error handling",
-                                        Some(serde_json::json!({
-                                            "error": restart_err.to_string(),
-                                        })),
-                                    );
+                            }
+
+                            if !recovered {
+                                match orchestrator.restart("transport_failure").await {
+                                    Ok(()) => {
+                                        recovered = true;
+                                    }
+                                    Err(restart_err) => {
+                                        tracing::error!(
+                                            ?restart_err,
+                                            "orchestrator restart failed after transport error"
+                                        );
+                                        emit_agent_stage(
+                                            &app_handle,
+                                            "llm_transport_error_recovery_failed",
+                                            "Orchestrator recovery failed; falling back to error handling",
+                                            Some(serde_json::json!({
+                                                "error": restart_err.to_string(),
+                                            })),
+                                        );
+                                    }
                                 }
+                            }
+
+                            if recovered {
+                                emit_agent_stage(
+                                    &app_handle,
+                                    "llm_transport_error_recovery_succeeded",
+                                    "Orchestrator recovered; retrying this turn once",
+                                    None,
+                                );
+
+                                let (retry_tx, retry_rx) =
+                                    tokio::sync::mpsc::unbounded_channel::<StreamEvent>();
+                                let mut retry_messages = retry_messages_seed.clone();
+                                let retry_agent_clone = retry_agent.clone();
+                                let retry_sid_clone = retry_session_id.clone();
+                                let retry_profile_clone = retry_execution_profile.clone();
+
+                                tauri::async_runtime::spawn(async move {
+                                    retry_agent_clone
+                                        .run_with_profile(
+                                            &retry_sid_clone,
+                                            &mut retry_messages,
+                                            retry_tx,
+                                            Some(retry_profile_clone),
+                                        )
+                                        .await;
+                                });
+
+                                active_rx = retry_rx;
+                                continue;
                             }
                         } else {
                             emit_agent_stage(
@@ -3859,13 +4076,11 @@ async fn send_message_with_profile(
                         }
                     }
 
-                    if is_transport_failure && full_response.is_empty() && successful_tool_count > 0 {
+                    if is_transport_failure && full_response.is_empty() && successful_tool_count > 0
+                    {
                         if let Some((tool_name, tool_result)) = last_successful_tool.as_ref() {
-                            let fallback_text = build_tool_only_fallback_message(
-                                tool_name,
-                                true,
-                                tool_result,
-                            );
+                            let fallback_text =
+                                build_tool_only_fallback_message(tool_name, true, tool_result);
                             full_response = fallback_text.clone();
                             emit_agent_stage(
                                 &app_handle,
@@ -3933,8 +4148,8 @@ async fn send_message_with_profile(
             }
         }
 
-        // Persist assistant response
-        if !full_response.is_empty() {
+        // Persist assistant response (skip transient runtime errors so they don't bloat future context)
+        if !full_response.is_empty() && !is_transient_llm_error_text(&full_response) {
             let _ = memory_store_clone.store_turn(&ConversationTurn {
                 id: None,
                 session_id: session_id_clone,
@@ -4117,9 +4332,7 @@ pub async fn create_session(
     *state.current_session_id.write().await = new_id.clone();
 
     // Store metadata preferences so empty sessions are still visible in the UI.
-    let provided_title = title
-        .as_deref()
-        .and_then(normalize_session_title);
+    let provided_title = title.as_deref().and_then(normalize_session_title);
     let resolved_title = provided_title
         .clone()
         .unwrap_or_else(|| "New chat".to_string());
@@ -4407,10 +4620,7 @@ pub async fn cancel_request(state: State<'_, AppStateCell>) -> Result<(), String
 }
 
 #[tauri::command]
-pub async fn cancel_turn(
-    session_id: String,
-    state: State<'_, AppStateCell>,
-) -> Result<(), String> {
+pub async fn cancel_turn(session_id: String, state: State<'_, AppStateCell>) -> Result<(), String> {
     let state = state
         .get()
         .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
@@ -4707,12 +4917,16 @@ pub async fn open_html_for_print(
 /// Read a local image file and return it as a base64 data URL.
 /// Used by the frontend to display generated/uploaded images stored on disk.
 #[tauri::command]
-pub async fn read_local_image(path: String, state: State<'_, AppStateCell>) -> Result<String, String> {
+pub async fn read_local_image(
+    path: String,
+    state: State<'_, AppStateCell>,
+) -> Result<String, String> {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
     use std::path::PathBuf;
 
     // Path safety: allow reads only under ~/.kria and configured image output roots.
-    let canonical = std::fs::canonicalize(&path).map_err(|e| format!("Cannot resolve path: {e}"))?;
+    let canonical =
+        std::fs::canonicalize(&path).map_err(|e| format!("Cannot resolve path: {e}"))?;
     let home = dirs::home_dir().unwrap_or_default();
 
     let mut allowed_roots: Vec<PathBuf> = vec![home.join(".kria")];
@@ -4749,7 +4963,9 @@ pub async fn read_local_image(path: String, state: State<'_, AppStateCell>) -> R
         return Err("Access denied: image path is outside configured KRIA storage roots".into());
     }
 
-    let bytes = tokio::fs::read(&canonical).await.map_err(|e| format!("Read failed: {e}"))?;
+    let bytes = tokio::fs::read(&canonical)
+        .await
+        .map_err(|e| format!("Read failed: {e}"))?;
 
     let ext = canonical
         .extension()
@@ -4779,9 +4995,14 @@ pub async fn save_uploaded_image(
 
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
     let now = chrono::Utc::now();
-    let month_dir = home.join(".kria").join("uploads").join("user")
+    let month_dir = home
+        .join(".kria")
+        .join("uploads")
+        .join("user")
         .join(now.format("%Y-%m").to_string());
-    tokio::fs::create_dir_all(&month_dir).await.map_err(|e| e.to_string())?;
+    tokio::fs::create_dir_all(&month_dir)
+        .await
+        .map_err(|e| e.to_string())?;
 
     let ext = match mime_type.as_str() {
         "image/png" => "png",
@@ -4793,10 +5014,12 @@ pub async fn save_uploaded_image(
     let filename = format!("user_{}.{}", ts, ext);
     let path = month_dir.join(&filename);
 
-    tokio::fs::write(&path, &data).await.map_err(|e| e.to_string())?;
+    tokio::fs::write(&path, &data)
+        .await
+        .map_err(|e| e.to_string())?;
 
     let sha = {
-        use sha2::{Sha256, Digest};
+        use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(&data);
         format!("{:x}", hasher.finalize())
@@ -4805,17 +5028,19 @@ pub async fn save_uploaded_image(
     // Store in SQLite chat_media table
     if let Some(s) = state.get() {
         let path_str = path.to_string_lossy().to_string();
-        let _ = s.memory_store.store_chat_media(&kria_core::memory::store::ChatMediaRecord {
-            session_id: session_id.clone(),
-            media_type: "uploaded".into(),
-            file_path: path_str.clone(),
-            sha256: Some(sha.clone()),
-            prompt: None,
-            width: None,
-            height: None,
-            style: None,
-            provenance: Some("user_upload".into()),
-        });
+        let _ = s
+            .memory_store
+            .store_chat_media(&kria_core::memory::store::ChatMediaRecord {
+                session_id: session_id.clone(),
+                media_type: "uploaded".into(),
+                file_path: path_str.clone(),
+                sha256: Some(sha.clone()),
+                prompt: None,
+                width: None,
+                height: None,
+                style: None,
+                provenance: Some("user_upload".into()),
+            });
 
         // Return base64 data URL so the frontend can display immediately
         let encoded = STANDARD.encode(&data);
@@ -4842,7 +5067,10 @@ pub async fn get_session_media(
     let state = state
         .get()
         .ok_or("KRIA is still initializing — please try again in a moment")?;
-    let records = state.memory_store.get_session_media(&session_id).map_err(|e| e.to_string())?;
+    let records = state
+        .memory_store
+        .get_session_media(&session_id)
+        .map_err(|e| e.to_string())?;
     Ok(serde_json::json!({ "media": records }))
 }
 
@@ -4942,9 +5170,8 @@ pub async fn start_voice(state: State<'_, AppStateCell>, app: AppHandle) -> Resu
         match effective_config
             .resolve_paths()
             .ok()
-            .and_then(|p| {
-                build_v2_pipeline(&effective_config, &p, state.hardware_info.tier).ok()
-            }) {
+            .and_then(|p| build_v2_pipeline(&effective_config, &p, state.hardware_info.tier).ok())
+        {
             Some((v2_pipeline, _state_rx, telemetry_rx)) => {
                 tracing::info!("voice: hot-swapping active_voice → v2");
                 *state.active_voice.write().await =
@@ -4952,9 +5179,7 @@ pub async fn start_voice(state: State<'_, AppStateCell>, app: AppHandle) -> Resu
                 *state.voice_v2_telemetry.lock().await = Some(telemetry_rx);
             }
             None => {
-                tracing::warn!(
-                    "voice: v2 hot-swap failed; continuing with v1 pipeline"
-                );
+                tracing::warn!("voice: v2 hot-swap failed; continuing with v1 pipeline");
             }
         }
     }
@@ -5132,7 +5357,7 @@ pub async fn start_voice(state: State<'_, AppStateCell>, app: AppHandle) -> Resu
                     drop(config_guard);
 
                     let recent_turns = memory_store
-                        .get_recent_turns(&session_id, 20)
+                        .get_recent_turns(&session_id, 5)
                         .unwrap_or_default();
                     let mut messages = Vec::with_capacity(recent_turns.len() + 2);
                     messages.push(ChatMessage {
@@ -5141,14 +5366,7 @@ pub async fn start_voice(state: State<'_, AppStateCell>, app: AppHandle) -> Resu
                         name: None,
                         images: None,
                     });
-                    for turn in &recent_turns {
-                        messages.push(ChatMessage {
-                            role: turn.role.clone(),
-                            content: turn.content.clone(),
-                            name: turn.tool_name.clone(),
-                            images: None,
-                        });
-                    }
+                    append_recent_turns_for_llm(&mut messages, &recent_turns);
                     messages.push(ChatMessage {
                         role: "user".into(),
                         content: text.clone(),
@@ -5265,26 +5483,58 @@ pub async fn start_voice(state: State<'_, AppStateCell>, app: AppHandle) -> Resu
 
                                 // Persist image metadata in chat_media table when generate_image succeeds
                                 if name == "generate_image" && success {
-                                    if let Some(imgs) = result.get("images").and_then(|v| v.as_array()) {
+                                    if let Some(imgs) =
+                                        result.get("images").and_then(|v| v.as_array())
+                                    {
                                         for img in imgs {
-                                            let file_path = img.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                                            if file_path.is_empty() { continue; }
-                                            let _ = ms2.store_chat_media(&kria_core::memory::store::ChatMediaRecord {
-                                                session_id: sid2.clone(),
-                                                media_type: "generated".into(),
-                                                file_path,
-                                                sha256: img.get("sha256").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                                                prompt: result.get("prompt").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                                                width: img.get("width").and_then(|v| v.as_u64()).map(|v| v as u32),
-                                                height: img.get("height").and_then(|v| v.as_u64()).map(|v| v as u32),
-                                                style: img.get("style").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                                                provenance: img.get("provenance").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                                            });
+                                            let file_path = img
+                                                .get("path")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("")
+                                                .to_string();
+                                            if file_path.is_empty() {
+                                                continue;
+                                            }
+                                            let _ = ms2.store_chat_media(
+                                                &kria_core::memory::store::ChatMediaRecord {
+                                                    session_id: sid2.clone(),
+                                                    media_type: "generated".into(),
+                                                    file_path,
+                                                    sha256: img
+                                                        .get("sha256")
+                                                        .and_then(|v| v.as_str())
+                                                        .map(|s| s.to_string()),
+                                                    prompt: result
+                                                        .get("prompt")
+                                                        .and_then(|v| v.as_str())
+                                                        .map(|s| s.to_string()),
+                                                    width: img
+                                                        .get("width")
+                                                        .and_then(|v| v.as_u64())
+                                                        .map(|v| v as u32),
+                                                    height: img
+                                                        .get("height")
+                                                        .and_then(|v| v.as_u64())
+                                                        .map(|v| v as u32),
+                                                    style: img
+                                                        .get("style")
+                                                        .and_then(|v| v.as_str())
+                                                        .map(|s| s.to_string()),
+                                                    provenance: img
+                                                        .get("provenance")
+                                                        .and_then(|v| v.as_str())
+                                                        .map(|s| s.to_string()),
+                                                },
+                                            );
                                         }
                                     }
                                 }
                             }
-                            StreamEvent::ToolProgress { call_id, message, percent } => {
+                            StreamEvent::ToolProgress {
+                                call_id,
+                                message,
+                                percent,
+                            } => {
                                 let _ = app2.emit(
                                     "kria:tool-progress",
                                     serde_json::json!({
@@ -5295,7 +5545,12 @@ pub async fn start_voice(state: State<'_, AppStateCell>, app: AppHandle) -> Resu
                                     }),
                                 );
                             }
-                            StreamEvent::ToolPayloadChunk { call_id, seq, is_final, data } => {
+                            StreamEvent::ToolPayloadChunk {
+                                call_id,
+                                seq,
+                                is_final,
+                                data,
+                            } => {
                                 let _ = app2.emit(
                                     "kria:tool-payload-chunk",
                                     serde_json::json!({
@@ -5369,7 +5624,7 @@ pub async fn start_voice(state: State<'_, AppStateCell>, app: AppHandle) -> Resu
                     }
 
                     // Persist assistant response
-                    if !full_response.is_empty() {
+                    if !full_response.is_empty() && !is_transient_llm_error_text(&full_response) {
                         let _ = ms2.store_turn(&ConversationTurn {
                             id: None,
                             session_id: sid2.clone(),
@@ -5607,7 +5862,9 @@ pub async fn send_image_message(
             None,
         );
     }
-    if let Err(e) = ensure_orchestrator_ready_for_turn(orchestrator_img.as_ref(), "image_turn").await {
+    if let Err(e) =
+        ensure_orchestrator_ready_for_turn(orchestrator_img.as_ref(), "image_turn").await
+    {
         emit_agent_stage(
             &app,
             "failed",
@@ -5731,7 +5988,7 @@ pub async fn send_image_message(
                 let summary = extract_image_preanalysis_summary(&result.data);
                 let extracted_images =
                     extract_preprocessed_image_attachments(&result.data, &mime_type)
-                    .unwrap_or_default();
+                        .unwrap_or_default();
                 let mut images =
                     constrain_runtime_image_attachments(extracted_images, llm_context_window);
                 if images.is_empty() {
@@ -5878,7 +6135,7 @@ pub async fn send_image_message(
     );
 
     let recent_turns = memory_store
-        .get_recent_turns(&session_id, 20)
+        .get_recent_turns(&session_id, 5)
         .unwrap_or_default();
 
     let mut messages = Vec::with_capacity(recent_turns.len() + 2);
@@ -5905,22 +6162,10 @@ pub async fn send_image_message(
         });
     }
 
-    for turn in &recent_turns {
-        messages.push(ChatMessage {
-            role: turn.role.clone(),
-            content: turn.content.clone(),
-            name: turn.tool_name.clone(),
-            images: None,
-        });
-    }
+    append_recent_turns_for_llm(&mut messages, &recent_turns);
     messages.push(ChatMessage {
         role: "user".into(),
-        content: build_image_llm_user_content(
-            &user_text,
-            &image_path_for_llm,
-            &image_intent,
-            None,
-        ),
+        content: build_image_llm_user_content(&user_text, &image_path_for_llm, &image_intent, None),
         name: None,
         images: Some(llm_images),
     });
@@ -6127,7 +6372,11 @@ pub async fn send_image_message(
                         timestamp: Utc::now(),
                     });
                 }
-                StreamEvent::ToolProgress { call_id, message, percent } => {
+                StreamEvent::ToolProgress {
+                    call_id,
+                    message,
+                    percent,
+                } => {
                     let _ = app_handle.emit(
                         "kria:tool-progress",
                         serde_json::json!({
@@ -6137,7 +6386,12 @@ pub async fn send_image_message(
                         }),
                     );
                 }
-                StreamEvent::ToolPayloadChunk { call_id, seq, is_final, data } => {
+                StreamEvent::ToolPayloadChunk {
+                    call_id,
+                    seq,
+                    is_final,
+                    data,
+                } => {
                     let _ = app_handle.emit(
                         "kria:tool-payload-chunk",
                         serde_json::json!({
@@ -6254,10 +6508,8 @@ pub async fn send_image_message(
                                 "LLM unavailable; returning pre-analysis summary fallback",
                                 None,
                             );
-                            let _ = app_handle.emit(
-                                "agent:token",
-                                serde_json::json!({ "text": fallback_text }),
-                            );
+                            let _ = app_handle
+                                .emit("agent:token", serde_json::json!({ "text": fallback_text }));
                             continue;
                         }
                     }
@@ -6293,7 +6545,7 @@ pub async fn send_image_message(
             }
         }
 
-        if !full_response.is_empty() {
+        if !full_response.is_empty() && !is_transient_llm_error_text(&full_response) {
             let _ = memory_store_clone.store_turn(&ConversationTurn {
                 id: None,
                 session_id: session_id_clone,
@@ -7271,9 +7523,7 @@ async fn maybe_bootstrap_colab_browser_connection(state: &AppState, server_name:
                 "colab browser bootstrap tool invocation failed"
             );
             let mut runtime = state.colab_runtime.write().await;
-            runtime.last_error = Some(format!(
-                "Colab browser bootstrap failed: {err}"
-            ));
+            runtime.last_error = Some(format!("Colab browser bootstrap failed: {err}"));
         }
     }
 }
@@ -7303,9 +7553,7 @@ async fn collect_colab_tier_status(state: &AppState) -> serde_json::Value {
                     error = %err,
                     "colab MCP tool refresh failed"
                 );
-                transient_warnings.push(format!(
-                    "Colab MCP tool refresh failed: {err}"
-                ));
+                transient_warnings.push(format!("Colab MCP tool refresh failed: {err}"));
             }
         }
         manager.status().await
@@ -7374,7 +7622,12 @@ pub async fn connect_colab_tier(
         }
 
         let server_name = config.colab.mcp_server_name.clone();
-        if let Some(server) = config.mcp.servers.iter_mut().find(|s| s.name == server_name) {
+        if let Some(server) = config
+            .mcp
+            .servers
+            .iter_mut()
+            .find(|s| s.name == server_name)
+        {
             server_found = true;
             if migrate_legacy_colab_server_command(server) {
                 changed = true;
@@ -7447,7 +7700,12 @@ pub async fn disconnect_colab_tier(
         }
 
         let target_server = config.colab.mcp_server_name.clone();
-        if let Some(server) = config.mcp.servers.iter_mut().find(|s| s.name == target_server) {
+        if let Some(server) = config
+            .mcp
+            .servers
+            .iter_mut()
+            .find(|s| s.name == target_server)
+        {
             if server.enabled {
                 server.enabled = false;
                 changed = true;
@@ -7916,12 +8174,11 @@ pub async fn get_orchestrator_status(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_colab_tier_status_payload,
-        build_google_workspace_status_payload, build_image_llm_user_content,
-        build_tool_result_event_payload, extract_image_preanalysis_summary,
-        extract_preprocessed_image_attachments, infer_image_intent_from_text, local_api_chat,
-        migrate_legacy_colab_server_command, sync_telegram_mcp_server_config, ColabRuntimeSnapshot,
-        ColabRuntimeState,
+        build_colab_tier_status_payload, build_google_workspace_status_payload,
+        build_image_llm_user_content, build_tool_result_event_payload,
+        extract_image_preanalysis_summary, extract_preprocessed_image_attachments,
+        infer_image_intent_from_text, local_api_chat, migrate_legacy_colab_server_command,
+        sync_telegram_mcp_server_config, ColabRuntimeSnapshot, ColabRuntimeState,
         GoogleWorkspaceRuntimeSnapshot, LocalApiBridgeState, LocalApiChatRequest,
         LocalApiResponder, COLAB_OFFICIAL_COMMAND, COLAB_OFFICIAL_SOURCE,
         OCR_HEALTH_PROBE_IMAGE_BYTES,
@@ -8698,7 +8955,9 @@ pub async fn voice_v2_status() -> Result<serde_json::Value, String> {
         if p.is_absolute() {
             p
         } else if p.components().count() > 1 {
-            paths.models_dir.join(p.strip_prefix("models").unwrap_or(&p))
+            paths
+                .models_dir
+                .join(p.strip_prefix("models").unwrap_or(&p))
         } else {
             wake_dir.join(p)
         }

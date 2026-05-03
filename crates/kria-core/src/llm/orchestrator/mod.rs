@@ -9,7 +9,10 @@ pub mod gpu_watchdog;
 pub mod server_manager;
 pub mod strategy;
 pub mod telemetry;
+pub mod threshold;
 pub mod tier_strategy;
+pub mod vision_strategy;
+pub mod vram_budget;
 
 use crate::config::OrchestratorConfig;
 use crate::infra::event_bus::EventBus;
@@ -93,6 +96,9 @@ pub struct Orchestrator {
     watchdog_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
     lifecycle_lock: Mutex<()>,
     last_restart_at: Mutex<Option<Instant>>,
+    /// Total VRAM detected at boot. Used by the watchdog for dynamic
+    /// threshold scaling (Phase 1). Zero on CPU-only backends.
+    total_vram_mb: u64,
     /// Keeps the TelemetryActor OS thread alive for the duration of the
     /// orchestrator's lifetime. Drop order: actor is dropped after watchdog.
     _telemetry_actor: Option<telemetry::TelemetryActor>,
@@ -122,15 +128,15 @@ impl Orchestrator {
         // and publishes snapshots via a watch channel. All async consumers read
         // from WatchTelemetry (zero-cost borrow) — no executor blocking.
         let poll_interval = Duration::from_secs(config.poll_interval_secs.max(1));
-        let (telemetry_actor, telemetry) =
-            tokio::task::spawn_blocking(move || {
-                telemetry::create_telemetry_actor(backend, poll_interval)
-            })
-            .await
-            .expect("telemetry actor thread spawn failed");
+        let (telemetry_actor, telemetry) = tokio::task::spawn_blocking(move || {
+            telemetry::create_telemetry_actor(backend, poll_interval)
+        })
+        .await
+        .expect("telemetry actor thread spawn failed");
 
         // Calculate initial parameters from pre-spawn telemetry
         let initial_snapshot = telemetry.snapshot().await;
+        let total_vram_mb = initial_snapshot.total_vram_mb;
         let initial_params = strategy::calculate_target_params(
             &config.model_profile,
             initial_snapshot.free_vram_mb,
@@ -156,15 +162,23 @@ impl Orchestrator {
             .spawn(
                 initial_params.ngl,
                 initial_params.context,
-                initial_params.enable_vision,
+                initial_params.vision_mode,
                 event_bus.clone(),
             )
             .await?;
 
         health.register("llama-server");
-        health.update("llama-server", crate::infra::health::ServiceStatus::Healthy, None);
+        health.update(
+            "llama-server",
+            crate::infra::health::ServiceStatus::Healthy,
+            None,
+        );
         health.register("orchestrator");
-        health.update("orchestrator", crate::infra::health::ServiceStatus::Healthy, None);
+        health.update(
+            "orchestrator",
+            crate::infra::health::ServiceStatus::Healthy,
+            None,
+        );
 
         // Start the watchdog loop
         let watchdog = gpu_watchdog::GpuWatchdog::new(
@@ -173,6 +187,7 @@ impl Orchestrator {
             telemetry.clone(),
             server_manager.clone(),
             event_bus.clone(),
+            total_vram_mb,
         );
 
         let watchdog_handle = tokio::spawn(async move {
@@ -189,6 +204,7 @@ impl Orchestrator {
             watchdog_handle: Mutex::new(Some(watchdog_handle)),
             lifecycle_lock: Mutex::new(()),
             last_restart_at: Mutex::new(None),
+            total_vram_mb,
             _telemetry_actor: Some(telemetry_actor),
         });
 
@@ -226,9 +242,9 @@ impl Orchestrator {
             .await;
 
         if self.backend == GpuBackend::Cuda {
-            self.wait_for_vram_release_bounded(
-                Duration::from_secs(self.config.vram_release_timeout_secs.max(1)),
-            )
+            self.wait_for_vram_release_bounded(Duration::from_secs(
+                self.config.vram_release_timeout_secs.max(1),
+            ))
             .await;
         }
 
@@ -287,9 +303,9 @@ impl Orchestrator {
             .await;
 
         if self.backend == GpuBackend::Cuda {
-            self.wait_for_vram_release_bounded(
-                Duration::from_secs(self.config.vram_release_timeout_secs.max(1)),
-            )
+            self.wait_for_vram_release_bounded(Duration::from_secs(
+                self.config.vram_release_timeout_secs.max(1),
+            ))
             .await;
         }
 
@@ -306,7 +322,7 @@ impl Orchestrator {
             .spawn(
                 target.ngl,
                 target.context,
-                target.enable_vision,
+                target.vision_mode,
                 self.event_bus.clone(),
             )
             .await;
@@ -329,13 +345,22 @@ impl Orchestrator {
                 } else {
                     self.config.model_profile.min_context
                 };
-                let fallback_vision = self.config.model_profile.has_vision_projector && fallback_ngl >= self.config.model_profile.vision_min_ngl;
+                let fallback_ram = {
+                    let mut sys = sysinfo::System::new();
+                    sys.refresh_memory();
+                    sys.available_memory() / (1024 * 1024)
+                };
+                let fallback_vm = vision_strategy::determine_vision_mode(
+                    &self.config.model_profile,
+                    fallback_ngl,
+                    fallback_ram,
+                );
 
                 self.server_manager
                     .spawn(
                         fallback_ngl,
                         fallback_ctx,
-                        fallback_vision,
+                        fallback_vm,
                         self.event_bus.clone(),
                     )
                     .await
@@ -441,7 +466,7 @@ impl Orchestrator {
             .spawn(
                 target.ngl,
                 target.context,
-                target.enable_vision,
+                target.vision_mode,
                 self.event_bus.clone(),
             )
             .await;
@@ -464,14 +489,22 @@ impl Orchestrator {
                 } else {
                     self.config.model_profile.min_context
                 };
-                let fallback_vision =
-                    self.config.model_profile.has_vision_projector && fallback_ngl >= self.config.model_profile.vision_min_ngl;
+                let fallback_ram = {
+                    let mut sys = sysinfo::System::new();
+                    sys.refresh_memory();
+                    sys.available_memory() / (1024 * 1024)
+                };
+                let fallback_vm = vision_strategy::determine_vision_mode(
+                    &self.config.model_profile,
+                    fallback_ngl,
+                    fallback_ram,
+                );
 
                 self.server_manager
                     .spawn(
                         fallback_ngl,
                         fallback_ctx,
-                        fallback_vision,
+                        fallback_vm,
                         self.event_bus.clone(),
                     )
                     .await
@@ -576,6 +609,7 @@ impl Orchestrator {
             self.telemetry.clone(),
             self.server_manager.clone(),
             self.event_bus.clone(),
+            self.total_vram_mb,
         );
 
         *lock = Some(tokio::spawn(async move {
@@ -627,13 +661,13 @@ impl Orchestrator {
     const SWAP_SLOT_FILENAME: &'static str = "kria_tier_b.bin";
     const SWAP_SLOT_ID: u32 = 0;
 
-    /// Hard-restart llama-server with `--n-gpu-layers 0` so the model lives
-    /// entirely in CPU RAM. Used by the image swap path to free VRAM.
+    /// Evict the LLM model from VRAM to free GPU for ComfyUI.
     ///
-    /// Best-effort persists slot 0's KV cache before the SIGTERM and
-    /// re-imports it after the new process is healthy. Failure to
-    /// save/restore the snapshot is non-fatal — it only forces the next
-    /// turn to re-prefill from scratch.
+    /// **Preferred path (zero-downtime):** API-level unload via Router Mode.
+    /// Server stays alive, port stays stable, no process restart needed.
+    ///
+    /// **Fallback path (legacy):** SIGTERM/SIGKILL + respawn with ngl=0.
+    /// Used when Router Mode is unavailable (HTTP 404/501).
     pub async fn evict_to_cpu(&self) -> anyhow::Result<()> {
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
 
@@ -643,14 +677,17 @@ impl Orchestrator {
             return Ok(());
         }
 
-        tracing::info!(prior_ngl, prior_ctx, "orchestrator: Tier B eviction starting");
+        tracing::info!(
+            prior_ngl,
+            prior_ctx,
+            "orchestrator: Tier B eviction starting"
+        );
 
         // Stop the watchdog *first* so it can't re-spawn behind our back when
         // it sees VRAM pressure during the swap.
         self.stop_watchdog().await;
 
-        // Best-effort: snapshot conversational context. We tolerate failure
-        // because the server is about to die anyway.
+        // Best-effort: snapshot conversational context.
         let _ = self
             .server_manager
             .save_slot_kv(Self::SWAP_SLOT_ID, Self::SWAP_SLOT_FILENAME)
@@ -659,10 +696,37 @@ impl Orchestrator {
         self.health.update(
             "llama-server",
             crate::infra::health::ServiceStatus::Starting,
-            Some("Tier B eviction: restarting on CPU".into()),
+            Some("Tier B eviction: freeing VRAM".into()),
         );
 
-        // SIGTERM → wait → SIGKILL ladder via ChildGuard.
+        // ── Try API-level unload first (zero-downtime path) ──────────────
+        match self.server_manager.api_unload_model().await {
+            Ok(()) => {
+                tracing::info!(
+                    prior_ngl,
+                    "orchestrator: Tier B eviction complete via API unload \
+                     (process alive, VRAM freed, zero-downtime)"
+                );
+                self.health.update(
+                    "llama-server",
+                    crate::infra::health::ServiceStatus::Healthy,
+                    Some("Tier B: model unloaded via API".into()),
+                );
+                return Ok(());
+            }
+            Err(api_err) => {
+                // THIS is the diagnostic the user needs to see in logs.
+                tracing::error!(
+                    error = %api_err,
+                    "orchestrator: API-level model unload FAILED — \
+                     falling back to legacy SIGTERM/SIGKILL process restart. \
+                     To enable zero-downtime swaps, upgrade llama-server to \
+                     b5291+ and launch with --models-dir instead of --model."
+                );
+            }
+        }
+
+        // ── Legacy fallback: SIGTERM → wait → SIGKILL ────────────────────
         self.server_manager
             .graceful_stop_with_timeout(Duration::from_secs(
                 self.config.graceful_stop_timeout_secs.max(1),
@@ -687,13 +751,32 @@ impl Orchestrator {
             self.config.model_profile.min_context
         };
 
+        // FIX: Determine vision mode dynamically instead of hardcoding Disabled.
+        // The mmproj weights can live in system RAM (CpuVision tier) even at
+        // ngl=0. Hardcoding Disabled here was the root cause of the LLM going
+        // blind during Tier B eviction despite having 8+ GB of free RAM.
+        let eviction_free_ram_mb = {
+            let mut sys = sysinfo::System::new();
+            sys.refresh_memory();
+            sys.available_memory() / (1024 * 1024)
+        };
+        let eviction_vision_mode = vision_strategy::determine_vision_mode(
+            &self.config.model_profile,
+            0, // ngl = 0 for CPU eviction
+            eviction_free_ram_mb,
+        );
+        tracing::info!(
+            free_ram_mb = eviction_free_ram_mb,
+            ?eviction_vision_mode,
+            "orchestrator: evict_to_cpu vision mode determined"
+        );
+
         self.server_manager
-            .spawn(0, cpu_ctx, false, self.event_bus.clone())
+            .spawn(0, cpu_ctx, eviction_vision_mode, self.event_bus.clone())
             .await
             .map_err(|e| anyhow::anyhow!("CPU-mode spawn failed: {e}"))?;
 
-        // Best-effort: rehydrate the conversation. The new process owns a
-        // fresh slot 0, so we restore from the snapshot we just took.
+        // Best-effort: rehydrate the conversation.
         let _ = self
             .server_manager
             .restore_slot_kv(Self::SWAP_SLOT_ID, Self::SWAP_SLOT_FILENAME)
@@ -702,10 +785,14 @@ impl Orchestrator {
         self.health.update(
             "llama-server",
             crate::infra::health::ServiceStatus::Healthy,
-            Some("Tier B: CPU-resident".into()),
+            Some("Tier B: CPU-resident (legacy restart)".into()),
         );
 
-        tracing::info!(prior_ngl, prior_ctx, "orchestrator: Tier B eviction complete");
+        tracing::info!(
+            prior_ngl,
+            prior_ctx,
+            "orchestrator: Tier B eviction complete (legacy process restart)"
+        );
         Ok(())
     }
 
@@ -728,16 +815,43 @@ impl Orchestrator {
 
         self.stop_watchdog().await;
 
+        self.health.update(
+            "llama-server",
+            crate::infra::health::ServiceStatus::Starting,
+            Some("Tier B restore: reloading model (API-first)".into()),
+        );
+
+        // Preferred path: API-level reload (zero-downtime, no process restart).
+        match self.server_manager.api_load_model().await {
+            Ok(()) => {
+                let _ = self
+                    .server_manager
+                    .restore_slot_kv(Self::SWAP_SLOT_ID, Self::SWAP_SLOT_FILENAME)
+                    .await;
+
+                self.health.update(
+                    "llama-server",
+                    crate::infra::health::ServiceStatus::Healthy,
+                    Some("Tier B: GPU-resident (API reload)".into()),
+                );
+                self.ensure_watchdog_running().await;
+
+                tracing::info!("orchestrator: Tier B restore complete via API load");
+                return Ok(());
+            }
+            Err(api_err) => {
+                tracing::warn!(
+                    error = %api_err,
+                    "orchestrator: API-level model load failed; falling back to legacy respawn"
+                );
+            }
+        }
+
+        // Legacy fallback path: graceful stop + fresh GPU spawn.
         let _ = self
             .server_manager
             .save_slot_kv(Self::SWAP_SLOT_ID, Self::SWAP_SLOT_FILENAME)
             .await;
-
-        self.health.update(
-            "llama-server",
-            crate::infra::health::ServiceStatus::Starting,
-            Some("Tier B restore: respawning on GPU".into()),
-        );
 
         self.server_manager
             .graceful_stop_with_timeout(Duration::from_secs(
@@ -772,7 +886,7 @@ impl Orchestrator {
             .spawn(
                 target.ngl,
                 target_ctx,
-                target.enable_vision,
+                target.vision_mode,
                 self.event_bus.clone(),
             )
             .await
@@ -807,11 +921,15 @@ impl crate::image::swap::LlmEvictionController for Orchestrator {
     }
 
     async fn evict_to_cpu(&self) -> Result<(), String> {
-        Orchestrator::evict_to_cpu(self).await.map_err(|e| e.to_string())
+        Orchestrator::evict_to_cpu(self)
+            .await
+            .map_err(|e| e.to_string())
     }
 
     async fn restore_from_cpu(&self) -> Result<(), String> {
-        Orchestrator::restore_from_cpu(self).await.map_err(|e| e.to_string())
+        Orchestrator::restore_from_cpu(self)
+            .await
+            .map_err(|e| e.to_string())
     }
 }
 
@@ -867,6 +985,7 @@ mod tests {
             watchdog_handle: Mutex::new(None),
             lifecycle_lock: Mutex::new(()),
             last_restart_at: Mutex::new(None),
+            total_vram_mb: 0,
             _telemetry_actor: None,
         }
     }
@@ -892,7 +1011,10 @@ mod tests {
         let orchestrator = build_test_orchestrator(config);
 
         let result = orchestrator.ensure_ready("unit_test_failure").await;
-        assert!(result.is_err(), "ensure_ready should fail without a valid model/runtime");
+        assert!(
+            result.is_err(),
+            "ensure_ready should fail without a valid model/runtime"
+        );
 
         let llama_health = orchestrator
             .health

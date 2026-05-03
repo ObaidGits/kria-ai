@@ -432,7 +432,9 @@ impl ToolHandler for ScreenshotAnalyze {
                 }
             }
             if !captured {
-                return ToolResult::err("no screenshot tool available (install maim or scrot: sudo apt install maim)");
+                return ToolResult::err(
+                    "no screenshot tool available (install maim or scrot: sudo apt install maim)",
+                );
             }
         } else {
             return ToolResult::err("screenshot not supported on this OS");
@@ -505,6 +507,7 @@ pub fn register(reg: &ToolRegistry, sidecar: Option<Arc<SidecarBridge>>) {
                 param("response_reserve", "integer", "Reserved output tokens (default 700)", false),
                 param("system_reserve", "integer", "Reserved system tokens (default 900)", false),
                 param("history_reserve", "integer", "Reserved history tokens (default 1400)", false),
+                param("hard_visual_token_cap", "integer", "Hard pre-flight cap for visual tokens (injected by orchestrator scheduler)", false),
                 param("model_name", "string", "Optional vision model hint (for sidecar profile selection)", false),
                 param("model_profile", "object", "Optional model profile override: patch_size, patch_merge, effective_patch and caps", false),
             ],

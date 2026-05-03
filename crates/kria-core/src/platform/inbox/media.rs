@@ -129,13 +129,10 @@ impl MediaResolver {
     }
 
     async fn download(&self, url: &str, dest: &Path) -> anyhow::Result<()> {
-        let response = tokio::time::timeout(
-            self.download_timeout,
-            self.http.get(url).send(),
-        )
-        .await
-        .map_err(|_| anyhow::anyhow!("download timeout"))?
-        .map_err(|e| anyhow::anyhow!("http error: {e}"))?;
+        let response = tokio::time::timeout(self.download_timeout, self.http.get(url).send())
+            .await
+            .map_err(|_| anyhow::anyhow!("download timeout"))?
+            .map_err(|e| anyhow::anyhow!("http error: {e}"))?;
 
         if !response.status().is_success() {
             return Err(anyhow::anyhow!("http {}", response.status()));

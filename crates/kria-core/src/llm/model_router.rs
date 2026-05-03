@@ -84,10 +84,7 @@ impl ModelRouter {
                     vec!["text".into(), "vision".into()],
                     vm.context_window,
                 ));
-                (
-                    Some(backend.clone() as Arc<dyn LlmBackend>),
-                    Some(backend),
-                )
+                (Some(backend.clone() as Arc<dyn LlmBackend>), Some(backend))
             })
             // If no explicit vision model but local backend exists, treat local
             // as vision-capable: the user may have loaded a vision model (e.g.
@@ -100,10 +97,7 @@ impl ModelRouter {
                         vec!["text".into(), "vision".into()],
                         config.llm.context_window,
                     ));
-                    (
-                        Some(backend.clone() as Arc<dyn LlmBackend>),
-                        Some(backend),
-                    )
+                    (Some(backend.clone() as Arc<dyn LlmBackend>), Some(backend))
                 } else {
                     (None, None)
                 }
@@ -215,21 +209,37 @@ impl ModelRouter {
     /// Route a request with images to a vision-capable backend.
     /// Falls back to regular routing if no vision backend is available.
     pub async fn route_vision(&self) -> Option<Arc<dyn LlmBackend>> {
-        if let Some(ref v) = self.vision_local {
-            return Some(v.clone());
+        if let Some(ref concrete) = self.vision_local_concrete {
+            if concrete.runtime_supports_vision() {
+                if let Some(ref v) = self.vision_local {
+                    return Some(v.clone());
+                }
+            } else {
+                tracing::warn!(
+                    "route_vision: local vision backend configured, but runtime vision is disabled; skipping local multimodal route"
+                );
+            }
         }
-        // Fall back to cloud if available (cloud models often support vision)
+
+        // Fall back to cloud vision backends if available.
         let clients = self.cloud_clients.read().await;
-        if let Some(client) = clients.values().next() {
+        if let Some(client) = clients
+            .values()
+            .find(|client| client.capabilities().iter().any(|cap| cap == "vision"))
+        {
             return Some(client.clone());
         }
-        // Last resort: use local text model (LLM will respond about image without seeing it)
-        self.local.clone()
+
+        // No runtime vision route available.
+        None
     }
 
     /// Check if a vision-capable backend is available.
     pub fn has_vision(&self) -> bool {
-        self.vision_local.is_some()
+        self.vision_local_concrete
+            .as_ref()
+            .map(|backend| backend.runtime_supports_vision())
+            .unwrap_or(false)
     }
 
     /// Always returns local client (for classification, planning).
@@ -267,6 +277,19 @@ impl ModelRouter {
         if let Some(ref backend) = self.vision_local_concrete {
             backend.attach_server_manager(mgr);
         }
+    }
+
+    /// Returns the currently attached orchestrator server manager, if local
+    /// backends are orchestrator-managed.
+    pub fn orchestrator_server_manager(&self) -> Option<Arc<LlamaServerManager>> {
+        self.vision_local_concrete
+            .as_ref()
+            .and_then(|backend| backend.server_manager())
+            .or_else(|| {
+                self.local_concrete
+                    .as_ref()
+                    .and_then(|backend| backend.server_manager())
+            })
     }
 
     /// Get status dict for dashboard.

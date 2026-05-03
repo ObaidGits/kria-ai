@@ -1,8 +1,9 @@
 //! Layer strategy calculator — determines optimal (ngl, context, vision)
 //! parameters given available VRAM and model profile.
 
-use crate::config::ModelProfile;
+use super::vision_strategy::{self, VisionMode};
 use super::GpuBackend;
+use crate::config::ModelProfile;
 
 /// Degradation level representing how much the model is operating below
 /// its optimal configuration.
@@ -46,7 +47,11 @@ pub struct TargetParams {
     /// Context window size in tokens.
     pub context: u32,
     /// Whether to enable vision (load mmproj).
+    /// **Deprecated**: prefer `vision_mode`. Kept for backward compatibility
+    /// with consumers that haven't been migrated yet.
     pub enable_vision: bool,
+    /// Multi-tiered vision capability — replaces the binary enable_vision flag.
+    pub vision_mode: VisionMode,
     /// Current degradation level.
     pub degradation: DegradationLevel,
 }
@@ -58,25 +63,35 @@ pub struct TargetParams {
 /// 2. Subtract base overhead (CUDA context + embeddings)
 /// 3. Maximize ngl from remaining budget
 /// 4. Allocate remaining VRAM to context window
-/// 5. Disable vision below ngl=15 (insufficient GPU capacity)
+/// 5. Determine VisionMode tier based on ngl and free RAM
 pub fn calculate_target_params(
     profile: &ModelProfile,
     free_vram_mb: u64,
     safety_margin_mb: u64,
     backend: GpuBackend,
 ) -> TargetParams {
+    // Query free system RAM for CPU vision feasibility check.
+    // This is a fast syscall (~1μs) so it's safe to call inline.
+    let free_ram_mb = {
+        let mut sys = sysinfo::System::new();
+        sys.refresh_memory();
+        sys.available_memory() / (1024 * 1024)
+    };
     // macOS Metal: all layers are always offloaded (unified memory).
     // Only context is adjusted based on free RAM.
     if backend == GpuBackend::Metal {
         return calculate_metal_params(profile, free_vram_mb);
     }
 
-    // CPU-only: no GPU layers, max context, no vision
+    // CPU-only: no GPU layers, max context. Vision still possible on CPU
+    // if enough RAM is available for the mmproj weights.
     if backend == GpuBackend::CpuOnly {
+        let vm = vision_strategy::determine_vision_mode(profile, 0, free_ram_mb);
         return TargetParams {
             ngl: 0,
             context: profile.max_context,
-            enable_vision: false,
+            enable_vision: vm.is_enabled(),
+            vision_mode: vm,
             degradation: DegradationLevel::CpuOnly,
         };
     }
@@ -91,12 +106,15 @@ pub fn calculate_target_params(
         0
     };
 
-    // Not enough for even base overhead + mmproj → CPU only
+    // Not enough for even base overhead + mmproj → CPU only.
+    // Vision may still be possible via CPU RAM.
     if available < profile.base_vram_overhead_mb as u64 + mmproj_cost {
+        let vm = vision_strategy::determine_vision_mode(profile, 0, free_ram_mb);
         return TargetParams {
             ngl: 0,
             context: profile.min_context,
-            enable_vision: false,
+            enable_vision: vm.is_enabled(),
+            vision_mode: vm,
             degradation: DegradationLevel::CpuOnly,
         };
     }
@@ -124,8 +142,9 @@ pub fn calculate_target_params(
         profile.max_context
     };
 
-    // Vision requires enough GPU capacity — disable below ngl=15
-    let enable_vision = profile.has_vision_projector && ngl >= profile.vision_min_ngl;
+    // Determine vision tier based on ngl and available system RAM.
+    let vision_mode = vision_strategy::determine_vision_mode(profile, ngl, free_ram_mb);
+    let enable_vision = vision_mode.is_enabled();
 
     let degradation = degradation_level(ngl, context, profile);
 
@@ -133,6 +152,7 @@ pub fn calculate_target_params(
         ngl,
         context,
         enable_vision,
+        vision_mode,
         degradation,
     }
 }
@@ -152,7 +172,9 @@ fn calculate_metal_params(profile: &ModelProfile, free_ram_mb: u64) -> TargetPar
         profile.max_context
     };
 
-    let enable_vision = profile.has_vision_projector;
+    // Metal always has full GPU layers, so vision is always FullGpu if projector exists.
+    let vision_mode = vision_strategy::determine_vision_mode(profile, ngl, free_ram_mb);
+    let enable_vision = vision_mode.is_enabled();
     let degradation = if context >= profile.max_context {
         DegradationLevel::Full
     } else {
@@ -163,6 +185,7 @@ fn calculate_metal_params(profile: &ModelProfile, free_ram_mb: u64) -> TargetPar
         ngl,
         context,
         enable_vision,
+        vision_mode,
         degradation,
     }
 }
@@ -221,7 +244,11 @@ mod tests {
         let result = calculate_target_params(&p, 300, 256, GpuBackend::Cuda);
         assert_eq!(result.ngl, 0);
         assert_eq!(result.context, p.min_context);
-        assert!(!result.enable_vision);
+        assert!(matches!(
+            result.vision_mode,
+            VisionMode::CpuVision | VisionMode::Disabled
+        ));
+        assert_eq!(result.enable_vision, result.vision_mode.has_vision());
         assert_eq!(result.degradation, DegradationLevel::CpuOnly);
     }
 
@@ -241,7 +268,8 @@ mod tests {
         // ~2GB = 2048 MB. Budget = 2048-256-200 = 1592. Layers = 1592/128 = 12
         let result = calculate_target_params(&p, 2048, 256, GpuBackend::Cuda);
         assert!(result.ngl < 15);
-        assert!(!result.enable_vision);
+        assert_eq!(result.vision_mode, VisionMode::ReducedGpu);
+        assert!(result.enable_vision);
     }
 
     #[test]
@@ -257,7 +285,11 @@ mod tests {
         let p = test_profile();
         let result = calculate_target_params(&p, 8192, 256, GpuBackend::CpuOnly);
         assert_eq!(result.ngl, 0);
-        assert!(!result.enable_vision);
+        assert!(matches!(
+            result.vision_mode,
+            VisionMode::CpuVision | VisionMode::Disabled
+        ));
+        assert_eq!(result.enable_vision, result.vision_mode.has_vision());
         assert_eq!(result.degradation, DegradationLevel::CpuOnly);
     }
 

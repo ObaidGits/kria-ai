@@ -20,6 +20,8 @@ pub mod styles;
 pub mod swap;
 pub mod ws_bridge;
 
-pub use orchestrator::{FailureReport, FailureStage, ImageError, ImageOrchestrator, ImageRequest, ImageResult};
 pub use capabilities::QualityProfile;
-pub use mode::{ImageMode, ModeError, ResolvedMode, resolve_image_mode};
+pub use mode::{resolve_image_mode, ImageMode, ModeError, ResolvedMode};
+pub use orchestrator::{
+    FailureReport, FailureStage, ImageError, ImageOrchestrator, ImageRequest, ImageResult,
+};

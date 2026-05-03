@@ -92,9 +92,9 @@ impl ImageTier {
     /// Minimum free VRAM required in MiB for this tier's image workflow.
     pub fn required_free_mb(&self) -> u64 {
         match self {
-            Self::SHighRes => 6_500,   // Flux-FP8 peak + 1024 MB safety
-            Self::AStandard => 6_000,  // Flux-Q4 peak + 768 MB safety
-            Self::BDropSwap => 4_500,  // Flux-Q4 after LLM offload + 512 MB safety
+            Self::SHighRes => 6_500,  // Flux-FP8 peak + 1024 MB safety
+            Self::AStandard => 6_000, // Flux-Q4 peak + 768 MB safety
+            Self::BDropSwap => 4_500, // Flux-Q4 after LLM offload + 512 MB safety
             Self::CRejectOrCloud => 0,
         }
     }
@@ -156,11 +156,13 @@ impl VramProfiler for NvmlProfiler {
     async fn snapshot(&self) -> VramSnapshot {
         match self.nvml.device_by_index(self.device_idx) {
             Ok(device) => {
-                let mem = device.memory_info().unwrap_or(nvml_wrapper::struct_wrappers::device::MemoryInfo {
-                    free: 0,
-                    total: 0,
-                    used: 0,
-                });
+                let mem = device.memory_info().unwrap_or(
+                    nvml_wrapper::struct_wrappers::device::MemoryInfo {
+                        free: 0,
+                        total: 0,
+                        used: 0,
+                    },
+                );
                 // Bar1 reserved (fragmentation pressure).
                 let reserved = device
                     .bar1_memory_info()
@@ -175,7 +177,12 @@ impl VramProfiler for NvmlProfiler {
             }
             Err(e) => {
                 tracing::warn!(error = %e, "NvmlProfiler: device query failed");
-                VramSnapshot { free_mb: 0, total_mb: 0, reserved_mb: 0, vendor: GpuVendor::Nvidia }
+                VramSnapshot {
+                    free_mb: 0,
+                    total_mb: 0,
+                    reserved_mb: 0,
+                    vendor: GpuVendor::Nvidia,
+                }
             }
         }
     }
@@ -210,24 +217,41 @@ impl VramProfiler for RocmProfiler {
             _ => (0, 0),
         };
 
-        VramSnapshot { free_mb, total_mb, reserved_mb: 0, vendor: GpuVendor::Amd }
+        VramSnapshot {
+            free_mb,
+            total_mb,
+            reserved_mb: 0,
+            vendor: GpuVendor::Amd,
+        }
     }
 }
 
 fn parse_rocm_json(bytes: &[u8]) -> (u64, u64) {
     // rocm-smi JSON: {"card0": {"VRAM Total Memory (B)": "8589934592", "VRAM Total Used Memory (B)": "..."}}
-    let text = match std::str::from_utf8(bytes) { Ok(s) => s, Err(_) => return (0, 0) };
-    let val = match serde_json::from_str::<serde_json::Value>(text) { Ok(v) => v, Err(_) => return (0, 0) };
+    let text = match std::str::from_utf8(bytes) {
+        Ok(s) => s,
+        Err(_) => return (0, 0),
+    };
+    let val = match serde_json::from_str::<serde_json::Value>(text) {
+        Ok(v) => v,
+        Err(_) => return (0, 0),
+    };
 
     let card = match val.as_object().and_then(|m| m.values().next()) {
         Some(c) => c.clone(),
         None => return (0, 0),
     };
 
-    let total_b: u64 = card.get("VRAM Total Memory (B)")
-        .and_then(|v| v.as_str()).and_then(|s| s.parse().ok()).unwrap_or(0);
-    let used_b: u64 = card.get("VRAM Total Used Memory (B)")
-        .and_then(|v| v.as_str()).and_then(|s| s.parse().ok()).unwrap_or(0);
+    let total_b: u64 = card
+        .get("VRAM Total Memory (B)")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    let used_b: u64 = card
+        .get("VRAM Total Used Memory (B)")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
 
     (
         total_b.saturating_sub(used_b) / 1_048_576,
@@ -250,7 +274,12 @@ impl NullProfiler {
 #[async_trait]
 impl VramProfiler for NullProfiler {
     async fn snapshot(&self) -> VramSnapshot {
-        VramSnapshot { free_mb: 0, total_mb: 0, reserved_mb: 0, vendor: GpuVendor::Unknown }
+        VramSnapshot {
+            free_mb: 0,
+            total_mb: 0,
+            reserved_mb: 0,
+            vendor: GpuVendor::Unknown,
+        }
     }
 }
 

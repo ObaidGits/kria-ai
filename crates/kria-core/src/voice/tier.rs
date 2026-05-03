@@ -208,10 +208,7 @@ mod tests {
     fn override_takes_precedence() {
         let mut cfg = VoiceConfig::default();
         cfg.tier = "c".into();
-        assert_eq!(
-            VoiceTier::resolve(&cfg, HardwareTier::High),
-            VoiceTier::C
-        );
+        assert_eq!(VoiceTier::resolve(&cfg, HardwareTier::High), VoiceTier::C);
     }
 
     #[test]

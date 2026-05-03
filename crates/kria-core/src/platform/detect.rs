@@ -343,7 +343,7 @@ pub fn detect_hardware() -> HardwareInfo {
         gpu_name,
         package_manager: get_package_manager(),
         hostname,
-        vram_free_mb: 0,  // populated lazily via VramProfiler on demand
-        image_tier: super::vram::ImageTier::default(),  // populated lazily
+        vram_free_mb: 0, // populated lazily via VramProfiler on demand
+        image_tier: super::vram::ImageTier::default(), // populated lazily
     }
 }

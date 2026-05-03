@@ -87,12 +87,23 @@ pub enum VoiceSessionState {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum VoiceTelemetry {
-    State { state: VoiceSessionState },
-    Partial { text: String, engine: String },
-    Final { text: String, engine: String, confidence: f32 },
+    State {
+        state: VoiceSessionState,
+    },
+    Partial {
+        text: String,
+        engine: String,
+    },
+    Final {
+        text: String,
+        engine: String,
+        confidence: f32,
+    },
     Wake(WakeWordEvent),
     Metrics(VoiceMetrics),
-    Error { message: String },
+    Error {
+        message: String,
+    },
     /// Emitted exactly once per turn the moment the first audio sample
     /// reaches the speaker — feeds TTFA telemetry.
     FirstAudioOut,
@@ -183,7 +194,11 @@ impl VoicePipelineV2 {
         wake: Option<WakeWordDetector>,
         aec: AecProcessor,
         post_editor: HinglishPostEditor,
-    ) -> (Self, watch::Receiver<VoiceSessionState>, mpsc::UnboundedReceiver<VoiceTelemetry>) {
+    ) -> (
+        Self,
+        watch::Receiver<VoiceSessionState>,
+        mpsc::UnboundedReceiver<VoiceTelemetry>,
+    ) {
         let (state_tx, state_rx) = watch::channel(VoiceSessionState::Sleeping);
         let (telemetry_tx, telemetry_rx) = mpsc::unbounded_channel();
         let pipeline = Self {
@@ -345,7 +360,11 @@ impl VoicePipelineV2 {
         let (partial_tx, mut partial_rx) = mpsc::unbounded_channel::<PartialTranscript>();
 
         // Hook STT first so we don't drop frames between subscribe + stream.
-        let stt_handle = self.stt.clone().start_stream(stt_pcm_rx, partial_tx).await?;
+        let stt_handle = self
+            .stt
+            .clone()
+            .start_stream(stt_pcm_rx, partial_tx)
+            .await?;
 
         // Spawn the capture-feed task. Reads from the broadcast, runs the
         // chunk through AEC, fans it out to STT and (later) VAD. Stops on
@@ -532,8 +551,13 @@ impl VoicePipelineV2 {
             // source of truth). The pipeline's metrics builder uses this
             // for TTFA accounting.
             let pb = pipeline_for_tts.playback.lock().await;
-            if pb.first_audio_emitted.load(std::sync::atomic::Ordering::SeqCst) {
-                let _ = pipeline_for_tts.telemetry_tx.send(VoiceTelemetry::FirstAudioOut);
+            if pb
+                .first_audio_emitted
+                .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                let _ = pipeline_for_tts
+                    .telemetry_tx
+                    .send(VoiceTelemetry::FirstAudioOut);
             }
             Ok(())
         });
@@ -617,11 +641,7 @@ impl VoicePipelineV2 {
     ///
     /// Wires the same per-turn `CancellationToken` so `force_abort` and
     /// the VAD-driven barge-in watcher cancel mid-speech.
-    pub async fn run_speak_turn<L, F>(
-        self: Arc<Self>,
-        prompt: String,
-        llm: L,
-    ) -> anyhow::Result<()>
+    pub async fn run_speak_turn<L, F>(self: Arc<Self>, prompt: String, llm: L) -> anyhow::Result<()>
     where
         L: FnOnce(String) -> F + Send + 'static,
         F: std::future::Future<Output = mpsc::Receiver<String>> + Send + 'static,
@@ -722,8 +742,13 @@ impl VoicePipelineV2 {
 
             bridge.abort();
             let pb = pipeline_for_tts.playback.lock().await;
-            if pb.first_audio_emitted.load(std::sync::atomic::Ordering::SeqCst) {
-                let _ = pipeline_for_tts.telemetry_tx.send(VoiceTelemetry::FirstAudioOut);
+            if pb
+                .first_audio_emitted
+                .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                let _ = pipeline_for_tts
+                    .telemetry_tx
+                    .send(VoiceTelemetry::FirstAudioOut);
             }
             Ok(())
         });
@@ -785,7 +810,9 @@ mod tests {
     }
     #[async_trait::async_trait]
     impl Stt for StubStt {
-        fn engine_id(&self) -> &'static str { "stub-stt" }
+        fn engine_id(&self) -> &'static str {
+            "stub-stt"
+        }
         async fn start_stream(
             self: Arc<Self>,
             mut pcm_rx: mpsc::Receiver<AudioChunk>,
@@ -797,9 +824,7 @@ mod tests {
             let delay = Duration::from_millis(self.delay_ms);
             tokio::spawn(async move {
                 // Drain frames so the sender doesn't block.
-                let drain = tokio::spawn(async move {
-                    while pcm_rx.recv().await.is_some() {}
-                });
+                let drain = tokio::spawn(async move { while pcm_rx.recv().await.is_some() {} });
                 tokio::select! {
                     _ = &mut abort_rx => {
                         drain.abort();
@@ -832,8 +857,12 @@ mod tests {
     }
     #[async_trait::async_trait]
     impl Tts for StubTts {
-        fn engine_id(&self) -> &'static str { "stub-tts" }
-        fn sample_rate(&self) -> TtsSampleRate { TtsSampleRate(22_050) }
+        fn engine_id(&self) -> &'static str {
+            "stub-tts"
+        }
+        fn sample_rate(&self) -> TtsSampleRate {
+            TtsSampleRate(22_050)
+        }
         async fn synthesize_sentence(
             self: Arc<Self>,
             _sentence: String,
@@ -871,7 +900,10 @@ mod tests {
     fn build_with_telemetry(
         stt: Arc<dyn Stt>,
         tts: Arc<dyn Tts>,
-    ) -> (Arc<VoicePipelineV2>, mpsc::UnboundedReceiver<VoiceTelemetry>) {
+    ) -> (
+        Arc<VoicePipelineV2>,
+        mpsc::UnboundedReceiver<VoiceTelemetry>,
+    ) {
         let cfg = VoiceConfig::default();
         let profile = VoiceTierProfile::build(&cfg, HardwareTier::Standard);
         let pb = PlaybackSink::new(22_050);
@@ -954,9 +986,7 @@ mod tests {
         };
 
         let p_clone = p.clone();
-        let turn = tokio::spawn(async move {
-            p_clone.run_turn(audio_rx, llm).await
-        });
+        let turn = tokio::spawn(async move { p_clone.run_turn(audio_rx, llm).await });
 
         // Wait until the pipeline is Speaking, then fire VAD SpeechStart.
         let p_state = p.clone();
@@ -975,14 +1005,16 @@ mod tests {
         vad_tx.send(VadResult::SpeechStart).unwrap();
 
         // The turn should wind down promptly after cancel propagates.
-        let _ = tokio::time::timeout(Duration::from_secs(2), turn).await
+        let _ = tokio::time::timeout(Duration::from_secs(2), turn)
+            .await
             .expect("turn did not finish after barge-in");
 
         // The first sentence had started but should NOT have completed —
         // barge-in cancelled it mid-synthesis.
         assert!(started.load(Ordering::SeqCst) >= 1);
         assert_eq!(
-            completed.load(Ordering::SeqCst), 0,
+            completed.load(Ordering::SeqCst),
+            0,
             "no sentences should have completed before barge-in"
         );
         assert!(cancelled.load(Ordering::SeqCst), "tts must observe abort");
@@ -1000,7 +1032,10 @@ mod tests {
 
     #[tokio::test]
     async fn force_abort_returns_to_sleeping_idempotently() {
-        let stt = Arc::new(StubStt { text: "x".into(), delay_ms: 10 });
+        let stt = Arc::new(StubStt {
+            text: "x".into(),
+            delay_ms: 10,
+        });
         let tts = Arc::new(StubTts {
             started: Arc::new(AtomicUsize::new(0)),
             completed: Arc::new(AtomicUsize::new(0)),
@@ -1016,7 +1051,10 @@ mod tests {
 
     #[tokio::test]
     async fn force_wake_transitions_to_listening() {
-        let stt = Arc::new(StubStt { text: "x".into(), delay_ms: 10 });
+        let stt = Arc::new(StubStt {
+            text: "x".into(),
+            delay_ms: 10,
+        });
         let tts = Arc::new(StubTts {
             started: Arc::new(AtomicUsize::new(0)),
             completed: Arc::new(AtomicUsize::new(0)),
@@ -1034,7 +1072,10 @@ mod tests {
         // Building a real Legacy variant requires the full v1 pipeline,
         // so we only verify the Streaming arm here. The Legacy arm is
         // exercised in commands.rs at construction time.
-        let stt = Arc::new(StubStt { text: "x".into(), delay_ms: 10 });
+        let stt = Arc::new(StubStt {
+            text: "x".into(),
+            delay_ms: 10,
+        });
         let tts = Arc::new(StubTts {
             started: Arc::new(AtomicUsize::new(0)),
             completed: Arc::new(AtomicUsize::new(0)),
@@ -1057,7 +1098,9 @@ mod tests {
     }
     #[async_trait::async_trait]
     impl Stt for PartialEmittingStt {
-        fn engine_id(&self) -> &'static str { "stub-partial-stt" }
+        fn engine_id(&self) -> &'static str {
+            "stub-partial-stt"
+        }
         async fn start_stream(
             self: Arc<Self>,
             mut pcm_rx: mpsc::Receiver<AudioChunk>,
@@ -1118,7 +1161,9 @@ mod tests {
 
         let llm = |_text: String| async move {
             let (tx, rx) = mpsc::channel::<String>(4);
-            tokio::spawn(async move { let _ = tx.send("ok.".into()).await; });
+            tokio::spawn(async move {
+                let _ = tx.send("ok.".into()).await;
+            });
             rx
         };
         p.clone().run_turn(audio_rx, llm).await.unwrap();
@@ -1128,7 +1173,9 @@ mod tests {
         while let Ok(ev) = tel_rx.try_recv() {
             match ev {
                 VoiceTelemetry::Partial { text, .. } => partials_seen.push(text),
-                VoiceTelemetry::Final { .. } => { saw_final = true; }
+                VoiceTelemetry::Final { .. } => {
+                    saw_final = true;
+                }
                 _ => {}
             }
         }
@@ -1160,7 +1207,10 @@ mod tests {
             per_sentence_ms: 2_000, // long synth — gives barge-in a wide window
             cancelled_flag: cancelled.clone(),
         });
-        let stt = Arc::new(StubStt { text: "ignored".into(), delay_ms: 1 });
+        let stt = Arc::new(StubStt {
+            text: "ignored".into(),
+            delay_ms: 1,
+        });
         let (p, mut tel_rx) = build_with_telemetry(stt, tts);
 
         let llm = |_t: String| async move {
@@ -1173,12 +1223,12 @@ mod tests {
         };
 
         let p_run = p.clone();
-        let turn = tokio::spawn(async move {
-            p_run.run_speak_turn("hello".into(), llm).await
-        });
+        let turn = tokio::spawn(async move { p_run.run_speak_turn("hello".into(), llm).await });
 
         for _ in 0..200 {
-            if p.state() == VoiceSessionState::Speaking { break; }
+            if p.state() == VoiceSessionState::Speaking {
+                break;
+            }
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
         assert_eq!(p.state(), VoiceSessionState::Speaking);

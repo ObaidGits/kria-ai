@@ -333,8 +333,7 @@ mod tests {
         // Approx 0.5 seconds of speech-like sine at moderate amplitude.
         let input: Vec<f32> = (0..8_000)
             .map(|i| {
-                0.05 * ((2.0 * std::f32::consts::PI * 220.0 * i as f32) / sample_rate as f32)
-                    .sin()
+                0.05 * ((2.0 * std::f32::consts::PI * 220.0 * i as f32) / sample_rate as f32).sin()
             })
             .collect();
 

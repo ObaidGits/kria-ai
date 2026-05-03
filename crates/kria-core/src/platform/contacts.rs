@@ -66,7 +66,11 @@ fn double_metaphone_primary(name: &str) -> String {
     let mut result = String::new();
 
     for (i, &ch) in chars.iter().enumerate() {
-        let prev = if i > 0 { chars.get(i - 1).copied() } else { None };
+        let prev = if i > 0 {
+            chars.get(i - 1).copied()
+        } else {
+            None
+        };
         let next = chars.get(i + 1).copied();
 
         match ch {
@@ -225,9 +229,9 @@ impl ContactsDb {
 
     async fn fetch_all(&self) -> Vec<ContactRecord> {
         let conn = self.conn.lock().await;
-        let mut stmt = match conn.prepare(
-            "SELECT display_name, phone_e164, email, telegram, signal_phone FROM contacts",
-        ) {
+        let mut stmt = match conn
+            .prepare("SELECT display_name, phone_e164, email, telegram, signal_phone FROM contacts")
+        {
             Ok(s) => s,
             Err(e) => {
                 warn!("failed to prepare contacts query: {e}");
@@ -236,20 +240,20 @@ impl ContactsDb {
         };
 
         let records = match stmt.query_map([], |row| {
-                Ok(ContactRecord {
-                    display_name: row.get(0)?,
-                    phone_e164: row.get(1)?,
-                    email: row.get(2)?,
-                    telegram_handle: row.get(3)?,
-                    signal_phone: row.get(4)?,
-                })
-            }) {
-                Ok(rows) => rows.flatten().collect::<Vec<_>>(),
-                Err(e) => {
-                    warn!("failed to query contacts: {e}");
-                    Vec::new()
-                }
-            };
+            Ok(ContactRecord {
+                display_name: row.get(0)?,
+                phone_e164: row.get(1)?,
+                email: row.get(2)?,
+                telegram_handle: row.get(3)?,
+                signal_phone: row.get(4)?,
+            })
+        }) {
+            Ok(rows) => rows.flatten().collect::<Vec<_>>(),
+            Err(e) => {
+                warn!("failed to query contacts: {e}");
+                Vec::new()
+            }
+        };
 
         records
     }
@@ -296,11 +300,15 @@ impl ContactsDb {
 
     fn get_identifier(record: &ContactRecord, app: &MessagingApp) -> Option<String> {
         match app {
-            MessagingApp::WhatsApp | MessagingApp::Signal => {
-                record.phone_e164.clone().or_else(|| record.signal_phone.clone())
-            }
+            MessagingApp::WhatsApp | MessagingApp::Signal => record
+                .phone_e164
+                .clone()
+                .or_else(|| record.signal_phone.clone()),
             MessagingApp::Gmail => record.email.clone(),
-            MessagingApp::Telegram => record.telegram_handle.clone().or_else(|| record.phone_e164.clone()),
+            MessagingApp::Telegram => record
+                .telegram_handle
+                .clone()
+                .or_else(|| record.phone_e164.clone()),
         }
     }
 
@@ -316,11 +324,7 @@ impl ContactsDb {
 
 #[async_trait::async_trait]
 impl ContactResolver for ContactsDb {
-    async fn resolve(
-        &self,
-        name: &str,
-        app: &MessagingApp,
-    ) -> Result<ContactId, ResolutionError> {
+    async fn resolve(&self, name: &str, app: &MessagingApp) -> Result<ContactId, ResolutionError> {
         let query = normalize(name);
         let all_contacts = self.fetch_all().await;
 
@@ -437,15 +441,9 @@ mod tests {
     #[tokio::test]
     async fn exact_match_resolves() {
         let (db, _tmp) = make_db().await;
-        db.insert(
-            "Anjali Sharma",
-            Some("+919876543210"),
-            None,
-            None,
-            None,
-        )
-        .await
-        .unwrap();
+        db.insert("Anjali Sharma", Some("+919876543210"), None, None, None)
+            .await
+            .unwrap();
 
         let result = db.resolve("Anjali Sharma", &MessagingApp::WhatsApp).await;
         assert!(result.is_ok());

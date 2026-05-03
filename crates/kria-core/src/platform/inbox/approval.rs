@@ -116,7 +116,13 @@ impl ApprovalBroker {
     pub fn list(&self) -> Vec<(Uuid, ConversationKey, String)> {
         self.pending
             .iter()
-            .map(|e| (e.key().clone(), e.message.conversation.clone(), e.reason.clone()))
+            .map(|e| {
+                (
+                    e.key().clone(),
+                    e.message.conversation.clone(),
+                    e.reason.clone(),
+                )
+            })
             .collect()
     }
 

@@ -94,7 +94,11 @@ impl PolicyGate {
         let origin = Origin::from_auth(&msg.auth);
 
         // Empty / useless messages are rejected regardless of origin.
-        if msg.text.as_deref().map(|t| t.trim().is_empty()).unwrap_or(true)
+        if msg
+            .text
+            .as_deref()
+            .map(|t| t.trim().is_empty())
+            .unwrap_or(true)
             && msg.media.is_empty()
         {
             return GateOutcome::Reject(RejectionReceipt {
@@ -165,15 +169,15 @@ impl RateLimitedGate {
     pub fn with_defaults() -> Self {
         Self {
             inner: PolicyGate,
-            owner_limiter: Arc::new(RateLimiter::direct(
-                Quota::per_minute(NonZeroU32::new(120).unwrap()),
-            )),
-            trusted_limiter: Arc::new(RateLimiter::direct(
-                Quota::per_minute(NonZeroU32::new(60).unwrap()),
-            )),
-            external_limiter: Arc::new(RateLimiter::direct(
-                Quota::per_minute(NonZeroU32::new(10).unwrap()),
-            )),
+            owner_limiter: Arc::new(RateLimiter::direct(Quota::per_minute(
+                NonZeroU32::new(120).unwrap(),
+            ))),
+            trusted_limiter: Arc::new(RateLimiter::direct(Quota::per_minute(
+                NonZeroU32::new(60).unwrap(),
+            ))),
+            external_limiter: Arc::new(RateLimiter::direct(Quota::per_minute(
+                NonZeroU32::new(10).unwrap(),
+            ))),
         }
     }
 

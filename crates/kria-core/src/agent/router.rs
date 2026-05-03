@@ -60,15 +60,9 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\balerts?\b.{0,20}\b(show|list|active|current)\b",
             "get_alerts",
         ),
-        (
-            r"(?i)\bdismiss\b.{0,20}\balert\b",
-            "dismiss_alert",
-        ),
+        (r"(?i)\bdismiss\b.{0,20}\balert\b", "dismiss_alert"),
         // Power plan
-        (
-            r"(?i)\bset\b.{0,20}\bpower\s+plan\b",
-            "set_power_plan",
-        ),
+        (r"(?i)\bset\b.{0,20}\bpower\s+plan\b", "set_power_plan"),
         (
             r"(?i)\bpower\s+plan\b.{0,20}\b(set|change|switch|to)\b",
             "set_power_plan",
@@ -77,10 +71,7 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\b(current|get|what|show).{0,20}\bpower\s+plan\b",
             "get_power_plan",
         ),
-        (
-            r"(?i)\bpower\s+plan\b",
-            "get_power_plan",
-        ),
+        (r"(?i)\bpower\s+plan\b", "get_power_plan"),
         // WiFi networks list
         (
             r"(?i)\b(list|show|available|nearby|scan)\b.{0,20}\b(wifi|wi-fi|wireless)\s*(networks?|ssid|connections?)\b",
@@ -172,10 +163,7 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
         ),
         // send_message: "text/message/WhatsApp/signal Anjali", "send a WhatsApp to X"
         // Excludes "text embeddings" / "text message" via the embeddings rule above.
-        (
-            r"(?i)\b(text|message|msg)\s+\w+\b",
-            "send_message",
-        ),
+        (r"(?i)\b(text|message|msg)\s+\w+\b", "send_message"),
         (
             r"(?i)\b(send|open)\s+(a\s+)?(whatsapp|telegram|signal)\b",
             "send_message",
@@ -431,7 +419,10 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
         (r"(?i)\bspeed\s*test\b", "speed_test"),
         (r"(?i)\b(my|public)\s*ip\b", "get_public_ip"),
         (r"(?i)\bdns\s+(lookup|resolve|query)\b", "dns_lookup"),
-        (r"(?i)\bcheck.{0,20}url\b|\burl.{0,20}(status|reachable|accessible)\b", "check_url_status"),
+        (
+            r"(?i)\bcheck.{0,20}url\b|\burl.{0,20}(status|reachable|accessible)\b",
+            "check_url_status",
+        ),
         // Internet connectivity check (must come AFTER specific internet patterns)
         (
             r"(?i)\b(connected|connection).{0,20}\b(internet|online|network)\b",
@@ -451,8 +442,14 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\b(recall|what\s+did\s+I|do\s+you\s+remember)\b",
             "recall_fact",
         ),
-        (r"(?i)\bsearch.{0,15}(my\s+)?(memory|knowledge)\b", "search_knowledge"),
-        (r"(?i)\blist.{0,20}(remember|snippets?|knowledge)\b", "list_remembered"),
+        (
+            r"(?i)\bsearch.{0,15}(my\s+)?(memory|knowledge)\b",
+            "search_knowledge",
+        ),
+        (
+            r"(?i)\blist.{0,20}(remember|snippets?|knowledge)\b",
+            "list_remembered",
+        ),
         // Notifications — keep general alert after dismiss_alert above
         (
             r"(?i)\b(notify|notification)\b|\bsend\s+(me\s+a\s+)?notification\b",
@@ -481,12 +478,21 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
         (r"(?i)\bgit\s+(stash)\b", "git_stash"),
         (r"(?i)\bgit\s+(push)\b", "git_push"),
         (r"(?i)\bgit\s+(checkout|switch)\b", "git_checkout"),
-        (r"(?i)\banalyze.{0,20}(project|codebase|repo)\b", "analyze_project"),
+        (
+            r"(?i)\banalyze.{0,20}(project|codebase|repo)\b",
+            "analyze_project",
+        ),
         // File ops extras
         (r"(?i)\bcount\s+(lines|loc)\b", "count_lines_of_code"),
-        (r"(?i)\bproject\s+(structure|tree|layout)\b", "get_project_structure"),
+        (
+            r"(?i)\bproject\s+(structure|tree|layout)\b",
+            "get_project_structure",
+        ),
         (r"(?i)\b(find|show).{0,20}(todo|fixme)\b", "find_todos"),
-        (r"(?i)\b(dir|folder)\s*(size|how\s+big)\b|\bhow\s+big.{0,20}(dir|folder|directory)\b", "calculate_dir_size"),
+        (
+            r"(?i)\b(dir|folder)\s*(size|how\s+big)\b|\bhow\s+big.{0,20}(dir|folder|directory)\b",
+            "calculate_dir_size",
+        ),
         // Image generation — MUST come before vision "analyze image" rule to avoid shadowing.
         // Covers: "generate/create/make/draw/paint/design an image/picture/photo/art of ..."
         // Also handles: "draw me a robot", "make me an image"
@@ -505,13 +511,20 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             "generate_image",
         ),
         // Vision extras
-        (r"(?i)\b(ocr|extract\s+text).{0,20}image\b", "ocr_image"),
-        (r"(?i)\banalyze.{0,20}image\b|\bwhat.{0,20}\b(on\s+)?screen\b", "screenshot_analyze"),
-        // Article extraction (sidecar)
         (
-            r"(?i)\bextract\s+(the\s+)?article\b",
-            "web_extract_article",
+            r"(?i)\b(ocr|extract\s+text|read\s+text).{0,20}(image|photo|picture|scan)\b",
+            "ocr_image",
         ),
+        (
+            r"(?i)\b(analy|describe|identify|detect|summar).{0,30}(image|photo|picture|scan)\b|\bwhat.{0,20}\bin\s+(this\s+)?(image|photo|picture)\b",
+            "analyze_image",
+        ),
+        (
+            r"(?i)\bwhat.{0,20}\b(on\s+)?screen\b|\b(analy|describe).{0,20}(my\s+)?screen\b",
+            "screenshot_analyze",
+        ),
+        // Article extraction (sidecar)
+        (r"(?i)\bextract\s+(the\s+)?article\b", "web_extract_article"),
         // Embeddings (sidecar)
         (
             r"(?i)\b(generate|create|make|compute|get)\s+(text\s+)?embeddings?\b|\bembedding\s+for\b",
@@ -539,17 +552,17 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
         // Package — use correct tool name
         (r"(?i)\binstall\s+\w+\b", "install_package"),
         (r"(?i)\buninstall\s+\w+\b", "uninstall_package"),
-        (r"(?i)\bremove\s+package\b|\bremove\s+\w+\s+package\b", "uninstall_package"),
+        (
+            r"(?i)\bremove\s+package\b|\bremove\s+\w+\s+package\b",
+            "uninstall_package",
+        ),
         // Hinglish patterns — fetch_webpage must come BEFORE generic Hinglish so URLs aren't lost
         // Web — fetch_webpage (placed after all Google Workspace patterns so gdocs/gsheets take priority)
         (
             r"(?i)\b(fetch|scrape|get|read|load)\b.{0,40}https?://",
             "fetch_webpage",
         ),
-        (
-            r"(?i)\bfetch\s+the\s+content\s+of\b",
-            "fetch_webpage",
-        ),
+        (r"(?i)\bfetch\s+the\s+content\s+of\b", "fetch_webpage"),
         (
             r"(?i)\b(get|load|scrape|read)\s+the\s+(content|page|text|html)\b",
             "fetch_webpage",
@@ -559,8 +572,14 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\bvolume\s+(band|zero|mute|off)\s+karo\b|\bband\s+karo\b.{0,15}volume",
             "set_volume",
         ),
-        (r"(?i)\b(cpu|processor)\s+kitna\b|\bram\s+(kitna|kya)\b", "get_cpu_usage"),
-        (r"(?i)\binternet\s+(hai|check|nahi|connected)\b", "ping_host"),
+        (
+            r"(?i)\b(cpu|processor)\s+kitna\b|\bram\s+(kitna|kya)\b",
+            "get_cpu_usage",
+        ),
+        (
+            r"(?i)\binternet\s+(hai|check|nahi|connected)\b",
+            "ping_host",
+        ),
         (r"(?i)\bbattery\s+(kitna|kya|check)\b", "get_battery_status"),
     ];
 
@@ -717,8 +736,7 @@ mod tests {
 
     #[test]
     fn routes_send_mail_prompts_to_gmail_send_tool() {
-        let result =
-            IntentRouter::classify("Send a Hye mail to \"zeeshanobaid335@gmail.com\"");
+        let result = IntentRouter::classify("Send a Hye mail to \"zeeshanobaid335@gmail.com\"");
         assert!(matches!(result.intent, Intent::DirectTool(_)));
         assert_eq!(result.tool_hint.as_deref(), Some("gw_gmail_send"));
     }
@@ -805,5 +823,19 @@ mod tests {
         let result = IntentRouter::classify("search for folder name zrok");
         assert!(matches!(result.intent, Intent::DirectTool(_)));
         assert_eq!(result.tool_hint.as_deref(), Some("search_files"));
+    }
+
+    #[test]
+    fn routes_image_analysis_prompts_to_analyze_image() {
+        let result = IntentRouter::classify("Analyze this image");
+        assert!(matches!(result.intent, Intent::DirectTool(_)));
+        assert_eq!(result.tool_hint.as_deref(), Some("analyze_image"));
+    }
+
+    #[test]
+    fn routes_screen_analysis_prompts_to_screenshot_analyze() {
+        let result = IntentRouter::classify("What is on my screen right now?");
+        assert!(matches!(result.intent, Intent::DirectTool(_)));
+        assert_eq!(result.tool_hint.as_deref(), Some("screenshot_analyze"));
     }
 }

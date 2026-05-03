@@ -119,7 +119,10 @@ impl InstalledAppRegistry {
         let manifests = tokio::task::spawn_blocking(scan_all_desktop_files)
             .await
             .unwrap_or_default();
-        info!(count = manifests.len(), "InstalledAppRegistry: scan complete");
+        info!(
+            count = manifests.len(),
+            "InstalledAppRegistry: scan complete"
+        );
         self.load_manifests(manifests).await;
     }
 

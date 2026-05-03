@@ -156,7 +156,10 @@ pub fn category_to_domain(category: &str) -> Domain {
     // MCP tool categories are prefixed "mcp_<server_name>"
     let cat = category.to_lowercase();
 
-    if cat.starts_with("mcp_gworkspace") || cat.contains("google_workspace") || cat.contains("workspace") {
+    if cat.starts_with("mcp_gworkspace")
+        || cat.contains("google_workspace")
+        || cat.contains("workspace")
+    {
         return Domain::Workspace;
     }
     if cat.starts_with("mcp_telegram") || cat.contains("telegram") {

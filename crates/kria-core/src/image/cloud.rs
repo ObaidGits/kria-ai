@@ -46,7 +46,10 @@ impl PollinationsClient {
             .user_agent("kria-assistant/1.0")
             .build()
             .unwrap_or_default();
-        Self { client, base_url: base_url.into() }
+        Self {
+            client,
+            base_url: base_url.into(),
+        }
     }
 
     /// Generate an image and return raw PNG bytes.
@@ -151,10 +154,7 @@ impl ImageRefusal {
                 "I can't generate images on this device — only {} MB of GPU memory is available.",
                 free_mb
             ),
-            reason_dev: format!(
-                "vram_free_mb={} < min_required_mb={}",
-                free_mb, required_mb
-            ),
+            reason_dev: format!("vram_free_mb={} < min_required_mb={}", free_mb, required_mb),
             fallbacks: vec!["cloud_pollinations", "cloud_hf_inference"],
         }
     }
@@ -219,10 +219,18 @@ impl CloudFallback {
                     CloudError::RateLimited => std::time::Duration::from_secs(30),
                     _ => std::time::Duration::from_secs(3 * attempt as u64),
                 };
-                warn!(attempt, wait_secs = wait.as_secs(), "CloudFallback: retrying Pollinations");
+                warn!(
+                    attempt,
+                    wait_secs = wait.as_secs(),
+                    "CloudFallback: retrying Pollinations"
+                );
                 tokio::time::sleep(wait).await;
             }
-            match self.pollinations.generate(prompt, width, height, seed).await {
+            match self
+                .pollinations
+                .generate(prompt, width, height, seed)
+                .await
+            {
                 Ok(r) => {
                     info!(provenance = %r.provenance, attempt, "CloudFallback: image obtained");
                     return Ok(r);

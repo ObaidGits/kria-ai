@@ -28,7 +28,11 @@ use kria_core::tools::registry;
 fn smoke_i18n_tools_registered() {
     // PROMPT-ID: I18N-01..I18N-03
     let reg = registry::build_default_registry();
-    for name in &["list_languages", "detect_language", "get_accessibility_settings"] {
+    for name in &[
+        "list_languages",
+        "detect_language",
+        "get_accessibility_settings",
+    ] {
         assert!(
             reg.get_handler(name).is_some(),
             "Tool `{name}` must be registered (§17)"
@@ -42,12 +46,21 @@ async fn functional_i18n01_list_languages() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("list_languages").unwrap().clone();
     let result = handler.execute(serde_json::json!({})).await;
-    assert!(result.success, "list_languages should succeed: {:?}", result.error);
-    let langs = result.data.as_array()
+    assert!(
+        result.success,
+        "list_languages should succeed: {:?}",
+        result.error
+    );
+    let langs = result
+        .data
+        .as_array()
         .cloned()
         .or_else(|| result.data["languages"].as_array().cloned())
         .unwrap_or_default();
-    assert!(!langs.is_empty(), "list_languages must return at least one language");
+    assert!(
+        !langs.is_empty(),
+        "list_languages must return at least one language"
+    );
 }
 
 #[tokio::test]
@@ -58,8 +71,13 @@ async fn functional_i18n02_detect_language_hindi() {
     let result = handler
         .execute(serde_json::json!({ "text": "Aaj mausam bahut accha hai" }))
         .await;
-    assert!(result.success, "detect_language should succeed: {:?}", result.error);
-    let lang = result.data["language"].as_str()
+    assert!(
+        result.success,
+        "detect_language should succeed: {:?}",
+        result.error
+    );
+    let lang = result.data["language"]
+        .as_str()
         .or(result.data["detected"].as_str())
         .or(result.data["code"].as_str())
         .unwrap_or("");
@@ -73,7 +91,10 @@ async fn functional_i18n02_detect_language_hindi() {
 async fn functional_i18n03_get_accessibility_settings() {
     // PROMPT-ID: I18N-03
     let reg = registry::build_default_registry();
-    let handler = reg.get_handler("get_accessibility_settings").unwrap().clone();
+    let handler = reg
+        .get_handler("get_accessibility_settings")
+        .unwrap()
+        .clone();
     let result = handler.execute(serde_json::json!({})).await;
     assert!(
         result.success || result.error.is_some(),
@@ -124,7 +145,10 @@ fn smoke_gworkspace_tools_registered() {
 fn policy_gw04_gmail_send_is_red() {
     // PROMPT-ID: GW-04
     let engine = PolicyEngine::new();
-    let d = engine.evaluate("gw_gmail_send", &serde_json::json!({ "to": "x@example.com" }));
+    let d = engine.evaluate(
+        "gw_gmail_send",
+        &serde_json::json!({ "to": "x@example.com" }),
+    );
     assert_eq!(d.risk_level, RiskLevel::Red, "gw_gmail_send must be Red");
 }
 
@@ -140,8 +164,15 @@ fn policy_gw05_gmail_delete_is_red() {
 fn policy_gw09_calendar_delete_is_red() {
     // PROMPT-ID: GW-09
     let engine = PolicyEngine::new();
-    let d = engine.evaluate("gw_calendar_delete", &serde_json::json!({ "id": "event-001" }));
-    assert_eq!(d.risk_level, RiskLevel::Red, "gw_calendar_delete must be Red");
+    let d = engine.evaluate(
+        "gw_calendar_delete",
+        &serde_json::json!({ "id": "event-001" }),
+    );
+    assert_eq!(
+        d.risk_level,
+        RiskLevel::Red,
+        "gw_calendar_delete must be Red"
+    );
 }
 
 #[test]
@@ -184,7 +215,11 @@ fn policy_gw_read_ops_are_green_or_yellow() {
 #[test]
 fn routing_gw01_gmail_inbox_routes_correctly() {
     // PROMPT-ID: GW-01
-    let prompts = ["Check my Gmail inbox.", "inbox dikhao", "show unread emails"];
+    let prompts = [
+        "Check my Gmail inbox.",
+        "inbox dikhao",
+        "show unread emails",
+    ];
     for p in &prompts {
         let r = IntentRouter::classify(p);
         assert!(
@@ -267,8 +302,11 @@ async fn functional_gw_unauthenticated_returns_clean_error() {
     );
     let err = result.error.unwrap_or_default().to_lowercase();
     assert!(
-        err.contains("auth") || err.contains("token") || err.contains("credentials")
-            || err.contains("unauthorized") || err.contains("not configured"),
+        err.contains("auth")
+            || err.contains("token")
+            || err.contains("credentials")
+            || err.contains("unauthorized")
+            || err.contains("not configured"),
         "Auth error message should mention credentials/auth/token, got: {err}"
     );
 }
@@ -332,7 +370,11 @@ async fn functional_colab_browser_connection_live() {
     };
     let handler = handler.clone();
     let result = handler.execute(serde_json::json!({})).await;
-    assert!(result.success, "open_colab_browser_connection should succeed: {:?}", result.error);
+    assert!(
+        result.success,
+        "open_colab_browser_connection should succeed: {:?}",
+        result.error
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

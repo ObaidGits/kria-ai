@@ -50,7 +50,9 @@ async fn functional_sys01_get_cpu_usage() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("get_cpu_usage").unwrap().clone();
     let result = handler.execute(serde_json::json!({})).await;
-    assert_tool_success(&serde_json::json!({"success": result.success, "data": result.data, "error": result.error}));
+    assert_tool_success(
+        &serde_json::json!({"success": result.success, "data": result.data, "error": result.error}),
+    );
     assert_result_field(
         &result.data,
         "percentage",
@@ -65,10 +67,18 @@ async fn functional_sys_get_memory_info() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("get_memory_info").unwrap().clone();
     let result = handler.execute(serde_json::json!({})).await;
-    assert!(result.success, "get_memory_info should succeed: {:?}", result.error);
+    assert!(
+        result.success,
+        "get_memory_info should succeed: {:?}",
+        result.error
+    );
     // Must return at least total_mb and used_mb
     assert!(
-        result.data.get("total_mb").or(result.data.get("total")).is_some(),
+        result
+            .data
+            .get("total_mb")
+            .or(result.data.get("total"))
+            .is_some(),
         "get_memory_info must include total memory field"
     );
 }
@@ -79,7 +89,11 @@ async fn functional_sys_get_disk_space() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("get_disk_space").unwrap().clone();
     let result = handler.execute(serde_json::json!({})).await;
-    assert!(result.success, "get_disk_space should succeed: {:?}", result.error);
+    assert!(
+        result.success,
+        "get_disk_space should succeed: {:?}",
+        result.error
+    );
 }
 
 #[tokio::test]
@@ -101,7 +115,11 @@ async fn functional_sys04_get_system_uptime() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("get_system_uptime").unwrap().clone();
     let result = handler.execute(serde_json::json!({})).await;
-    assert!(result.success, "get_system_uptime should succeed: {:?}", result.error);
+    assert!(
+        result.success,
+        "get_system_uptime should succeed: {:?}",
+        result.error
+    );
 }
 
 #[tokio::test]
@@ -110,7 +128,11 @@ async fn functional_sys05_check_system_health() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("check_system_health").unwrap().clone();
     let result = handler.execute(serde_json::json!({})).await;
-    assert!(result.success, "check_system_health should succeed: {:?}", result.error);
+    assert!(
+        result.success,
+        "check_system_health should succeed: {:?}",
+        result.error
+    );
 }
 
 #[tokio::test]
@@ -121,7 +143,11 @@ async fn functional_sys06_get_alerts() {
     let result = handler
         .execute(serde_json::json!({ "include_dismissed": false }))
         .await;
-    assert!(result.success, "get_alerts should succeed: {:?}", result.error);
+    assert!(
+        result.success,
+        "get_alerts should succeed: {:?}",
+        result.error
+    );
 }
 
 #[tokio::test]
@@ -158,7 +184,11 @@ async fn functional_sys09_get_network_status() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("get_network_status").unwrap().clone();
     let result = handler.execute(serde_json::json!({})).await;
-    assert!(result.success, "get_network_status should succeed: {:?}", result.error);
+    assert!(
+        result.success,
+        "get_network_status should succeed: {:?}",
+        result.error
+    );
 }
 
 // ── Routing ────────────────────────────────────────────────────────────────
@@ -166,7 +196,11 @@ async fn functional_sys09_get_network_status() {
 #[test]
 fn routing_sys01_system_stats_routes_to_get_cpu_or_check_health() {
     // PROMPT-ID: SYS-01
-    let prompts = ["What are my system stats?", "system stats", "show system info"];
+    let prompts = [
+        "What are my system stats?",
+        "system stats",
+        "show system info",
+    ];
     for p in &prompts {
         let r = IntentRouter::classify(p);
         let routed_to_sys = matches!(
@@ -390,7 +424,12 @@ async fn functional_cfg01_set_volume_integer_param() {
     let handler = reg.get_handler("set_volume").unwrap().clone();
     let result = handler.execute(serde_json::json!({ "level": 60 })).await;
     assert!(
-        result.success || result.error.as_deref().map(|e| !e.contains("parse")).unwrap_or(true),
+        result.success
+            || result
+                .error
+                .as_deref()
+                .map(|e| !e.contains("parse"))
+                .unwrap_or(true),
         "set_volume with integer level 60 must not fail with parse error: {:?}",
         result.error
     );
@@ -403,7 +442,12 @@ async fn functional_cfg01_set_volume_string_percent_param() {
     let handler = reg.get_handler("set_volume").unwrap().clone();
     let result = handler.execute(serde_json::json!({ "level": "60%" })).await;
     assert!(
-        result.success || result.error.as_deref().map(|e| !e.contains("parse")).unwrap_or(true),
+        result.success
+            || result
+                .error
+                .as_deref()
+                .map(|e| !e.contains("parse"))
+                .unwrap_or(true),
         "set_volume with string '60%' must not fail with parse error: {:?}",
         result.error
     );
@@ -426,10 +470,12 @@ async fn functional_cfg07_get_environment_variable_home() {
     // PROMPT-ID: CFG-07
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("get_environment_variable").unwrap().clone();
-    let result = handler
-        .execute(serde_json::json!({ "name": "HOME" }))
-        .await;
-    assert!(result.success, "get_environment_variable HOME should succeed: {:?}", result.error);
+    let result = handler.execute(serde_json::json!({ "name": "HOME" })).await;
+    assert!(
+        result.success,
+        "get_environment_variable HOME should succeed: {:?}",
+        result.error
+    );
     let val = result.data["value"].as_str().unwrap_or("");
     assert!(
         val.contains("/home") || val.contains("obaid") || !val.is_empty(),
@@ -441,9 +487,16 @@ async fn functional_cfg07_get_environment_variable_home() {
 async fn functional_cfg08_list_environment_variables() {
     // PROMPT-ID: CFG-08
     let reg = registry::build_default_registry();
-    let handler = reg.get_handler("list_environment_variables").unwrap().clone();
+    let handler = reg
+        .get_handler("list_environment_variables")
+        .unwrap()
+        .clone();
     let result = handler.execute(serde_json::json!({})).await;
-    assert!(result.success, "list_environment_variables should succeed: {:?}", result.error);
+    assert!(
+        result.success,
+        "list_environment_variables should succeed: {:?}",
+        result.error
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -477,7 +530,11 @@ async fn functional_proc01_list_running_apps() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("list_running_apps").unwrap().clone();
     let result = handler.execute(serde_json::json!({})).await;
-    assert!(result.success, "list_running_apps should succeed: {:?}", result.error);
+    assert!(
+        result.success,
+        "list_running_apps should succeed: {:?}",
+        result.error
+    );
     // Must return an array or object with process data
     assert!(
         result.data.is_array() || result.data.is_object(),

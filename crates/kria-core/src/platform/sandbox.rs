@@ -39,9 +39,7 @@ pub fn install_seccomp_filter() -> Result<(), String> {
 
 #[cfg(target_os = "linux")]
 fn install_linux() -> Result<(), String> {
-    use seccompiler::{
-        BpfProgram, SeccompAction, SeccompFilter, SeccompRule, TargetArch,
-    };
+    use seccompiler::{BpfProgram, SeccompAction, SeccompFilter, SeccompRule, TargetArch};
     use std::collections::BTreeMap;
 
     // Build a rule-map of syscalls to deny.
@@ -74,8 +72,12 @@ fn install_linux() -> Result<(), String> {
         "chroot"
     ];
 
-    let arch = TargetArch::try_from(std::env::consts::ARCH)
-        .map_err(|e| format!("seccomp: unsupported arch '{}': {e}", std::env::consts::ARCH))?;
+    let arch = TargetArch::try_from(std::env::consts::ARCH).map_err(|e| {
+        format!(
+            "seccomp: unsupported arch '{}': {e}",
+            std::env::consts::ARCH
+        )
+    })?;
 
     let filter = SeccompFilter::new(
         rules,
@@ -104,20 +106,20 @@ fn libc_syscall_nr(name: &str) -> Result<i64, String> {
     // For x86_64 (the primary target for KRIA desktop):
     #[cfg(target_arch = "x86_64")]
     let nr = match name {
-        "mount"           => libc::SYS_mount,
-        "umount2"         => libc::SYS_umount2,
-        "kexec_load"      => libc::SYS_kexec_load,
+        "mount" => libc::SYS_mount,
+        "umount2" => libc::SYS_umount2,
+        "kexec_load" => libc::SYS_kexec_load,
         "kexec_file_load" => libc::SYS_kexec_file_load,
-        "init_module"     => libc::SYS_init_module,
-        "finit_module"    => libc::SYS_finit_module,
-        "delete_module"   => libc::SYS_delete_module,
-        "bpf"             => libc::SYS_bpf,
-        "reboot"          => libc::SYS_reboot,
-        "swapon"          => libc::SYS_swapon,
-        "swapoff"         => libc::SYS_swapoff,
-        "pivot_root"      => libc::SYS_pivot_root,
-        "chroot"          => libc::SYS_chroot,
-        other             => return Err(format!("unknown syscall name: {other}")),
+        "init_module" => libc::SYS_init_module,
+        "finit_module" => libc::SYS_finit_module,
+        "delete_module" => libc::SYS_delete_module,
+        "bpf" => libc::SYS_bpf,
+        "reboot" => libc::SYS_reboot,
+        "swapon" => libc::SYS_swapon,
+        "swapoff" => libc::SYS_swapoff,
+        "pivot_root" => libc::SYS_pivot_root,
+        "chroot" => libc::SYS_chroot,
+        other => return Err(format!("unknown syscall name: {other}")),
     };
 
     #[cfg(not(target_arch = "x86_64"))]

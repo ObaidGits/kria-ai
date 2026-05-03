@@ -141,7 +141,9 @@ impl AuditLogger {
             .unwrap_or_else(|_| "GENESIS".to_string());
 
         // Timestamp for this row (use the same value we'll insert).
-        let timestamp = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+        let timestamp = chrono::Utc::now()
+            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+            .to_string();
         let params_str = parameters.to_string();
 
         // Compute row_hash = SHA-256(prev_hash || timestamp || session_id || action || params || decision).
@@ -303,7 +305,9 @@ impl AuditLogger {
                     action: r.get(3)?,
                     parameters: r.get(4)?,
                     decision: r.get(5)?,
-                    prev_hash: r.get::<_, Option<String>>(6)?.unwrap_or_else(|| "GENESIS".into()),
+                    prev_hash: r
+                        .get::<_, Option<String>>(6)?
+                        .unwrap_or_else(|| "GENESIS".into()),
                     row_hash: r.get::<_, Option<String>>(7)?.unwrap_or_default(),
                 })
             })

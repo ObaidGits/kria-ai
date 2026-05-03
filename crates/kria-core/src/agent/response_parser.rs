@@ -20,19 +20,15 @@ static BRACKET_CALL_RE: Lazy<Regex> =
 
 /// Pattern 3: Raw JSON {"name": "tool_name", "arguments": {...}}
 static RAW_JSON_TOOL_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(
-        r#"\{"name"\s*:\s*"([A-Za-z0-9_-]+)"\s*,\s*"arguments"\s*:\s*(\{[^}]*\})\}"#,
-    )
-    .unwrap()
+    Regex::new(r#"\{"name"\s*:\s*"([A-Za-z0-9_-]+)"\s*,\s*"arguments"\s*:\s*(\{[^}]*\})\}"#)
+        .unwrap()
 });
 
 /// Pattern 7: Python-style positional call  tool_name("value")  or  tool_name(param="value")
 /// Last-resort fallback — only matched when all other patterns fail.
 /// The caller must supply a set of known tool names to prevent false positives.
 static PYTHON_CALL_RE: Lazy<Regex> =
-    Lazy::new(|| {
-        Regex::new(r#"(?m)^[ \t]*([A-Za-z0-9_-]+)\(([^)]*)\)[ \t]*$"#).unwrap()
-    });
+    Lazy::new(|| Regex::new(r#"(?m)^[ \t]*([A-Za-z0-9_-]+)\(([^)]*)\)[ \t]*$"#).unwrap());
 
 /// Parse all tool calls from LLM output text.
 pub fn parse_tool_calls(text: &str) -> Vec<ParsedToolCall> {
@@ -203,8 +199,7 @@ mod tests {
 
     #[test]
     fn parse_hyphenated_mcp_tool_name() {
-        let text =
-            r#"{"name": "mcp_colab-mcp_execute_cell", "arguments": {"code": "print(1)"}}"#;
+        let text = r#"{"name": "mcp_colab-mcp_execute_cell", "arguments": {"code": "print(1)"}}"#;
         let calls = parse_tool_calls(text);
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].name, "mcp_colab-mcp_execute_cell");

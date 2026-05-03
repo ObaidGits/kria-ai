@@ -523,58 +523,53 @@ impl PolicyEngine {
     ) -> PolicyDecision {
         match cap {
             // ── OpenUrl ──────────────────────────────────────────────────────
-            Capability::OpenUrl { url } => {
-                match classify_url(url, registry_schemes) {
-                    Err(SchemeError::PermanentlyBlocked(scheme)) => PolicyDecision {
-                        risk_level: RiskLevel::Black,
-                        action: format!("open_url:{scheme}"),
-                        requires_approval: false,
-                        blocked: true,
-                        reason: format!("scheme '{scheme}' is permanently blocked"),
-                        escalated_from: None,
-                    },
-                    Err(SchemeError::UnknownDeepLink(scheme)) => PolicyDecision {
-                        risk_level: RiskLevel::Black,
-                        action: format!("open_url:{scheme}"),
-                        requires_approval: false,
-                        blocked: true,
-                        reason: format!(
-                            "scheme '{scheme}' is not registered by any installed application"
+            Capability::OpenUrl { url } => match classify_url(url, registry_schemes) {
+                Err(SchemeError::PermanentlyBlocked(scheme)) => PolicyDecision {
+                    risk_level: RiskLevel::Black,
+                    action: format!("open_url:{scheme}"),
+                    requires_approval: false,
+                    blocked: true,
+                    reason: format!("scheme '{scheme}' is permanently blocked"),
+                    escalated_from: None,
+                },
+                Err(SchemeError::UnknownDeepLink(scheme)) => PolicyDecision {
+                    risk_level: RiskLevel::Black,
+                    action: format!("open_url:{scheme}"),
+                    requires_approval: false,
+                    blocked: true,
+                    reason: format!(
+                        "scheme '{scheme}' is not registered by any installed application"
+                    ),
+                    escalated_from: None,
+                },
+                Err(e) => PolicyDecision {
+                    risk_level: RiskLevel::Black,
+                    action: "open_url".to_string(),
+                    requires_approval: false,
+                    blocked: true,
+                    reason: format!("URL classification failed: {e}"),
+                    escalated_from: None,
+                },
+                Ok(classification) => {
+                    let (requires_approval, reason) = match classification.risk {
+                        RiskLevel::Green => (false, "auto-execute: standard safe URI".into()),
+                        RiskLevel::Yellow => (
+                            false,
+                            "execute + preview: deep-link to registered app".into(),
                         ),
-                        escalated_from: None,
-                    },
-                    Err(e) => PolicyDecision {
-                        risk_level: RiskLevel::Black,
+                        RiskLevel::Red => (true, "requires approval: unusual URI scheme".into()),
+                        RiskLevel::Black => unreachable!("classify_url never returns Black Ok"),
+                    };
+                    PolicyDecision {
+                        risk_level: classification.risk,
                         action: "open_url".to_string(),
-                        requires_approval: false,
-                        blocked: true,
-                        reason: format!("URL classification failed: {e}"),
+                        requires_approval,
+                        blocked: false,
+                        reason,
                         escalated_from: None,
-                    },
-                    Ok(classification) => {
-                        let (requires_approval, reason) = match classification.risk {
-                            RiskLevel::Green => (false, "auto-execute: standard safe URI".into()),
-                            RiskLevel::Yellow => (
-                                false,
-                                "execute + preview: deep-link to registered app".into(),
-                            ),
-                            RiskLevel::Red => (
-                                true,
-                                "requires approval: unusual URI scheme".into(),
-                            ),
-                            RiskLevel::Black => unreachable!("classify_url never returns Black Ok"),
-                        };
-                        PolicyDecision {
-                            risk_level: classification.risk,
-                            action: "open_url".to_string(),
-                            requires_approval,
-                            blocked: false,
-                            reason,
-                            escalated_from: None,
-                        }
                     }
                 }
-            }
+            },
 
             // ── LaunchApp ────────────────────────────────────────────────────
             // SafeArg constructor already rejected metacharacters; this is defense-in-depth.
@@ -655,7 +650,8 @@ impl PolicyEngine {
         if destructive_hint && decision.risk_level == RiskLevel::Green {
             decision.escalated_from = Some(RiskLevel::Green);
             decision.risk_level = RiskLevel::Yellow;
-            decision.reason = "escalated to YELLOW: router flagged destructive modality verb".into();
+            decision.reason =
+                "escalated to YELLOW: router flagged destructive modality verb".into();
         }
 
         decision
@@ -758,7 +754,7 @@ mod tests {
 
     #[test]
     fn capability_ax_invoke_is_red() {
-        use crate::platform::intent::capability::{AxAction, Capability, CanonicalAppId};
+        use crate::platform::intent::capability::{AxAction, CanonicalAppId, Capability};
 
         let policy = PolicyEngine::new();
         let cap = Capability::AxInvoke {

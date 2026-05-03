@@ -5,8 +5,11 @@
 //! character-based heuristic (`len / 4`) when the endpoint is unavailable so
 //! callers never need to handle an error path.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 /// Approximate tokens per character for the heuristic fallback.
 const CHARS_PER_TOKEN_FALLBACK: usize = 4;
+static TOKENIZE_404_WARNED: AtomicBool = AtomicBool::new(false);
 
 /// Character budget corresponding to `LLM_TOOL_RESULT_TOKEN_BUDGET` tokens.
 /// Used in synchronous shaping code that cannot await.
@@ -27,7 +30,14 @@ pub async fn count_tokens(text: &str, base_url: &str) -> usize {
         return text.len() / CHARS_PER_TOKEN_FALLBACK;
     }
 
-    let url = format!("{}/tokenize", base_url.trim_end_matches('/'));
+    let trimmed = base_url.trim_end_matches('/');
+    let root = trimmed.strip_suffix("/v1").unwrap_or(trimmed);
+    let primary_url = format!("{}/tokenize", root);
+    let secondary_url = if root != trimmed {
+        Some(format!("{}/tokenize", trimmed))
+    } else {
+        None
+    };
     let body = serde_json::json!({ "content": text });
 
     let client = reqwest::Client::builder()
@@ -35,42 +45,73 @@ pub async fn count_tokens(text: &str, base_url: &str) -> usize {
         .build()
         .unwrap_or_default();
 
-    match client.post(&url).json(&body).send().await {
-        Ok(resp) if resp.status().is_success() => {
-            match resp.json::<serde_json::Value>().await {
-                Ok(v) => {
-                    if let Some(tokens) = v.get("tokens").and_then(|t| t.as_array()) {
-                        return tokens.len();
+    async fn try_tokenize(
+        client: &reqwest::Client,
+        url: &str,
+        body: &serde_json::Value,
+        text: &str,
+    ) -> Option<usize> {
+        match client.post(url).json(body).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                match resp.json::<serde_json::Value>().await {
+                    Ok(v) => {
+                        if let Some(tokens) = v.get("tokens").and_then(|t| t.as_array()) {
+                            return Some(tokens.len());
+                        }
+                        tracing::warn!(
+                            target: "kria::tokenize",
+                            "llama.cpp /tokenize response missing 'tokens' field; using len/4 fallback"
+                        );
+                        Some(text.len() / CHARS_PER_TOKEN_FALLBACK)
                     }
-                    tracing::warn!(
-                        target: "kria::tokenize",
-                        "llama.cpp /tokenize response missing 'tokens' field; using len/4 fallback"
-                    );
-                    text.len() / CHARS_PER_TOKEN_FALLBACK
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        target: "kria::tokenize",
-                        "failed to parse /tokenize response: {e}; using len/4 fallback"
-                    );
-                    text.len() / CHARS_PER_TOKEN_FALLBACK
+                    Err(e) => {
+                        tracing::warn!(
+                            target: "kria::tokenize",
+                            "failed to parse /tokenize response: {e}; using len/4 fallback"
+                        );
+                        Some(text.len() / CHARS_PER_TOKEN_FALLBACK)
+                    }
                 }
             }
-        }
-        Ok(resp) => {
-            tracing::warn!(
-                target: "kria::tokenize",
-                "/tokenize returned HTTP {}; using len/4 fallback",
-                resp.status()
-            );
-            text.len() / CHARS_PER_TOKEN_FALLBACK
-        }
-        Err(e) => {
-            tracing::warn!(
-                target: "kria::tokenize",
-                "/tokenize request failed: {e}; using len/4 fallback"
-            );
-            text.len() / CHARS_PER_TOKEN_FALLBACK
+            Ok(resp) if resp.status() == reqwest::StatusCode::NOT_FOUND => None,
+            Ok(resp) => {
+                tracing::warn!(
+                    target: "kria::tokenize",
+                    "/tokenize returned HTTP {}; using len/4 fallback",
+                    resp.status()
+                );
+                Some(text.len() / CHARS_PER_TOKEN_FALLBACK)
+            }
+            Err(e) => {
+                tracing::warn!(
+                    target: "kria::tokenize",
+                    "/tokenize request failed: {e}; using len/4 fallback"
+                );
+                Some(text.len() / CHARS_PER_TOKEN_FALLBACK)
+            }
         }
     }
+
+    if let Some(count) = try_tokenize(&client, &primary_url, &body, text).await {
+        return count;
+    }
+
+    if let Some(url) = secondary_url.as_deref() {
+        if let Some(count) = try_tokenize(&client, url, &body, text).await {
+            return count;
+        }
+    }
+
+    if !TOKENIZE_404_WARNED.swap(true, Ordering::Relaxed) {
+        tracing::warn!(
+            target: "kria::tokenize",
+            "/tokenize returned HTTP 404 on all candidate paths; switching to len/4 fallback"
+        );
+    } else {
+        tracing::debug!(
+            target: "kria::tokenize",
+            "/tokenize still unavailable (404); continuing len/4 fallback"
+        );
+    }
+    text.len() / CHARS_PER_TOKEN_FALLBACK
 }

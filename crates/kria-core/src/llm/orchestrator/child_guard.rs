@@ -80,9 +80,7 @@ impl ChildGuard {
     /// Non-blocking check whether the child has exited. Returns `Ok(Some(…))`
     /// if it has exited, `Ok(None)` if still running, or `Err` if the child
     /// was already fully reaped (i.e. `terminate`/`force_kill` completed).
-    pub fn try_wait(
-        &mut self,
-    ) -> std::io::Result<Option<std::process::ExitStatus>> {
+    pub fn try_wait(&mut self) -> std::io::Result<Option<std::process::ExitStatus>> {
         match self.child.as_mut() {
             Some(c) => c.try_wait(),
             None => Err(std::io::Error::new(
@@ -206,7 +204,11 @@ fn kill_process_group(pid: u32, sigkill: bool) {
             Ok(p) if p > 0 => p,
             _ => return,
         };
-        let sig = if sigkill { libc::SIGKILL } else { libc::SIGTERM };
+        let sig = if sigkill {
+            libc::SIGKILL
+        } else {
+            libc::SIGTERM
+        };
         unsafe {
             libc::kill(-pgid, sig);
         }

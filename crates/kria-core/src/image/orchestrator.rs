@@ -3,23 +3,23 @@
 //! Coordinates: tier admission → ComfyUI sidecar → WebSocket progress →
 //! Tier B swap if needed → cloud fallback on Tier C.
 
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::time::{Duration, Instant};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 use tokio::sync::{oneshot, Semaphore};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 use crate::config::ImageGenerationConfig;
-use crate::image::capabilities::{QualityProfile, ResolvedWorkflow, resolve as resolve_workflow};
-use crate::image::cloud::{CloudFallback, CloudError};
-use crate::image::comfy::{ComfyError, ComfySidecar, ComfyLaunchConfig};
-use crate::image::mode::{ResolvedMode, resolve_image_mode};
-use crate::image::prompt_enhancer::{EnhancedPrompt, enhance};
-use crate::image::styles::{AspectRatio, ImageStyle, classify_style_from_prompt};
+use crate::image::capabilities::{resolve as resolve_workflow, QualityProfile, ResolvedWorkflow};
+use crate::image::cloud::{CloudError, CloudFallback};
+use crate::image::comfy::{ComfyError, ComfyLaunchConfig, ComfySidecar};
+use crate::image::mode::{resolve_image_mode, ResolvedMode};
+use crate::image::prompt_enhancer::{enhance, EnhancedPrompt};
+use crate::image::styles::{classify_style_from_prompt, AspectRatio, ImageStyle};
 use crate::image::swap::{EvictionToken, SwapCoordinator, SwapError};
 use crate::image::ws_bridge::{spawn_ws_listener, EventEmitter};
 use crate::platform::vram::{build_profiler, ImageTier, VramProfiler};
@@ -52,7 +52,9 @@ pub struct ImageRequest {
     pub enhance: Option<bool>,
 }
 
-fn default_count() -> u32 { 1 }
+fn default_count() -> u32 {
+    1
+}
 
 /// Output from a successful generation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -341,10 +343,7 @@ impl ImageOrchestrator {
         };
 
         let sidecar = ComfySidecar::new(comfy_cfg);
-        let cloud = CloudFallback::new(
-            &cfg.pollinations_base_url,
-            cfg.cloud_fallback != "off",
-        );
+        let cloud = CloudFallback::new(&cfg.pollinations_base_url, cfg.cloud_fallback != "off");
         let swap_coord = SwapCoordinator::new(cfg.defrag_every_n_swaps);
         let profiler = build_profiler();
         let job_sem = Arc::new(Semaphore::new(cfg.max_concurrent_jobs.max(1)));
@@ -413,8 +412,7 @@ impl ImageOrchestrator {
 
         // ── Step 1: resolve style ────────────────────────────────────────────
         let style = req.style.unwrap_or_else(|| {
-            classify_style_from_prompt(&req.prompt)
-                .unwrap_or(ImageStyle::Photorealistic)
+            classify_style_from_prompt(&req.prompt).unwrap_or(ImageStyle::Photorealistic)
         });
 
         // ── Step 2: resolve aspect ───────────────────────────────────────────
@@ -433,7 +431,10 @@ impl ImageOrchestrator {
             // LLM requested cloud — signal Tier C only when env doesn't say local_only.
             ImageTier::CRejectOrCloud
         } else if !self.cfg.tier_override.is_empty() {
-            self.cfg.tier_override.parse().unwrap_or(ImageTier::CRejectOrCloud)
+            self.cfg
+                .tier_override
+                .parse()
+                .unwrap_or(ImageTier::CRejectOrCloud)
         } else {
             let snapshot = self.profiler.snapshot().await;
             ImageTier::from_snapshot(&snapshot)
@@ -461,11 +462,7 @@ impl ImageOrchestrator {
             // LLM hint: prefer cloud. Only reached when env doesn't say local_only.
             ResolvedMode::CloudOnly
         } else {
-            match resolve_image_mode(
-                &self.cfg.image_mode,
-                &self.cfg.cloud_fallback,
-                tier,
-            ) {
+            match resolve_image_mode(&self.cfg.image_mode, &self.cfg.cloud_fallback, tier) {
                 Ok(m) => m,
                 Err(e) => {
                     return Err(ImageError::Reported(Box::new(FailureReport {
@@ -496,14 +493,17 @@ impl ImageOrchestrator {
                     provider: "local".into(),
                     http_status: None,
                     attempt: 0,
-                    message: "Local image generation is degraded this session (VRAM swap timeouts).".into(),
+                    message:
+                        "Local image generation is degraded this session (VRAM swap timeouts)."
+                            .into(),
                     hint: "Restart KRIA to reset, or set image_mode = \"local_then_cloud\".".into(),
                 })));
             }
         }
 
         // ── Step 4: resolve quality profile ─────────────────────────────────
-        let profile = req.quality
+        let profile = req
+            .quality
             .unwrap_or_else(|| self.cfg.default_quality.parse().unwrap_or_default());
 
         // ── Step 5: check SDXL model availability ───────────────────────────
@@ -513,7 +513,9 @@ impl ImageOrchestrator {
         let wf = resolve_workflow(profile, tier, style, sdxl_available);
 
         // ── Step 7: resolve base seed (always randomize if not provided) ─────
-        let base_seed = req.seed.unwrap_or_else(|| rand::thread_rng().gen::<u64>() % 0xFFFF_FFFF);
+        let base_seed = req
+            .seed
+            .unwrap_or_else(|| rand::thread_rng().gen::<u64>() % 0xFFFF_FFFF);
 
         // ── Step 8: prompt enhancement (template-only; zero cost on Tier B/C) ─
         let should_enhance = req.enhance.unwrap_or(true);
@@ -573,7 +575,8 @@ impl ImageOrchestrator {
                     self.generate_local(&job, emitter).await
                 }
                 ImageTier::BDropSwap => {
-                    self.generate_with_swap(&job, emitter, llm_evictor.clone()).await
+                    self.generate_with_swap(&job, emitter, llm_evictor.clone())
+                        .await
                 }
                 ImageTier::CRejectOrCloud => {
                     // resolve_image_mode already rejected this combination;
@@ -597,16 +600,19 @@ impl ImageOrchestrator {
                         self.generate_local(&job, emitter).await
                     }
                     ImageTier::BDropSwap => {
-                        self.generate_with_swap(&job, emitter, llm_evictor.clone()).await
+                        self.generate_with_swap(&job, emitter, llm_evictor.clone())
+                            .await
                     }
-                    ImageTier::CRejectOrCloud => Err(ImageError::Reported(Box::new(FailureReport {
-                        stage: FailureStage::TierAdmission,
-                        provider: "tier".into(),
-                        http_status: None,
-                        attempt: 0,
-                        message: "no GPU; cannot attempt local generation".into(),
-                        hint: "Falling back to cloud.".into(),
-                    }))),
+                    ImageTier::CRejectOrCloud => {
+                        Err(ImageError::Reported(Box::new(FailureReport {
+                            stage: FailureStage::TierAdmission,
+                            provider: "tier".into(),
+                            http_status: None,
+                            attempt: 0,
+                            message: "no GPU; cannot attempt local generation".into(),
+                            hint: "Falling back to cloud.".into(),
+                        })))
+                    }
                 };
                 match local_result {
                     Ok(r) => Ok(r),
@@ -620,23 +626,22 @@ impl ImageOrchestrator {
                 }
             }
 
-            ResolvedMode::CloudThenLocal => {
-                match self.generate_cloud(&job).await {
-                    Ok(r) => Ok(r),
-                    Err(e) => {
-                        warn!(error = %e, "CloudThenLocal: cloud failed, trying local fallback");
-                        match tier {
-                            ImageTier::SHighRes | ImageTier::AStandard => {
-                                self.generate_local(&job, emitter).await
-                            }
-                            ImageTier::BDropSwap => {
-                                self.generate_with_swap(&job, emitter, llm_evictor.clone()).await
-                            }
-                            ImageTier::CRejectOrCloud => Err(e),
+            ResolvedMode::CloudThenLocal => match self.generate_cloud(&job).await {
+                Ok(r) => Ok(r),
+                Err(e) => {
+                    warn!(error = %e, "CloudThenLocal: cloud failed, trying local fallback");
+                    match tier {
+                        ImageTier::SHighRes | ImageTier::AStandard => {
+                            self.generate_local(&job, emitter).await
                         }
+                        ImageTier::BDropSwap => {
+                            self.generate_with_swap(&job, emitter, llm_evictor.clone())
+                                .await
+                        }
+                        ImageTier::CRejectOrCloud => Err(e),
                     }
                 }
-            }
+            },
         };
 
         let elapsed_ms = start.elapsed().as_millis() as u64;
@@ -644,10 +649,13 @@ impl ImageOrchestrator {
             Ok(mut r) => {
                 // Phase 13F: voice announce — "Image ready."
                 if let Some(emit) = &announce_emitter {
-                    emit("voice:speak", serde_json::json!({
-                        "text": "Image ready.",
-                        "priority": "normal"
-                    }));
+                    emit(
+                        "voice:speak",
+                        serde_json::json!({
+                            "text": "Image ready.",
+                            "priority": "normal"
+                        }),
+                    );
                 }
                 r.elapsed_ms = elapsed_ms;
                 r.tier_used = tier.as_str().to_string();
@@ -675,7 +683,10 @@ impl ImageOrchestrator {
         emitter: Option<EventEmitter>,
     ) -> Result<ImageResult, ImageError> {
         // Acquire job semaphore.
-        let _permit = self.job_sem.acquire().await
+        let _permit = self
+            .job_sem
+            .acquire()
+            .await
             .map_err(|_| ImageError::Comfy(ComfyError::NotRunning))?;
 
         // Ensure sidecar is running.
@@ -711,7 +722,9 @@ impl ImageOrchestrator {
             info!(prompt_id = %queued.prompt_id, img_index = i, "ComfyUI job queued");
 
             // Wait for completion.
-            let outputs = self.wait_for_job(queued, if i == 0 { emitter.clone() } else { None }).await?;
+            let outputs = self
+                .wait_for_job(queued, if i == 0 { emitter.clone() } else { None })
+                .await?;
 
             // Collect output files.
             let imgs = self.collect_outputs(outputs, job, img_seed).await?;
@@ -775,16 +788,22 @@ impl ImageOrchestrator {
         };
 
         // ── Phase 1: announce swap + freeze audio ─────────────────────────────
-        emit_event("image:tier_blackout", serde_json::json!({
-            "free_mb": 0_u64,
-            "required_mb": required_mb,
-            "stage": "evicting_llm"
-        }));
+        emit_event(
+            "image:tier_blackout",
+            serde_json::json!({
+                "free_mb": 0_u64,
+                "required_mb": required_mb,
+                "stage": "evicting_llm"
+            }),
+        );
         // Hinglish voice announce — low-priority TTS (fire-and-forget).
-        emit_event("voice:speak", serde_json::json!({
-            "text": "Generating your image, ek moment.",
-            "priority": "low"
-        }));
+        emit_event(
+            "voice:speak",
+            serde_json::json!({
+                "text": "Generating your image, ek moment.",
+                "priority": "low"
+            }),
+        );
 
         // Pause voice/STT capture during GPU reallocation.
         if let Some(pause) = self.audio_pause_fn.get() {
@@ -800,30 +819,36 @@ impl ImageOrchestrator {
             evictor.clone(),
             self.profiler.clone(),
             required_mb,
-        ).await {
+        )
+        .await
+        {
             Ok(t) => t,
-            Err(SwapError::VramTimeout { free_mb, required_mb: req_mb }) => {
+            Err(SwapError::VramTimeout {
+                free_mb,
+                required_mb: req_mb,
+            }) => {
                 warn!(
                     free_mb,
                     required_mb = req_mb,
                     "VramBarrier timeout after CPU-mode restart — retrying once"
                 );
-                emit_event("image:tier_blackout", serde_json::json!({
-                    "free_mb": free_mb,
-                    "required_mb": req_mb,
-                    "stage": "retry_after_interrupt"
-                }));
+                emit_event(
+                    "image:tier_blackout",
+                    serde_json::json!({
+                        "free_mb": free_mb,
+                        "required_mb": req_mb,
+                        "stage": "retry_after_interrupt"
+                    }),
+                );
 
                 // Brief pause for driver-side cleanup (NVML often lags
                 // SIGKILL by 100-500 ms even after the process is reaped).
                 tokio::time::sleep(Duration::from_millis(600)).await;
 
                 // Single retry — the controller is idempotent.
-                match EvictionToken::acquire(
-                    evictor.clone(),
-                    self.profiler.clone(),
-                    required_mb,
-                ).await {
+                match EvictionToken::acquire(evictor.clone(), self.profiler.clone(), required_mb)
+                    .await
+                {
                     Ok(t) => t,
                     Err(e) => {
                         // Both attempts failed — increment hang counter.
@@ -832,10 +857,13 @@ impl ImageOrchestrator {
                         if hangs >= 2 {
                             self.session_degraded.store(true, Ordering::Release);
                             warn!("ImageOrchestrator: 2 hang timeouts — session degraded to cloud-only");
-                            emit_event("image:session_degraded", serde_json::json!({
-                                "level": "cloud_only",
-                                "hang_count": hangs
-                            }));
+                            emit_event(
+                                "image:session_degraded",
+                                serde_json::json!({
+                                    "level": "cloud_only",
+                                    "hang_count": hangs
+                                }),
+                            );
                         }
                         if let Some(resume) = self.audio_resume_fn.get() {
                             resume();
@@ -853,11 +881,14 @@ impl ImageOrchestrator {
         };
 
         // VRAM cleared and stable.
-        emit_event("image:tier_blackout", serde_json::json!({
-            "free_mb": required_mb,
-            "required_mb": required_mb,
-            "stage": "ready"
-        }));
+        emit_event(
+            "image:tier_blackout",
+            serde_json::json!({
+                "free_mb": required_mb,
+                "required_mb": required_mb,
+                "stage": "ready"
+            }),
+        );
 
         // ── Phase 3: run image generation ─────────────────────────────────────
         let result = self.generate_local(job, emitter).await;
@@ -874,7 +905,10 @@ impl ImageOrchestrator {
         // runs llama-server's built-in warmup pass before reporting healthy,
         // and the slot KV-cache restore re-imports the prior conversation's
         // tokens. No additional `/completion` poke is needed here.
-        emit_event("image:tier_blackout", serde_json::json!({ "stage": "restored" }));
+        emit_event(
+            "image:tier_blackout",
+            serde_json::json!({ "stage": "restored" }),
+        );
 
         // ── Phase 5: defrag check ─────────────────────────────────────────────
         if self.swap_coord.tick() {
@@ -893,10 +927,7 @@ impl ImageOrchestrator {
 
     // ─── Cloud fallback ───────────────────────────────────────────────────────
 
-    async fn generate_cloud(
-        &self,
-        job: &ResolvedJob,
-    ) -> Result<ImageResult, ImageError> {
+    async fn generate_cloud(&self, job: &ResolvedJob) -> Result<ImageResult, ImageError> {
         // Build a style-prefixed prompt for cloud providers.
         let styled_prompt = format!("{} {}", job.style.as_str(), job.positive_prompt);
 
@@ -906,9 +937,16 @@ impl ImageOrchestrator {
             // Always use a per-image seed — eliminates "same image every run" bug.
             let img_seed = job.base_seed.wrapping_add(u64::from(i));
 
-            let result = self.cloud.generate(&styled_prompt, job.width, job.height, Some(img_seed)).await?;
+            let result = self
+                .cloud
+                .generate(&styled_prompt, job.width, job.height, Some(img_seed))
+                .await?;
 
-            let ext = if result.png_bytes.starts_with(b"\x89PNG\r\n\x1a\n") { "png" } else { "jpg" };
+            let ext = if result.png_bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+                "png"
+            } else {
+                "jpg"
+            };
             let out_path = self.save_bytes(&result.png_bytes, ext).await?;
             let sha = sha256_hex(&result.png_bytes);
 
@@ -1210,7 +1248,8 @@ impl ImageOrchestrator {
         job: &ResolvedJob,
         img_seed: u64,
     ) -> Result<Vec<GeneratedImage>, ImageError> {
-        tokio::fs::create_dir_all(&self.output_dir).await
+        tokio::fs::create_dir_all(&self.output_dir)
+            .await
             .map_err(|e| ImageError::OutputDir(e.to_string()))?;
 
         let comfy_output_dir = self.output_dir.clone();
@@ -1244,7 +1283,8 @@ impl ImageOrchestrator {
 
     /// Save raw bytes to a timestamped file in `output_dir`.
     async fn save_bytes(&self, bytes: &[u8], ext: &str) -> Result<PathBuf, ImageError> {
-        tokio::fs::create_dir_all(&self.output_dir).await
+        tokio::fs::create_dir_all(&self.output_dir)
+            .await
             .map_err(|e| ImageError::OutputDir(e.to_string()))?;
 
         let ts = std::time::SystemTime::now()
@@ -1271,7 +1311,9 @@ impl ImageOrchestrator {
     #[allow(dead_code)]
     fn conditioning_cache_path(&self, prompt: &str, clip2: &str) -> PathBuf {
         let key = sha256_hex(format!("{}:{}", prompt, clip2).as_bytes());
-        self.cache_dir.join("conditioning").join(format!("{}.bin", key))
+        self.cache_dir
+            .join("conditioning")
+            .join(format!("{}.bin", key))
     }
 
     /// LRU eviction: remove oldest conditioning-cache blobs until total ≤ 500 MB.
@@ -1325,7 +1367,7 @@ impl ImageOrchestrator {
 }
 
 fn sha256_hex(data: &[u8]) -> String {
-    use sha2::{Sha256, Digest};
+    use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
     h.update(data);
     format!("{:x}", h.finalize())

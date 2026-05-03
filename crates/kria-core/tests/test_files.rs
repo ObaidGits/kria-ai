@@ -112,7 +112,9 @@ fn routing_fs03_search_files_routes_correctly() {
 #[test]
 fn routing_fs13_search_file_contents_routes_correctly() {
     // PROMPT-ID: FS-13
-    let r = IntentRouter::classify("search inside .py files for the pattern 'import os' under /home/obaid/projects");
+    let r = IntentRouter::classify(
+        "search inside .py files for the pattern 'import os' under /home/obaid/projects",
+    );
     assert!(
         matches!(&r.intent, Intent::DirectTool(t) if t == "search_file_contents")
             || matches!(r.intent, Intent::ComplexTask),
@@ -162,9 +164,16 @@ async fn functional_fs01_read_existing_file() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("read_file").unwrap().clone();
     let result = handler.execute(serde_json::json!({ "path": path })).await;
-    assert!(result.success, "read_file should succeed for Cargo.toml: {:?}", result.error);
+    assert!(
+        result.success,
+        "read_file should succeed for Cargo.toml: {:?}",
+        result.error
+    );
     let content = result.data["content"].as_str().unwrap_or("");
-    assert!(!content.is_empty(), "read_file must return non-empty content");
+    assert!(
+        !content.is_empty(),
+        "read_file must return non-empty content"
+    );
 }
 
 #[tokio::test]
@@ -195,7 +204,10 @@ async fn functional_fs02_list_directory() {
         .await;
     if !result.success {
         // May be permission-denied in CI — that's fine as long as it's clean
-        assert!(result.error.is_some(), "list_directory failure must have error field");
+        assert!(
+            result.error.is_some(),
+            "list_directory failure must have error field"
+        );
         return;
     }
     assert!(
@@ -218,7 +230,12 @@ async fn functional_fs10_calculate_dir_size() {
     );
     if result.success {
         assert!(
-            result.data.get("total_bytes").or(result.data.get("size_bytes")).or(result.data.get("size_mb")).is_some(),
+            result
+                .data
+                .get("total_bytes")
+                .or(result.data.get("size_bytes"))
+                .or(result.data.get("size_mb"))
+                .is_some(),
             "calculate_dir_size must include a size field"
         );
     }
@@ -242,7 +259,11 @@ async fn functional_fs05_write_file_sandbox() {
             "overwrite": false
         }))
         .await;
-    assert!(result.success, "write_file should succeed in sandbox: {:?}", result.error);
+    assert!(
+        result.success,
+        "write_file should succeed in sandbox: {:?}",
+        result.error
+    );
     assert_eq!(
         std::fs::read_to_string(&path).unwrap_or_default(),
         "Hello KRIA"
@@ -283,11 +304,12 @@ async fn functional_fs06_copy_file_sandbox() {
             "destination": dst.to_str().unwrap()
         }))
         .await;
-    assert!(result.success, "copy_file should succeed in sandbox: {:?}", result.error);
-    assert_eq!(
-        std::fs::read_to_string(&dst).unwrap_or_default(),
-        "copy me"
+    assert!(
+        result.success,
+        "copy_file should succeed in sandbox: {:?}",
+        result.error
     );
+    assert_eq!(std::fs::read_to_string(&dst).unwrap_or_default(), "copy me");
 }
 
 #[tokio::test]
@@ -304,8 +326,15 @@ async fn functional_fs07_rename_file_sandbox() {
             "destination": renamed.to_str().unwrap()
         }))
         .await;
-    assert!(result.success, "rename_file should succeed in sandbox: {:?}", result.error);
-    assert!(!original.exists(), "original file should be gone after rename");
+    assert!(
+        result.success,
+        "rename_file should succeed in sandbox: {:?}",
+        result.error
+    );
+    assert!(
+        !original.exists(),
+        "original file should be gone after rename"
+    );
     assert!(renamed.exists(), "renamed file should exist");
 }
 
@@ -325,7 +354,11 @@ async fn functional_fs08_move_file_sandbox() {
             "destination": dst.to_str().unwrap()
         }))
         .await;
-    assert!(result.success, "move_file should succeed in sandbox: {:?}", result.error);
+    assert!(
+        result.success,
+        "move_file should succeed in sandbox: {:?}",
+        result.error
+    );
     assert!(!src.exists(), "source file should be gone after move");
     assert!(dst.exists(), "destination file should exist after move");
 }
@@ -340,10 +373,19 @@ async fn functional_fs09_get_file_info_sandbox() {
     let result = handler
         .execute(serde_json::json!({ "path": file.to_str().unwrap() }))
         .await;
-    assert!(result.success, "get_file_info should succeed: {:?}", result.error);
+    assert!(
+        result.success,
+        "get_file_info should succeed: {:?}",
+        result.error
+    );
     // Must include at least size
     assert!(
-        result.data.get("size").or(result.data.get("size_bytes")).or(result.data.get("bytes")).is_some(),
+        result
+            .data
+            .get("size")
+            .or(result.data.get("size_bytes"))
+            .or(result.data.get("bytes"))
+            .is_some(),
         "get_file_info must include a size field"
     );
 }
@@ -371,10 +413,7 @@ fn policy_fs11_delete_file_is_red() {
 fn policy_fs11_delete_blocked_path_is_red() {
     // PROMPT-ID: FS-11, SAFE-01 — /etc paths always Red
     let engine = PolicyEngine::new();
-    let decision = engine.evaluate(
-        "delete_file",
-        &serde_json::json!({ "path": "/etc/passwd" }),
-    );
+    let decision = engine.evaluate("delete_file", &serde_json::json!({ "path": "/etc/passwd" }));
     assert_eq!(
         decision.risk_level,
         RiskLevel::Red,
@@ -386,10 +425,7 @@ fn policy_fs11_delete_blocked_path_is_red() {
 fn policy_write_to_blocked_path_escalates_to_red() {
     // PROMPT-ID: FS-05 + SAFE-01
     let engine = PolicyEngine::new();
-    let decision = engine.evaluate(
-        "write_file",
-        &serde_json::json!({ "path": "/etc/hosts" }),
-    );
+    let decision = engine.evaluate("write_file", &serde_json::json!({ "path": "/etc/hosts" }));
     assert_eq!(
         decision.risk_level,
         RiskLevel::Red,
@@ -415,9 +451,13 @@ async fn functional_fs17_diff_files_sandbox() {
             "file_b": b.to_str().unwrap()
         }))
         .await;
-    assert!(result.success, "diff_files should succeed: {:?}", result.error);
-    let diff_text = result.data["diff"].as_str().unwrap_or("")
-        .to_owned() + result.data.to_string().as_str();
+    assert!(
+        result.success,
+        "diff_files should succeed: {:?}",
+        result.error
+    );
+    let diff_text =
+        result.data["diff"].as_str().unwrap_or("").to_owned() + result.data.to_string().as_str();
     assert!(
         diff_text.contains("changed") || diff_text.contains("line2"),
         "diff output should highlight changed line"

@@ -309,10 +309,7 @@ impl DownloadClient {
 /// Retryable status codes.
 #[allow(dead_code)]
 fn is_retryable_status(status: reqwest::StatusCode) -> bool {
-    matches!(
-        status.as_u16(),
-        429 | 500 | 502 | 503 | 504
-    )
+    matches!(status.as_u16(), 429 | 500 | 502 | 503 | 504)
 }
 
 /// Check if enough disk space is available.

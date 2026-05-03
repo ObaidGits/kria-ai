@@ -21,7 +21,12 @@ use kria_core::tools::registry;
 fn smoke_vision_tools_registered() {
     // PROMPT-ID: VIS-01..VIS-06
     let reg = registry::build_default_registry();
-    let required = ["screenshot", "screenshot_analyze", "ocr_image", "analyze_image"];
+    let required = [
+        "screenshot",
+        "screenshot_analyze",
+        "ocr_image",
+        "analyze_image",
+    ];
     for name in &required {
         assert!(
             reg.get_handler(name).is_some(),
@@ -134,7 +139,10 @@ async fn functional_vis05_analyze_image_missing_file_clean_error() {
         !result.success,
         "analyze_image for missing file must fail cleanly"
     );
-    assert!(result.error.is_some(), "analyze_image failure must include error message");
+    assert!(
+        result.error.is_some(),
+        "analyze_image failure must include error message"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -158,7 +166,11 @@ async fn functional_vis01_screenshot_live() {
         .execute(serde_json::json!({ "output": out_path.to_str().unwrap() }))
         .await;
 
-    assert!(result.success, "screenshot should succeed when DISPLAY is set: {:?}", result.error);
+    assert!(
+        result.success,
+        "screenshot should succeed when DISPLAY is set: {:?}",
+        result.error
+    );
     assert!(out_path.exists(), "screenshot must create the output file");
     let meta = std::fs::metadata(&out_path).unwrap();
     assert!(
@@ -186,7 +198,8 @@ async fn functional_vis01_screenshot_creates_file() {
         .await;
 
     if result.success {
-        let returned_path = result.data["path"].as_str()
+        let returned_path = result.data["path"]
+            .as_str()
             .or(result.data["output"].as_str())
             .unwrap_or("");
         assert!(
@@ -214,7 +227,8 @@ async fn functional_vis02_screenshot_analyze_live() {
 
     // Either succeed with a description, or fail cleanly (model may not be loaded)
     if result.success {
-        let description = result.data["description"].as_str()
+        let description = result.data["description"]
+            .as_str()
             .or(result.data["text"].as_str())
             .or(result.data["content"].as_str())
             .unwrap_or("");

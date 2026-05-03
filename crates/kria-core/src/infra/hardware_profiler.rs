@@ -144,9 +144,7 @@ fn detect_gpu_vendor_sysfs() -> Option<GpuVendor> {
             }
             if id == "0x8086" {
                 // Intel integrated or Arc
-                tracing::info!(
-                    "detected Intel GPU via sysfs (not yet supported for acceleration)"
-                );
+                tracing::info!("detected Intel GPU via sysfs (not yet supported for acceleration)");
                 return Some(GpuVendor::Intel);
             }
         }
@@ -215,14 +213,8 @@ mod tests {
         assert_eq!(classify_tier(32768, Some(12288)), HardwareTier::High);
 
         // Performance: GPU >= 4GB AND RAM >= 12GB
-        assert_eq!(
-            classify_tier(12288, Some(4096)),
-            HardwareTier::Performance
-        );
-        assert_eq!(
-            classify_tier(16384, Some(6144)),
-            HardwareTier::Performance
-        );
+        assert_eq!(classify_tier(12288, Some(4096)), HardwareTier::Performance);
+        assert_eq!(classify_tier(16384, Some(6144)), HardwareTier::Performance);
 
         // Standard: RAM >= 8GB (no GPU or GPU < 4GB)
         assert_eq!(classify_tier(8192, None), HardwareTier::Standard);
@@ -233,10 +225,7 @@ mod tests {
         assert_eq!(classify_tier(6144, Some(1024)), HardwareTier::Lite);
 
         // Edge: GPU >= 8GB but RAM < 16GB → not High
-        assert_eq!(
-            classify_tier(12288, Some(8192)),
-            HardwareTier::Performance
-        );
+        assert_eq!(classify_tier(12288, Some(8192)), HardwareTier::Performance);
     }
 
     #[test]

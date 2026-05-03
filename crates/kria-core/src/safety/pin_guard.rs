@@ -102,9 +102,8 @@ impl PinGuard {
                 let duration = state.lockout_duration;
                 state.locked_until = Some(Instant::now() + duration);
                 // Double the duration for the NEXT lockout, capped at max.
-                state.lockout_duration = Duration::from_secs(
-                    (duration.as_secs() * 2).min(MAX_LOCKOUT_SECS),
-                );
+                state.lockout_duration =
+                    Duration::from_secs((duration.as_secs() * 2).min(MAX_LOCKOUT_SECS));
                 // Reset failure counter so the threshold applies again after lockout.
                 state.consecutive_failures = 0;
 
@@ -164,7 +163,12 @@ mod tests {
         let g = PinGuard::new();
         for expected_left in (1..=4).rev() {
             let result = g.check(SESSION, || false).await;
-            assert_eq!(result, PinCheckResult::Rejected { attempts_left: expected_left });
+            assert_eq!(
+                result,
+                PinCheckResult::Rejected {
+                    attempts_left: expected_left
+                }
+            );
         }
     }
 
@@ -175,7 +179,12 @@ mod tests {
             let _ = g.check(SESSION, || false).await;
         }
         let result = g.check(SESSION, || false).await;
-        assert!(matches!(result, PinCheckResult::Locked { retry_after_secs: 60 }));
+        assert!(matches!(
+            result,
+            PinCheckResult::Locked {
+                retry_after_secs: 60
+            }
+        ));
     }
 
     #[tokio::test]
@@ -210,7 +219,12 @@ mod tests {
         }
         let result = g.check(SESSION, || false).await;
         // Already locked from the 5 failures above, retry should show ~120s.
-        assert!(matches!(result, PinCheckResult::Locked { retry_after_secs: 120 }));
+        assert!(matches!(
+            result,
+            PinCheckResult::Locked {
+                retry_after_secs: 120
+            }
+        ));
     }
 
     #[tokio::test]

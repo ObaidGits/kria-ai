@@ -81,8 +81,7 @@ impl InboxQueue {
             .map_err(|e| anyhow::anyhow!("partition open: {e}"))?;
 
         let key = msg.id.as_u128().to_be_bytes();
-        let val =
-            rmp_serde::to_vec(msg).map_err(|e| anyhow::anyhow!("msgpack encode: {e}"))?;
+        let val = rmp_serde::to_vec(msg).map_err(|e| anyhow::anyhow!("msgpack encode: {e}"))?;
 
         partition
             .insert(key, val)
@@ -114,8 +113,8 @@ impl InboxQueue {
 
         let (key, val) = entry.map_err(|e| anyhow::anyhow!("fjall iter: {e}"))?;
 
-        let msg: InboundMessage = rmp_serde::from_slice(&val)
-            .map_err(|e| anyhow::anyhow!("msgpack decode: {e}"))?;
+        let msg: InboundMessage =
+            rmp_serde::from_slice(&val).map_err(|e| anyhow::anyhow!("msgpack decode: {e}"))?;
 
         partition
             .remove(key)
@@ -132,7 +131,9 @@ impl InboxQueue {
             .open_partition(PARTITION_NAME, PartitionCreateOptions::default())
             .map_err(|e| anyhow::anyhow!("partition open: {e}"))?;
 
-        Ok(partition.len().map_err(|e| anyhow::anyhow!("fjall len: {e}"))? as usize)
+        Ok(partition
+            .len()
+            .map_err(|e| anyhow::anyhow!("fjall len: {e}"))? as usize)
     }
 
     /// Drain all queued messages into a `Vec` (for migration / inspection).

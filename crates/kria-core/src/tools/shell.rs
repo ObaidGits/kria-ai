@@ -42,9 +42,7 @@ impl ToolHandler for ExecuteBash {
 
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(timeout_secs),
-            tokio::process::Command::new(shell)
-                .args(&args)
-                .output(),
+            tokio::process::Command::new(shell).args(&args).output(),
         )
         .await;
 

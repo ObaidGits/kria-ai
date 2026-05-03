@@ -9,10 +9,12 @@ Pipeline goals:
 from __future__ import annotations
 
 import base64
+import importlib.util
 import io
 import logging
 import math
 import os
+import shutil
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,7 +22,7 @@ from typing import Any, Dict, List, Tuple
 
 logger = logging.getLogger("kria.processors.image")
 
-METHODS = ["analyze"]
+METHODS = ["analyze", "ocr_health"]
 MAX_IMAGE_SIZE_BYTES = int(os.environ.get("KRIA_MAX_IMAGE_SIZE_MB", "100")) * 1024 * 1024
 MAX_IMAGE_PIXELS = int(os.environ.get("KRIA_MAX_IMAGE_PIXELS", "40000000"))
 
@@ -339,6 +341,82 @@ def analyze(params: dict) -> dict:
     result["summary"] = "; ".join(parts) if parts else "Image analyzed"
 
     return result
+
+
+def ocr_health(params: dict) -> dict:
+    """Report OCR runtime readiness without requiring a test image."""
+    tier = str(params.get("_tier", "standard")).lower()
+    ocr_enabled_for_tier = tier != "lite"
+
+    pyt_available = False
+    pyt_detail = "unavailable"
+    tesseract_path = shutil.which("tesseract")
+    tesseract_version = ""
+
+    if importlib.util.find_spec("pytesseract") is None:
+        pyt_detail = "pytesseract package not installed"
+    elif not tesseract_path:
+        pyt_detail = "tesseract binary not found on PATH"
+    else:
+        try:
+            import pytesseract
+
+            version_obj = pytesseract.get_tesseract_version()
+            tesseract_version = str(version_obj)
+            pyt_available = True
+            pyt_detail = "ready"
+        except Exception as exc:
+            pyt_detail = f"pytesseract runtime check failed: {exc}"
+
+    easy_available = importlib.util.find_spec("easyocr") is not None
+    easy_detail = "ready" if easy_available else "easyocr package not installed"
+
+    effective_engine = "none"
+    available = False
+    detail = ""
+
+    if not ocr_enabled_for_tier:
+        detail = "OCR is disabled in lite tier"
+    elif tier in ("performance", "high"):
+        if easy_available:
+            effective_engine = "easyocr"
+            available = True
+            detail = "easyocr available"
+        elif pyt_available:
+            effective_engine = "pytesseract"
+            available = True
+            detail = "pytesseract available (fallback engine)"
+        else:
+            detail = (
+                f"OCR engines unavailable (easyocr: {easy_detail}; pytesseract: {pyt_detail})"
+            )
+    elif pyt_available:
+        effective_engine = "pytesseract"
+        available = True
+        detail = "pytesseract available"
+    else:
+        detail = f"pytesseract unavailable: {pyt_detail}"
+
+    return {
+        "status": "ready" if available else "degraded",
+        "tier": tier,
+        "ocr_enabled_for_tier": ocr_enabled_for_tier,
+        "available": available,
+        "effective_engine": effective_engine,
+        "detail": detail,
+        "engines": {
+            "pytesseract": {
+                "available": pyt_available,
+                "detail": pyt_detail,
+                "binary_path": tesseract_path,
+                "version": tesseract_version,
+            },
+            "easyocr": {
+                "available": easy_available,
+                "detail": easy_detail,
+            },
+        },
+    }
 
 
 def _resolve_file_path(params: dict) -> str:
@@ -716,39 +794,117 @@ def _run_ocr_pipeline(img, rois: List[Dict[str, Any]], tier: str, mode: str) -> 
 
 
 def _run_ocr_once(img, tier: str) -> Tuple[str, float, str]:
+    def _candidate_score(text: str, conf: float) -> float:
+        if not text:
+            return -1.0
+        dense_chars = [ch for ch in text if not ch.isspace()]
+        alnum_ratio = (
+            sum(1 for ch in dense_chars if ch.isalnum()) / float(len(dense_chars))
+            if dense_chars
+            else 0.0
+        )
+        coverage = min(len(text) / 220.0, 1.0)
+        return (conf * 0.45) + (coverage * 0.40) + (alnum_ratio * 0.15)
+
     try:
+        easy_candidate: Tuple[str, float, str] = ("", 0.0, "none")
+        easy_score = -1.0
         if tier in ("performance", "high"):
             try:
                 import easyocr
 
-                reader = easyocr.Reader(["en"], gpu=True)
+                use_gpu = False
+                try:
+                    import torch
+
+                    use_gpu = bool(
+                        torch.cuda.is_available()
+                        or (
+                            hasattr(torch.backends, "mps")
+                            and torch.backends.mps.is_available()
+                        )
+                    )
+                except Exception:
+                    use_gpu = False
+
+                reader = easyocr.Reader(["en"], gpu=use_gpu)
                 lines = reader.readtext(_pil_to_cv_bgr(img))
                 text = "\n".join(str(row[1]).strip() for row in lines if len(row) >= 2).strip()
                 confs = [float(row[2]) for row in lines if len(row) >= 3 and isinstance(row[2], (float, int))]
                 conf = float(sum(confs) / max(1, len(confs))) if confs else 0.0
                 if text:
-                    return text, conf, "easyocr"
+                    easy_candidate = (text, conf, "easyocr")
+                    easy_score = _candidate_score(text, conf)
             except ImportError:
                 pass
             except Exception as e:
                 logger.warning("easyocr failed, falling back to pytesseract: %s", e)
 
-        import pytesseract
-        from pytesseract import Output
+        # If EasyOCR is already strong, keep latency low and skip Tesseract.
+        if easy_candidate[0] and easy_score >= 0.72 and len(easy_candidate[0]) >= 160:
+            return easy_candidate
 
-        data = pytesseract.image_to_data(img, output_type=Output.DICT)
-        confs = []
-        for val in data.get("conf", []):
-            try:
-                conf_v = float(val)
-            except Exception:
-                continue
-            if conf_v >= 0:
-                confs.append(conf_v / 100.0)
+        tess_candidate: Tuple[str, float, str] = ("", 0.0, "none")
+        tess_score = -1.0
+        try:
+            import pytesseract
+            from pytesseract import Output
 
-        text = pytesseract.image_to_string(img).strip()
-        conf = float(sum(confs) / max(1, len(confs))) if confs else 0.0
-        return text, conf, "pytesseract"
+            variants = [img]
+            if max(img.width, img.height) < 1400:
+                from PIL import Image
+
+                scale = min(2.0, 1600.0 / max(1.0, float(max(img.width, img.height))))
+                if scale > 1.05:
+                    resample = (
+                        Image.Resampling.LANCZOS
+                        if hasattr(Image, "Resampling")
+                        else Image.LANCZOS
+                    )
+                    variants.append(
+                        img.resize(
+                            (int(round(img.width * scale)), int(round(img.height * scale))),
+                            resample=resample,
+                        )
+                    )
+
+            configs = ("--oem 3 --psm 6", "--oem 3 --psm 11")
+            best = ("", 0.0, -1.0)  # text, conf, score
+
+            for variant in variants:
+                for cfg in configs:
+                    data = pytesseract.image_to_data(variant, output_type=Output.DICT, config=cfg)
+                    confs = []
+                    for val in data.get("conf", []):
+                        try:
+                            conf_v = float(val)
+                        except Exception:
+                            continue
+                        if conf_v >= 0:
+                            confs.append(conf_v / 100.0)
+
+                    text = pytesseract.image_to_string(variant, config=cfg).strip()
+                    conf = float(sum(confs) / max(1, len(confs))) if confs else 0.0
+                    if not text:
+                        continue
+
+                    score = _candidate_score(text, conf)
+                    if score > best[2]:
+                        best = (text, conf, score)
+
+            if best[0]:
+                tess_candidate = (best[0], best[1], "pytesseract")
+                tess_score = best[2]
+        except Exception as e:
+            logger.warning("pytesseract OCR failed: %s", e)
+
+        if easy_candidate[0] and easy_score >= tess_score:
+            return easy_candidate
+        if tess_candidate[0]:
+            return tess_candidate
+        if easy_candidate[0]:
+            return easy_candidate
+        return "", 0.0, "none"
     except Exception as e:
         logger.warning("OCR failed: %s", e)
         return "", 0.0, "none"

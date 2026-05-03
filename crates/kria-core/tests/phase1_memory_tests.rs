@@ -475,9 +475,7 @@ fn context_builder_retrieves_relevant_facts() {
     let embeddings = EmbeddingModel::load(128).unwrap();
 
     // Add some facts with vectors
-    for text in ["Rust is fast", "Python is flexible", "KRIA uses local LLMs"]
-        .iter()
-    {
+    for text in ["Rust is fast", "Python is flexible", "KRIA uses local LLMs"].iter() {
         let id = store
             .store_fact(&MemoryFact {
                 id: None,

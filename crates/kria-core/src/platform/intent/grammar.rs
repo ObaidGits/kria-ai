@@ -220,10 +220,27 @@ pub fn validate_capability_json(raw: &str) -> Result<(), CapabilitySchemaError> 
                 .to_ascii_lowercase();
             // Scheme allow-list (mirrors scheme.rs BLOCKED_SCHEMES).
             let blocked = [
-                "file://", "javascript:", "data:", "vbscript:", "smb://", "cifs://",
-                "nfs://", "ftp://", "sftp://", "about:", "chrome-extension://",
-                "chrome-devtools://", "moz-extension://", "resource:", "view-source:",
-                "intent:", "android-app:", "vnc://", "rdp://", "ssh://", "content://",
+                "file://",
+                "javascript:",
+                "data:",
+                "vbscript:",
+                "smb://",
+                "cifs://",
+                "nfs://",
+                "ftp://",
+                "sftp://",
+                "about:",
+                "chrome-extension://",
+                "chrome-devtools://",
+                "moz-extension://",
+                "resource:",
+                "view-source:",
+                "intent:",
+                "android-app:",
+                "vnc://",
+                "rdp://",
+                "ssh://",
+                "content://",
             ];
             for scheme in blocked {
                 if url.starts_with(scheme) {
@@ -241,7 +258,9 @@ pub fn validate_capability_json(raw: &str) -> Result<(), CapabilitySchemaError> 
             if let Some(args) = v["args"].as_array() {
                 for arg in args {
                     if let Some(s) = arg.as_str() {
-                        if s.chars().any(|c| matches!(c, ';' | '&' | '|' | '$' | '`' | '<' | '>')) {
+                        if s.chars()
+                            .any(|c| matches!(c, ';' | '&' | '|' | '$' | '`' | '<' | '>'))
+                        {
                             return Err(CapabilitySchemaError::BlockedValue(
                                 "shell metacharacter in arg".into(),
                             ));
@@ -255,7 +274,9 @@ pub fn validate_capability_json(raw: &str) -> Result<(), CapabilitySchemaError> 
                 return Err(CapabilitySchemaError::MissingField("app".into()));
             }
             if v["contact"]["identifier"].as_str().is_none() {
-                return Err(CapabilitySchemaError::MissingField("contact.identifier".into()));
+                return Err(CapabilitySchemaError::MissingField(
+                    "contact.identifier".into(),
+                ));
             }
             if v["body"].as_str().is_none() {
                 return Err(CapabilitySchemaError::MissingField("body".into()));
@@ -265,7 +286,9 @@ pub fn validate_capability_json(raw: &str) -> Result<(), CapabilitySchemaError> 
             let path = v["path"]
                 .as_str()
                 .ok_or_else(|| CapabilitySchemaError::MissingField("path".into()))?;
-            let blocked_roots = ["/etc/", "/boot/", "/root/", "/usr/", "/var/", "/proc/", "/sys/"];
+            let blocked_roots = [
+                "/etc/", "/boot/", "/root/", "/usr/", "/var/", "/proc/", "/sys/",
+            ];
             for root in blocked_roots {
                 if path.starts_with(root) {
                     return Err(CapabilitySchemaError::BlockedValue(format!(
@@ -303,7 +326,10 @@ mod tests {
     fn schema_is_computed_once_and_cached() {
         let a = capability_schema();
         let b = capability_schema();
-        assert!(std::ptr::eq(a, b), "should return the same static reference");
+        assert!(
+            std::ptr::eq(a, b),
+            "should return the same static reference"
+        );
     }
 
     #[test]
@@ -315,7 +341,9 @@ mod tests {
 
     #[test]
     fn validate_open_url_https_ok() {
-        assert!(validate_capability_json(r#"{"intent":"OpenUrl","url":"https://example.com"}"#).is_ok());
+        assert!(
+            validate_capability_json(r#"{"intent":"OpenUrl","url":"https://example.com"}"#).is_ok()
+        );
     }
 
     #[test]

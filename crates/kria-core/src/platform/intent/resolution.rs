@@ -83,7 +83,9 @@ pub struct Candidate {
 pub enum ResolutionError {
     /// Multiple contacts matched the query. The LLM must ask the user to pick one.
     /// Carries up to 3 candidates with confidence scores.
-    #[error("ambiguous contact '{query}': {candidate_count} matches found — ask the user to specify")]
+    #[error(
+        "ambiguous contact '{query}': {candidate_count} matches found — ask the user to specify"
+    )]
     Ambiguous {
         query: String,
         candidates: Vec<Candidate>,
@@ -193,11 +195,7 @@ pub trait ContactResolver: Send + Sync {
     /// - `Err(NotFound)` — no candidates.
     /// - `Err(Incomplete)` — unique match but missing required identifier.
     /// - `Err(BackendError)` — storage failure.
-    async fn resolve(
-        &self,
-        name: &str,
-        app: &MessagingApp,
-    ) -> Result<ContactId, ResolutionError>;
+    async fn resolve(&self, name: &str, app: &MessagingApp) -> Result<ContactId, ResolutionError>;
 }
 
 // ─── NullContactResolver ─────────────────────────────────────────────────────
@@ -208,11 +206,7 @@ pub struct NullContactResolver;
 
 #[async_trait::async_trait]
 impl ContactResolver for NullContactResolver {
-    async fn resolve(
-        &self,
-        name: &str,
-        _app: &MessagingApp,
-    ) -> Result<ContactId, ResolutionError> {
+    async fn resolve(&self, name: &str, _app: &MessagingApp) -> Result<ContactId, ResolutionError> {
         Err(ResolutionError::NotFound {
             query: name.to_string(),
         })
@@ -249,7 +243,11 @@ mod tests {
         ];
         let err = ResolutionError::ambiguous("Anjali", candidates);
         match &err {
-            ResolutionError::Ambiguous { candidate_count, candidates, .. } => {
+            ResolutionError::Ambiguous {
+                candidate_count,
+                candidates,
+                ..
+            } => {
                 assert_eq!(*candidate_count, 2);
                 assert_eq!(candidates.len(), 2);
             }

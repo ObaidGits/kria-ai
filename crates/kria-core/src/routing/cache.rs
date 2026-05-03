@@ -20,7 +20,7 @@
 //! model.fingerprint         — embedding model id string
 //! ```
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -88,6 +88,8 @@ pub struct RouterCache {
     state: RwLock<CacheState>,
     /// All tool embeddings — tool_id → L2-normalised f32 vector.
     embeddings: RwLock<HashMap<String, Vec<f32>>>,
+    /// Stable tool domain mapping derived from ToolRegistry categories.
+    tool_domains: RwLock<HashMap<String, Domain>>,
     /// Domain → centroid vector.
     centroids: RwLock<HashMap<Domain, Vec<f32>>>,
     /// OOD calibration: top-1 similarity values from ~500 OOD prompts.
@@ -97,13 +99,17 @@ pub struct RouterCache {
 }
 
 impl RouterCache {
-    pub fn new(cache_dir: PathBuf, model_id: String) -> (Arc<Self>, broadcast::Sender<RouterCacheEvent>) {
+    pub fn new(
+        cache_dir: PathBuf,
+        model_id: String,
+    ) -> (Arc<Self>, broadcast::Sender<RouterCacheEvent>) {
         let (tx, _) = broadcast::channel(16);
         let cache = Arc::new(Self {
             cache_dir,
             model_id,
             state: RwLock::new(CacheState::Empty),
             embeddings: RwLock::new(HashMap::new()),
+            tool_domains: RwLock::new(HashMap::new()),
             centroids: RwLock::new(HashMap::new()),
             ood_dist: RwLock::new(Vec::new()),
             event_tx: tx.clone(),
@@ -134,10 +140,13 @@ impl RouterCache {
     /// Return tool IDs that belong to any of the provided domains.
     pub(crate) async fn tool_ids_for_domains(&self, domains: &[Domain]) -> Vec<String> {
         let embs = self.embeddings.read().await;
+        let tool_domains = self.tool_domains.read().await;
         embs.keys()
             .filter(|id| {
-                let cat = id.split('_').next().unwrap_or("");
-                let d = super::domain::category_to_domain(cat);
+                let d = tool_domains
+                    .get(*id)
+                    .copied()
+                    .unwrap_or_else(|| id_to_domain_hint(id));
                 domains.contains(&d)
             })
             .cloned()
@@ -168,11 +177,24 @@ impl RouterCache {
         match self.load_from_disk().await {
             Ok(manifest) => {
                 let delta = self.compute_delta(&manifest, &tool_descriptions);
-                if delta.is_empty() {
+                let current_tool_ids: HashSet<&str> = tool_descriptions
+                    .iter()
+                    .map(|(id, _, _)| id.as_str())
+                    .collect();
+                let removed_count = manifest
+                    .entries
+                    .keys()
+                    .filter(|id| !current_tool_ids.contains(id.as_str()))
+                    .count();
+                if delta.is_empty() && removed_count == 0 {
                     info!("[RouterCache] all embeddings valid — transitioning to Ready");
                     *self.state.write().await = CacheState::Ready;
                 } else {
-                    info!("[RouterCache] {} tool(s) need re-embedding — reconciling", delta.len());
+                    info!(
+                        "[RouterCache] reconcile required (to_embed={}, removed={})",
+                        delta.len(),
+                        removed_count
+                    );
                     *self.state.write().await = CacheState::Reconciling;
                     let this = Arc::clone(self);
                     tokio::spawn(async move { this.reconcile(delta, tool_descriptions).await });
@@ -247,6 +269,8 @@ impl RouterCache {
         }
 
         let mut embs = self.embeddings.write().await;
+        let mut domains = self.tool_domains.write().await;
+        domains.clear();
         for (id, entry) in &manifest.entries {
             let start = entry.offset * 4;
             let end = start + entry.dim * 4;
@@ -259,6 +283,7 @@ impl RouterCache {
                 .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
                 .collect();
             embs.insert(id.clone(), v);
+            domains.insert(id.clone(), domain_from_str(&entry.domain));
         }
 
         // Reload centroids
@@ -308,22 +333,36 @@ impl RouterCache {
             return;
         }
 
-        // Embed only the delta tools
-        let texts: Vec<&str> = to_embed.iter().map(|(_, d, _)| d.as_str()).collect();
-        let new_embeddings = match embed::embed_batch(&texts) {
-            Ok(e) => e,
-            Err(e) => {
-                warn!("[RouterCache] embed_batch failed: {e}");
-                *self.state.write().await = CacheState::Ready;
-                return;
+        // Embed only the delta tools.
+        let new_embeddings = if to_embed.is_empty() {
+            Vec::new()
+        } else {
+            let texts: Vec<&str> = to_embed.iter().map(|(_, d, _)| d.as_str()).collect();
+            match embed::embed_batch(&texts) {
+                Ok(e) => e,
+                Err(e) => {
+                    warn!("[RouterCache] embed_batch failed: {e}");
+                    *self.state.write().await = CacheState::Ready;
+                    return;
+                }
             }
         };
 
         {
             let mut embs = self.embeddings.write().await;
+            let keep_ids: HashSet<&str> = all_tools.iter().map(|(id, _, _)| id.as_str()).collect();
+            embs.retain(|id, _| keep_ids.contains(id.as_str()));
             for ((id, desc, cat), vec) in to_embed.iter().zip(new_embeddings.iter()) {
                 let _ = (desc, cat); // used for fingerprinting only
                 embs.insert(id.clone(), vec.clone());
+            }
+        }
+
+        {
+            let mut domains = self.tool_domains.write().await;
+            domains.clear();
+            for (id, _, category) in &all_tools {
+                domains.insert(id.clone(), category_to_domain(category));
             }
         }
 
@@ -354,17 +393,22 @@ impl RouterCache {
                     raw_bytes.extend_from_slice(&f.to_le_bytes());
                 }
                 let dim = v.len();
-                if manifest.dim == 0 { manifest.dim = dim; }
-                manifest.entries.insert(id.clone(), ToolCacheEntry {
-                    fingerprint: canonical_fingerprint(id, desc, cat),
-                    offset: start,
-                    dim,
-                    domain: category_to_domain(cat).as_str().to_string(),
-                    embedded_at: std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs(),
-                });
+                if manifest.dim == 0 {
+                    manifest.dim = dim;
+                }
+                manifest.entries.insert(
+                    id.clone(),
+                    ToolCacheEntry {
+                        fingerprint: canonical_fingerprint(id, desc, cat),
+                        offset: start,
+                        dim,
+                        domain: category_to_domain(cat).as_str().to_string(),
+                        embedded_at: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs(),
+                    },
+                );
                 offset += dim;
             }
         }
@@ -395,9 +439,12 @@ impl RouterCache {
         // Tool description embeddings grouped by domain
         {
             let embs = self.embeddings.read().await;
+            let domains = self.tool_domains.read().await;
             for (id, vec) in embs.iter() {
-                // Derive domain from id prefix (mcp_<server>_<tool> or plain tool_name)
-                let domain = id_to_domain_hint(id);
+                let domain = domains
+                    .get(id)
+                    .copied()
+                    .unwrap_or_else(|| id_to_domain_hint(id));
                 per_domain.entry(domain).or_default().push(vec.clone());
             }
         }
@@ -445,12 +492,20 @@ impl RouterCache {
     fn save_centroids(&self, centroids: &HashMap<Domain, Vec<f32>>) -> Result<()> {
         std::fs::create_dir_all(&self.cache_dir)?;
         let path = self.cache_dir.join("domain_centroids.v1.bin");
-        let data: Vec<u8> = centroids.iter().flat_map(|(domain, v)| {
-            let domain_byte = [domain_to_u8(*domain)];
-            let len_bytes = (v.len() as u32).to_le_bytes();
-            let float_bytes: Vec<u8> = v.iter().flat_map(|f| f.to_le_bytes()).collect();
-            domain_byte.iter().chain(len_bytes.iter()).chain(float_bytes.iter()).copied().collect::<Vec<u8>>()
-        }).collect();
+        let data: Vec<u8> = centroids
+            .iter()
+            .flat_map(|(domain, v)| {
+                let domain_byte = [domain_to_u8(*domain)];
+                let len_bytes = (v.len() as u32).to_le_bytes();
+                let float_bytes: Vec<u8> = v.iter().flat_map(|f| f.to_le_bytes()).collect();
+                domain_byte
+                    .iter()
+                    .chain(len_bytes.iter())
+                    .chain(float_bytes.iter())
+                    .copied()
+                    .collect::<Vec<u8>>()
+            })
+            .collect();
         std::fs::write(path, data)?;
         Ok(())
     }
@@ -506,7 +561,9 @@ impl RouterCache {
         let centroid_vecs: Vec<&Vec<f32>> = centroids.values().collect();
 
         let prompts: Vec<&str> = ood_prompts.iter().map(|s| *s).collect();
-        let Ok(embs) = embed::embed_batch(&prompts) else { return };
+        let Ok(embs) = embed::embed_batch(&prompts) else {
+            return;
+        };
 
         let sims: Vec<f32> = embs
             .iter()
@@ -543,6 +600,24 @@ pub fn canonical_fingerprint(id: &str, description: &str, category: &str) -> Str
 /// Derive a domain hint from a tool id string (best-effort, not authoritative).
 fn id_to_domain_hint(id: &str) -> Domain {
     category_to_domain(id.split('_').next().unwrap_or(""))
+}
+
+fn domain_from_str(raw: &str) -> Domain {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "conversation" => Domain::Conversation,
+        "system_info" => Domain::SystemInfo,
+        "file_ops" => Domain::FileOps,
+        "app_lifecycle" => Domain::AppLifecycle,
+        "comms" | "communication" => Domain::Comms,
+        "workspace" => Domain::Workspace,
+        "knowledge" => Domain::Knowledge,
+        "power" => Domain::Power,
+        "vision" => Domain::Vision,
+        "packages" => Domain::Packages,
+        "developer" => Domain::Developer,
+        "planner" => Domain::Planner,
+        _ => Domain::Knowledge,
+    }
 }
 
 fn domain_to_u8(d: Domain) -> u8 {

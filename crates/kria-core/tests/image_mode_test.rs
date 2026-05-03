@@ -68,8 +68,7 @@ fn m_t04_auto_tier_s_cloud_always() {
 /// M-T05: local_only + no GPU → Err(LocalRequestedNoGpu)
 #[test]
 fn m_t05_local_only_tier_c_errors() {
-    let e = resolve_image_mode("local_only", "always", ImageTier::CRejectOrCloud)
-        .unwrap_err();
+    let e = resolve_image_mode("local_only", "always", ImageTier::CRejectOrCloud).unwrap_err();
     assert!(
         matches!(e, ModeError::LocalRequestedNoGpu),
         "M-T05: expected LocalRequestedNoGpu, got {e}"
@@ -107,17 +106,25 @@ fn m_t08_cloud_only_cloud_off_errors() {
 /// M-T09: local_with_cloud_fallback + Tier B → LocalThenCloud
 #[test]
 fn m_t09_local_with_cloud_fallback_tier_b() {
-    let r = resolve_image_mode("local_with_cloud_fallback", "always", ImageTier::BDropSwap)
-        .unwrap();
+    let r =
+        resolve_image_mode("local_with_cloud_fallback", "always", ImageTier::BDropSwap).unwrap();
     assert_eq!(r, ResolvedMode::LocalThenCloud, "M-T09 failed");
 }
 
 /// M-T10: local_with_cloud_fallback + Tier C + cloud enabled → graceful CloudOnly
 #[test]
 fn m_t10_local_with_cloud_fallback_tier_c_degrades() {
-    let r = resolve_image_mode("local_with_cloud_fallback", "always", ImageTier::CRejectOrCloud)
-        .unwrap();
-    assert_eq!(r, ResolvedMode::CloudOnly, "M-T10: expected graceful CloudOnly degrade");
+    let r = resolve_image_mode(
+        "local_with_cloud_fallback",
+        "always",
+        ImageTier::CRejectOrCloud,
+    )
+    .unwrap();
+    assert_eq!(
+        r,
+        ResolvedMode::CloudOnly,
+        "M-T10: expected graceful CloudOnly degrade"
+    );
 }
 
 // ─── M-T11: CloudWithLocalFallback ───────────────────────────────────────────
@@ -125,8 +132,8 @@ fn m_t10_local_with_cloud_fallback_tier_c_degrades() {
 /// M-T11: cloud_with_local_fallback + Tier B → CloudThenLocal
 #[test]
 fn m_t11_cloud_with_local_fallback_tier_b() {
-    let r = resolve_image_mode("cloud_with_local_fallback", "always", ImageTier::BDropSwap)
-        .unwrap();
+    let r =
+        resolve_image_mode("cloud_with_local_fallback", "always", ImageTier::BDropSwap).unwrap();
     assert_eq!(r, ResolvedMode::CloudThenLocal, "M-T11 failed");
 }
 
@@ -148,7 +155,11 @@ fn m_t12_env_mode_overrides_config() {
 fn m_t13_env_cloud_fallback_false_overrides_config() {
     with_cloud_env("false", || {
         let r = resolve_image_mode("auto", "always", ImageTier::BDropSwap).unwrap();
-        assert_eq!(r, ResolvedMode::LocalOnly, "M-T13: cloud env=false should win");
+        assert_eq!(
+            r,
+            ResolvedMode::LocalOnly,
+            "M-T13: cloud env=false should win"
+        );
     });
 }
 
@@ -183,17 +194,24 @@ fn hyphen_variant_parses() {
 /// cloud_with_local_fallback + Tier C + cloud enabled → CloudOnly (no local).
 #[test]
 fn cloud_with_local_fallback_no_gpu_stays_cloud() {
-    let r = resolve_image_mode("cloud_with_local_fallback", "always", ImageTier::CRejectOrCloud)
-        .unwrap();
+    let r = resolve_image_mode(
+        "cloud_with_local_fallback",
+        "always",
+        ImageTier::CRejectOrCloud,
+    )
+    .unwrap();
     assert_eq!(r, ResolvedMode::CloudOnly);
 }
 
 /// local_with_cloud_fallback + cloud OFF + Tier C → error (no GPU, no cloud).
 #[test]
 fn local_with_cloud_fallback_no_gpu_no_cloud_errors() {
-    let e =
-        resolve_image_mode("local_with_cloud_fallback", "off", ImageTier::CRejectOrCloud)
-            .unwrap_err();
+    let e = resolve_image_mode(
+        "local_with_cloud_fallback",
+        "off",
+        ImageTier::CRejectOrCloud,
+    )
+    .unwrap_err();
     assert!(matches!(e, ModeError::LocalRequestedNoGpu));
 }
 
@@ -210,6 +228,10 @@ fn auto_tier_a_with_cloud() {
 fn env_cloud_fallback_true_enables_cloud() {
     with_cloud_env("true", || {
         let r = resolve_image_mode("auto", "off", ImageTier::BDropSwap).unwrap();
-        assert_eq!(r, ResolvedMode::LocalThenCloud, "env true should override config off");
+        assert_eq!(
+            r,
+            ResolvedMode::LocalThenCloud,
+            "env true should override config off"
+        );
     });
 }

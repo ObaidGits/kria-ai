@@ -41,6 +41,7 @@ use std::time::{Duration, Instant};
 use super::server_manager::LlamaServerManager;
 use super::strategy::{self, TargetParams};
 use super::telemetry::GpuTelemetry;
+use super::threshold::ThresholdProfile;
 use super::GpuBackend;
 
 // ── EMA helper ───────────────────────────────────────────────────────
@@ -157,6 +158,8 @@ pub struct GpuWatchdog {
     telemetry: Arc<dyn GpuTelemetry>,
     server: Arc<LlamaServerManager>,
     event_bus: Arc<EventBus>,
+    /// Total VRAM detected at boot, used for dynamic threshold scaling.
+    total_vram_mb: u64,
 }
 
 impl GpuWatchdog {
@@ -166,6 +169,7 @@ impl GpuWatchdog {
         telemetry: Arc<dyn GpuTelemetry>,
         server: Arc<LlamaServerManager>,
         event_bus: Arc<EventBus>,
+        total_vram_mb: u64,
     ) -> Self {
         Self {
             config,
@@ -173,6 +177,7 @@ impl GpuWatchdog {
             telemetry,
             server,
             event_bus,
+            total_vram_mb,
         }
     }
 
@@ -180,22 +185,29 @@ impl GpuWatchdog {
     pub async fn run(&self) {
         let poll_interval = Duration::from_secs(self.config.poll_interval_secs.max(1));
 
-        let (yield_threshold, emergency_threshold, recover_threshold) =
+        // Compute dynamic thresholds from total VRAM. On Metal, macOS-specific
+        // RAM thresholds override (unified memory behaves differently).
+        let (yield_threshold, emergency_threshold, recover_threshold, hysteresis) =
             if self.backend == GpuBackend::Metal {
                 (
                     self.config.macos_yield_ram_mb,
                     self.config.macos_emergency_ram_mb,
                     self.config.macos_recover_ram_mb,
+                    self.config.hysteresis_band_mb,
                 )
             } else {
+                // Phase 1: dynamic percentage-based scaling from total VRAM,
+                // with config values as overrides when non-zero.
+                let profile = ThresholdProfile::from_total_vram(self.total_vram_mb)
+                    .with_config_overrides(&self.config);
                 (
-                    self.config.yield_threshold_mb,
-                    self.config.emergency_threshold_mb,
-                    self.config.recover_threshold_mb,
+                    profile.yield_mb,
+                    profile.emergency_mb,
+                    profile.recover_mb,
+                    profile.hysteresis_mb,
                 )
             };
 
-        let hysteresis = self.config.hysteresis_band_mb;
         let pressure_dwell = Duration::from_secs(self.config.pressure_dwell_secs);
         let emergency_dwell = Duration::from_millis(self.config.emergency_dwell_ms);
         let recovery_dwell = Duration::from_secs(self.config.recovery_dwell_secs);
@@ -217,13 +229,14 @@ impl GpuWatchdog {
         tracing::info!(
             backend = ?self.backend,
             telemetry = self.telemetry.source_name(),
+            total_vram_mb = self.total_vram_mb,
             yield_mb = yield_threshold,
             emergency_mb = emergency_threshold,
             recover_mb = recover_threshold,
             hysteresis_mb = hysteresis,
             pressure_dwell_secs = self.config.pressure_dwell_secs,
             emergency_dwell_ms = self.config.emergency_dwell_ms,
-            "watchdog: starting"
+            "watchdog: starting (dynamic thresholds)"
         );
 
         loop {
@@ -262,11 +275,9 @@ impl GpuWatchdog {
                                     elapsed_ms = since.elapsed().as_millis(),
                                     "watchdog: EMERGENCY — triggering swap"
                                 );
-                                self.event_bus.publish(KriaEvent::VramPressure {
-                                    free_vram_mb: free,
-                                });
-                                self.execute_swap(free, true, &mut emergency_budget)
-                                    .await;
+                                self.event_bus
+                                    .publish(KriaEvent::VramPressure { free_vram_mb: free });
+                                self.execute_swap(free, true, &mut emergency_budget).await;
                                 WatchdogState::Cooldown {
                                     until: Instant::now() + cooldown_dur,
                                 }
@@ -325,11 +336,8 @@ impl GpuWatchdog {
                             self.config.safety_margin_mb,
                             self.backend,
                         );
-                        let delta =
-                            target.ngl.saturating_sub(current_ngl);
-                        if delta >= self.config.min_ngl_delta_up
-                            && normal_budget.has_budget()
-                        {
+                        let delta = target.ngl.saturating_sub(current_ngl);
+                        if delta >= self.config.min_ngl_delta_up && normal_budget.has_budget() {
                             tracing::info!(
                                 free_mb = free,
                                 delta_ngl = delta,
@@ -361,8 +369,11 @@ impl GpuWatchdog {
                         // Sustained pressure — check rate limit, then swap.
                         if normal_budget.has_budget() {
                             let (current_ngl, _) = self.server.current_params();
-                            let delta = (current_ngl as i64 - target.ngl as i64)
-                                .unsigned_abs() as u32;
+                            // Use the pre-computed target only as a gate to decide
+                            // whether a swap is worth doing. The actual swap params
+                            // are recomputed from fresh telemetry below.
+                            let delta =
+                                (current_ngl as i64 - target.ngl as i64).unsigned_abs() as u32;
 
                             if delta < self.config.min_ngl_delta {
                                 tracing::debug!(
@@ -374,15 +385,25 @@ impl GpuWatchdog {
                                     until: Instant::now() + cooldown_dur,
                                 }
                             } else {
+                                // Recompute target from current VRAM, not the stale
+                                // snapshot captured when we entered Pressured. During
+                                // the pressure dwell (default 5s), VRAM can shift by
+                                // hundreds of MB due to other processes or KV growth.
+                                let fresh_target = strategy::calculate_target_params(
+                                    &self.config.model_profile,
+                                    free,
+                                    self.config.safety_margin_mb,
+                                    self.backend,
+                                );
                                 tracing::warn!(
                                     free_mb = free,
-                                    new_ngl = target.ngl,
-                                    "watchdog: sustained pressure — swapping"
+                                    gate_ngl = target.ngl,
+                                    fresh_ngl = fresh_target.ngl,
+                                    "watchdog: sustained pressure — swapping (target recomputed)"
                                 );
-                                self.event_bus.publish(KriaEvent::VramPressure {
-                                    free_vram_mb: free,
-                                });
-                                self.execute_swap_with_target(&target, false, &mut normal_budget)
+                                self.event_bus
+                                    .publish(KriaEvent::VramPressure { free_vram_mb: free });
+                                self.execute_swap_with_target(&fresh_target, false, &mut normal_budget)
                                     .await;
                                 WatchdogState::Cooldown {
                                     until: Instant::now() + cooldown_dur,
@@ -450,12 +471,7 @@ impl GpuWatchdog {
     }
 
     /// Execute a swap using a freshly calculated target (emergency path).
-    async fn execute_swap(
-        &self,
-        free_vram_mb: u64,
-        emergency: bool,
-        budget: &mut RateBucket,
-    ) {
+    async fn execute_swap(&self, free_vram_mb: u64, emergency: bool, budget: &mut RateBucket) {
         let target = strategy::calculate_target_params(
             &self.config.model_profile,
             free_vram_mb,
@@ -473,10 +489,13 @@ impl GpuWatchdog {
         emergency: bool,
         budget: &mut RateBucket,
     ) {
-        let (old_ngl, _) = self.server.current_params();
+        let (old_ngl, old_ctx) = self.server.current_params();
+        let old_vision_enabled = self.server.current_vision_enabled();
+        let target_vision_enabled = target.vision_mode.load_mmproj();
 
         tracing::info!(
             old_ngl,
+            old_ctx,
             new_ngl = target.ngl,
             new_ctx = target.context,
             emergency,
@@ -496,26 +515,131 @@ impl GpuWatchdog {
         self.server.cancel_streams();
         self.event_bus.publish(KriaEvent::LlmStreamInterrupted);
 
-        // 2. Kill old server (emergency = immediate, normal = graceful).
+        // 2. API-first zero-downtime path.
+        //
+        // We use Router Mode unload/load as the primary mechanism, and if the
+        // runtime appears to support dynamic props we attempt to stage target
+        // ngl/ctx between unload and load. Any error falls back to the legacy
+        // process restart ladder below.
+        let api_swap_result: Result<(), String> = async {
+            self.server
+                .api_unload_model()
+                .await
+                .map_err(|e| format!("api_unload_model failed: {e}"))?;
+
+            let needs_dynamic_update = old_ngl != target.ngl
+                || old_ctx != target.context
+                || old_vision_enabled != target_vision_enabled;
+
+            if needs_dynamic_update {
+                let base_url = self.server.api_url();
+                if base_url.is_empty() {
+                    return Err("dynamic props update failed: empty API URL".to_string());
+                }
+                let root_url = base_url
+                    .trim_end_matches('/')
+                    .trim_end_matches("/v1")
+                    .to_string();
+                let props_url = format!("{root_url}/props");
+                let request_timeout_secs = self.config.health_check_timeout_secs.clamp(1, 30);
+                let client = reqwest::Client::builder()
+                    .timeout(Duration::from_secs(request_timeout_secs))
+                    .build()
+                    .unwrap_or_default();
+
+                let props_payload = serde_json::json!({
+                    "n_gpu_layers": target.ngl,
+                    "n_ctx": target.context,
+                    "ctx_size": target.context,
+                    "vision_mode": target.vision_mode.as_str(),
+                    "enable_vision": target_vision_enabled,
+                });
+
+                let resp = client
+                    .post(&props_url)
+                    .json(&props_payload)
+                    .send()
+                    .await
+                    .map_err(|e| format!("dynamic props update transport error: {e}"))?;
+
+                if !resp.status().is_success() {
+                    let status = resp.status();
+                    let body = resp.text().await.unwrap_or_default();
+                    return Err(format!("dynamic props update failed (HTTP {status}): {body}"));
+                }
+
+                tracing::info!(
+                    url = %props_url,
+                    new_ngl = target.ngl,
+                    new_ctx = target.context,
+                    vision_mode = %target.vision_mode,
+                    "watchdog: dynamic runtime props accepted before API reload"
+                );
+            }
+
+            self.server
+                .api_load_model()
+                .await
+                .map_err(|e| format!("api_load_model failed: {e}"))?;
+
+            Ok(())
+        }
+        .await;
+
+        if api_swap_result.is_ok() {
+            let duration = swap_start.elapsed();
+            budget.record();
+
+            self.event_bus.publish(KriaEvent::LlmSwapCompleted {
+                new_ngl: target.ngl,
+                new_context: target.context,
+                duration_ms: duration.as_millis() as u64,
+            });
+
+            self.event_bus.publish(KriaEvent::LlmDegradationChanged {
+                level: target.degradation.as_str().to_string(),
+            });
+
+            tracing::info!(
+                new_ngl = target.ngl,
+                new_ctx = target.context,
+                duration_ms = duration.as_millis(),
+                "watchdog: swap completed via API zero-downtime path"
+            );
+            return;
+        }
+
+        let api_err = api_swap_result.err().unwrap_or_else(|| "unknown API swap error".to_string());
+        tracing::warn!(
+            error = %api_err,
+            old_ngl,
+            old_ctx,
+            new_ngl = target.ngl,
+            new_ctx = target.context,
+            emergency,
+            "watchdog: API swap path failed; falling back to legacy process restart"
+        );
+
+        // 3. Legacy fallback: kill old server (emergency = immediate, normal = graceful).
         if emergency {
             self.server.kill().await;
         } else {
             self.server.graceful_stop().await;
         }
 
-        // 3. On CUDA: wait for VRAM to actually free before spawning. Use the
+        // 4. On CUDA: wait for VRAM to actually free before spawning. Use the
         //    watch-channel snapshot (not a fresh blocking NVML call) to poll.
         if self.backend == GpuBackend::Cuda {
             self.wait_for_vram_release().await;
         }
 
-        // 4. Spawn new server.
+        // 5. Spawn new server.
         match self
             .server
             .spawn(
                 target.ngl,
                 target.context,
-                target.enable_vision,
+                target.vision_mode,
                 self.event_bus.clone(),
             )
             .await
@@ -552,8 +676,7 @@ impl GpuWatchdog {
     /// Poll until free VRAM rises above `yield_threshold` or timeout elapses.
     /// Uses the watch-channel telemetry snapshot — never blocks the executor.
     async fn wait_for_vram_release(&self) {
-        let timeout =
-            Duration::from_secs(self.config.vram_release_timeout_secs.max(1));
+        let timeout = Duration::from_secs(self.config.vram_release_timeout_secs.max(1));
         let deadline = Instant::now() + timeout;
 
         loop {

@@ -139,8 +139,7 @@ where
         return Some(TierModelChoice {
             model: (*best).clone(),
             reason: SelectionReason::TierFit { budget_mb },
-            vision_disabled: !tier.has_vision()
-                && best.capabilities.iter().any(|c| c == "vision"),
+            vision_disabled: !tier.has_vision() && best.capabilities.iter().any(|c| c == "vision"),
         });
     }
 
@@ -286,15 +285,9 @@ mod tests {
             mk_model("qwen3-0.6b", "q06.gguf", 0.6, false, 4096),
             mk_model("qwen2.5-vl-7b", "qwen.gguf", 6.0, true, 8192),
         ];
-        let choice = select_model_for_tier(
-            HardwareTier::Lite,
-            4 * 1024,
-            None,
-            "",
-            &models,
-            |_| true,
-        )
-        .unwrap();
+        let choice =
+            select_model_for_tier(HardwareTier::Lite, 4 * 1024, None, "", &models, |_| true)
+                .unwrap();
         assert_eq!(choice.model.name, "qwen3-0.6b");
     }
 
@@ -343,23 +336,16 @@ mod tests {
         ];
         // Lite tier with 2 GB RAM → 60% budget = 1228 MB. Both 6 GB and 2 GB
         // models exceed that, so neither fits → fallback to smallest existing.
-        let choice = select_model_for_tier(
-            HardwareTier::Lite,
-            2 * 1024,
-            None,
-            "",
-            &models,
-            |_| true,
-        )
-        .unwrap();
+        let choice =
+            select_model_for_tier(HardwareTier::Lite, 2 * 1024, None, "", &models, |_| true)
+                .unwrap();
         assert_eq!(choice.model.name, "qwen3-0.6b");
         assert!(matches!(choice.reason, SelectionReason::SmallestFallback));
     }
 
     #[test]
     fn returns_none_when_models_empty() {
-        let choice =
-            select_model_for_tier(HardwareTier::Standard, 8192, None, "", &[], |_| true);
+        let choice = select_model_for_tier(HardwareTier::Standard, 8192, None, "", &[], |_| true);
         assert!(choice.is_none());
     }
 

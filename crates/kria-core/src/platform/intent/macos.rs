@@ -32,8 +32,10 @@ impl Default for MacosBackend {
 #[async_trait]
 impl OsIntentBackend for MacosBackend {
     async fn open_uri(&self, _url: &url::Url) -> Result<(), String> {
-        Err("MacosBackend not yet implemented — use NSWorkspace.open(_:) with MainThreadMarker"
-            .to_string())
+        Err(
+            "MacosBackend not yet implemented — use NSWorkspace.open(_:) with MainThreadMarker"
+                .to_string(),
+        )
     }
 
     async fn launch_app(&self, _app_id: &CanonicalAppId, _args: &[SafeArg]) -> Result<u32, String> {

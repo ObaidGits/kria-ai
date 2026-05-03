@@ -31,8 +31,10 @@ fn cloud_only_config(out_dir: &PathBuf) -> ImageGenerationConfig {
 
 fn test_out_dir() -> PathBuf {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent().unwrap()  // crates/
-        .parent().unwrap()  // workspace root
+        .parent()
+        .unwrap() // crates/
+        .parent()
+        .unwrap() // workspace root
         .join("target/test-sandbox/image_gen_test");
     std::fs::create_dir_all(&dir).expect("create test output dir");
     dir
@@ -51,7 +53,7 @@ async fn test_cloud_image_generation_saves_file() {
 
     let req = ImageRequest {
         prompt: "a serene Japanese garden at dawn, koi pond, cherry blossoms".to_string(),
-        style: None,      // auto-classify → photorealistic
+        style: None, // auto-classify → photorealistic
         aspect: Default::default(),
         count: 1,
         seed: Some(42),
@@ -75,14 +77,20 @@ async fn test_cloud_image_generation_saves_file() {
             println!("  sha256:     {}", img.sha256);
             println!("  size:       {}×{}", img.width, img.height);
             println!("  style:      {}", img.style);
-            println!("  provenance: {}", img.provenance);            println!("  seed:       {}", img.seed);
+            println!("  provenance: {}", img.provenance);
+            println!("  seed:       {}", img.seed);
             println!("  quality:    {}", img.quality);
             println!("  steps:      {}", img.steps);
             println!("  sampler:    {}", img.sampler);
-            println!("  enhance:    {}", img.enhance_mode);            println!("  elapsed:    {}ms", img_result.elapsed_ms);
+            println!("  enhance:    {}", img.enhance_mode);
+            println!("  elapsed:    {}ms", img_result.elapsed_ms);
             println!("  tier:       {}", img_result.tier_used);
 
-            assert!(img.path.exists(), "Output file should exist on disk: {:?}", img.path);
+            assert!(
+                img.path.exists(),
+                "Output file should exist on disk: {:?}",
+                img.path
+            );
             let bytes = std::fs::read(&img.path).expect("read output file");
             assert!(!bytes.is_empty(), "Output file should not be empty");
 
@@ -96,7 +104,11 @@ async fn test_cloud_image_generation_saves_file() {
                 &bytes[..bytes.len().min(8)]
             );
 
-            println!("✅ Image saved to: {} ({} bytes)", img.path.display(), bytes.len());
+            println!(
+                "✅ Image saved to: {} ({} bytes)",
+                img.path.display(),
+                bytes.len()
+            );
         }
         Err(e) => {
             panic!("Image generation failed: {e}");
@@ -129,16 +141,31 @@ async fn test_cloud_image_generation_anime_style() {
     println!("Generating anime-style image via Pollinations.ai…");
     let result = orchestrator.generate(req, None, None).await;
 
-    assert!(result.is_ok(), "Anime image generation failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Anime image generation failed: {:?}",
+        result.err()
+    );
     let img_result = result.unwrap();
     let img = &img_result.images[0];
 
-    assert!(img.path.exists(), "Anime image file should exist: {:?}", img.path);
+    assert!(
+        img.path.exists(),
+        "Anime image file should exist: {:?}",
+        img.path
+    );
     let bytes = std::fs::read(&img.path).expect("read anime output file");
     let is_png = bytes.len() >= 8 && bytes.starts_with(b"\x89PNG\r\n\x1a\n");
     let is_jpeg = bytes.len() >= 3 && bytes.starts_with(b"\xff\xd8\xff");
-    assert!(is_png || is_jpeg, "Anime output should be a valid PNG or JPEG");
-    println!("✅ Anime image saved to: {} ({} bytes)", img.path.display(), bytes.len());
+    assert!(
+        is_png || is_jpeg,
+        "Anime output should be a valid PNG or JPEG"
+    );
+    println!(
+        "✅ Anime image saved to: {} ({} bytes)",
+        img.path.display(),
+        bytes.len()
+    );
 }
 
 /// Test that the new GeneratedImage metadata fields are populated on cloud path.
@@ -164,7 +191,9 @@ async fn test_cloud_image_metadata_fields() {
         enhance: Some(true),
     };
 
-    let result = orchestrator.generate(req, None, None).await
+    let result = orchestrator
+        .generate(req, None, None)
+        .await
         .expect("cloud generation should succeed");
 
     let img = &result.images[0];
@@ -180,7 +209,11 @@ async fn test_cloud_image_metadata_fields() {
     );
 
     // Steps must be a reasonable number (Schnell: 4, Balanced: 4–8).
-    assert!(img.steps >= 1 && img.steps <= 50, "steps out of range: {}", img.steps);
+    assert!(
+        img.steps >= 1 && img.steps <= 50,
+        "steps out of range: {}",
+        img.steps
+    );
 
     // cfg_scale for Schnell must be exactly 1.0.
     assert!(
@@ -226,7 +259,9 @@ async fn test_cloud_count_two_unique_seeds() {
     };
 
     println!("Generating 2 images (testing seed uniqueness)…");
-    let result = orchestrator.generate(req, None, None).await
+    let result = orchestrator
+        .generate(req, None, None)
+        .await
         .expect("count=2 generation should succeed");
 
     assert_eq!(result.images.len(), 2, "Should get exactly 2 images");
@@ -234,15 +269,30 @@ async fn test_cloud_count_two_unique_seeds() {
     let seed0 = result.images[0].seed;
     let seed1 = result.images[1].seed;
 
-    assert_ne!(seed0, seed1, "Image seeds must differ (same-seed bug fix): seed0={seed0} seed1={seed1}");
-    assert_eq!(seed1, seed0.wrapping_add(1), "seed1 should be seed0 + 1, got seed0={seed0} seed1={seed1}");
+    assert_ne!(
+        seed0, seed1,
+        "Image seeds must differ (same-seed bug fix): seed0={seed0} seed1={seed1}"
+    );
+    assert_eq!(
+        seed1,
+        seed0.wrapping_add(1),
+        "seed1 should be seed0 + 1, got seed0={seed0} seed1={seed1}"
+    );
 
     // Both files must exist.
     for (i, img) in result.images.iter().enumerate() {
-        assert!(img.path.exists(), "image[{i}] path should exist: {:?}", img.path);
+        assert!(
+            img.path.exists(),
+            "image[{i}] path should exist: {:?}",
+            img.path
+        );
         let bytes = std::fs::read(&img.path).expect("read file");
         assert!(!bytes.is_empty(), "image[{i}] should not be empty");
-        println!("✅ image[{i}]: seed={} path={}", img.seed, img.path.display());
+        println!(
+            "✅ image[{i}]: seed={} path={}",
+            img.seed,
+            img.path.display()
+        );
     }
 }
 
@@ -270,7 +320,9 @@ async fn test_prompt_enhancement_applied() {
         enhance: Some(true),
     };
 
-    let result = orchestrator.generate(req, None, None).await
+    let result = orchestrator
+        .generate(req, None, None)
+        .await
         .expect("enhanced generation should succeed");
 
     let img = &result.images[0];
@@ -284,5 +336,9 @@ async fn test_prompt_enhancement_applied() {
         img.final_prompt
     );
 
-    println!("✅ enhance_mode={} final_prompt_len={}", img.enhance_mode, img.final_prompt.len());
+    println!(
+        "✅ enhance_mode={} final_prompt_len={}",
+        img.enhance_mode,
+        img.final_prompt.len()
+    );
 }

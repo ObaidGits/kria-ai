@@ -13,8 +13,8 @@
 //! Together this gets us mid-sentence interruption within ~50 ms of VAD
 //! firing, which is the budget the plan calls for.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};

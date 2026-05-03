@@ -146,9 +146,7 @@ async fn install_kria_modules(venv_dir: &str, used_uv: bool) -> anyhow::Result<(
                 .output()
                 .await?;
 
-            let site_pkgs = String::from_utf8_lossy(&site_out.stdout)
-                .trim()
-                .to_string();
+            let site_pkgs = String::from_utf8_lossy(&site_out.stdout).trim().to_string();
             if site_pkgs.is_empty() {
                 anyhow::bail!("could not determine venv site-packages path");
             }
@@ -162,10 +160,7 @@ async fn install_kria_modules(venv_dir: &str, used_uv: bool) -> anyhow::Result<(
             // Install runtime deps
             install_runtime_deps(venv_dir, used_uv).await;
 
-            tracing::info!(
-                "sidecar bootstrap: kria-modules installed to {}",
-                site_pkgs
-            );
+            tracing::info!("sidecar bootstrap: kria-modules installed to {}", site_pkgs);
         }
         None => {
             tracing::warn!(

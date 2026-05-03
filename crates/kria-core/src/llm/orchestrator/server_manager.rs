@@ -6,12 +6,14 @@
 //! - Ephemeral ports via --port 0 + stderr parsing (V5, V14)
 //! - ChildGuard RAII: SIGTERM→SIGKILL ladder + prctl/setsid (Phase 2)
 
-use crate::config::OrchestratorConfig;
+use crate::config::{ModelProfile, OrchestratorConfig};
 use crate::infra::event_bus::EventBus;
 use crate::llm::orchestrator::child_guard::{self, ChildGuard};
+use crate::llm::orchestrator::vision_strategy::VisionMode;
 use crate::platform::os;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -58,6 +60,15 @@ fn launch_tuning(config_batch_size: u32, enable_vision: bool) -> LaunchTuning {
     }
 }
 
+fn v1_models_endpoint(base_url: &str, action: &str) -> String {
+    let base = base_url.trim_end_matches('/');
+    if base.ends_with("/v1") {
+        format!("{base}/models/{action}")
+    } else {
+        format!("{base}/v1/models/{action}")
+    }
+}
+
 /// Manages a single llama-server process with atomic state tracking.
 pub struct LlamaServerManager {
     config: OrchestratorConfig,
@@ -69,12 +80,22 @@ pub struct LlamaServerManager {
     current_ngl: AtomicU32,
     /// Current context window.
     current_ctx: AtomicU32,
+    /// Whether the current runtime was spawned with vision/mmproj enabled.
+    current_vision: AtomicBool,
+    /// Last GPU layer count before an API-level unload. Used to restore
+    /// `current_ngl` on API load success.
+    pre_api_unload_ngl: AtomicU32,
+    /// Last vision flag before an API-level unload.
+    pre_api_unload_vision: AtomicBool,
     /// The actual API URL (updated after port discovery).
     api_url: tokio::sync::RwLock<String>,
     /// The child process wrapped in a ChildGuard for safe lifecycle management.
     child: Mutex<Option<ChildGuard>>,
     /// CancellationToken — cancelled during swap to abort in-flight streams.
-    cancel_token: CancellationToken,
+    /// Guarded by a std::sync::Mutex so `cancel_streams()` can atomically
+    /// cancel the current token and mint a fresh replacement. Using std::sync
+    /// (not tokio) because the critical section is non-async and sub-μs.
+    cancel_token: std::sync::Mutex<CancellationToken>,
     /// Token for the stderr reader task.
     reader_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// Notified when a swap finishes (STATE_STOPPED or STATE_READY).
@@ -95,9 +116,12 @@ impl LlamaServerManager {
             state: AtomicU8::new(STATE_STOPPED),
             current_ngl: AtomicU32::new(0),
             current_ctx: AtomicU32::new(0),
+            current_vision: AtomicBool::new(false),
+            pre_api_unload_ngl: AtomicU32::new(0),
+            pre_api_unload_vision: AtomicBool::new(false),
             api_url: tokio::sync::RwLock::new(String::new()),
             child: Mutex::new(None),
-            cancel_token: CancellationToken::new(),
+            cancel_token: std::sync::Mutex::new(CancellationToken::new()),
             reader_handle: Mutex::new(None),
             swap_done: Arc::new(Notify::new()),
         }
@@ -148,6 +172,44 @@ impl LlamaServerManager {
         )
     }
 
+    /// Whether the current runtime can accept image input.
+    pub fn current_vision_enabled(&self) -> bool {
+        self.current_vision.load(Ordering::Acquire)
+    }
+
+    /// Whether vision is configured well enough to request a vision spawn.
+    pub fn vision_configured(&self) -> bool {
+        self.mmproj_path
+            .as_ref()
+            .map(|p| !p.trim().is_empty() && Path::new(p).exists())
+            .unwrap_or(false)
+    }
+
+    /// Router-mode `--models-dir` value inferred from `model_path`.
+    fn router_models_dir(&self) -> Option<PathBuf> {
+        let path = Path::new(&self.model_path);
+        let parent = path.parent()?;
+        if parent.as_os_str().is_empty() {
+            None
+        } else {
+            Some(parent.to_path_buf())
+        }
+    }
+
+    /// Model identifier used for router mode API (`/v1/models/load|unload`)
+    /// and `--model` argument when `--models-dir` is enabled.
+    fn router_model_id(&self) -> String {
+        let path = Path::new(&self.model_path);
+        if self.router_models_dir().is_some() {
+            path.file_name()
+                .and_then(|s| s.to_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| self.model_path.clone())
+        } else {
+            self.model_path.clone()
+        }
+    }
+
     /// Get the current API URL.
     pub fn api_url(&self) -> String {
         // Use try_read to avoid blocking; fall back to empty if locked
@@ -157,14 +219,41 @@ impl LlamaServerManager {
             .unwrap_or_default()
     }
 
-    /// Get a CancellationToken that streams should select! on.
-    pub fn cancel_token(&self) -> CancellationToken {
-        self.cancel_token.clone()
+    /// Current orchestrator model profile (used by vision pre-flight budgeting).
+    pub fn model_profile(&self) -> ModelProfile {
+        self.config.model_profile.clone()
     }
 
-    /// Cancel all in-flight streams (non-blocking).
+    /// Current orchestrator VRAM safety margin (MB).
+    pub fn safety_margin_mb(&self) -> u64 {
+        self.config.safety_margin_mb
+    }
+
+    /// Test helper: force the API URL without spawning a real child process.
+    #[doc(hidden)]
+    pub async fn set_api_url_for_testing(&self, api_url: String) {
+        let mut lock = self.api_url.write().await;
+        *lock = api_url;
+    }
+
+    /// Get a CancellationToken that streams should select! on.
+    ///
+    /// Returns a clone of the *current* (non-cancelled) token. Each stream
+    /// captures this at creation time, so only streams started before the
+    /// next `cancel_streams()` call will be aborted.
+    pub fn cancel_token(&self) -> CancellationToken {
+        self.cancel_token.lock().unwrap().clone()
+    }
+
+    /// Cancel all in-flight streams, then mint a fresh token for new streams.
+    ///
+    /// This is the fix for the non-renewable CancellationToken bug: previously
+    /// the token was created once and never replaced, so after the first swap
+    /// every new stream would inherit an already-cancelled token.
     pub fn cancel_streams(&self) {
-        self.cancel_token.cancel();
+        let mut guard = self.cancel_token.lock().unwrap();
+        guard.cancel();
+        *guard = CancellationToken::new();
     }
 
     /// Returns an `Arc<Notify>` that is notified every time a swap finishes
@@ -201,23 +290,51 @@ impl LlamaServerManager {
         &self,
         ngl: u32,
         context: u32,
-        enable_vision: bool,
+        vision_mode: VisionMode,
         _event_bus: Arc<EventBus>,
     ) -> anyhow::Result<()> {
+        // Derive booleans from the vision mode for backward compat
+        let vision_requested = vision_mode.load_mmproj();
+        let vision_enabled = vision_requested && self.vision_configured();
+        if vision_requested && !vision_enabled {
+            tracing::warn!(
+                requested = vision_requested,
+                ?vision_mode,
+                mmproj_path = ?self.mmproj_path,
+                "server_manager: vision requested but mmproj is missing/unavailable; starting text-only runtime"
+            );
+        }
+
         self.state.store(STATE_STARTING, Ordering::Release);
+        self.current_vision.store(false, Ordering::Release);
 
         // Resolve binary: check ~/.kria/bin/ first, then config path (with .exe on Windows)
         let binary = os::resolve_binary("llama-server", &self.config.llama_server_binary);
 
         // Build llama-server command
         let mut cmd = tokio::process::Command::new(&binary);
-        let tuning = launch_tuning(self.config.batch_size, enable_vision);
+        let tuning = launch_tuning(self.config.batch_size, vision_enabled);
 
         // Configure prctl(PR_SET_PDEATHSIG=SIGKILL) + setsid() in pre_exec
         // so the child is killed if Kria panics or is force-quit.
         child_guard::configure_child_command(&mut cmd);
 
-        cmd.arg("--model").arg(&self.model_path);
+        let router_models_dir = self.router_models_dir();
+        let model_id = self.router_model_id();
+        if let Some(models_dir) = router_models_dir.as_ref() {
+            // Router mode: this is required for `/v1/models/unload|load` to work.
+            //
+            // Important compatibility note:
+            // Some llama-server builds expose `--models-dir` but still expect
+            // `--model` to be a resolvable filesystem path at process start.
+            // Passing only the basename here can make startup fail before the
+            // listening port is reported ("failed to open GGUF file ...").
+            cmd.arg("--models-dir").arg(models_dir);
+            cmd.arg("--model").arg(&self.model_path);
+        } else {
+            // Fallback for bare relative paths where parent dir is unavailable.
+            cmd.arg("--model").arg(&self.model_path);
+        }
         cmd.arg("--port").arg("0"); // Ephemeral port (V5)
         cmd.arg("--ctx-size").arg(context.to_string());
         cmd.arg("--n-gpu-layers").arg(ngl.to_string());
@@ -267,9 +384,16 @@ impl LlamaServerManager {
         }
 
         // Vision projector (mmproj)
-        if enable_vision {
+        // CpuVision mode: load mmproj even at ngl=0. The projector weights
+        // live in system RAM, not VRAM. This keeps the LLM sighted.
+        if vision_enabled {
             if let Some(ref mmproj) = self.mmproj_path {
                 cmd.arg("--mmproj").arg(mmproj);
+                tracing::info!(
+                    ?vision_mode,
+                    ngl,
+                    "server_manager: loading mmproj (vision_mode={vision_mode})"
+                );
             }
         }
 
@@ -281,7 +405,11 @@ impl LlamaServerManager {
             binary = %binary,
             ngl,
             ctx = context,
-            vision = enable_vision,
+            router_mode = router_models_dir.is_some(),
+            model_id = %model_id,
+            models_dir = ?router_models_dir,
+            vision_requested,
+            vision_enabled,
             batch_size = tuning.batch_size,
             ubatch_size = ?tuning.ubatch_size,
             parallel = ?tuning.parallel,
@@ -338,6 +466,7 @@ impl LlamaServerManager {
         // Update state and params atomically
         self.current_ngl.store(ngl, Ordering::Release);
         self.current_ctx.store(context, Ordering::Release);
+        self.current_vision.store(vision_enabled, Ordering::Release);
         self.state.store(STATE_READY, Ordering::Release);
 
         tracing::info!(
@@ -461,10 +590,7 @@ impl LlamaServerManager {
         // Fallback for older formats that end with host:port.
         for segment in line.rsplit(':') {
             let trimmed = segment.trim_start();
-            let digits: String = trimmed
-                .chars()
-                .take_while(|c| c.is_ascii_digit())
-                .collect();
+            let digits: String = trimmed.chars().take_while(|c| c.is_ascii_digit()).collect();
             if let Ok(port) = digits.parse::<u16>() {
                 if port >= 1024 {
                     return Some(port);
@@ -516,6 +642,194 @@ impl LlamaServerManager {
         }
     }
 
+    // ─── API-Level Model Swap (Router Mode) ──────────────────────────────────
+    //
+    // These methods use llama.cpp Router Mode endpoints (`/v1/models/unload`
+    // and `/v1/models/load`) to flush or restore model weights in VRAM without
+    // killing the server process. The server stays alive on its ephemeral port
+    // and no port re-discovery is needed.
+    //
+    // Prerequisites:
+    // - llama-server must be built from llama.cpp b5291+ (Router Mode support)
+    // - Server must be started in Router Mode (`--models-dir` instead of `--model`)
+    //
+    // When Router Mode is unavailable (older builds or single-model launch),
+    // these methods return Err and the caller falls back to process restart.
+
+    /// Unload the current model from VRAM via the Router Mode API.
+    ///
+    /// On success: model weights are flushed from GPU, VRAM is freed,
+    /// server process stays alive, port stays stable.
+    ///
+    /// On failure (501/404 = Router Mode not available): returns Err.
+    /// Caller should fall back to `graceful_stop` + `spawn`.
+    pub async fn api_unload_model(&self) -> anyhow::Result<()> {
+        let base_url = self.api_url();
+        if base_url.is_empty() {
+            tracing::error!("server_manager: api_unload_model called but no API URL is set — \
+                             server is not running. Caller will fall back to process kill.");
+            anyhow::bail!("api_unload_model: no API URL (server not running)");
+        }
+        // Router Mode endpoint (OpenAI-compatible prefix included).
+        let models_url = v1_models_endpoint(&base_url, "unload");
+
+        let request_timeout_secs = self.config.health_check_timeout_secs.clamp(1, 30);
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(request_timeout_secs))
+            .build()
+            .unwrap_or_default();
+
+        let model_id = self.router_model_id();
+        let payload = serde_json::json!({ "model": model_id });
+
+        tracing::info!(
+            url = %models_url,
+            model = %self.router_model_id(),
+            request_timeout_secs,
+            "server_manager: API-level model unload requested"
+        );
+
+        self.state.store(STATE_SWAPPING, Ordering::Release);
+        self.cancel_streams();
+
+        let request_start = std::time::Instant::now();
+        let resp = client
+            .post(&models_url)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| {
+                let elapsed_ms = request_start.elapsed().as_millis();
+                self.state.store(STATE_READY, Ordering::Release);
+                let timed_out = e.is_timeout();
+                tracing::error!(
+                    elapsed_ms,
+                    timed_out,
+                    error = %e,
+                    url = %models_url,
+                    "server_manager: api_unload_model HTTP request FAILED before fallback. \
+                     This means the HTTP call never reached the server or timed out. \
+                     Caller will now fall back to SIGTERM/SIGKILL process restart."
+                );
+                anyhow::anyhow!("api_unload_model: transport error after {elapsed_ms}ms: {e}")
+            })?;
+
+        let elapsed_ms = request_start.elapsed().as_millis();
+        let status = resp.status();
+
+        if status.as_u16() == 501 || status.as_u16() == 404 {
+            // Router Mode not available — revert state and let caller fall back.
+            // This is the EXPECTED path for single-model llama-server builds.
+            let body = resp.text().await.unwrap_or_default();
+            self.state.store(STATE_READY, Ordering::Release);
+            tracing::error!(
+                status = status.as_u16(),
+                elapsed_ms,
+                url = %models_url,
+                body = %body,
+                "server_manager: api_unload_model received HTTP {} (Router Mode not supported). \
+                 The server does not support zero-downtime model swaps. \
+                 Falling back to legacy SIGTERM→SIGKILL process restart (this takes ~5-12 seconds). \
+                 To enable zero-downtime swaps, upgrade llama-server to b5291+ and use --models-dir.",
+                status.as_u16()
+            );
+            anyhow::bail!(
+                "api_unload_model: Router Mode not supported (HTTP {status}). \
+                 Falling back to process restart."
+            );
+        }
+
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            self.state.store(STATE_READY, Ordering::Release);
+            tracing::error!(
+                status = status.as_u16(),
+                elapsed_ms,
+                body = %body,
+                "server_manager: api_unload_model failed with unexpected HTTP status"
+            );
+            anyhow::bail!("api_unload_model: failed (HTTP {status}): {body}");
+        }
+
+        // Model unloaded — GPU is clear. Keep process alive.
+        self.pre_api_unload_ngl
+            .store(self.current_ngl.load(Ordering::Acquire), Ordering::Release);
+        self.pre_api_unload_vision
+            .store(self.current_vision.load(Ordering::Acquire), Ordering::Release);
+        self.current_ngl.store(0, Ordering::Release);
+        self.current_vision.store(false, Ordering::Release);
+        // Stay in SWAPPING state — caller will transition to READY after reload
+        self.swap_done.notify_waiters();
+
+        tracing::info!(
+            elapsed_ms,
+            "server_manager: model unloaded via API (VRAM freed, process alive)"
+        );
+        Ok(())
+    }
+
+    /// Reload the model into VRAM via the Router Mode API.
+    ///
+    /// Inverse of `api_unload_model`. Pulls weights back onto GPU.
+    /// The server process must still be alive (not killed).
+    pub async fn api_load_model(&self) -> anyhow::Result<()> {
+        let base_url = self.api_url();
+        if base_url.is_empty() {
+            anyhow::bail!("api_load_model: no API URL (server not running)");
+        }
+        let models_url = v1_models_endpoint(&base_url, "load");
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(120)) // Loading can take a while
+            .build()
+            .unwrap_or_default();
+
+        let model_id = self.router_model_id();
+        let payload = serde_json::json!({ "model": model_id });
+
+        tracing::info!(
+            url = %models_url,
+            model = %self.router_model_id(),
+            "server_manager: API-level model load requested"
+        );
+
+        let resp = client
+            .post(&models_url)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("api_load_model: transport error: {e}"))?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            self.state.store(STATE_ERROR, Ordering::Release);
+            anyhow::bail!("api_load_model: failed (HTTP {status}): {body}");
+        }
+
+        // Wait for health before marking ready
+        let health_url = base_url.replace("/v1", "/health");
+        if let Err(e) = self.wait_for_health(&health_url).await {
+            self.state.store(STATE_ERROR, Ordering::Release);
+            return Err(e);
+        }
+
+        // Restore logical runtime params that were intentionally set to
+        // `ngl=0/vision=false` at unload time.
+        let restored_ngl = self.pre_api_unload_ngl.load(Ordering::Acquire);
+        let restored_vision = self.pre_api_unload_vision.load(Ordering::Acquire);
+        if restored_ngl > 0 {
+            self.current_ngl.store(restored_ngl, Ordering::Release);
+        }
+        self.current_vision
+            .store(restored_vision, Ordering::Release);
+        self.state.store(STATE_READY, Ordering::Release);
+        self.swap_done.notify_waiters();
+
+        tracing::info!("server_manager: model reloaded via API (GPU-resident)");
+        Ok(())
+    }
+
     /// Graceful stop: send interrupt signal, wait for drain, then kill.
     pub async fn graceful_stop(&self) {
         self.graceful_stop_with_timeout(Duration::from_secs(
@@ -540,6 +854,7 @@ impl LlamaServerManager {
         }
 
         self.state.store(STATE_STOPPED, Ordering::Release);
+        self.current_vision.store(false, Ordering::Release);
         self.swap_done.notify_waiters();
     }
 
@@ -557,6 +872,7 @@ impl LlamaServerManager {
         }
 
         self.state.store(STATE_STOPPED, Ordering::Release);
+        self.current_vision.store(false, Ordering::Release);
         self.swap_done.notify_waiters();
     }
 
@@ -706,7 +1022,10 @@ mod tests {
     #[test]
     fn extract_port_from_standard_line() {
         let line = "main: server is listening on http://127.0.0.1:43567";
-        assert_eq!(LlamaServerManager::extract_port_from_line(line), Some(43567));
+        assert_eq!(
+            LlamaServerManager::extract_port_from_line(line),
+            Some(43567)
+        );
     }
 
     #[test]
@@ -718,13 +1037,19 @@ mod tests {
     #[test]
     fn extract_port_from_line_with_space_after_colon() {
         let line = "srv  listen: HTTP server is listening, hostname: 127.0.0.1, port: 44123, n_threads_http: 31";
-        assert_eq!(LlamaServerManager::extract_port_from_line(line), Some(44123));
+        assert_eq!(
+            LlamaServerManager::extract_port_from_line(line),
+            Some(44123)
+        );
     }
 
     #[test]
     fn extract_port_from_port_word_format() {
         let line = "main: server is listening, host 127.0.0.1, port 45321";
-        assert_eq!(LlamaServerManager::extract_port_from_line(line), Some(45321));
+        assert_eq!(
+            LlamaServerManager::extract_port_from_line(line),
+            Some(45321)
+        );
     }
 
     #[test]

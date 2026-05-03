@@ -18,9 +18,8 @@ static KEY_VALUE_SECRET_RE: Lazy<Regex> = Lazy::new(|| {
     .expect("valid key/value secret regex")
 });
 
-static BEARER_TOKEN_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)bearer\s+[A-Za-z0-9._\-]+=*").expect("valid bearer token regex")
-});
+static BEARER_TOKEN_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?i)bearer\s+[A-Za-z0-9._\-]+=*").expect("valid bearer token regex"));
 
 pub fn pipeline_debug_enabled() -> bool {
     *PIPELINE_DEBUG_ENABLED
@@ -44,7 +43,12 @@ pub fn sanitize_json_for_logs(
     max_text_chars: usize,
     max_array_items: usize,
 ) -> Value {
-    sanitize_json_inner(value, max_text_chars, max_array_items, DEFAULT_MAX_OBJECT_FIELDS)
+    sanitize_json_inner(
+        value,
+        max_text_chars,
+        max_array_items,
+        DEFAULT_MAX_OBJECT_FIELDS,
+    )
 }
 
 pub fn log_pipeline_step(session_id: &str, step: &str, message: &str, detail: Option<Value>) {
@@ -294,6 +298,8 @@ mod tests {
     fn essential_step_detector_includes_prompt_and_llm() {
         assert!(is_essential_pipeline_step("prompt_entered"));
         assert!(is_essential_pipeline_step("llm_response_received"));
-        assert!(!is_essential_pipeline_step("some_internal_non_pipeline_step"));
+        assert!(!is_essential_pipeline_step(
+            "some_internal_non_pipeline_step"
+        ));
     }
 }

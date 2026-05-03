@@ -44,7 +44,10 @@ fn policy_safe01_write_to_blocked_paths_is_red() {
     // PROMPT-ID: SAFE-01, SAFE-03
     let engine = PolicyEngine::new();
     for path in BLOCKED_PATHS {
-        let d = engine.evaluate("write_file", &serde_json::json!({ "path": path, "content": "x" }));
+        let d = engine.evaluate(
+            "write_file",
+            &serde_json::json!({ "path": path, "content": "x" }),
+        );
         assert_eq!(
             d.risk_level,
             RiskLevel::Red,
@@ -57,7 +60,11 @@ fn policy_safe01_write_to_blocked_paths_is_red() {
 fn policy_safe01_read_blocked_paths_is_at_least_yellow() {
     // PROMPT-ID: SAFE-01 — reading sensitive paths must not be Green
     let engine = PolicyEngine::new();
-    let sensitive = ["/etc/shadow", "/home/obaid/.ssh/id_rsa", "/home/obaid/.gnupg/secring.gpg"];
+    let sensitive = [
+        "/etc/shadow",
+        "/home/obaid/.ssh/id_rsa",
+        "/home/obaid/.gnupg/secring.gpg",
+    ];
     for path in &sensitive {
         let d = engine.evaluate("read_file", &serde_json::json!({ "path": path }));
         assert_ne!(
@@ -93,10 +100,7 @@ fn policy_safe05_catastrophic_bash_is_red() {
 fn policy_safe07_git_no_verify_bypass_is_red() {
     // PROMPT-ID: SAFE-07 — --no-verify skips pre-commit/pre-push hooks; must be blocked
     let engine = PolicyEngine::new();
-    let cmds = [
-        "git push --no-verify",
-        "git commit --no-verify -m 'bypass'",
-    ];
+    let cmds = ["git push --no-verify", "git commit --no-verify -m 'bypass'"];
     for cmd in &cmds {
         let d = engine.evaluate("execute_bash", &serde_json::json!({ "command": cmd }));
         assert_eq!(
@@ -127,7 +131,10 @@ async fn functional_safe01_write_to_etc_returns_error() {
         !result.success,
         "write_file to /etc must not succeed (was: success=true)"
     );
-    assert!(result.error.is_some(), "write_file /etc failure must carry an error message");
+    assert!(
+        result.error.is_some(),
+        "write_file /etc failure must carry an error message"
+    );
 }
 
 #[tokio::test]
@@ -141,10 +148,7 @@ async fn functional_safe03_write_to_ssh_returns_error() {
             "content": "test"
         }))
         .await;
-    assert!(
-        !result.success,
-        "write_file to ~/.ssh must not succeed"
-    );
+    assert!(!result.success, "write_file to ~/.ssh must not succeed");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -227,7 +231,10 @@ async fn functional_safe08_hitl_gateway_timeout_flow() {
         )
         .await;
     assert!(
-        matches!(outcome, ApprovalResponse::Timeout | ApprovalResponse::Denied),
+        matches!(
+            outcome,
+            ApprovalResponse::Timeout | ApprovalResponse::Denied
+        ),
         "Timed-out HITL request must be Timeout or Denied, got: {outcome:?}"
     );
 }
@@ -239,7 +246,12 @@ async fn functional_safe08_hitl_gateway_timeout_flow() {
 #[test]
 fn routing_safe06_emergency_stop_phrase() {
     // PROMPT-ID: SAFE-06 — "KRIA stop now" must not be routed to a normal tool
-    let phrases = ["KRIA stop now", "KRIA stop", "kria stop now", "Kria stop now please"];
+    let phrases = [
+        "KRIA stop now",
+        "KRIA stop",
+        "kria stop now",
+        "Kria stop now please",
+    ];
     for phrase in &phrases {
         let r = IntentRouter::classify(phrase);
         // Must NOT resolve to a regular tool — it should be EmergencyStop, Conversation, or
@@ -422,9 +434,15 @@ fn policy_safe10_pin_required_for_destructive_actions() {
     let red_ops = [
         ("shutdown", serde_json::json!({})),
         ("reboot", serde_json::json!({})),
-        ("delete_file", serde_json::json!({ "path": "/home/obaid/something.txt" })),
+        (
+            "delete_file",
+            serde_json::json!({ "path": "/home/obaid/something.txt" }),
+        ),
         ("gw_gmail_delete", serde_json::json!({ "id": "123" })),
-        ("execute_bash", serde_json::json!({ "command": "git push origin main" })),
+        (
+            "execute_bash",
+            serde_json::json!({ "command": "git push origin main" }),
+        ),
     ];
     for (op, params) in &red_ops {
         let d = engine.evaluate(op, params);

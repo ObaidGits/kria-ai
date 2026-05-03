@@ -101,9 +101,22 @@ pub fn classify_style_from_prompt(prompt: &str) -> Option<ImageStyle> {
     let anime_score = score_keywords(
         &lower,
         &[
-            "anime", "manga", "chibi", "cel shad", "cel-shad", "sakura",
-            "kawaii", "moe", "shounen", "shonen", "shojo", "shoujou",
-            "studio ghibli", "ghibli", "dragon ball", "naruto",
+            "anime",
+            "manga",
+            "chibi",
+            "cel shad",
+            "cel-shad",
+            "sakura",
+            "kawaii",
+            "moe",
+            "shounen",
+            "shonen",
+            "shojo",
+            "shoujou",
+            "studio ghibli",
+            "ghibli",
+            "dragon ball",
+            "naruto",
         ],
     );
 
@@ -111,8 +124,17 @@ pub fn classify_style_from_prompt(prompt: &str) -> Option<ImageStyle> {
     let cartoon_score = score_keywords(
         &lower,
         &[
-            "cartoon", "toon", "pixar", "animated", "flat colour", "flat color",
-            "vector art", "vector", "caricature", "comic", "children's book",
+            "cartoon",
+            "toon",
+            "pixar",
+            "animated",
+            "flat colour",
+            "flat color",
+            "vector art",
+            "vector",
+            "caricature",
+            "comic",
+            "children's book",
         ],
     );
 
@@ -120,8 +142,15 @@ pub fn classify_style_from_prompt(prompt: &str) -> Option<ImageStyle> {
     let lineart_score = score_keywords(
         &lower,
         &[
-            "line art", "lineart", "sketch", "pencil drawing", "ink drawing",
-            "technical illustration", "blueprint", "schematic", "outline",
+            "line art",
+            "lineart",
+            "sketch",
+            "pencil drawing",
+            "ink drawing",
+            "technical illustration",
+            "blueprint",
+            "schematic",
+            "outline",
             "black and white line",
         ],
     );
@@ -130,9 +159,21 @@ pub fn classify_style_from_prompt(prompt: &str) -> Option<ImageStyle> {
     let photo_score = score_keywords(
         &lower,
         &[
-            "photo", "photograph", "photorealistic", "realistic", "portrait",
-            "cinematic", "4k", "8k", "raw photo", "dslr", "lens", "bokeh",
-            "studio lighting", "natural light", "hyperrealistic",
+            "photo",
+            "photograph",
+            "photorealistic",
+            "realistic",
+            "portrait",
+            "cinematic",
+            "4k",
+            "8k",
+            "raw photo",
+            "dslr",
+            "lens",
+            "bokeh",
+            "studio lighting",
+            "natural light",
+            "hyperrealistic",
         ],
     );
 
@@ -149,7 +190,12 @@ pub fn classify_style_from_prompt(prompt: &str) -> Option<ImageStyle> {
     }
 
     // Require strict winner — if two styles score equally, treat as ambiguous.
-    let second = scores.iter().filter(|&&(s, _)| s != max.0).map(|&(_, v)| v).max().unwrap_or(0);
+    let second = scores
+        .iter()
+        .filter(|&&(s, _)| s != max.0)
+        .map(|&(_, v)| v)
+        .max()
+        .unwrap_or(0);
     if max.1 == second && max.1 > 0 {
         return None;
     }
@@ -166,10 +212,10 @@ fn score_keywords(lower: &str, keywords: &[&str]) -> u32 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AspectRatio {
-    Square,        // 1:1  → 1024×1024
-    Landscape,     // 16:9 → 1024×576
-    Portrait,      // 9:16 → 576×1024
-    Wide,          // 2.39:1 cinematic → 1024×428
+    Square,    // 1:1  → 1024×1024
+    Landscape, // 16:9 → 1024×576
+    Portrait,  // 9:16 → 576×1024
+    Wide,      // 2.39:1 cinematic → 1024×428
 }
 
 impl AspectRatio {

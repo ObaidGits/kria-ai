@@ -101,9 +101,8 @@ fn routing_mem02_recall_fact_routes_correctly() {
 #[test]
 fn routing_mem05_save_snippet_routes_correctly() {
     // PROMPT-ID: MEM-05
-    let r = IntentRouter::classify(
-        "Save this code snippet named 'hello_rust' in Rust: fn main() {}",
-    );
+    let r =
+        IntentRouter::classify("Save this code snippet named 'hello_rust' in Rust: fn main() {}");
     assert!(
         matches!(&r.intent, Intent::DirectTool(t) if t == "save_snippet")
             || matches!(r.intent, Intent::Conversation | Intent::ComplexTask),
@@ -145,7 +144,8 @@ async fn functional_mem01_mem02_remember_recall_roundtrip() {
         "recall_fact should succeed: {:?}",
         recall_result.error
     );
-    let value = recall_result.data["value"].as_str()
+    let value = recall_result.data["value"]
+        .as_str()
         .or(recall_result.data["result"].as_str())
         .or(recall_result.data.as_str())
         .unwrap_or("");
@@ -215,7 +215,8 @@ async fn functional_mem05_mem06_snippet_save_get() {
         "get_snippet should find saved snippet: {:?}",
         get_result.error
     );
-    let code = get_result.data["content"].as_str()
+    let code = get_result.data["content"]
+        .as_str()
         .or(get_result.data["code"].as_str())
         .or(get_result.data.as_str())
         .unwrap_or("");
@@ -359,10 +360,15 @@ async fn functional_auto03_smart_suggest() {
         "smart_suggest must not panic"
     );
     if result.success {
-        let suggestions = result.data.as_array()
+        let suggestions = result
+            .data
+            .as_array()
             .map(|a| !a.is_empty())
             .or_else(|| result.data["suggestions"].as_array().map(|a| !a.is_empty()))
             .unwrap_or(true);
-        assert!(suggestions, "smart_suggest should return at least one suggestion");
+        assert!(
+            suggestions,
+            "smart_suggest should return at least one suggestion"
+        );
     }
 }

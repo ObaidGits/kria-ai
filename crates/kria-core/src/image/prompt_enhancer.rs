@@ -103,12 +103,7 @@ fn boilerplate(style: ImageStyle) -> StyleBoilerplate {
                 "high-contrast lettering",
                 "professional design",
             ],
-            negative: &[
-                "illegible text",
-                "blurry",
-                "watermark",
-                "distorted letters",
-            ],
+            negative: &["illegible text", "blurry", "watermark", "distorted letters"],
         },
     }
 }
@@ -212,7 +207,10 @@ mod tests {
     #[test]
     fn enriches_weak_prompt() {
         let ep = enhance_template("a cat", ImageStyle::Photorealistic, false);
-        assert!(ep.positive.contains("sharp focus"), "should inject boilerplate");
+        assert!(
+            ep.positive.contains("sharp focus"),
+            "should inject boilerplate"
+        );
         assert!(ep.was_enhanced);
         assert_eq!(ep.mode, "template");
     }

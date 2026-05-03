@@ -105,7 +105,11 @@ fn routing_dt05_get_active_window_routes_correctly() {
 #[test]
 fn routing_dt06_list_windows_routes_correctly() {
     // PROMPT-ID: DT-06
-    let prompts = ["List all open windows.", "show all windows", "khuli windows list karo"];
+    let prompts = [
+        "List all open windows.",
+        "show all windows",
+        "khuli windows list karo",
+    ];
     for p in &prompts {
         let r = IntentRouter::classify(p);
         assert!(
@@ -205,14 +209,23 @@ async fn functional_dt01_dt02_clipboard_roundtrip() {
     let set_result = set_handler
         .execute(serde_json::json!({ "text": "Hello from KRIA test" }))
         .await;
-    assert!(set_result.success, "set_clipboard failed: {:?}", set_result.error);
+    assert!(
+        set_result.success,
+        "set_clipboard failed: {:?}",
+        set_result.error
+    );
 
     // Read it back
     let get_handler = reg.get_handler("get_clipboard").unwrap().clone();
     let get_result = get_handler.execute(serde_json::json!({})).await;
-    assert!(get_result.success, "get_clipboard failed: {:?}", get_result.error);
+    assert!(
+        get_result.success,
+        "get_clipboard failed: {:?}",
+        get_result.error
+    );
 
-    let content = get_result.data["content"].as_str()
+    let content = get_result.data["content"]
+        .as_str()
         .or(get_result.data["text"].as_str())
         .or(get_result.data.as_str())
         .unwrap_or("");
@@ -235,7 +248,9 @@ async fn functional_dt03_transform_clipboard_uppercase() {
     // Seed a value
     {
         let h = reg.get_handler("set_clipboard").unwrap().clone();
-        let r = h.execute(serde_json::json!({ "text": "hello world" })).await;
+        let r = h
+            .execute(serde_json::json!({ "text": "hello world" }))
+            .await;
         if !r.success {
             eprintln!("SKIP: could not set clipboard");
             return;
@@ -247,13 +262,18 @@ async fn functional_dt03_transform_clipboard_uppercase() {
     let result = handler
         .execute(serde_json::json!({ "transform": "uppercase" }))
         .await;
-    assert!(result.success, "transform_clipboard uppercase failed: {:?}", result.error);
+    assert!(
+        result.success,
+        "transform_clipboard uppercase failed: {:?}",
+        result.error
+    );
 
     // Verify
     let get_h = reg.get_handler("get_clipboard").unwrap().clone();
     let get_r = get_h.execute(serde_json::json!({})).await;
     if get_r.success {
-        let content = get_r.data["content"].as_str()
+        let content = get_r.data["content"]
+            .as_str()
             .or(get_r.data.as_str())
             .unwrap_or("");
         assert_eq!(
@@ -364,7 +384,11 @@ async fn functional_com03_compose_email_no_send() {
         "compose_email must not panic"
     );
     // Must NOT have a field indicating the email was sent
-    let sent = result.data.get("sent").and_then(|v| v.as_bool()).unwrap_or(false);
+    let sent = result
+        .data
+        .get("sent")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     assert!(
         !sent,
         "compose_email must NOT auto-send — it should only open a draft"

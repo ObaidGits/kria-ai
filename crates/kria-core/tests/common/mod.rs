@@ -265,22 +265,14 @@ impl Default for SandboxDir {
 pub fn internet_available() -> bool {
     use std::net::TcpStream;
     use std::time::Duration;
-    TcpStream::connect_timeout(
-        &"1.1.1.1:80".parse().unwrap(),
-        Duration::from_secs(3),
-    )
-    .is_ok()
+    TcpStream::connect_timeout(&"1.1.1.1:80".parse().unwrap(), Duration::from_secs(3)).is_ok()
 }
 
 /// Returns true if the local LLM server appears to be running.
 pub fn llm_available() -> bool {
     use std::net::TcpStream;
     use std::time::Duration;
-    TcpStream::connect_timeout(
-        &"127.0.0.1:8080".parse().unwrap(),
-        Duration::from_secs(2),
-    )
-    .is_ok()
+    TcpStream::connect_timeout(&"127.0.0.1:8080".parse().unwrap(), Duration::from_secs(2)).is_ok()
 }
 
 /// Returns true if a GNOME / X11 display is available.

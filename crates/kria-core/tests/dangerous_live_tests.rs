@@ -52,14 +52,21 @@ fn dangerous_t1_kill_process_is_yellow_and_requires_approval() {
     // Policy classifies kill_process as Yellow (execute+notify tier; no blocking approval needed)
     let engine = PolicyEngine::new();
     let d = engine.evaluate("kill_process", &serde_json::json!({ "pid": 1 }));
-    assert_eq!(d.risk_level, RiskLevel::Yellow, "kill_process must be Yellow per policy");
+    assert_eq!(
+        d.risk_level,
+        RiskLevel::Yellow,
+        "kill_process must be Yellow per policy"
+    );
     assert!(!d.blocked, "kill_process must not be blocked");
 }
 
 #[test]
 fn dangerous_t1_delete_file_is_red_and_requires_approval() {
     let engine = PolicyEngine::new();
-    let d = engine.evaluate("delete_file", &serde_json::json!({ "path": "/home/obaid/test.txt" }));
+    let d = engine.evaluate(
+        "delete_file",
+        &serde_json::json!({ "path": "/home/obaid/test.txt" }),
+    );
     assert_eq!(d.risk_level, RiskLevel::Red, "delete_file must be Red");
     assert!(d.requires_approval, "delete_file must require approval");
 }
@@ -68,8 +75,15 @@ fn dangerous_t1_delete_file_is_red_and_requires_approval() {
 fn dangerous_t1_gmail_send_is_yellow_and_requires_approval() {
     // Policy classifies gw_gmail_send as Yellow (reversible via Gmail Undo Send window)
     let engine = PolicyEngine::new();
-    let d = engine.evaluate("gw_gmail_send", &serde_json::json!({ "to": "test@example.com" }));
-    assert_eq!(d.risk_level, RiskLevel::Yellow, "gw_gmail_send must be Yellow per policy");
+    let d = engine.evaluate(
+        "gw_gmail_send",
+        &serde_json::json!({ "to": "test@example.com" }),
+    );
+    assert_eq!(
+        d.risk_level,
+        RiskLevel::Yellow,
+        "gw_gmail_send must be Yellow per policy"
+    );
     assert!(!d.blocked, "gw_gmail_send must not be blocked");
 }
 
@@ -80,8 +94,15 @@ fn dangerous_t1_push_to_main_is_red_and_requires_approval() {
         "execute_bash",
         &serde_json::json!({ "command": "git push origin main" }),
     );
-    assert_eq!(bash.risk_level, RiskLevel::Red, "git push origin main must be Red");
-    assert!(bash.requires_approval, "git push origin main must require approval");
+    assert_eq!(
+        bash.risk_level,
+        RiskLevel::Red,
+        "git push origin main must be Red"
+    );
+    assert!(
+        bash.requires_approval,
+        "git push origin main must require approval"
+    );
 }
 
 // ── HITL invoked for each Red action ─────────────────────────────────────
@@ -124,7 +145,10 @@ async fn dangerous_t1_hitl_is_invoked_for_red_action() {
 async fn dangerous_t2_sandbox_delete_file() {
     let sandbox = SandboxDir::new();
     sandbox.write_file("to_delete.txt", "delete me");
-    assert!(sandbox.exists("to_delete.txt"), "File must exist before delete");
+    assert!(
+        sandbox.exists("to_delete.txt"),
+        "File must exist before delete"
+    );
 
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("delete_file").unwrap().clone();
@@ -133,7 +157,11 @@ async fn dangerous_t2_sandbox_delete_file() {
             "path": sandbox.child("to_delete.txt").to_str().unwrap()
         }))
         .await;
-    assert!(result.success, "sandbox delete_file should succeed: {:?}", result.error);
+    assert!(
+        result.success,
+        "sandbox delete_file should succeed: {:?}",
+        result.error
+    );
     assert!(
         !sandbox.exists("to_delete.txt"),
         "File must not exist after delete"
@@ -155,8 +183,15 @@ async fn dangerous_t2_sandbox_move_then_delete() {
             "destination": sandbox.child("moved.txt").to_str().unwrap()
         }))
         .await;
-    assert!(mv_result.success, "move_file should succeed: {:?}", mv_result.error);
-    assert!(sandbox.exists("moved.txt"), "moved.txt must exist after move");
+    assert!(
+        mv_result.success,
+        "move_file should succeed: {:?}",
+        mv_result.error
+    );
+    assert!(
+        sandbox.exists("moved.txt"),
+        "moved.txt must exist after move"
+    );
 
     // Delete moved file
     let del_handler = reg.get_handler("delete_file").unwrap().clone();
@@ -165,8 +200,15 @@ async fn dangerous_t2_sandbox_move_then_delete() {
             "path": sandbox.child("moved.txt").to_str().unwrap()
         }))
         .await;
-    assert!(del_result.success, "delete moved file should succeed: {:?}", del_result.error);
-    assert!(!sandbox.exists("moved.txt"), "moved.txt must not exist after delete");
+    assert!(
+        del_result.success,
+        "delete moved file should succeed: {:?}",
+        del_result.error
+    );
+    assert!(
+        !sandbox.exists("moved.txt"),
+        "moved.txt must not exist after delete"
+    );
 }
 
 #[tokio::test]
@@ -187,7 +229,11 @@ async fn dangerous_t2_sandbox_clean_directory() {
             "path": sandbox.path.to_str().unwrap()
         }))
         .await;
-    assert!(result.success, "clean_directory should succeed: {:?}", result.error);
+    assert!(
+        result.success,
+        "clean_directory should succeed: {:?}",
+        result.error
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -213,7 +259,11 @@ async fn dangerous_t3_real_shutdown() {
     let result = handler
         .execute(serde_json::json!({ "delay_minutes": 1 }))
         .await;
-    assert!(result.success, "shutdown tool must succeed: {:?}", result.error);
+    assert!(
+        result.success,
+        "shutdown tool must succeed: {:?}",
+        result.error
+    );
 }
 
 /// ⚠  This test sends a real email.
@@ -241,5 +291,9 @@ async fn dangerous_t3_real_gmail_send() {
             "body": "This is an automated dangerous live test from the KRIA test suite."
         }))
         .await;
-    assert!(result.success, "gw_gmail_send must succeed: {:?}", result.error);
+    assert!(
+        result.success,
+        "gw_gmail_send must succeed: {:?}",
+        result.error
+    );
 }

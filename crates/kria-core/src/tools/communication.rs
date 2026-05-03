@@ -29,14 +29,25 @@ impl ToolHandler for SendNotification {
         let cli_ok = tokio::process::Command::new("notify-send")
             .env("DBUS_SESSION_BUS_ADDRESS", &dbus_addr)
             .env("DISPLAY", &display)
-            .args(["-a", "KRIA", "-u", "normal", "-t", "8000",
-                   "--icon=dialog-information", title, body])
+            .args([
+                "-a",
+                "KRIA",
+                "-u",
+                "normal",
+                "-t",
+                "8000",
+                "--icon=dialog-information",
+                title,
+                body,
+            ])
             .status()
             .await
             .map(|s| s.success())
             .unwrap_or(false);
         if cli_ok {
-            return ToolResult::ok(serde_json::json!({ "sent": true, "title": title, "method": "notify-send" }));
+            return ToolResult::ok(
+                serde_json::json!({ "sent": true, "title": title, "method": "notify-send" }),
+            );
         }
         // Fallback: notify_rust (may go to notification bell on GNOME 44+ instead of popup)
         let rust_result = notify_rust::Notification::new()
@@ -47,7 +58,9 @@ impl ToolHandler for SendNotification {
             .urgency(notify_rust::Urgency::Normal)
             .show();
         if rust_result.is_ok() {
-            return ToolResult::ok(serde_json::json!({ "sent": true, "title": title, "method": "notify_rust" }));
+            return ToolResult::ok(
+                serde_json::json!({ "sent": true, "title": title, "method": "notify_rust" }),
+            );
         }
         ToolResult::err("notification failed: notify-send CLI and notify_rust both failed")
     }
@@ -100,8 +113,17 @@ impl ToolHandler for ScheduleReminder {
             let cli_ok = tokio::process::Command::new("notify-send")
                 .env("DBUS_SESSION_BUS_ADDRESS", &dbus_addr)
                 .env("DISPLAY", &display)
-                .args(["-a", "KRIA", "-u", "critical", "-t", "0",
-                       "--icon=alarm", "\u{23f0} KRIA Reminder", &msg])
+                .args([
+                    "-a",
+                    "KRIA",
+                    "-u",
+                    "critical",
+                    "-t",
+                    "0",
+                    "--icon=alarm",
+                    "\u{23f0} KRIA Reminder",
+                    &msg,
+                ])
                 .status()
                 .await
                 .map(|s| s.success())
@@ -124,7 +146,10 @@ impl ToolHandler for ScheduleReminder {
         let display_mins = delay_secs / 60;
         let display_secs = delay_secs % 60;
         let time_str = if display_secs == 0 {
-            format!("{display_mins} minute{}", if display_mins == 1 { "" } else { "s" })
+            format!(
+                "{display_mins} minute{}",
+                if display_mins == 1 { "" } else { "s" }
+            )
         } else {
             format!("{display_mins}m {display_secs}s")
         };

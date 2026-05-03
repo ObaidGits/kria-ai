@@ -34,7 +34,11 @@ pub fn is_ood(ctx: &OodContext<'_>) -> bool {
     // ── z-score against OOD calibration ──────────────────────────────────
     let z = if ctx.ood_distribution.len() >= 2 {
         let (mean, std) = mean_std(ctx.ood_distribution);
-        if std > 1e-6 { (top1 - mean) / std } else { 0.0 }
+        if std > 1e-6 {
+            (top1 - mean) / std
+        } else {
+            0.0
+        }
     } else {
         // No calibration data: skip z-test (only entropy matters).
         ctx.z_threshold + 1.0
@@ -78,7 +82,11 @@ fn entropy_softmax(sims: &[f32], tau: f32) -> f32 {
     exps.iter()
         .map(|e| {
             let p = e / sum_exp;
-            if p > 1e-9 { -p * p.ln() } else { 0.0 }
+            if p > 1e-9 {
+                -p * p.ln()
+            } else {
+                0.0
+            }
         })
         .sum()
 }

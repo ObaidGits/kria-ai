@@ -4,10 +4,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::image::{ImageOrchestrator, ImageRequest, QualityProfile};
 use crate::image::orchestrator::FailureReport;
-use crate::image::ws_bridge::EventEmitter;
 use crate::image::styles::{AspectRatio, ImageStyle};
+use crate::image::ws_bridge::EventEmitter;
+use crate::image::{ImageOrchestrator, ImageRequest, QualityProfile};
 use crate::infra::ToolResult;
 use crate::llm::orchestrator::Orchestrator;
 use crate::safety::RiskLevel;
@@ -57,9 +57,8 @@ impl ToolHandler for GenerateImageHandler {
         let force_cloud = params["force_cloud"].as_bool().unwrap_or(false);
 
         // New optional params.
-        let quality: Option<QualityProfile> = params["quality"]
-            .as_str()
-            .and_then(|s| s.parse().ok());
+        let quality: Option<QualityProfile> =
+            params["quality"].as_str().and_then(|s| s.parse().ok());
         let negative: Option<String> = params["negative"]
             .as_str()
             .filter(|s| !s.is_empty())
@@ -96,29 +95,31 @@ impl ToolHandler for GenerateImageHandler {
                 .map(|o| o.clone() as Arc<dyn crate::image::swap::LlmEvictionController>)
         };
 
-        match self.orchestrator.generate(req, Some(emitter), llm_evictor).await {
-            Ok(result) => {
-                ToolResult::ok(serde_json::json!({
-                    "images": result.images.iter().map(|img| serde_json::json!({
-                        "path": img.path.display().to_string(),
-                        "sha256": img.sha256,
-                        "width": img.width,
-                        "height": img.height,
-                        "style": img.style,
-                        "provenance": img.provenance,
-                        "seed": img.seed,
-                        "quality": img.quality,
-                        "steps": img.steps,
-                        "sampler": img.sampler,
-                        "cfg_scale": img.cfg_scale,
-                        "enhance_mode": img.enhance_mode,
-                        "final_prompt": img.final_prompt,
-                    })).collect::<Vec<_>>(),
-                    "elapsed_ms": result.elapsed_ms,
-                    "tier_used": result.tier_used,
-                    "swap_count": result.swap_count,
-                }))
-            }
+        match self
+            .orchestrator
+            .generate(req, Some(emitter), llm_evictor)
+            .await
+        {
+            Ok(result) => ToolResult::ok(serde_json::json!({
+                "images": result.images.iter().map(|img| serde_json::json!({
+                    "path": img.path.display().to_string(),
+                    "sha256": img.sha256,
+                    "width": img.width,
+                    "height": img.height,
+                    "style": img.style,
+                    "provenance": img.provenance,
+                    "seed": img.seed,
+                    "quality": img.quality,
+                    "steps": img.steps,
+                    "sampler": img.sampler,
+                    "cfg_scale": img.cfg_scale,
+                    "enhance_mode": img.enhance_mode,
+                    "final_prompt": img.final_prompt,
+                })).collect::<Vec<_>>(),
+                "elapsed_ms": result.elapsed_ms,
+                "tier_used": result.tier_used,
+                "swap_count": result.swap_count,
+            })),
             Err(e) => {
                 let report = FailureReport::from_error(&e);
                 ToolResult::err_with_data(

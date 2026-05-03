@@ -60,9 +60,7 @@ impl ToolHandler for OpenApplication {
                 if let Some(s) = v.as_str() {
                     match SafeArg::new(s) {
                         Ok(a) => safe_args.push(a),
-                        Err(e) => {
-                            return ToolResult::err(format!("invalid argument '{s}': {e}"))
-                        }
+                        Err(e) => return ToolResult::err(format!("invalid argument '{s}': {e}")),
                     }
                 }
             }
@@ -84,11 +82,9 @@ impl ToolHandler for OpenApplication {
             Err(DispatchError::PolicyBlocked(reason)) => {
                 ToolResult::err(format!("blocked by policy: {reason}"))
             }
-            Err(DispatchError::RateLimitExceeded(action, retry)) => {
-                ToolResult::err(format!(
-                    "rate limit exceeded for '{action}', retry after {retry}s"
-                ))
-            }
+            Err(DispatchError::RateLimitExceeded(action, retry)) => ToolResult::err(format!(
+                "rate limit exceeded for '{action}', retry after {retry}s"
+            )),
             Err(e) => ToolResult::err(format!("dispatch error: {e}")),
         }
     }
@@ -249,11 +245,7 @@ impl ToolHandler for SendMessage {
             app: app.clone(),
         };
 
-        let cap = Capability::SendMessage {
-            app,
-            contact,
-            body,
-        };
+        let cap = Capability::SendMessage { app, contact, body };
 
         match self.dispatcher.dispatch(&cap, &session_id, false).await {
             Ok(result) => {
@@ -274,7 +266,6 @@ impl ToolHandler for SendMessage {
     }
 }
 
-
 // ─── Legacy stubs (no dispatcher) ────────────────────────────────────────────
 //
 // Used when `register_with_dispatcher` is called with `None`.
@@ -287,10 +278,16 @@ impl ToolHandler for LegacyOpenApplication {
         let app = params["name"].as_str().unwrap_or("");
         let args: Vec<String> = params["args"]
             .as_array()
-            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default();
         match tokio::process::Command::new(app).args(&args).spawn() {
-            Ok(child) => ToolResult::ok(serde_json::json!({ "application": app, "pid": child.id(), "launched": true })),
+            Ok(child) => ToolResult::ok(
+                serde_json::json!({ "application": app, "pid": child.id(), "launched": true }),
+            ),
             Err(e) => ToolResult::err(format!("failed to open {app}: {e}")),
         }
     }
@@ -336,7 +333,6 @@ impl ToolHandler for NullSendMessage {
         ToolResult::err("send_message is not available: IntentDispatcher not initialized yet")
     }
 }
-
 
 struct ListRunningApps;
 #[async_trait]
@@ -443,17 +439,16 @@ pub fn register_with_dispatcher(
     // Fallback: if no dispatcher is provided, use the stateless legacy handlers.
     let _has_dispatcher = dispatcher.is_some();
 
-    let open_app_handler: Arc<dyn ToolHandler> = if let (Some(d), Some(r)) =
-        (dispatcher.clone(), registry.clone())
-    {
-        Arc::new(OpenApplication {
-            dispatcher: d,
-            registry: r,
-        })
-    } else {
-        // Legacy fallback (no dispatcher yet) — uses raw process::Command.
-        Arc::new(LegacyOpenApplication)
-    };
+    let open_app_handler: Arc<dyn ToolHandler> =
+        if let (Some(d), Some(r)) = (dispatcher.clone(), registry.clone()) {
+            Arc::new(OpenApplication {
+                dispatcher: d,
+                registry: r,
+            })
+        } else {
+            // Legacy fallback (no dispatcher yet) — uses raw process::Command.
+            Arc::new(LegacyOpenApplication)
+        };
 
     let open_url_handler: Arc<dyn ToolHandler> = if let Some(d) = dispatcher.clone() {
         Arc::new(OpenUrl {
@@ -612,4 +607,3 @@ pub fn register_with_dispatcher(
         reg.register(def, handler);
     }
 }
-

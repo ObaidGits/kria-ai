@@ -48,7 +48,7 @@ pub use pipeline::{ActivePipeline, VoicePipelineV2, VoiceSessionState, VoiceTele
 pub use playback::{PlaybackSink, PlaybackState};
 pub use post_edit::{HinglishPostEditor, PostEditDecision};
 pub use sentence::SentenceSplitter;
-pub use stt::{PartialTranscript, FinalTranscript, Stt, StreamHandle};
+pub use stt::{FinalTranscript, PartialTranscript, StreamHandle, Stt};
 pub use tts::{Tts, TtsSampleRate};
 pub use wake::{WakeWordDetector, WakeWordEvent};
 
@@ -78,13 +78,10 @@ pub fn build_v2_with_cli_engines(
     let tts_v2: Arc<dyn Tts> = Arc::new(tts::CliPiperTts::new(tts, 22_050));
     let playback = PlaybackSink::new(22_050);
     let aec = AecProcessor::passthrough(AecSettings::default());
-    let post_editor = HinglishPostEditor::from_config(
-        &voice_cfg.post_edit,
-        profile.post_edit_timeout_ms,
-    );
-    let (pipeline, state_rx, telemetry_rx) = VoicePipelineV2::new(
-        profile, stt_v2, tts_v2, playback, wake, aec, post_editor,
-    );
+    let post_editor =
+        HinglishPostEditor::from_config(&voice_cfg.post_edit, profile.post_edit_timeout_ms);
+    let (pipeline, state_rx, telemetry_rx) =
+        VoicePipelineV2::new(profile, stt_v2, tts_v2, playback, wake, aec, post_editor);
     (Arc::new(pipeline), state_rx, telemetry_rx)
 }
 

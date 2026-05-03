@@ -150,7 +150,10 @@ fn colab_capability_summary_detects_execution_via_modern_keyword_variants() {
 
     let summary = build_colab_capability_summary(&registry, server_name);
     assert_eq!(summary["features"]["cell_execution"].as_bool(), Some(true));
-    assert_eq!(summary["features"]["notebook_selection"].as_bool(), Some(true));
+    assert_eq!(
+        summary["features"]["notebook_selection"].as_bool(),
+        Some(true)
+    );
     assert_eq!(
         summary["ready_requirements"]["satisfied"].as_bool(),
         Some(true)
@@ -178,7 +181,10 @@ fn colab_capability_summary_uses_parameter_hints_for_execution_signal() {
 
     let summary = build_colab_capability_summary(&registry, server_name);
     assert_eq!(summary["features"]["cell_execution"].as_bool(), Some(true));
-    assert_eq!(summary["features"]["notebook_discovery"].as_bool(), Some(true));
+    assert_eq!(
+        summary["features"]["notebook_discovery"].as_bool(),
+        Some(true)
+    );
     assert_eq!(
         summary["ready_requirements"]["satisfied"].as_bool(),
         Some(true)

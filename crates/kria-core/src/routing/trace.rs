@@ -1,9 +1,9 @@
 //! RouterTrace — structured observability event emitted per routing turn.
 //! Fed into the existing AuditLogger.
 
-use serde::{Deserialize, Serialize};
-use super::domain::Domain;
 use super::decide::RouteDecision;
+use super::domain::Domain;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RouterTrace {
@@ -33,10 +33,18 @@ impl RouterTrace {
         Self {
             input_text: input_text.to_string(),
             primary_modality: modality.primary.as_str().to_string(),
-            all_modalities: modality.all.iter().map(|m| m.as_str().to_string()).collect(),
+            all_modalities: modality
+                .all
+                .iter()
+                .map(|m| m.as_str().to_string())
+                .collect(),
             destructive: modality.destructive,
             segments: segments.to_vec(),
-            top_domains: sims.iter().take(3).map(|(d, s)| (d.as_str().to_string(), *s)).collect(),
+            top_domains: sims
+                .iter()
+                .take(3)
+                .map(|(d, s)| (d.as_str().to_string(), *s))
+                .collect(),
             decision: decision_str(decision),
             selected_tools,
             cache_state: cache_state.to_string(),

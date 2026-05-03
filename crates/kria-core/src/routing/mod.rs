@@ -89,8 +89,14 @@ impl Router {
         if !embed::is_ready() || cache_state == cache::CacheState::Empty {
             let decision = self.regex_fallback(text);
             let trace = RouterTrace::from_parts(
-                text, &modality, &[text.to_string()], &[], &decision,
-                vec![], &cache_state_str, start.elapsed().as_millis() as u64,
+                text,
+                &modality,
+                &[text.to_string()],
+                &[],
+                &decision,
+                vec![],
+                &cache_state_str,
+                start.elapsed().as_millis() as u64,
             );
             return (decision, modality, trace);
         }
@@ -109,8 +115,14 @@ impl Router {
                 warn!("[Router] embed_batch failed: {e} — degrading to regex");
                 let decision = self.regex_fallback(text);
                 let trace = RouterTrace::from_parts(
-                    text, &modality, &segments, &[], &decision,
-                    vec![], &cache_state_str, start.elapsed().as_millis() as u64,
+                    text,
+                    &modality,
+                    &segments,
+                    &[],
+                    &decision,
+                    vec![],
+                    &cache_state_str,
+                    start.elapsed().as_millis() as u64,
                 );
                 return (decision, modality, trace);
             }
@@ -129,14 +141,17 @@ impl Router {
 
         // Per-segment similarities (only when we have multiple segments)
         let segment_sims: Vec<Vec<(Domain, f32)>> = if segments.len() > 1 {
-            seg_embs.iter().map(|emb| {
-                let mut s: Vec<(Domain, f32)> = centroids
-                    .iter()
-                    .map(|(d, c)| (*d, embed::cosine_sim(emb, c)))
-                    .collect();
-                s.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-                s
-            }).collect()
+            seg_embs
+                .iter()
+                .map(|emb| {
+                    let mut s: Vec<(Domain, f32)> = centroids
+                        .iter()
+                        .map(|(d, c)| (*d, embed::cosine_sim(emb, c)))
+                        .collect();
+                    s.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                    s
+                })
+                .collect()
         } else {
             vec![]
         };
@@ -158,14 +173,24 @@ impl Router {
             "[Router] text={:?} decision={:?} margin={:.3} modality={:?}",
             &text[..text.len().min(60)],
             decision,
-            if domain_sims.len() >= 2 { domain_sims[0].1 - domain_sims[1].1 } else { 1.0 },
+            if domain_sims.len() >= 2 {
+                domain_sims[0].1 - domain_sims[1].1
+            } else {
+                1.0
+            },
             modality.primary,
         );
 
         let selected_tools = self.tools_for_decision(&decision).await;
         let trace = RouterTrace::from_parts(
-            text, &modality, &segments, &domain_sims, &decision,
-            selected_tools, &cache_state_str, start.elapsed().as_millis() as u64,
+            text,
+            &modality,
+            &segments,
+            &domain_sims,
+            &decision,
+            selected_tools,
+            &cache_state_str,
+            start.elapsed().as_millis() as u64,
         );
 
         (decision, modality, trace)
@@ -207,37 +232,69 @@ impl Router {
 fn tool_name_to_category(tool_name: &str) -> String {
     // Extract prefix (e.g. "get_cpu_usage" → "system_info" by prefix lookup)
     let lc = tool_name.to_lowercase();
-    if lc.starts_with("get_cpu") || lc.starts_with("get_mem") || lc.starts_with("get_disk")
-        || lc.starts_with("get_battery") || lc.starts_with("get_gpu")
-        || lc.starts_with("get_network") || lc.starts_with("get_system")
+    if lc.starts_with("get_cpu")
+        || lc.starts_with("get_mem")
+        || lc.starts_with("get_disk")
+        || lc.starts_with("get_battery")
+        || lc.starts_with("get_gpu")
+        || lc.starts_with("get_network")
+        || lc.starts_with("get_system")
     {
         "system_info".into()
-    } else if lc.starts_with("read_") || lc.starts_with("write_") || lc.starts_with("delete_")
-        || lc.starts_with("search_file") || lc.starts_with("list_dir") || lc.starts_with("parse_")
+    } else if lc.starts_with("read_")
+        || lc.starts_with("write_")
+        || lc.starts_with("delete_")
+        || lc.starts_with("search_file")
+        || lc.starts_with("list_dir")
+        || lc.starts_with("parse_")
     {
         "file_ops".into()
-    } else if lc.starts_with("open_app") || lc.starts_with("close_app") || lc.starts_with("list_running") {
+    } else if lc.starts_with("open_app")
+        || lc.starts_with("close_app")
+        || lc.starts_with("list_running")
+    {
         "app_lifecycle".into()
     } else if lc.starts_with("gw_") || lc.starts_with("mcp_gworkspace") {
         "mcp_gworkspace".into()
-    } else if lc.starts_with("web_search") || lc.starts_with("fetch_") || lc.starts_with("get_news")
-        || lc.starts_with("get_weather") || lc.starts_with("recall_") || lc.starts_with("search_knowledge")
+    } else if lc.starts_with("web_search")
+        || lc.starts_with("fetch_")
+        || lc.starts_with("get_news")
+        || lc.starts_with("get_weather")
+        || lc.starts_with("recall_")
+        || lc.starts_with("search_knowledge")
     {
         "knowledge".into()
-    } else if lc.starts_with("send_") || lc.starts_with("compose_") || lc.starts_with("reply_")
-        || lc.starts_with("schedule_") || lc.starts_with("gw_mail") || lc.starts_with("gw_calendar")
+    } else if lc.starts_with("send_")
+        || lc.starts_with("compose_")
+        || lc.starts_with("reply_")
+        || lc.starts_with("schedule_")
+        || lc.starts_with("gw_mail")
+        || lc.starts_with("gw_calendar")
     {
         "communication".into()
-    } else if lc.starts_with("shutdown") || lc.starts_with("reboot") || lc.starts_with("set_volume")
-        || lc.starts_with("mute_") || lc.starts_with("set_brightness") || lc.starts_with("lock_")
+    } else if lc.starts_with("shutdown")
+        || lc.starts_with("reboot")
+        || lc.starts_with("set_volume")
+        || lc.starts_with("mute_")
+        || lc.starts_with("set_brightness")
+        || lc.starts_with("lock_")
     {
         "power".into()
-    } else if lc.starts_with("screenshot") || lc.starts_with("describe_screen") || lc.starts_with("vision") {
+    } else if lc.starts_with("screenshot")
+        || lc.starts_with("describe_screen")
+        || lc.starts_with("vision")
+    {
         "vision".into()
-    } else if lc.starts_with("install_") || lc.starts_with("uninstall_") || lc.starts_with("update_") {
+    } else if lc.starts_with("install_")
+        || lc.starts_with("uninstall_")
+        || lc.starts_with("update_")
+    {
         "packages".into()
-    } else if lc.starts_with("run_") || lc.starts_with("git_") || lc.starts_with("shell_")
-        || lc.starts_with("kill_") || lc.starts_with("list_process")
+    } else if lc.starts_with("run_")
+        || lc.starts_with("git_")
+        || lc.starts_with("shell_")
+        || lc.starts_with("kill_")
+        || lc.starts_with("list_process")
     {
         "developer".into()
     } else {

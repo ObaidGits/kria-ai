@@ -14,19 +14,29 @@ use tracing;
 use crate::agent::loop_engine::StreamEvent;
 use crate::agent::AgentLoop;
 use crate::config::TelegramConfig;
-use crate::safety::hitl::ApprovalResponse;
 use crate::llm::orchestrator::Orchestrator;
 use crate::llm::ChatMessage;
 use crate::memory::embeddings::EmbeddingModel;
 use crate::memory::store::MemoryStore;
 use crate::memory::vectors::VectorIndex;
 use crate::platform::detect::get_available_package_managers;
+use crate::safety::hitl::ApprovalResponse;
 use crate::tools::ToolRegistry;
 
 const TELEGRAM_API: &str = "https://api.telegram.org/bot";
 const TELEGRAM_CONFLICT_BASE_BACKOFF_SECS: u64 = 2;
 const TELEGRAM_CONFLICT_MAX_BACKOFF_SECS: u64 = 90;
 const TELEGRAM_CONFLICT_JITTER_MAX_MS: u64 = 1200;
+
+fn is_transient_llm_error_text(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("⚠️ llm error")
+        || lower.contains("context too large for model")
+        || lower.contains("local llm transport error")
+        || lower.contains("error sending request for url")
+        || lower.contains("local llm unavailable")
+        || lower.contains("circuit open")
+}
 
 /// Handle to a running Telegram bridge. Drop or call stop() to shut down.
 pub struct TelegramBridge {
@@ -524,7 +534,7 @@ pub async fn process_message(
 
     // Build messages with history
     let recent_turns = memory_store
-        .get_recent_turns(&session_id, 10)
+        .get_recent_turns(&session_id, 5)
         .unwrap_or_default();
 
     let mut messages = Vec::with_capacity(recent_turns.len() + 2);
@@ -535,6 +545,10 @@ pub async fn process_message(
         images: None,
     });
     for turn in &recent_turns {
+        if turn.role.eq_ignore_ascii_case("assistant") && is_transient_llm_error_text(&turn.content)
+        {
+            continue;
+        }
         messages.push(ChatMessage {
             role: turn.role.clone(),
             content: turn.content.clone(),
@@ -570,7 +584,10 @@ pub async fn process_message(
         let mut ok = false;
         for attempt in 0..=MAX_RETRIES {
             match orc.ensure_ready("telegram_turn").await {
-                Ok(()) => { ok = true; break; }
+                Ok(()) => {
+                    ok = true;
+                    break;
+                }
                 Err(e) => {
                     last_err = e.to_string();
                     if attempt < MAX_RETRIES {
@@ -692,28 +709,30 @@ pub async fn process_message(
         full_response = "I processed your request but have no text response.".to_string();
     }
 
-    // Persist assistant turn
-    let _ = memory_store.store_turn(&crate::memory::store::ConversationTurn {
-        id: None,
-        session_id: session_id.clone(),
-        role: "assistant".into(),
-        content: full_response.clone(),
-        tool_name: None,
-        tool_result: None,
-        tokens_used: None,
-        timestamp: chrono::Utc::now(),
-    });
+    if !is_transient_llm_error_text(&full_response) {
+        // Persist assistant turn
+        let _ = memory_store.store_turn(&crate::memory::store::ConversationTurn {
+            id: None,
+            session_id: session_id.clone(),
+            role: "assistant".into(),
+            content: full_response.clone(),
+            tool_name: None,
+            tool_result: None,
+            tokens_used: None,
+            timestamp: chrono::Utc::now(),
+        });
 
-    // Extract facts
-    let fact_mgr = crate::memory::facts::FactManager::new(memory_store, vectors, embeddings);
-    match fact_mgr.extract_from_turn(text, &full_response) {
-        Ok(ids) if !ids.is_empty() => {
-            tracing::info!(
-                count = ids.len(),
-                "telegram: extracted facts from conversation"
-            );
+        // Extract facts
+        let fact_mgr = crate::memory::facts::FactManager::new(memory_store, vectors, embeddings);
+        match fact_mgr.extract_from_turn(text, &full_response) {
+            Ok(ids) if !ids.is_empty() => {
+                tracing::info!(
+                    count = ids.len(),
+                    "telegram: extracted facts from conversation"
+                );
+            }
+            _ => {}
         }
-        _ => {}
     }
 
     full_response
@@ -754,7 +773,10 @@ impl TelegramIngressAdapter {
             .split(',')
             .find_map(|s| s.trim().parse::<i64>().ok());
 
-        Self { config, owner_chat_id }
+        Self {
+            config,
+            owner_chat_id,
+        }
     }
 
     fn auth_for_chat(&self, chat_id: i64) -> InboxAuthContext {
@@ -871,9 +893,7 @@ impl IngressAdapter for TelegramIngressAdapter {
                     .as_i64()
                     .map(|i| i.to_string())
                     .unwrap_or_else(|| chat_id.to_string());
-                let native_id = msg["message_id"]
-                    .as_i64()
-                    .map(|i| i.to_string());
+                let native_id = msg["message_id"].as_i64().map(|i| i.to_string());
 
                 let auth = self.auth_for_chat(chat_id);
 
@@ -937,10 +957,7 @@ impl EgressAdapter for TelegramEgressAdapter {
                     outbound_id: msg.id,
                     native_message_id: None,
                     delivered: false,
-                    error: Some(format!(
-                        "invalid chat_id '{}'",
-                        msg.conversation.chat_id
-                    )),
+                    error: Some(format!("invalid chat_id '{}'", msg.conversation.chat_id)),
                 };
             }
         };

@@ -38,9 +38,9 @@ pub fn is_ready() -> bool {
 
 /// Embed a batch of texts. Returns L2-normalised vectors.
 pub fn embed_batch(texts: &[&str]) -> Result<Vec<Vec<f32>>> {
-    let cell = EMBED_MODEL
-        .get()
-        .ok_or_else(|| anyhow::anyhow!("embedding model not initialised; call init_embedding_model first"))?;
+    let cell = EMBED_MODEL.get().ok_or_else(|| {
+        anyhow::anyhow!("embedding model not initialised; call init_embedding_model first")
+    })?;
     let mut model = cell
         .lock()
         .map_err(|_| anyhow::anyhow!("embedding model mutex poisoned"))?;
@@ -51,7 +51,9 @@ pub fn embed_batch(texts: &[&str]) -> Result<Vec<Vec<f32>>> {
 /// Embed a single text. Returns an L2-normalised vector.
 pub fn embed_one(text: &str) -> Result<Vec<f32>> {
     let mut batch = embed_batch(&[text])?;
-    batch.pop().ok_or_else(|| anyhow::anyhow!("empty embedding result"))
+    batch
+        .pop()
+        .ok_or_else(|| anyhow::anyhow!("empty embedding result"))
 }
 
 /// Cosine similarity of two pre-normalised vectors (= dot product).

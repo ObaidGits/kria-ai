@@ -158,7 +158,10 @@ impl HinglishPostEditor {
             }
             Err(_) => {
                 let elapsed_ms = self.timeout.as_millis() as u64;
-                tracing::warn!(timeout_ms = elapsed_ms, "post-edit timed out; using raw transcript");
+                tracing::warn!(
+                    timeout_ms = elapsed_ms,
+                    "post-edit timed out; using raw transcript"
+                );
                 raw.to_string()
             }
         }
@@ -222,19 +225,28 @@ mod tests {
     #[test]
     fn hinglish_marker_triggers_run() {
         let e = ed("on_low_confidence");
-        assert_eq!(e.decide(&t("kya haal hai bhai", 0.95)), PostEditDecision::Run);
+        assert_eq!(
+            e.decide(&t("kya haal hai bhai", 0.95)),
+            PostEditDecision::Run
+        );
     }
 
     #[test]
     fn plain_english_skips() {
         let e = ed("on_low_confidence");
-        assert_eq!(e.decide(&t("schedule a meeting tomorrow", 0.92)), PostEditDecision::Skip);
+        assert_eq!(
+            e.decide(&t("schedule a meeting tomorrow", 0.92)),
+            PostEditDecision::Skip
+        );
     }
 
     #[test]
     fn marker_inside_word_does_not_trigger() {
         // "haircare" contains "hai" but not as a word.
         let e = ed("on_low_confidence");
-        assert_eq!(e.decide(&t("haircare products", 0.95)), PostEditDecision::Skip);
+        assert_eq!(
+            e.decide(&t("haircare products", 0.95)),
+            PostEditDecision::Skip
+        );
     }
 }

@@ -12,9 +12,9 @@
 //!   checkpoint is available.
 //! * High on Tier B → silent downgrade to Balanced.
 
-use serde::{Deserialize, Serialize};
 use crate::image::styles::ImageStyle;
 use crate::platform::vram::ImageTier;
+use serde::{Deserialize, Serialize};
 
 // ─── Quality profile ──────────────────────────────────────────────────────────
 
@@ -288,7 +288,11 @@ mod tests {
     /// hires-fix must never be emitted below Tier S.
     #[test]
     fn hires_fix_banned_below_tier_s() {
-        let non_s = [ImageTier::AStandard, ImageTier::BDropSwap, ImageTier::CRejectOrCloud];
+        let non_s = [
+            ImageTier::AStandard,
+            ImageTier::BDropSwap,
+            ImageTier::CRejectOrCloud,
+        ];
         for &tier in &non_s {
             for &profile in &ALL_PROFILES {
                 for &style in &ALL_STYLES {
@@ -305,9 +309,21 @@ mod tests {
     /// Photorealistic requests should use SDXL Lightning on local GPU tiers.
     #[test]
     fn photorealistic_routes_to_sdxl_on_gpu_tiers() {
-        for &tier in &[ImageTier::SHighRes, ImageTier::AStandard, ImageTier::BDropSwap] {
-            let r = resolve(QualityProfile::Balanced, tier, ImageStyle::Photorealistic, true);
-            assert!(r.use_sdxl, "photorealistic should route to SDXL on {tier:?}");
+        for &tier in &[
+            ImageTier::SHighRes,
+            ImageTier::AStandard,
+            ImageTier::BDropSwap,
+        ] {
+            let r = resolve(
+                QualityProfile::Balanced,
+                tier,
+                ImageStyle::Photorealistic,
+                true,
+            );
+            assert!(
+                r.use_sdxl,
+                "photorealistic should route to SDXL on {tier:?}"
+            );
             assert_eq!(r.model_file, "juggernautXL_v9Lightning.safetensors");
             assert_eq!(r.sampler, "euler");
             assert_eq!(r.scheduler, "sgm_uniform");

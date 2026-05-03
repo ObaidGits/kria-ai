@@ -219,7 +219,9 @@ impl IntentDispatcher {
         approved: bool,
     ) -> Result<DispatchResult, DispatchError> {
         let registry_schemes = self.registry.registered_schemes();
-        let decision = self.policy.classify_capability(cap, Some(&registry_schemes));
+        let decision = self
+            .policy
+            .classify_capability(cap, Some(&registry_schemes));
 
         log_pipeline_step(
             session_id,
@@ -257,7 +259,12 @@ impl IntentDispatcher {
 
         // Rate limit.
         let bucket_key = Self::bucket_key(cap);
-        let rate_check = self.rate_limits.lock().await.get_mut(bucket_key).map(|b| b.try_consume());
+        let rate_check = self
+            .rate_limits
+            .lock()
+            .await
+            .get_mut(bucket_key)
+            .map(|b| b.try_consume());
         match rate_check {
             Some(Err(retry_after)) => {
                 warn!(
@@ -283,7 +290,9 @@ impl IntentDispatcher {
         // validator.  If the model produced something outside the schema via the
         // unconstrained code path, this catches it before any OS call is made.
         if let Ok(raw) = serde_json::to_string(cap) {
-            if let Err(schema_err) = crate::platform::intent::grammar::validate_capability_json(&raw) {
+            if let Err(schema_err) =
+                crate::platform::intent::grammar::validate_capability_json(&raw)
+            {
                 warn!(
                     session_id = session_id,
                     err = %schema_err,
@@ -315,7 +324,11 @@ impl IntentDispatcher {
     async fn execute_on_backend(&self, cap: &Capability, session_id: &str) -> DispatchResult {
         match cap {
             Capability::OpenUrl { url } => {
-                info!(session_id = session_id, url = url.as_str(), "dispatching open_uri");
+                info!(
+                    session_id = session_id,
+                    url = url.as_str(),
+                    "dispatching open_uri"
+                );
                 match self.backend.open_uri(url).await {
                     Ok(()) => DispatchResult::ok(
                         format!("Opened: {}", url.as_str()),
@@ -347,10 +360,9 @@ impl IntentDispatcher {
                             "launched": true,
                         }),
                     ),
-                    Err(e) => DispatchResult::err(format!(
-                        "Failed to launch '{}': {e}",
-                        app_id.as_str()
-                    )),
+                    Err(e) => {
+                        DispatchResult::err(format!("Failed to launch '{}': {e}", app_id.as_str()))
+                    }
                 }
             }
 
@@ -368,11 +380,10 @@ impl IntentDispatcher {
                 // Build a deep-link URL for the messaging app.
                 // NOTE: This opens a DRAFT, not auto-sends. User must press send.
                 let url_result: Result<url::Url, String> = match app {
-                    MessagingApp::WhatsApp => build_whatsapp_url(
-                        &contact.identifier,
-                        body.as_str(),
-                    )
-                    .map_err(|e| e.to_string()),
+                    MessagingApp::WhatsApp => {
+                        build_whatsapp_url(&contact.identifier, body.as_str())
+                            .map_err(|e| e.to_string())
+                    }
                     MessagingApp::Telegram => {
                         // Telegram deep link: https://t.me/<username>?text=<body>
                         let encoded: String = url::form_urlencoded::Serializer::new(String::new())
@@ -386,14 +397,16 @@ impl IntentDispatcher {
                             .append_pair("to", &contact.identifier)
                             .append_pair("body", body.as_str())
                             .finish();
-                        url::Url::parse(&format!("https://mail.google.com/mail/?view=cm&{}", encoded))
-                            .map_err(|e| e.to_string())
+                        url::Url::parse(&format!(
+                            "https://mail.google.com/mail/?view=cm&{}",
+                            encoded
+                        ))
+                        .map_err(|e| e.to_string())
                     }
                     MessagingApp::Signal => {
                         // Signal doesn't have a universal deep-link standard on Linux desktop;
                         // fall back to opening the app and noting that the message was pre-filled.
-                        url::Url::parse("https://signal.org/install")
-                            .map_err(|e| e.to_string())
+                        url::Url::parse("https://signal.org/install").map_err(|e| e.to_string())
                     }
                 };
 
@@ -427,7 +440,11 @@ impl IntentDispatcher {
                 );
                 match tokio::fs::write(path.as_path(), content).await {
                     Ok(()) => DispatchResult::ok(
-                        format!("Written {} bytes to {}", content.len(), path.as_path().display()),
+                        format!(
+                            "Written {} bytes to {}",
+                            content.len(),
+                            path.as_path().display()
+                        ),
                         serde_json::json!({
                             "path": path.as_path().display().to_string(),
                             "bytes_written": content.len(),

@@ -152,7 +152,9 @@ impl ToolHandler for WriteFile {
             return ToolResult::err("content exceeds 10MB limit");
         }
         if !overwrite && tokio::fs::metadata(path).await.is_ok() {
-            return ToolResult::err(format!("write_file failed: file already exists and overwrite is false: {path}"));
+            return ToolResult::err(format!(
+                "write_file failed: file already exists and overwrite is false: {path}"
+            ));
         }
         if let Some(parent) = PathBuf::from(path).parent() {
             let _ = tokio::fs::create_dir_all(parent).await;

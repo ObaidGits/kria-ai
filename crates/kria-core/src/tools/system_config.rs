@@ -79,24 +79,33 @@ impl ToolHandler for SetBrightness {
             .min(100);
         if cfg!(target_os = "linux") {
             let dbus_addr = std::env::var("DBUS_SESSION_BUS_ADDRESS")
-                .or_else(|_| std::env::var("XDG_RUNTIME_DIR").map(|d| format!("unix:path={}/bus", d)))
+                .or_else(|_| {
+                    std::env::var("XDG_RUNTIME_DIR").map(|d| format!("unix:path={}/bus", d))
+                })
                 .unwrap_or_else(|_| "unix:path=/run/user/1000/bus".to_string());
             // 1st: GNOME SettingsDaemon D-Bus — controls hardware backlight AND updates system tray slider
             let gdbus_val = format!("<int32 {}>", level);
             let gnome_ok = tokio::process::Command::new("gdbus")
                 .args([
-                    "call", "--session",
-                    "--dest", "org.gnome.SettingsDaemon.Power",
-                    "--object-path", "/org/gnome/SettingsDaemon/Power",
-                    "--method", "org.freedesktop.DBus.Properties.Set",
-                    "org.gnome.SettingsDaemon.Power.Screen", "Brightness",
+                    "call",
+                    "--session",
+                    "--dest",
+                    "org.gnome.SettingsDaemon.Power",
+                    "--object-path",
+                    "/org/gnome/SettingsDaemon/Power",
+                    "--method",
+                    "org.freedesktop.DBus.Properties.Set",
+                    "org.gnome.SettingsDaemon.Power.Screen",
+                    "Brightness",
                     &gdbus_val,
                 ])
                 .env("DBUS_SESSION_BUS_ADDRESS", &dbus_addr)
                 .output()
                 .await;
             if matches!(gnome_ok, Ok(ref o) if o.status.success()) {
-                return ToolResult::ok(serde_json::json!({ "brightness": level, "backend": "gnome-settingsd" }));
+                return ToolResult::ok(
+                    serde_json::json!({ "brightness": level, "backend": "gnome-settingsd" }),
+                );
             }
             // 2nd: brightnessctl (hardware backlight, works without GNOME)
             let bc = tokio::process::Command::new("brightnessctl")
@@ -104,7 +113,9 @@ impl ToolHandler for SetBrightness {
                 .output()
                 .await;
             if matches!(bc, Ok(ref o) if o.status.success()) {
-                return ToolResult::ok(serde_json::json!({ "brightness": level, "backend": "brightnessctl" }));
+                return ToolResult::ok(
+                    serde_json::json!({ "brightness": level, "backend": "brightnessctl" }),
+                );
             }
             // 3rd: xrandr (gamma/color correction only — does not change hardware backlight)
             let fraction = format!("{:.2}", level as f64 / 100.0);
@@ -121,7 +132,9 @@ impl ToolHandler for SetBrightness {
                         .output()
                         .await;
                     if matches!(xr2, Ok(ref o) if o.status.success()) {
-                        return ToolResult::ok(serde_json::json!({ "brightness": level, "backend": "xrandr-gamma" }));
+                        return ToolResult::ok(
+                            serde_json::json!({ "brightness": level, "backend": "xrandr-gamma" }),
+                        );
                     }
                 }
             }

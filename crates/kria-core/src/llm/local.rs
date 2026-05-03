@@ -1,6 +1,5 @@
 use crate::infra::circuit_breaker::{CircuitBreaker, CircuitBreakerError, CircuitState};
-use crate::infra::pipeline_trace::sanitize_text_for_logs;
-use crate::llm::orchestrator::server_manager::LlamaServerManager;
+use crate::llm::orchestrator::server_manager::{LlamaServerManager, STATE_READY};
 use crate::llm::{
     extract_openai_content_text, extract_openai_message_text, extract_openai_tool_calls,
     trim_messages_for_context, ChatMessage, ContextTooLargeError, LlmBackend, LlmResponse,
@@ -62,6 +61,11 @@ impl LocalBackend {
     /// Safe to call on `&self` (uses `OnceLock`) — idempotent, first call wins.
     pub fn attach_server_manager(&self, mgr: Arc<LlamaServerManager>) {
         let _ = self.server_manager.set(mgr);
+    }
+
+    /// Returns the attached orchestrator server manager, if any.
+    pub fn server_manager(&self) -> Option<Arc<LlamaServerManager>> {
+        self.server_manager.get().cloned()
     }
 
     /// Resolve the current API URL — from server manager if attached, else fallback.
@@ -126,19 +130,24 @@ impl LocalBackend {
         self.model_label = label;
     }
 
-    fn looks_like_context_overflow_response(status: reqwest::StatusCode, body: &str) -> bool {
-        if matches!(status.as_u16(), 400 | 413 | 422) {
-            return true;
-        }
-
+    fn looks_like_context_overflow_response(_status: reqwest::StatusCode, body: &str) -> bool {
         let lower = body.to_ascii_lowercase();
         lower.contains("context")
-            && (lower.contains("too large")
-                || lower.contains("too long")
-                || lower.contains("overflow")
-                || lower.contains("token limit")
-                || lower.contains("max tokens")
-                || lower.contains("exceeds"))
+            || lower.contains("token")
+            || lower.contains("tokens")
+            || lower.contains("exceed")
+            || lower.contains("exceeds")
+            || lower.contains("too large")
+            || lower.contains("too long")
+            || lower.contains("overflow")
+    }
+
+    fn looks_like_vision_not_supported_response(body: &str) -> bool {
+        let lower = body.to_ascii_lowercase();
+        lower.contains("image input is not supported")
+            || lower.contains("vision input is not supported")
+            || (lower.contains("mmproj") && lower.contains("image"))
+            || (lower.contains("mmproj") && lower.contains("vision"))
     }
 
     fn looks_like_transport_connectivity_error(message: &str) -> bool {
@@ -152,12 +161,74 @@ impl LocalBackend {
             || lower.contains("broken pipe")
     }
 
+    fn estimate_prompt_tokens(messages: &[ChatMessage], tools: Option<&[ToolSchema]>) -> usize {
+        let message_chars: usize = messages.iter().map(|m| m.content.chars().count()).sum();
+        let image_overhead: usize = messages
+            .iter()
+            .map(|m| m.images.as_ref().map(|imgs| imgs.len()).unwrap_or(0) * 512)
+            .sum();
+        let tool_chars: usize = tools
+            .map(|defs| {
+                defs.iter()
+                    .map(|schema| {
+                        schema.name.len()
+                            + schema.description.len()
+                            + schema.parameters.to_string().len()
+                    })
+                    .sum()
+            })
+            .unwrap_or(0);
+
+        // Approximation only; leave headroom for wire-format overhead.
+        ((message_chars + image_overhead + tool_chars) / 4).saturating_add(64)
+    }
+
+    fn clamp_max_tokens_for_context(
+        &self,
+        messages: &[ChatMessage],
+        tools: Option<&[ToolSchema]>,
+        requested_max_tokens: u32,
+    ) -> u32 {
+        let context_window = self.context_window.load(Ordering::Acquire).max(512) as u32;
+        let estimated_prompt_tokens = Self::estimate_prompt_tokens(messages, tools) as u32;
+        let reserve_tokens = 96u32;
+        let available_completion =
+            context_window.saturating_sub(estimated_prompt_tokens.saturating_add(reserve_tokens));
+
+        if available_completion < 64 {
+            return 0;
+        }
+
+        // Never allow completion to monopolize the full context.
+        let context_half_cap = (context_window / 2).max(128);
+        requested_max_tokens
+            .min(available_completion)
+            .min(context_half_cap)
+            .max(64)
+    }
+
     fn should_ignore_for_circuit(error: &anyhow::Error) -> bool {
         if error.downcast_ref::<ContextTooLargeError>().is_some() {
             return true;
         }
 
-        Self::looks_like_transport_connectivity_error(&error.to_string())
+        let message = error.to_string();
+        Self::looks_like_transport_connectivity_error(&message)
+            || Self::looks_like_vision_not_supported_response(&message)
+    }
+
+    /// Returns whether this backend can currently process image inputs.
+    pub fn runtime_supports_vision(&self) -> bool {
+        if !self.capabilities.iter().any(|cap| cap == "vision") {
+            return false;
+        }
+        if let Some(mgr) = self.server_manager.get() {
+            if mgr.state() == STATE_READY {
+                return mgr.current_vision_enabled();
+            }
+            return mgr.vision_configured();
+        }
+        true
     }
 
     async fn health_check_once(&self) -> bool {
@@ -168,6 +239,28 @@ impl LocalBackend {
             .await
             .map(|r| r.status().is_success())
             .unwrap_or(false)
+    }
+
+    async fn wait_for_backend_ready(&self, timeout_secs: u64) -> bool {
+        if !self.wait_for_swap(timeout_secs).await {
+            return false;
+        }
+
+        // Without an orchestrator-backed server manager we have no swap lifecycle;
+        // rely on the request path to surface errors directly.
+        if self.server_manager.get().is_none() {
+            return true;
+        }
+
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout_secs.max(1));
+        while tokio::time::Instant::now() < deadline {
+            if self.health_check_once().await {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+
+        false
     }
 
     async fn try_recover_open_circuit(&self, name: &str, attempt: usize) -> bool {
@@ -197,6 +290,17 @@ impl LocalBackend {
         temperature: f32,
         max_tokens: u32,
     ) -> anyhow::Result<LlmResponse> {
+        let max_tokens = self.clamp_max_tokens_for_context(messages, tools, max_tokens);
+        if max_tokens == 0 {
+            tracing::warn!(
+                context_window = self.context_window.load(Ordering::Acquire),
+                estimated_prompt_tokens = Self::estimate_prompt_tokens(messages, tools),
+                message_count = messages.len(),
+                "local LLM prompt leaves no completion budget; returning context overflow"
+            );
+            return Err(ContextTooLargeError.into());
+        }
+
         // Convert messages to the OpenAI wire format, using multimodal content
         // for any messages that contain images (required for vision models).
         let wire_messages: Vec<serde_json::Value> = messages
@@ -262,11 +366,16 @@ impl LocalBackend {
             if Self::looks_like_context_overflow_response(status, &body_text) {
                 return Err(ContextTooLargeError.into());
             }
+            if Self::looks_like_vision_not_supported_response(&body_text) {
+                anyhow::bail!("local LLM vision unavailable: {body_text}");
+            }
 
-            anyhow::bail!(
-                "local LLM request failed (status {status}): {}",
-                sanitize_text_for_logs(&body_text, 220)
+            tracing::error!(
+                status = %status,
+                response_body = %body_text,
+                "local LLM request failed with non-overflow error"
             );
+            anyhow::bail!("local LLM API error (status {status}): {body_text}");
         }
 
         let body: serde_json::Value = resp.json().await?;
@@ -306,6 +415,17 @@ impl LocalBackend {
         temperature: f32,
         max_tokens: u32,
     ) -> anyhow::Result<LlmResponse> {
+        let max_tokens = self.clamp_max_tokens_for_context(messages, None, max_tokens);
+        if max_tokens == 0 {
+            tracing::warn!(
+                context_window = self.context_window.load(Ordering::Acquire),
+                estimated_prompt_tokens = Self::estimate_prompt_tokens(messages, None),
+                message_count = messages.len(),
+                "grammar prompt leaves no completion budget; returning context overflow"
+            );
+            return Err(ContextTooLargeError.into());
+        }
+
         // Wait for any in-progress swap before sending (Notify-based, no busy-poll).
         if !self.wait_for_swap(120).await {
             anyhow::bail!("local LLM: swap timeout exceeded (120s) waiting for grammar chat");
@@ -356,7 +476,9 @@ impl LocalBackend {
             let body_text = resp.text().await.unwrap_or_default();
             // If the server doesn't support json_schema (older llama.cpp), fall back to
             // standard chat without grammar constraint but log a warning.
-            if matches!(status.as_u16(), 400 | 422) && body_text.to_ascii_lowercase().contains("json_schema") {
+            if matches!(status.as_u16(), 400 | 422)
+                && body_text.to_ascii_lowercase().contains("json_schema")
+            {
                 tracing::warn!(
                     "[LocalBackend] llama.cpp does not support json_schema response_format; \
                      falling back to unconstrained chat. Upgrade llama.cpp for llguidance support."
@@ -366,10 +488,12 @@ impl LocalBackend {
             if Self::looks_like_context_overflow_response(status, &body_text) {
                 return Err(ContextTooLargeError.into());
             }
-            anyhow::bail!(
-                "grammar chat request failed (status {status}): {}",
-                sanitize_text_for_logs(&body_text, 220)
+            tracing::error!(
+                status = %status,
+                response_body = %body_text,
+                "grammar chat request failed with non-overflow error"
             );
+            anyhow::bail!("local LLM grammar API error (status {status}): {body_text}");
         }
 
         let body: serde_json::Value = resp.json().await?;
@@ -379,11 +503,13 @@ impl LocalBackend {
 
         // With json_schema mode, the model emits structured JSON in the content field.
         // Try to extract tool_calls from the JSON content if it looks like a tool-call object.
-        let tool_calls = if content.trim_start().starts_with('{') || content.trim_start().starts_with('[') {
-            extract_tool_calls_from_json_content(&content).or_else(|| extract_openai_tool_calls(message))
-        } else {
-            extract_openai_tool_calls(message)
-        };
+        let tool_calls =
+            if content.trim_start().starts_with('{') || content.trim_start().starts_with('[') {
+                extract_tool_calls_from_json_content(&content)
+                    .or_else(|| extract_openai_tool_calls(message))
+            } else {
+                extract_openai_tool_calls(message)
+            };
 
         let usage = body["usage"].as_object().map(|u| crate::llm::TokenUsage {
             prompt_tokens: u["prompt_tokens"].as_u64().unwrap_or(0) as u32,
@@ -415,7 +541,8 @@ impl LlmBackend for LocalBackend {
     }
 
     fn tokenizer_base_url(&self) -> String {
-        self.resolve_api_url()
+        let url = self.resolve_api_url();
+        url.strip_suffix("/v1").unwrap_or(&url).to_string()
     }
 
     async fn chat(
@@ -425,14 +552,14 @@ impl LlmBackend for LocalBackend {
         temperature: f32,
         max_tokens: u32,
     ) -> anyhow::Result<LlmResponse> {
-        // V10: Wait for swap to complete before sending a request
-        if !self.wait_for_swap(120).await {
-            anyhow::bail!("local LLM: swap timeout exceeded (120s)");
-        }
-
         let mut current_messages = messages.to_vec();
+        const MAX_CHAT_ATTEMPTS: usize = 5;
 
-        for attempt in 0..3 {
+        for attempt in 0..MAX_CHAT_ATTEMPTS {
+            if !self.wait_for_backend_ready(120).await {
+                anyhow::bail!("local LLM: backend readiness timeout exceeded (120s)");
+            }
+
             match self
                 .circuit
                 .call(
@@ -453,19 +580,60 @@ impl LlmBackend for LocalBackend {
                 }
                 Err(CircuitBreakerError::Inner(e)) => {
                     if e.downcast_ref::<ContextTooLargeError>().is_some() {
+                        let total_chars: usize = current_messages
+                            .iter()
+                            .map(|m| m.content.chars().count())
+                            .sum();
                         tracing::warn!(
                             attempt,
                             message_count = current_messages.len(),
-                            total_chars = current_messages
-                                .iter()
-                                .map(|m| m.content.chars().count())
-                                .sum::<usize>(),
+                            total_chars,
                             "context too large, trimming"
                         );
-                        current_messages = trim_messages_for_context(&current_messages, attempt);
+
+                        if current_messages.len() <= 2 {
+                            tracing::error!(
+                                attempt,
+                                message_count = current_messages.len(),
+                                total_chars,
+                                "context overflow persisted with minimal prompt window; aborting without further retries"
+                            );
+                            return Err(ContextTooLargeError.into());
+                        }
+
+                        let trimmed = trim_messages_for_context(&current_messages, attempt);
+                        let trimmed_total_chars: usize =
+                            trimmed.iter().map(|m| m.content.chars().count()).sum();
+                        if trimmed.len() >= current_messages.len()
+                            && trimmed_total_chars >= total_chars
+                        {
+                            tracing::error!(
+                                attempt,
+                                message_count = current_messages.len(),
+                                total_chars,
+                                trimmed_message_count = trimmed.len(),
+                                trimmed_total_chars,
+                                "context trimmer made no progress; aborting"
+                            );
+                            return Err(ContextTooLargeError.into());
+                        }
+
+                        current_messages = trimmed;
                         continue;
                     }
-                    if attempt == 2 {
+                    if Self::looks_like_transport_connectivity_error(&e.to_string()) {
+                        tracing::warn!(
+                            attempt,
+                            "local LLM transport failed; waiting for swap/health before retry"
+                        );
+                        let _ = self.wait_for_backend_ready(30).await;
+                        if attempt + 1 < MAX_CHAT_ATTEMPTS {
+                            tokio::time::sleep(Duration::from_millis(250 * (attempt as u64 + 1)))
+                                .await;
+                            continue;
+                        }
+                    }
+                    if attempt + 1 >= MAX_CHAT_ATTEMPTS {
                         return Err(e);
                     }
                 }
@@ -473,7 +641,7 @@ impl LlmBackend for LocalBackend {
         }
 
         anyhow::bail!(
-            "local LLM context overflow after 3 attempts; start a new session or increase model context"
+            "local LLM context overflow after {MAX_CHAT_ATTEMPTS} attempts; start a new session or increase model context"
         )
     }
 
@@ -484,6 +652,17 @@ impl LlmBackend for LocalBackend {
         temperature: f32,
         max_tokens: u32,
     ) -> anyhow::Result<Pin<Box<dyn Stream<Item = String> + Send>>> {
+        let max_tokens = self.clamp_max_tokens_for_context(messages, tools, max_tokens);
+        if max_tokens == 0 {
+            tracing::warn!(
+                context_window = self.context_window.load(Ordering::Acquire),
+                estimated_prompt_tokens = Self::estimate_prompt_tokens(messages, tools),
+                message_count = messages.len(),
+                "stream prompt leaves no completion budget; returning context overflow"
+            );
+            return Err(ContextTooLargeError.into());
+        }
+
         // V10: Wait for swap to complete
         if !self.wait_for_swap(120).await {
             anyhow::bail!("local LLM: swap timeout exceeded (120s)");
@@ -549,10 +728,12 @@ impl LlmBackend for LocalBackend {
             }
 
             self.circuit.on_failure().await;
-            anyhow::bail!(
-                "local LLM stream request failed (status {status}): {}",
-                sanitize_text_for_logs(&body_text, 220)
+            tracing::error!(
+                status = %status,
+                response_body = %body_text,
+                "local LLM stream request failed with non-overflow error"
             );
+            anyhow::bail!("local LLM stream API error (status {status}): {body_text}");
         }
 
         self.circuit.on_success().await;
@@ -560,48 +741,45 @@ impl LlmBackend for LocalBackend {
         // V13: Build cancellable stream using select! on CancellationToken
         let cancel = self.cancel_token();
 
-        let stream = futures::stream::unfold(
-            (resp, cancel),
-            |(mut resp, cancel)| async move {
-                // If we have a cancel token, use select! to abort on cancellation
-                let chunk_result = if let Some(ref token) = cancel {
-                    tokio::select! {
-                        biased;
-                        _ = token.cancelled() => {
-                            tracing::info!("local LLM stream: cancelled by orchestrator swap");
-                            return None;
-                        }
-                        result = resp.chunk() => result,
+        let stream = futures::stream::unfold((resp, cancel), |(mut resp, cancel)| async move {
+            // If we have a cancel token, use select! to abort on cancellation
+            let chunk_result = if let Some(ref token) = cancel {
+                tokio::select! {
+                    biased;
+                    _ = token.cancelled() => {
+                        tracing::info!("local LLM stream: cancelled by orchestrator swap");
+                        return None;
                     }
-                } else {
-                    resp.chunk().await
-                };
+                    result = resp.chunk() => result,
+                }
+            } else {
+                resp.chunk().await
+            };
 
-                match chunk_result {
-                    Ok(Some(chunk)) => {
-                        let text = String::from_utf8_lossy(&chunk).to_string();
-                        // Parse SSE: lines starting with "data: "
-                        let mut tokens = String::new();
-                        for line in text.lines() {
-                            if let Some(data) = line.strip_prefix("data: ") {
-                                if data == "[DONE]" {
-                                    continue;
-                                }
-                                if let Ok(v) = serde_json::from_str::<serde_json::Value>(data) {
-                                    let delta_content = &v["choices"][0]["delta"]["content"];
-                                    let tok = extract_openai_content_text(delta_content);
-                                    if !tok.is_empty() {
-                                        tokens.push_str(&tok);
-                                    }
+            match chunk_result {
+                Ok(Some(chunk)) => {
+                    let text = String::from_utf8_lossy(&chunk).to_string();
+                    // Parse SSE: lines starting with "data: "
+                    let mut tokens = String::new();
+                    for line in text.lines() {
+                        if let Some(data) = line.strip_prefix("data: ") {
+                            if data == "[DONE]" {
+                                continue;
+                            }
+                            if let Ok(v) = serde_json::from_str::<serde_json::Value>(data) {
+                                let delta_content = &v["choices"][0]["delta"]["content"];
+                                let tok = extract_openai_content_text(delta_content);
+                                if !tok.is_empty() {
+                                    tokens.push_str(&tok);
                                 }
                             }
                         }
-                        Some((tokens, (resp, cancel)))
                     }
-                    _ => None,
+                    Some((tokens, (resp, cancel)))
                 }
-            },
-        );
+                _ => None,
+            }
+        });
 
         Ok(Box::pin(stream))
     }
@@ -629,11 +807,13 @@ fn extract_tool_calls_from_json_content(content: &str) -> Option<Vec<serde_json:
     let calls: Vec<serde_json::Value> = items
         .into_iter()
         .filter_map(|item| {
-            let name = item.get("tool")
+            let name = item
+                .get("tool")
                 .or_else(|| item.get("name"))
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string())?;
-            let arguments = item.get("arguments")
+            let arguments = item
+                .get("arguments")
                 .or_else(|| item.get("args"))
                 .cloned()
                 .unwrap_or(serde_json::Value::Object(Default::default()));
@@ -649,5 +829,9 @@ fn extract_tool_calls_from_json_content(content: &str) -> Option<Vec<serde_json:
         })
         .collect();
 
-    if calls.is_empty() { None } else { Some(calls) }
+    if calls.is_empty() {
+        None
+    } else {
+        Some(calls)
+    }
 }

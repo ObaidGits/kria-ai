@@ -215,10 +215,7 @@ struct ListInstalledPackages;
 #[async_trait]
 impl ToolHandler for ListInstalledPackages {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let limit = params
-            .get("limit")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(500) as usize;
+        let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(500) as usize;
 
         let mut sources: Vec<serde_json::Value> = Vec::new();
 
@@ -269,7 +266,11 @@ impl ToolHandler for ListInstalledPackages {
         }
 
         // snap
-        if let Ok(out) = tokio::process::Command::new("snap").arg("list").output().await {
+        if let Ok(out) = tokio::process::Command::new("snap")
+            .arg("list")
+            .output()
+            .await
+        {
             if out.status.success() {
                 let names: Vec<String> = String::from_utf8_lossy(&out.stdout)
                     .lines()
@@ -1018,15 +1019,13 @@ async fn get_info_with_pm(pm: PackageManager, name: &str) -> serde_json::Value {
                 return serde_json::json!({"name": name, "found": false, "source": "apt"});
             }
             let field = |key: &str| -> Option<String> {
-                out.lines()
-                    .find(|l| l.starts_with(key))
-                    .map(|l| {
-                        l.split_once(": ")
-                            .map(|x| x.1)
-                            .unwrap_or("")
-                            .trim()
-                            .to_string()
-                    })
+                out.lines().find(|l| l.starts_with(key)).map(|l| {
+                    l.split_once(": ")
+                        .map(|x| x.1)
+                        .unwrap_or("")
+                        .trim()
+                        .to_string()
+                })
             };
             serde_json::json!({
                 "name": name,
@@ -1046,15 +1045,13 @@ async fn get_info_with_pm(pm: PackageManager, name: &str) -> serde_json::Value {
                 return serde_json::json!({"name": name, "found": false, "source": "dnf"});
             }
             let field = |key: &str| -> Option<String> {
-                out.lines()
-                    .find(|l| l.starts_with(key))
-                    .map(|l| {
-                        l.split_once(": ")
-                            .map(|x| x.1)
-                            .unwrap_or("")
-                            .trim()
-                            .to_string()
-                    })
+                out.lines().find(|l| l.starts_with(key)).map(|l| {
+                    l.split_once(": ")
+                        .map(|x| x.1)
+                        .unwrap_or("")
+                        .trim()
+                        .to_string()
+                })
             };
             serde_json::json!({
                 "name": name,
@@ -1079,15 +1076,13 @@ async fn get_info_with_pm(pm: PackageManager, name: &str) -> serde_json::Value {
                 return serde_json::json!({"name": name, "found": false, "source": "pacman"});
             }
             let field = |key: &str| -> Option<String> {
-                out.lines()
-                    .find(|l| l.starts_with(key))
-                    .map(|l| {
-                        l.split_once(": ")
-                            .map(|x| x.1)
-                            .unwrap_or("")
-                            .trim()
-                            .to_string()
-                    })
+                out.lines().find(|l| l.starts_with(key)).map(|l| {
+                    l.split_once(": ")
+                        .map(|x| x.1)
+                        .unwrap_or("")
+                        .trim()
+                        .to_string()
+                })
             };
             serde_json::json!({
                 "name": name,
@@ -1101,15 +1096,13 @@ async fn get_info_with_pm(pm: PackageManager, name: &str) -> serde_json::Value {
         PackageManager::Zypper => {
             let out = run_cmd("zypper", &["info", name]).await.unwrap_or_default();
             let field = |key: &str| -> Option<String> {
-                out.lines()
-                    .find(|l| l.contains(key))
-                    .map(|l| {
-                        l.split_once(": ")
-                            .map(|x| x.1)
-                            .unwrap_or("")
-                            .trim()
-                            .to_string()
-                    })
+                out.lines().find(|l| l.contains(key)).map(|l| {
+                    l.split_once(": ")
+                        .map(|x| x.1)
+                        .unwrap_or("")
+                        .trim()
+                        .to_string()
+                })
             };
             serde_json::json!({
                 "name": name,
@@ -1164,15 +1157,13 @@ async fn get_info_with_pm(pm: PackageManager, name: &str) -> serde_json::Value {
         PackageManager::Snap => {
             let out = run_cmd("snap", &["info", name]).await.unwrap_or_default();
             let field = |key: &str| -> Option<String> {
-                out.lines()
-                    .find(|l| l.starts_with(key))
-                    .map(|l| {
-                        l.split_once(": ")
-                            .map(|x| x.1)
-                            .unwrap_or("")
-                            .trim()
-                            .to_string()
-                    })
+                out.lines().find(|l| l.starts_with(key)).map(|l| {
+                    l.split_once(": ")
+                        .map(|x| x.1)
+                        .unwrap_or("")
+                        .trim()
+                        .to_string()
+                })
             };
             serde_json::json!({
                 "name": name,

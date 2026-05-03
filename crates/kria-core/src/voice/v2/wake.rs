@@ -393,18 +393,14 @@ mod oww {
             Some(frames)
         }
 
-        fn run_embedding(
-            &self,
-            mels: &[[f32; OWW_MEL_BINS]],
-        ) -> Option<[f32; OWW_EMBED_DIM]> {
+        fn run_embedding(&self, mels: &[[f32; OWW_MEL_BINS]]) -> Option<[f32; OWW_EMBED_DIM]> {
             let mut sess = self.embed.lock().ok()?;
             let mut flat = Vec::with_capacity(OWW_MEL_WINDOW * OWW_MEL_BINS);
             for f in mels.iter().take(OWW_MEL_WINDOW) {
                 flat.extend_from_slice(f);
             }
             let input =
-                Tensor::from_array(([1usize, OWW_MEL_WINDOW, OWW_MEL_BINS, 1usize], flat))
-                    .ok()?;
+                Tensor::from_array(([1usize, OWW_MEL_WINDOW, OWW_MEL_BINS, 1usize], flat)).ok()?;
             let outputs = sess.run(ort::inputs!["input_1" => input]).ok()?;
             let value = outputs.iter().next()?.1;
             let (_shape, data) = value.try_extract_tensor::<f32>().ok()?;
@@ -422,11 +418,8 @@ mod oww {
             for e in embeds {
                 flat.extend_from_slice(e);
             }
-            let input = Tensor::from_array((
-                [1usize, OWW_EMBED_WINDOW, OWW_EMBED_DIM],
-                flat,
-            ))
-            .ok()?;
+            let input =
+                Tensor::from_array(([1usize, OWW_EMBED_WINDOW, OWW_EMBED_DIM], flat)).ok()?;
             // Wake-head exports use varying first-input names; pick whatever
             // ort reports.
             let input_name = sess
@@ -434,9 +427,7 @@ mod oww {
                 .first()
                 .map(|i| i.name().to_string())
                 .unwrap_or_else(|| "input".into());
-            let outputs = sess
-                .run(ort::inputs![input_name.as_str() => input])
-                .ok()?;
+            let outputs = sess.run(ort::inputs![input_name.as_str() => input]).ok()?;
             let value = outputs.iter().next()?.1;
             let (_shape, data) = value.try_extract_tensor::<f32>().ok()?;
             data.first().copied()
@@ -503,7 +494,10 @@ mod tests {
     #[test]
     fn model_paths_resolve_alongside_keyword() {
         let m = WakeWordModels::from_keyword_path(PathBuf::from("/m/wake/hey_ria.onnx"));
-        assert_eq!(m.melspectrogram, PathBuf::from("/m/wake/melspectrogram.onnx"));
+        assert_eq!(
+            m.melspectrogram,
+            PathBuf::from("/m/wake/melspectrogram.onnx")
+        );
         assert_eq!(m.embedding, PathBuf::from("/m/wake/embedding_model.onnx"));
         assert_eq!(m.keyword, PathBuf::from("/m/wake/hey_ria.onnx"));
     }

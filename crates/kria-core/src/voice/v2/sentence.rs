@@ -182,13 +182,7 @@ mod tests {
     fn handles_devanagari_danda() {
         let mut s = SentenceSplitter::new();
         let out = s.push("Mujhe meeting schedule karni hai। Kal subah।");
-        assert_eq!(
-            out,
-            vec![
-                "Mujhe meeting schedule karni hai।",
-                "Kal subah।"
-            ]
-        );
+        assert_eq!(out, vec!["Mujhe meeting schedule karni hai।", "Kal subah।"]);
     }
 
     #[test]

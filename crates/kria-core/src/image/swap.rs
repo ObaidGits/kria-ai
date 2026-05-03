@@ -259,8 +259,11 @@ impl SwapCoordinator {
     pub fn tick(&self) -> bool {
         let n = self.swap_count.fetch_add(1, Ordering::AcqRel) + 1;
         if self.defrag_threshold > 0 && n % self.defrag_threshold == 0 {
-            info!(swap_count = n, defrag_threshold = self.defrag_threshold,
-                "SwapCoordinator: defrag threshold reached");
+            info!(
+                swap_count = n,
+                defrag_threshold = self.defrag_threshold,
+                "SwapCoordinator: defrag threshold reached"
+            );
             true
         } else {
             false

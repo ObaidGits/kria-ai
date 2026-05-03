@@ -10,8 +10,7 @@
 mod common;
 
 use common::{
-    internet_available, sidecar_available, tool_call_response,
-    MockLlmServer, SandboxDir,
+    internet_available, sidecar_available, tool_call_response, MockLlmServer, SandboxDir,
 };
 use kria_core::agent::router::{Intent, IntentRouter};
 use kria_core::safety::policy::{PolicyEngine, RiskLevel};
@@ -63,7 +62,11 @@ async fn functional_chain01_stats_plus_summary() {
     let reg = registry::build_default_registry();
     let cpu_handler = reg.get_handler("get_cpu_usage").unwrap().clone();
     let cpu_result = cpu_handler.execute(serde_json::json!({})).await;
-    assert!(cpu_result.success, "Step 1 (cpu_usage) failed: {:?}", cpu_result.error);
+    assert!(
+        cpu_result.success,
+        "Step 1 (cpu_usage) failed: {:?}",
+        cpu_result.error
+    );
 
     let pct = cpu_result.data["percent"]
         .as_f64()
@@ -106,13 +109,21 @@ async fn functional_chain02_read_transform_write() {
     let read_result = read_handler
         .execute(serde_json::json!({ "path": source.to_str().unwrap() }))
         .await;
-    assert!(read_result.success, "read_file step failed: {:?}", read_result.error);
+    assert!(
+        read_result.success,
+        "read_file step failed: {:?}",
+        read_result.error
+    );
 
-    let content = read_result.data["content"].as_str()
+    let content = read_result.data["content"]
+        .as_str()
         .or(read_result.data.as_str())
         .unwrap_or("")
         .to_owned();
-    assert!(content.contains("hello"), "Read content should contain 'hello'");
+    assert!(
+        content.contains("hello"),
+        "Read content should contain 'hello'"
+    );
 
     // Step 2: transform (uppercase) and write to new file
     let transformed = content.to_uppercase();
@@ -124,7 +135,11 @@ async fn functional_chain02_read_transform_write() {
             "content": transformed
         }))
         .await;
-    assert!(write_result.success, "write_file step failed: {:?}", write_result.error);
+    assert!(
+        write_result.success,
+        "write_file step failed: {:?}",
+        write_result.error
+    );
 
     // Verify
     let content_out = sandbox.read_file("dest.txt");
@@ -141,9 +156,7 @@ async fn functional_chain02_read_transform_write() {
 #[test]
 fn routing_chain03_conditional_notification_is_complex_task() {
     // PROMPT-ID: CHAIN-03
-    let r = IntentRouter::classify(
-        "If CPU usage is above 80%, send me a notification.",
-    );
+    let r = IntentRouter::classify("If CPU usage is above 80%, send me a notification.");
     assert!(
         matches!(r.intent, Intent::ComplexTask | Intent::Conversation),
         "Conditional CPU alert should be ComplexTask, got: {:?}",
@@ -158,9 +171,8 @@ fn routing_chain03_conditional_notification_is_complex_task() {
 #[test]
 fn routing_chain04_fetch_then_summarise_is_complex_task() {
     // PROMPT-ID: CHAIN-04
-    let r = IntentRouter::classify(
-        "Fetch the Rust 2024 edition blog post and summarise it for me.",
-    );
+    let r =
+        IntentRouter::classify("Fetch the Rust 2024 edition blog post and summarise it for me.");
     assert!(
         matches!(r.intent, Intent::ComplexTask | Intent::Conversation),
         "Fetch+summarise should be ComplexTask, got: {:?}",
@@ -185,7 +197,8 @@ async fn functional_chain04_fetch_and_summarise() {
         "fetch_webpage must not panic"
     );
     if result.success {
-        let text = result.data["text"].as_str()
+        let text = result.data["text"]
+            .as_str()
             .or(result.data["content"].as_str())
             .unwrap_or("");
         assert!(
@@ -202,9 +215,7 @@ async fn functional_chain04_fetch_and_summarise() {
 #[test]
 fn routing_chain05_git_status_commit_complex_task() {
     // PROMPT-ID: CHAIN-05
-    let r = IntentRouter::classify(
-        "Check git status and commit if there are changes.",
-    );
+    let r = IntentRouter::classify("Check git status and commit if there are changes.");
     assert!(
         matches!(r.intent, Intent::ComplexTask | Intent::Conversation),
         "Git status then conditional commit should be ComplexTask, got: {:?}",
@@ -224,7 +235,11 @@ async fn functional_chain05_git_status_check() {
     let result = handler
         .execute(serde_json::json!({ "path": kria.to_str().unwrap() }))
         .await;
-    assert!(result.success, "git_status should succeed: {:?}", result.error);
+    assert!(
+        result.success,
+        "git_status should succeed: {:?}",
+        result.error
+    );
     // git_commit is Red — we verify policy here only
     let engine = PolicyEngine::new();
     let d = engine.evaluate(
@@ -368,7 +383,8 @@ async fn functional_side03_web_extract_article() {
         "web_extract_article must not panic"
     );
     if result.success {
-        let text = result.data["text"].as_str()
+        let text = result.data["text"]
+            .as_str()
             .or(result.data["content"].as_str())
             .unwrap_or("");
         assert!(
@@ -404,7 +420,10 @@ async fn functional_side04_embeddings_generate() {
             .as_array()
             .map(|a| a.len())
             .unwrap_or(0);
-        assert!(dims > 0, "embeddings_generate should return a non-empty vector");
+        assert!(
+            dims > 0,
+            "embeddings_generate should return a non-empty vector"
+        );
     }
 }
 

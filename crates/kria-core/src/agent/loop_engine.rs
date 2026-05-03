@@ -15,10 +15,12 @@ use crate::infra::isolation::run_isolated;
 use crate::infra::pipeline_trace::{
     log_pipeline_step, sanitize_json_for_logs, sanitize_text_for_logs,
 };
+use crate::llm::orchestrator::vision_strategy::VisionMode;
+use crate::llm::orchestrator::vram_budget::{calculate_safe_visual_tokens, estimate_visual_tokens};
 use crate::llm::tokenize::count_tokens;
 use crate::llm::{
-    ChatMessage, ModelRouter, ToolSchema, LLM_TOOL_RESULT_TOKEN_BUDGET, LLM_TURN_TOOL_BUDGET,
-    TOOL_RESULT_MAX_CHARS,
+    ChatMessage, ImageAttachment, LlmResponse, ModelRouter, ToolSchema, LLM_TOOL_RESULT_TOKEN_BUDGET,
+    LLM_TURN_TOOL_BUDGET, TOOL_RESULT_MAX_CHARS,
 };
 use crate::mcp::payload_shaper::shape_for_llm;
 use crate::safety::audit::{DecidedBy, Decision};
@@ -52,11 +54,7 @@ fn canonical_json(v: &serde_json::Value) -> String {
             format!("{{{inner}}}")
         }
         serde_json::Value::Array(arr) => {
-            let inner = arr
-                .iter()
-                .map(canonical_json)
-                .collect::<Vec<_>>()
-                .join(",");
+            let inner = arr.iter().map(canonical_json).collect::<Vec<_>>().join(",");
             format!("[{inner}]")
         }
         other => other.to_string(),
@@ -97,8 +95,7 @@ static CREATE_TITLE_CONTEXT_RE: Lazy<Regex> = Lazy::new(|| {
 });
 
 static CREATE_TITLE_FALLBACK_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)\b(?:for|about)\s+([^\n\r,.;!?]+)")
-        .expect("valid title fallback regex")
+    Regex::new(r"(?i)\b(?:for|about)\s+([^\n\r,.;!?]+)").expect("valid title fallback regex")
 });
 
 static TITLE_DURATION_ONLY_RE: Lazy<Regex> = Lazy::new(|| {
@@ -147,8 +144,10 @@ static GMAIL_MESSAGE_ID_RE: Lazy<Regex> = Lazy::new(|| {
 });
 
 static CALENDAR_EVENT_ID_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)\b(?:event[_\s-]?id|calendar[_\s-]?event[_\s-]?id)\b\s*[:=]?\s*([A-Za-z0-9_@-]{8,})")
-        .expect("valid calendar event id regex")
+    Regex::new(
+        r"(?i)\b(?:event[_\s-]?id|calendar[_\s-]?event[_\s-]?id)\b\s*[:=]?\s*([A-Za-z0-9_@-]{8,})",
+    )
+    .expect("valid calendar event id regex")
 });
 
 static GENERIC_RESOURCE_ID_RE: Lazy<Regex> = Lazy::new(|| {
@@ -179,8 +178,7 @@ static FORCED_TOOL_DIRECTIVE_RE: Lazy<Regex> = Lazy::new(|| {
 });
 
 static FENCED_CODE_BLOCK_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?is)```(?:[a-z0-9_+\-]+)?\s*(.*?)\s*```")
-        .expect("valid fenced code block regex")
+    Regex::new(r"(?is)```(?:[a-z0-9_+\-]+)?\s*(.*?)\s*```").expect("valid fenced code block regex")
 });
 
 static SENSITIVE_JSON_FIELD_RE: Lazy<Regex> = Lazy::new(|| {
@@ -471,6 +469,365 @@ fn build_message_preview(messages: &[ChatMessage], max_messages: usize) -> serde
     serde_json::Value::Array(preview)
 }
 
+const MAX_ROUTED_TOOL_SCHEMAS_PER_TURN: usize = 8;
+const DIRECT_INTENT_HINT_MIN_CONFIDENCE: f32 = 0.55;
+const CONTEXT_HISTORY_ITEM_CHAR_CAP: usize = 900;
+const CONTEXT_TOTAL_CHAR_BUDGET: usize = 12_000;
+
+fn extract_user_context_block(system_prompt: &str) -> Option<String> {
+    const USER_CONTEXT_HEADER: &str = "## User Context";
+    const RESPONSE_MARKER: &str = "Respond naturally.";
+
+    let start = system_prompt.find(USER_CONTEXT_HEADER)?;
+    let after_header = &system_prompt[start + USER_CONTEXT_HEADER.len()..];
+    let end = after_header
+        .find(RESPONSE_MARKER)
+        .unwrap_or(after_header.len());
+    let block = after_header[..end].trim();
+    if block.is_empty() {
+        None
+    } else {
+        Some(block.to_string())
+    }
+}
+
+fn build_filtered_tool_schema_catalog(tool_schemas: &[ToolSchema]) -> String {
+    if tool_schemas.is_empty() {
+        return "No tools are enabled for this turn. Reply conversationally unless a tool-enabled follow-up is required.".to_string();
+    }
+
+    let mut lines = Vec::with_capacity(tool_schemas.len() + 2);
+    lines.push(format!(
+        "Only the following {} routed tool(s) are enabled for this turn.",
+        tool_schemas.len()
+    ));
+    lines.push(
+        "Use exact tool names. Function schemas are provided separately by the runtime."
+            .to_string(),
+    );
+
+    for schema in tool_schemas {
+        lines.push(format!(
+            "- {}: {}",
+            schema.name,
+            sanitize_text_for_logs(&schema.description, 120)
+        ));
+    }
+
+    lines.join("\n")
+}
+
+fn rewrite_system_prompt_tools_block(system_prompt: &str, tool_schemas: &[ToolSchema]) -> String {
+    let user_context = extract_user_context_block(system_prompt);
+    let mut rebuilt = String::with_capacity(2800);
+    rebuilt.push_str(
+        "You are K.R.I.A., a desktop AI assistant.\n\n\
+## Core Rules\n\
+1. Use tools when the user asks for actions or live data; otherwise answer conversationally.\n\
+2. Never invent tool outputs. If a tool fails, report the failure and retry with a sensible alternative.\n\
+3. Do not ask for confirmation when intent is clear. Execute the best matching tool.\n\
+4. Keep responses concise and grounded in available evidence.\n\
+5. Match the user's language.\n\
+6. For web/info lookup use dedicated web/news tools, not browser-opening tools unless user explicitly asks to open a browser.\n\n\
+## Enabled Tools\n",
+    );
+    rebuilt.push_str(&build_filtered_tool_schema_catalog(tool_schemas));
+
+    if let Some(context) = user_context {
+        rebuilt.push_str("\n\n## User Context\n");
+        rebuilt.push_str(&sanitize_text_for_logs(&context, 1200));
+    }
+
+    rebuilt.push_str(
+        "\n\nWhen tools are needed, emit:\n\
+<tool_call>\n\
+{\"name\":\"tool_name\",\"arguments\":{\"param\":\"value\"}}\n\
+</tool_call>\n\
+Then continue with grounded results.",
+    );
+    rebuilt
+}
+
+fn truncate_text_for_context(text: &str, max_chars: usize) -> String {
+    let char_count = text.chars().count();
+    if char_count <= max_chars {
+        return text.to_string();
+    }
+    if max_chars <= 40 {
+        return text.chars().take(max_chars).collect();
+    }
+
+    let head_budget = (max_chars * 3) / 4;
+    let tail_budget = max_chars.saturating_sub(head_budget).saturating_sub(24);
+    let head: String = text.chars().take(head_budget).collect();
+    let tail: String = if tail_budget > 0 {
+        text.chars()
+            .rev()
+            .take(tail_budget)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect()
+    } else {
+        String::new()
+    };
+    let omitted = char_count.saturating_sub(head_budget + tail_budget);
+    if tail.is_empty() {
+        format!("{head}\n...[truncated {omitted} chars]")
+    } else {
+        format!("{head}\n...[truncated {omitted} chars]\n{tail}")
+    }
+}
+
+fn compact_messages_for_chat(messages: &mut Vec<ChatMessage>) {
+    if messages.is_empty() {
+        return;
+    }
+
+    let mut latest_user_idx = messages.iter().rposition(|m| m.role == "user");
+
+    for (idx, msg) in messages.iter_mut().enumerate() {
+        if msg.role.eq_ignore_ascii_case("system") {
+            let max_chars = if idx == 0 { 3_500 } else { 1_000 };
+            msg.content = truncate_text_for_context(&msg.content, max_chars);
+            continue;
+        }
+
+        if Some(idx) == latest_user_idx {
+            msg.content = truncate_text_for_context(&msg.content, 2_000);
+            continue;
+        }
+
+        msg.content = truncate_text_for_context(&msg.content, CONTEXT_HISTORY_ITEM_CHAR_CAP);
+    }
+
+    let mut total_chars: usize = messages.iter().map(|m| m.content.chars().count()).sum();
+    while total_chars > CONTEXT_TOTAL_CHAR_BUDGET && messages.len() > 2 {
+        let removable_idx = messages.iter().enumerate().skip(1).find_map(|(idx, msg)| {
+            if msg.role.eq_ignore_ascii_case("system") || Some(idx) == latest_user_idx {
+                None
+            } else {
+                Some(idx)
+            }
+        });
+
+        let Some(idx) = removable_idx else {
+            break;
+        };
+
+        total_chars = total_chars.saturating_sub(messages[idx].content.chars().count());
+        messages.remove(idx);
+
+        if let Some(user_idx) = latest_user_idx {
+            if idx < user_idx {
+                latest_user_idx = Some(user_idx - 1);
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct VisualTokenCapDecision {
+    hard_cap: u32,
+    safe_cap: u32,
+    free_vram_mb: u64,
+    safety_margin_mb: u64,
+    vision_mode: VisionMode,
+}
+
+fn add_tool_if_available(
+    allowed_tool_names: &HashSet<String>,
+    selected: &mut HashSet<String>,
+    name: &str,
+) {
+    if allowed_tool_names.contains(name) {
+        selected.insert(name.to_string());
+    }
+}
+
+fn fallback_routed_tool_candidates(
+    user_text: &str,
+    intent_hint: Option<&str>,
+    allowed_tool_names: &HashSet<String>,
+) -> HashSet<String> {
+    let mut selected = HashSet::new();
+    let lower = user_text.to_ascii_lowercase();
+
+    if let Some(hint) = intent_hint.map(str::trim).filter(|s| !s.is_empty()) {
+        add_tool_if_available(allowed_tool_names, &mut selected, hint);
+    }
+
+    if lower.contains("install")
+        || lower.contains("uninstall")
+        || lower.contains("package")
+        || lower.contains("installed app")
+    {
+        for tool in [
+            "search_package",
+            "check_package_installed",
+            "install_package",
+            "uninstall_package",
+        ] {
+            add_tool_if_available(allowed_tool_names, &mut selected, tool);
+        }
+    }
+
+    if lower.contains("news") || lower.contains("headline") {
+        add_tool_if_available(allowed_tool_names, &mut selected, "search_news");
+    }
+
+    if lower.contains("search")
+        || lower.contains("look up")
+        || lower.contains("find information")
+        || lower.contains("web")
+    {
+        add_tool_if_available(allowed_tool_names, &mut selected, "web_search");
+        add_tool_if_available(allowed_tool_names, &mut selected, "searxng_search");
+    }
+
+    if lower.contains("file") || lower.contains("folder") || lower.contains("directory") {
+        for tool in [
+            "mcp_fs_search_files",
+            "search_files",
+            "find_files_by_pattern",
+        ] {
+            add_tool_if_available(allowed_tool_names, &mut selected, tool);
+        }
+    }
+
+    if lower.contains("image")
+        || lower.contains("draw")
+        || lower.contains("generate")
+        || lower.contains("art")
+    {
+        add_tool_if_available(allowed_tool_names, &mut selected, "generate_image");
+    }
+
+    if looks_like_google_workspace_request(&lower) {
+        for tool in [
+            "gw_gmail_inbox",
+            "gw_gmail_search",
+            "gw_gmail_read",
+            "gw_gmail_send",
+            "gw_calendar_search",
+            "gw_calendar_create",
+            "gw_drive_search",
+            "gw_drive_read",
+            "gw_docs_read",
+            "gw_docs_edit",
+        ] {
+            add_tool_if_available(allowed_tool_names, &mut selected, tool);
+        }
+    }
+
+    selected
+}
+
+fn score_tool_relevance(query_text: &str, schema: &ToolSchema) -> i32 {
+    let query = query_text.to_ascii_lowercase();
+    let name = schema.name.to_ascii_lowercase();
+    let description = schema.description.to_ascii_lowercase();
+    let mut score = 0;
+
+    for token in query
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|t| t.len() >= 3)
+    {
+        if name.contains(token) {
+            score += 6;
+        }
+        if description.contains(token) {
+            score += 2;
+        }
+    }
+
+    if query.contains("install") || query.contains("uninstall") || query.contains("package") {
+        if schema.name.contains("package") {
+            score += 8;
+        }
+    }
+    if query.contains("news") && schema.name == "search_news" {
+        score += 10;
+    }
+    if (query.contains("search") || query.contains("web"))
+        && (schema.name == "web_search" || schema.name == "searxng_search")
+    {
+        score += 8;
+    }
+    if query.contains("image") && schema.name == "generate_image" {
+        score += 10;
+    }
+
+    score
+}
+
+fn select_routed_tool_schemas(
+    all_tool_schemas: &[ToolSchema],
+    query_text: &str,
+    direct_tool_hint: Option<&str>,
+    selected_tool_names: &HashSet<String>,
+    fallback_tool_names: &HashSet<String>,
+    forced_tool_name: Option<&str>,
+    tool_lock_name: Option<&str>,
+    conversation_only: bool,
+) -> Vec<ToolSchema> {
+    let mut include_names: HashSet<String> = if direct_tool_hint.is_some() {
+        HashSet::new()
+    } else {
+        selected_tool_names.clone()
+    };
+    let mut pinned_names: HashSet<String> = HashSet::new();
+    if let Some(tool) = direct_tool_hint.map(str::trim).filter(|s| !s.is_empty()) {
+        include_names.insert(tool.to_string());
+        pinned_names.insert(tool.to_string());
+    }
+    if let Some(tool) = forced_tool_name.map(str::trim).filter(|s| !s.is_empty()) {
+        include_names.insert(tool.to_string());
+        pinned_names.insert(tool.to_string());
+    }
+    if let Some(tool) = tool_lock_name.map(str::trim).filter(|s| !s.is_empty()) {
+        include_names.insert(tool.to_string());
+        pinned_names.insert(tool.to_string());
+    }
+    if include_names.is_empty() {
+        include_names.extend(fallback_tool_names.iter().cloned());
+        pinned_names.extend(fallback_tool_names.iter().cloned());
+    }
+
+    let filtered: Vec<ToolSchema> = if conversation_only && include_names.is_empty() {
+        Vec::new()
+    } else if include_names.is_empty() {
+        Vec::new()
+    } else {
+        all_tool_schemas
+            .iter()
+            .filter(|schema| include_names.contains(&schema.name))
+            .cloned()
+            .collect()
+    };
+
+    let mut ranked: Vec<(bool, i32, ToolSchema)> = filtered
+        .into_iter()
+        .map(|schema| {
+            let pinned = pinned_names.contains(&schema.name);
+            let score = score_tool_relevance(query_text, &schema);
+            (pinned, score, schema)
+        })
+        .collect();
+
+    ranked.sort_by(|a, b| {
+        b.0.cmp(&a.0)
+            .then_with(|| b.1.cmp(&a.1))
+            .then_with(|| a.2.name.cmp(&b.2.name))
+    });
+
+    if ranked.len() > MAX_ROUTED_TOOL_SCHEMAS_PER_TURN {
+        ranked.truncate(MAX_ROUTED_TOOL_SCHEMAS_PER_TURN);
+    }
+
+    ranked.into_iter().map(|(_, _, schema)| schema).collect()
+}
+
 fn build_tool_calls_preview(tool_calls: &[ParsedToolCall]) -> serde_json::Value {
     let preview: Vec<serde_json::Value> = tool_calls
         .iter()
@@ -511,7 +868,8 @@ fn looks_like_spurious_gmail_capability_line(line: &str) -> bool {
         || lower.contains("not supported by the current interface")
         || lower.contains("use a web browser")
         || lower.contains("third-party application");
-    let gmail_context = lower.contains("gmail") || lower.contains("email") || lower.contains("inbox");
+    let gmail_context =
+        lower.contains("gmail") || lower.contains("email") || lower.contains("inbox");
     unsupported && gmail_context
 }
 
@@ -535,12 +893,15 @@ fn extract_grounded_gmail_counts(tool_result: &serde_json::Value) -> Option<(u64
     let payload = tool_result.get("data").unwrap_or(tool_result);
 
     let requested = payload.get("requested_count").and_then(|v| v.as_u64());
-    let returned = payload.get("returned_count").and_then(|v| v.as_u64()).or_else(|| {
-        payload
-            .get("messages")
-            .and_then(|v| v.as_array())
-            .map(|messages| messages.len() as u64)
-    });
+    let returned = payload
+        .get("returned_count")
+        .and_then(|v| v.as_u64())
+        .or_else(|| {
+            payload
+                .get("messages")
+                .and_then(|v| v.as_array())
+                .map(|messages| messages.len() as u64)
+        });
 
     match (requested, returned) {
         (Some(req), Some(ret)) => Some((req, ret)),
@@ -559,7 +920,10 @@ fn build_image_success_response(tool_result: &serde_json::Value) -> String {
         .and_then(|img| img.get("provenance"))
         .and_then(|v| v.as_str())
         .unwrap_or("AI");
-    let elapsed_ms = tool_result.get("elapsed_ms").and_then(|v| v.as_u64()).unwrap_or(0);
+    let elapsed_ms = tool_result
+        .get("elapsed_ms")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
     let elapsed_s = elapsed_ms as f64 / 1000.0;
     let path = first
         .and_then(|img| img.get("path"))
@@ -587,16 +951,24 @@ fn build_image_success_response(tool_result: &serde_json::Value) -> String {
 
     let meta = {
         let mut parts = Vec::new();
-        if !quality.is_empty() { parts.push(format!("quality: {quality}")); }
-        if !tier.is_empty() { parts.push(format!("tier: {tier}")); }
-        if let Some(s) = seed { parts.push(format!("seed: {s}")); }
-        if parts.is_empty() { String::new() } else { format!(" ({})", parts.join(", ")) }
+        if !quality.is_empty() {
+            parts.push(format!("quality: {quality}"));
+        }
+        if !tier.is_empty() {
+            parts.push(format!("tier: {tier}"));
+        }
+        if let Some(s) = seed {
+            parts.push(format!("seed: {s}"));
+        }
+        if parts.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", parts.join(", "))
+        }
     };
 
     if count == 1 && !path.is_empty() {
-        format!(
-            "Image generated in {elapsed_s:.1}s using {source}{meta}.\nSaved to: `{path}`"
-        )
+        format!("Image generated in {elapsed_s:.1}s using {source}{meta}.\nSaved to: `{path}`")
     } else if count > 1 {
         format!("{count} images generated in {elapsed_s:.1}s using {source}{meta}.")
     } else {
@@ -624,9 +996,13 @@ fn build_image_failure_response(data: &serde_json::Value) -> String {
         .unwrap_or("");
 
     let mut msg = format!("Image generation failed at stage **{stage}**");
-    if !provider.is_empty() { msg.push_str(&format!(" (provider: {provider})")); }
+    if !provider.is_empty() {
+        msg.push_str(&format!(" (provider: {provider})"));
+    }
     msg.push_str(&format!(": {message}"));
-    if !hint.is_empty() { msg.push_str(&format!("\n\nHint: {hint}")); }
+    if !hint.is_empty() {
+        msg.push_str(&format!("\n\nHint: {hint}"));
+    }
     msg
 }
 
@@ -634,9 +1010,7 @@ fn build_grounded_gmail_count_summary(tool_result: &serde_json::Value) -> Option
     let (requested, returned) = extract_grounded_gmail_counts(tool_result)?;
 
     if requested == returned {
-        Some(format!(
-            "I retrieved {returned} grounded Gmail message(s)."
-        ))
+        Some(format!("I retrieved {returned} grounded Gmail message(s)."))
     } else {
         Some(format!(
             "I retrieved {returned} grounded Gmail message(s) out of {requested} requested."
@@ -801,7 +1175,9 @@ fn build_grounded_gmail_message_list_summary(tool_result: &serde_json::Value) ->
     let mut lines = Vec::with_capacity(1 + visible_count * 3);
 
     if requested == returned_for_display {
-        lines.push(format!("I retrieved {returned_for_display} grounded Gmail message(s):"));
+        lines.push(format!(
+            "I retrieved {returned_for_display} grounded Gmail message(s):"
+        ));
     } else {
         lines.push(format!(
             "I retrieved {returned_for_display} grounded Gmail message(s) out of {requested} requested:"
@@ -825,7 +1201,14 @@ fn build_grounded_gmail_message_list_summary(tool_result: &serde_json::Value) ->
 
         let preview = first_non_empty_string_field(
             message,
-            &["preview", "snippet", "description", "text", "content", "body"],
+            &[
+                "preview",
+                "snippet",
+                "description",
+                "text",
+                "content",
+                "body",
+            ],
             LLM_GMAIL_PREVIEW_MAX_CHARS,
         )
         .unwrap_or_else(|| "No preview available.".to_string());
@@ -890,7 +1273,10 @@ fn clean_gmail_body_candidate(candidate: &str) -> Option<String> {
 
     // Avoid turning vague references into accidental sends.
     let normalized = body.to_ascii_lowercase();
-    if matches!(normalized.as_str(), "mail" | "email" | "gmail" | "this" | "that" | "it") {
+    if matches!(
+        normalized.as_str(),
+        "mail" | "email" | "gmail" | "this" | "that" | "it"
+    ) {
         return None;
     }
 
@@ -1031,7 +1417,10 @@ fn extract_identifier_after_keyword(text: &str, keywords: &[&str]) -> Option<Str
                     .trim_start_matches(|c: char| matches!(c, ':' | '=' | '#' | '/'))
                     .split(|c: char| {
                         c.is_whitespace()
-                            || matches!(c, '/' | '?' | '&' | '#' | ',' | ';' | '"' | '\'' | '(' | ')')
+                            || matches!(
+                                c,
+                                '/' | '?' | '&' | '#' | ',' | ';' | '"' | '\'' | '(' | ')'
+                            )
                     })
                     .next()
                     .unwrap_or("");
@@ -1254,9 +1643,56 @@ fn infer_confirmation_send_query_from_history(
     ))
 }
 
+fn extract_attachment_path_from_user_text(user_text: &str) -> Option<String> {
+    const ATTACHMENT_PATH_MARKER: &str = "Attachment path (available to local tools if needed):";
+    user_text
+        .lines()
+        .find_map(|line| {
+            line.trim()
+                .strip_prefix(ATTACHMENT_PATH_MARKER)
+                .map(|path| path.trim().trim_matches('`').to_string())
+        })
+        .filter(|path| !path.is_empty())
+}
+
+fn query_contains_path_like_token(query: &str) -> bool {
+    query.split_whitespace().any(|token| {
+        token.starts_with('/') || token.starts_with("~/") || token.starts_with("file://")
+    })
+}
+
 fn resolve_intent_fallback_query(last_user_text: &str, messages: &[ChatMessage]) -> String {
-    infer_confirmation_send_query_from_history(last_user_text, messages)
-        .unwrap_or_else(|| last_user_text.trim().to_string())
+    let mut resolved = infer_confirmation_send_query_from_history(last_user_text, messages)
+        .unwrap_or_else(|| last_user_text.trim().to_string());
+
+    let lower = resolved.to_ascii_lowercase();
+    let looks_like_image_query = looks_like_pure_image_analysis_request(&lower)
+        || lower.contains("image")
+        || lower.contains("photo")
+        || lower.contains("picture")
+        || lower.contains("scan");
+
+    if looks_like_image_query && !query_contains_path_like_token(&resolved) {
+        if let Some(path) = messages
+            .iter()
+            .rev()
+            .find(|m| m.role.eq_ignore_ascii_case("user"))
+            .and_then(|m| extract_attachment_path_from_user_text(&m.content))
+        {
+            resolved.push(' ');
+            resolved.push_str(&path);
+        }
+    }
+
+    resolved
+}
+
+fn looks_like_vision_unavailable_error(error_message: &str) -> bool {
+    let lower = error_message.to_ascii_lowercase();
+    lower.contains("local llm vision unavailable")
+        || lower.contains("image input is not supported")
+        || (lower.contains("mmproj") && lower.contains("image"))
+        || (lower.contains("mmproj") && lower.contains("vision"))
 }
 
 // ─── App-lifecycle intent extractors ─────────────────────────────────────────
@@ -1285,7 +1721,10 @@ fn extract_app_name_from_query(text: &str) -> Option<String> {
 fn extract_url_from_query(text: &str) -> Option<String> {
     text.split_whitespace()
         .find(|w| w.starts_with("http://") || w.starts_with("https://"))
-        .map(|s| s.trim_end_matches(&['.', ',', ')', ']', ';'][..]).to_string())
+        .map(|s| {
+            s.trim_end_matches(&['.', ',', ')', ']', ';'][..])
+                .to_string()
+        })
 }
 
 /// Extract (search_query, optional_site) from utterances like:
@@ -1303,9 +1742,20 @@ fn extract_browser_search_intent(text: &str) -> (String, Option<String>) {
     };
 
     // Strip out the site/app name and leading verb phrases, leaving the actual query.
-    let after_verb = ["search for ", "search ", "google ", "look up ", "find ", "play "]
-        .iter()
-        .find_map(|prefix| lower.find(prefix).map(|i| text[i + prefix.len()..].trim().to_string()));
+    let after_verb = [
+        "search for ",
+        "search ",
+        "google ",
+        "look up ",
+        "find ",
+        "play ",
+    ]
+    .iter()
+    .find_map(|prefix| {
+        lower
+            .find(prefix)
+            .map(|i| text[i + prefix.len()..].trim().to_string())
+    });
 
     let query = after_verb.unwrap_or_else(|| {
         // Fallback: strip "open <app> and" prefix, take the rest.
@@ -1318,14 +1768,23 @@ fn extract_browser_search_intent(text: &str) -> (String, Option<String>) {
     });
 
     // Remove "on youtube", "on chrome", "in browser" suffixes.
-    let suffixes = [" on youtube", " on chrome", " on firefox", " in browser", " on youtube.com", " in youtube"];
-    let clean_query = suffixes
-        .iter()
-        .fold(query.to_lowercase(), |q, suf| {
-            q.trim_end_matches(suf.trim()).trim().to_string()
-        });
+    let suffixes = [
+        " on youtube",
+        " on chrome",
+        " on firefox",
+        " in browser",
+        " on youtube.com",
+        " in youtube",
+    ];
+    let clean_query = suffixes.iter().fold(query.to_lowercase(), |q, suf| {
+        q.trim_end_matches(suf.trim()).trim().to_string()
+    });
 
-    let final_query = if clean_query.is_empty() { text.trim().to_string() } else { clean_query };
+    let final_query = if clean_query.is_empty() {
+        text.trim().to_string()
+    } else {
+        clean_query
+    };
     (final_query, site)
 }
 
@@ -1377,8 +1836,6 @@ fn extract_send_message_intent(text: &str) -> (String, String, String) {
 
     (app.to_string(), contact, body)
 }
-
-
 
 fn infer_file_search_kind(text_lower: &str) -> &'static str {
     if text_lower.contains("folder") || text_lower.contains("directory") {
@@ -1583,16 +2040,9 @@ fn routing_focus_text_from_user_content(user_text: &str) -> String {
 }
 
 fn looks_like_pure_image_analysis_request(text_lower: &str) -> bool {
-    let has_image_context = [
-        "image",
-        "photo",
-        "picture",
-        "screenshot",
-        "screen",
-        "scan",
-    ]
-    .iter()
-    .any(|needle| text_lower.contains(needle));
+    let has_image_context = ["image", "photo", "picture", "screenshot", "screen", "scan"]
+        .iter()
+        .any(|needle| text_lower.contains(needle));
 
     let has_analysis_intent = [
         "analy",
@@ -1636,6 +2086,25 @@ fn looks_like_pure_image_analysis_request(text_lower: &str) -> bool {
     has_image_context && has_analysis_intent && !has_non_image_action
 }
 
+fn infer_image_analysis_intent_hint(user_query: &str) -> &'static str {
+    let lower = user_query.to_ascii_lowercase();
+    let has_text = ["ocr", "read", "extract", "text", "word", "sentence"]
+        .iter()
+        .any(|needle| lower.contains(needle));
+    let has_scene = [
+        "describe", "scene", "object", "identify", "detect", "analy", "what is",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle));
+
+    match (has_text, has_scene) {
+        (true, true) => "mixed",
+        (true, false) => "text_reading",
+        (false, true) => "scene_understanding",
+        (false, false) => "mixed",
+    }
+}
+
 fn is_tool_allowed_for_image_focus(def: &ToolDef) -> bool {
     if def.category.eq_ignore_ascii_case("vision") {
         return true;
@@ -1652,9 +2121,16 @@ fn looks_like_drive_list_request(text_lower: &str) -> bool {
     let has_drive_context = ["google drive", "drive"]
         .iter()
         .any(|needle| text_lower.contains(needle));
-    let has_list_intent = ["list", "show", "browse", "contents", "what is in", "what's in"]
-        .iter()
-        .any(|needle| text_lower.contains(needle));
+    let has_list_intent = [
+        "list",
+        "show",
+        "browse",
+        "contents",
+        "what is in",
+        "what's in",
+    ]
+    .iter()
+    .any(|needle| text_lower.contains(needle));
     let has_search_intent = ["search", "find", "look for", "locate"]
         .iter()
         .any(|needle| text_lower.contains(needle));
@@ -1956,7 +2432,8 @@ fn build_fallback_call_for_hint(
             }
         }
         "gw_drive_search" if allowed_tool_names.contains("gw_drive_search") => {
-            if looks_like_drive_list_request(&lower) && allowed_tool_names.contains("gw_drive_list") {
+            if looks_like_drive_list_request(&lower) && allowed_tool_names.contains("gw_drive_list")
+            {
                 Some(ParsedToolCall {
                     name: "gw_drive_list".into(),
                     arguments: serde_json::json!({}),
@@ -1970,12 +2447,10 @@ fn build_fallback_call_for_hint(
                 })
             }
         }
-        "gw_drive_list" if allowed_tool_names.contains("gw_drive_list") => {
-            Some(ParsedToolCall {
-                name: "gw_drive_list".into(),
-                arguments: serde_json::json!({}),
-            })
-        }
+        "gw_drive_list" if allowed_tool_names.contains("gw_drive_list") => Some(ParsedToolCall {
+            name: "gw_drive_list".into(),
+            arguments: serde_json::json!({}),
+        }),
         "gw_drive_read" if allowed_tool_names.contains("gw_drive_read") => {
             if let Some(file_id) = infer_google_resource_id(user_query) {
                 Some(ParsedToolCall {
@@ -2239,10 +2714,10 @@ fn build_fallback_call_for_hint(
             }),
         }),
         // ── App lifecycle ─────────────────────────────────────────────────────
-
         "open_application" if allowed_tool_names.contains("open_application") => {
             // Extract the app name: "open <name>" / "launch <name>" / "start <name>"
-            let app_name = extract_app_name_from_query(user_query).unwrap_or_else(|| user_query.trim().to_string());
+            let app_name = extract_app_name_from_query(user_query)
+                .unwrap_or_else(|| user_query.trim().to_string());
             Some(ParsedToolCall {
                 name: "open_application".into(),
                 arguments: serde_json::json!({
@@ -2252,7 +2727,8 @@ fn build_fallback_call_for_hint(
         }
         "open_url" if allowed_tool_names.contains("open_url") => {
             // Extract the first https?:// URL from the query.
-            let url = extract_url_from_query(user_query).unwrap_or_else(|| user_query.trim().to_string());
+            let url =
+                extract_url_from_query(user_query).unwrap_or_else(|| user_query.trim().to_string());
             Some(ParsedToolCall {
                 name: "open_url".into(),
                 arguments: serde_json::json!({ "url": url }),
@@ -2300,34 +2776,44 @@ fn build_fallback_call_for_hint(
             name: "get_cpu_usage".into(),
             arguments: serde_json::json!({}),
         }),
-        "get_memory_info" if allowed_tool_names.contains("get_memory_info") => Some(ParsedToolCall {
-            name: "get_memory_info".into(),
-            arguments: serde_json::json!({}),
-        }),
+        "get_memory_info" if allowed_tool_names.contains("get_memory_info") => {
+            Some(ParsedToolCall {
+                name: "get_memory_info".into(),
+                arguments: serde_json::json!({}),
+            })
+        }
         "get_disk_space" if allowed_tool_names.contains("get_disk_space") => Some(ParsedToolCall {
             name: "get_disk_space".into(),
             arguments: serde_json::json!({}),
         }),
-        "get_network_status" if allowed_tool_names.contains("get_network_status") => Some(ParsedToolCall {
-            name: "get_network_status".into(),
-            arguments: serde_json::json!({}),
-        }),
-        "get_battery_status" if allowed_tool_names.contains("get_battery_status") => Some(ParsedToolCall {
-            name: "get_battery_status".into(),
-            arguments: serde_json::json!({}),
-        }),
+        "get_network_status" if allowed_tool_names.contains("get_network_status") => {
+            Some(ParsedToolCall {
+                name: "get_network_status".into(),
+                arguments: serde_json::json!({}),
+            })
+        }
+        "get_battery_status" if allowed_tool_names.contains("get_battery_status") => {
+            Some(ParsedToolCall {
+                name: "get_battery_status".into(),
+                arguments: serde_json::json!({}),
+            })
+        }
         "get_gpu_info" if allowed_tool_names.contains("get_gpu_info") => Some(ParsedToolCall {
             name: "get_gpu_info".into(),
             arguments: serde_json::json!({}),
         }),
-        "get_system_uptime" if allowed_tool_names.contains("get_system_uptime") => Some(ParsedToolCall {
-            name: "get_system_uptime".into(),
-            arguments: serde_json::json!({}),
-        }),
-        "check_system_health" if allowed_tool_names.contains("check_system_health") => Some(ParsedToolCall {
-            name: "check_system_health".into(),
-            arguments: serde_json::json!({}),
-        }),
+        "get_system_uptime" if allowed_tool_names.contains("get_system_uptime") => {
+            Some(ParsedToolCall {
+                name: "get_system_uptime".into(),
+                arguments: serde_json::json!({}),
+            })
+        }
+        "check_system_health" if allowed_tool_names.contains("check_system_health") => {
+            Some(ParsedToolCall {
+                name: "check_system_health".into(),
+                arguments: serde_json::json!({}),
+            })
+        }
         // ── Alerts ───────────────────────────────────────────────────────────
         "get_alerts" if allowed_tool_names.contains("get_alerts") => Some(ParsedToolCall {
             name: "get_alerts".into(),
@@ -2363,10 +2849,12 @@ fn build_fallback_call_for_hint(
                 arguments: serde_json::json!({ "path": path }),
             })
         }
-        "list_watched_dirs" if allowed_tool_names.contains("list_watched_dirs") => Some(ParsedToolCall {
-            name: "list_watched_dirs".into(),
-            arguments: serde_json::json!({}),
-        }),
+        "list_watched_dirs" if allowed_tool_names.contains("list_watched_dirs") => {
+            Some(ParsedToolCall {
+                name: "list_watched_dirs".into(),
+                arguments: serde_json::json!({}),
+            })
+        }
         "smart_suggest" if allowed_tool_names.contains("smart_suggest") => Some(ParsedToolCall {
             name: "smart_suggest".into(),
             arguments: serde_json::json!({ "context": user_query }),
@@ -2411,7 +2899,10 @@ fn build_fallback_call_for_hint(
             arguments: serde_json::json!({}),
         }),
         "set_power_plan" if allowed_tool_names.contains("set_power_plan") => {
-            let plan = if lower.contains("power-saver") || lower.contains("power saver") || lower.contains("powersave") {
+            let plan = if lower.contains("power-saver")
+                || lower.contains("power saver")
+                || lower.contains("powersave")
+            {
                 "power-saver"
             } else if lower.contains("performance") {
                 "performance"
@@ -2424,7 +2915,8 @@ fn build_fallback_call_for_hint(
             })
         }
         "set_volume" if allowed_tool_names.contains("set_volume") => {
-            let is_mute = lower.contains("band") || lower.contains("mute") || lower.contains("zero");
+            let is_mute =
+                lower.contains("band") || lower.contains("mute") || lower.contains("zero");
             let level: u64 = if is_mute {
                 0
             } else {
@@ -2432,7 +2924,10 @@ fn build_fallback_call_for_hint(
                     .split_whitespace()
                     .find_map(|w| {
                         // Strip trailing % before parsing so "100%" → 100
-                        w.trim_end_matches('%').parse::<u64>().ok().filter(|&n| n <= 100)
+                        w.trim_end_matches('%')
+                            .parse::<u64>()
+                            .ok()
+                            .filter(|&n| n <= 100)
                     })
                     .unwrap_or(50)
             };
@@ -2446,7 +2941,10 @@ fn build_fallback_call_for_hint(
                 .split_whitespace()
                 .find_map(|w| {
                     // Strip trailing % before parsing so "80%" → 80
-                    w.trim_end_matches('%').parse::<u64>().ok().filter(|&n| n <= 100)
+                    w.trim_end_matches('%')
+                        .parse::<u64>()
+                        .ok()
+                        .filter(|&n| n <= 100)
                 })
                 .unwrap_or(50);
             Some(ParsedToolCall {
@@ -2455,32 +2953,47 @@ fn build_fallback_call_for_hint(
             })
         }
         "toggle_wifi" if allowed_tool_names.contains("toggle_wifi") => {
-            let enable = !(lower.contains(" off") || lower.contains("disable") || lower.contains("turn off") || lower.contains("band "));
+            let enable = !(lower.contains(" off")
+                || lower.contains("disable")
+                || lower.contains("turn off")
+                || lower.contains("band "));
             Some(ParsedToolCall {
                 name: "toggle_wifi".into(),
                 arguments: serde_json::json!({ "enable": enable }),
             })
         }
-        "get_wifi_networks" if allowed_tool_names.contains("get_wifi_networks") => Some(ParsedToolCall {
-            name: "get_wifi_networks".into(),
-            arguments: serde_json::json!({}),
-        }),
+        "get_wifi_networks" if allowed_tool_names.contains("get_wifi_networks") => {
+            Some(ParsedToolCall {
+                name: "get_wifi_networks".into(),
+                arguments: serde_json::json!({}),
+            })
+        }
         "get_environment_variable" if allowed_tool_names.contains("get_environment_variable") => {
-            let name = lower.split_whitespace().last().unwrap_or("HOME").to_uppercase();
+            let name = lower
+                .split_whitespace()
+                .last()
+                .unwrap_or("HOME")
+                .to_uppercase();
             Some(ParsedToolCall {
                 name: "get_environment_variable".into(),
                 arguments: serde_json::json!({ "name": name }),
             })
         }
-        "list_environment_variables" if allowed_tool_names.contains("list_environment_variables") => Some(ParsedToolCall {
-            name: "list_environment_variables".into(),
-            arguments: serde_json::json!({}),
-        }),
+        "list_environment_variables"
+            if allowed_tool_names.contains("list_environment_variables") =>
+        {
+            Some(ParsedToolCall {
+                name: "list_environment_variables".into(),
+                arguments: serde_json::json!({}),
+            })
+        }
         // ── Process / service ────────────────────────────────────────────────
-        "list_running_apps" if allowed_tool_names.contains("list_running_apps") => Some(ParsedToolCall {
-            name: "list_running_apps".into(),
-            arguments: serde_json::json!({}),
-        }),
+        "list_running_apps" if allowed_tool_names.contains("list_running_apps") => {
+            Some(ParsedToolCall {
+                name: "list_running_apps".into(),
+                arguments: serde_json::json!({}),
+            })
+        }
         "close_application" if allowed_tool_names.contains("close_application") => {
             let name = extract_app_name_from_query(user_query)
                 .unwrap_or_else(|| user_query.trim().to_string());
@@ -2509,7 +3022,10 @@ fn build_fallback_call_for_hint(
             } else {
                 "status"
             };
-            let skip_words = ["start", "stop", "restart", "status", "service", "check", "the", "of", "manage", "my"];
+            let skip_words = [
+                "start", "stop", "restart", "status", "service", "check", "the", "of", "manage",
+                "my",
+            ];
             let service = lower
                 .split_whitespace()
                 .find(|w| !skip_words.contains(w))
@@ -2520,10 +3036,12 @@ fn build_fallback_call_for_hint(
                 arguments: serde_json::json!({ "name": service, "action": action }),
             })
         }
-        "get_active_connections" if allowed_tool_names.contains("get_active_connections") => Some(ParsedToolCall {
-            name: "get_active_connections".into(),
-            arguments: serde_json::json!({}),
-        }),
+        "get_active_connections" if allowed_tool_names.contains("get_active_connections") => {
+            Some(ParsedToolCall {
+                name: "get_active_connections".into(),
+                arguments: serde_json::json!({}),
+            })
+        }
         "focus_window" if allowed_tool_names.contains("focus_window") => {
             let title = extract_app_name_from_query(user_query)
                 .unwrap_or_else(|| user_query.trim().to_string());
@@ -2537,10 +3055,12 @@ fn build_fallback_call_for_hint(
             name: "screenshot".into(),
             arguments: serde_json::json!({}),
         }),
-        "screenshot_analyze" if allowed_tool_names.contains("screenshot_analyze") => Some(ParsedToolCall {
-            name: "screenshot_analyze".into(),
-            arguments: serde_json::json!({}),
-        }),
+        "screenshot_analyze" if allowed_tool_names.contains("screenshot_analyze") => {
+            Some(ParsedToolCall {
+                name: "screenshot_analyze".into(),
+                arguments: serde_json::json!({}),
+            })
+        }
         "get_clipboard" if allowed_tool_names.contains("get_clipboard") => Some(ParsedToolCall {
             name: "get_clipboard".into(),
             arguments: serde_json::json!({}),
@@ -2580,10 +3100,12 @@ fn build_fallback_call_for_hint(
                 arguments: serde_json::json!({ "text": text }),
             })
         }
-        "get_active_window" if allowed_tool_names.contains("get_active_window") => Some(ParsedToolCall {
-            name: "get_active_window".into(),
-            arguments: serde_json::json!({}),
-        }),
+        "get_active_window" if allowed_tool_names.contains("get_active_window") => {
+            Some(ParsedToolCall {
+                name: "get_active_window".into(),
+                arguments: serde_json::json!({}),
+            })
+        }
         "list_windows" if allowed_tool_names.contains("list_windows") => Some(ParsedToolCall {
             name: "list_windows".into(),
             arguments: serde_json::json!({}),
@@ -2613,7 +3135,11 @@ fn build_fallback_call_for_hint(
                 .unwrap_or_else(|| {
                     ["notification: ", "notify: ", "send notification "]
                         .iter()
-                        .find_map(|m| lower.find(m).map(|i| user_query[i + m.len()..].trim().to_string()))
+                        .find_map(|m| {
+                            lower
+                                .find(m)
+                                .map(|i| user_query[i + m.len()..].trim().to_string())
+                        })
                         .unwrap_or_else(|| user_query.trim().to_string())
                 });
             Some(ParsedToolCall {
@@ -2640,7 +3166,11 @@ fn build_fallback_call_for_hint(
                 .unwrap_or_else(|| {
                     ["remind me to ", "reminder: "]
                         .iter()
-                        .find_map(|m| lower.find(m).map(|i| user_query[i + m.len()..].trim().to_string()))
+                        .find_map(|m| {
+                            lower
+                                .find(m)
+                                .map(|i| user_query[i + m.len()..].trim().to_string())
+                        })
                         .unwrap_or_else(|| user_query.trim().to_string())
                 });
             Some(ParsedToolCall {
@@ -2662,7 +3192,11 @@ fn build_fallback_call_for_hint(
         // ── Knowledge / memory ────────────────────────────────────────────────
         "remember_fact" if allowed_tool_names.contains("remember_fact") => {
             let (key, value) = if let Some(pos) = lower.find(" is ") {
-                let k = user_query[..pos].split_whitespace().last().unwrap_or("note").to_string();
+                let k = user_query[..pos]
+                    .split_whitespace()
+                    .last()
+                    .unwrap_or("note")
+                    .to_string();
                 let v = user_query[pos + 4..].trim().to_string();
                 (k, v)
             } else {
@@ -2677,14 +3211,18 @@ fn build_fallback_call_for_hint(
             name: "recall_fact".into(),
             arguments: serde_json::json!({ "query": user_query }),
         }),
-        "search_knowledge" if allowed_tool_names.contains("search_knowledge") => Some(ParsedToolCall {
-            name: "search_knowledge".into(),
-            arguments: serde_json::json!({ "query": user_query, "max_results": 5 }),
-        }),
-        "list_remembered" if allowed_tool_names.contains("list_remembered") => Some(ParsedToolCall {
-            name: "list_remembered".into(),
-            arguments: serde_json::json!({}),
-        }),
+        "search_knowledge" if allowed_tool_names.contains("search_knowledge") => {
+            Some(ParsedToolCall {
+                name: "search_knowledge".into(),
+                arguments: serde_json::json!({ "query": user_query, "max_results": 5 }),
+            })
+        }
+        "list_remembered" if allowed_tool_names.contains("list_remembered") => {
+            Some(ParsedToolCall {
+                name: "list_remembered".into(),
+                arguments: serde_json::json!({}),
+            })
+        }
         "save_snippet" if allowed_tool_names.contains("save_snippet") => {
             let name = QUOTED_TEXT_RE
                 .captures(user_query)
@@ -2754,7 +3292,9 @@ fn build_fallback_call_for_hint(
             let url = user_query
                 .split_whitespace()
                 .find(|w| w.starts_with("http"))
-                .map(|w| w.trim_end_matches(|c: char| c == '.' || c == ',' || c == '\'' || c == ')'))
+                .map(|w| {
+                    w.trim_end_matches(|c: char| c == '.' || c == ',' || c == '\'' || c == ')')
+                })
                 .unwrap_or("")
                 .to_string();
             if url.is_empty() {
@@ -2793,10 +3333,12 @@ fn build_fallback_call_for_hint(
                 arguments: serde_json::json!({ "url": url, "destination": "/home/obaid/Downloads/" }),
             })
         }
-        "get_current_time" if allowed_tool_names.contains("get_current_time") => Some(ParsedToolCall {
-            name: "get_current_time".into(),
-            arguments: serde_json::json!({}),
-        }),
+        "get_current_time" if allowed_tool_names.contains("get_current_time") => {
+            Some(ParsedToolCall {
+                name: "get_current_time".into(),
+                arguments: serde_json::json!({}),
+            })
+        }
         "get_weather" if allowed_tool_names.contains("get_weather") => Some(ParsedToolCall {
             name: "get_weather".into(),
             arguments: serde_json::json!({}),
@@ -2824,10 +3366,12 @@ fn build_fallback_call_for_hint(
             name: "git_stash".into(),
             arguments: serde_json::json!({ "path": infer_git_path(user_query) }),
         }),
-        "git_branch_list" if allowed_tool_names.contains("git_branch_list") => Some(ParsedToolCall {
-            name: "git_branch_list".into(),
-            arguments: serde_json::json!({ "path": infer_git_path(user_query) }),
-        }),
+        "git_branch_list" if allowed_tool_names.contains("git_branch_list") => {
+            Some(ParsedToolCall {
+                name: "git_branch_list".into(),
+                arguments: serde_json::json!({ "path": infer_git_path(user_query) }),
+            })
+        }
         "git_commit" if allowed_tool_names.contains("git_commit") => {
             let message = QUOTED_TEXT_RE
                 .captures(user_query)
@@ -2844,7 +3388,13 @@ fn build_fallback_call_for_hint(
                 .captures(user_query)
                 .and_then(|c| c.get(1).or_else(|| c.get(2)))
                 .map(|m| m.as_str().to_string())
-                .unwrap_or_else(|| lower.split_whitespace().last().unwrap_or("main").to_string());
+                .unwrap_or_else(|| {
+                    lower
+                        .split_whitespace()
+                        .last()
+                        .unwrap_or("main")
+                        .to_string()
+                });
             Some(ParsedToolCall {
                 name: "git_checkout".into(),
                 arguments: serde_json::json!({ "path": infer_git_path(user_query), "branch": branch }),
@@ -2892,11 +3442,7 @@ fn build_fallback_call_for_hint(
             })
         }
         "check_package_installed" if allowed_tool_names.contains("check_package_installed") => {
-            let pkg = lower
-                .split_whitespace()
-                .last()
-                .unwrap_or("")
-                .to_string();
+            let pkg = lower.split_whitespace().last().unwrap_or("").to_string();
             if pkg.is_empty() {
                 return None;
             }
@@ -2921,32 +3467,53 @@ fn build_fallback_call_for_hint(
         }
         // ── Shell execution ────────────────────────────────────────────────────
         "execute_bash" if allowed_tool_names.contains("execute_bash") => {
-            let command = ["run: ", "execute: ", "bash: ", "command: ", "run bash: ", "execute bash: ", "run: bash "]
-                .iter()
-                .find_map(|m| lower.find(m).map(|i| user_query[i + m.len()..].trim().to_string()))
-                .or_else(|| {
-                    QUOTED_TEXT_RE
-                        .captures(user_query)
-                        .and_then(|c| c.get(1).or_else(|| c.get(2)))
-                        .map(|m| m.as_str().to_string())
-                })
-                .unwrap_or_else(|| user_query.trim().to_string());
+            let command = [
+                "run: ",
+                "execute: ",
+                "bash: ",
+                "command: ",
+                "run bash: ",
+                "execute bash: ",
+                "run: bash ",
+            ]
+            .iter()
+            .find_map(|m| {
+                lower
+                    .find(m)
+                    .map(|i| user_query[i + m.len()..].trim().to_string())
+            })
+            .or_else(|| {
+                QUOTED_TEXT_RE
+                    .captures(user_query)
+                    .and_then(|c| c.get(1).or_else(|| c.get(2)))
+                    .map(|m| m.as_str().to_string())
+            })
+            .unwrap_or_else(|| user_query.trim().to_string());
             Some(ParsedToolCall {
                 name: "execute_bash".into(),
                 arguments: serde_json::json!({ "command": command }),
             })
         }
         "execute_python" if allowed_tool_names.contains("execute_python") => {
-            let code = ["python: ", "execute python: ", "run python: ", "python code: "]
-                .iter()
-                .find_map(|m| lower.find(m).map(|i| user_query[i + m.len()..].trim().to_string()))
-                .or_else(|| {
-                    FENCED_CODE_BLOCK_RE
-                        .captures(user_query)
-                        .and_then(|c| c.get(1))
-                        .map(|m| m.as_str().trim().to_string())
-                })
-                .unwrap_or_else(|| user_query.trim().to_string());
+            let code = [
+                "python: ",
+                "execute python: ",
+                "run python: ",
+                "python code: ",
+            ]
+            .iter()
+            .find_map(|m| {
+                lower
+                    .find(m)
+                    .map(|i| user_query[i + m.len()..].trim().to_string())
+            })
+            .or_else(|| {
+                FENCED_CODE_BLOCK_RE
+                    .captures(user_query)
+                    .and_then(|c| c.get(1))
+                    .map(|m| m.as_str().trim().to_string())
+            })
+            .unwrap_or_else(|| user_query.trim().to_string());
             Some(ParsedToolCall {
                 name: "execute_python".into(),
                 arguments: serde_json::json!({ "code": code }),
@@ -3100,14 +3667,20 @@ fn build_fallback_call_for_hint(
             }
             Some(ParsedToolCall {
                 name: "analyze_image".into(),
-                arguments: serde_json::json!({ "path": path, "operations": ["describe"] }),
+                arguments: serde_json::json!({
+                    "path": path,
+                    "operations": ["metadata", "ocr", "features"],
+                    "intent": infer_image_analysis_intent_hint(user_query),
+                }),
             })
         }
         // ── Scheduler ─────────────────────────────────────────────────────────
-        "list_scheduled_tasks" if allowed_tool_names.contains("list_scheduled_tasks") => Some(ParsedToolCall {
-            name: "list_scheduled_tasks".into(),
-            arguments: serde_json::json!({}),
-        }),
+        "list_scheduled_tasks" if allowed_tool_names.contains("list_scheduled_tasks") => {
+            Some(ParsedToolCall {
+                name: "list_scheduled_tasks".into(),
+                arguments: serde_json::json!({}),
+            })
+        }
         // ── I18N ──────────────────────────────────────────────────────────────
         "list_languages" if allowed_tool_names.contains("list_languages") => Some(ParsedToolCall {
             name: "list_languages".into(),
@@ -3124,10 +3697,14 @@ fn build_fallback_call_for_hint(
                 arguments: serde_json::json!({ "text": text }),
             })
         }
-        "get_accessibility_settings" if allowed_tool_names.contains("get_accessibility_settings") => Some(ParsedToolCall {
-            name: "get_accessibility_settings".into(),
-            arguments: serde_json::json!({}),
-        }),
+        "get_accessibility_settings"
+            if allowed_tool_names.contains("get_accessibility_settings") =>
+        {
+            Some(ParsedToolCall {
+                name: "get_accessibility_settings".into(),
+                arguments: serde_json::json!({}),
+            })
+        }
         // ── Image generation ──────────────────────────────────────────────────
         "generate_image" if allowed_tool_names.contains("generate_image") => {
             // Strip leading imperative verbs so only the subject description remains.
@@ -3139,7 +3716,11 @@ fn build_fallback_call_for_hint(
                 ).ok()
                     .and_then(|re| re.find(trimmed).map(|m| trimmed[m.end()..].trim().to_string()))
                     .unwrap_or_else(|| trimmed.to_string());
-                if without_prefix.is_empty() { trimmed.to_string() } else { without_prefix }
+                if without_prefix.is_empty() {
+                    trimmed.to_string()
+                } else {
+                    without_prefix
+                }
             };
             Some(ParsedToolCall {
                 name: "generate_image".into(),
@@ -3211,7 +3792,8 @@ fn build_multi_intent_fallback_calls(
         || lower.contains("internet check")
         || lower.contains("kya internet")
         || lower.contains("internet hai")
-        || (lower.contains("internet") && (lower.contains("check") || lower.contains("working") || lower.contains("status")));
+        || (lower.contains("internet")
+            && (lower.contains("check") || lower.contains("working") || lower.contains("status")));
 
     if is_internet_check && allowed_tool_names.contains("ping_host") {
         return vec![
@@ -3285,7 +3867,13 @@ fn build_intent_fallback_tool_call(
                 ColabIntent::CreateNotebook => {
                     let full_title = title
                         .as_deref()
-                        .map(|t| if t.ends_with(".ipynb") { t.to_string() } else { format!("{}.ipynb", t) })
+                        .map(|t| {
+                            if t.ends_with(".ipynb") {
+                                t.to_string()
+                            } else {
+                                format!("{}.ipynb", t)
+                            }
+                        })
                         .unwrap_or_else(|| "Untitled.ipynb".to_string());
                     if allowed_tool_names.contains("gw_drive_create") {
                         return Some(ParsedToolCall {
@@ -3505,9 +4093,7 @@ fn build_grounding_count_note(tool_name: &str, tool_result: &serde_json::Value) 
     }
 
     let payload = tool_result.get("data").unwrap_or(tool_result);
-    let requested = payload
-        .get("requested_count")
-        .and_then(|v| v.as_u64())?;
+    let requested = payload.get("requested_count").and_then(|v| v.as_u64())?;
     let returned = payload
         .get("returned_count")
         .and_then(|v| v.as_u64())
@@ -3557,7 +4143,11 @@ fn compact_text_for_llm(raw: &str, max_chars: usize) -> String {
     truncated
 }
 
-fn first_non_empty_string_field(message: &serde_json::Value, keys: &[&str], max_chars: usize) -> Option<String> {
+fn first_non_empty_string_field(
+    message: &serde_json::Value,
+    keys: &[&str],
+    max_chars: usize,
+) -> Option<String> {
     keys.iter().find_map(|key| {
         message
             .get(*key)
@@ -3608,7 +4198,14 @@ fn compact_gmail_message_for_llm(message: &serde_json::Value) -> serde_json::Val
 
     if let Some(preview) = first_non_empty_string_field(
         message,
-        &["preview", "snippet", "description", "text", "content", "body"],
+        &[
+            "preview",
+            "snippet",
+            "description",
+            "text",
+            "content",
+            "body",
+        ],
         LLM_GMAIL_PREVIEW_MAX_CHARS,
     ) {
         compacted.insert("preview".into(), serde_json::Value::String(preview));
@@ -3625,7 +4222,9 @@ fn compact_gmail_message_for_llm(message: &serde_json::Value) -> serde_json::Val
     serde_json::Value::Object(compacted)
 }
 
-fn compact_gmail_messages_for_llm(messages: &[serde_json::Value]) -> (Vec<serde_json::Value>, usize) {
+fn compact_gmail_messages_for_llm(
+    messages: &[serde_json::Value],
+) -> (Vec<serde_json::Value>, usize) {
     let mut visible = Vec::new();
     let mut used_chars = 0usize;
     let mut omitted = 0usize;
@@ -3671,7 +4270,10 @@ fn compact_gmail_payload_for_llm(payload: &serde_json::Value) -> serde_json::Val
                 ))
             })
             .collect();
-        compacted.insert("warnings".into(), serde_json::Value::Array(compacted_warnings));
+        compacted.insert(
+            "warnings".into(),
+            serde_json::Value::Array(compacted_warnings),
+        );
     }
 
     let messages = compacted
@@ -3684,7 +4286,10 @@ fn compact_gmail_payload_for_llm(payload: &serde_json::Value) -> serde_json::Val
     if !messages.is_empty() {
         let total = messages.len();
         let (visible_messages, omitted_messages) = compact_gmail_messages_for_llm(&messages);
-        compacted.insert("messages".into(), serde_json::Value::Array(visible_messages.clone()));
+        compacted.insert(
+            "messages".into(),
+            serde_json::Value::Array(visible_messages.clone()),
+        );
         compacted.insert(
             "llm_visible_message_count".into(),
             serde_json::json!(visible_messages.len()),
@@ -3720,7 +4325,10 @@ fn compact_gmail_payload_for_llm(payload: &serde_json::Value) -> serde_json::Val
     serde_json::Value::Object(compacted)
 }
 
-fn compact_tool_result_for_llm(tool_name: &str, tool_result: &serde_json::Value) -> serde_json::Value {
+fn compact_tool_result_for_llm(
+    tool_name: &str,
+    tool_result: &serde_json::Value,
+) -> serde_json::Value {
     let is_gmail_tool = matches!(tool_name, "gw_gmail_inbox" | "gw_gmail_search");
     if !is_gmail_tool {
         return tool_result.clone();
@@ -3743,6 +4351,82 @@ fn compact_tool_result_for_llm(tool_name: &str, tool_result: &serde_json::Value)
     }
 
     compact_gmail_payload_for_llm(tool_result)
+}
+
+fn extract_preprocessed_image_attachments(
+    tool_data: &serde_json::Value,
+    default_mime_type: &str,
+) -> Option<Vec<ImageAttachment>> {
+    let analysis = tool_data.get("analysis").unwrap_or(tool_data);
+
+    let thumbnail_attachment = analysis
+        .get("thumbnail_base64")
+        .or_else(|| tool_data.get("thumbnail_base64"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|thumb_b64| ImageAttachment {
+            data: thumb_b64.to_string(),
+            mime_type: analysis
+                .get("thumbnail_mime_type")
+                .or_else(|| tool_data.get("thumbnail_mime_type"))
+                .and_then(|v| v.as_str())
+                .filter(|m| !m.trim().is_empty())
+                .unwrap_or(default_mime_type)
+                .to_string(),
+        });
+
+    if let Some(items) = analysis.get("selected_images").and_then(|v| v.as_array()) {
+        let mut attachments = Vec::new();
+        let mut has_global_frame = false;
+        for item in items {
+            let data = item
+                .get("data_base64")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim();
+            if data.is_empty() {
+                continue;
+            }
+
+            let mime_type = item
+                .get("mime_type")
+                .and_then(|v| v.as_str())
+                .filter(|m| !m.trim().is_empty())
+                .unwrap_or(default_mime_type)
+                .to_string();
+
+            if item
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .map(|kind| kind.eq_ignore_ascii_case("global"))
+                .unwrap_or(false)
+            {
+                has_global_frame = true;
+            }
+
+            attachments.push(ImageAttachment {
+                data: data.to_string(),
+                mime_type,
+            });
+        }
+
+        if !has_global_frame {
+            if let Some(thumb) = thumbnail_attachment.clone() {
+                attachments.push(thumb);
+            }
+        }
+
+        if !attachments.is_empty() {
+            return Some(attachments);
+        }
+    }
+
+    if let Some(thumb) = thumbnail_attachment {
+        return Some(vec![thumb]);
+    }
+
+    None
 }
 
 // ─── Colab workflow state machine ────────────────────────────────────────────
@@ -3837,7 +4521,10 @@ impl ColabFlowState {
     }
 
     /// Returns the next forced calls for this workflow, if any.
-    fn next_required_calls(&self, allowed_tool_names: &std::collections::HashSet<String>) -> Vec<ParsedToolCall> {
+    fn next_required_calls(
+        &self,
+        allowed_tool_names: &std::collections::HashSet<String>,
+    ) -> Vec<ParsedToolCall> {
         // Step 1 (CreateNotebook only): create the Drive file first.
         if self.intent == ColabIntent::CreateNotebook && !self.drive_create_attempted {
             let call = self.drive_create_call();
@@ -3856,7 +4543,10 @@ impl ColabFlowState {
         }
 
         // Step 3 (ExecuteCode only): execute after browser is confirmed connected.
-        if self.intent == ColabIntent::ExecuteCode && self.browser_connected && !self.execute_attempted {
+        if self.intent == ColabIntent::ExecuteCode
+            && self.browser_connected
+            && !self.execute_attempted
+        {
             if let Some(call) = self.execute_call() {
                 if allowed_tool_names.contains(&call.name) {
                     return vec![call];
@@ -3867,7 +4557,12 @@ impl ColabFlowState {
         vec![]
     }
 
-    fn observe_tool_result(&mut self, call: &ParsedToolCall, success: bool, data: &serde_json::Value) {
+    fn observe_tool_result(
+        &mut self,
+        call: &ParsedToolCall,
+        success: bool,
+        data: &serde_json::Value,
+    ) {
         match call.name.as_str() {
             "gw_drive_create" => {
                 self.drive_create_attempted = true;
@@ -3882,7 +4577,10 @@ impl ColabFlowState {
             n if n.contains("open_colab_browser_connection") => {
                 self.browser_open_attempted = true;
                 // The tool returns {result: true/false}.
-                let connected = data.get("result").and_then(|v| v.as_bool()).unwrap_or(success);
+                let connected = data
+                    .get("result")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(success);
                 self.browser_connected = connected;
             }
             n if n.contains("execute_cell") => {
@@ -3943,28 +4641,40 @@ fn detect_colab_intent(text: &str) -> Option<(ColabIntent, Option<String>, Optio
 
     let is_colab = lower.contains("colab")
         || lower.contains("google colab")
-        || (lower.contains("notebook") && (lower.contains("python") || lower.contains("jupyter") || lower.contains("ipynb")));
+        || (lower.contains("notebook")
+            && (lower.contains("python") || lower.contains("jupyter") || lower.contains("ipynb")));
 
     if !is_colab {
         return None;
     }
 
     // Create intent
-    let is_create = ["create", "new", "make", "start a", "open a new", "banao", "bana"]
-        .iter()
-        .any(|kw| lower.contains(kw));
+    let is_create = [
+        "create",
+        "new",
+        "make",
+        "start a",
+        "open a new",
+        "banao",
+        "bana",
+    ]
+    .iter()
+    .any(|kw| lower.contains(kw));
 
     if is_create {
         // Extract notebook title if present
-        let title = infer_title(text, "").pipe_nonempty()
+        let title = infer_title(text, "")
+            .pipe_nonempty()
             .or_else(|| extract_notebook_title_from_text(text));
         return Some((ColabIntent::CreateNotebook, title, None));
     }
 
     // Execute intent
-    let is_execute = ["run", "execute", "chalao", "chala", "print(", "import ", "code:"]
-        .iter()
-        .any(|kw| lower.contains(kw));
+    let is_execute = [
+        "run", "execute", "chalao", "chala", "print(", "import ", "code:",
+    ]
+    .iter()
+    .any(|kw| lower.contains(kw));
 
     if is_execute {
         let code = extract_code_from_text(text);
@@ -3972,9 +4682,16 @@ fn detect_colab_intent(text: &str) -> Option<(ColabIntent, Option<String>, Optio
     }
 
     // Open intent
-    let is_open = ["open", "kholo", "kho do", "launch", "set as active", "active"]
-        .iter()
-        .any(|kw| lower.contains(kw));
+    let is_open = [
+        "open",
+        "kholo",
+        "kho do",
+        "launch",
+        "set as active",
+        "active",
+    ]
+    .iter()
+    .any(|kw| lower.contains(kw));
 
     if is_open {
         return Some((ColabIntent::OpenNotebook, None, None));
@@ -3991,7 +4708,9 @@ fn extract_notebook_title_from_text(text: &str) -> Option<String> {
         if let Some(idx) = lower.find(marker) {
             let rest = text[idx + marker.len()..].trim();
             let title = rest
-                .split(|c: char| matches!(c, ' ') && !rest[..rest.find(c).unwrap_or(0)].ends_with('.'))
+                .split(|c: char| {
+                    matches!(c, ' ') && !rest[..rest.find(c).unwrap_or(0)].ends_with('.')
+                })
                 .next()
                 .unwrap_or(rest)
                 .trim_matches(|c: char| c == '"' || c == '\'' || c == '`' || c == '.')
@@ -4057,7 +4776,11 @@ trait PipeNonEmpty {
 }
 impl PipeNonEmpty for String {
     fn pipe_nonempty(self) -> Option<String> {
-        if self.is_empty() { None } else { Some(self) }
+        if self.is_empty() {
+            None
+        } else {
+            Some(self)
+        }
     }
 }
 
@@ -4609,6 +5332,69 @@ impl AgentLoop {
         Arc::clone(&self.hitl_gateway)
     }
 
+    /// Best-effort pre-flight cap for visual tokens before `analyze_image`.
+    async fn compute_visual_token_cap(&self) -> VisualTokenCapDecision {
+        let mut safety_margin_mb = 512u64;
+        let mut profile = crate::config::ModelProfile::default();
+        let mut current_ngl = 0u32;
+        let mut vision_enabled = self.model_router.has_vision();
+
+        if let Some(mgr) = self.model_router.orchestrator_server_manager() {
+            safety_margin_mb = mgr.safety_margin_mb();
+            profile = mgr.model_profile();
+            let (ngl, _ctx) = mgr.current_params();
+            current_ngl = ngl;
+            vision_enabled = mgr.current_vision_enabled();
+        }
+
+        let vision_mode = match (vision_enabled, current_ngl) {
+            (false, _) => VisionMode::Disabled,
+            (true, 0) => VisionMode::CpuVision,
+            (true, ngl) if ngl < profile.vision_min_ngl => VisionMode::ReducedGpu,
+            (true, _) => VisionMode::FullGpu,
+        };
+
+        if !vision_mode.has_vision() {
+            return VisualTokenCapDecision {
+                hard_cap: 0,
+                safe_cap: 0,
+                free_vram_mb: 0,
+                safety_margin_mb,
+                vision_mode,
+            };
+        }
+
+        let free_vram_mb = crate::platform::vram::build_profiler().snapshot().await.free_mb;
+        let safe_cap = calculate_safe_visual_tokens(
+            free_vram_mb,
+            safety_margin_mb,
+            &profile,
+            0, // Conservative fallback until live KV occupancy is exposed.
+        );
+
+        let mode_cap = match vision_mode.max_image_dimension() {
+            0 => u32::MAX, // full-resolution mode
+            dim => estimate_visual_tokens(dim, dim, 14),
+        };
+
+        let cap = if safe_cap == 0 {
+            // If telemetry is unavailable, fall back to the mode cap.
+            if mode_cap == u32::MAX { 4096 } else { mode_cap }
+        } else if mode_cap == u32::MAX {
+            safe_cap
+        } else {
+            safe_cap.min(mode_cap)
+        };
+
+        VisualTokenCapDecision {
+            hard_cap: cap.max(64),
+            safe_cap,
+            free_vram_mb,
+            safety_margin_mb,
+            vision_mode,
+        }
+    }
+
     /// Run the agent loop for a single user turn.
     /// Returns a channel of StreamEvents.
     pub async fn run(
@@ -4681,6 +5467,13 @@ impl AgentLoop {
         let routing_focus_lower = routing_focus_text.to_lowercase();
         let pure_image_analysis_turn =
             has_images && looks_like_pure_image_analysis_request(&routing_focus_lower);
+        let mut inline_images_allowed_for_turn = true;
+        let mut inline_image_vision_mode = VisionMode::FullGpu;
+        if has_images {
+            let cap_probe = self.compute_visual_token_cap().await;
+            inline_image_vision_mode = cap_probe.vision_mode;
+            inline_images_allowed_for_turn = cap_probe.vision_mode.has_vision();
+        }
 
         log_pipeline_step(
             session_id,
@@ -4699,17 +5492,46 @@ impl AgentLoop {
         );
 
         let backend = if has_images {
-            match self.model_router.route_vision().await {
-                Some(b) => b,
-                None => {
-                    log_pipeline_step(
-                        session_id,
-                        "backend_unavailable",
-                        "No vision backend available",
-                        Some(serde_json::json!({ "requested": "vision" })),
-                    );
-                    let _ = event_tx.send(StreamEvent::Error("no vision backend available".into()));
-                    return;
+            if inline_images_allowed_for_turn {
+                match self.model_router.route_vision().await {
+                    Some(b) => b,
+                    None => {
+                        log_pipeline_step(
+                            session_id,
+                            "backend_unavailable",
+                            "No vision backend available despite enabled VisionMode; falling back to chat backend",
+                            Some(serde_json::json!({
+                                "requested": "vision",
+                                "fallback": "chat_backend_inline_images_preserved",
+                                "vision_mode": inline_image_vision_mode.as_str(),
+                            })),
+                        );
+                        match self.model_router.route("chat").await {
+                            Some(b) => b,
+                            None => {
+                                let _ = event_tx
+                                    .send(StreamEvent::Error("no LLM backend available".into()));
+                                return;
+                            }
+                        }
+                    }
+                }
+            } else {
+                log_pipeline_step(
+                    session_id,
+                    "vision_mode_disabled",
+                    "VisionMode is disabled for this runtime; stripping inline images for LLM rounds",
+                    Some(serde_json::json!({
+                        "vision_mode": inline_image_vision_mode.as_str(),
+                    })),
+                );
+                match self.model_router.route("chat").await {
+                    Some(b) => b,
+                    None => {
+                        let _ = event_tx
+                            .send(StreamEvent::Error("no LLM backend available".into()));
+                        return;
+                    }
                 }
             }
         } else {
@@ -4829,7 +5651,7 @@ impl AgentLoop {
         // Build tool schemas for the LLM (filtered by mount manager)
         let mount_mgr = self.mount_manager.read().await;
         let tool_defs = self.tool_registry.list_for_tier(&self.hardware_tier);
-        let tool_schemas: Vec<ToolSchema> = tool_defs
+        let mut tool_schemas: Vec<ToolSchema> = tool_defs
             .iter()
             .filter(|d| mount_mgr.is_mounted(&d.name))
             .filter(|d| {
@@ -4853,6 +5675,7 @@ impl AgentLoop {
                 parameters: d.to_function_schema()["function"]["parameters"].clone(),
             })
             .collect();
+        tool_schemas.sort_by(|a, b| a.name.cmp(&b.name));
         let allowed_tool_names: HashSet<String> =
             tool_schemas.iter().map(|s| s.name.clone()).collect();
         drop(mount_mgr);
@@ -4876,12 +5699,6 @@ impl AgentLoop {
             })),
         );
 
-        let llm_tool_schemas: Option<&[ToolSchema]> = if pure_image_analysis_turn {
-            None
-        } else {
-            Some(&tool_schemas)
-        };
-
         // Track tools already approved in this user-turn to avoid re-asking.
         // Key: "tool_name|args_json"
         let mut approved_this_turn: HashSet<String> = HashSet::new();
@@ -4893,15 +5710,30 @@ impl AgentLoop {
         let mut last_successful_gmail_result: Option<serde_json::Value> = None;
         let mut last_successful_image_result: Option<serde_json::Value> = None;
         let intent_result = IntentRouter::classify(&routing_focus_text);
-        let forced_tool_requested = extract_forced_tool_directive(&routing_focus_text).is_some();
-
-        // Semantic routing: run async router when available, capturing per-turn modality.
-        let turn_modality = if let Some(router) = &self.semantic_router {
-            let (_, modality, _trace) = router.route(&routing_focus_text).await;
+        let forced_tool_directive = extract_forced_tool_directive(&routing_focus_text);
+        let forced_tool_requested = forced_tool_directive.is_some();
+        let forced_tool_name = forced_tool_directive.as_ref().map(|(name, _)| name.clone());
+        let direct_intent_tool_hint = match &intent_result.intent {
+            crate::agent::router::Intent::DirectTool(name)
+                if intent_result.confidence >= DIRECT_INTENT_HINT_MIN_CONFIDENCE =>
+            {
+                Some(name.as_str())
+            }
+            _ => intent_result
+                .tool_hint
+                .as_deref()
+                .filter(|_| intent_result.confidence >= self.min_confidence_to_act),
+        };
+        let mut turn_modality = if let Some(router) = &self.semantic_router {
+            let (_, modality, _) = router.route(&routing_focus_text).await;
             modality
         } else {
             crate::routing::verbs::classify_modality(&routing_focus_text)
         };
+        let base_system_prompt_template = messages
+            .first()
+            .filter(|m| m.role.eq_ignore_ascii_case("system"))
+            .map(|m| m.content.clone());
 
         log_pipeline_step(
             session_id,
@@ -4919,6 +5751,103 @@ impl AgentLoop {
         );
 
         for round in 0..self.max_tool_rounds {
+            let round_user_text = messages
+                .iter()
+                .rev()
+                .find(|m| m.role == "user")
+                .map(|m| m.content.as_str())
+                .unwrap_or(routing_focus_text.as_str());
+            let round_focus_text = routing_focus_text_from_user_content(round_user_text);
+            let mut routed_tool_names: HashSet<String> = HashSet::new();
+            let mut conversation_only_route = false;
+
+            if let Some(router) = &self.semantic_router {
+                let (decision, modality, trace) = router.route(&round_focus_text).await;
+                turn_modality = modality;
+                conversation_only_route =
+                    matches!(decision, crate::routing::RouteDecision::Conversation);
+                routed_tool_names.extend(trace.selected_tools.into_iter());
+            }
+            let fallback_tool_names = fallback_routed_tool_candidates(
+                &round_focus_text,
+                intent_result.tool_hint.as_deref(),
+                &allowed_tool_names,
+            );
+
+            let round_tool_schemas = if pure_image_analysis_turn {
+                Vec::new()
+            } else {
+                select_routed_tool_schemas(
+                    &tool_schemas,
+                    &round_focus_text,
+                    direct_intent_tool_hint,
+                    &routed_tool_names,
+                    &fallback_tool_names,
+                    forced_tool_name.as_deref(),
+                    execution_profile.tool_lock.as_deref(),
+                    conversation_only_route,
+                )
+            };
+
+            if let Some(template) = base_system_prompt_template.as_ref() {
+                if let Some(system_msg) = messages
+                    .first_mut()
+                    .filter(|m| m.role.eq_ignore_ascii_case("system"))
+                {
+                    system_msg.content =
+                        rewrite_system_prompt_tools_block(template, &round_tool_schemas);
+                } else {
+                    messages.insert(
+                        0,
+                        ChatMessage {
+                            role: "system".into(),
+                            content: rewrite_system_prompt_tools_block(
+                                template,
+                                &round_tool_schemas,
+                            ),
+                            name: None,
+                            images: None,
+                        },
+                    );
+                }
+            }
+
+            let total_chars_before_compaction: usize =
+                messages.iter().map(|m| m.content.chars().count()).sum();
+            compact_messages_for_chat(messages);
+            let total_chars_after_compaction: usize =
+                messages.iter().map(|m| m.content.chars().count()).sum();
+            if total_chars_after_compaction < total_chars_before_compaction {
+                log_pipeline_step(
+                    session_id,
+                    "llm_context_compacted",
+                    "Compacted message history to fit context budget",
+                    Some(serde_json::json!({
+                        "round": round,
+                        "before_chars": total_chars_before_compaction,
+                        "after_chars": total_chars_after_compaction,
+                        "message_count": messages.len(),
+                    })),
+                );
+            }
+
+            let llm_tool_schemas: Option<&[ToolSchema]> = if pure_image_analysis_turn {
+                None
+            } else {
+                Some(round_tool_schemas.as_slice())
+            };
+
+            let mut llm_messages = messages.clone();
+            let should_strip_images_for_round = has_images && !inline_images_allowed_for_turn;
+            if should_strip_images_for_round {
+                for message in &mut llm_messages {
+                    if message.has_images() {
+                        message.images = None;
+                    }
+                }
+            }
+            let round_has_images = llm_messages.iter().any(|message| message.has_images());
+
             log_pipeline_step(
                 session_id,
                 "llm_input_prepared",
@@ -4926,26 +5855,57 @@ impl AgentLoop {
                 Some(serde_json::json!({
                     "round": round,
                     "tool_schema_count": llm_tool_schemas.map(|schemas| schemas.len()).unwrap_or(0),
+                    "routed_tool_count": routed_tool_names.len(),
+                    "fallback_tool_count": fallback_tool_names.len(),
+                    "direct_hint_tool": direct_intent_tool_hint,
+                    "images_stripped_for_round": should_strip_images_for_round,
                     "history_message_count": messages.len(),
-                    "messages_preview": build_message_preview(messages, 6),
+                    "messages_preview": build_message_preview(&llm_messages, 6),
                 })),
             );
 
             // Call LLM
-            let response = match backend.chat(messages, llm_tool_schemas, 0.7, 4096).await {
+            let response = match backend
+                .chat(&llm_messages, llm_tool_schemas, 0.7, 4096)
+                .await
+            {
                 Ok(r) => r,
                 Err(e) => {
-                    log_pipeline_step(
-                        session_id,
-                        "llm_error",
-                        "LLM call failed",
-                        Some(serde_json::json!({
-                            "round": round,
-                            "error": sanitize_text_for_logs(&e.to_string(), 260),
-                        })),
-                    );
-                    let _ = event_tx.send(StreamEvent::Error(format!("LLM error: {e}")));
-                    return;
+                    let error_text = e.to_string();
+                    if round_has_images && looks_like_vision_unavailable_error(&error_text) {
+                        log_pipeline_step(
+                            session_id,
+                            "vision_runtime_fallback",
+                            "Vision runtime unavailable; keeping VisionMode-driven inline-image policy (no blind stripping)",
+                            Some(serde_json::json!({
+                                "round": round,
+                                "vision_mode": inline_image_vision_mode.as_str(),
+                                "error": sanitize_text_for_logs(&error_text, 260),
+                            })),
+                        );
+                        let _ = event_tx.send(StreamEvent::Plan(
+                            "Vision runtime is temporarily unavailable; using OCR/image tools fallback."
+                                .into(),
+                        ));
+                        LlmResponse {
+                            content: String::new(),
+                            model: backend.model_label().to_string(),
+                            usage: None,
+                            tool_calls: None,
+                        }
+                    } else {
+                        log_pipeline_step(
+                            session_id,
+                            "llm_error",
+                            "LLM call failed",
+                            Some(serde_json::json!({
+                                "round": round,
+                                "error": sanitize_text_for_logs(&error_text, 260),
+                            })),
+                        );
+                        let _ = event_tx.send(StreamEvent::Error(format!("LLM error: {e}")));
+                        return;
+                    }
                 }
             };
 
@@ -5079,7 +6039,9 @@ impl AgentLoop {
                 let intent_fallback_query =
                     resolve_intent_fallback_query(&routing_focus_text, &messages);
                 let fallback_intent_result = IntentRouter::classify(&intent_fallback_query);
-                let fallback_confidence = fallback_intent_result.confidence.max(intent_result.confidence);
+                let fallback_confidence = fallback_intent_result
+                    .confidence
+                    .max(intent_result.confidence);
 
                 let fallback_calls =
                     build_multi_intent_fallback_calls(&intent_fallback_query, &allowed_tool_names);
@@ -5088,7 +6050,8 @@ impl AgentLoop {
                     if forced_tool_requested || fallback_confidence >= self.min_confidence_to_act {
                         intent_fallback_used = true;
                         synthetic_intent_calls = true;
-                        let names: Vec<&str> = fallback_calls.iter().map(|c| c.name.as_str()).collect();
+                        let names: Vec<&str> =
+                            fallback_calls.iter().map(|c| c.name.as_str()).collect();
                         let plan_message = if intent_fallback_query == routing_focus_text {
                             format!(
                                 "No tool call returned; applying intent fallback via {}",
@@ -5333,6 +6296,33 @@ impl AgentLoop {
 
             // Execute each tool call
             for call in &tool_calls {
+                let mut execution_args = call.arguments.clone();
+                if call.name == "analyze_image" {
+                    let cap_decision = self.compute_visual_token_cap().await;
+                    let mut payload_obj = match &execution_args {
+                        serde_json::Value::Object(obj) => obj.clone(),
+                        serde_json::Value::String(raw) => serde_json::from_str::<serde_json::Value>(raw)
+                            .ok()
+                            .and_then(|v| v.as_object().cloned())
+                            .unwrap_or_default(),
+                        _ => serde_json::Map::new(),
+                    };
+                    payload_obj.insert(
+                        "hard_visual_token_cap".to_string(),
+                        serde_json::json!(cap_decision.hard_cap),
+                    );
+                    execution_args = serde_json::Value::Object(payload_obj);
+
+                    tracing::info!(
+                        hard_visual_token_cap = cap_decision.hard_cap,
+                        safe_visual_token_cap = cap_decision.safe_cap,
+                        free_vram_mb = cap_decision.free_vram_mb,
+                        safety_margin_mb = cap_decision.safety_margin_mb,
+                        vision_mode = %cap_decision.vision_mode,
+                        "agent_loop: injected hard_visual_token_cap for analyze_image pre-flight"
+                    );
+                }
+
                 log_pipeline_step(
                     session_id,
                     "tool_call_started",
@@ -5340,7 +6330,7 @@ impl AgentLoop {
                     Some(serde_json::json!({
                         "round": round,
                         "tool": call.name.clone(),
-                        "arguments": sanitize_json_for_logs(&call.arguments, 220, 8),
+                        "arguments": sanitize_json_for_logs(&execution_args, 220, 8),
                     })),
                 );
 
@@ -5384,7 +6374,7 @@ impl AgentLoop {
 
                 let _ = event_tx.send(StreamEvent::ToolStart {
                     name: call.name.clone(),
-                    params: call.arguments.clone(),
+                    params: execution_args.clone(),
                 });
 
                 // ── Colab browser-connection gate ────────────────────────────
@@ -5439,8 +6429,7 @@ impl AgentLoop {
                         });
                         messages.push(ChatMessage {
                             role: "tool".into(),
-                            content: serde_json::to_string(&gate_result.data)
-                                .unwrap_or_default(),
+                            content: serde_json::to_string(&gate_result.data).unwrap_or_default(),
                             name: Some(bootstrap.name.clone()),
                             images: None,
                         });
@@ -5460,7 +6449,7 @@ impl AgentLoop {
                 // Policy check — pass destructive hint from semantic router modality
                 let decision = self.policy_engine.evaluate_with_modality_hint(
                     &call.name,
-                    &call.arguments,
+                    &execution_args,
                     turn_modality.destructive,
                 );
 
@@ -5483,7 +6472,7 @@ impl AgentLoop {
                     self.audit_logger.log(
                         session_id,
                         &call.name,
-                        &call.arguments,
+                        &execution_args,
                         RiskLevel::Black,
                         Decision::Blocked,
                         DecidedBy::Hardcoded,
@@ -5519,7 +6508,7 @@ impl AgentLoop {
 
                 if decision.requires_approval {
                     // RED tier — needs HITL approval (but skip if same tool+args already approved this turn)
-                    let dedup_key = format!("{}|{}", call.name, call.arguments);
+                    let dedup_key = format!("{}|{}", call.name, execution_args);
                     let already_approved = approved_this_turn.contains(&dedup_key);
 
                     if already_approved {
@@ -5527,7 +6516,7 @@ impl AgentLoop {
                         self.audit_logger.log(
                             session_id,
                             &call.name,
-                            &call.arguments,
+                            &execution_args,
                             decision.risk_level,
                             Decision::Approved,
                             DecidedBy::Policy,
@@ -5551,7 +6540,7 @@ impl AgentLoop {
                             request_id: request_id.clone(),
                             action: call.name.clone(),
                             risk_level: decision.risk_level.as_str().into(),
-                            parameters: call.arguments.clone(),
+                            parameters: execution_args.clone(),
                         });
 
                         log_pipeline_step(
@@ -5571,9 +6560,9 @@ impl AgentLoop {
                             .request_approval_with_id(
                                 &request_id,
                                 &call.name,
-                                call.arguments.clone(),
+                                execution_args.clone(),
                                 decision.risk_level,
-                                &format!("Execute {} with params: {}", call.name, call.arguments),
+                                &format!("Execute {} with params: {}", call.name, execution_args),
                                 true,
                             )
                             .await;
@@ -5599,7 +6588,7 @@ impl AgentLoop {
                         self.audit_logger.log(
                             session_id,
                             &call.name,
-                            &call.arguments,
+                            &execution_args,
                             decision.risk_level,
                             audit_decision,
                             decided_by,
@@ -5663,7 +6652,7 @@ impl AgentLoop {
                 }
 
                 // ── Dedup guard: abort on repeated identical failure ───────────
-                let call_hash = call_dedup_hash(&call.name, &call.arguments);
+                let call_hash = call_dedup_hash(&call.name, &execution_args);
                 if let Some((fail_count, cached_err)) = failed_calls.get(&call_hash) {
                     if *fail_count >= 1 {
                         let abort_msg = format!(
@@ -5720,8 +6709,7 @@ impl AgentLoop {
                 let hb_tx = event_tx.clone();
                 let hb_tool = call.name.clone();
                 tokio::spawn(async move {
-                    let mut interval =
-                        tokio::time::interval(std::time::Duration::from_secs(2));
+                    let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
                     interval.tick().await; // skip the immediate first tick
                     loop {
                         tokio::select! {
@@ -5742,7 +6730,7 @@ impl AgentLoop {
                 let tool_result = if let Some(handler) = self.tool_registry.get_handler(&call.name)
                 {
                     let handler = handler.clone();
-                    let args = call.arguments.clone();
+                    let args = execution_args.clone();
                     // Long-running tools get extended timeouts
                     let timeout_secs = match call.name.as_str() {
                         "install_application"
@@ -5850,7 +6838,10 @@ impl AgentLoop {
                 // and skip the LLM round so the user gets clear feedback immediately.
                 if call.name == "generate_image" && !tool_result.success {
                     let failure_msg = build_image_failure_response(&tool_result.data);
-                    tracing::warn!(session = session_id, "generate_image failed; returning structured failure to user");
+                    tracing::warn!(
+                        session = session_id,
+                        "generate_image failed; returning structured failure to user"
+                    );
                     let _ = event_tx.send(StreamEvent::Token(failure_msg.clone()));
                     let _ = event_tx.send(StreamEvent::Done(failure_msg));
                     return;
@@ -5879,6 +6870,18 @@ impl AgentLoop {
                 //   2. Count tokens via llama.cpp /tokenize; if still over the
                 //      per-tool budget, re-shape with a tighter char budget.
                 //   3. Hard char-cap as a final safety net.
+                let mut extracted_tool_images =
+                    if tool_result.success && call.name == "analyze_image" {
+                        extract_preprocessed_image_attachments(&tool_result.data, "image/jpeg")
+                    } else {
+                        None
+                    };
+                let extracted_tool_image_count =
+                    extracted_tool_images.as_ref().map(|imgs| imgs.len()).unwrap_or(0);
+                if !inline_images_allowed_for_turn {
+                    extracted_tool_images = None;
+                }
+
                 let llm_tool_result = compact_tool_result_for_llm(&call.name, &tool_result.data);
                 let result_str = if !tool_result.success {
                     let err_msg = tool_result
@@ -5889,8 +6892,7 @@ impl AgentLoop {
                 } else {
                     // ── Context Bomb mitigation ────────────────────────────
                     // Per-tool char budget derived from token budget.
-                    let char_budget =
-                        LLM_TOOL_RESULT_TOKEN_BUDGET * 4; // ~4 chars/token heuristic
+                    let char_budget = LLM_TOOL_RESULT_TOKEN_BUDGET * 4; // ~4 chars/token heuristic
 
                     // Stream the full payload to the UI via ToolPayloadChunk so
                     // the user always sees complete data while the LLM only gets
@@ -5916,18 +6918,15 @@ impl AgentLoop {
                     if token_count > LLM_TOOL_RESULT_TOKEN_BUDGET {
                         // Re-shape with a char budget proportional to how much
                         // we need to shrink.
-                        let tighter = (char_budget * LLM_TOOL_RESULT_TOKEN_BUDGET / token_count)
-                            .max(512);
+                        let tighter =
+                            (char_budget * LLM_TOOL_RESULT_TOKEN_BUDGET / token_count).max(512);
                         let reshaped = shape_for_llm(&call.name, &llm_tool_result, tighter);
                         shaped_str = reshaped.value.to_string();
                     }
 
                     // Stage 3: hard char cap as final safety net.
                     if shaped_str.len() > TOOL_RESULT_MAX_CHARS {
-                        format!(
-                            "{}...<truncated>",
-                            &shaped_str[..TOOL_RESULT_MAX_CHARS]
-                        )
+                        format!("{}...<truncated>", &shaped_str[..TOOL_RESULT_MAX_CHARS])
                     } else {
                         shaped_str
                     }
@@ -5955,6 +6954,7 @@ impl AgentLoop {
                             .error
                             .as_ref()
                             .map(|e| sanitize_text_for_logs(e, 220)),
+                        "migrated_tool_images": extracted_tool_image_count,
                         "result_preview": sanitize_json_for_logs(&tool_result.data, 220, 8),
                         "result_tokens": result_tokens,
                         "turn_tool_tokens_total": turn_tool_tokens,
@@ -5977,17 +6977,18 @@ impl AgentLoop {
                     result_str
                 };
 
-                let tool_msg = if let Some(note) = build_grounding_count_note(&call.name, &llm_tool_result) {
-                    format!("{tool_msg}\n\n{note}")
-                } else {
-                    tool_msg
-                };
+                let tool_msg =
+                    if let Some(note) = build_grounding_count_note(&call.name, &llm_tool_result) {
+                        format!("{tool_msg}\n\n{note}")
+                    } else {
+                        tool_msg
+                    };
 
                 messages.push(ChatMessage {
                     role: "tool".into(),
                     content: tool_msg,
                     name: Some(call.name.clone()),
-                    images: None,
+                    images: extracted_tool_images,
                 });
             }
 
@@ -6277,9 +7278,9 @@ mod tests {
         assert!(note.contains("Never claim or enumerate more than 3"));
     }
 
-        #[test]
-        fn sanitize_assistant_text_response_filters_sensitive_json_blocks() {
-                let raw = r#"The latest unread emails are listed above.
+    #[test]
+    fn sanitize_assistant_text_response_filters_sensitive_json_blocks() {
+        let raw = r#"The latest unread emails are listed above.
 
 ```json
 {
@@ -6290,16 +7291,16 @@ mod tests {
 
 Please open Gmail for full details."#;
 
-                let sanitized = sanitize_assistant_text_response(raw);
-                assert!(sanitized.contains("The latest unread emails are listed above."));
-                assert!(sanitized.contains("[Filtered unsafe raw payload omitted.]"));
-                assert!(!sanitized.contains("toolbench_rapidapi_key"));
-                assert!(!sanitized.contains("088440d910mshef857391f2fc461p17ae9ejsnaebc918926ff"));
-        }
+        let sanitized = sanitize_assistant_text_response(raw);
+        assert!(sanitized.contains("The latest unread emails are listed above."));
+        assert!(sanitized.contains("[Filtered unsafe raw payload omitted.]"));
+        assert!(!sanitized.contains("toolbench_rapidapi_key"));
+        assert!(!sanitized.contains("088440d910mshef857391f2fc461p17ae9ejsnaebc918926ff"));
+    }
 
-        #[test]
-        fn sanitize_assistant_text_response_filters_raw_gmail_payload_blocks() {
-                let raw = r#"```json
+    #[test]
+    fn sanitize_assistant_text_response_filters_raw_gmail_payload_blocks() {
+        let raw = r#"```json
 {
     "query": "in:inbox is:unread",
     "requested_count": 3,
@@ -6310,13 +7311,13 @@ Please open Gmail for full details."#;
 }
 ```"#;
 
-                let sanitized = sanitize_assistant_text_response(raw);
-                assert_eq!(sanitized.trim(), "[Filtered unsafe raw payload omitted.]");
-        }
+        let sanitized = sanitize_assistant_text_response(raw);
+        assert_eq!(sanitized.trim(), "[Filtered unsafe raw payload omitted.]");
+    }
 
-        #[test]
-        fn sanitize_assistant_text_response_filters_gmail_payload_without_query_field() {
-                let raw = r#"```json
+    #[test]
+    fn sanitize_assistant_text_response_filters_gmail_payload_without_query_field() {
+        let raw = r#"```json
 {
     "data": {
         "count": 3,
@@ -6333,59 +7334,59 @@ Please open Gmail for full details."#;
 }
 ```"#;
 
-                let sanitized = sanitize_assistant_text_response(raw);
-                assert_eq!(sanitized.trim(), "[Filtered unsafe raw payload omitted.]");
-        }
+        let sanitized = sanitize_assistant_text_response(raw);
+        assert_eq!(sanitized.trim(), "[Filtered unsafe raw payload omitted.]");
+    }
 
-        #[test]
-        fn sanitize_assistant_text_response_preserves_normal_code_blocks() {
-                let raw = r#"Use this helper:
+    #[test]
+    fn sanitize_assistant_text_response_preserves_normal_code_blocks() {
+        let raw = r#"Use this helper:
 
 ```python
 print("hello")
 ```
 "#;
 
-                let sanitized = sanitize_assistant_text_response(raw);
-                assert!(sanitized.contains("print(\"hello\")"));
-                assert!(sanitized.contains("```python"));
-        }
+        let sanitized = sanitize_assistant_text_response(raw);
+        assert!(sanitized.contains("print(\"hello\")"));
+        assert!(sanitized.contains("```python"));
+    }
 
-            #[test]
-            fn build_tool_call_history_content_outputs_canonical_calls_only() {
-                let calls = vec![
-                    ParsedToolCall {
-                        name: "gw_gmail_inbox".into(),
-                        arguments: serde_json::json!({
-                            "query": "in:inbox is:unread",
-                            "max_results": 3
-                        }),
-                    },
-                    ParsedToolCall {
-                        name: "gw_gmail_read".into(),
-                        arguments: serde_json::json!({ "message_id": "abc123" }),
-                    },
-                ];
+    #[test]
+    fn build_tool_call_history_content_outputs_canonical_calls_only() {
+        let calls = vec![
+            ParsedToolCall {
+                name: "gw_gmail_inbox".into(),
+                arguments: serde_json::json!({
+                    "query": "in:inbox is:unread",
+                    "max_results": 3
+                }),
+            },
+            ParsedToolCall {
+                name: "gw_gmail_read".into(),
+                arguments: serde_json::json!({ "message_id": "abc123" }),
+            },
+        ];
 
-                let serialized = build_tool_call_history_content(&calls);
+        let serialized = build_tool_call_history_content(&calls);
 
-                assert!(serialized.contains("<tool_call>"));
-                assert!(serialized.contains("\"name\":\"gw_gmail_inbox\""));
-                assert!(serialized.contains("\"name\":\"gw_gmail_read\""));
-                assert!(!serialized.contains("TOOL_ERROR"));
-            }
+        assert!(serialized.contains("<tool_call>"));
+        assert!(serialized.contains("\"name\":\"gw_gmail_inbox\""));
+        assert!(serialized.contains("\"name\":\"gw_gmail_read\""));
+        assert!(!serialized.contains("TOOL_ERROR"));
+    }
 
-            #[test]
-            fn strip_spurious_gmail_error_lines_removes_tool_error_and_capability_claims() {
-                let raw = "Fetched 3 unread emails.\nTOOL_ERROR: The operation to fetch emails is not directly supported by the current interface. Please use a web browser or a third-party application for checking your Gmail inbox.\nDone.";
-                let cleaned = strip_spurious_gmail_error_lines(raw);
+    #[test]
+    fn strip_spurious_gmail_error_lines_removes_tool_error_and_capability_claims() {
+        let raw = "Fetched 3 unread emails.\nTOOL_ERROR: The operation to fetch emails is not directly supported by the current interface. Please use a web browser or a third-party application for checking your Gmail inbox.\nDone.";
+        let cleaned = strip_spurious_gmail_error_lines(raw);
 
-                assert!(cleaned.contains("Fetched 3 unread emails."));
-                assert!(cleaned.contains("Done."));
-                assert!(!cleaned.contains("TOOL_ERROR:"));
-                assert!(!cleaned.contains("not directly supported"));
-                assert!(!cleaned.contains("third-party application"));
-            }
+        assert!(cleaned.contains("Fetched 3 unread emails."));
+        assert!(cleaned.contains("Done."));
+        assert!(!cleaned.contains("TOOL_ERROR:"));
+        assert!(!cleaned.contains("not directly supported"));
+        assert!(!cleaned.contains("third-party application"));
+    }
 
     #[test]
     fn grounded_gmail_count_summary_uses_requested_and_returned_counts() {
@@ -6649,7 +7650,10 @@ print("hello")
             .len();
 
         assert!(visible < 24);
-        assert_eq!(compact["llm_visible_message_count"], serde_json::json!(visible));
+        assert_eq!(
+            compact["llm_visible_message_count"],
+            serde_json::json!(visible)
+        );
         assert_eq!(
             compact["llm_omitted_message_count"],
             serde_json::json!(24 - visible)
@@ -6759,10 +7763,8 @@ print("hello")
         let mut allowed = HashSet::new();
         allowed.insert("gw_gmail_send".to_string());
 
-        let call = build_intent_fallback_tool_call(
-            "Send mail to zeeshanobaid335@gmail.com",
-            &allowed,
-        );
+        let call =
+            build_intent_fallback_tool_call("Send mail to zeeshanobaid335@gmail.com", &allowed);
 
         assert!(call.is_none());
     }
@@ -6809,6 +7811,30 @@ print("hello")
         assert_eq!(call.name, "gw_gmail_send");
         assert_eq!(call.arguments["to"], "zeeshanobaid335@gmail.com");
         assert_eq!(call.arguments["body"], "Hello Zeeshan how are you.");
+    }
+
+    #[test]
+    fn intent_fallback_appends_attachment_path_for_image_prompts() {
+        let attachment_path = "/home/test/.kria/attachments/demo.png";
+        let messages = vec![ChatMessage {
+            role: "user".into(),
+            content: format!(
+                "Analyze this image\n\nImage attachment is already included for this turn.\nAttachment path (available to local tools if needed): {}",
+                attachment_path
+            ),
+            name: None,
+            images: None,
+        }];
+
+        let contextual_query = resolve_intent_fallback_query("Analyze this image", &messages);
+        assert!(contextual_query.contains(attachment_path));
+
+        let mut allowed = HashSet::new();
+        allowed.insert("analyze_image".to_string());
+        let call = build_intent_fallback_tool_call(&contextual_query, &allowed)
+            .expect("expected analyze_image fallback call");
+        assert_eq!(call.name, "analyze_image");
+        assert_eq!(call.arguments["path"], attachment_path);
     }
 
     #[test]
@@ -6904,10 +7930,7 @@ print("hello")
         .expect("expected drive delete fallback call");
 
         assert_eq!(call.name, "gw_drive_delete");
-        assert_eq!(
-            call.arguments["file_id"],
-            "1n2B3c4D5e6F7g8H9i0JkLmNoPq"
-        );
+        assert_eq!(call.arguments["file_id"], "1n2B3c4D5e6F7g8H9i0JkLmNoPq");
     }
 
     #[test]
@@ -6961,11 +7984,8 @@ print("hello")
         let mut allowed = HashSet::new();
         allowed.insert("gw_gmail_inbox".to_string());
 
-        let call = build_intent_fallback_tool_call(
-            "fetch latest 120 unread gmails",
-            &allowed,
-        )
-        .expect("expected gmail inbox fallback call");
+        let call = build_intent_fallback_tool_call("fetch latest 120 unread gmails", &allowed)
+            .expect("expected gmail inbox fallback call");
 
         assert_eq!(call.name, "gw_gmail_inbox");
         assert_eq!(call.arguments["query"], "in:inbox is:unread");
@@ -7036,7 +8056,10 @@ print("hello")
         .expect("expected calendar create fallback call");
 
         assert_eq!(call.name, "gw_calendar_create");
-        assert_eq!(call.arguments["attendees"][0]["email"], "zeeshanobaid335@gmail.com");
+        assert_eq!(
+            call.arguments["attendees"][0]["email"],
+            "zeeshanobaid335@gmail.com"
+        );
     }
 
     #[test]
@@ -7044,11 +8067,9 @@ print("hello")
         let mut allowed = HashSet::new();
         allowed.insert("gw_sheets_create".to_string());
 
-        let call = build_intent_fallback_tool_call(
-            "Create a Google Sheet for monthly budget",
-            &allowed,
-        )
-        .expect("expected sheets create fallback call");
+        let call =
+            build_intent_fallback_tool_call("Create a Google Sheet for monthly budget", &allowed)
+                .expect("expected sheets create fallback call");
 
         assert_eq!(call.name, "gw_sheets_create");
         assert_eq!(call.arguments["title"], "monthly budget");
@@ -7162,8 +8183,12 @@ print("hello")
             .map(|s| s.to_string())
             .collect();
 
-        let candidates =
-            build_tool_choice_candidates("check my gmail for unread messages", &allowed, None, 0.45);
+        let candidates = build_tool_choice_candidates(
+            "check my gmail for unread messages",
+            &allowed,
+            None,
+            0.45,
+        );
 
         assert!(candidates.iter().any(|c| c.name == "gw_gmail_inbox"));
         assert!(candidates.iter().any(|c| c.name == "gw_calendar_search"));

@@ -5,9 +5,9 @@
 //! drains the channel, decodes into rodio, and forks a copy into the AEC
 //! reference path.
 
-use std::sync::Arc;
 #[cfg(feature = "voice-piper-rs")]
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use tokio::sync::mpsc;

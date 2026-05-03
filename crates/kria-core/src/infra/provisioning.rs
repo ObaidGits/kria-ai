@@ -192,8 +192,7 @@ impl ProvisioningEngine {
 
     /// Run the hardware detection step.
     pub fn run_hardware_detection(&mut self) -> anyhow::Result<&HardwareProfile> {
-        self.state
-            .start_step(ProvisioningStep::HardwareDetection);
+        self.state.start_step(ProvisioningStep::HardwareDetection);
 
         let profile = hardware_profiler::profile_hardware();
 
@@ -229,7 +228,10 @@ impl ProvisioningEngine {
         F: Fn(DownloadProgress) + Send + Sync,
     {
         // Skip if external backend
-        if matches!(self.state.backend_choice, Some(BackendChoice::External { .. })) {
+        if matches!(
+            self.state.backend_choice,
+            Some(BackendChoice::External { .. })
+        ) {
             self.state.skip_step(ProvisioningStep::ModelDownload);
             return Ok(());
         }
@@ -309,14 +311,15 @@ impl ProvisioningEngine {
         F: Fn(DownloadProgress) + Send + Sync,
     {
         // Skip if external backend
-        if matches!(self.state.backend_choice, Some(BackendChoice::External { .. })) {
-            self.state
-                .skip_step(ProvisioningStep::ServerVerification);
+        if matches!(
+            self.state.backend_choice,
+            Some(BackendChoice::External { .. })
+        ) {
+            self.state.skip_step(ProvisioningStep::ServerVerification);
             return Ok(());
         }
 
-        self.state
-            .start_step(ProvisioningStep::ServerVerification);
+        self.state.start_step(ProvisioningStep::ServerVerification);
 
         match crate::llm::server_binary::ensure_llama_server(&self.cancel, on_progress).await {
             Ok(status) => {
@@ -411,10 +414,7 @@ impl ProvisioningEngine {
         let mut info = String::new();
         info.push_str("=== K.R.I.A. Provisioning Diagnostics ===\n\n");
 
-        info.push_str(&format!(
-            "Current step: {:?}\n",
-            self.state.current_step
-        ));
+        info.push_str(&format!("Current step: {:?}\n", self.state.current_step));
 
         if let Some(ref profile) = self.state.hardware_profile {
             info.push_str(&format!(

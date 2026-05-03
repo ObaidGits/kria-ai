@@ -9,13 +9,13 @@
 //! Heartbeat: sends a `{"op":"ping"}` every 2 s; reconnects if no response
 //! for 5 s. State is recovered via `GET /history/{prompt_id}` on reconnect.
 
+use futures::{SinkExt, StreamExt};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::oneshot;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, info, warn};
-use futures::{SinkExt, StreamExt};
 
 /// A type-erased event emitter — fulfilled by `Arc<tauri::AppHandle>` in the desktop
 /// crate, or a no-op in tests / server builds.
@@ -129,7 +129,8 @@ pub fn spawn_ws_listener(
                                 &completion_tx,
                                 &ping_task,
                                 &cancel,
-                            ).await;
+                            )
+                            .await;
                             // If cancelled (job done or error), we're done.
                             if cancel.is_cancelled() {
                                 ping_task.abort();
@@ -188,11 +189,15 @@ async fn handle_frame(
     ping_task: &tokio::task::JoinHandle<()>,
     cancel: &tokio_util::sync::CancellationToken,
 ) {
-    let Ok(val) = serde_json::from_str::<serde_json::Value>(text) else { return };
+    let Ok(val) = serde_json::from_str::<serde_json::Value>(text) else {
+        return;
+    };
     let msg_type = val.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
     let emit = |event: &str, payload: serde_json::Value| {
-        if let Some(e) = emitter { e(event, payload); }
+        if let Some(e) = emitter {
+            e(event, payload);
+        }
     };
 
     match msg_type {
@@ -200,11 +205,14 @@ async fn handle_frame(
             let value = val["data"]["value"].as_u64().unwrap_or(0);
             let max = val["data"]["max"].as_u64().unwrap_or(1);
             let percent = (value * 100 / max.max(1)) as u32;
-            emit("image:progress", serde_json::json!({
-                "value": value,
-                "max": max,
-                "percent": percent,
-            }));
+            emit(
+                "image:progress",
+                serde_json::json!({
+                    "value": value,
+                    "max": max,
+                    "percent": percent,
+                }),
+            );
             debug!(value, max, "ComfyUI progress");
         }
         "executing" => {
@@ -226,7 +234,10 @@ async fn handle_frame(
                     });
                 }
             }
-            info!(outputs = outputs.len(), prompt_id, "ComfyUI job completed via WS");
+            info!(
+                outputs = outputs.len(),
+                prompt_id, "ComfyUI job completed via WS"
+            );
             ping_task.abort();
             cancel.cancel();
         }
@@ -234,7 +245,10 @@ async fn handle_frame(
             let queue = val["data"]["status"]["exec_info"]["queue_remaining"]
                 .as_u64()
                 .unwrap_or(0);
-            emit("image:queue", serde_json::json!({ "queue_remaining": queue }));
+            emit(
+                "image:queue",
+                serde_json::json!({ "queue_remaining": queue }),
+            );
         }
         "error" => {
             let message = val["data"]["message"]
@@ -271,7 +285,9 @@ async fn recover_from_history(
     match client.get(&url).send().await {
         Ok(resp) => {
             let Ok(val) = resp.json::<serde_json::Value>().await else {
-                return Err(WsBridgeError::ComfyError { message: "history parse failed".into() });
+                return Err(WsBridgeError::ComfyError {
+                    message: "history parse failed".into(),
+                });
             };
             let mut outputs = Vec::new();
             if let Some(images) = val[prompt_id]["outputs"].as_object() {
@@ -288,11 +304,15 @@ async fn recover_from_history(
                 }
             }
             if outputs.is_empty() {
-                Err(WsBridgeError::ComfyError { message: "no outputs in history".into() })
+                Err(WsBridgeError::ComfyError {
+                    message: "no outputs in history".into(),
+                })
             } else {
                 Ok(outputs)
             }
         }
-        Err(e) => Err(WsBridgeError::ComfyError { message: e.to_string() }),
+        Err(e) => Err(WsBridgeError::ComfyError {
+            message: e.to_string(),
+        }),
     }
 }

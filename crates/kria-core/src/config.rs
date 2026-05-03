@@ -518,7 +518,10 @@ impl OrchestratorConfig {
         // mlock: requires headroom of model_size + 4 GB on top of model RAM,
         // and only reliable on Performance/High tiers.
         let mlock_safe = matches!(tier, HardwareTier::Performance | HardwareTier::High)
-            && total_ram_mb >= model_size_mb.saturating_add(4 * 1024).saturating_add(model_size_mb);
+            && total_ram_mb
+                >= model_size_mb
+                    .saturating_add(4 * 1024)
+                    .saturating_add(model_size_mb);
         if !mlock_safe {
             self.mlock = false;
         }
@@ -1237,7 +1240,7 @@ impl Default for ImageGenerationConfig {
             output_dir: "cache/images".into(),
             conditioning_cache_dir: "cache/conditioning".into(),
             conditioning_cache_max_mb: 500,
-            idle_unload_secs: 300,   // 5 minutes
+            idle_unload_secs: 300, // 5 minutes
             prewarm: "auto".into(),
             prewarm_delay_secs: 30,
             cloud_fallback: "auto_offer".into(),

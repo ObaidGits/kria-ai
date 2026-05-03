@@ -8,7 +8,6 @@
 ///    D. Notification delivery  — notify-send primary with explicit DBUS env
 ///    E. Hinglish routing       — "volume ko X% kardo", "brightness badhaao"
 /// ─────────────────────────────────────────────────────────────────────────
-
 use kria_core::agent::router::{Intent, IntentRouter};
 use kria_core::tools::registry;
 
@@ -44,7 +43,10 @@ fn smoke_fetch_content_of_url_routes_to_fetch_webpage() {
 fn functional_fetch_webpage_tool_registered() {
     let reg = registry::build_default_registry();
     let def = reg.get_def("fetch_webpage");
-    assert!(def.is_some(), "fetch_webpage must be registered in default registry");
+    assert!(
+        def.is_some(),
+        "fetch_webpage must be registered in default registry"
+    );
     let def = def.unwrap();
     assert!(
         def.parameters.iter().any(|p| p.name == "url"),
@@ -262,12 +264,23 @@ async fn integration_notify_send_with_explicit_dbus_shows_popup() {
     let status = tokio::process::Command::new("notify-send")
         .env("DBUS_SESSION_BUS_ADDRESS", &dbus_addr)
         .env("DISPLAY", &display)
-        .args(["-a", "KRIA", "-u", "normal", "-t", "3000",
-               "KRIA Test", "Bug fix integration test: notification working!"])
+        .args([
+            "-a",
+            "KRIA",
+            "-u",
+            "normal",
+            "-t",
+            "3000",
+            "KRIA Test",
+            "Bug fix integration test: notification working!",
+        ])
         .status()
         .await
         .expect("notify-send must be available");
-    assert!(status.success(), "notify-send must exit 0 with explicit DBUS env");
+    assert!(
+        status.success(),
+        "notify-send must exit 0 with explicit DBUS env"
+    );
 }
 
 /// Integration: send_notification tool executes successfully on a desktop session.
@@ -275,13 +288,19 @@ async fn integration_notify_send_with_explicit_dbus_shows_popup() {
 #[ignore = "requires GNOME desktop session (run manually: cargo test -- --ignored)"]
 async fn integration_send_notification_tool_executes() {
     let reg = registry::build_default_registry();
-    let handler = reg.get_handler("send_notification").expect("tool must be registered");
+    let handler = reg
+        .get_handler("send_notification")
+        .expect("tool must be registered");
     let params = serde_json::json!({
         "title": "KRIA Integration Test",
         "body": "send_notification tool executed successfully!"
     });
     let result = handler.execute(params).await;
-    assert!(result.success, "send_notification should return success=true; got: {:?}", result.error);
+    assert!(
+        result.success,
+        "send_notification should return success=true; got: {:?}",
+        result.error
+    );
 }
 
 /// Integration: schedule_reminder with 0.1-minute delay (6 seconds) schedules and fires.
@@ -290,18 +309,26 @@ async fn integration_send_notification_tool_executes() {
 #[ignore = "slow (6s) + requires GNOME desktop session (run manually: cargo test -- --ignored)"]
 async fn integration_schedule_reminder_fires_after_delay() {
     let reg = registry::build_default_registry();
-    let handler = reg.get_handler("schedule_reminder").expect("tool must be registered");
+    let handler = reg
+        .get_handler("schedule_reminder")
+        .expect("tool must be registered");
     let params = serde_json::json!({
         "message": "KRIA integration test reminder fired!",
         "delay_minutes": 0.1  // 6 seconds
     });
     let result = handler.execute(params).await;
-    assert!(result.success, "schedule_reminder should return success=true");
+    assert!(
+        result.success,
+        "schedule_reminder should return success=true"
+    );
 
     // Verify the scheduled: true JSON response
     let data = &result.data;
     assert_eq!(data["scheduled"], serde_json::json!(true));
-    assert!(data["fires_in"].is_string(), "fires_in should be a human-readable string");
+    assert!(
+        data["fires_in"].is_string(),
+        "fires_in should be a human-readable string"
+    );
 
     // Wait for the reminder to fire (6 seconds + buffer)
     tokio::time::sleep(std::time::Duration::from_secs(8)).await;
@@ -370,11 +397,17 @@ fn functional_set_volume_tool_registered() {
 #[ignore = "requires PipeWire/PulseAudio (run manually: cargo test -- --ignored)"]
 async fn integration_set_volume_integer_level_100() {
     let reg = registry::build_default_registry();
-    let handler = reg.get_handler("set_volume").expect("tool must be registered");
+    let handler = reg
+        .get_handler("set_volume")
+        .expect("tool must be registered");
 
     // Test: integer JSON
     let result = handler.execute(serde_json::json!({ "level": 100 })).await;
-    assert!(result.success, "set_volume with integer 100 should succeed; got: {:?}", result.error);
+    assert!(
+        result.success,
+        "set_volume with integer 100 should succeed; got: {:?}",
+        result.error
+    );
 
     // Reset to 75%
     let _ = handler.execute(serde_json::json!({ "level": 75 })).await;
@@ -385,13 +418,25 @@ async fn integration_set_volume_integer_level_100() {
 #[ignore = "requires PipeWire/PulseAudio (run manually: cargo test -- --ignored)"]
 async fn integration_set_volume_string_level_100_percent() {
     let reg = registry::build_default_registry();
-    let handler = reg.get_handler("set_volume").expect("tool must be registered");
+    let handler = reg
+        .get_handler("set_volume")
+        .expect("tool must be registered");
 
     // Test: string "100%"
-    let result = handler.execute(serde_json::json!({ "level": "100%" })).await;
-    assert!(result.success, "set_volume with '100%' string should succeed; got: {:?}", result.error);
+    let result = handler
+        .execute(serde_json::json!({ "level": "100%" }))
+        .await;
+    assert!(
+        result.success,
+        "set_volume with '100%' string should succeed; got: {:?}",
+        result.error
+    );
     let data = &result.data;
-    assert_eq!(data["volume"], serde_json::json!(100), "volume in response should be 100");
+    assert_eq!(
+        data["volume"],
+        serde_json::json!(100),
+        "volume in response should be 100"
+    );
 
     // Reset to 75%
     let _ = handler.execute(serde_json::json!({ "level": 75 })).await;
@@ -402,10 +447,16 @@ async fn integration_set_volume_string_level_100_percent() {
 #[ignore = "requires GNOME desktop session (run manually: cargo test -- --ignored)"]
 async fn integration_set_brightness_gnome_dbus() {
     let reg = registry::build_default_registry();
-    let handler = reg.get_handler("set_brightness").expect("tool must be registered");
+    let handler = reg
+        .get_handler("set_brightness")
+        .expect("tool must be registered");
 
     let result = handler.execute(serde_json::json!({ "level": 70 })).await;
-    assert!(result.success, "set_brightness should succeed on GNOME; got: {:?}", result.error);
+    assert!(
+        result.success,
+        "set_brightness should succeed on GNOME; got: {:?}",
+        result.error
+    );
     let data = &result.data;
     // When using GNOME SettingsDaemon, backend should be "gnome-settingsd"
     let backend = data["backend"].as_str().unwrap_or("unknown");

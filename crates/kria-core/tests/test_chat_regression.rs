@@ -74,12 +74,19 @@ fn reg_f2_search_for_filename_with_extension_routes_to_search_files() {
 #[test]
 fn reg_f2b_search_for_filename_must_not_route_to_web_search() {
     // The chat showed "Search for sem-8.pdf" routed to web_search → empty results.
-    let phrases = ["Search for notes.txt", "Search for sem-8.pdf", "find report.docx"];
+    let phrases = [
+        "Search for notes.txt",
+        "Search for sem-8.pdf",
+        "find report.docx",
+    ];
     for p in &phrases {
         let r = IntentRouter::classify(p);
         if let Intent::DirectTool(t) = &r.intent {
             assert_ne!(t, "web_search", "REG-F2b: '{p}' must NOT go to web_search");
-            assert_ne!(t, "fetch_webpage", "REG-F2b: '{p}' must NOT go to fetch_webpage");
+            assert_ne!(
+                t, "fetch_webpage",
+                "REG-F2b: '{p}' must NOT go to fetch_webpage"
+            );
         }
     }
 }
@@ -93,10 +100,25 @@ fn reg_f2b_search_for_filename_must_not_route_to_web_search() {
 fn reg_f3_search_files_is_green_no_approval() {
     use kria_core::safety::policy::{PolicyEngine, RiskLevel};
     let p = PolicyEngine::new();
-    for tool in ["search_files", "read_file", "list_directory", "find_files_by_pattern"] {
-        let d = p.evaluate(tool, &serde_json::json!({ "directory": "/home/obaid", "pattern": "*.txt" }));
-        assert_eq!(d.risk_level, RiskLevel::Green, "REG-F3: {tool} must be Green");
-        assert!(!d.requires_approval, "REG-F3: {tool} must not require approval");
+    for tool in [
+        "search_files",
+        "read_file",
+        "list_directory",
+        "find_files_by_pattern",
+    ] {
+        let d = p.evaluate(
+            tool,
+            &serde_json::json!({ "directory": "/home/obaid", "pattern": "*.txt" }),
+        );
+        assert_eq!(
+            d.risk_level,
+            RiskLevel::Green,
+            "REG-F3: {tool} must be Green"
+        );
+        assert!(
+            !d.requires_approval,
+            "REG-F3: {tool} must not require approval"
+        );
         assert!(!d.blocked, "REG-F3: {tool} must not be blocked");
     }
 }
@@ -122,7 +144,10 @@ fn reg_f4_what_is_my_cpu_stats_routes_to_get_cpu_usage() {
         match &r.intent {
             Intent::DirectTool(t) => {
                 let ok = t == "get_cpu_usage" || t == "check_system_health";
-                assert!(ok, "REG-F4: '{p}' must route to get_cpu_usage or check_system_health, got {t}");
+                assert!(
+                    ok,
+                    "REG-F4: '{p}' must route to get_cpu_usage or check_system_health, got {t}"
+                );
             }
             other => panic!("REG-F4: '{p}' must be DirectTool, got {other:?}"),
         }
@@ -315,7 +340,10 @@ fn reg_f10_list_installed_applications_routes_to_packages_tool() {
 fn reg_f11_gw_drive_search_policy_is_green() {
     use kria_core::safety::policy::{PolicyEngine, RiskLevel};
     let p = PolicyEngine::new();
-    let d = p.evaluate("gw_drive_search", &serde_json::json!({ "query": "quarterly report" }));
+    let d = p.evaluate(
+        "gw_drive_search",
+        &serde_json::json!({ "query": "quarterly report" }),
+    );
     // Even if not yet listed in the policy table, default for unknown read-style
     // tool names should not be Red/Black. This guards against a regression that
     // would force HITL on every Drive search.
@@ -476,9 +504,9 @@ fn reg_image_generation_routes_to_tool() {
                 t, "generate_image",
                 "REG-IMAGE-GEN: '{p}' must route to generate_image, got '{t}'"
             ),
-            other => panic!(
-                "REG-IMAGE-GEN: '{p}' must be DirectTool(generate_image), got {other:?}"
-            ),
+            other => {
+                panic!("REG-IMAGE-GEN: '{p}' must be DirectTool(generate_image), got {other:?}")
+            }
         }
     }
 }

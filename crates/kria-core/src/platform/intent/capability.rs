@@ -27,8 +27,7 @@ pub struct SafeArg(String);
 /// Characters that have special meaning in POSIX shells or Windows cmd.
 /// A `SafeArg` must not contain any of these.
 const SHELL_METACHARACTERS: &[char] = &[
-    ';', '&', '|', '$', '`', '<', '>', '!', '{', '}', '(', ')', '\'', '"', '\\', '\n', '\r',
-    '\0',
+    ';', '&', '|', '$', '`', '<', '>', '!', '{', '}', '(', ')', '\'', '"', '\\', '\n', '\r', '\0',
 ];
 
 /// Characters that could represent path traversal in an argument.
@@ -103,19 +102,8 @@ pub struct SandboxedPath(PathBuf);
 
 /// Paths that are always blocked regardless of user configuration.
 const BLOCKED_ROOTS: &[&str] = &[
-    "/etc",
-    "/boot",
-    "/root",
-    "/usr",
-    "/var",
-    "/proc",
-    "/sys",
-    "/sbin",
-    "/bin",
-    "/lib",
-    "/lib64",
-    "/run",
-    "/dev",
+    "/etc", "/boot", "/root", "/usr", "/var", "/proc", "/sys", "/sbin", "/bin", "/lib", "/lib64",
+    "/run", "/dev",
 ];
 
 /// Sensitive dot-directories that are always blocked.
@@ -269,9 +257,7 @@ pub enum Capability {
     /// Open a URI in the system's default handler (browser, mail client, etc.).
     /// The `Url` type guarantees syntactic validity; `classify_url` is called
     /// by `IntentDispatcher` before this reaches the backend.
-    OpenUrl {
-        url: Url,
-    },
+    OpenUrl { url: Url },
 
     /// Launch an installed application by its canonical registry ID.
     /// Arguments are `SafeArg` tokens — no shell metacharacters are possible.

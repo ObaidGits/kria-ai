@@ -64,8 +64,8 @@ macro_rules! real_llm_guard {
 /// (first_tool_called, response_text).
 /// Falls back to the tool-registry router when the server is not up.
 async fn run_prompt_real(prompt: &str) -> (Option<String>, String) {
-    let base_url = std::env::var("KRIA_BASE_URL")
-        .unwrap_or_else(|_| "http://127.0.0.1:8088".to_string());
+    let base_url =
+        std::env::var("KRIA_BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:8088".to_string());
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
@@ -127,7 +127,13 @@ async fn quality_sys01_cpu_usage_uses_tool() {
     let (tool, response) = run_prompt_real("What is the current CPU usage?").await;
     let pass = tool.as_deref().map_or(false, |t| t.contains("cpu"));
     assert_no_bash_hallucination(&response);
-    record_result("SYS-01", "What is the current CPU usage?", tool.as_deref(), &response, pass);
+    record_result(
+        "SYS-01",
+        "What is the current CPU usage?",
+        tool.as_deref(),
+        &response,
+        pass,
+    );
     assert!(pass, "SYS-01: expected cpu tool, got tool={tool:?}");
 }
 
@@ -135,9 +141,17 @@ async fn quality_sys01_cpu_usage_uses_tool() {
 async fn quality_sys02_memory_usage_uses_tool() {
     real_llm_guard!();
     let (tool, response) = run_prompt_real("Show me the memory usage.").await;
-    let pass = tool.as_deref().map_or(false, |t| t.contains("memory") || t.contains("mem"));
+    let pass = tool
+        .as_deref()
+        .map_or(false, |t| t.contains("memory") || t.contains("mem"));
     assert_no_bash_hallucination(&response);
-    record_result("SYS-02", "Show me the memory usage.", tool.as_deref(), &response, pass);
+    record_result(
+        "SYS-02",
+        "Show me the memory usage.",
+        tool.as_deref(),
+        &response,
+        pass,
+    );
     assert!(pass, "SYS-02: expected memory tool, got tool={tool:?}");
 }
 
@@ -145,9 +159,17 @@ async fn quality_sys02_memory_usage_uses_tool() {
 async fn quality_net01_web_search_uses_tool() {
     real_llm_guard!();
     let (tool, response) = run_prompt_real("Search the web for Rust 2024 edition.").await;
-    let pass = tool.as_deref().map_or(false, |t| t.contains("web_search") || t.contains("search"));
+    let pass = tool
+        .as_deref()
+        .map_or(false, |t| t.contains("web_search") || t.contains("search"));
     assert_no_bash_hallucination(&response);
-    record_result("NET-01", "Search the web for Rust 2024 edition.", tool.as_deref(), &response, pass);
+    record_result(
+        "NET-01",
+        "Search the web for Rust 2024 edition.",
+        tool.as_deref(),
+        &response,
+        pass,
+    );
     assert!(pass, "NET-01: expected web_search tool, got tool={tool:?}");
 }
 
@@ -155,9 +177,17 @@ async fn quality_net01_web_search_uses_tool() {
 async fn quality_fs01_list_files_uses_tool() {
     real_llm_guard!();
     let (tool, response) = run_prompt_real("List the files in /home/obaid.").await;
-    let pass = tool.as_deref().map_or(false, |t| t.contains("list") || t.contains("files"));
+    let pass = tool
+        .as_deref()
+        .map_or(false, |t| t.contains("list") || t.contains("files"));
     assert_no_bash_hallucination(&response);
-    record_result("FS-01", "List the files in /home/obaid.", tool.as_deref(), &response, pass);
+    record_result(
+        "FS-01",
+        "List the files in /home/obaid.",
+        tool.as_deref(),
+        &response,
+        pass,
+    );
     assert!(pass, "FS-01: expected list tool, got tool={tool:?}");
 }
 
@@ -165,39 +195,66 @@ async fn quality_fs01_list_files_uses_tool() {
 async fn quality_critical_system_stats_uses_tool() {
     real_llm_guard!();
     let (tool, response) = run_prompt_real("What is the System Stats?").await;
-    let pass = tool.as_deref().map_or(false, |t|
-        t.contains("stats") || t.contains("cpu") || t.contains("system"));
+    let pass = tool.as_deref().map_or(false, |t| {
+        t.contains("stats") || t.contains("cpu") || t.contains("system")
+    });
     assert_no_bash_hallucination(&response);
     assert_response_length_sane(&response, 10, 1000);
-    record_result("CRITICAL-1", "What is the System Stats?", tool.as_deref(), &response, pass);
-    assert!(pass, "Critical: System Stats must use a system tool, got tool={tool:?}");
+    record_result(
+        "CRITICAL-1",
+        "What is the System Stats?",
+        tool.as_deref(),
+        &response,
+        pass,
+    );
+    assert!(
+        pass,
+        "Critical: System Stats must use a system tool, got tool={tool:?}"
+    );
 }
 
 #[tokio::test]
 async fn quality_critical_internet_check_uses_tool() {
     real_llm_guard!();
     let (tool, response) = run_prompt_real("Are you connected to Internet?").await;
-    let pass = tool.as_deref().map_or(false, |t|
-        t.contains("internet") || t.contains("ping") || t.contains("connect"));
+    let pass = tool.as_deref().map_or(false, |t| {
+        t.contains("internet") || t.contains("ping") || t.contains("connect")
+    });
     assert_no_bash_hallucination(&response);
-    record_result("CRITICAL-2", "Are you connected to Internet?", tool.as_deref(), &response, pass);
-    assert!(pass, "Critical: Internet check must use connectivity tool, got tool={tool:?}");
+    record_result(
+        "CRITICAL-2",
+        "Are you connected to Internet?",
+        tool.as_deref(),
+        &response,
+        pass,
+    );
+    assert!(
+        pass,
+        "Critical: Internet check must use connectivity tool, got tool={tool:?}"
+    );
 }
 
 #[tokio::test]
 async fn quality_critical_ongoing_ops_uses_tool() {
     real_llm_guard!();
     let (tool, response) = run_prompt_real("Is there any ongoing Operation you are doing?").await;
-    let pass = tool.as_deref().map_or(false, |t|
-        t.contains("task") || t.contains("queue") || t.contains("running"))
-        || matches!(
-            kria_core::agent::router::IntentRouter::classify(
-                "Is there any ongoing Operation you are doing?"
-            ).intent,
-            kria_core::agent::router::Intent::Conversation
-        );
+    let pass = tool.as_deref().map_or(false, |t| {
+        t.contains("task") || t.contains("queue") || t.contains("running")
+    }) || matches!(
+        kria_core::agent::router::IntentRouter::classify(
+            "Is there any ongoing Operation you are doing?"
+        )
+        .intent,
+        kria_core::agent::router::Intent::Conversation
+    );
     assert_no_bash_hallucination(&response);
-    record_result("CRITICAL-3", "Is there any ongoing Operation you are doing?", tool.as_deref(), &response, pass);
+    record_result(
+        "CRITICAL-3",
+        "Is there any ongoing Operation you are doing?",
+        tool.as_deref(),
+        &response,
+        pass,
+    );
 }
 
 #[tokio::test]
@@ -205,7 +262,13 @@ async fn quality_no_bash_hallucination_on_ps_aux_prompt() {
     real_llm_guard!();
     let (_, response) = run_prompt_real("What processes are running?").await;
     assert_no_bash_hallucination(&response);
-    record_result("HALLUC-01", "What processes are running?", None, &response, true);
+    record_result(
+        "HALLUC-01",
+        "What processes are running?",
+        None,
+        &response,
+        true,
+    );
 }
 
 #[tokio::test]
@@ -213,7 +276,13 @@ async fn quality_no_bash_hallucination_on_disk_usage() {
     real_llm_guard!();
     let (_, response) = run_prompt_real("How much disk space is available?").await;
     assert_no_bash_hallucination(&response);
-    record_result("HALLUC-02", "How much disk space is available?", None, &response, true);
+    record_result(
+        "HALLUC-02",
+        "How much disk space is available?",
+        None,
+        &response,
+        true,
+    );
 }
 
 #[tokio::test]
@@ -228,8 +297,16 @@ async fn quality_no_bash_hallucination_on_memory_prompt() {
 async fn quality_gw01_gmail_inbox_uses_tool() {
     real_llm_guard!();
     let (tool, response) = run_prompt_real("Check my Gmail inbox.").await;
-    let pass = tool.as_deref().map_or(false, |t| t.contains("gmail") || t.contains("gw_"));
+    let pass = tool
+        .as_deref()
+        .map_or(false, |t| t.contains("gmail") || t.contains("gw_"));
     assert_no_bash_hallucination(&response);
-    record_result("GW-01", "Check my Gmail inbox.", tool.as_deref(), &response, pass);
+    record_result(
+        "GW-01",
+        "Check my Gmail inbox.",
+        tool.as_deref(),
+        &response,
+        pass,
+    );
     assert!(pass, "GW-01: expected Gmail tool, got tool={tool:?}");
 }

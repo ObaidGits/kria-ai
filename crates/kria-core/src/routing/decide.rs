@@ -9,7 +9,6 @@
 //! Produces a `RouteDecision` with no static numeric thresholds for
 //! OOD or multi-intent detection.
 
-
 use super::domain::Domain;
 use super::ood::{self, OodContext};
 use super::verbs::ModalityResult;
@@ -81,7 +80,11 @@ pub fn decide(input: &DecideInput<'_>) -> RouteDecision {
 
     // ── Step 3: Soft multi-intent — margin too small AND multiple modalities
     let top1_domain = sims[0].0;
-    let top2_domain = if sims.len() > 1 { Some(sims[1].0) } else { None };
+    let top2_domain = if sims.len() > 1 {
+        Some(sims[1].0)
+    } else {
+        None
+    };
 
     let has_multi_modality = input.modality.all.len() >= 2;
     let margin_is_small = margin < input.config.multi_intent_margin;
