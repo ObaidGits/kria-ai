@@ -1,4 +1,11 @@
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Instant;
+
+use crate::resource::{
+    GpuLeaseError, GpuLeaseGuard, GpuLeaseManager, GpuOwner, ImageRuntimeSnapshot,
+    L1ResidencySnapshot, L1RuntimeSnapshot, RamSnapshot, ResourceSnapshot, VramSnapshot,
+};
 
 /// Strip markdown formatting and other non-speech characters from `text` before
 /// handing it to Piper/espeak-ng.
@@ -57,7 +64,7 @@ pub fn normalize_for_tts(text: &str) -> String {
     );
 
     // 8. Replace em-dash / en-dash with a natural pause
-    let text = text.replace('—', ", ").replace('–', ", ");
+    let text = text.replace(['—', '–'], ", ");
 
     // 9. Strip leftover bare special chars that espeak would vocalise literally
     let text = Regex::new(r"[*_#~|\\]").map_or_else(
@@ -94,6 +101,7 @@ pub struct TextToSpeech {
     /// Piper binary path (if using CLI mode).
     binary_path: Option<PathBuf>,
     sample_rate: u32,
+    gpu_lease: Option<Arc<GpuLeaseManager>>,
 }
 
 impl TextToSpeech {
@@ -104,7 +112,12 @@ impl TextToSpeech {
             config_path,
             binary_path,
             sample_rate: 22050,
+            gpu_lease: None,
         }
+    }
+
+    pub fn set_gpu_lease(&mut self, gpu_lease: Arc<GpuLeaseManager>) {
+        self.gpu_lease = Some(gpu_lease);
     }
 
     /// Synthesize speech from text, returning WAV file path.
@@ -116,7 +129,8 @@ impl TextToSpeech {
         let clean = normalize_for_tts(text);
         let output_path = std::env::temp_dir().join("kria_tts_output.wav");
 
-        if let Some(ref binary) = self.binary_path {
+        let lease_guard = self.acquire_speech_lease("speech_tts_synthesize")?;
+        let result: anyhow::Result<PathBuf> = if let Some(ref binary) = self.binary_path {
             let mut child = tokio::process::Command::new(binary)
                 .args([
                     "--model",
@@ -147,13 +161,19 @@ impl TextToSpeech {
 
             let status = child.wait().await?;
             if !status.success() {
-                anyhow::bail!("piper TTS failed");
+                Err(anyhow::anyhow!("piper TTS failed"))
+            } else {
+                Ok(output_path)
             }
-
-            Ok(output_path)
         } else {
-            anyhow::bail!("piper-rs bindings not yet implemented; provide binary_path")
-        }
+            Err(anyhow::anyhow!(
+                "piper-rs bindings not yet implemented; provide binary_path"
+            ))
+        };
+
+        drop(lease_guard);
+        self.reconcile_speech_lease_idle();
+        result
     }
 
     /// Synthesize and return raw PCM samples (f32).
@@ -180,6 +200,70 @@ impl TextToSpeech {
 
     pub fn sample_rate(&self) -> u32 {
         self.sample_rate
+    }
+
+    fn map_gpu_lease_error(error: GpuLeaseError) -> anyhow::Error {
+        let hint = match &error {
+            GpuLeaseError::Busy { owner } => {
+                format!("GPU is currently leased by {owner:?}. Retry after the active turn.")
+            }
+            GpuLeaseError::Recovering { reason } => {
+                format!("GPU is recovering ({reason:?}). Retry in a few seconds.")
+            }
+            GpuLeaseError::Degraded { reason } => {
+                format!("GPU lease manager is degraded: {reason}")
+            }
+        };
+        anyhow::anyhow!("speech GPU lease unavailable: {error}. {hint}")
+    }
+
+    fn acquire_speech_lease(&self, turn_label: &str) -> anyhow::Result<Option<GpuLeaseGuard>> {
+        let Some(gpu_lease) = &self.gpu_lease else {
+            return Ok(None);
+        };
+
+        gpu_lease
+            .acquire_guard(
+                GpuOwner::Speech,
+                turn_label,
+                Some(std::time::Duration::from_secs(120)),
+            )
+            .map(Some)
+            .map_err(Self::map_gpu_lease_error)
+    }
+
+    fn reconcile_speech_lease_idle(&self) {
+        let Some(gpu_lease) = &self.gpu_lease else {
+            return;
+        };
+
+        let mut sys = sysinfo::System::new();
+        sys.refresh_memory();
+
+        let snapshot = ResourceSnapshot {
+            vram: VramSnapshot {
+                free_mb: 0,
+                total_mb: 0,
+                used_mb: 0,
+            },
+            ram: RamSnapshot {
+                total_mb: sys.total_memory() / (1024 * 1024),
+                free_mb: sys.available_memory() / (1024 * 1024),
+            },
+            l1: L1RuntimeSnapshot {
+                residency: L1ResidencySnapshot::Stopped,
+                process_id: None,
+            },
+            image: ImageRuntimeSnapshot {
+                backend_id: "comfy_ui".to_string(),
+                is_generating: false,
+                process_id: None,
+            },
+            processes: Vec::new(),
+            sampled_at: Instant::now(),
+        };
+
+        gpu_lease.reconcile(&snapshot);
     }
 }
 

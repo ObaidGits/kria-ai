@@ -1,10 +1,15 @@
 use crate::infra::ToolResult;
+use crate::resource::{
+    GpuLeaseError, GpuLeaseGuard, GpuLeaseManager, GpuOwner, ImageRuntimeSnapshot,
+    L1ResidencySnapshot, L1RuntimeSnapshot, RamSnapshot, ResourceSnapshot, VramSnapshot,
+};
 use crate::safety::RiskLevel;
 use crate::sidecar::SidecarBridge;
 use crate::tools::registry::{ParamDef, ToolDef, ToolHandler, ToolRegistry};
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 const DEFAULT_CONTEXT_WINDOW: u64 = 4096;
 const DEFAULT_RESPONSE_RESERVE: u64 = 700;
@@ -219,15 +224,90 @@ fn build_sidecar_hints(
 }
 
 /// Wrapper for optional sidecar access.
-struct VisionSidecar(Option<Arc<tokio::sync::Mutex<Arc<SidecarBridge>>>>);
+struct VisionSidecar {
+    sidecar: Option<Arc<tokio::sync::Mutex<Arc<SidecarBridge>>>>,
+    gpu_lease: Option<Arc<GpuLeaseManager>>,
+}
 
 impl VisionSidecar {
+    fn map_gpu_lease_error(error: GpuLeaseError) -> anyhow::Error {
+        let hint = match &error {
+            GpuLeaseError::Busy { owner } => {
+                format!("GPU is currently leased by {owner:?}. Retry after the active turn.")
+            }
+            GpuLeaseError::Recovering { reason } => {
+                format!("GPU is recovering ({reason:?}). Retry in a few seconds.")
+            }
+            GpuLeaseError::Degraded { reason } => {
+                format!("GPU lease manager is degraded: {reason}")
+            }
+        };
+        anyhow::anyhow!("vision GPU lease unavailable: {error}. {hint}")
+    }
+
+    fn acquire_vision_lease(&self, turn_label: &str) -> anyhow::Result<Option<GpuLeaseGuard>> {
+        if self.sidecar.is_none() {
+            return Ok(None);
+        }
+
+        let Some(gpu_lease) = &self.gpu_lease else {
+            return Ok(None);
+        };
+
+        gpu_lease
+            .acquire_guard(
+                GpuOwner::Vision,
+                turn_label,
+                Some(Duration::from_secs(120)),
+            )
+            .map(Some)
+            .map_err(Self::map_gpu_lease_error)
+    }
+
+    fn reconcile_vision_lease_idle(&self) {
+        let Some(gpu_lease) = &self.gpu_lease else {
+            return;
+        };
+
+        let mut sys = sysinfo::System::new();
+        sys.refresh_memory();
+
+        let snapshot = ResourceSnapshot {
+            vram: VramSnapshot {
+                free_mb: 0,
+                total_mb: 0,
+                used_mb: 0,
+            },
+            ram: RamSnapshot {
+                total_mb: sys.total_memory() / (1024 * 1024),
+                free_mb: sys.available_memory() / (1024 * 1024),
+            },
+            l1: L1RuntimeSnapshot {
+                residency: L1ResidencySnapshot::Stopped,
+                process_id: None,
+            },
+            image: ImageRuntimeSnapshot {
+                backend_id: "comfy_ui".to_string(),
+                is_generating: false,
+                process_id: None,
+            },
+            processes: Vec::new(),
+            sampled_at: Instant::now(),
+        };
+
+        gpu_lease.reconcile(&snapshot);
+    }
+
     async fn try_ocr(
         &self,
         path: &str,
         hints: &serde_json::Map<String, serde_json::Value>,
-    ) -> Option<String> {
-        let guard = self.0.as_ref()?;
+    ) -> anyhow::Result<Option<String>> {
+        let guard = match self.sidecar.as_ref() {
+            Some(guard) => guard,
+            None => return Ok(None),
+        };
+        let lease_guard = self.acquire_vision_lease("vision_ocr")?;
         let bridge = guard.lock().await;
         let mut payload = serde_json::Map::new();
         payload.insert("file".into(), serde_json::json!(path));
@@ -239,8 +319,12 @@ impl VisionSidecar {
         let result = bridge
             .request("image.analyze", serde_json::Value::Object(payload))
             .await
-            .ok()?;
-        result["ocr_text"].as_str().map(|s| s.to_string())
+            .ok()
+            .and_then(|value| value["ocr_text"].as_str().map(|s| s.to_string()));
+
+        drop(lease_guard);
+        self.reconcile_vision_lease_idle();
+        Ok(result)
     }
 
     async fn try_analyze(
@@ -248,8 +332,12 @@ impl VisionSidecar {
         path: &str,
         operations: &[&str],
         hints: &serde_json::Map<String, serde_json::Value>,
-    ) -> Option<serde_json::Value> {
-        let guard = self.0.as_ref()?;
+    ) -> anyhow::Result<Option<serde_json::Value>> {
+        let guard = match self.sidecar.as_ref() {
+            Some(guard) => guard,
+            None => return Ok(None),
+        };
+        let lease_guard = self.acquire_vision_lease("vision_analyze")?;
         let bridge = guard.lock().await;
         let mut payload = serde_json::Map::new();
         payload.insert("file".into(), serde_json::json!(path));
@@ -258,10 +346,14 @@ impl VisionSidecar {
             payload.insert(key.clone(), value.clone());
         }
 
-        bridge
+        let result = bridge
             .request("image.analyze", serde_json::Value::Object(payload))
             .await
-            .ok()
+            .ok();
+
+        drop(lease_guard);
+        self.reconcile_vision_lease_idle();
+        Ok(result)
     }
 }
 
@@ -288,7 +380,12 @@ impl ToolHandler for OcrImage {
         let hints = build_sidecar_hints(Some(&params), "text_reading");
 
         // Try sidecar OCR first (pytesseract/easyocr)
-        if let Some(text) = self.sidecar.try_ocr(&resolved_str, &hints).await {
+        let sidecar_text = match self.sidecar.try_ocr(&resolved_str, &hints).await {
+            Ok(text) => text,
+            Err(e) => return ToolResult::err(e.to_string()),
+        };
+
+        if let Some(text) = sidecar_text {
             return ToolResult::ok(serde_json::json!({
                 "text": text,
                 "source": "sidecar",
@@ -361,11 +458,16 @@ impl ToolHandler for AnalyzeImage {
 
         let ops_refs: Vec<&str> = operations.iter().map(|s| s.as_ref()).collect();
         let hints = build_sidecar_hints(Some(&params), infer_image_intent(&ops_refs));
-        if let Some(analysis) = self
+        let sidecar_analysis = match self
             .sidecar
             .try_analyze(&resolved_str, &ops_refs, &hints)
             .await
         {
+            Ok(analysis) => analysis,
+            Err(e) => return ToolResult::err(e.to_string()),
+        };
+
+        if let Some(analysis) = sidecar_analysis {
             return ToolResult::ok(serde_json::json!({
                 "path": resolved_str,
                 "metadata": info,
@@ -447,7 +549,12 @@ impl ToolHandler for ScreenshotAnalyze {
         let hints = build_sidecar_hints(Some(&params), "ui_error_reading");
 
         // Try sidecar OCR
-        if let Some(text) = self.sidecar.try_ocr(output_path, &hints).await {
+        let sidecar_text = match self.sidecar.try_ocr(output_path, &hints).await {
+            Ok(text) => text,
+            Err(e) => return ToolResult::err(e.to_string()),
+        };
+
+        if let Some(text) = sidecar_text {
             result["ocr_text"] = serde_json::json!(text);
             result["source"] = serde_json::json!("sidecar");
             return ToolResult::ok(result);
@@ -470,10 +577,15 @@ impl ToolHandler for ScreenshotAnalyze {
     }
 }
 
-pub fn register(reg: &ToolRegistry, sidecar: Option<Arc<SidecarBridge>>) {
-    let vision_sidecar = Arc::new(VisionSidecar(
-        sidecar.map(|s| Arc::new(tokio::sync::Mutex::new(s))),
-    ));
+pub fn register(
+    reg: &ToolRegistry,
+    sidecar: Option<Arc<SidecarBridge>>,
+    gpu_lease: Option<Arc<GpuLeaseManager>>,
+) {
+    let vision_sidecar = Arc::new(VisionSidecar {
+        sidecar: sidecar.map(|s| Arc::new(tokio::sync::Mutex::new(s))),
+        gpu_lease,
+    });
 
     let tools: Vec<(ToolDef, Arc<dyn ToolHandler>)> = vec![
         (ToolDef {

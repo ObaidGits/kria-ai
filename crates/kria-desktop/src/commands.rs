@@ -1,50 +1,81 @@
 use async_trait::async_trait;
 use axum::{
-    extract::State as AxumState,
+    extract::{
+        ws::Message,
+        ws::WebSocket,
+        ws::WebSocketUpgrade,
+        Path as AxumPath,
+        Query,
+        State as AxumState,
+    },
     http::StatusCode,
+    response::{sse::Event, sse::KeepAlive, sse::Sse, IntoResponse},
     routing::{get, post},
     Json, Router,
 };
+use async_stream::stream;
 use chrono::Utc;
+use futures::{SinkExt, StreamExt};
+use tower_http::cors::CorsLayer;
+use kria_connection_control::manager::{
+    ControlPlaneEvent, DockerEvalRequest, DockerHealthStatus, TargetMode, TargetState,
+    TerminalStream,
+};
 use kria_core::agent::loop_engine::{
     PromptLabToolSelectionStrategy, StreamEvent, TurnExecutionMode, TurnExecutionProfile,
 };
 use kria_core::agent::AgentLoop;
 use kria_core::automation::{AutomationScheduler, MacroRecorder, WorkflowEngine};
-use kria_core::config::{ColabConfig, KriaConfig};
+use kria_core::config::{ColabConfig, KriaConfig, KriaSystemConfig};
 use kria_core::image::ImageOrchestrator;
+use kria_core::infra::environment::remote_qemu::{
+    ControlPlaneTransport, FileCommitPolicy, GuestFilesystemPolicy, GuestOsFamily,
+    HelperProvisioning, HostArtifactGcConfig, HostPlatform, InfrastructureRuntimeConfig,
+    PrivilegedCommitMode, QemuSshEnvironment, RemoteConfig, ReplayCachePolicy, ResetPolicy,
+    SshMultiplexingConfig, SshPoolConfig, SshTransportBackend, TargetKind,
+};
 use kria_core::infra::health::{HealthRegistry, ServiceStatus};
+use kria_core::infra::pool::{SelectionWeights, TargetHealthTelemetry, TargetId, TargetPool};
+use kria_core::infra::qos::AdaptiveQosScheduler;
 use kria_core::infra::EventBus;
 use kria_core::llm::model_router::RoutingMode;
-use kria_core::llm::orchestrator::Orchestrator;
+use kria_core::llm::orchestrator::{Orchestrator, RemoteQemuToolBridge};
 use kria_core::llm::{ChatMessage, ImageAttachment, ModelRouter};
 use kria_core::mcp::client::McpServerState;
 use kria_core::mcp::server_manager::McpServerStatus;
 use kria_core::mcp::{build_colab_capability_summary, McpServerManager};
 use kria_core::memory::embeddings::EmbeddingModel;
-use kria_core::memory::store::ConversationTurn;
 use kria_core::memory::vectors::VectorIndex;
-use kria_core::memory::MemoryStore;
+use kria_core::memory::{
+    ChatMediaRecord, ConversationTurn, MemoryManager, MemoryRuntime, MemoryStore,
+    MemoryTurnWrite, PreferenceRecord,
+};
 use kria_core::platform::detect::{
     detect_hardware, get_available_package_managers, HardwareInfo, HardwareTier,
 };
+use kria_core::resource::GpuLeaseManager;
 use kria_core::safety::hitl::{ApprovalResponse, HitlGateway};
-use kria_core::safety::{AuditLogger, PolicyEngine, RollbackManager};
+use kria_core::safety::{AuditLogger, PolicyEngine, RiskLevel, RollbackManager};
 use kria_core::sidecar::SidecarBridge;
 use kria_core::tools::google_workspace as gw;
 use kria_core::tools::google_workspace_contract as gw_contract;
 use kria_core::tools::mount_manager;
-use kria_core::tools::registry::{self, ToolRegistry};
+use kria_core::tools::registry::{self, ParamDef, ToolDef, ToolHandler, ToolRegistry};
 use kria_core::voice::{
     default_input_device_name, default_output_device_name, list_input_devices, list_output_devices,
     SpeechToText, TextToSpeech, VoicePipeline, VoicePipelineEvent, VoicePipelineState,
 };
+use kria_core::infra::ToolResult;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::RwLock;
+use tokio::time::timeout;
+use uuid::Uuid;
 
 use kria_core::platform::telegram::TelegramBridge;
+use crate::fleet_control::DesktopFleetControlRuntime;
 
 const AGENT_EVENT_IDLE_TIMEOUT_SECS: u64 = 180;
 const AGENT_TIMEOUT_MESSAGE: &str = "⚠️ Timed out waiting for model output. Please verify the model runtime is healthy and try again.";
@@ -63,6 +94,1641 @@ const COLAB_OFFICIAL_SOURCE: &str = "git+https://github.com/googlecolab/colab-mc
 const COLAB_BROWSER_BOOTSTRAP_TOOL: &str = "open_colab_browser_connection";
 const HISTORY_ITEM_CHAR_CAP: usize = 900;
 const HISTORY_TOTAL_CHAR_BUDGET: usize = 3_200;
+const IRONCLAD_FORENSIC_MAX_ENTRIES: usize = 128;
+const IRONCLAD_FORENSIC_EVIDENCE_MAX_BYTES: usize = 512 * 1024;
+const IRONCLAD_HARD_RESET_CONFIRMATION: &str = "HARD RESET";
+const IRONCLAD_STATUS_EMIT_INTERVAL_SECS: u64 = 4;
+const TARGET_ENROLLMENT_DEFAULT_SSH_PORT: u16 = 22;
+const TARGET_ENROLLMENT_KEYSCAN_TIMEOUT_SECS: u64 = 10;
+const TARGET_ENROLLMENT_SSH_TIMEOUT_SECS: u64 = 14;
+const TARGET_ENROLLMENT_REGISTRY_DIR: &str = "fleet";
+const TARGET_ENROLLMENT_REGISTRY_FILE: &str = "targets.json";
+const TARGET_ENROLLMENT_RUNTIME_DIR: &str = "runtime";
+const TARGET_ENROLLMENT_KEY_DEFAULT_PATH: &str = "~/.ssh/kria_id";
+const TARGET_ENROLLMENT_VERIFY_MARKER: &str = "__KRIA_ENROLLMENT_OK__";
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct ExecuteFleetCommandToolInput {
+    command: String,
+    #[serde(default)]
+    target: Option<String>,
+    #[serde(default)]
+    lease_ttl_seconds: Option<u64>,
+    #[serde(default)]
+    max_attempts: Option<usize>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+struct GetFleetOverviewToolInput {
+    #[serde(default)]
+    target: Option<String>,
+}
+
+#[derive(Clone)]
+struct ExecuteFleetCommandTool {
+    fleet_control_runtime: Arc<DesktopFleetControlRuntime>,
+}
+
+#[derive(Clone)]
+struct GetFleetOverviewTool {
+    fleet_control_runtime: Arc<DesktopFleetControlRuntime>,
+}
+
+fn fleet_tool_param(name: &str, param_type: &str, description: &str, required: bool) -> ParamDef {
+    ParamDef {
+        name: name.to_string(),
+        param_type: param_type.to_string(),
+        description: description.to_string(),
+        required,
+        default: None,
+    }
+}
+
+fn register_fleet_runtime_tools(
+    tool_registry: &ToolRegistry,
+    fleet_control_runtime: Arc<DesktopFleetControlRuntime>,
+) {
+    let definition = ToolDef {
+        name: "execute_fleet_command".to_string(),
+        description: "Execute a shell command on an enrolled fleet target (connected VM/computer) through KRIA fleet connection control. Use this for remote host actions like package install/check on connected targets.".to_string(),
+        category: "fleet".to_string(),
+        default_tier: RiskLevel::Red,
+        min_tier: "lite",
+        parameters: vec![
+            fleet_tool_param("command", "string", "Shell command to run on the remote target", true),
+            fleet_tool_param("target", "string", "Optional target hint (target_id, display name, host, or user@host). Omit to auto-select best ready target", false),
+            fleet_tool_param("lease_ttl_seconds", "integer", "Optional lease TTL in seconds (default 300, min 30, max 900)", false),
+            fleet_tool_param("max_attempts", "integer", "Optional dispatch retry attempts (default 2, min 1, max 6)", false),
+        ],
+    };
+
+    let handler: Arc<dyn ToolHandler> = Arc::new(ExecuteFleetCommandTool {
+        fleet_control_runtime: fleet_control_runtime.clone(),
+    });
+    tool_registry.register(definition, handler);
+
+    let overview_definition = ToolDef {
+        name: "get_fleet_overview".to_string(),
+        description: "Get enrolled/connected VM and remote target inventory, including total counts and target states. Use this for prompts like 'How many VMs do I have?' or 'List my connected machines'.".to_string(),
+        category: "fleet".to_string(),
+        default_tier: RiskLevel::Green,
+        min_tier: "lite",
+        parameters: vec![fleet_tool_param(
+            "target",
+            "string",
+            "Optional target filter hint (target_id or display name substring)",
+            false,
+        )],
+    };
+
+    let overview_handler: Arc<dyn ToolHandler> = Arc::new(GetFleetOverviewTool {
+        fleet_control_runtime,
+    });
+    tool_registry.register(overview_definition, overview_handler);
+}
+
+fn fleet_target_matches_hint(target: &crate::fleet_control::FleetTargetProjection, hint: &str) -> bool {
+    let needle = hint.to_ascii_lowercase();
+    if needle.is_empty() {
+        return true;
+    }
+
+    target.target_id.to_ascii_lowercase().starts_with(&needle)
+        || target
+            .display_name
+            .to_ascii_lowercase()
+            .contains(&needle)
+}
+
+fn remote_command_sudo_hint(stderr: &str) -> Option<&'static str> {
+    let lower = stderr.to_ascii_lowercase();
+    if lower.contains("sudo:")
+        && (lower.contains("password") || lower.contains("tty") || lower.contains("askpass"))
+    {
+        return Some(
+            "Remote sudo likely requires interactive password. Configure passwordless sudo for this automation user or run a non-sudo command.",
+        );
+    }
+    None
+}
+
+fn remote_command_error_excerpt(stderr: &str) -> Option<String> {
+    let compact = stderr
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .take(2)
+        .collect::<Vec<_>>()
+        .join(" | ");
+
+    if compact.is_empty() {
+        None
+    } else {
+        Some(truncate_for_error(&compact, 220))
+    }
+}
+
+#[async_trait]
+impl ToolHandler for ExecuteFleetCommandTool {
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let input: ExecuteFleetCommandToolInput = match serde_json::from_value(params) {
+            Ok(value) => value,
+            Err(error) => return ToolResult::err(format!("invalid parameters: {error}")),
+        };
+
+        let command = input.command.trim();
+        if command.is_empty() {
+            return ToolResult::err("command parameter is required");
+        }
+
+        let lease_ttl_seconds = input.lease_ttl_seconds.unwrap_or(300).clamp(30, 900);
+        let max_attempts = input.max_attempts.unwrap_or(2).clamp(1, 6);
+        let target_hint = input
+            .target
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+
+        let result = self
+            .fleet_control_runtime
+            .run_shell_command(
+                command,
+                target_hint,
+                Duration::from_secs(lease_ttl_seconds),
+                Duration::from_secs(45),
+                max_attempts,
+            )
+            .await;
+
+        let outcome = match result {
+            Ok(value) => value,
+            Err(error) => {
+                return ToolResult::err(format!(
+                    "fleet command dispatch failed: {error:#}"
+                ))
+            }
+        };
+
+        let mut data = match serde_json::to_value(&outcome) {
+            Ok(value) => value,
+            Err(error) => {
+                return ToolResult::err(format!(
+                    "fleet command result serialization failed: {error}"
+                ))
+            }
+        };
+
+        if let Some(hint) = remote_command_sudo_hint(&outcome.stderr) {
+            data["hint"] = serde_json::json!(hint);
+        }
+
+        if outcome.exit_code == 0 {
+            ToolResult::ok(data)
+        } else {
+            let mut message = format!(
+                "remote command exited with non-zero status {}",
+                outcome.exit_code
+            );
+            if let Some(excerpt) = remote_command_error_excerpt(&outcome.stderr) {
+                message.push_str("; stderr: ");
+                message.push_str(&excerpt);
+            }
+            if let Some(hint) = remote_command_sudo_hint(&outcome.stderr) {
+                message.push_str("; ");
+                message.push_str(hint);
+            }
+
+            ToolResult::err_with_data(
+                message,
+                data,
+            )
+        }
+    }
+}
+
+#[async_trait]
+impl ToolHandler for GetFleetOverviewTool {
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let input: GetFleetOverviewToolInput = match serde_json::from_value(params) {
+            Ok(value) => value,
+            Err(error) => return ToolResult::err(format!("invalid parameters: {error}")),
+        };
+
+        let targets = self.fleet_control_runtime.snapshot_targets().await;
+        let total_targets = targets.len();
+        let ready_targets = targets.iter().filter(|row| row.state == "ready").count();
+        let leased_targets = targets.iter().filter(|row| row.state == "leased").count();
+        let tainted_targets =
+            targets.iter().filter(|row| row.state == "tainted" || row.tainted).count();
+        let quarantined_targets = targets
+            .iter()
+            .filter(|row| row.state == "quarantine")
+            .count();
+        let disabled_targets = targets.iter().filter(|row| row.state == "disabled").count();
+
+        let filter_hint = input
+            .target
+            .as_deref()
+            .map(str::trim)
+            .filter(|hint| !hint.is_empty())
+            .map(str::to_string);
+
+        let visible_targets = if let Some(filter) = filter_hint.as_deref() {
+            targets
+                .iter()
+                .filter(|row| fleet_target_matches_hint(row, filter))
+                .cloned()
+                .collect::<Vec<_>>()
+        } else {
+            targets.clone()
+        };
+
+        let mut payload = serde_json::json!({
+            "total_targets": total_targets,
+            "ready_targets": ready_targets,
+            "leased_targets": leased_targets,
+            "tainted_targets": tainted_targets,
+            "quarantined_targets": quarantined_targets,
+            "disabled_targets": disabled_targets,
+            "selected_target_count": visible_targets.len(),
+            "filter_applied": filter_hint,
+            "targets": visible_targets,
+        });
+
+        if payload["selected_target_count"] == serde_json::json!(0)
+            && payload["filter_applied"].is_string()
+            && total_targets > 0
+        {
+            payload["hint"] = serde_json::json!(
+                "No targets matched the filter. Retry with target_id or a display-name fragment."
+            );
+        }
+
+        ToolResult::ok(payload)
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct IroncladResetSnapshot {
+    pub event_id: String,
+    pub phase: String,
+    pub reason: String,
+    pub detail: String,
+    pub started_unix_ms: u64,
+    pub completed_unix_ms: Option<u64>,
+    pub in_flight: bool,
+}
+
+impl Default for IroncladResetSnapshot {
+    fn default() -> Self {
+        Self {
+            event_id: uuid::Uuid::new_v4().to_string(),
+            phase: "idle".to_string(),
+            reason: "none".to_string(),
+            detail: "No reset activity recorded yet".to_string(),
+            started_unix_ms: unix_now_ms(),
+            completed_unix_ms: Some(unix_now_ms()),
+            in_flight: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct IroncladForensicRecord {
+    pub id: String,
+    pub timestamp_unix_ms: u64,
+    pub category: String,
+    pub severity: String,
+    pub summary: String,
+    pub source: String,
+    pub evidence: String,
+    pub last_gasp_detected: bool,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct IroncladConfigUpdatePayload {
+    pub high_recovery_slo_ms: Option<u64>,
+    pub lease_ttl_ms: Option<u64>,
+    pub heartbeat_grace_ms: Option<u64>,
+    pub quarantine_cooldown_ms: Option<u64>,
+    pub max_normalized_hash_distance: Option<f64>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewTargetRequest {
+    pub display_name: String,
+    pub host: String,
+    pub port: Option<u16>,
+    pub username: String,
+    pub ssh_private_key_path: Option<String>,
+    pub expected_hostkey_sha256: Option<String>,
+    pub commander_epoch: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+struct NormalizedNewTargetRequest {
+    display_name: String,
+    host: String,
+    port: u16,
+    username: String,
+    ssh_private_key_path: PathBuf,
+    expected_hostkey_sha256_b64: Option<String>,
+    commander_epoch: Option<i64>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterNewTargetResponse {
+    pub target_id: String,
+    pub display_name: String,
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub mode: String,
+    pub ssh_hostkey_sha256_b64: String,
+    pub ssh_private_key_path: String,
+    pub ssh_public_key_path: String,
+    pub commander_epoch: i64,
+    pub created_new_target: bool,
+    pub created_local_key: bool,
+    pub enrolled_at_unix_ms: i64,
+    pub registry_path: String,
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RegisterNewTargetErrorCode {
+    ValidationFailed,
+    ConnectionRefused,
+    AuthenticationFailed,
+    HostKeyChanged,
+    DependencyMissing,
+    BootstrapFailed,
+    PersistenceFailed,
+    Unknown,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterNewTargetError {
+    pub code: RegisterNewTargetErrorCode,
+    pub message: String,
+    pub detail: Option<String>,
+}
+
+impl RegisterNewTargetError {
+    fn new(
+        code: RegisterNewTargetErrorCode,
+        message: impl Into<String>,
+        detail: Option<String>,
+    ) -> Self {
+        Self {
+            code,
+            message: message.into(),
+            detail,
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FleetEnrollmentRegistry {
+    schema_version: u32,
+    targets: Vec<EnrolledTargetRecord>,
+}
+
+impl Default for FleetEnrollmentRegistry {
+    fn default() -> Self {
+        Self {
+            schema_version: 1,
+            targets: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EnrolledTargetRecord {
+    target_id: String,
+    display_name: String,
+    host: String,
+    port: u16,
+    username: String,
+    mode: String,
+    ssh_private_key_path: String,
+    ssh_public_key_path: String,
+    ssh_hostkey_sha256_b64: String,
+    commander_epoch: i64,
+    enrolled_at_unix_ms: i64,
+    last_verified_unix_ms: i64,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct EnrolledTargetStatusSnapshot {
+    target_id: String,
+    display_name: String,
+    host: String,
+    port: u16,
+    username: String,
+    mode: String,
+    ssh_hostkey_sha256_b64: String,
+    commander_epoch: i64,
+    enrolled_at_unix_ms: i64,
+    last_verified_unix_ms: i64,
+}
+
+#[derive(Debug)]
+struct CommandRunOutput {
+    status: std::process::ExitStatus,
+    stdout: String,
+    stderr: String,
+}
+
+struct TempFileGuard {
+    path: PathBuf,
+}
+
+impl TempFileGuard {
+    fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    fn path(&self) -> &Path {
+        self.path.as_path()
+    }
+}
+
+impl Drop for TempFileGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+fn truncate_for_error(value: &str, max_chars: usize) -> String {
+    let mut out = String::new();
+    for (idx, ch) in value.chars().enumerate() {
+        if idx >= max_chars {
+            out.push_str("...[truncated]");
+            break;
+        }
+        out.push(ch);
+    }
+    out
+}
+
+fn expand_tilde_path(raw_path: &str) -> PathBuf {
+    let trimmed = raw_path.trim();
+    if trimmed == "~" {
+        return dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    }
+
+    if let Some(rest) = trimmed.strip_prefix("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(rest);
+        }
+    }
+
+    PathBuf::from(trimmed)
+}
+
+fn normalize_hostkey_sha256_b64(raw: &str) -> String {
+    raw.trim()
+        .trim_start_matches("SHA256:")
+        .trim()
+        .to_string()
+}
+
+fn shell_quote_single(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+fn normalize_new_target_request(
+    request: NewTargetRequest,
+) -> Result<NormalizedNewTargetRequest, RegisterNewTargetError> {
+    let display_name = request.display_name.trim().to_string();
+    let host = request.host.trim().to_string();
+    let username = request.username.trim().to_string();
+    let port = request.port.unwrap_or(TARGET_ENROLLMENT_DEFAULT_SSH_PORT);
+
+    if host.is_empty() {
+        return Err(RegisterNewTargetError::new(
+            RegisterNewTargetErrorCode::ValidationFailed,
+            "Host is required",
+            None,
+        ));
+    }
+
+    if host.chars().any(char::is_whitespace) {
+        return Err(RegisterNewTargetError::new(
+            RegisterNewTargetErrorCode::ValidationFailed,
+            "Host cannot contain whitespace",
+            Some(host),
+        ));
+    }
+
+    if username.is_empty() {
+        return Err(RegisterNewTargetError::new(
+            RegisterNewTargetErrorCode::ValidationFailed,
+            "Username is required",
+            None,
+        ));
+    }
+
+    if username.chars().any(char::is_whitespace) {
+        return Err(RegisterNewTargetError::new(
+            RegisterNewTargetErrorCode::ValidationFailed,
+            "Username cannot contain whitespace",
+            Some(username),
+        ));
+    }
+
+    if port == 0 {
+        return Err(RegisterNewTargetError::new(
+            RegisterNewTargetErrorCode::ValidationFailed,
+            "SSH port must be between 1 and 65535",
+            None,
+        ));
+    }
+
+    let resolved_display_name = if display_name.is_empty() {
+        host.clone()
+    } else {
+        display_name
+    };
+
+    let private_key_raw = request
+        .ssh_private_key_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(TARGET_ENROLLMENT_KEY_DEFAULT_PATH);
+    let ssh_private_key_path = expand_tilde_path(private_key_raw);
+
+    let expected_hostkey_sha256_b64 = request
+        .expected_hostkey_sha256
+        .as_deref()
+        .map(normalize_hostkey_sha256_b64)
+        .filter(|value| !value.is_empty());
+
+    Ok(NormalizedNewTargetRequest {
+        display_name: resolved_display_name,
+        host,
+        port,
+        username,
+        ssh_private_key_path,
+        expected_hostkey_sha256_b64,
+        commander_epoch: request.commander_epoch,
+    })
+}
+
+async fn run_external_command(
+    binary: &str,
+    args: &[String],
+    timeout_secs: u64,
+) -> Result<CommandRunOutput, RegisterNewTargetError> {
+    let mut command = tokio::process::Command::new(binary);
+    command
+        .kill_on_drop(true)
+        .args(args)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    let output = timeout(Duration::from_secs(timeout_secs), command.output())
+        .await
+        .map_err(|_| {
+            RegisterNewTargetError::new(
+                RegisterNewTargetErrorCode::BootstrapFailed,
+                format!("Command timed out: {binary}"),
+                Some(format!("args={} timeout_secs={timeout_secs}", args.join(" "))),
+            )
+        })?
+        .map_err(|error| {
+            RegisterNewTargetError::new(
+                RegisterNewTargetErrorCode::DependencyMissing,
+                format!("Failed to launch command: {binary}"),
+                Some(error.to_string()),
+            )
+        })?;
+
+    Ok(CommandRunOutput {
+        status: output.status,
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+    })
+}
+
+fn parse_ssh_hostkey_fingerprint(ssh_keygen_stdout: &str) -> Option<String> {
+    let mut fallback: Option<String> = None;
+    for line in ssh_keygen_stdout.lines() {
+        let token = line
+            .split_whitespace()
+            .find(|part| part.starts_with("SHA256:"));
+        let Some(raw_fp) = token else {
+            continue;
+        };
+
+        let normalized = normalize_hostkey_sha256_b64(raw_fp);
+        if line.to_ascii_lowercase().contains("ed25519") {
+            return Some(normalized);
+        }
+
+        if fallback.is_none() {
+            fallback = Some(normalized);
+        }
+    }
+
+    fallback
+}
+
+fn classify_ssh_stage_error(output: &CommandRunOutput, stage: &str) -> RegisterNewTargetError {
+    let merged = format!("{}\n{}", output.stderr, output.stdout);
+    let merged_lower = merged.to_ascii_lowercase();
+    let detail = Some(format!(
+        "stage={stage}; exit_code={:?}; stderr={}; stdout={}",
+        output.status.code(),
+        truncate_for_error(output.stderr.trim(), 500),
+        truncate_for_error(output.stdout.trim(), 500),
+    ));
+
+    if merged_lower.contains("remote host identification has changed")
+        || merged_lower.contains("host key verification failed")
+    {
+        return RegisterNewTargetError::new(
+            RegisterNewTargetErrorCode::HostKeyChanged,
+            "Host key changed while enrolling target",
+            detail,
+        );
+    }
+
+    if merged_lower.contains("permission denied")
+        || merged_lower.contains("authentication failed")
+        || merged_lower.contains("publickey")
+    {
+        return RegisterNewTargetError::new(
+            RegisterNewTargetErrorCode::AuthenticationFailed,
+            "SSH authentication failed for the provided user/key",
+            detail,
+        );
+    }
+
+    if merged_lower.contains("connection refused")
+        || merged_lower.contains("connection timed out")
+        || merged_lower.contains("operation timed out")
+        || merged_lower.contains("no route to host")
+        || merged_lower.contains("could not resolve hostname")
+        || merged_lower.contains("name or service not known")
+    {
+        return RegisterNewTargetError::new(
+            RegisterNewTargetErrorCode::ConnectionRefused,
+            "Connection refused or host unreachable during enrollment",
+            detail,
+        );
+    }
+
+    RegisterNewTargetError::new(
+        RegisterNewTargetErrorCode::BootstrapFailed,
+        "Failed to complete SSH bootstrap for target enrollment",
+        detail,
+    )
+}
+
+fn build_ssh_base_args(
+    request: &NormalizedNewTargetRequest,
+    known_hosts_path: &Path,
+) -> Vec<String> {
+    vec![
+        "-o".to_string(),
+        "BatchMode=yes".to_string(),
+        "-o".to_string(),
+        "ConnectTimeout=10".to_string(),
+        "-o".to_string(),
+        "StrictHostKeyChecking=yes".to_string(),
+        "-o".to_string(),
+        format!("UserKnownHostsFile={}", known_hosts_path.to_string_lossy()),
+        "-o".to_string(),
+        "GlobalKnownHostsFile=/dev/null".to_string(),
+        "-o".to_string(),
+        "IdentitiesOnly=yes".to_string(),
+        "-o".to_string(),
+        "PreferredAuthentications=publickey".to_string(),
+        "-o".to_string(),
+        "PasswordAuthentication=no".to_string(),
+        "-i".to_string(),
+        request.ssh_private_key_path.to_string_lossy().to_string(),
+        "-p".to_string(),
+        request.port.to_string(),
+        format!("{}@{}", request.username, request.host),
+    ]
+}
+
+async fn ensure_local_ssh_keypair(
+    private_key_path: &Path,
+) -> Result<(String, PathBuf, bool), RegisterNewTargetError> {
+    let Some(parent) = private_key_path.parent() else {
+        return Err(RegisterNewTargetError::new(
+            RegisterNewTargetErrorCode::ValidationFailed,
+            "Invalid SSH private key path",
+            Some(private_key_path.to_string_lossy().to_string()),
+        ));
+    };
+
+    std::fs::create_dir_all(parent).map_err(|error| {
+        RegisterNewTargetError::new(
+            RegisterNewTargetErrorCode::PersistenceFailed,
+            "Failed to create directory for SSH key",
+            Some(error.to_string()),
+        )
+    })?;
+
+    let public_key_path = PathBuf::from(format!("{}.pub", private_key_path.to_string_lossy()));
+    let mut created_key = false;
+
+    if !private_key_path.exists() {
+        let args = vec![
+            "-q".to_string(),
+            "-t".to_string(),
+            "ed25519".to_string(),
+            "-a".to_string(),
+            "64".to_string(),
+            "-N".to_string(),
+            "".to_string(),
+            "-f".to_string(),
+            private_key_path.to_string_lossy().to_string(),
+            "-C".to_string(),
+            "kria-enrollment".to_string(),
+        ];
+        let generated =
+            run_external_command("ssh-keygen", &args, TARGET_ENROLLMENT_KEYSCAN_TIMEOUT_SECS)
+                .await?;
+        if !generated.status.success() {
+            return Err(RegisterNewTargetError::new(
+                RegisterNewTargetErrorCode::BootstrapFailed,
+                "Failed to generate local SSH key pair",
+                Some(format!(
+                    "stderr={}; stdout={}",
+                    truncate_for_error(generated.stderr.trim(), 500),
+                    truncate_for_error(generated.stdout.trim(), 500),
+                )),
+            ));
+        }
+        created_key = true;
+    }
+
+    if !public_key_path.exists() {
+        let args = vec![
+            "-y".to_string(),
+            "-f".to_string(),
+            private_key_path.to_string_lossy().to_string(),
+        ];
+        let derived = run_external_command("ssh-keygen", &args, TARGET_ENROLLMENT_KEYSCAN_TIMEOUT_SECS)
+            .await?;
+        if !derived.status.success() {
+            return Err(RegisterNewTargetError::new(
+                RegisterNewTargetErrorCode::BootstrapFailed,
+                "Failed to derive local SSH public key",
+                Some(format!(
+                    "stderr={}; stdout={}",
+                    truncate_for_error(derived.stderr.trim(), 500),
+                    truncate_for_error(derived.stdout.trim(), 500),
+                )),
+            ));
+        }
+        std::fs::write(&public_key_path, format!("{}\n", derived.stdout.trim())).map_err(
+            |error| {
+                RegisterNewTargetError::new(
+                    RegisterNewTargetErrorCode::PersistenceFailed,
+                    "Failed to persist derived SSH public key",
+                    Some(error.to_string()),
+                )
+            },
+        )?;
+    }
+
+    let public_key_raw = std::fs::read_to_string(&public_key_path).map_err(|error| {
+        RegisterNewTargetError::new(
+            RegisterNewTargetErrorCode::PersistenceFailed,
+            "Failed to read local SSH public key",
+            Some(error.to_string()),
+        )
+    })?;
+    let public_key = public_key_raw.trim().to_string();
+
+    if public_key.is_empty() {
+        return Err(RegisterNewTargetError::new(
+            RegisterNewTargetErrorCode::BootstrapFailed,
+            "Local SSH public key is empty",
+            Some(public_key_path.to_string_lossy().to_string()),
+        ));
+    }
+
+    Ok((public_key, public_key_path, created_key))
+}
+
+async fn fetch_ssh_hostkey_fingerprint(
+    host: &str,
+    port: u16,
+) -> Result<(String, String), RegisterNewTargetError> {
+    let keyscan_args = vec![
+        "-T".to_string(),
+        "8".to_string(),
+        "-p".to_string(),
+        port.to_string(),
+        host.to_string(),
+    ];
+    let keyscan =
+        run_external_command("ssh-keyscan", &keyscan_args, TARGET_ENROLLMENT_KEYSCAN_TIMEOUT_SECS)
+            .await?;
+
+    if keyscan.stdout.trim().is_empty() {
+        return Err(classify_ssh_stage_error(&keyscan, "ssh_keyscan"));
+    }
+
+    let temp_scan_path = std::env::temp_dir().join(format!(
+        "kria_target_keyscan_{}_{}.tmp",
+        std::process::id(),
+        Uuid::new_v4()
+    ));
+    std::fs::write(&temp_scan_path, keyscan.stdout.as_bytes()).map_err(|error| {
+        RegisterNewTargetError::new(
+            RegisterNewTargetErrorCode::PersistenceFailed,
+            "Failed to persist temporary keyscan output",
+            Some(error.to_string()),
+        )
+    })?;
+    let temp_scan_guard = TempFileGuard::new(temp_scan_path);
+
+    let keygen_args = vec![
+        "-lf".to_string(),
+        temp_scan_guard.path().to_string_lossy().to_string(),
+        "-E".to_string(),
+        "sha256".to_string(),
+    ];
+    let keygen =
+        run_external_command("ssh-keygen", &keygen_args, TARGET_ENROLLMENT_KEYSCAN_TIMEOUT_SECS)
+            .await?;
+    if !keygen.status.success() {
+        return Err(RegisterNewTargetError::new(
+            RegisterNewTargetErrorCode::BootstrapFailed,
+            "Failed to compute SSH host key fingerprint",
+            Some(format!(
+                "stderr={}; stdout={}",
+                truncate_for_error(keygen.stderr.trim(), 500),
+                truncate_for_error(keygen.stdout.trim(), 500),
+            )),
+        ));
+    }
+
+    let fingerprint = parse_ssh_hostkey_fingerprint(&keygen.stdout).ok_or_else(|| {
+        RegisterNewTargetError::new(
+            RegisterNewTargetErrorCode::BootstrapFailed,
+            "Unable to parse SSH host key fingerprint",
+            Some(truncate_for_error(keygen.stdout.trim(), 500)),
+        )
+    })?;
+
+    Ok((keyscan.stdout, fingerprint))
+}
+
+fn load_fleet_enrollment_registry(
+    path: &Path,
+) -> Result<FleetEnrollmentRegistry, RegisterNewTargetError> {
+    if !path.exists() {
+        return Ok(FleetEnrollmentRegistry::default());
+    }
+
+    let bytes = std::fs::read(path).map_err(|error| {
+        RegisterNewTargetError::new(
+            RegisterNewTargetErrorCode::PersistenceFailed,
+            "Failed to read enrollment registry",
+            Some(error.to_string()),
+        )
+    })?;
+
+    if bytes.is_empty() {
+        return Ok(FleetEnrollmentRegistry::default());
+    }
+
+    serde_json::from_slice::<FleetEnrollmentRegistry>(&bytes).map_err(|error| {
+        RegisterNewTargetError::new(
+            RegisterNewTargetErrorCode::PersistenceFailed,
+            "Enrollment registry is corrupted",
+            Some(error.to_string()),
+        )
+    })
+}
+
+fn save_fleet_enrollment_registry(
+    path: &Path,
+    registry: &FleetEnrollmentRegistry,
+) -> Result<(), RegisterNewTargetError> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| {
+            RegisterNewTargetError::new(
+                RegisterNewTargetErrorCode::PersistenceFailed,
+                "Failed to create enrollment registry directory",
+                Some(error.to_string()),
+            )
+        })?;
+    }
+
+    let payload = serde_json::to_vec_pretty(registry).map_err(|error| {
+        RegisterNewTargetError::new(
+            RegisterNewTargetErrorCode::PersistenceFailed,
+            "Failed to serialize enrollment registry",
+            Some(error.to_string()),
+        )
+    })?;
+
+    let temp_path = path.with_extension(format!("tmp-{}", Uuid::new_v4()));
+    std::fs::write(&temp_path, payload).map_err(|error| {
+        RegisterNewTargetError::new(
+            RegisterNewTargetErrorCode::PersistenceFailed,
+            "Failed to write temporary enrollment registry",
+            Some(error.to_string()),
+        )
+    })?;
+
+    if let Err(error) = std::fs::rename(&temp_path, path) {
+        let _ = std::fs::remove_file(&temp_path);
+        return Err(RegisterNewTargetError::new(
+            RegisterNewTargetErrorCode::PersistenceFailed,
+            "Failed to persist enrollment registry",
+            Some(error.to_string()),
+        ));
+    }
+
+    Ok(())
+}
+
+async fn resolve_target_registry_path(
+    state: &AppState,
+) -> Result<PathBuf, RegisterNewTargetError> {
+    let config = state.config.read().await;
+    let paths = config.resolve_paths().map_err(|error| {
+        RegisterNewTargetError::new(
+            RegisterNewTargetErrorCode::PersistenceFailed,
+            "Failed to resolve KRIA data paths",
+            Some(error.to_string()),
+        )
+    })?;
+
+    Ok(target_registry_path_from_data_dir(paths.data_dir.as_path()))
+}
+
+fn target_registry_path_from_data_dir(data_dir: &Path) -> PathBuf {
+    data_dir
+        .join(TARGET_ENROLLMENT_REGISTRY_DIR)
+        .join(TARGET_ENROLLMENT_REGISTRY_FILE)
+}
+
+fn default_target_registry_path() -> PathBuf {
+    let paths = kria_core::platform::paths::KriaPaths::resolve();
+    target_registry_path_from_data_dir(paths.data_dir.as_path())
+}
+
+fn load_enrolled_target_status_snapshots() -> (Vec<EnrolledTargetStatusSnapshot>, PathBuf) {
+    let registry_path = default_target_registry_path();
+    let snapshots = match load_fleet_enrollment_registry(registry_path.as_path()) {
+        Ok(registry) => registry
+            .targets
+            .into_iter()
+            .map(|target| EnrolledTargetStatusSnapshot {
+                target_id: target.target_id,
+                display_name: target.display_name,
+                host: target.host,
+                port: target.port,
+                username: target.username,
+                mode: target.mode,
+                ssh_hostkey_sha256_b64: target.ssh_hostkey_sha256_b64,
+                commander_epoch: target.commander_epoch,
+                enrolled_at_unix_ms: target.enrolled_at_unix_ms,
+                last_verified_unix_ms: target.last_verified_unix_ms,
+            })
+            .collect(),
+        Err(error) => {
+            tracing::warn!(
+                code = ?error.code,
+                message = %error.message,
+                detail = ?error.detail,
+                path = %registry_path.to_string_lossy(),
+                "fleet status: failed to load enrollment registry snapshot"
+            );
+            Vec::new()
+        }
+    };
+
+    (snapshots, registry_path)
+}
+
+fn fleet_runtime_root_from_data_dir(data_dir: &Path) -> PathBuf {
+    data_dir
+        .join(TARGET_ENROLLMENT_REGISTRY_DIR)
+        .join(TARGET_ENROLLMENT_RUNTIME_DIR)
+}
+
+fn current_host_platform() -> HostPlatform {
+    if cfg!(target_os = "windows") {
+        HostPlatform::Windows
+    } else if cfg!(target_os = "macos") {
+        HostPlatform::MacOs
+    } else {
+        HostPlatform::Linux
+    }
+}
+
+fn build_remote_config_for_enrolled_target(
+    target: &EnrolledTargetRecord,
+    runtime_root: &Path,
+    system_config: &KriaSystemConfig,
+) -> Result<RemoteConfig, String> {
+    let target_root = runtime_root.join(&target.target_id);
+    let control_root = target_root.join("control");
+    let staging_root = target_root.join("staging");
+    let workspace_root = target_root.join("workspace");
+    let helper_cache_root = target_root.join("helper_cache");
+    let helper_root = target_root.join("helper");
+    let helper_lock_root = target_root.join("helper_lock");
+    let state_root = target_root.join("state");
+    let mux_root = target_root.join("mux");
+
+    for directory in [
+        target_root.as_path(),
+        control_root.as_path(),
+        staging_root.as_path(),
+        workspace_root.as_path(),
+        helper_cache_root.as_path(),
+        helper_root.as_path(),
+        helper_lock_root.as_path(),
+        state_root.as_path(),
+        mux_root.as_path(),
+    ] {
+        std::fs::create_dir_all(directory)
+            .map_err(|error| format!("failed to create runtime directory {}: {error}", directory.display()))?;
+    }
+
+    let ssh_key_path = expand_tilde_path(&target.ssh_private_key_path);
+    if !ssh_key_path.exists() {
+        return Err(format!(
+            "SSH private key is missing for target {}: {}",
+            target.target_id,
+            ssh_key_path.display()
+        ));
+    }
+
+    let pinned_host_key = {
+        let normalized = normalize_hostkey_sha256_b64(&target.ssh_hostkey_sha256_b64);
+        if normalized.is_empty() {
+            None
+        } else {
+            Some(normalized)
+        }
+    };
+
+    Ok(RemoteConfig {
+        host_platform: current_host_platform(),
+        host: target.host.clone(),
+        port: target.port,
+        username: target.username.clone(),
+        ssh_key_path,
+        guest_os_family: GuestOsFamily::Posix,
+        target_kind: TargetKind::PhysicalRemoteHost,
+        qemu_boot_cmd: None,
+        qemu_pid_state_file: target_root.join("qemu.pid"),
+        instance_id: format!("fleet-target-{}", target.target_id),
+        remote_control_dir: control_root,
+        transport_backend: SshTransportBackend::OpenSshControlMaster,
+        ssh_multiplexing: SshMultiplexingConfig {
+            enable_control_master: true,
+            control_path_cmd: mux_root.join("cmd.sock"),
+            control_path_bulk: mux_root.join("bulk.sock"),
+            control_persist_secs: 90,
+            establish_timeout_ms: 2_000,
+            control_check_timeout_ms: 1_000,
+            allow_no_mux_for_test: true,
+            rust_ssh_max_parallel_channels: 16,
+        },
+        helper_provisioning: HelperProvisioning {
+            required_helper_version: "kria-remote-helper-v1".to_string(),
+            helper_manifest_path: target_root.join("helper.manifest"),
+            helper_manifest_sig_path: target_root.join("helper.manifest.sig"),
+            helper_public_key_path: target_root.join("helper.pub"),
+            host_helper_cache_dir: helper_cache_root,
+            remote_helper_dir: helper_root,
+            remote_helper_lock_dir: helper_lock_root,
+            helper_lock_timeout_ms: 10_000,
+            helper_lock_claim_retry_ms: 200,
+            supervisor_heartbeat_interval_ms: 1_000,
+            supervisor_heartbeat_timeout_ms: 5_000,
+            worker_journal_silence_timeout_ms: 5_000,
+            emergency_status_buffer_bytes: 512 * 1024,
+            last_gasp_packet_timeout_ms: 2_000,
+            max_helper_rss_bytes: 128 * 1024 * 1024,
+        },
+        control_transport: ControlPlaneTransport::EphemeralSftpFile,
+        envelope_ttl_ms: system_config.target_pool.lease_ttl_ms.max(5_000),
+        max_command_payload_bytes: 1_024 * 1_024,
+        file_commit_policy: FileCommitPolicy {
+            remote_staging_dir: staging_root,
+            privileged_commit_mode: PrivilegedCommitMode::Disabled,
+            privileged_commit_helper_path: None,
+            staging_sweep_ttl_secs: 300,
+            staging_lease_heartbeat_timeout_ms: 2_000,
+            staging_sweep_batch_limit: 64,
+            enforce_linux_openat2: cfg!(target_os = "linux"),
+            privileged_probe_timeout_ms: 1_500,
+            privileged_commit_timeout_ms: 2_000,
+            disable_privileged_on_probe_failure: true,
+        },
+        guest_filesystem_policy: GuestFilesystemPolicy {
+            require_control_dir_writable: true,
+            require_staging_dir_writable: true,
+            require_non_readonly_mount: true,
+            min_free_bytes_floor: 64 * 1024 * 1024,
+        },
+        reset_policy: ResetPolicy {
+            admission_freeze_timeout_ms: 750,
+            zombie_reap_timeout_ms: 500,
+            lock_acquire_timeout_ms: 1_500,
+            network_call_timeout_ms: 5_000,
+            total_reset_deadline_ms: 30_000,
+        },
+        replay_cache_policy: ReplayCachePolicy {
+            retained_epoch_buckets: 2,
+            max_nonces_per_epoch: 512,
+        },
+        ssh_pool: SshPoolConfig {
+            max_active_targets_hard_cap: 128,
+            idle_ttl_secs: 120,
+            sweep_interval_secs: 30,
+            fd_soft_limit: 16_384,
+            fd_reserve: 256,
+            fd_per_command_budget: 8,
+            fd_telemetry_sample_ms: 1_000,
+        },
+        host_artifact_gc: HostArtifactGcConfig {
+            enable_gc: true,
+            gc_ttl_secs: 3_600,
+            state_root_dir: state_root,
+            host_binary_sha256_or_build_id: format!(
+                "kria-desktop-{}",
+                env!("CARGO_PKG_VERSION")
+            ),
+        },
+        infrastructure_runtime: InfrastructureRuntimeConfig {
+            infra_worker_threads: 2,
+            high_priority_queue_capacity: 64,
+            medium_priority_queue_capacity: 64,
+            low_priority_queue_capacity: 64,
+            infra_spawn_timeout_ms: 2_000,
+        },
+        ssh_connect_timeout_ms: 15_000,
+        command_timeout_ms: 60_000,
+        boot_wait_timeout_ms: 20_000,
+        poll_interval_ms: 250,
+        shutdown_timeout_ms: 10_000,
+        soft_reset_grace_ms: 1_000,
+        soft_reset_kill_timeout_ms: 5_000,
+        max_soft_reset_attempts: 2,
+        inflight_drain_timeout_ms: 10_000,
+        local_cancel_kill_timeout_ms: 5_000,
+        max_stdout_bytes: 2 * 1024 * 1024,
+        max_stderr_bytes: 2 * 1024 * 1024,
+        max_read_file_bytes: 2 * 1024 * 1024,
+        command_timeout_requires_reset: true,
+        known_hosts_path: None,
+        strict_host_key_checking: pinned_host_key.is_some(),
+        pinned_host_key_sha256: pinned_host_key,
+        remote_workspace_root: Some(workspace_root),
+    })
+}
+
+fn build_placeholder_bridge_remote_config(
+    runtime_root: &Path,
+    system_config: &KriaSystemConfig,
+) -> Result<RemoteConfig, String> {
+    let bridge_root = runtime_root.join("_bridge_fallback");
+    std::fs::create_dir_all(&bridge_root).map_err(|error| {
+        format!(
+            "failed to create bridge fallback runtime directory {}: {error}",
+            bridge_root.display()
+        )
+    })?;
+
+    Ok(RemoteConfig {
+        host_platform: current_host_platform(),
+        host: "bridge-placeholder.local".to_string(),
+        port: 22,
+        username: "bridge".to_string(),
+        ssh_key_path: bridge_root.join("placeholder.key"),
+        guest_os_family: GuestOsFamily::Posix,
+        target_kind: TargetKind::PhysicalRemoteHost,
+        qemu_boot_cmd: None,
+        qemu_pid_state_file: bridge_root.join("qemu.pid"),
+        instance_id: format!("fleet-bridge-{}", Uuid::new_v4()),
+        remote_control_dir: bridge_root.join("control"),
+        transport_backend: SshTransportBackend::OpenSshControlMaster,
+        ssh_multiplexing: SshMultiplexingConfig {
+            enable_control_master: false,
+            control_path_cmd: bridge_root.join("cmd.sock"),
+            control_path_bulk: bridge_root.join("bulk.sock"),
+            control_persist_secs: 15,
+            establish_timeout_ms: 500,
+            control_check_timeout_ms: 500,
+            allow_no_mux_for_test: true,
+            rust_ssh_max_parallel_channels: 4,
+        },
+        helper_provisioning: HelperProvisioning {
+            required_helper_version: "bridge-placeholder".to_string(),
+            helper_manifest_path: bridge_root.join("helper.manifest"),
+            helper_manifest_sig_path: bridge_root.join("helper.manifest.sig"),
+            helper_public_key_path: bridge_root.join("helper.pub"),
+            host_helper_cache_dir: bridge_root.join("helper_cache"),
+            remote_helper_dir: bridge_root.join("helper"),
+            remote_helper_lock_dir: bridge_root.join("helper_lock"),
+            helper_lock_timeout_ms: 500,
+            helper_lock_claim_retry_ms: 50,
+            supervisor_heartbeat_interval_ms: 500,
+            supervisor_heartbeat_timeout_ms: 2_000,
+            worker_journal_silence_timeout_ms: 2_000,
+            emergency_status_buffer_bytes: 512 * 1024,
+            last_gasp_packet_timeout_ms: 500,
+            max_helper_rss_bytes: 64 * 1024 * 1024,
+        },
+        control_transport: ControlPlaneTransport::EphemeralSftpFile,
+        envelope_ttl_ms: system_config.target_pool.lease_ttl_ms.max(1_000),
+        max_command_payload_bytes: 64 * 1024,
+        file_commit_policy: FileCommitPolicy {
+            remote_staging_dir: bridge_root.join("staging"),
+            privileged_commit_mode: PrivilegedCommitMode::Disabled,
+            privileged_commit_helper_path: None,
+            staging_sweep_ttl_secs: 60,
+            staging_lease_heartbeat_timeout_ms: 500,
+            staging_sweep_batch_limit: 16,
+            enforce_linux_openat2: cfg!(target_os = "linux"),
+            privileged_probe_timeout_ms: 500,
+            privileged_commit_timeout_ms: 500,
+            disable_privileged_on_probe_failure: true,
+        },
+        guest_filesystem_policy: GuestFilesystemPolicy {
+            require_control_dir_writable: true,
+            require_staging_dir_writable: true,
+            require_non_readonly_mount: true,
+            min_free_bytes_floor: 1,
+        },
+        reset_policy: ResetPolicy {
+            admission_freeze_timeout_ms: 100,
+            zombie_reap_timeout_ms: 100,
+            lock_acquire_timeout_ms: 250,
+            network_call_timeout_ms: 500,
+            total_reset_deadline_ms: 5_000,
+        },
+        replay_cache_policy: ReplayCachePolicy {
+            retained_epoch_buckets: 2,
+            max_nonces_per_epoch: 64,
+        },
+        ssh_pool: SshPoolConfig {
+            max_active_targets_hard_cap: 8,
+            idle_ttl_secs: 30,
+            sweep_interval_secs: 30,
+            fd_soft_limit: 4_096,
+            fd_reserve: 64,
+            fd_per_command_budget: 4,
+            fd_telemetry_sample_ms: 100,
+        },
+        host_artifact_gc: HostArtifactGcConfig {
+            enable_gc: true,
+            gc_ttl_secs: 60,
+            state_root_dir: bridge_root.join("state"),
+            host_binary_sha256_or_build_id: "bridge-placeholder".to_string(),
+        },
+        infrastructure_runtime: InfrastructureRuntimeConfig {
+            infra_worker_threads: 1,
+            high_priority_queue_capacity: 8,
+            medium_priority_queue_capacity: 8,
+            low_priority_queue_capacity: 8,
+            infra_spawn_timeout_ms: 500,
+        },
+        ssh_connect_timeout_ms: 500,
+        command_timeout_ms: 500,
+        boot_wait_timeout_ms: 500,
+        poll_interval_ms: 50,
+        shutdown_timeout_ms: 500,
+        soft_reset_grace_ms: 100,
+        soft_reset_kill_timeout_ms: 100,
+        max_soft_reset_attempts: 1,
+        inflight_drain_timeout_ms: 500,
+        local_cancel_kill_timeout_ms: 500,
+        max_stdout_bytes: 128 * 1024,
+        max_stderr_bytes: 128 * 1024,
+        max_read_file_bytes: 128 * 1024,
+        command_timeout_requires_reset: true,
+        known_hosts_path: None,
+        strict_host_key_checking: false,
+        pinned_host_key_sha256: None,
+        remote_workspace_root: Some(bridge_root.join("workspace")),
+    })
+}
+
+async fn admit_enrolled_target_to_fleet_runtime(
+    fleet_runtime: &Arc<FleetRuntimeState>,
+    target: &EnrolledTargetRecord,
+) -> Result<bool, String> {
+    let _admission_guard = fleet_runtime.admission_lock.lock().await;
+
+    let parsed_target_id = Uuid::parse_str(target.target_id.trim()).map_err(|error| {
+        format!(
+            "target_id '{}' is not a valid UUID: {error}",
+            target.target_id
+        )
+    })?;
+    let target_id = TargetId(parsed_target_id);
+
+    if fleet_runtime
+        .target_pool
+        .inventory_state(&target_id)
+        .await
+        .is_some()
+    {
+        return Ok(false);
+    }
+
+    let remote_config = build_remote_config_for_enrolled_target(
+        target,
+        fleet_runtime.runtime_root.as_path(),
+        &fleet_runtime.system_config,
+    )?;
+
+    let runtime_handle = tokio::runtime::Handle::current();
+    let environment = Arc::new(
+        QemuSshEnvironment::new(remote_config, runtime_handle.clone(), runtime_handle)
+            .map_err(|error| format!("failed to construct QemuSshEnvironment: {error}"))?,
+    );
+
+    fleet_runtime
+        .target_pool
+        .add_target(target_id, environment, TargetHealthTelemetry::default())
+        .await;
+
+    Ok(true)
+}
+
+fn configure_orchestrator_fleet_bridge(
+    orchestrator: &Arc<Orchestrator>,
+    fleet_runtime: &Arc<FleetRuntimeState>,
+) -> Result<(), String> {
+    let fallback_config = build_placeholder_bridge_remote_config(
+        fleet_runtime.runtime_root.as_path(),
+        &fleet_runtime.system_config,
+    )?;
+
+    let runtime_handle = tokio::runtime::Handle::current();
+    let fallback_environment = Arc::new(
+        QemuSshEnvironment::new(fallback_config, runtime_handle.clone(), runtime_handle)
+            .map_err(|error| {
+                format!(
+                    "failed to build fallback remote environment for orchestrator bridge: {error}"
+                )
+            })?,
+    );
+
+    let bridge = RemoteQemuToolBridge::new(fallback_environment)
+        .with_target_pool(fleet_runtime.target_pool.clone());
+    orchestrator.set_remote_tool_bridge(bridge);
+    Ok(())
+}
+
+async fn pulse_target_pool_telemetry(target_pool: &Arc<TargetPool>) {
+    match target_pool.acquire_lease().await {
+        Ok(lease) => {
+            if let Err(error) = target_pool.release_lease(&lease.lease_id).await {
+                tracing::warn!(
+                    error = %error,
+                    lease_id = %lease.lease_id.0,
+                    "fleet runtime: failed to release telemetry pulse lease"
+                );
+            }
+        }
+        Err(error) => {
+            tracing::debug!(
+                error = %error,
+                "fleet runtime: telemetry pulse skipped"
+            );
+        }
+    }
+}
+
+fn unix_now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|value| value.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn trim_forensic_evidence(raw: &str) -> String {
+    let bytes = raw.as_bytes();
+    if bytes.len() <= IRONCLAD_FORENSIC_EVIDENCE_MAX_BYTES {
+        return raw.to_string();
+    }
+
+    let truncation_notice = format!(
+        "\n...[truncated forensic evidence by {} bytes]",
+        bytes
+            .len()
+            .saturating_sub(IRONCLAD_FORENSIC_EVIDENCE_MAX_BYTES)
+    );
+
+    let allowed = IRONCLAD_FORENSIC_EVIDENCE_MAX_BYTES.saturating_sub(truncation_notice.len());
+    let mut clipped = String::from_utf8_lossy(&bytes[..allowed]).to_string();
+    clipped.push_str(&truncation_notice);
+    clipped
+}
+
+fn detect_last_gasp_signature(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("last_gasp")
+        || lower.contains("last-gasp")
+        || (lower.contains("terminal_state") && lower.contains("command_id"))
+}
+
+fn make_ironclad_forensic_record(
+    category: &str,
+    severity: &str,
+    summary: String,
+    evidence: String,
+    source: &str,
+) -> IroncladForensicRecord {
+    let evidence_trimmed = trim_forensic_evidence(&evidence);
+    let last_gasp_detected = detect_last_gasp_signature(&evidence_trimmed)
+        || detect_last_gasp_signature(&summary);
+
+    IroncladForensicRecord {
+        id: uuid::Uuid::new_v4().to_string(),
+        timestamp_unix_ms: unix_now_ms(),
+        category: category.to_string(),
+        severity: severity.to_string(),
+        summary,
+        source: source.to_string(),
+        evidence: evidence_trimmed,
+        last_gasp_detected,
+    }
+}
+
+async fn append_ironclad_forensic_record(
+    log: &Arc<RwLock<Vec<IroncladForensicRecord>>>,
+    app: &AppHandle,
+    category: &str,
+    severity: &str,
+    summary: impl Into<String>,
+    evidence: impl Into<String>,
+    source: &str,
+) -> IroncladForensicRecord {
+    let record = make_ironclad_forensic_record(
+        category,
+        severity,
+        summary.into(),
+        evidence.into(),
+        source,
+    );
+
+    {
+        let mut guard = log.write().await;
+        guard.push(record.clone());
+        if guard.len() > IRONCLAD_FORENSIC_MAX_ENTRIES {
+            let overflow = guard.len() - IRONCLAD_FORENSIC_MAX_ENTRIES;
+            guard.drain(0..overflow);
+        }
+    }
+
+    let _ = app.emit("ironclad:forensic", serde_json::json!(record.clone()));
+    record
+}
+
+fn discover_from_roots(file_name: &str) -> Option<PathBuf> {
+    let mut roots: Vec<PathBuf> = Vec::new();
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            roots.push(parent.to_path_buf());
+        }
+    }
+
+    if let Ok(cwd) = std::env::current_dir() {
+        roots.push(cwd);
+    }
+
+    for start in roots {
+        let mut dir = Some(start.as_path());
+        while let Some(current) = dir {
+            let candidate = current.join(file_name);
+            if candidate.exists() {
+                return Some(candidate);
+            }
+
+            dir = current.parent();
+            if dir.map(|path| path == Path::new("/")).unwrap_or(true) {
+                break;
+            }
+        }
+    }
+
+    None
+}
+
+fn resolve_ironclad_config_path() -> PathBuf {
+    if let Ok(path) = std::env::var("KRIA_SYSTEM_CONFIG_PATH") {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
+        }
+    }
+
+    discover_from_roots("kria_config.toml").unwrap_or_else(|| PathBuf::from("kria_config.toml"))
+}
+
+fn load_ironclad_system_config_with_path() -> (PathBuf, KriaSystemConfig) {
+    let path = resolve_ironclad_config_path();
+    let config = KriaSystemConfig::load(Some(path.as_path()));
+    (path, config)
+}
+
+fn merge_ironclad_config_document(
+    mut document: toml::Value,
+    config: &KriaSystemConfig,
+) -> Result<toml::Value, String> {
+    if !document.is_table() {
+        document = toml::Value::Table(toml::map::Map::new());
+    }
+
+    let Some(table) = document.as_table_mut() else {
+        return Err("Unable to access TOML root table".to_string());
+    };
+
+    table.insert(
+        "qos".to_string(),
+        toml::Value::try_from(config.qos.clone()).map_err(|e| e.to_string())?,
+    );
+    table.insert(
+        "target_pool".to_string(),
+        toml::Value::try_from(config.target_pool.clone()).map_err(|e| e.to_string())?,
+    );
+    table.insert(
+        "snapshot".to_string(),
+        toml::Value::try_from(config.snapshot.clone()).map_err(|e| e.to_string())?,
+    );
+
+    Ok(document)
+}
+
+fn persist_ironclad_system_config(path: &Path, config: &KriaSystemConfig) -> Result<(), String> {
+    let existing = if path.exists() {
+        std::fs::read_to_string(path).map_err(|e| e.to_string())?
+    } else {
+        String::new()
+    };
+
+    let parsed = if existing.trim().is_empty() {
+        toml::Value::Table(toml::map::Map::new())
+    } else {
+        toml::from_str::<toml::Value>(&existing).map_err(|e| e.to_string())?
+    };
+
+    let merged = merge_ironclad_config_document(parsed, config)?;
+    let encoded = toml::to_string_pretty(&merged).map_err(|e| e.to_string())?;
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+
+    std::fs::write(path, encoded).map_err(|e| e.to_string())
+}
+
+fn memory_turn_write(
+    session_id: impl Into<String>,
+    user_prompt: impl Into<String>,
+    assistant_response: impl Into<String>,
+    tool_name: Option<String>,
+    tool_result: Option<String>,
+    tokens_used: Option<i32>,
+) -> MemoryTurnWrite {
+    MemoryTurnWrite {
+        session_id: session_id.into(),
+        user_prompt: user_prompt.into(),
+        assistant_response: assistant_response.into(),
+        tool_name,
+        tool_result,
+        tokens_used,
+        timestamp: Utc::now(),
+        extraction: None,
+    }
+}
+
+fn preference_record(key: impl Into<String>, value: impl Into<String>) -> PreferenceRecord {
+    PreferenceRecord {
+        key: key.into(),
+        value: value.into(),
+    }
+}
 
 fn is_colab_bootstrap_tool_name(tool_name: &str) -> bool {
     tool_name
@@ -687,6 +2353,35 @@ struct LocalApiChatRequest {
     from_user: Option<String>,
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct LocalApiFleetEventsQuery {
+    #[serde(default)]
+    lease_id: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct LocalApiFleetTerminalQuery {
+    target_id: String,
+    #[serde(default)]
+    lease_id: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct LocalApiFleetHeartbeatRequest {
+    #[serde(default)]
+    lease_id: Option<String>,
+    #[serde(default)]
+    sent_at_unix_ms: Option<i64>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct LocalApiFleetDockerEvalRequest {
+    lease_id: String,
+    target_id: String,
+    #[serde(default)]
+    suite_name: Option<String>,
+}
+
 #[async_trait]
 trait LocalApiResponder: Send + Sync {
     async fn respond(&self, request: &LocalApiChatRequest) -> serde_json::Value;
@@ -695,12 +2390,13 @@ trait LocalApiResponder: Send + Sync {
 #[derive(Clone)]
 struct LocalApiBridgeState {
     responder: Arc<dyn LocalApiResponder>,
+    fleet_control_runtime: Arc<DesktopFleetControlRuntime>,
 }
 
 #[derive(Clone)]
 struct AgentLoopLocalApiResponder {
     agent_loop: Arc<AgentLoop>,
-    memory_store: Arc<MemoryStore>,
+    memory_store: Arc<dyn MemoryRuntime>,
     tool_registry: Arc<ToolRegistry>,
     embeddings: Arc<EmbeddingModel>,
     vectors: Arc<VectorIndex>,
@@ -777,6 +2473,444 @@ async fn local_api_chat(
     (StatusCode::OK, Json(response))
 }
 
+async fn local_api_fleet_events(
+    AxumState(state): AxumState<LocalApiBridgeState>,
+    Query(query): Query<LocalApiFleetEventsQuery>,
+) -> Sse<impl futures::Stream<Item = Result<Event, std::convert::Infallible>>> {
+    let mut rx = state.fleet_control_runtime.manager.subscribe_events();
+    let snapshot_payload = serde_json::json!({
+        "type": "snapshot",
+        "targets": state.fleet_control_runtime.snapshot_targets().await,
+    })
+    .to_string();
+    let lease_filter = query
+        .lease_id
+        .as_deref()
+        .and_then(|raw| Uuid::parse_str(raw).ok());
+
+    let event_stream = stream! {
+        yield Ok(Event::default().data(snapshot_payload));
+
+        loop {
+            match rx.recv().await {
+                Ok(event) => {
+                    if let Some(filter) = lease_filter {
+                        if !local_api_event_matches_lease(&event, filter) {
+                            continue;
+                        }
+                    }
+
+                    let payload = local_api_control_plane_event_json(&event).to_string();
+                    yield Ok(Event::default().data(payload));
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                    tracing::warn!(skipped, "local fleet SSE consumer lagged");
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    };
+
+    Sse::new(event_stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(10))
+            .text("keepalive"),
+    )
+}
+
+async fn local_api_fleet_terminal_ws(
+    ws: WebSocketUpgrade,
+    AxumState(state): AxumState<LocalApiBridgeState>,
+    Query(query): Query<LocalApiFleetTerminalQuery>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| local_api_handle_fleet_terminal_socket(socket, state, query))
+}
+
+async fn local_api_handle_fleet_terminal_socket(
+    socket: WebSocket,
+    state: LocalApiBridgeState,
+    query: LocalApiFleetTerminalQuery,
+) {
+    let target_id = match Uuid::parse_str(query.target_id.trim()) {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::warn!(error = %error, target_id = %query.target_id, "invalid target_id for local terminal ws");
+            return;
+        }
+    };
+
+    let lease_id = query
+        .lease_id
+        .as_deref()
+        .and_then(|raw| Uuid::parse_str(raw).ok());
+
+    let session_id = Uuid::new_v4().to_string();
+    if let Err(error) = state
+        .fleet_control_runtime
+        .manager
+        .register_terminal_session(target_id, session_id.clone(), None)
+        .await
+    {
+        tracing::warn!(error = %error, target_id = %target_id, "failed to register local terminal session");
+        return;
+    }
+
+    let mut rx = state.fleet_control_runtime.manager.subscribe_events();
+    let (mut sender, mut receiver) = socket.split();
+    let connected = serde_json::json!({
+        "type": "connected",
+        "target_id": target_id,
+        "lease_id": lease_id,
+        "session_id": session_id,
+    });
+    if sender
+        .send(Message::Text(connected.to_string().into()))
+        .await
+        .is_err()
+    {
+        return;
+    }
+
+    loop {
+        tokio::select! {
+            incoming = receiver.next() => {
+                match incoming {
+                    Some(Ok(Message::Text(text))) => {
+                        if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&text) {
+                            let kind = payload.get("kind").and_then(|v| v.as_str()).unwrap_or_default();
+                            if kind.eq_ignore_ascii_case("ping") {
+                                let pong = serde_json::json!({"type": "pong"}).to_string();
+                                if sender.send(Message::Text(pong.into())).await.is_err() {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) => break,
+                    Some(Ok(_)) => {}
+                    Some(Err(error)) => {
+                        tracing::warn!(error = %error, target_id = %target_id, "local terminal websocket receive error");
+                        let _ = state
+                            .fleet_control_runtime
+                            .manager
+                            .report_terminal_ws_failure(
+                                target_id,
+                                session_id.clone(),
+                                None,
+                                error.to_string(),
+                                true,
+                            )
+                            .await;
+                        break;
+                    }
+                    None => break,
+                }
+            }
+            event = rx.recv() => {
+                match event {
+                    Ok(event) => {
+                        if !local_api_event_matches_target(&event, target_id) {
+                            continue;
+                        }
+
+                        let payload = local_api_control_plane_event_json(&event).to_string();
+                        if sender.send(Message::Text(payload.into())).await.is_err() {
+                            let _ = state
+                                .fleet_control_runtime
+                                .manager
+                                .report_terminal_ws_failure(
+                                    target_id,
+                                    session_id.clone(),
+                                    None,
+                                    "local terminal websocket closed while sending event",
+                                    true,
+                                )
+                                .await;
+                            break;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                        tracing::warn!(skipped, target_id = %target_id, "local terminal websocket event stream lagged");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        }
+    }
+}
+
+async fn local_api_fleet_lease_heartbeat(
+    AxumPath(lease_id): AxumPath<Uuid>,
+    AxumState(state): AxumState<LocalApiBridgeState>,
+    Json(payload): Json<LocalApiFleetHeartbeatRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    if let Some(body_lease_id) = payload.lease_id.as_deref() {
+        if let Ok(parsed) = Uuid::parse_str(body_lease_id) {
+            if parsed != lease_id {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "status": "error",
+                        "message": "lease id mismatch between path and body"
+                    })),
+                ));
+            }
+        }
+    }
+
+    match state.fleet_control_runtime.manager.heartbeat(lease_id).await {
+        Ok(()) => Ok(Json(serde_json::json!({
+            "type": "heartbeat_ack",
+            "lease_id": lease_id,
+            "received_sent_at_unix_ms": payload.sent_at_unix_ms,
+            "ts_unix_ms": Utc::now().timestamp_millis(),
+        }))),
+        Err(error) => Err((
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({
+                "status": "error",
+                "message": error.to_string(),
+            })),
+        )),
+    }
+}
+
+async fn local_api_fleet_docker_evals(
+    AxumState(state): AxumState<LocalApiBridgeState>,
+    Json(request): Json<LocalApiFleetDockerEvalRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let lease_id = Uuid::parse_str(request.lease_id.trim()).map_err(|error| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "status": "error",
+                "message": format!("invalid lease_id: {error}"),
+            })),
+        )
+    })?;
+
+    let target_id = Uuid::parse_str(request.target_id.trim()).map_err(|error| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "status": "error",
+                "message": format!("invalid target_id: {error}"),
+            })),
+        )
+    })?;
+
+    let suite_name = request
+        .suite_name
+        .unwrap_or_else(|| "kria_core_docker_suite".to_string());
+
+    let summary = state
+        .fleet_control_runtime
+        .manager
+        .run_docker_eval(DockerEvalRequest {
+            lease_id,
+            target_id,
+            suite_name,
+        })
+        .await
+        .map_err(|error| {
+            (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({
+                    "status": "error",
+                    "message": error.to_string(),
+                })),
+            )
+        })?;
+
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "summary": {
+            "run_id": summary.run_id,
+            "target_id": summary.target_id,
+            "lease_id": summary.lease_id,
+            "suite_name": summary.suite_name,
+            "status": local_api_docker_health_label(summary.status),
+            "passed_count": summary.passed_count,
+            "failed_count": summary.failed_count,
+            "started_at_unix_ms": summary.started_at_unix_ms,
+            "finished_at_unix_ms": summary.finished_at_unix_ms,
+            "cases": summary.cases,
+        }
+    })))
+}
+
+fn local_api_event_matches_lease(event: &ControlPlaneEvent, lease_id: Uuid) -> bool {
+    match event {
+        ControlPlaneEvent::FleetAlert {
+            lease_id: Some(id), ..
+        } => *id == lease_id,
+        ControlPlaneEvent::TerminalLine {
+            lease_id: Some(id), ..
+        } => *id == lease_id,
+        ControlPlaneEvent::TargetStatus { .. }
+        | ControlPlaneEvent::DockerEvalUpdate { .. }
+        | ControlPlaneEvent::TerminalGap { .. }
+        | ControlPlaneEvent::ClockDrift { .. }
+        | ControlPlaneEvent::FleetAlert { lease_id: None, .. }
+        | ControlPlaneEvent::TerminalLine { lease_id: None, .. } => true,
+    }
+}
+
+fn local_api_event_matches_target(event: &ControlPlaneEvent, target_id: Uuid) -> bool {
+    match event {
+        ControlPlaneEvent::TargetStatus { target_id: id, .. } => *id == target_id,
+        ControlPlaneEvent::FleetAlert {
+            target_id: Some(id), ..
+        } => *id == target_id,
+        ControlPlaneEvent::DockerEvalUpdate { target_id: id, .. } => *id == target_id,
+        ControlPlaneEvent::TerminalGap { marker } => marker.target_id == target_id,
+        ControlPlaneEvent::TerminalLine { target_id: id, .. } => *id == target_id,
+        ControlPlaneEvent::ClockDrift { alert } => alert.target_id == target_id,
+        ControlPlaneEvent::FleetAlert {
+            target_id: None, ..
+        } => false,
+    }
+}
+
+fn local_api_control_plane_event_json(event: &ControlPlaneEvent) -> serde_json::Value {
+    match event {
+        ControlPlaneEvent::TargetStatus {
+            target_id,
+            display_name,
+            mode,
+            state,
+            tainted,
+            reason,
+            health_score,
+            latency_ewma_ms,
+            recent_failure_rate,
+            docker_health,
+            docker_pass_count,
+            docker_fail_count,
+            docker_last_run_at_unix_ms,
+        } => serde_json::json!({
+            "type": "target_status",
+            "target_id": target_id,
+            "display_name": display_name,
+            "mode": local_api_target_mode_label(*mode),
+            "state": local_api_target_state_label(*state),
+            "tainted": tainted,
+            "reason": reason,
+            "health_score": health_score,
+            "latency_ewma_ms": latency_ewma_ms,
+            "recent_failure_rate": recent_failure_rate,
+            "docker_health": local_api_docker_health_label(*docker_health),
+            "docker_pass_count": docker_pass_count,
+            "docker_fail_count": docker_fail_count,
+            "docker_last_run_at_unix_ms": docker_last_run_at_unix_ms,
+            "updated_at_unix_ms": local_api_now_unix_ms(),
+        }),
+        ControlPlaneEvent::FleetAlert {
+            target_id,
+            lease_id,
+            category,
+            message,
+        } => serde_json::json!({
+            "type": "fleet_alert",
+            "target_id": target_id,
+            "lease_id": lease_id,
+            "category": category,
+            "message": message,
+            "created_at_unix_ms": local_api_now_unix_ms(),
+        }),
+        ControlPlaneEvent::DockerEvalUpdate {
+            target_id,
+            run_id,
+            docker_health,
+            docker_pass_count,
+            docker_fail_count,
+            updated_at_unix_ms,
+        } => serde_json::json!({
+            "type": "docker_eval_update",
+            "target_id": target_id,
+            "run_id": run_id,
+            "docker_health": local_api_docker_health_label(*docker_health),
+            "docker_pass_count": docker_pass_count,
+            "docker_fail_count": docker_fail_count,
+            "docker_last_run_at_unix_ms": updated_at_unix_ms,
+            "updated_at_unix_ms": updated_at_unix_ms,
+        }),
+        ControlPlaneEvent::TerminalGap { marker } => serde_json::json!({
+            "type": "terminal_gap",
+            "target_id": marker.target_id,
+            "session_id": marker.session_id,
+            "since_offset": marker.since_offset,
+            "message": marker.message,
+            "created_at_unix_ms": marker.created_at_unix_ms,
+        }),
+        ControlPlaneEvent::TerminalLine {
+            target_id,
+            lease_id,
+            offset,
+            stream,
+            text,
+            ts_unix_ms,
+        } => serde_json::json!({
+            "type": "terminal_line",
+            "target_id": target_id,
+            "lease_id": lease_id,
+            "offset": offset,
+            "stream": local_api_terminal_stream_label(*stream),
+            "text": text,
+            "ts_unix_ms": ts_unix_ms,
+        }),
+        ControlPlaneEvent::ClockDrift { alert } => serde_json::json!({
+            "type": "clock_drift",
+            "alert": {
+                "target_id": alert.target_id,
+                "previous_buffer_ms": alert.previous_buffer_ms,
+                "next_buffer_ms": alert.next_buffer_ms,
+                "rejection_count": alert.rejection_count,
+                "created_at_unix_ms": alert.created_at_unix_ms,
+            }
+        }),
+    }
+}
+
+fn local_api_target_mode_label(mode: TargetMode) -> &'static str {
+    match mode {
+        TargetMode::SshBootstrap => "ssh_bootstrap",
+        TargetMode::ReverseWs => "reverse_ws",
+        TargetMode::UnixSocket => "unix_socket",
+    }
+}
+
+fn local_api_target_state_label(state: TargetState) -> &'static str {
+    match state {
+        TargetState::Ready => "ready",
+        TargetState::Leased => "leased",
+        TargetState::Quarantine => "quarantine",
+        TargetState::Tainted => "tainted",
+        TargetState::Disabled => "disabled",
+    }
+}
+
+fn local_api_docker_health_label(status: DockerHealthStatus) -> &'static str {
+    match status {
+        DockerHealthStatus::Unknown => "unknown",
+        DockerHealthStatus::Running => "running",
+        DockerHealthStatus::Pass => "pass",
+        DockerHealthStatus::Fail => "fail",
+    }
+}
+
+fn local_api_terminal_stream_label(stream: TerminalStream) -> &'static str {
+    match stream {
+        TerminalStream::Stdout => "stdout",
+        TerminalStream::Stderr => "stderr",
+        TerminalStream::System => "system",
+    }
+}
+
+fn local_api_now_unix_ms() -> i64 {
+    Utc::now().timestamp_millis()
+}
+
 async fn probe_existing_local_api_bridge(health_url: &str) -> bool {
     match reqwest::Client::new()
         .get(health_url)
@@ -793,6 +2927,7 @@ fn start_local_api_bridge(
     host: String,
     port: u16,
     responder: Arc<dyn LocalApiResponder>,
+    fleet_control_runtime: Arc<DesktopFleetControlRuntime>,
     health: Arc<HealthRegistry>,
 ) {
     let bind_addr = format!("{host}:{port}");
@@ -810,7 +2945,18 @@ fn start_local_api_bridge(
                 let router = Router::new()
                     .route("/api/health", get(local_api_health))
                     .route("/api/chat", post(local_api_chat))
-                    .with_state(LocalApiBridgeState { responder });
+                    .route("/api/fleet/events", get(local_api_fleet_events))
+                    .route("/api/fleet/terminal", get(local_api_fleet_terminal_ws))
+                    .route(
+                        "/api/fleet/leases/{lease_id}/heartbeat",
+                        post(local_api_fleet_lease_heartbeat),
+                    )
+                    .route("/api/fleet/docker-evals", post(local_api_fleet_docker_evals))
+                    .layer(CorsLayer::permissive())
+                    .with_state(LocalApiBridgeState {
+                        responder,
+                        fleet_control_runtime,
+                    });
 
                 health.update(
                     "local_api_bridge",
@@ -1143,6 +3289,37 @@ fn build_tool_result_event_payload(
     })
 }
 
+fn extract_generate_image_paths(payload: &serde_json::Value) -> Vec<String> {
+    let direct_images = payload
+        .get("images")
+        .and_then(|v| v.as_array())
+        .or_else(|| {
+            payload
+                .get("data")
+                .and_then(|v| v.get("images"))
+                .and_then(|v| v.as_array())
+        })
+        .or_else(|| {
+            payload
+                .get("result")
+                .and_then(|v| v.get("images"))
+                .and_then(|v| v.as_array())
+        })
+        .cloned()
+        .unwrap_or_default();
+
+    direct_images
+        .iter()
+        .filter_map(|img| {
+            img.get("path")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|p| p.starts_with('/'))
+                .map(ToOwned::to_owned)
+        })
+        .collect()
+}
+
 fn summarize_tool_turn_for_history(
     name: &str,
     success: bool,
@@ -1160,6 +3337,23 @@ fn summarize_tool_turn_for_history(
 
     let payload = result.get("data").unwrap_or(result);
     let source_count = metadata.get("source_count").and_then(|v| v.as_u64());
+
+    if name == "generate_image" {
+        let image_paths = extract_generate_image_paths(payload);
+        if !image_paths.is_empty() {
+            if image_paths.len() == 1 {
+                return format!(
+                    "Tool '{name}' generated 1 image. Saved to: {}",
+                    image_paths[0]
+                );
+            }
+            let joined = image_paths.join(", ");
+            return format!(
+                "Tool '{name}' generated {} images. Saved to: {joined}",
+                image_paths.len()
+            );
+        }
+    }
 
     if name == "gw_gmail_inbox" || name == "gw_gmail_search" {
         let returned = payload
@@ -1745,6 +3939,24 @@ fn resolve_hardware_info(
 /// before init completes without a "state not managed" panic.
 pub type AppStateCell = tokio::sync::OnceCell<AppState>;
 
+pub struct FleetRuntimeState {
+    pub target_pool: Arc<TargetPool>,
+    pub system_config: KriaSystemConfig,
+    pub runtime_root: PathBuf,
+    admission_lock: tokio::sync::Mutex<()>,
+}
+
+impl FleetRuntimeState {
+    fn new(target_pool: Arc<TargetPool>, system_config: KriaSystemConfig, runtime_root: PathBuf) -> Self {
+        Self {
+            target_pool,
+            system_config,
+            runtime_root,
+            admission_lock: tokio::sync::Mutex::new(()),
+        }
+    }
+}
+
 /// Shared application state managed by Tauri.
 pub struct AppState {
     pub config: Arc<RwLock<KriaConfig>>,
@@ -1753,7 +3965,7 @@ pub struct AppState {
     pub model_router: Arc<ModelRouter>,
     pub agent_loop: Arc<AgentLoop>,
     pub tool_registry: Arc<ToolRegistry>,
-    pub memory_store: Arc<MemoryStore>,
+    pub memory_store: Arc<dyn MemoryRuntime>,
     pub hitl: Arc<HitlGateway>,
     pub event_bus: Arc<EventBus>,
     /// Held to keep the sidecar process alive for the app's lifetime.
@@ -1792,6 +4004,14 @@ pub struct AppState {
     pub gw_client_ref: gw::GwClientRef,
     /// Colab cloud-tier runtime status surface.
     pub colab_runtime: Arc<RwLock<ColabRuntimeSnapshot>>,
+    /// Latest reset lifecycle snapshot for operator visibility.
+    pub ironclad_reset: Arc<RwLock<IroncladResetSnapshot>>,
+    /// In-memory rolling forensic audit feed for trust-first diagnostics.
+    pub ironclad_forensic_log: Arc<RwLock<Vec<IroncladForensicRecord>>>,
+    /// Fleet runtime admission state for TargetPool-backed remote targets.
+    pub fleet_runtime: Arc<FleetRuntimeState>,
+    /// Connection-control runtime hydrated from enrollment registry for fleet control-plane telemetry.
+    pub fleet_control_runtime: Arc<DesktopFleetControlRuntime>,
     /// Hardware orchestrator — manages llama-server lifecycle and dynamic GPU offloading.
     /// Wrapped in RwLock so the background startup task can populate it after AppState
     /// is set, keeping the main init path non-blocking.
@@ -1915,13 +4135,18 @@ fn build_voice_pipeline(
         );
     }
 
+    let speech_gpu_lease =
+        GpuLeaseManager::shared(std::time::Duration::from_secs(120), std::time::Duration::from_secs(15));
+
     let mut stt = SpeechToText::new(stt_model_path.clone(), whisper_bin.clone());
+    stt.set_gpu_lease(speech_gpu_lease.clone());
     stt.set_language(&config.voice.language);
     if config.hardware.threads > 0 {
         stt.set_threads(config.hardware.threads.clamp(1, 12));
     }
     stt.set_command_timeout(std::time::Duration::from_secs(45));
-    let tts = TextToSpeech::new(tts_model_path, piper_bin);
+    let mut tts = TextToSpeech::new(tts_model_path, piper_bin);
+    tts.set_gpu_lease(speech_gpu_lease.clone());
     let vad_model_path = paths.models_dir.join("vad").join("silero_vad.onnx");
 
     let pipeline =
@@ -1937,8 +4162,10 @@ fn build_voice_pipeline(
         let warm_bin = whisper_bin.clone();
         let warm_lang = config.voice.language.clone();
         let warm_threads = config.hardware.threads;
+        let warm_gpu_lease = speech_gpu_lease.clone();
         tokio::spawn(async move {
             let mut warm_stt = SpeechToText::new(warm_model, warm_bin);
+            warm_stt.set_gpu_lease(warm_gpu_lease);
             warm_stt.set_language(&warm_lang);
             if warm_threads > 0 {
                 warm_stt.set_threads(warm_threads.clamp(1, 12));
@@ -1984,13 +4211,18 @@ fn build_v2_pipeline(
     let whisper_bin = which_binary("whisper-cpp").or_else(|| which_binary("main"));
     let piper_bin = which_binary("piper");
 
+    let speech_gpu_lease =
+        GpuLeaseManager::shared(std::time::Duration::from_secs(120), std::time::Duration::from_secs(15));
+
     let mut stt = SpeechToText::new(stt_model_path, whisper_bin);
+    stt.set_gpu_lease(speech_gpu_lease.clone());
     stt.set_language(&config.voice.language);
     if config.hardware.threads > 0 {
         stt.set_threads(config.hardware.threads.clamp(1, 12));
     }
     stt.set_command_timeout(std::time::Duration::from_secs(45));
-    let tts = TextToSpeech::new(tts_model_path, piper_bin);
+    let mut tts = TextToSpeech::new(tts_model_path, piper_bin);
+    tts.set_gpu_lease(speech_gpu_lease);
 
     let wake = if config.voice.wake_word.enabled {
         let wake_dir = paths.models_dir.join("wake");
@@ -2039,7 +4271,7 @@ async fn start_voice_v2_loop(
     session_id_lock: Arc<RwLock<String>>,
     config: Arc<RwLock<KriaConfig>>,
     hw_info: Arc<HardwareInfo>,
-    memory_store: Arc<MemoryStore>,
+    memory_store: Arc<dyn MemoryRuntime>,
     tool_registry: Arc<kria_core::tools::registry::ToolRegistry>,
     app: AppHandle,
 ) {
@@ -2355,7 +4587,8 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     );
 
     // Initialize memory store (SQLite)
-    let memory_store = Arc::new(MemoryStore::open(&paths.db_path)?);
+    let memory_store_backend = Arc::new(MemoryStore::open(&paths.db_path)?);
+    let memory_store: Arc<dyn MemoryRuntime> = memory_store_backend.clone();
 
     // Initialize model router from config
     let model_router = Arc::new(ModelRouter::from_config(&config));
@@ -2629,7 +4862,7 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
 
     // Build the full tool registry (60+ tools + 6 precognitive) with MemoryStore, RAG, and Proactive
     let rag_engine = Arc::new(kria_core::memory::RagEngine::new(
-        memory_store.clone(),
+        memory_store_backend.clone(),
         vectors.clone(),
         embeddings.clone(),
     ));
@@ -2644,7 +4877,14 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     kria_core::tools::precognitive::register(&tool_registry_inner, sidecar.clone());
     kria_core::tools::news::register(&tool_registry_inner, sidecar.clone());
     // Re-register vision tools with sidecar (overrides the None-sidecar registration from build_registry)
-    kria_core::tools::vision::register(&tool_registry_inner, Some(sidecar.clone()));
+    kria_core::tools::vision::register(
+        &tool_registry_inner,
+        Some(sidecar.clone()),
+        Some(GpuLeaseManager::shared(
+            std::time::Duration::from_secs(120),
+            std::time::Duration::from_secs(15),
+        )),
+    );
 
     // ── Image generation orchestrator ─────────────────────────────────────────
     let image_cfg = config.image_generation.clone();
@@ -2699,6 +4939,15 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     let gw_client_ref = gw::new_client_ref();
     tracing::info!("[GW] created lazy GwClientRef — registering Google Workspace tools now");
     gw::register(&tool_registry_inner, gw_client_ref.clone(), sidecar.clone());
+
+    let fleet_control_runtime = match DesktopFleetControlRuntime::initialize(paths.data_dir.as_path()).await {
+        Ok(runtime) => Arc::new(runtime),
+        Err(error) => {
+            tracing::warn!(error = %error, "desktop fleet-control runtime initialization failed; using empty runtime");
+            Arc::new(DesktopFleetControlRuntime::empty())
+        }
+    };
+    register_fleet_runtime_tools(&tool_registry_inner, fleet_control_runtime.clone());
 
     // Wrap registry in Arc immediately — thread-safe for background MCP registration
     let tool_registry = Arc::new(tool_registry_inner);
@@ -2969,6 +5218,23 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         },
         colab_server_name.clone(),
     )));
+    let ironclad_reset = Arc::new(RwLock::new(IroncladResetSnapshot::default()));
+    let ironclad_forensic_log = Arc::new(RwLock::new(Vec::<IroncladForensicRecord>::new()));
+    let (_, ironclad_system_config) = load_ironclad_system_config_with_path();
+    let fleet_runtime_root = fleet_runtime_root_from_data_dir(paths.data_dir.as_path());
+    std::fs::create_dir_all(&fleet_runtime_root)?;
+    let fleet_qos = Arc::new(AdaptiveQosScheduler::new(&ironclad_system_config));
+    let target_pool = Arc::new(TargetPool::new(
+        &ironclad_system_config,
+        SelectionWeights::default(),
+        fleet_qos,
+    ));
+    target_pool.register_default_probes().await;
+    let fleet_runtime = Arc::new(FleetRuntimeState::new(
+        target_pool,
+        ironclad_system_config,
+        fleet_runtime_root,
+    ));
 
     if colab_enabled {
         let colab_server_configured = {
@@ -2988,6 +5254,8 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
             ));
         }
     }
+
+    let fleet_control_runtime_for_bridge = fleet_control_runtime.clone();
 
     let state = AppState {
         config,
@@ -3016,6 +5284,10 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         mcp_manager: mcp_manager.clone(),
         gw_client_ref: gw_client_ref.clone(),
         colab_runtime: colab_runtime.clone(),
+        ironclad_reset: ironclad_reset.clone(),
+        ironclad_forensic_log: ironclad_forensic_log.clone(),
+        fleet_runtime: fleet_runtime.clone(),
+        fleet_control_runtime,
         orchestrator: orch_cell.clone(),
         orchestrator_active_turns: orchestrator_active_turns.clone(),
         orchestrator_last_activity_at: orchestrator_last_activity_at.clone(),
@@ -3027,6 +5299,123 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     }
 
     tracing::info!("[INIT] AppState set — frontend is now unblocked");
+
+    // Restore previously enrolled targets into live TargetPool runtime.
+    let handle_restore = handle.clone();
+    let orch_for_restore = orch_cell.clone();
+    let reset_for_restore = ironclad_reset.clone();
+    let forensic_for_restore = ironclad_forensic_log.clone();
+    let fleet_runtime_restore = fleet_runtime.clone();
+    let registry_path_restore = paths
+        .data_dir
+        .join(TARGET_ENROLLMENT_REGISTRY_DIR)
+        .join(TARGET_ENROLLMENT_REGISTRY_FILE);
+    tokio::spawn(async move {
+        let registry = match load_fleet_enrollment_registry(registry_path_restore.as_path()) {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::warn!(
+                    code = ?error.code,
+                    message = %error.message,
+                    detail = ?error.detail,
+                    "fleet runtime: failed to load enrollment registry during restore"
+                );
+                return;
+            }
+        };
+
+        if registry.targets.is_empty() {
+            return;
+        }
+
+        let mut admitted = 0usize;
+        let mut skipped = 0usize;
+        let mut failures: Vec<String> = Vec::new();
+
+        for target in &registry.targets {
+            match admit_enrolled_target_to_fleet_runtime(&fleet_runtime_restore, target).await {
+                Ok(true) => admitted += 1,
+                Ok(false) => skipped += 1,
+                Err(error) => {
+                    failures.push(format!("{} ({})", target.target_id, error));
+                }
+            }
+        }
+
+        if let Some(orch) = orch_for_restore.read().await.clone() {
+            if let Err(error) = configure_orchestrator_fleet_bridge(&orch, &fleet_runtime_restore) {
+                tracing::warn!(
+                    error = %error,
+                    "fleet runtime: failed to wire orchestrator bridge after restore"
+                );
+            } else {
+                pulse_target_pool_telemetry(&fleet_runtime_restore.target_pool).await;
+            }
+        }
+
+        if admitted > 0 || skipped > 0 {
+            append_ironclad_forensic_record(
+                &forensic_for_restore,
+                &handle_restore,
+                "fleet_runtime",
+                "info",
+                format!(
+                    "Fleet runtime restore finished: admitted={} skipped={}",
+                    admitted, skipped
+                ),
+                format!(
+                    "registry_path={}; total_targets={}",
+                    registry_path_restore.to_string_lossy(),
+                    registry.targets.len()
+                ),
+                "desktop.fleet",
+            )
+            .await;
+        }
+
+        if !failures.is_empty() {
+            append_ironclad_forensic_record(
+                &forensic_for_restore,
+                &handle_restore,
+                "fleet_runtime",
+                "warn",
+                "Some enrolled targets failed runtime admission during restore".to_string(),
+                failures.join(" | "),
+                "desktop.fleet",
+            )
+            .await;
+        }
+
+        let status_payload = collect_ironclad_status_from_parts(
+            &orch_for_restore,
+            &reset_for_restore,
+            &forensic_for_restore,
+        )
+        .await;
+        let _ = handle_restore.emit("ironclad:status", status_payload);
+    });
+
+    // Emit periodic Ironclad status snapshots for non-blocking UI updates.
+    let handle_ironclad_status = handle.clone();
+    let orch_for_status = orch_cell.clone();
+    let reset_for_status = ironclad_reset.clone();
+    let forensic_for_status = ironclad_forensic_log.clone();
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(
+            IRONCLAD_STATUS_EMIT_INTERVAL_SECS,
+        ));
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            ticker.tick().await;
+            let payload = collect_ironclad_status_from_parts(
+                &orch_for_status,
+                &reset_for_status,
+                &forensic_for_status,
+            )
+            .await;
+            let _ = handle_ironclad_status.emit("ironclad:status", payload);
+        }
+    });
 
     // ── Background orchestrator startup (non-blocking) ────────────────────────
     // Spawning llama-server and waiting for /health can take 30-180 seconds.
@@ -3040,6 +5429,7 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         let last_activity_bg = orchestrator_last_activity_at.clone();
         let voice_active_bg = voice_active.clone();
         let handle_bg = handle.clone();
+        let fleet_runtime_bg = fleet_runtime.clone();
 
         tokio::spawn(async move {
             tracing::info!("orchestrator: starting in background");
@@ -3053,6 +5443,16 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
             .await
             {
                 Ok(orch) => {
+                    if let Err(error) = configure_orchestrator_fleet_bridge(&orch, &fleet_runtime_bg)
+                    {
+                        tracing::warn!(
+                            error = %error,
+                            "orchestrator: failed to wire fleet runtime bridge"
+                        );
+                    } else {
+                        pulse_target_pool_telemetry(&fleet_runtime_bg.target_pool).await;
+                    }
+
                     // orch is Arc<Orchestrator> from Orchestrator::start()
                     // Wire server manager into model router (uses OnceLock — idempotent).
                     model_router_bg.attach_server_manager(orch.server_manager.clone());
@@ -3103,6 +5503,9 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
                                 if orch_idle.server_manager.is_swapping() {
                                     continue;
                                 }
+                                if orch_idle.server_manager.current_params().0 == 0 {
+                                    continue;
+                                }
                                 let idle_for = {
                                     let lock = last_activity.lock().await;
                                     lock.elapsed()
@@ -3117,7 +5520,10 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
                                     Ok(true) => {
                                         let _ = handle_idle.emit(
                                             "orchestrator:idle_released",
-                                            serde_json::json!({ "idle_for_secs": idle_for.as_secs() }),
+                                            serde_json::json!({
+                                                "idle_for_secs": idle_for.as_secs(),
+                                                "mode": "unloaded"
+                                            }),
                                         );
                                         touch_orchestrator_activity(&last_activity).await;
                                     }
@@ -3225,6 +5631,7 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         local_api_host,
         local_api_port,
         local_api_responder,
+        fleet_control_runtime_for_bridge,
         health.clone(),
     );
 
@@ -3554,6 +5961,7 @@ async fn send_message_with_profile(
 
     // Use the persistent session ID from AppState
     let session_id = state.current_session_id.read().await.clone();
+    let memory_writer: Arc<dyn MemoryManager> = memory_store.clone();
 
     emit_agent_stage(
         &app,
@@ -3589,16 +5997,14 @@ async fn send_message_with_profile(
     });
 
     // Persist user turn
-    let _ = memory_store.store_turn(&ConversationTurn {
-        id: None,
-        session_id: session_id.clone(),
-        role: "user".into(),
-        content: message.clone(),
-        tool_name: None,
-        tool_result: None,
-        tokens_used: None,
-        timestamp: Utc::now(),
-    });
+    let _ = memory_writer.store_turn(&memory_turn_write(
+        session_id.clone(),
+        message.clone(),
+        String::new(),
+        None,
+        None,
+        None,
+    ));
 
     emit_agent_stage(
         &app,
@@ -3622,7 +6028,7 @@ async fn send_message_with_profile(
             } else {
                 message.clone()
             };
-            let _ = memory_store.set_preference(&title_key, &title);
+            let _ = memory_writer.set_preference(&preference_record(title_key, title));
         }
     }
 
@@ -3650,11 +6056,16 @@ async fn send_message_with_profile(
     let app_handle = app.clone();
     let session_id_clone = session_id.clone();
     let memory_store_clone = memory_store.clone();
+    let memory_writer_clone = memory_writer.clone();
     let embeddings_clone = state.embeddings.clone();
     let vectors_clone = state.vectors.clone();
     let user_message_clone = message.clone();
     let orchestrator_for_recovery = state.orchestrator.read().await.clone();
+    let ironclad_orchestrator_cell_for_stream = state.orchestrator.clone();
+    let ironclad_reset_for_stream = state.ironclad_reset.clone();
+    let ironclad_forensic_for_stream = state.ironclad_forensic_log.clone();
     let retry_agent = agent_loop.clone();
+    let stale_guard_agent = agent_loop.clone();
     let retry_session_id = session_id.clone();
     let retry_execution_profile = execution_profile.clone();
     let retry_messages_seed = messages.clone();
@@ -3684,6 +6095,7 @@ async fn send_message_with_profile(
         let mut last_successful_tool: Option<(String, serde_json::Value)> = None;
         let mut recovery_attempted = false;
         let mut active_rx = event_rx;
+        let mut active_turn_id: Option<String> = None;
         let mut pending_tool_params: std::collections::HashMap<String, serde_json::Value> =
             std::collections::HashMap::new();
 
@@ -3723,7 +6135,26 @@ async fn send_message_with_profile(
                 }
             };
 
+            if let StreamEvent::TurnAccepted { session_id, turn_id } = &event {
+                if session_id == &session_id_clone {
+                    active_turn_id = Some(turn_id.clone());
+                }
+                continue;
+            }
+
+            if let Some(turn_id) = active_turn_id.as_deref() {
+                if !stale_guard_agent.is_turn_active(&session_id_clone, turn_id) {
+                    tracing::debug!(
+                        session_id = %session_id_clone,
+                        turn_id = %turn_id,
+                        "Dropping stale stream event in send_message consumer"
+                    );
+                    continue;
+                }
+            }
+
             match event {
+                StreamEvent::TurnAccepted { .. } => {}
                 StreamEvent::Token(text) => {
                     if !saw_first_token {
                         saw_first_token = true;
@@ -3813,11 +6244,10 @@ async fn send_message_with_profile(
                         "result": result,
                         "metadata": metadata,
                     });
-                    let _ = memory_store_clone.store_turn(&ConversationTurn {
-                        id: None,
-                        session_id: session_id_clone.clone(),
-                        role: "tool".into(),
-                        content: summarize_tool_turn_for_history(
+                    let _ = memory_writer_clone.store_turn(&memory_turn_write(
+                        session_id_clone.clone(),
+                        String::new(),
+                        summarize_tool_turn_for_history(
                             &name,
                             success,
                             &result,
@@ -3825,11 +6255,10 @@ async fn send_message_with_profile(
                                 .get("metadata")
                                 .unwrap_or(&serde_json::Value::Null),
                         ),
-                        tool_name: Some(name),
-                        tool_result: Some(persisted_payload.to_string()),
-                        tokens_used: None,
-                        timestamp: Utc::now(),
-                    });
+                        Some(name),
+                        Some(persisted_payload.to_string()),
+                        None,
+                    ));
                 }
                 StreamEvent::ToolProgress {
                     call_id,
@@ -3964,6 +6393,29 @@ async fn send_message_with_profile(
                 StreamEvent::Error(err) => {
                     tracing::error!("Agent error: {}", err);
                     let is_transport_failure = is_likely_local_llm_transport_error(&err);
+
+                    append_ironclad_forensic_record(
+                        &ironclad_forensic_for_stream,
+                        &app_handle,
+                        "agent_stream_error",
+                        if is_transport_failure { "warning" } else { "error" },
+                        if is_transport_failure {
+                            "Agent stream transport failure detected"
+                        } else {
+                            "Agent stream error detected"
+                        },
+                        err.clone(),
+                        "agent.stream",
+                    )
+                    .await;
+
+                    let status_payload = collect_ironclad_status_from_parts(
+                        &ironclad_orchestrator_cell_for_stream,
+                        &ironclad_reset_for_stream,
+                        &ironclad_forensic_for_stream,
+                    )
+                    .await;
+                    let _ = app_handle.emit("ironclad:status", status_payload);
 
                     if is_transport_failure
                         && full_response.is_empty()
@@ -4150,16 +6602,14 @@ async fn send_message_with_profile(
 
         // Persist assistant response (skip transient runtime errors so they don't bloat future context)
         if !full_response.is_empty() && !is_transient_llm_error_text(&full_response) {
-            let _ = memory_store_clone.store_turn(&ConversationTurn {
-                id: None,
-                session_id: session_id_clone,
-                role: "assistant".into(),
-                content: full_response.clone(),
-                tool_name: None,
-                tool_result: None,
-                tokens_used: None,
-                timestamp: Utc::now(),
-            });
+            let _ = memory_writer_clone.store_turn(&memory_turn_write(
+                session_id_clone,
+                String::new(),
+                full_response.clone(),
+                None,
+                None,
+                None,
+            ));
 
             emit_agent_stage(
                 &app_handle,
@@ -4172,7 +6622,7 @@ async fn send_message_with_profile(
 
             // Automatic fact extraction from user message + assistant response
             let fact_mgr = kria_core::memory::facts::FactManager::new(
-                &memory_store_clone,
+                memory_store_clone.as_ref(),
                 &vectors_clone,
                 &embeddings_clone,
             );
@@ -4336,17 +6786,23 @@ pub async fn create_session(
     let resolved_title = provided_title
         .clone()
         .unwrap_or_else(|| "New chat".to_string());
-    let _ = state
-        .memory_store
-        .set_preference(&format!("session_title:{}", new_id), &resolved_title);
-    let _ = state.memory_store.set_preference(
-        &format!("session_title_manual:{}", new_id),
-        if provided_title.is_some() { "1" } else { "0" },
-    );
-    let _ = state.memory_store.set_preference(
-        &format!("session_created_at:{}", new_id),
-        &Utc::now().to_rfc3339(),
-    );
+    let memory_writer: Arc<dyn MemoryManager> = state.memory_store.clone();
+    let _ = memory_writer.set_preference(&preference_record(
+        format!("session_title:{}", new_id),
+        resolved_title,
+    ));
+    let _ = memory_writer.set_preference(&preference_record(
+        format!("session_title_manual:{}", new_id),
+        if provided_title.is_some() {
+            "1".to_string()
+        } else {
+            "0".to_string()
+        },
+    ));
+    let _ = memory_writer.set_preference(&preference_record(
+        format!("session_created_at:{}", new_id),
+        Utc::now().to_rfc3339(),
+    ));
 
     tracing::info!(session_id = %new_id, "new session created");
     Ok(serde_json::json!({
@@ -4467,6 +6923,7 @@ pub async fn delete_session(
         .memory_store
         .delete_session(&session_id)
         .map_err(|e| e.to_string())?;
+    let memory_writer: Arc<dyn MemoryManager> = state.memory_store.clone();
 
     let mut replacement_session_id: Option<String> = None;
 
@@ -4475,16 +6932,18 @@ pub async fn delete_session(
         let new_id = uuid::Uuid::new_v4().to_string();
         *state.current_session_id.write().await = new_id.clone();
 
-        let _ = state
-            .memory_store
-            .set_preference(&format!("session_title:{}", new_id), "New chat");
-        let _ = state
-            .memory_store
-            .set_preference(&format!("session_title_manual:{}", new_id), "0");
-        let _ = state.memory_store.set_preference(
-            &format!("session_created_at:{}", new_id),
-            &Utc::now().to_rfc3339(),
-        );
+        let _ = memory_writer.set_preference(&preference_record(
+            format!("session_title:{}", new_id),
+            "New chat",
+        ));
+        let _ = memory_writer.set_preference(&preference_record(
+            format!("session_title_manual:{}", new_id),
+            "0",
+        ));
+        let _ = memory_writer.set_preference(&preference_record(
+            format!("session_created_at:{}", new_id),
+            Utc::now().to_rfc3339(),
+        ));
 
         replacement_session_id = Some(new_id);
     }
@@ -4513,13 +6972,15 @@ pub async fn rename_session(
         .ok_or_else(|| "Session title cannot be empty".to_string())?;
 
     let key = format!("session_title:{}", session_id);
-    state
-        .memory_store
-        .set_preference(&key, &resolved_title)
+    let memory_writer: Arc<dyn MemoryManager> = state.memory_store.clone();
+    memory_writer
+        .set_preference(&preference_record(key, resolved_title))
         .map_err(|e| e.to_string())?;
-    state
-        .memory_store
-        .set_preference(&format!("session_title_manual:{}", session_id), "1")
+    memory_writer
+        .set_preference(&preference_record(
+            format!("session_title_manual:{}", session_id),
+            "1",
+        ))
         .map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -4569,13 +7030,15 @@ pub async fn auto_rename_session(
         }));
     }
 
-    state
-        .memory_store
-        .set_preference(&format!("session_title:{}", session_id), &resolved_title)
+    let memory_writer: Arc<dyn MemoryManager> = state.memory_store.clone();
+    memory_writer
+        .set_preference(&preference_record(
+            format!("session_title:{}", session_id),
+            resolved_title.clone(),
+        ))
         .map_err(|e| e.to_string())?;
-    state
-        .memory_store
-        .set_preference(&manual_key, "0")
+    memory_writer
+        .set_preference(&preference_record(manual_key, "0"))
         .map_err(|e| e.to_string())?;
 
     Ok(serde_json::json!({
@@ -5028,9 +7491,8 @@ pub async fn save_uploaded_image(
     // Store in SQLite chat_media table
     if let Some(s) = state.get() {
         let path_str = path.to_string_lossy().to_string();
-        let _ = s
-            .memory_store
-            .store_chat_media(&kria_core::memory::store::ChatMediaRecord {
+        let memory_writer: Arc<dyn MemoryManager> = s.memory_store.clone();
+        let _ = memory_writer.store_media(&ChatMediaRecord {
                 session_id: session_id.clone(),
                 media_type: "uploaded".into(),
                 file_path: path_str.clone(),
@@ -5225,6 +7687,7 @@ pub async fn start_voice(state: State<'_, AppStateCell>, app: AppHandle) -> Resu
     let app_handle = app.clone();
     let voice_pipeline = voice_pipeline.clone();
     let memory_store = state.memory_store.clone();
+    let memory_writer: Arc<dyn MemoryManager> = memory_store.clone();
     let agent_loop = state.agent_loop.clone();
     let tool_registry = state.tool_registry.clone();
     let event_bus = state.event_bus.clone();
@@ -5374,16 +7837,14 @@ pub async fn start_voice(state: State<'_, AppStateCell>, app: AppHandle) -> Resu
                         images: None,
                     });
 
-                    let _ = memory_store.store_turn(&ConversationTurn {
-                        id: None,
-                        session_id: session_id.clone(),
-                        role: "user".into(),
-                        content: format!("🎤 {}", text),
-                        tool_name: None,
-                        tool_result: None,
-                        tokens_used: None,
-                        timestamp: Utc::now(),
-                    });
+                    let _ = memory_writer.store_turn(&memory_turn_write(
+                        session_id.clone(),
+                        format!("🎤 {}", text),
+                        String::new(),
+                        None,
+                        None,
+                        None,
+                    ));
 
                     event_bus.publish(kria_core::infra::event_bus::KriaEvent::MessageReceived {
                         session_id: session_id.clone(),
@@ -5399,6 +7860,7 @@ pub async fn start_voice(state: State<'_, AppStateCell>, app: AppHandle) -> Resu
                         tokio::sync::mpsc::unbounded_channel::<StreamEvent>();
 
                     let agent = agent_loop.clone();
+                    let stale_guard_agent = agent_loop.clone();
                     let sid = session_id.clone();
                     tokio::spawn(async move {
                         agent.run(&sid, &mut messages, agent_tx).await;
@@ -5412,14 +7874,35 @@ pub async fn start_voice(state: State<'_, AppStateCell>, app: AppHandle) -> Resu
                     > = std::collections::HashMap::new();
                     let app2 = app_handle.clone();
                     let ms2 = memory_store.clone();
+                    let mw2 = memory_writer.clone();
                     let sid2 = session_id.clone();
                     let emb2 = embeddings.clone();
                     let vec2 = vectors.clone();
                     let text2 = text.clone();
                     let vp = voice_pipeline.clone();
+                    let mut active_turn_id: Option<String> = None;
 
                     while let Some(ev) = agent_rx.recv().await {
+                        if let StreamEvent::TurnAccepted { session_id, turn_id } = &ev {
+                            if session_id == &sid2 {
+                                active_turn_id = Some(turn_id.clone());
+                            }
+                            continue;
+                        }
+
+                        if let Some(turn_id) = active_turn_id.as_deref() {
+                            if !stale_guard_agent.is_turn_active(&sid2, turn_id) {
+                                tracing::debug!(
+                                    session_id = %sid2,
+                                    turn_id = %turn_id,
+                                    "Dropping stale stream event in voice consumer"
+                                );
+                                continue;
+                            }
+                        }
+
                         match ev {
+                            StreamEvent::TurnAccepted { .. } => {}
                             StreamEvent::Token(t) => {
                                 full_response.push_str(&t);
                                 let _ = app2.emit("agent:token", serde_json::json!({"text": t}));
@@ -5455,11 +7938,10 @@ pub async fn start_voice(state: State<'_, AppStateCell>, app: AppHandle) -> Resu
                                     "metadata": metadata,
                                 });
 
-                                let _ = ms2.store_turn(&ConversationTurn {
-                                    id: None,
-                                    session_id: sid2.clone(),
-                                    role: "tool".into(),
-                                    content: summarize_tool_turn_for_history(
+                                let _ = mw2.store_turn(&memory_turn_write(
+                                    sid2.clone(),
+                                    String::new(),
+                                    summarize_tool_turn_for_history(
                                         persisted_payload
                                             .get("name")
                                             .and_then(|v| v.as_str())
@@ -5472,14 +7954,13 @@ pub async fn start_voice(state: State<'_, AppStateCell>, app: AppHandle) -> Resu
                                             .get("metadata")
                                             .unwrap_or(&serde_json::Value::Null),
                                     ),
-                                    tool_name: persisted_payload
+                                    persisted_payload
                                         .get("name")
                                         .and_then(|v| v.as_str())
                                         .map(|s| s.to_string()),
-                                    tool_result: Some(persisted_payload.to_string()),
-                                    tokens_used: None,
-                                    timestamp: Utc::now(),
-                                });
+                                    Some(persisted_payload.to_string()),
+                                    None,
+                                ));
 
                                 // Persist image metadata in chat_media table when generate_image succeeds
                                 if name == "generate_image" && success {
@@ -5495,8 +7976,8 @@ pub async fn start_voice(state: State<'_, AppStateCell>, app: AppHandle) -> Resu
                                             if file_path.is_empty() {
                                                 continue;
                                             }
-                                            let _ = ms2.store_chat_media(
-                                                &kria_core::memory::store::ChatMediaRecord {
+                                            let _ = mw2.store_media(
+                                                &ChatMediaRecord {
                                                     session_id: sid2.clone(),
                                                     media_type: "generated".into(),
                                                     file_path,
@@ -5625,18 +8106,19 @@ pub async fn start_voice(state: State<'_, AppStateCell>, app: AppHandle) -> Resu
 
                     // Persist assistant response
                     if !full_response.is_empty() && !is_transient_llm_error_text(&full_response) {
-                        let _ = ms2.store_turn(&ConversationTurn {
-                            id: None,
-                            session_id: sid2.clone(),
-                            role: "assistant".into(),
-                            content: full_response.clone(),
-                            tool_name: None,
-                            tool_result: None,
-                            tokens_used: None,
-                            timestamp: Utc::now(),
-                        });
-                        let fact_mgr =
-                            kria_core::memory::facts::FactManager::new(&ms2, &vec2, &emb2);
+                        let _ = mw2.store_turn(&memory_turn_write(
+                            sid2.clone(),
+                            String::new(),
+                            full_response.clone(),
+                            None,
+                            None,
+                            None,
+                        ));
+                        let fact_mgr = kria_core::memory::facts::FactManager::new(
+                            ms2.as_ref(),
+                            &vec2,
+                            &emb2,
+                        );
                         let _ = fact_mgr.extract_from_turn(&text2, &full_response);
 
                         // Speak the response via TTS
@@ -6124,6 +8606,7 @@ pub async fn send_image_message(
     drop(config);
 
     let session_id = state.current_session_id.read().await.clone();
+    let memory_writer: Arc<dyn MemoryManager> = memory_store.clone();
 
     emit_agent_stage(
         &app,
@@ -6171,16 +8654,14 @@ pub async fn send_image_message(
     });
 
     // Persist user turn (content only, images stored in attachments/)
-    let _ = memory_store.store_turn(&ConversationTurn {
-        id: None,
-        session_id: session_id.clone(),
-        role: "user".into(),
-        content: format!("{}\n[image: {}]", user_text, filename),
-        tool_name: None,
-        tool_result: None,
-        tokens_used: None,
-        timestamp: Utc::now(),
-    });
+    let _ = memory_writer.store_turn(&memory_turn_write(
+        session_id.clone(),
+        format!("{}\n[image: {}]", user_text, filename),
+        String::new(),
+        None,
+        None,
+        None,
+    ));
 
     emit_agent_stage(
         &app,
@@ -6204,7 +8685,8 @@ pub async fn send_image_message(
             } else {
                 user_text.clone()
             };
-            let _ = memory_store.set_preference(&title_key, &format!("📷 {}", title));
+            let _ = memory_writer
+                .set_preference(&preference_record(title_key, format!("📷 {}", title)));
         }
     }
 
@@ -6229,10 +8711,12 @@ pub async fn send_image_message(
     let app_handle = app.clone();
     let session_id_clone = session_id.clone();
     let memory_store_clone = memory_store.clone();
+    let memory_writer_clone = memory_writer.clone();
     let embeddings_clone = state.embeddings.clone();
     let vectors_clone = state.vectors.clone();
     let user_message_clone = user_text.clone();
     let preanalysis_summary_fallback = preanalysis_summary.clone();
+    let stale_guard_agent = agent_loop.clone();
 
     let agent = agent_loop.clone();
     let sid = session_id.clone();
@@ -6251,6 +8735,7 @@ pub async fn send_image_message(
     tauri::async_runtime::spawn(async move {
         let mut full_response = String::new();
         let mut saw_first_token = false;
+        let mut active_turn_id: Option<String> = None;
         let mut pending_tool_params: std::collections::HashMap<String, serde_json::Value> =
             std::collections::HashMap::new();
 
@@ -6290,7 +8775,26 @@ pub async fn send_image_message(
                 }
             };
 
+            if let StreamEvent::TurnAccepted { session_id, turn_id } = &event {
+                if session_id == &session_id_clone {
+                    active_turn_id = Some(turn_id.clone());
+                }
+                continue;
+            }
+
+            if let Some(turn_id) = active_turn_id.as_deref() {
+                if !stale_guard_agent.is_turn_active(&session_id_clone, turn_id) {
+                    tracing::debug!(
+                        session_id = %session_id_clone,
+                        turn_id = %turn_id,
+                        "Dropping stale stream event in image consumer"
+                    );
+                    continue;
+                }
+            }
+
             match event {
+                StreamEvent::TurnAccepted { .. } => {}
                 StreamEvent::Token(text) => {
                     if !saw_first_token {
                         saw_first_token = true;
@@ -6352,11 +8856,10 @@ pub async fn send_image_message(
                         .get("name")
                         .and_then(|v| v.as_str())
                         .unwrap_or("tool");
-                    let _ = memory_store_clone.store_turn(&ConversationTurn {
-                        id: None,
-                        session_id: session_id_clone.clone(),
-                        role: "tool".into(),
-                        content: summarize_tool_turn_for_history(
+                    let _ = memory_writer_clone.store_turn(&memory_turn_write(
+                        session_id_clone.clone(),
+                        String::new(),
+                        summarize_tool_turn_for_history(
                             tool_name,
                             success,
                             persisted_payload
@@ -6366,11 +8869,10 @@ pub async fn send_image_message(
                                 .get("metadata")
                                 .unwrap_or(&serde_json::Value::Null),
                         ),
-                        tool_name: Some(tool_name.to_string()),
-                        tool_result: Some(persisted_payload.to_string()),
-                        tokens_used: None,
-                        timestamp: Utc::now(),
-                    });
+                        Some(tool_name.to_string()),
+                        Some(persisted_payload.to_string()),
+                        None,
+                    ));
                 }
                 StreamEvent::ToolProgress {
                     call_id,
@@ -6546,16 +9048,14 @@ pub async fn send_image_message(
         }
 
         if !full_response.is_empty() && !is_transient_llm_error_text(&full_response) {
-            let _ = memory_store_clone.store_turn(&ConversationTurn {
-                id: None,
-                session_id: session_id_clone,
-                role: "assistant".into(),
-                content: full_response.clone(),
-                tool_name: None,
-                tool_result: None,
-                tokens_used: None,
-                timestamp: Utc::now(),
-            });
+            let _ = memory_writer_clone.store_turn(&memory_turn_write(
+                session_id_clone,
+                String::new(),
+                full_response.clone(),
+                None,
+                None,
+                None,
+            ));
 
             emit_agent_stage(
                 &app_handle,
@@ -6567,7 +9067,7 @@ pub async fn send_image_message(
             );
 
             let fact_mgr = kria_core::memory::facts::FactManager::new(
-                &memory_store_clone,
+                memory_store_clone.as_ref(),
                 &vectors_clone,
                 &embeddings_clone,
             );
@@ -8125,6 +10625,268 @@ pub async fn disconnect_google_workspace(
     Ok(())
 }
 
+fn classify_ironclad_qos_light(
+    high_recovery_wait_p95_ms: u64,
+    high_recovery_slo_ms: u64,
+    qos_pressure_active: bool,
+    target_health_degraded: bool,
+    reset_in_flight: bool,
+) -> &'static str {
+    if reset_in_flight {
+        return "yellow";
+    }
+
+    if target_health_degraded {
+        return "red";
+    }
+
+    if qos_pressure_active {
+        return "yellow";
+    }
+
+    if high_recovery_slo_ms == 0 {
+        return "green";
+    }
+
+    if high_recovery_wait_p95_ms > high_recovery_slo_ms {
+        "yellow"
+    } else {
+        "green"
+    }
+}
+
+async fn collect_ironclad_status_from_parts(
+    orchestrator_cell: &Arc<tokio::sync::RwLock<Option<Arc<Orchestrator>>>>,
+    reset_state: &Arc<RwLock<IroncladResetSnapshot>>,
+    forensic_log: &Arc<RwLock<Vec<IroncladForensicRecord>>>,
+) -> serde_json::Value {
+    let reset_snapshot = reset_state.read().await.clone();
+    let forensic_snapshot = forensic_log.read().await;
+    let forensic_count = forensic_snapshot.len();
+    let latest_forensic = forensic_snapshot.last().cloned();
+    drop(forensic_snapshot);
+
+    let (enrolled_targets, enrollment_registry_path) = load_enrolled_target_status_snapshots();
+    let enrolled_target_count = enrolled_targets.len();
+
+    let orchestrator = orchestrator_cell.read().await.clone();
+    if let Some(orchestrator) = orchestrator {
+        let snapshot = orchestrator.remote_infra_observability_snapshot();
+        let pool_packet = snapshot.latest_pool_packet.clone();
+        let qos_packet = snapshot.latest_qos_adaptation.clone();
+
+        let total_targets = pool_packet
+            .as_ref()
+            .map(|p| p.total_targets)
+            .unwrap_or(enrolled_target_count);
+        let ready_targets = pool_packet.as_ref().map(|p| p.ready_targets).unwrap_or(0);
+        let leased_targets = pool_packet.as_ref().map(|p| p.leased_targets).unwrap_or(0);
+        let tainted_targets = pool_packet.as_ref().map(|p| p.tainted_targets).unwrap_or(0);
+        let quarantined_targets = pool_packet
+            .as_ref()
+            .map(|p| p.quarantined_targets)
+            .unwrap_or(0);
+        let active_leases = pool_packet.as_ref().map(|p| p.active_leases).unwrap_or(0);
+
+        let high_recovery_wait_p95_ms = qos_packet
+            .as_ref()
+            .map(|p| p.high_recovery_wait_p95_ms)
+            .unwrap_or(0);
+        let high_recovery_slo_ms = qos_packet.as_ref().map(|p| p.high_recovery_slo_ms).unwrap_or(0);
+
+        let qos_traffic_light = classify_ironclad_qos_light(
+            high_recovery_wait_p95_ms,
+            high_recovery_slo_ms,
+            snapshot.qos_pressure_active,
+            snapshot.target_health_degraded || tainted_targets > 0 || quarantined_targets > 0,
+            reset_snapshot.in_flight,
+        );
+
+        serde_json::json!({
+            "enabled": true,
+            "fleet": {
+                "total_targets": total_targets,
+                "ready_targets": ready_targets,
+                "leased_targets": leased_targets,
+                "tainted_targets": tainted_targets,
+                "quarantined_targets": quarantined_targets,
+                "active_leases": active_leases,
+                "health_degraded": snapshot.target_health_degraded || tainted_targets > 0 || quarantined_targets > 0,
+                "source_unwired": pool_packet.is_none(),
+                "pool_packet": pool_packet,
+                "enrolled_target_count": enrolled_target_count,
+                "enrolled_targets": enrolled_targets,
+                "enrollment_registry_path": enrollment_registry_path.to_string_lossy().to_string(),
+            },
+            "qos": {
+                "traffic_light": qos_traffic_light,
+                "pressure_active": snapshot.qos_pressure_active,
+                "high_recovery_wait_p95_ms": high_recovery_wait_p95_ms,
+                "high_recovery_slo_ms": high_recovery_slo_ms,
+                "decision": qos_packet.as_ref().map(|p| format!("{:?}", p.decision)),
+                "reason": qos_packet.as_ref().map(|p| p.reason.clone()),
+                "adaptation_packet": qos_packet,
+            },
+            "reset": reset_snapshot,
+            "forensics": {
+                "count": forensic_count,
+                "latest": latest_forensic,
+            },
+        })
+    } else {
+        serde_json::json!({
+            "enabled": false,
+            "fleet": {
+                "total_targets": enrolled_target_count,
+                "ready_targets": 0,
+                "leased_targets": 0,
+                "tainted_targets": 0,
+                "quarantined_targets": 0,
+                "active_leases": 0,
+                "health_degraded": false,
+                "source_unwired": true,
+                "pool_packet": serde_json::Value::Null,
+                "enrolled_target_count": enrolled_target_count,
+                "enrolled_targets": enrolled_targets,
+                "enrollment_registry_path": enrollment_registry_path.to_string_lossy().to_string(),
+            },
+            "qos": {
+                "traffic_light": "gray",
+                "pressure_active": false,
+                "high_recovery_wait_p95_ms": 0,
+                "high_recovery_slo_ms": 0,
+                "decision": serde_json::Value::Null,
+                "reason": serde_json::Value::Null,
+                "adaptation_packet": serde_json::Value::Null,
+            },
+            "reset": reset_snapshot,
+            "forensics": {
+                "count": forensic_count,
+                "latest": latest_forensic,
+            },
+        })
+    }
+}
+
+async fn enqueue_ironclad_reset(
+    orchestrator_cell: Arc<tokio::sync::RwLock<Option<Arc<Orchestrator>>>>,
+    reset_state: Arc<RwLock<IroncladResetSnapshot>>,
+    forensic_log: Arc<RwLock<Vec<IroncladForensicRecord>>>,
+    app_handle: AppHandle,
+    mode: &'static str,
+    reason: String,
+    force_shutdown_before_restart: bool,
+) -> Result<IroncladResetSnapshot, String> {
+    let event_id = uuid::Uuid::new_v4().to_string();
+    let queued_snapshot = {
+        let mut guard = reset_state.write().await;
+        if guard.in_flight {
+            return Err("A reset is already in progress; wait for completion first".to_string());
+        }
+
+        *guard = IroncladResetSnapshot {
+            event_id: event_id.clone(),
+            phase: "requested".to_string(),
+            reason: reason.clone(),
+            detail: format!("{mode} reset queued"),
+            started_unix_ms: unix_now_ms(),
+            completed_unix_ms: None,
+            in_flight: true,
+        };
+
+        guard.clone()
+    };
+
+    let _ = app_handle.emit("ironclad:reset", serde_json::json!(queued_snapshot.clone()));
+
+    let orchestrator_cell_bg = orchestrator_cell.clone();
+    let reset_state_bg = reset_state.clone();
+    let forensic_log_bg = forensic_log.clone();
+    let app_bg = app_handle.clone();
+    let reason_bg = reason.clone();
+    let mode_bg = mode.to_string();
+    let event_id_bg = event_id.clone();
+
+    tokio::spawn(async move {
+        {
+            let mut guard = reset_state_bg.write().await;
+            guard.phase = "in_progress".to_string();
+            guard.detail = format!("{mode_bg} reset in progress");
+        }
+
+        if let Ok(in_progress) = serde_json::to_value(reset_state_bg.read().await.clone()) {
+            let _ = app_bg.emit("ironclad:reset", in_progress);
+        }
+
+        let result = {
+            let orchestrator = orchestrator_cell_bg.read().await.clone();
+            match orchestrator {
+                Some(orch) => {
+                    if force_shutdown_before_restart {
+                        orch.shutdown().await;
+                    }
+                    orch.restart(&reason_bg).await.map_err(|e| e.to_string())
+                }
+                None => Err("Local orchestrator is not available in this runtime".to_string()),
+            }
+        };
+
+        let (final_phase, final_detail, forensic_severity) = match &result {
+            Ok(_) => (
+                "healthy".to_string(),
+                format!("{mode_bg} reset completed successfully"),
+                "info".to_string(),
+            ),
+            Err(error) => (
+                "failed".to_string(),
+                format!("{mode_bg} reset failed: {error}"),
+                "critical".to_string(),
+            ),
+        };
+
+        {
+            let mut guard = reset_state_bg.write().await;
+            guard.phase = final_phase;
+            guard.detail = final_detail.clone();
+            guard.completed_unix_ms = Some(unix_now_ms());
+            guard.in_flight = false;
+        }
+
+        let completed_snapshot = reset_state_bg.read().await.clone();
+        let _ = app_bg.emit("ironclad:reset", serde_json::json!(completed_snapshot));
+
+        let evidence = match result {
+            Ok(_) => format!(
+                "event_id={event_id_bg}; mode={mode_bg}; reason={reason_bg}; outcome=ok"
+            ),
+            Err(error) => format!(
+                "event_id={event_id_bg}; mode={mode_bg}; reason={reason_bg}; outcome=error; detail={error}"
+            ),
+        };
+
+        append_ironclad_forensic_record(
+            &forensic_log_bg,
+            &app_bg,
+            "reset",
+            &forensic_severity,
+            format!("{mode_bg} reset lifecycle completed"),
+            evidence,
+            "desktop.reset",
+        )
+        .await;
+
+        let status_payload = collect_ironclad_status_from_parts(
+            &orchestrator_cell_bg,
+            &reset_state_bg,
+            &forensic_log_bg,
+        )
+        .await;
+        let _ = app_bg.emit("ironclad:status", status_payload);
+    });
+
+    Ok(queued_snapshot)
+}
+
 /// Return a snapshot of the hardware orchestrator state.
 #[tauri::command]
 pub async fn get_orchestrator_status(
@@ -8171,6 +10933,496 @@ pub async fn get_orchestrator_status(
     }
 }
 
+#[tauri::command]
+pub async fn register_new_target(
+    request: NewTargetRequest,
+    state: State<'_, AppStateCell>,
+    app_handle: AppHandle,
+) -> Result<RegisterNewTargetResponse, RegisterNewTargetError> {
+    let state = state.get().ok_or_else(|| {
+        RegisterNewTargetError::new(
+            RegisterNewTargetErrorCode::Unknown,
+            "KRIA is still initializing, please try again in a moment",
+            None,
+        )
+    })?;
+
+    let request = normalize_new_target_request(request)?;
+
+    for dependency in ["ssh", "ssh-keyscan", "ssh-keygen"] {
+        if which_binary(dependency).is_none() {
+            return Err(RegisterNewTargetError::new(
+                RegisterNewTargetErrorCode::DependencyMissing,
+                format!("Required dependency is missing: {dependency}"),
+                Some("Install OpenSSH client tools and retry enrollment".to_string()),
+            ));
+        }
+    }
+
+    let (public_key, public_key_path, created_local_key) =
+        ensure_local_ssh_keypair(request.ssh_private_key_path.as_path()).await?;
+
+    let (known_hosts_entries, observed_hostkey_sha256_b64) =
+        fetch_ssh_hostkey_fingerprint(&request.host, request.port).await?;
+
+    let registry_path = resolve_target_registry_path(state).await?;
+    let mut registry = load_fleet_enrollment_registry(registry_path.as_path())?;
+
+    let existing_index = registry.targets.iter().position(|target| {
+        target.host.eq_ignore_ascii_case(&request.host)
+            && target.port == request.port
+            && target.username.eq_ignore_ascii_case(&request.username)
+            && target.mode == "ssh_bootstrap"
+    });
+    let existing_record = existing_index.map(|idx| registry.targets[idx].clone());
+
+    if let Some(existing) = existing_record.as_ref() {
+        if existing.ssh_hostkey_sha256_b64 != observed_hostkey_sha256_b64 {
+            return Err(RegisterNewTargetError::new(
+                RegisterNewTargetErrorCode::HostKeyChanged,
+                "Host key changed for an already enrolled target",
+                Some(format!(
+                    "existing={} observed={}",
+                    existing.ssh_hostkey_sha256_b64, observed_hostkey_sha256_b64
+                )),
+            ));
+        }
+    }
+
+    if let Some(expected) = request.expected_hostkey_sha256_b64.as_ref() {
+        if expected != &observed_hostkey_sha256_b64 {
+            return Err(RegisterNewTargetError::new(
+                RegisterNewTargetErrorCode::HostKeyChanged,
+                "Observed SSH host key fingerprint does not match expected fingerprint",
+                Some(format!(
+                    "expected={} observed={}",
+                    expected, observed_hostkey_sha256_b64
+                )),
+            ));
+        }
+    }
+
+    let known_hosts_temp_path = std::env::temp_dir().join(format!(
+        "kria_known_hosts_{}_{}.tmp",
+        std::process::id(),
+        Uuid::new_v4()
+    ));
+    std::fs::write(&known_hosts_temp_path, known_hosts_entries.as_bytes()).map_err(|error| {
+        RegisterNewTargetError::new(
+            RegisterNewTargetErrorCode::PersistenceFailed,
+            "Failed to persist temporary known_hosts file",
+            Some(error.to_string()),
+        )
+    })?;
+    let known_hosts_guard = TempFileGuard::new(known_hosts_temp_path);
+
+    let mut verify_args = build_ssh_base_args(&request, known_hosts_guard.path());
+    verify_args.push(format!("printf '{}'", TARGET_ENROLLMENT_VERIFY_MARKER));
+    let verify_output = run_external_command("ssh", &verify_args, TARGET_ENROLLMENT_SSH_TIMEOUT_SECS)
+        .await?;
+    if !verify_output.status.success() || !verify_output.stdout.contains(TARGET_ENROLLMENT_VERIFY_MARKER)
+    {
+        return Err(classify_ssh_stage_error(&verify_output, "verify_ssh_access"));
+    }
+
+    let quoted_public_key = shell_quote_single(&public_key);
+    let bootstrap_command = format!(
+        "set -eu; umask 077; mkdir -p \"$HOME/.ssh\"; touch \"$HOME/.ssh/authorized_keys\"; chmod 700 \"$HOME/.ssh\"; chmod 600 \"$HOME/.ssh/authorized_keys\"; if ! grep -qxF {quoted_public_key} \"$HOME/.ssh/authorized_keys\"; then printf '%s\\n' {quoted_public_key} >> \"$HOME/.ssh/authorized_keys\"; fi"
+    );
+    let mut bootstrap_args = build_ssh_base_args(&request, known_hosts_guard.path());
+    bootstrap_args.push(bootstrap_command);
+    let bootstrap_output =
+        run_external_command("ssh", &bootstrap_args, TARGET_ENROLLMENT_SSH_TIMEOUT_SECS).await?;
+    if !bootstrap_output.status.success() {
+        return Err(classify_ssh_stage_error(&bootstrap_output, "bootstrap_authorized_keys"));
+    }
+
+    let now_unix_ms = unix_now_ms() as i64;
+    let commander_epoch = request
+        .commander_epoch
+        .or(existing_record.as_ref().map(|record| record.commander_epoch))
+        .unwrap_or(0);
+    let enrolled_at_unix_ms = existing_record
+        .as_ref()
+        .map(|record| record.enrolled_at_unix_ms)
+        .unwrap_or(now_unix_ms);
+
+    let private_key_path = request.ssh_private_key_path.to_string_lossy().to_string();
+    let public_key_path_str = public_key_path.to_string_lossy().to_string();
+
+    let created_new_target = existing_index.is_none();
+    let target_id = existing_record
+        .as_ref()
+        .map(|record| record.target_id.clone())
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+
+    let staged_record = EnrolledTargetRecord {
+        target_id: target_id.clone(),
+        display_name: request.display_name.clone(),
+        host: request.host.clone(),
+        port: request.port,
+        username: request.username.clone(),
+        mode: "ssh_bootstrap".to_string(),
+        ssh_private_key_path: private_key_path.clone(),
+        ssh_public_key_path: public_key_path_str.clone(),
+        ssh_hostkey_sha256_b64: observed_hostkey_sha256_b64.clone(),
+        commander_epoch,
+        enrolled_at_unix_ms,
+        last_verified_unix_ms: now_unix_ms,
+    };
+
+    let runtime_created = admit_enrolled_target_to_fleet_runtime(&state.fleet_runtime, &staged_record)
+        .await
+        .map_err(|detail| {
+            RegisterNewTargetError::new(
+                RegisterNewTargetErrorCode::BootstrapFailed,
+                "Target verified but runtime admission failed",
+                Some(detail),
+            )
+        })?;
+
+    if let Some(index) = existing_index {
+        let record = registry
+            .targets
+            .get_mut(index)
+            .ok_or_else(|| {
+                RegisterNewTargetError::new(
+                    RegisterNewTargetErrorCode::PersistenceFailed,
+                    "Enrollment registry indexing failed",
+                    None,
+                )
+            })?;
+        *record = staged_record;
+    } else {
+        registry.targets.push(staged_record);
+    }
+
+    save_fleet_enrollment_registry(registry_path.as_path(), &registry)?;
+
+    if let Some(orchestrator) = state.orchestrator.read().await.clone() {
+        if let Err(error) = configure_orchestrator_fleet_bridge(&orchestrator, &state.fleet_runtime)
+        {
+            tracing::warn!(
+                error = %error,
+                "fleet enrollment: failed to wire orchestrator bridge after runtime admission"
+            );
+        } else {
+            pulse_target_pool_telemetry(&state.fleet_runtime.target_pool).await;
+        }
+    }
+
+    append_ironclad_forensic_record(
+        &state.ironclad_forensic_log,
+        &app_handle,
+        "fleet_enrollment",
+        "info",
+        format!(
+            "Fleet target enrolled: {}@{}:{}",
+            request.username, request.host, request.port
+        ),
+        format!(
+            "target_id={target_id}; display_name={}; fingerprint={}; created_new={created_new_target}; key_created={created_local_key}; runtime_created={runtime_created}",
+            request.display_name, observed_hostkey_sha256_b64
+        ),
+        "desktop.fleet",
+    )
+    .await;
+
+    let response = RegisterNewTargetResponse {
+        target_id: target_id.clone(),
+        display_name: request.display_name,
+        host: request.host,
+        port: request.port,
+        username: request.username,
+        mode: "ssh_bootstrap".to_string(),
+        ssh_hostkey_sha256_b64: observed_hostkey_sha256_b64,
+        ssh_private_key_path: private_key_path,
+        ssh_public_key_path: public_key_path_str,
+        commander_epoch,
+        created_new_target,
+        created_local_key,
+        enrolled_at_unix_ms,
+        registry_path: registry_path.to_string_lossy().to_string(),
+    };
+
+    let _ = app_handle.emit("fleet:target_enrolled", serde_json::json!(response.clone()));
+    let _ = app_handle.emit(
+        "ironclad:status",
+        collect_ironclad_status_from_parts(
+            &state.orchestrator,
+            &state.ironclad_reset,
+            &state.ironclad_forensic_log,
+        )
+        .await,
+    );
+
+    Ok(response)
+}
+
+#[tauri::command]
+pub async fn get_ironclad_status(
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    let state = state
+        .get()
+        .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
+
+    let mut payload = collect_ironclad_status_from_parts(
+        &state.orchestrator,
+        &state.ironclad_reset,
+        &state.ironclad_forensic_log,
+    )
+    .await;
+
+    let (commander_host, commander_port) = {
+        let cfg = state.config.read().await;
+        (cfg.server.host.clone(), cfg.server.port)
+    };
+    let commander_base_url = local_api_base_url(&commander_host, commander_port);
+    let fleet_control_targets = state.fleet_control_runtime.snapshot_targets().await;
+
+    let (config_path, config) = load_ironclad_system_config_with_path();
+    let config_summary = serde_json::json!({
+        "high_recovery_slo_ms": config.qos.high_recovery_slo_ms,
+        "lease_ttl_ms": config.target_pool.lease_ttl_ms,
+        "heartbeat_grace_ms": config.target_pool.heartbeat_grace_ms,
+        "quarantine_cooldown_ms": config.target_pool.quarantine_cooldown_ms,
+        "max_normalized_hash_distance": config.snapshot.max_normalized_hash_distance,
+    });
+
+    if let Some(root) = payload.as_object_mut() {
+        root.insert(
+            "config_path".to_string(),
+            serde_json::json!(config_path.to_string_lossy()),
+        );
+        root.insert("config".to_string(), config_summary);
+        root.insert(
+            "trust_first".to_string(),
+            serde_json::json!({
+                "hard_reset_confirmation": IRONCLAD_HARD_RESET_CONFIRMATION,
+                "hard_reset_requires_confirmation": true,
+            }),
+        );
+
+        if let Some(fleet) = root.get_mut("fleet").and_then(|value| value.as_object_mut()) {
+            fleet.insert(
+                "commander_base_url".to_string(),
+                serde_json::json!(commander_base_url),
+            );
+            fleet.insert(
+                "connection_control_wired".to_string(),
+                serde_json::json!(true),
+            );
+            fleet.insert(
+                "connection_control_target_count".to_string(),
+                serde_json::json!(fleet_control_targets.len()),
+            );
+            fleet.insert(
+                "connection_control_targets".to_string(),
+                serde_json::json!(fleet_control_targets),
+            );
+        }
+    }
+
+    Ok(payload)
+}
+
+#[tauri::command]
+pub async fn get_ironclad_forensics(
+    limit: Option<usize>,
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    let state = state
+        .get()
+        .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
+
+    let limit = limit.unwrap_or(50).min(IRONCLAD_FORENSIC_MAX_ENTRIES).max(1);
+    let guard = state.ironclad_forensic_log.read().await;
+    let total = guard.len();
+    let start = total.saturating_sub(limit);
+    let records = guard[start..].to_vec();
+
+    Ok(serde_json::json!({
+        "total": total,
+        "limit": limit,
+        "records": records,
+    }))
+}
+
+#[tauri::command]
+pub async fn request_ironclad_soft_reset(
+    reason: Option<String>,
+    state: State<'_, AppStateCell>,
+    app_handle: AppHandle,
+) -> Result<serde_json::Value, String> {
+    let state = state
+        .get()
+        .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
+
+    let reason = reason
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "manual_soft_reset".to_string());
+
+    let queued = enqueue_ironclad_reset(
+        state.orchestrator.clone(),
+        state.ironclad_reset.clone(),
+        state.ironclad_forensic_log.clone(),
+        app_handle,
+        "soft",
+        reason,
+        false,
+    )
+    .await?;
+
+    Ok(serde_json::json!({
+        "accepted": true,
+        "event_id": queued.event_id,
+        "phase": queued.phase,
+        "reason": queued.reason,
+        "in_flight": queued.in_flight,
+    }))
+}
+
+#[tauri::command]
+pub async fn request_ironclad_hard_reset(
+    reason: Option<String>,
+    confirmation_phrase: String,
+    state: State<'_, AppStateCell>,
+    app_handle: AppHandle,
+) -> Result<serde_json::Value, String> {
+    let state = state
+        .get()
+        .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
+
+    if confirmation_phrase.trim() != IRONCLAD_HARD_RESET_CONFIRMATION {
+        return Err(format!(
+            "Hard reset rejected: confirmation phrase must be '{}'",
+            IRONCLAD_HARD_RESET_CONFIRMATION
+        ));
+    }
+
+    let reason = reason
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "manual_hard_reset".to_string());
+
+    let queued = enqueue_ironclad_reset(
+        state.orchestrator.clone(),
+        state.ironclad_reset.clone(),
+        state.ironclad_forensic_log.clone(),
+        app_handle,
+        "hard",
+        reason,
+        true,
+    )
+    .await?;
+
+    Ok(serde_json::json!({
+        "accepted": true,
+        "event_id": queued.event_id,
+        "phase": queued.phase,
+        "reason": queued.reason,
+        "in_flight": queued.in_flight,
+        "trust_first": {
+            "confirmed": true,
+            "phrase": IRONCLAD_HARD_RESET_CONFIRMATION,
+        }
+    }))
+}
+
+#[tauri::command]
+pub async fn get_ironclad_config() -> Result<serde_json::Value, String> {
+    let (path, config) = load_ironclad_system_config_with_path();
+    Ok(serde_json::json!({
+        "path": path.to_string_lossy(),
+        "exists": path.exists(),
+        "config": {
+            "high_recovery_slo_ms": config.qos.high_recovery_slo_ms,
+            "lease_ttl_ms": config.target_pool.lease_ttl_ms,
+            "heartbeat_grace_ms": config.target_pool.heartbeat_grace_ms,
+            "quarantine_cooldown_ms": config.target_pool.quarantine_cooldown_ms,
+            "max_normalized_hash_distance": config.snapshot.max_normalized_hash_distance,
+        }
+    }))
+}
+
+#[tauri::command]
+pub async fn update_ironclad_config(
+    payload: IroncladConfigUpdatePayload,
+    state: State<'_, AppStateCell>,
+    app_handle: AppHandle,
+) -> Result<serde_json::Value, String> {
+    let state = state
+        .get()
+        .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
+
+    let (path, mut config) = load_ironclad_system_config_with_path();
+    let mut applied: Vec<&'static str> = Vec::new();
+
+    if let Some(value) = payload.high_recovery_slo_ms {
+        config.qos.high_recovery_slo_ms = value.clamp(50, 300_000);
+        applied.push("high_recovery_slo_ms");
+    }
+    if let Some(value) = payload.lease_ttl_ms {
+        config.target_pool.lease_ttl_ms = value.clamp(500, 3_600_000);
+        applied.push("lease_ttl_ms");
+    }
+    if let Some(value) = payload.heartbeat_grace_ms {
+        config.target_pool.heartbeat_grace_ms = value.clamp(100, 120_000);
+        applied.push("heartbeat_grace_ms");
+    }
+    if let Some(value) = payload.quarantine_cooldown_ms {
+        config.target_pool.quarantine_cooldown_ms = value.clamp(1_000, 86_400_000);
+        applied.push("quarantine_cooldown_ms");
+    }
+    if let Some(value) = payload.max_normalized_hash_distance {
+        config.snapshot.max_normalized_hash_distance = value.clamp(0.0, 1.0);
+        applied.push("max_normalized_hash_distance");
+    }
+
+    if applied.is_empty() {
+        return Ok(serde_json::json!({
+            "updated": false,
+            "reason": "No fields provided",
+        }));
+    }
+
+    persist_ironclad_system_config(path.as_path(), &config)?;
+
+    append_ironclad_forensic_record(
+        &state.ironclad_forensic_log,
+        &app_handle,
+        "config",
+        "info",
+        format!("Ironclad config updated: {}", applied.join(", ")),
+        format!("path={}; fields={}", path.to_string_lossy(), applied.join(",")),
+        "desktop.config",
+    )
+    .await;
+
+    let status_payload = collect_ironclad_status_from_parts(
+        &state.orchestrator,
+        &state.ironclad_reset,
+        &state.ironclad_forensic_log,
+    )
+    .await;
+    let _ = app_handle.emit("ironclad:status", status_payload);
+
+    Ok(serde_json::json!({
+        "updated": true,
+        "path": path.to_string_lossy(),
+        "applied": applied,
+        "config": {
+            "high_recovery_slo_ms": config.qos.high_recovery_slo_ms,
+            "lease_ttl_ms": config.target_pool.lease_ttl_ms,
+            "heartbeat_grace_ms": config.target_pool.heartbeat_grace_ms,
+            "quarantine_cooldown_ms": config.target_pool.quarantine_cooldown_ms,
+            "max_normalized_hash_distance": config.snapshot.max_normalized_hash_distance,
+        }
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -8178,9 +11430,10 @@ mod tests {
         build_image_llm_user_content, build_tool_result_event_payload,
         extract_image_preanalysis_summary, extract_preprocessed_image_attachments,
         infer_image_intent_from_text, local_api_chat, migrate_legacy_colab_server_command,
-        sync_telegram_mcp_server_config, ColabRuntimeSnapshot, ColabRuntimeState,
-        GoogleWorkspaceRuntimeSnapshot, LocalApiBridgeState, LocalApiChatRequest,
-        LocalApiResponder, COLAB_OFFICIAL_COMMAND, COLAB_OFFICIAL_SOURCE,
+        summarize_tool_turn_for_history, sync_telegram_mcp_server_config,
+        ColabRuntimeSnapshot, ColabRuntimeState, GoogleWorkspaceRuntimeSnapshot,
+        LocalApiBridgeState, LocalApiChatRequest, LocalApiResponder, COLAB_OFFICIAL_COMMAND,
+        COLAB_OFFICIAL_SOURCE,
         OCR_HEALTH_PROBE_IMAGE_BYTES,
     };
     use async_trait::async_trait;
@@ -8535,6 +11788,33 @@ mod tests {
     }
 
     #[test]
+    fn summarize_generate_image_history_reads_nested_result_paths() {
+        let result = serde_json::json!({
+            "name": "generate_image",
+            "success": true,
+            "result": {
+                "images": [
+                    { "path": "/tmp/kria-image-a.png" },
+                    { "path": "relative-image.png" },
+                    { "path": "/tmp/kria-image-b.png" }
+                ]
+            }
+        });
+
+        let summary = summarize_tool_turn_for_history(
+            "generate_image",
+            true,
+            &result,
+            &serde_json::json!({}),
+        );
+
+        assert!(summary.contains("generated 2 images"));
+        assert!(summary.contains("/tmp/kria-image-a.png"));
+        assert!(summary.contains("/tmp/kria-image-b.png"));
+        assert!(!summary.contains("relative-image.png"));
+    }
+
+    #[test]
     fn image_user_content_includes_path_and_instruction() {
         let content = build_image_llm_user_content(
             "Analyze this image",
@@ -8755,6 +12035,9 @@ mod tests {
     async fn local_api_chat_rejects_empty_messages() {
         let state = LocalApiBridgeState {
             responder: std::sync::Arc::new(EchoLocalApiResponder),
+            fleet_control_runtime: std::sync::Arc::new(
+                crate::fleet_control::DesktopFleetControlRuntime::empty(),
+            ),
         };
 
         let (status, body) = local_api_chat(
@@ -8777,6 +12060,9 @@ mod tests {
     async fn local_api_chat_uses_responder_payload() {
         let state = LocalApiBridgeState {
             responder: std::sync::Arc::new(EchoLocalApiResponder),
+            fleet_control_runtime: std::sync::Arc::new(
+                crate::fleet_control::DesktopFleetControlRuntime::empty(),
+            ),
         };
 
         let (status, body) = local_api_chat(

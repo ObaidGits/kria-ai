@@ -36,6 +36,7 @@ const resolveInitialEnvironment = (): "assistant" | "prompt_lab" => {
 const [assistantMessages, setAssistantMessages] = createSignal<Message[]>([]);
 const [promptLabMessages, setPromptLabMessages] = createSignal<Message[]>([]);
 const [sessions, setSessions] = createSignal<Session[]>([]);
+const [isSessionStartupLoading, setIsSessionStartupLoading] = createSignal(true);
 const [assistantCurrentSession, setAssistantCurrentSession] = createSignal<string | null>(
   readStorageValue(STORAGE_KEYS.assistantSession)
 );
@@ -62,9 +63,9 @@ const [settings, setSettings] = createSignal<Record<string, any> | null>(null);
 const [models, setModels] = createSignal<any[]>([]);
 const [audioDevices, setAudioDevices] = createSignal<AudioDevicesData | null>(null);
 const resolveInitialTheme = (): "dark" | "light" => {
-  if (typeof window === "undefined") return "dark";
+  if (typeof window === "undefined") return "light";
   const saved = readStorageValue(STORAGE_KEYS.theme);
-  return saved === "light" ? "light" : "dark";
+  return saved === "dark" ? "dark" : "light";
 };
 
 const [theme, setTheme] = createSignal<"dark" | "light">(resolveInitialTheme());
@@ -151,6 +152,40 @@ const toolChoiceRequest = createMemo<ToolChoiceRequest | null>(() =>
 
 let healthLoadInFlight = false;
 let healthLoadQueued = false;
+let sessionHydrationRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let sessionHydrationRetryMs = 350;
+let hasResolvedInitialSessionHydration = false;
+const SESSION_HYDRATION_RETRY_MAX_MS = 5000;
+
+function scheduleSessionHydrationRetry() {
+  if (typeof window === "undefined") return;
+  if (sessionHydrationRetryTimer) return;
+
+  const delayMs = sessionHydrationRetryMs;
+  sessionHydrationRetryMs = Math.min(
+    Math.floor(sessionHydrationRetryMs * 1.8),
+    SESSION_HYDRATION_RETRY_MAX_MS
+  );
+
+  sessionHydrationRetryTimer = window.setTimeout(() => {
+    sessionHydrationRetryTimer = null;
+    void initializeSessionPersistence();
+  }, delayMs);
+}
+
+function resetSessionHydrationRetryState() {
+  if (sessionHydrationRetryTimer) {
+    clearTimeout(sessionHydrationRetryTimer);
+    sessionHydrationRetryTimer = null;
+  }
+  sessionHydrationRetryMs = 350;
+}
+
+function markInitialSessionHydrationSettled() {
+  if (hasResolvedInitialSessionHydration) return;
+  hasResolvedInitialSessionHydration = true;
+  setIsSessionStartupLoading(false);
+}
 
 // Telegram integration
 export interface TelegramConfig {
@@ -200,6 +235,7 @@ export interface Session {
   id: string;
   title: string;
   updatedAt: number;
+  turnCount?: number;
 }
 
 export interface HitlRequest {
@@ -962,6 +998,140 @@ export interface ColabTierStatus {
 
 const [colabStatus, setColabStatus] = createSignal<ColabTierStatus | null>(null);
 
+export interface IroncladResetSnapshot {
+  event_id: string;
+  phase: string;
+  reason: string;
+  detail: string;
+  started_unix_ms: number;
+  completed_unix_ms: number | null;
+  in_flight: boolean;
+}
+
+export interface IroncladForensicRecord {
+  id: string;
+  timestamp_unix_ms: number;
+  category: string;
+  severity: string;
+  summary: string;
+  source: string;
+  evidence: string;
+  last_gasp_detected: boolean;
+}
+
+export interface IroncladEnrolledTargetSnapshot {
+  target_id: string;
+  display_name: string;
+  host: string;
+  port: number;
+  username: string;
+  mode: string;
+  ssh_hostkey_sha256_b64: string;
+  commander_epoch: number;
+  enrolled_at_unix_ms: number;
+  last_verified_unix_ms: number;
+}
+
+export interface IroncladFleetStatus {
+  total_targets: number;
+  ready_targets: number;
+  leased_targets: number;
+  tainted_targets: number;
+  quarantined_targets: number;
+  active_leases: number;
+  health_degraded: boolean;
+  source_unwired: boolean;
+  enrolled_target_count?: number;
+  enrolled_targets?: IroncladEnrolledTargetSnapshot[];
+  enrollment_registry_path?: string;
+}
+
+export interface IroncladQosStatus {
+  traffic_light: "green" | "yellow" | "red" | "gray";
+  pressure_active: boolean;
+  high_recovery_wait_p95_ms: number;
+  high_recovery_slo_ms: number;
+  decision?: string | null;
+  reason?: string | null;
+}
+
+export interface IroncladConfigSnapshot {
+  high_recovery_slo_ms: number;
+  lease_ttl_ms: number;
+  heartbeat_grace_ms: number;
+  quarantine_cooldown_ms: number;
+  max_normalized_hash_distance: number;
+}
+
+export interface IroncladConfigUpdatePayload {
+  high_recovery_slo_ms?: number;
+  lease_ttl_ms?: number;
+  heartbeat_grace_ms?: number;
+  quarantine_cooldown_ms?: number;
+  max_normalized_hash_distance?: number;
+}
+
+export interface IroncladStatus {
+  enabled: boolean;
+  fleet: IroncladFleetStatus;
+  qos: IroncladQosStatus;
+  reset: IroncladResetSnapshot;
+  forensics: {
+    count: number;
+    latest?: IroncladForensicRecord | null;
+  };
+  config_path?: string;
+  config?: IroncladConfigSnapshot;
+}
+
+export type RegisterNewTargetErrorCode =
+  | "validation_failed"
+  | "connection_refused"
+  | "authentication_failed"
+  | "host_key_changed"
+  | "dependency_missing"
+  | "bootstrap_failed"
+  | "persistence_failed"
+  | "unknown";
+
+export interface RegisterNewTargetRequest {
+  displayName: string;
+  host: string;
+  port?: number;
+  username: string;
+  sshPrivateKeyPath?: string;
+  expectedHostkeySha256?: string;
+  commanderEpoch?: number;
+}
+
+export interface RegisterNewTargetResponse {
+  targetId: string;
+  displayName: string;
+  host: string;
+  port: number;
+  username: string;
+  mode: string;
+  sshHostkeySha256B64: string;
+  sshPrivateKeyPath: string;
+  sshPublicKeyPath: string;
+  commanderEpoch: number;
+  createdNewTarget: boolean;
+  createdLocalKey: boolean;
+  enrolledAtUnixMs: number;
+  registryPath: string;
+}
+
+export interface RegisterNewTargetErrorPayload {
+  code: RegisterNewTargetErrorCode;
+  message: string;
+  detail?: string;
+}
+
+const [ironcladStatus, setIroncladStatus] = createSignal<IroncladStatus | null>(null);
+const [ironcladForensics, setIroncladForensics] = createSignal<IroncladForensicRecord[]>([]);
+const [ironcladForensicsTotal, setIroncladForensicsTotal] = createSignal(0);
+const [ironcladResetEvent, setIroncladResetEvent] = createSignal<IroncladResetSnapshot | null>(null);
+
 async function loadGoogleStatus(account?: string): Promise<GoogleWorkspaceStatus | null> {
   try {
     const result = await invoke<GoogleWorkspaceStatus>("get_google_workspace_status", { account: account ?? null });
@@ -1028,6 +1198,90 @@ async function setColabNotebook(notebookId: string): Promise<ColabTierStatus | n
   return result;
 }
 
+async function loadIroncladStatus(): Promise<IroncladStatus | null> {
+  try {
+    const result = await invoke<IroncladStatus>("get_ironclad_status");
+    setIroncladStatus(result);
+    if (result?.reset) {
+      setIroncladResetEvent(result.reset);
+    }
+    if (result?.forensics?.count !== undefined) {
+      setIroncladForensicsTotal(result.forensics.count);
+    }
+    return result;
+  } catch (e) {
+    console.error("Failed to load Ironclad status:", e);
+    return null;
+  }
+}
+
+async function loadIroncladForensics(limit = 64): Promise<IroncladForensicRecord[]> {
+  try {
+    const result = await invoke<{ total: number; limit: number; records: IroncladForensicRecord[] }>(
+      "get_ironclad_forensics",
+      { limit }
+    );
+    const sorted = [...(result.records ?? [])].sort(
+      (a, b) => b.timestamp_unix_ms - a.timestamp_unix_ms
+    );
+    setIroncladForensics(sorted);
+    setIroncladForensicsTotal(result.total ?? sorted.length);
+    return sorted;
+  } catch (e) {
+    console.error("Failed to load Ironclad forensics:", e);
+    return [];
+  }
+}
+
+async function requestIroncladSoftReset(reason?: string): Promise<Record<string, unknown>> {
+  const result = await invoke<Record<string, unknown>>("request_ironclad_soft_reset", {
+    reason: reason?.trim() ? reason.trim() : null,
+  });
+  void loadIroncladStatus();
+  return result;
+}
+
+async function requestIroncladHardReset(
+  confirmationPhrase: string,
+  reason?: string
+): Promise<Record<string, unknown>> {
+  const result = await invoke<Record<string, unknown>>("request_ironclad_hard_reset", {
+    reason: reason?.trim() ? reason.trim() : null,
+    confirmationPhrase,
+  });
+  void loadIroncladStatus();
+  return result;
+}
+
+async function getIroncladConfig(): Promise<{ path: string; exists: boolean; config: IroncladConfigSnapshot }> {
+  return invoke<{ path: string; exists: boolean; config: IroncladConfigSnapshot }>("get_ironclad_config");
+}
+
+async function updateIroncladConfig(
+  payload: IroncladConfigUpdatePayload
+): Promise<{ updated: boolean; config?: IroncladConfigSnapshot; applied?: string[]; reason?: string }> {
+  const result = await invoke<{
+    updated: boolean;
+    config?: IroncladConfigSnapshot;
+    applied?: string[];
+    reason?: string;
+  }>("update_ironclad_config", { payload });
+
+  if (result?.updated) {
+    await Promise.all([loadIroncladStatus(), loadIroncladForensics(64)]);
+  }
+
+  return result;
+}
+
+async function registerNewTarget(
+  request: RegisterNewTargetRequest
+): Promise<RegisterNewTargetResponse> {
+  const response = await invoke<RegisterNewTargetResponse>("register_new_target", { request });
+  void loadIroncladStatus();
+  return response;
+}
+
 function submitToolChoice(candidateName: string) {
   const req = toolChoiceRequest();
   if (!req) return;
@@ -1047,14 +1301,33 @@ function dismissToolChoice() {
 }
 
 // --- Settings management ---
+const FONT_SCALE_VALUES = ["0.8", "0.9", "1.0", "1.2", "1.5", "2.0"] as const;
+
+function normalizeFontScale(value: unknown): string {
+  const parsed = Number.parseFloat(String(value ?? "1"));
+  if (Number.isNaN(parsed)) return "1.0";
+
+  const exact = FONT_SCALE_VALUES.find((candidate) => Math.abs(Number.parseFloat(candidate) - parsed) < 0.001);
+  return exact ?? "1.0";
+}
+
+function applyUiRuntimePreferences(ui: Record<string, any> | null | undefined) {
+  if (typeof document === "undefined") return;
+
+  const root = document.documentElement;
+  root.setAttribute("data-high-contrast", String(Boolean(ui?.high_contrast)));
+  root.setAttribute("data-reduce-motion", String(Boolean(ui?.reduce_motion)));
+  root.setAttribute("data-font-scale", normalizeFontScale(ui?.font_scale));
+}
+
 async function loadSettings() {
   try {
     const result = await invoke<Record<string, any>>("get_settings");
     setSettings(result);
-    // Apply theme from loaded settings
-    if (result?.ui?.theme) {
-      applyTheme(result.ui.theme);
-    }
+    // Keep theme deterministic: default to light unless explicitly dark.
+    const resolvedTheme: "dark" | "light" = result?.ui?.theme === "dark" ? "dark" : "light";
+    applyTheme(resolvedTheme);
+    applyUiRuntimePreferences(result?.ui);
   } catch (e) {
     console.error("Failed to load settings:", e);
   }
@@ -1079,10 +1352,9 @@ async function saveSettings(newSettings: Record<string, any>) {
   try {
     await invoke("update_settings", { settings: newSettings });
     setSettings(newSettings);
-    // Apply theme if changed
-    if (newSettings?.ui?.theme) {
-      applyTheme(newSettings.ui.theme);
-    }
+    const resolvedTheme: "dark" | "light" = newSettings?.ui?.theme === "dark" ? "dark" : "light";
+    applyTheme(resolvedTheme);
+    applyUiRuntimePreferences(newSettings?.ui);
   } catch (e) {
     console.error("Failed to save settings:", e);
     throw e;
@@ -1129,17 +1401,22 @@ function setHighlightThemeStylesheet(t: "dark" | "light") {
 }
 
 // --- Session management ---
-async function loadSessions() {
+async function loadSessions(): Promise<Session[] | null> {
   try {
     const result = await invoke<{ id: string; title: string; turn_count: number; last_active: string }[]>("list_sessions");
     const mapped: Session[] = result.map((s) => ({
       id: s.id,
       title: s.title || "Untitled",
       updatedAt: new Date(s.last_active).getTime() || Date.now(),
+      turnCount: typeof s.turn_count === "number" ? s.turn_count : 0,
     }));
+
+    mapped.sort((a, b) => b.updatedAt - a.updatedAt);
     setSessions(mapped);
+    return mapped;
   } catch (e) {
     console.error("Failed to load sessions:", e);
+    return null;
   }
 }
 
@@ -1295,26 +1572,42 @@ async function loadMappedSessionHistory(sessionId: string): Promise<Message[]> {
   for (const t of history) {
     const ts = new Date(t.timestamp).getTime() || Date.now();
 
-    if (t.role === "tool" && t.tool_name) {
+    if (t.tool_name) {
       const tc = parseStoredToolCall(t.tool_name, t.tool_result);
-      const last = mapped[mapped.length - 1];
 
-      if (last?.role === "assistant") {
-        mapped[mapped.length - 1] = {
-          ...last,
-          toolCalls: [...(last.toolCalls || []), tc],
-          timestamp: Math.max(last.timestamp, ts),
-        };
-      } else {
+      // New persistence format stores tool turns as assistant rows that carry
+      // both summary text and structured tool payload.
+      if (normalizeRole(t.role) === "assistant") {
         mapped.push({
           id: crypto.randomUUID(),
           role: "assistant",
-          content: "",
+          content: t.content,
           timestamp: ts,
           toolCalls: [tc],
         });
+        continue;
       }
-      continue;
+
+      // Backward compatibility for legacy role=tool rows.
+      if (normalizeRole(t.role) === "tool") {
+        const last = mapped[mapped.length - 1];
+        if (last?.role === "assistant") {
+          mapped[mapped.length - 1] = {
+            ...last,
+            toolCalls: [...(last.toolCalls || []), tc],
+            timestamp: Math.max(last.timestamp, ts),
+          };
+        } else {
+          mapped.push({
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: "",
+            timestamp: ts,
+            toolCalls: [tc],
+          });
+        }
+        continue;
+      }
     }
 
     mapped.push({
@@ -1496,30 +1789,97 @@ function initListeners() {
       } | null;
     }>(`${eventPrefix}:tool_result`, (event) => {
       const { name, result, success, metadata } = event.payload;
+      const completedToolCall: ToolCall = {
+        name,
+        args: {},
+        status: (success ? "done" : "error") as ToolCall["status"],
+        result,
+        metadata: metadata
+          ? {
+              confidence: metadata.confidence,
+              sourceCount: metadata.source_count,
+              freshnessAgeHours: metadata.freshness_age_hours,
+              regionMatch: metadata.region_match,
+            }
+          : undefined,
+      };
+
       updateScopedMessages(scope, (prev) => {
-        const last = prev[prev.length - 1];
-        if (last?.role === "assistant" && last.toolCalls?.length) {
-          const updated = last.toolCalls.map((tc) => {
+        for (let i = prev.length - 1; i >= 0; i--) {
+          const msg = prev[i];
+          if (msg.role !== "assistant" || !msg.toolCalls?.length) continue;
+
+          let didUpdate = false;
+          const updated = msg.toolCalls.map((tc) => {
             if (tc.name === name && tc.status === "running") {
+              didUpdate = true;
               return {
                 ...tc,
-                status: (success ? "done" : "error") as ToolCall["status"],
-                result,
-                metadata: metadata
-                  ? {
-                      confidence: metadata.confidence,
-                      sourceCount: metadata.source_count,
-                      freshnessAgeHours: metadata.freshness_age_hours,
-                      regionMatch: metadata.region_match,
-                    }
-                  : tc.metadata,
+                status: completedToolCall.status,
+                result: completedToolCall.result,
+                metadata: completedToolCall.metadata ?? tc.metadata,
               };
             }
             return tc;
           });
-          return [...prev.slice(0, -1), { ...last, toolCalls: updated }];
+
+          if (didUpdate) {
+            return [
+              ...prev.slice(0, i),
+              { ...msg, toolCalls: updated },
+              ...prev.slice(i + 1),
+            ];
+          }
         }
-        return prev;
+
+        const last = prev[prev.length - 1];
+        if (last?.role === "assistant") {
+          let alreadyPresent = false;
+          const newResultSig = (() => {
+            try {
+              return JSON.stringify(completedToolCall.result);
+            } catch {
+              return String(completedToolCall.result ?? "");
+            }
+          })();
+
+          for (const tc of last.toolCalls || []) {
+            if (tc.name !== name || tc.status === "running") continue;
+            let existingSig = "";
+            try {
+              existingSig = JSON.stringify(tc.result);
+            } catch {
+              existingSig = String(tc.result ?? "");
+            }
+            if (existingSig === newResultSig) {
+              alreadyPresent = true;
+              break;
+            }
+          }
+
+          if (alreadyPresent) {
+            return prev;
+          }
+
+          return [
+            ...prev.slice(0, -1),
+            {
+              ...last,
+              toolCalls: [...(last.toolCalls || []), completedToolCall],
+            },
+          ];
+        }
+
+        return [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: "",
+            timestamp: Date.now(),
+            toolCalls: [completedToolCall],
+          },
+        ];
       });
     });
 
@@ -1669,6 +2029,10 @@ function initListeners() {
     setDegradationLevel(event.payload.level);
   });
 
+  listen("orchestrator:ready", () => {
+    void loadIroncladStatus();
+  });
+
   listen<ColabTierStatus | null>("colab:status", (event) => {
     const payload = event.payload;
     if (payload && typeof payload === "object") {
@@ -1681,11 +2045,118 @@ function initListeners() {
 
     void loadColabStatus();
   });
+
+  listen<IroncladStatus | null>("ironclad:status", (event) => {
+    const payload = event.payload;
+    if (payload && typeof payload === "object") {
+      setIroncladStatus(payload as IroncladStatus);
+      const typed = payload as IroncladStatus;
+      if (typed.reset) {
+        setIroncladResetEvent(typed.reset);
+      }
+      if (typed.forensics?.count !== undefined) {
+        setIroncladForensicsTotal(typed.forensics.count);
+      }
+      return;
+    }
+
+    void loadIroncladStatus();
+  });
+
+  listen<IroncladResetSnapshot>("ironclad:reset", (event) => {
+    const payload = event.payload;
+    if (!payload || typeof payload !== "object") return;
+
+    setIroncladResetEvent(payload);
+    setIroncladStatus((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        reset: payload,
+      };
+    });
+  });
+
+  listen<IroncladForensicRecord>("ironclad:forensic", (event) => {
+    const payload = event.payload;
+    if (!payload || typeof payload !== "object" || !payload.id) return;
+
+    let nextCount = ironcladForensicsTotal();
+    setIroncladForensics((prev) => {
+      if (prev.some((record) => record.id === payload.id)) {
+        return prev;
+      }
+
+      const merged = [payload, ...prev]
+        .sort((a, b) => b.timestamp_unix_ms - a.timestamp_unix_ms)
+        .slice(0, 128);
+      nextCount = Math.max(nextCount, merged.length);
+      return merged;
+    });
+
+    setIroncladForensicsTotal(nextCount);
+    setIroncladStatus((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        forensics: {
+          ...prev.forensics,
+          count: Math.max(prev.forensics?.count ?? 0, nextCount),
+          latest: payload,
+        },
+      };
+    });
+  });
 }
 
 async function initializeSessionPersistence() {
-  await loadSessions();
+  const availableSessions = await loadSessions();
+
+  if (!availableSessions) {
+    // Backend may still be initializing; keep persisted IDs and retry.
+    scheduleSessionHydrationRetry();
+    return;
+  }
+
+  resetSessionHydrationRetryState();
+  markInitialSessionHydrationSettled();
+
+  if (availableSessions.length === 0) {
+    setScopedCurrentSession("assistant", null);
+    setScopedCurrentSession("prompt_lab", null);
+    updateScopedMessages("assistant", () => []);
+    updateScopedMessages("prompt_lab", () => []);
+    return;
+  }
+
+  const preferredSessionId =
+    availableSessions.find((session) => (session.turnCount ?? 0) > 0)?.id ??
+    availableSessions[0].id;
+
+  const ensureScopedSessionSelection = (scope: StreamScope) => {
+    const active = getScopedCurrentSession(scope);
+    const activeSession = active
+      ? availableSessions.find((session) => session.id === active)
+      : null;
+
+    if (activeSession && (activeSession.turnCount ?? 0) > 0) {
+      return;
+    }
+
+    if (activeSession && activeSession.id === preferredSessionId) {
+      return;
+    }
+
+    setScopedCurrentSession(scope, preferredSessionId);
+  };
+
+  ensureScopedSessionSelection("assistant");
+  ensureScopedSessionSelection("prompt_lab");
   await syncEnvironmentSession(currentEnvironment());
+}
+
+async function rehydrateSessionsAfterReady() {
+  await initializeSessionPersistence();
 }
 
 // Initialize listeners on import
@@ -1699,16 +2170,22 @@ loadSettings();
 void loadTelegramConfig();
 loadAudioDevices();
 void loadColabStatus();
+void loadIroncladStatus();
+void loadIroncladForensics();
 // Prime and refresh system health for UI status indicators.
 loadHealth();
 setInterval(() => {
   loadHealth();
 }, 12000);
+setInterval(() => {
+  void loadIroncladStatus();
+}, 10000);
 
 // --- Export store ---
 export const appStore = {
   messages,
   sessions,
+  isSessionStartupLoading,
   currentSession,
   isThinking,
   showSettings,
@@ -1726,6 +2203,7 @@ export const appStore = {
   setInputText,
   currentEnvironment,
   setCurrentEnvironment,
+  rehydrateSessionsAfterReady,
   settings,
   models,
   audioDevices,
@@ -1789,6 +2267,17 @@ export const appStore = {
   connectColab,
   disconnectColab,
   setColabNotebook,
+  ironcladStatus,
+  ironcladForensics,
+  ironcladForensicsTotal,
+  ironcladResetEvent,
+  loadIroncladStatus,
+  loadIroncladForensics,
+  requestIroncladSoftReset,
+  requestIroncladHardReset,
+  getIroncladConfig,
+  updateIroncladConfig,
+  registerNewTarget,
   reconcileMcpRuntime,
   restartMcpServerRuntime,
   submitToolChoice,

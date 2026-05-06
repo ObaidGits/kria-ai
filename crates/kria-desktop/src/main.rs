@@ -4,6 +4,7 @@
 )]
 
 mod commands;
+mod fleet_control;
 mod tray;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -112,6 +113,13 @@ fn main() {
             commands::connect_google_workspace,
             commands::disconnect_google_workspace,
             commands::get_orchestrator_status,
+            commands::register_new_target,
+            commands::get_ironclad_status,
+            commands::get_ironclad_forensics,
+            commands::request_ironclad_soft_reset,
+            commands::request_ironclad_hard_reset,
+            commands::get_ironclad_config,
+            commands::update_ironclad_config,
             // Provisioning (first-boot setup wizard)
             commands::get_provisioning_state,
             commands::start_provisioning,

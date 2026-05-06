@@ -112,15 +112,10 @@ pub trait Stt: Send + Sync {
 /// Fallback that proxies to the existing Python sidecar (faster-whisper).
 /// Available unconditionally; slower than `WhisperRsStt` but needs no native
 /// build deps.
+#[derive(Default)]
 pub struct SidecarStt {
     /// Reserved for future configuration (model name, beam size, …).
     _placeholder: (),
-}
-
-impl Default for SidecarStt {
-    fn default() -> Self {
-        Self { _placeholder: () }
-    }
 }
 
 impl SidecarStt {

@@ -9,7 +9,7 @@
 
 mod common;
 
-use common::{assert_tool_success, internet_available};
+use common::internet_available;
 use kria_core::agent::router::{Intent, IntentRouter};
 use kria_core::safety::policy::{PolicyEngine, RiskLevel};
 use kria_core::tools::registry;
@@ -71,9 +71,9 @@ fn routing_net01_web_search_routes_correctly() {
     for p in &prompts {
         let r = IntentRouter::classify(p);
         assert!(
-            matches!(&r.intent, Intent::DirectTool(t) if matches!(t.as_str(), "web_search" | "searxng_search"))
+            matches!(&r.intent, Intent::DirectTool(t) if matches!(t.as_str(), "web_search" | "searxng_search" | "browser_search"))
                 || matches!(r.intent, Intent::ComplexTask),
-            "'{p}' should route to web_search/searxng_search, got: {:?}",
+            "'{p}' should route to web_search/searxng_search/browser_search, got: {:?}",
             r.intent
         );
     }
@@ -324,6 +324,7 @@ async fn functional_net03_check_url_status_google() {
     if result.success {
         let status = result.data["status_code"]
             .as_u64()
+            .or(result.data["status"].as_u64())
             .or(result.data["code"].as_u64())
             .unwrap_or(0);
         assert!(

@@ -20,6 +20,7 @@ pub struct RouterTrace {
 }
 
 impl RouterTrace {
+    #[allow(clippy::too_many_arguments)]
     pub fn from_parts(
         input_text: &str,
         modality: &super::verbs::ModalityResult,

@@ -6,6 +6,7 @@
 
 pub mod child_guard;
 pub mod gpu_watchdog;
+pub mod runtime;
 pub mod server_manager;
 pub mod strategy;
 pub mod telemetry;
@@ -14,12 +15,34 @@ pub mod tier_strategy;
 pub mod vision_strategy;
 pub mod vram_budget;
 
+pub use runtime::L1Runtime;
+pub use crate::resource::L1Residency;
+
 use crate::config::OrchestratorConfig;
 use crate::infra::event_bus::EventBus;
+use crate::infra::environment::remote_qemu::QemuSshEnvironment;
+use crate::infra::environment::{
+    CommandExecutor, CommandRequest, CommandResult, EnvironmentError, EnvironmentLifecycle,
+    FileSystemOps, ListDirRequest, ListDirResult, ReadFileRequest, ReadFileResult, ResetReason,
+    ShellState, WriteFileRequest, WriteFileResult,
+};
 use crate::infra::health::HealthRegistry;
-use std::sync::Arc;
+use crate::infra::pool::{LeaseHandle, PoolTelemetryPacket, TargetPool};
+use crate::infra::qos::{QosAdaptationDecision, QosAdaptationPacket};
+use crate::resource::{
+    GpuLeaseManager, GpuOwner, ImageRuntimeSnapshot, L1RuntimeSnapshot, LeaseToken,
+    RamSnapshot, RecoveryReason, ResourceSnapshot, VramSnapshot,
+};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
+
+fn is_router_mode_unavailable_error(err: &str) -> bool {
+    err.contains("Router Mode not supported")
+        || err.contains("Router Mode not active")
+        || err.contains("cached HTTP 404/501")
+}
 
 /// Which GPU backend is available on this platform.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,11 +108,436 @@ pub struct OrchestratorSnapshot {
     pub server_healthy: bool,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct L1ResidencyMetrics {
+    pub unload_latency_ms: u64,
+    pub load_latency_ms: u64,
+    pub slot_save_ok: bool,
+    pub slot_restore_ok: bool,
+}
+
+/// Intent surface for remote tool-calls backed by an environment provider.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RemoteToolCallIntent {
+    ExecuteCommand {
+        request: CommandRequest,
+        shell_state: ShellState,
+    },
+    ReadFile {
+        request: ReadFileRequest,
+    },
+    WriteFile {
+        request: WriteFileRequest,
+    },
+    ListDir {
+        request: ListDirRequest,
+    },
+}
+
+/// Result payload for a remote tool-call intent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RemoteToolCallOutcome {
+    Command(CommandResult),
+    ReadFile(ReadFileResult),
+    WriteFile(WriteFileResult),
+    ListDir(ListDirResult),
+}
+
+/// Stages emitted while handling EnvironmentResetRequired recovery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoteResetLifecycleStage {
+    AgentPaused,
+    ResetStarted,
+    ResetHealthy,
+    AgentResumed,
+}
+
+pub type RemoteResetLifecycleCallback =
+    Arc<dyn Fn(RemoteResetLifecycleStage, &str) + Send + Sync>;
+
+pub type RemoteInfraObservabilityCallback =
+    Arc<dyn Fn(RemoteInfraObservabilityEvent) + Send + Sync>;
+
+#[derive(Debug, Clone)]
+pub enum RemoteInfraObservabilityEvent {
+    PoolTelemetry(PoolTelemetryPacket),
+    QosAdaptation(QosAdaptationPacket),
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RemoteInfraObservabilityState {
+    pub latest_pool_packet: Option<PoolTelemetryPacket>,
+    pub latest_qos_adaptation: Option<QosAdaptationPacket>,
+    pub target_health_degraded: bool,
+    pub qos_pressure_active: bool,
+}
+
+impl RemoteInfraObservabilityState {
+    fn apply_event(&mut self, event: &RemoteInfraObservabilityEvent) {
+        match event {
+            RemoteInfraObservabilityEvent::PoolTelemetry(packet) => {
+                self.target_health_degraded = packet.tainted_targets > 0 || packet.quarantined_targets > 0;
+                self.latest_pool_packet = Some(packet.clone());
+            }
+            RemoteInfraObservabilityEvent::QosAdaptation(packet) => {
+                match packet.decision {
+                    QosAdaptationDecision::ThrottleLowMaintenance
+                    | QosAdaptationDecision::RejectLowMaintenance => {
+                        self.qos_pressure_active = true;
+                    }
+                    QosAdaptationDecision::ReleaseLowMaintenanceThrottle => {
+                        self.qos_pressure_active = false;
+                    }
+                    QosAdaptationDecision::PromoteMediumReconnect => {}
+                }
+                self.latest_qos_adaptation = Some(packet.clone());
+            }
+        }
+    }
+}
+
+pub type RemoteQemuToolBridge = RemoteEnvironmentToolBridge<QemuSshEnvironment>;
+
+/// Adapter that maps remote intents onto CommandExecutor/FileSystemOps and
+/// performs a single reset-and-retry cycle when EnvironmentResetRequired occurs.
+#[derive(Clone)]
+pub struct RemoteEnvironmentToolBridge<E>
+where
+    E: CommandExecutor + FileSystemOps + EnvironmentLifecycle + Send + Sync + 'static,
+{
+    environment: Arc<E>,
+    target_pool: Option<Arc<TargetPool>>,
+    on_reset_lifecycle: Arc<StdMutex<Option<RemoteResetLifecycleCallback>>>,
+    on_observability: Arc<StdMutex<Option<RemoteInfraObservabilityCallback>>>,
+    observability_state: Arc<StdMutex<RemoteInfraObservabilityState>>,
+}
+
+impl<E> RemoteEnvironmentToolBridge<E>
+where
+    E: CommandExecutor + FileSystemOps + EnvironmentLifecycle + Send + Sync + 'static,
+{
+    pub fn new(environment: Arc<E>) -> Self {
+        Self {
+            environment,
+            target_pool: None,
+            on_reset_lifecycle: Arc::new(StdMutex::new(None)),
+            on_observability: Arc::new(StdMutex::new(None)),
+            observability_state: Arc::new(StdMutex::new(RemoteInfraObservabilityState::default())),
+        }
+    }
+
+    pub fn with_reset_lifecycle_callback(mut self, callback: RemoteResetLifecycleCallback) -> Self {
+        self.set_reset_lifecycle_callback(Some(callback));
+        self
+    }
+
+    pub fn with_target_pool(mut self, target_pool: Arc<TargetPool>) -> Self {
+        self.target_pool = Some(Arc::clone(&target_pool));
+        self.register_pool_observability_callback(&target_pool);
+        self
+    }
+
+    pub fn with_observability_callback(
+        mut self,
+        callback: RemoteInfraObservabilityCallback,
+    ) -> Self {
+        self.set_observability_callback(Some(callback));
+        self
+    }
+
+    pub fn set_reset_lifecycle_callback(&mut self, callback: Option<RemoteResetLifecycleCallback>) {
+        *self
+            .on_reset_lifecycle
+            .lock()
+            .expect("remote bridge reset lifecycle lock poisoned") = callback;
+    }
+
+    pub fn set_observability_callback(&mut self, callback: Option<RemoteInfraObservabilityCallback>) {
+        *self
+            .on_observability
+            .lock()
+            .expect("remote bridge observability callback lock poisoned") = callback;
+    }
+
+    pub fn observability_snapshot(&self) -> RemoteInfraObservabilityState {
+        self.observability_state
+            .lock()
+            .expect("remote bridge observability state lock poisoned")
+            .clone()
+    }
+
+    pub async fn dispatch_tool_call(
+        &self,
+        intent: RemoteToolCallIntent,
+    ) -> Result<RemoteToolCallOutcome, EnvironmentError> {
+        let retry_intent = intent.clone();
+        let mut active_lease = self.acquire_verified_pool_lease().await?;
+
+        let outcome = match self.dispatch_once(intent, active_lease.as_ref()).await {
+            Ok(outcome) => Ok(outcome),
+            Err(EnvironmentError::EnvironmentResetRequired { reason }) => {
+                self.emit_reset_stage(RemoteResetLifecycleStage::AgentPaused, &reason);
+                self.emit_reset_stage(RemoteResetLifecycleStage::ResetStarted, &reason);
+
+                let reset_reason = Self::classify_reset_reason(&reason);
+                self.handle_reset_recovery(reset_reason, &mut active_lease).await?;
+
+                self.emit_reset_stage(RemoteResetLifecycleStage::ResetHealthy, &reason);
+                let retry = self.dispatch_once(retry_intent, active_lease.as_ref()).await;
+                self.emit_reset_stage(RemoteResetLifecycleStage::AgentResumed, &reason);
+                retry
+            }
+            Err(error) => Err(error),
+        };
+
+        self.release_pool_lease(active_lease).await;
+        outcome
+    }
+
+    async fn dispatch_once(
+        &self,
+        intent: RemoteToolCallIntent,
+        active_lease: Option<&LeaseHandle>,
+    ) -> Result<RemoteToolCallOutcome, EnvironmentError> {
+        if let Some(pool) = &self.target_pool {
+            let lease = active_lease.ok_or_else(|| EnvironmentError::EnvironmentResetRequired {
+                reason: "no lease, no dispatch invariant violation".to_string(),
+            })?;
+            let environment = pool.environment_for_lease(lease).await?;
+            let outcome = Self::dispatch_intent_to_environment(environment.as_ref(), intent).await;
+            self.sync_pool_observability(pool);
+            return outcome;
+        }
+
+        Self::dispatch_intent_to_environment(self.environment.as_ref(), intent).await
+    }
+
+    async fn dispatch_intent_to_environment<T>(
+        environment: &T,
+        intent: RemoteToolCallIntent,
+    ) -> Result<RemoteToolCallOutcome, EnvironmentError>
+    where
+        T: CommandExecutor + FileSystemOps + Send + Sync + ?Sized,
+    {
+        match intent {
+            RemoteToolCallIntent::ExecuteCommand {
+                request,
+                shell_state,
+            } => environment
+                .execute_command(request, shell_state)
+                .await
+                .map(RemoteToolCallOutcome::Command),
+            RemoteToolCallIntent::ReadFile { request } => environment
+                .read_file(request)
+                .await
+                .map(RemoteToolCallOutcome::ReadFile),
+            RemoteToolCallIntent::WriteFile { request } => environment
+                .write_file(request)
+                .await
+                .map(RemoteToolCallOutcome::WriteFile),
+            RemoteToolCallIntent::ListDir { request } => environment
+                .list_dir(request)
+                .await
+                .map(RemoteToolCallOutcome::ListDir),
+        }
+    }
+
+    async fn acquire_verified_pool_lease(&self) -> Result<Option<LeaseHandle>, EnvironmentError> {
+        let Some(pool) = &self.target_pool else {
+            return Ok(None);
+        };
+
+        let lease = pool.acquire_lease().await?;
+        let renewed = pool.heartbeat(&lease.lease_id).await?;
+        self.sync_pool_observability(pool);
+        Ok(Some(renewed))
+    }
+
+    async fn release_pool_lease(&self, active_lease: Option<LeaseHandle>) {
+        let Some(pool) = &self.target_pool else {
+            return;
+        };
+
+        if let Some(lease) = active_lease {
+            if let Err(error) = pool.release_lease(&lease.lease_id).await {
+                tracing::warn!(
+                    error = %error,
+                    lease_id = %lease.lease_id.0,
+                    "remote bridge: failed to release lease after dispatch"
+                );
+            }
+            self.sync_pool_observability(pool);
+        }
+    }
+
+    async fn handle_reset_recovery(
+        &self,
+        reset_reason: ResetReason,
+        active_lease: &mut Option<LeaseHandle>,
+    ) -> Result<(), EnvironmentError> {
+        if let Some(pool) = &self.target_pool {
+            let lease = active_lease
+                .clone()
+                .ok_or_else(|| EnvironmentError::EnvironmentResetRequired {
+                    reason: "recovery requested without an active pool lease".to_string(),
+                })?;
+            let environment = pool.environment_for_lease(&lease).await?;
+
+            Self::run_fail_closed_reset(environment.as_ref(), reset_reason).await?;
+            environment.ensure_ready().await?;
+
+            // RFC-005 recovery: renew lease after reset before replaying the tool call.
+            let renewed = match pool.heartbeat(&lease.lease_id).await {
+                Ok(renewed) => renewed,
+                Err(_) => {
+                    let lease = pool.acquire_lease().await?;
+                    pool.heartbeat(&lease.lease_id).await?
+                }
+            };
+
+            *active_lease = Some(renewed);
+            self.sync_pool_observability(pool);
+            return Ok(());
+        }
+
+        Self::run_fail_closed_reset(self.environment.as_ref(), reset_reason).await?;
+        self.environment.ensure_ready().await
+    }
+
+    async fn run_fail_closed_reset<T>(
+        environment: &T,
+        reset_reason: ResetReason,
+    ) -> Result<(), EnvironmentError>
+    where
+        T: EnvironmentLifecycle + ?Sized,
+    {
+        match environment.reset_environment(reset_reason).await {
+            Ok(()) => Ok(()),
+            Err(primary_error) => {
+                tracing::warn!(
+                    error = %primary_error,
+                    "remote bridge: reset failed; enforcing fail-closed hard reprovision"
+                );
+
+                environment
+                    .reset_environment(ResetReason::RuntimeFailure)
+                    .await
+                    .map_err(|fallback_error| EnvironmentError::EnvironmentResetFailed {
+                        reason: "orchestrator_fail_closed_recovery".to_string(),
+                        details: format!(
+                            "primary_reset_error={primary_error}; hard_reprovision_error={fallback_error}"
+                        ),
+                    })
+            }
+        }
+    }
+
+    fn register_pool_observability_callback(&self, pool: &Arc<TargetPool>) {
+        let state = Arc::clone(&self.observability_state);
+        let callback = Arc::clone(&self.on_observability);
+
+        pool.register_telemetry_callback(Arc::new(move |packet| {
+            Self::publish_observability_event(
+                &state,
+                &callback,
+                RemoteInfraObservabilityEvent::PoolTelemetry(packet),
+            );
+        }));
+    }
+
+    fn sync_pool_observability(&self, pool: &Arc<TargetPool>) {
+        if let Some(packet) = pool.latest_telemetry_packet() {
+            self.emit_observability_event(RemoteInfraObservabilityEvent::PoolTelemetry(packet));
+        }
+
+        if let Some(adaptation) = pool.qos_adaptation_snapshot(1).into_iter().next() {
+            self.emit_observability_event(RemoteInfraObservabilityEvent::QosAdaptation(adaptation));
+        }
+    }
+
+    fn emit_observability_event(&self, event: RemoteInfraObservabilityEvent) {
+        Self::publish_observability_event(
+            &self.observability_state,
+            &self.on_observability,
+            event,
+        );
+    }
+
+    fn publish_observability_event(
+        state: &Arc<StdMutex<RemoteInfraObservabilityState>>,
+        callback_store: &Arc<StdMutex<Option<RemoteInfraObservabilityCallback>>>,
+        event: RemoteInfraObservabilityEvent,
+    ) {
+        {
+            let mut guard = state
+                .lock()
+                .expect("remote bridge observability state lock poisoned");
+            guard.apply_event(&event);
+        }
+
+        let callback = callback_store
+            .lock()
+            .expect("remote bridge observability callback lock poisoned")
+            .clone();
+        if let Some(callback) = callback {
+            callback(event.clone());
+        }
+
+        match &event {
+            RemoteInfraObservabilityEvent::PoolTelemetry(packet) => {
+                let payload = serde_json::to_string(packet)
+                    .unwrap_or_else(|error| format!("telemetry_error:{error}"));
+                tracing::info!(
+                    target: "kria_orchestrator",
+                    packet = %payload,
+                    "orchestrator_pool_telemetry"
+                );
+            }
+            RemoteInfraObservabilityEvent::QosAdaptation(packet) => {
+                let payload = serde_json::to_string(packet)
+                    .unwrap_or_else(|error| format!("telemetry_error:{error}"));
+                tracing::info!(
+                    target: "kria_orchestrator",
+                    packet = %payload,
+                    "orchestrator_qos_adaptation"
+                );
+            }
+        }
+    }
+
+    fn emit_reset_stage(&self, stage: RemoteResetLifecycleStage, reason: &str) {
+        let callback = self
+            .on_reset_lifecycle
+            .lock()
+            .expect("remote bridge reset lifecycle lock poisoned")
+            .clone();
+
+        if let Some(callback) = callback {
+            callback(stage, reason);
+        }
+    }
+
+    fn classify_reset_reason(reason: &str) -> ResetReason {
+        let lower = reason.to_ascii_lowercase();
+        if lower.contains("resource") || lower.contains("fd") || lower.contains("disk") {
+            ResetReason::ResourceExhaustion
+        } else if lower.contains("policy") {
+            ResetReason::Policy
+        } else if lower.contains("manual") {
+            ResetReason::Manual
+        } else {
+            ResetReason::RuntimeFailure
+        }
+    }
+}
+
 /// Top-level orchestrator that wires telemetry → watchdog → server_manager.
 pub struct Orchestrator {
     pub config: OrchestratorConfig,
     pub backend: GpuBackend,
     pub server_manager: Arc<server_manager::LlamaServerManager>,
+    gpu_lease: Arc<GpuLeaseManager>,
+    l1_lease_token: StdMutex<Option<LeaseToken>>,
     telemetry: Arc<dyn telemetry::GpuTelemetry>,
     event_bus: Arc<EventBus>,
     health: Arc<HealthRegistry>,
@@ -99,6 +547,12 @@ pub struct Orchestrator {
     /// Total VRAM detected at boot. Used by the watchdog for dynamic
     /// threshold scaling (Phase 1). Zero on CPU-only backends.
     total_vram_mb: u64,
+    last_unload_latency_ms: AtomicU64,
+    last_load_latency_ms: AtomicU64,
+    last_slot_save_ok: AtomicBool,
+    last_slot_restore_ok: AtomicBool,
+    remote_tool_bridge: StdMutex<Option<Arc<RemoteQemuToolBridge>>>,
+    remote_infra_observability: Arc<StdMutex<RemoteInfraObservabilityState>>,
     /// Keeps the TelemetryActor OS thread alive for the duration of the
     /// orchestrator's lifetime. Drop order: actor is dropped after watchdog.
     _telemetry_actor: Option<telemetry::TelemetryActor>,
@@ -117,12 +571,30 @@ impl Orchestrator {
         event_bus: Arc<EventBus>,
         health: Arc<HealthRegistry>,
     ) -> anyhow::Result<Arc<Self>> {
+        health.register("llama-server");
+        health.register("orchestrator");
+        health.update(
+            "orchestrator",
+            crate::infra::health::ServiceStatus::Starting,
+            Some("detecting GPU backend".into()),
+        );
+        health.update(
+            "llama-server",
+            crate::infra::health::ServiceStatus::Starting,
+            Some("awaiting spawn parameters".into()),
+        );
+
         // GpuBackend::detect() calls nvidia-smi (a subprocess) when NVML is
         // unavailable. Wrap in spawn_blocking so we never block a Tokio worker.
         let backend = tokio::task::spawn_blocking(GpuBackend::detect)
             .await
             .unwrap_or(GpuBackend::CpuOnly);
         tracing::info!(?backend, "orchestrator: detected GPU backend");
+        health.update(
+            "orchestrator",
+            crate::infra::health::ServiceStatus::Starting,
+            Some(format!("GPU backend detected: {:?}", backend)),
+        );
 
         // Start the TelemetryActor: a dedicated OS thread that owns NVML/sysinfo
         // and publishes snapshots via a watch channel. All async consumers read
@@ -133,6 +605,11 @@ impl Orchestrator {
         })
         .await
         .expect("telemetry actor thread spawn failed");
+        health.update(
+            "orchestrator",
+            crate::infra::health::ServiceStatus::Starting,
+            Some(format!("Telemetry online ({})", telemetry.source_name())),
+        );
 
         // Calculate initial parameters from pre-spawn telemetry
         let initial_snapshot = telemetry.snapshot().await;
@@ -158,26 +635,46 @@ impl Orchestrator {
             mmproj_path,
         ));
 
-        server_manager
+        health.update(
+            "llama-server",
+            crate::infra::health::ServiceStatus::Starting,
+            Some(format!(
+                "Spawning llama-server (ngl={}, ctx={})",
+                initial_params.ngl, initial_params.context
+            )),
+        );
+
+        if let Err(e) = server_manager
             .spawn(
                 initial_params.ngl,
                 initial_params.context,
                 initial_params.vision_mode,
                 event_bus.clone(),
             )
-            .await?;
+            .await
+        {
+            health.update(
+                "llama-server",
+                crate::infra::health::ServiceStatus::Degraded,
+                Some(format!("startup spawn failed: {e}")),
+            );
+            health.update(
+                "orchestrator",
+                crate::infra::health::ServiceStatus::Degraded,
+                Some("startup aborted".into()),
+            );
+            return Err(e);
+        }
 
-        health.register("llama-server");
         health.update(
             "llama-server",
             crate::infra::health::ServiceStatus::Healthy,
-            None,
+            Some("Server ready (warming kernels)".into()),
         );
-        health.register("orchestrator");
         health.update(
             "orchestrator",
-            crate::infra::health::ServiceStatus::Healthy,
-            None,
+            crate::infra::health::ServiceStatus::Starting,
+            Some("Starting GPU watchdog".into()),
         );
 
         // Start the watchdog loop
@@ -193,11 +690,36 @@ impl Orchestrator {
         let watchdog_handle = tokio::spawn(async move {
             watchdog.run().await;
         });
+        health.update(
+            "orchestrator",
+            crate::infra::health::ServiceStatus::Healthy,
+            Some("Watchdog active".into()),
+        );
+
+        {
+            let warmup_manager = server_manager.clone();
+            let warmup_health = health.clone();
+            tokio::spawn(async move {
+                if let Err(e) = warmup_manager.run_warmup_completion().await {
+                    tracing::debug!(?e, "orchestrator: warmup prompt failed");
+                } else {
+                    warmup_health.update(
+                        "llama-server",
+                        crate::infra::health::ServiceStatus::Healthy,
+                        Some("Warmup completed".into()),
+                    );
+                }
+            });
+        }
+
+        let gpu_lease = Arc::new(GpuLeaseManager::default());
 
         let orchestrator = Arc::new(Self {
             config,
             backend,
             server_manager,
+            gpu_lease,
+            l1_lease_token: StdMutex::new(None),
             telemetry,
             event_bus,
             health,
@@ -205,8 +727,21 @@ impl Orchestrator {
             lifecycle_lock: Mutex::new(()),
             last_restart_at: Mutex::new(None),
             total_vram_mb,
+            last_unload_latency_ms: AtomicU64::new(0),
+            last_load_latency_ms: AtomicU64::new(0),
+            last_slot_save_ok: AtomicBool::new(false),
+            last_slot_restore_ok: AtomicBool::new(false),
+            remote_tool_bridge: StdMutex::new(None),
+            remote_infra_observability: Arc::new(StdMutex::new(RemoteInfraObservabilityState::default())),
             _telemetry_actor: Some(telemetry_actor),
         });
+
+        if initial_params.ngl > 0 {
+            orchestrator.claim_l1_lease("startup_initial_spawn");
+        }
+        orchestrator
+            .reconcile_l1_lease(initial_params.ngl > 0)
+            .await;
 
         Ok(orchestrator)
     }
@@ -224,6 +759,223 @@ impl Orchestrator {
         }
     }
 
+    pub fn set_remote_tool_bridge(&self, bridge: RemoteQemuToolBridge) {
+        let mut slot = self
+            .remote_tool_bridge
+            .lock()
+            .expect("remote tool bridge lock poisoned");
+        *slot = Some(Arc::new(bridge));
+    }
+
+    pub fn clear_remote_tool_bridge(&self) {
+        let mut slot = self
+            .remote_tool_bridge
+            .lock()
+            .expect("remote tool bridge lock poisoned");
+        *slot = None;
+    }
+
+    pub fn remote_infra_observability_snapshot(&self) -> RemoteInfraObservabilityState {
+        self.remote_infra_observability
+            .lock()
+            .expect("remote infra observability lock poisoned")
+            .clone()
+    }
+
+    pub async fn dispatch_remote_tool_call(
+        &self,
+        intent: RemoteToolCallIntent,
+    ) -> Result<RemoteToolCallOutcome, EnvironmentError> {
+        let bridge = self
+            .remote_tool_bridge
+            .lock()
+            .expect("remote tool bridge lock poisoned")
+            .clone()
+            .ok_or_else(|| EnvironmentError::ProviderUnavailable {
+                provider: "remote_tool_bridge".to_string(),
+                details: "RemoteEnvironmentToolBridge not configured".to_string(),
+            })?;
+
+        let outcome = bridge.dispatch_tool_call(intent).await;
+        self.update_remote_infra_observability(bridge.observability_snapshot());
+        outcome
+    }
+
+    fn update_remote_infra_observability(&self, snapshot: RemoteInfraObservabilityState) {
+        {
+            let mut state = self
+                .remote_infra_observability
+                .lock()
+                .expect("remote infra observability lock poisoned");
+            *state = snapshot.clone();
+        }
+
+        let degraded = snapshot.target_health_degraded || snapshot.qos_pressure_active;
+        let status = if degraded {
+            crate::infra::health::ServiceStatus::Degraded
+        } else {
+            crate::infra::health::ServiceStatus::Healthy
+        };
+
+        self.health.update(
+            "orchestrator",
+            status,
+            Some(Self::format_remote_infra_observability_message(&snapshot)),
+        );
+    }
+
+    fn format_remote_infra_observability_message(snapshot: &RemoteInfraObservabilityState) -> String {
+        let pool = snapshot.latest_pool_packet.as_ref().map_or_else(
+            || "pool=unavailable".to_string(),
+            |packet| {
+                format!(
+                    "pool[event={}, ready={}, leased={}, tainted={}, quarantined={}]",
+                    packet.event,
+                    packet.ready_targets,
+                    packet.leased_targets,
+                    packet.tainted_targets,
+                    packet.quarantined_targets,
+                )
+            },
+        );
+
+        let qos = snapshot.latest_qos_adaptation.as_ref().map_or_else(
+            || "qos=unavailable".to_string(),
+            |packet| {
+                format!(
+                    "qos[decision={:?}, high_wait_p95_ms={}, slo_ms={}]",
+                    packet.decision, packet.high_recovery_wait_p95_ms, packet.high_recovery_slo_ms
+                )
+            },
+        );
+
+        format!(
+            "{}; {}; target_health_degraded={}; qos_pressure_active={}",
+            pool,
+            qos,
+            snapshot.target_health_degraded,
+            snapshot.qos_pressure_active,
+        )
+    }
+
+    pub fn l1_residency(&self) -> L1Residency {
+        let state = self.server_manager.state();
+        let (ngl, _) = self.server_manager.current_params();
+
+        match state {
+            server_manager::STATE_STOPPED => L1Residency::Stopped,
+            server_manager::STATE_STARTING => L1Residency::Starting,
+            server_manager::STATE_SWAPPING => {
+                if ngl == 0 {
+                    L1Residency::RamHotVramCold
+                } else {
+                    L1Residency::ReloadingGpu
+                }
+            }
+            server_manager::STATE_READY => {
+                if ngl > 0 {
+                    L1Residency::GpuHot
+                } else if self.backend == GpuBackend::Cuda {
+                    L1Residency::RamHotVramCold
+                } else {
+                    L1Residency::CpuResidentLegacy
+                }
+            }
+            server_manager::STATE_ERROR => L1Residency::Error,
+            _ => L1Residency::Error,
+        }
+    }
+
+    pub fn residency_metrics(&self) -> L1ResidencyMetrics {
+        L1ResidencyMetrics {
+            unload_latency_ms: self.last_unload_latency_ms.load(Ordering::Acquire),
+            load_latency_ms: self.last_load_latency_ms.load(Ordering::Acquire),
+            slot_save_ok: self.last_slot_save_ok.load(Ordering::Acquire),
+            slot_restore_ok: self.last_slot_restore_ok.load(Ordering::Acquire),
+        }
+    }
+
+    fn record_slot_save(&self, ok: bool) {
+        self.last_slot_save_ok.store(ok, Ordering::Release);
+    }
+
+    fn record_slot_restore(&self, ok: bool) {
+        self.last_slot_restore_ok.store(ok, Ordering::Release);
+    }
+
+    fn claim_l1_lease(&self, turn_label: &str) {
+        let mut lock = self
+            .l1_lease_token
+            .lock()
+            .expect("l1 lease token lock poisoned");
+
+        if let Some(token) = lock.as_ref() {
+            if self.gpu_lease.refresh(token, Some(Duration::from_secs(300))) {
+                return;
+            }
+        }
+
+        match self.gpu_lease.acquire_token(
+            GpuOwner::L1Worker,
+            turn_label,
+            Some(Duration::from_secs(300)),
+        ) {
+            Ok(token) => {
+                *lock = Some(token);
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "orchestrator: failed to claim L1 GPU lease");
+            }
+        }
+    }
+
+    fn release_l1_lease(&self, reason: RecoveryReason) {
+        let mut lock = self
+            .l1_lease_token
+            .lock()
+            .expect("l1 lease token lock poisoned");
+        if let Some(token) = lock.take() {
+            let _ = self.gpu_lease.release_token(&token, reason);
+        }
+    }
+
+    async fn build_resource_snapshot(&self, l1_gpu_resident_hint: bool) -> ResourceSnapshot {
+        let telemetry = self.telemetry.snapshot().await;
+        let live_process = self.server_manager.has_live_process().await;
+        let l1_gpu_resident = live_process && l1_gpu_resident_hint;
+
+        let mut sys = sysinfo::System::new();
+        sys.refresh_memory();
+
+        ResourceSnapshot {
+            vram: VramSnapshot {
+                free_mb: telemetry.free_vram_mb,
+                total_mb: telemetry.total_vram_mb,
+                used_mb: telemetry.total_vram_mb.saturating_sub(telemetry.free_vram_mb),
+            },
+            ram: RamSnapshot {
+                total_mb: sys.total_memory() / (1024 * 1024),
+                free_mb: sys.available_memory() / (1024 * 1024),
+            },
+            l1: L1RuntimeSnapshot {
+                residency: self.l1_residency(),
+                process_id: None,
+            },
+            image: ImageRuntimeSnapshot {
+                backend_id: "comfy_ui".to_string(),
+                is_generating: l1_gpu_resident,
+                process_id: None,
+            },
+            processes: Vec::new(),
+            sampled_at: Instant::now(),
+        }
+    }
+
+    async fn reconcile_l1_lease(&self, l1_gpu_resident: bool) {
+        let snapshot = self.build_resource_snapshot(l1_gpu_resident).await;
+        self.gpu_lease.reconcile(&snapshot);
+    }
+
     /// Get the current API URL of the running llama-server.
     pub fn api_url(&self) -> String {
         self.server_manager.api_url()
@@ -234,6 +986,7 @@ impl Orchestrator {
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
         tracing::info!("orchestrator: shutting down");
         self.stop_watchdog().await;
+        self.release_l1_lease(RecoveryReason::ShutdownRequested);
 
         self.server_manager
             .graceful_stop_with_timeout(Duration::from_secs(
@@ -247,6 +1000,8 @@ impl Orchestrator {
             ))
             .await;
         }
+
+        self.reconcile_l1_lease(false).await;
 
         self.health.update(
             "llama-server",
@@ -376,6 +1131,14 @@ impl Orchestrator {
 
         match restart_result {
             Ok(()) => {
+                let (ngl, _) = self.server_manager.current_params();
+                if ngl > 0 {
+                    self.claim_l1_lease("restart");
+                } else {
+                    self.release_l1_lease(RecoveryReason::OwnerReleaseRequested);
+                }
+                self.reconcile_l1_lease(ngl > 0).await;
+
                 self.health.update(
                     "llama-server",
                     crate::infra::health::ServiceStatus::Healthy,
@@ -414,9 +1177,70 @@ impl Orchestrator {
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
 
         let has_live_process = self.server_manager.has_live_process().await;
-        if has_live_process && self.server_manager.is_healthy() {
+        let (current_ngl, current_ctx) = self.server_manager.current_params();
+
+        if has_live_process && self.server_manager.is_healthy() && current_ngl > 0 {
+            self.claim_l1_lease("ensure_ready_fast_path");
+            self.reconcile_l1_lease(true).await;
             self.ensure_watchdog_running().await;
             return Ok(());
+        }
+
+        let suspended = has_live_process && current_ngl == 0;
+
+        if suspended {
+            tracing::info!(
+                reason,
+                state = self.server_manager.state(),
+                "orchestrator: restoring idle-suspended runtime via API reload"
+            );
+            self.health.update(
+                "llama-server",
+                crate::infra::health::ServiceStatus::Starting,
+                Some("restoring idle-suspended model".into()),
+            );
+            let load_started = Instant::now();
+            match self.server_manager.api_load_model().await {
+                Ok(()) => {
+                    self.last_load_latency_ms
+                        .store(load_started.elapsed().as_millis() as u64, Ordering::Release);
+                    let slot_restore_ok = self.server_manager.restore_active_slot().await;
+                    self.record_slot_restore(slot_restore_ok);
+                    tracing::debug!(
+                        slot_restore_ok,
+                        load_latency_ms = self.last_load_latency_ms.load(Ordering::Acquire),
+                        "orchestrator: idle resume slot restore status"
+                    );
+                    self.claim_l1_lease("ensure_ready_idle_resume");
+                    self.reconcile_l1_lease(true).await;
+                    self.health.update(
+                        "llama-server",
+                        crate::infra::health::ServiceStatus::Healthy,
+                        Some("idle resume complete".into()),
+                    );
+                    self.health.update(
+                        "orchestrator",
+                        crate::infra::health::ServiceStatus::Healthy,
+                        None,
+                    );
+                    self.ensure_watchdog_running().await;
+                    return Ok(());
+                }
+                Err(e) => {
+                    let e_text = e.to_string();
+                    if is_router_mode_unavailable_error(&e_text) {
+                        tracing::info!(
+                            error = %e,
+                            "orchestrator: API idle resume unavailable on this llama-server; using legacy restart path"
+                        );
+                    } else {
+                        tracing::warn!(
+                            error = %e,
+                            "orchestrator: API idle resume failed; falling back to restart"
+                        );
+                    }
+                }
+            }
         }
 
         tracing::info!(
@@ -437,7 +1261,8 @@ impl Orchestrator {
             Some("starting local LLM runtime".into()),
         );
 
-        let (previous_ngl, previous_ctx) = self.server_manager.current_params();
+        let previous_ngl = current_ngl;
+        let previous_ctx = current_ctx;
         if has_live_process || self.server_manager.state() != server_manager::STATE_STOPPED {
             self.server_manager
                 .graceful_stop_with_timeout(Duration::from_secs(
@@ -520,6 +1345,14 @@ impl Orchestrator {
 
         match ensure_result {
             Ok(()) => {
+                let (ngl, _) = self.server_manager.current_params();
+                if ngl > 0 {
+                    self.claim_l1_lease("ensure_ready");
+                } else {
+                    self.release_l1_lease(RecoveryReason::OwnerReleaseRequested);
+                }
+                self.reconcile_l1_lease(ngl > 0).await;
+
                 self.health.update(
                     "llama-server",
                     crate::infra::health::ServiceStatus::Healthy,
@@ -557,17 +1390,56 @@ impl Orchestrator {
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
 
         if !self.server_manager.has_live_process().await {
+            self.release_l1_lease(RecoveryReason::OwnerReleaseRequested);
+            self.reconcile_l1_lease(false).await;
             return Ok(false);
         }
 
         tracing::info!(reason, "orchestrator: idle release requested");
         self.stop_watchdog().await;
 
+        let slot_save_ok = self.server_manager.save_active_slot().await;
+        self.record_slot_save(slot_save_ok);
+
+        let unload_started = Instant::now();
+
+        match self.server_manager.api_unload_model().await {
+            Ok(()) => {
+                self.last_unload_latency_ms
+                    .store(unload_started.elapsed().as_millis() as u64, Ordering::Release);
+                self.release_l1_lease(RecoveryReason::OwnerReleaseRequested);
+                self.reconcile_l1_lease(false).await;
+                tracing::debug!(
+                    slot_save_ok,
+                    unload_latency_ms = self.last_unload_latency_ms.load(Ordering::Acquire),
+                    "orchestrator: idle release metrics"
+                );
+                self.health.update(
+                    "llama-server",
+                    crate::infra::health::ServiceStatus::Degraded,
+                    Some("idle suspended (model unloaded)".into()),
+                );
+                self.health.update(
+                    "orchestrator",
+                    crate::infra::health::ServiceStatus::Healthy,
+                    Some("idle release active (process alive)".into()),
+                );
+                return Ok(true);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    ?e,
+                    "orchestrator: idle API unload failed, falling back to process stop"
+                );
+            }
+        }
+
         self.server_manager
             .graceful_stop_with_timeout(Duration::from_secs(
                 self.config.graceful_stop_timeout_secs.max(1),
             ))
             .await;
+        self.release_l1_lease(RecoveryReason::OwnerReleaseRequested);
 
         if self.backend == GpuBackend::Cuda {
             self.wait_for_vram_release_bounded(Duration::from_secs(
@@ -575,6 +1447,7 @@ impl Orchestrator {
             ))
             .await;
         }
+        self.reconcile_l1_lease(false).await;
 
         self.health.update(
             "llama-server",
@@ -657,10 +1530,6 @@ impl Orchestrator {
     // server is started with `--parallel 1` (the orchestrator's default for
     // single-user assistants) this is the only slot that exists.
 
-    /// Filename used inside `--slot-save-path` for Tier B context snapshots.
-    const SWAP_SLOT_FILENAME: &'static str = "kria_tier_b.bin";
-    const SWAP_SLOT_ID: u32 = 0;
-
     /// Evict the LLM model from VRAM to free GPU for ComfyUI.
     ///
     /// **Preferred path (zero-downtime):** API-level unload via Router Mode.
@@ -668,12 +1537,14 @@ impl Orchestrator {
     ///
     /// **Fallback path (legacy):** SIGTERM/SIGKILL + respawn with ngl=0.
     /// Used when Router Mode is unavailable (HTTP 404/501).
-    pub async fn evict_to_cpu(&self) -> anyhow::Result<()> {
+    pub async fn evict_to_ram(&self) -> anyhow::Result<()> {
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
 
         let (prior_ngl, prior_ctx) = self.server_manager.current_params();
         if prior_ngl == 0 {
             tracing::info!("orchestrator: evict_to_cpu no-op (already CPU-resident)");
+            self.release_l1_lease(RecoveryReason::OwnerReleaseRequested);
+            self.reconcile_l1_lease(false).await;
             return Ok(());
         }
 
@@ -688,10 +1559,8 @@ impl Orchestrator {
         self.stop_watchdog().await;
 
         // Best-effort: snapshot conversational context.
-        let _ = self
-            .server_manager
-            .save_slot_kv(Self::SWAP_SLOT_ID, Self::SWAP_SLOT_FILENAME)
-            .await;
+        let slot_save_ok = self.server_manager.save_active_slot().await;
+        self.record_slot_save(slot_save_ok);
 
         self.health.update(
             "llama-server",
@@ -700,29 +1569,44 @@ impl Orchestrator {
         );
 
         // ── Try API-level unload first (zero-downtime path) ──────────────
+        let unload_started = Instant::now();
         match self.server_manager.api_unload_model().await {
             Ok(()) => {
+                self.last_unload_latency_ms
+                    .store(unload_started.elapsed().as_millis() as u64, Ordering::Release);
+                self.release_l1_lease(RecoveryReason::OwnerReleaseRequested);
+                self.reconcile_l1_lease(false).await;
                 tracing::info!(
                     prior_ngl,
                     "orchestrator: Tier B eviction complete via API unload \
                      (process alive, VRAM freed, zero-downtime)"
                 );
+                tracing::debug!(
+                    slot_save_ok,
+                    unload_latency_ms = self.last_unload_latency_ms.load(Ordering::Acquire),
+                    "orchestrator: Tier B eviction metrics"
+                );
                 self.health.update(
                     "llama-server",
-                    crate::infra::health::ServiceStatus::Healthy,
+                    crate::infra::health::ServiceStatus::Degraded,
                     Some("Tier B: model unloaded via API".into()),
                 );
                 return Ok(());
             }
             Err(api_err) => {
-                // THIS is the diagnostic the user needs to see in logs.
-                tracing::error!(
-                    error = %api_err,
-                    "orchestrator: API-level model unload FAILED — \
-                     falling back to legacy SIGTERM/SIGKILL process restart. \
-                     To enable zero-downtime swaps, upgrade llama-server to \
-                     b5291+ and launch with --models-dir instead of --model."
-                );
+                let api_err_text = api_err.to_string();
+                if is_router_mode_unavailable_error(&api_err_text) {
+                    tracing::info!(
+                        error = %api_err,
+                        "orchestrator: API-level model unload unavailable on this llama-server; using legacy restart path"
+                    );
+                } else {
+                    tracing::error!(
+                        error = %api_err,
+                        "orchestrator: API-level model unload FAILED — \
+                         falling back to legacy SIGTERM/SIGKILL process restart."
+                    );
+                }
             }
         }
 
@@ -777,10 +1661,11 @@ impl Orchestrator {
             .map_err(|e| anyhow::anyhow!("CPU-mode spawn failed: {e}"))?;
 
         // Best-effort: rehydrate the conversation.
-        let _ = self
-            .server_manager
-            .restore_slot_kv(Self::SWAP_SLOT_ID, Self::SWAP_SLOT_FILENAME)
-            .await;
+        let slot_restore_ok = self.server_manager.restore_active_slot().await;
+        self.record_slot_restore(slot_restore_ok);
+        self.release_l1_lease(RecoveryReason::OwnerReleaseRequested);
+        self.reconcile_l1_lease(false).await;
+        tracing::debug!(slot_restore_ok, "orchestrator: Tier B eviction restore status");
 
         self.health.update(
             "llama-server",
@@ -796,10 +1681,14 @@ impl Orchestrator {
         Ok(())
     }
 
+    pub async fn evict_to_cpu(&self) -> anyhow::Result<()> {
+        self.evict_to_ram().await
+    }
+
     /// Inverse of `evict_to_cpu`: hard-restart llama-server back onto the GPU
     /// using the strategy calculator's freshly-recomputed `(ngl, ctx)` based
     /// on currently-free VRAM. Best-effort restores the swap slot.
-    pub async fn restore_from_cpu(&self) -> anyhow::Result<()> {
+    pub async fn reload_to_vram(&self) -> anyhow::Result<()> {
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
 
         let (current_ngl, current_ctx) = self.server_manager.current_params();
@@ -808,6 +1697,8 @@ impl Orchestrator {
                 current_ngl,
                 "orchestrator: restore_from_cpu no-op (already on GPU)"
             );
+            self.claim_l1_lease("tier_b_restore_noop");
+            self.reconcile_l1_lease(true).await;
             return Ok(());
         }
 
@@ -822,12 +1713,15 @@ impl Orchestrator {
         );
 
         // Preferred path: API-level reload (zero-downtime, no process restart).
+        let load_started = Instant::now();
         match self.server_manager.api_load_model().await {
             Ok(()) => {
-                let _ = self
-                    .server_manager
-                    .restore_slot_kv(Self::SWAP_SLOT_ID, Self::SWAP_SLOT_FILENAME)
-                    .await;
+                self.last_load_latency_ms
+                    .store(load_started.elapsed().as_millis() as u64, Ordering::Release);
+                let slot_restore_ok = self.server_manager.restore_active_slot().await;
+                self.record_slot_restore(slot_restore_ok);
+                self.claim_l1_lease("tier_b_restore_api");
+                self.reconcile_l1_lease(true).await;
 
                 self.health.update(
                     "llama-server",
@@ -836,22 +1730,33 @@ impl Orchestrator {
                 );
                 self.ensure_watchdog_running().await;
 
+                tracing::debug!(
+                    slot_restore_ok,
+                    load_latency_ms = self.last_load_latency_ms.load(Ordering::Acquire),
+                    "orchestrator: Tier B restore API metrics"
+                );
                 tracing::info!("orchestrator: Tier B restore complete via API load");
                 return Ok(());
             }
             Err(api_err) => {
-                tracing::warn!(
-                    error = %api_err,
-                    "orchestrator: API-level model load failed; falling back to legacy respawn"
-                );
+                let api_err_text = api_err.to_string();
+                if is_router_mode_unavailable_error(&api_err_text) {
+                    tracing::info!(
+                        error = %api_err,
+                        "orchestrator: API-level model load unavailable on this llama-server; using legacy respawn path"
+                    );
+                } else {
+                    tracing::warn!(
+                        error = %api_err,
+                        "orchestrator: API-level model load failed; falling back to legacy respawn"
+                    );
+                }
             }
         }
 
         // Legacy fallback path: graceful stop + fresh GPU spawn.
-        let _ = self
-            .server_manager
-            .save_slot_kv(Self::SWAP_SLOT_ID, Self::SWAP_SLOT_FILENAME)
-            .await;
+        let slot_save_ok = self.server_manager.save_active_slot().await;
+        self.record_slot_save(slot_save_ok);
 
         self.server_manager
             .graceful_stop_with_timeout(Duration::from_secs(
@@ -892,10 +1797,15 @@ impl Orchestrator {
             .await
             .map_err(|e| anyhow::anyhow!("GPU-mode respawn failed: {e}"))?;
 
-        let _ = self
-            .server_manager
-            .restore_slot_kv(Self::SWAP_SLOT_ID, Self::SWAP_SLOT_FILENAME)
-            .await;
+        let slot_restore_ok = self.server_manager.restore_active_slot().await;
+        self.record_slot_restore(slot_restore_ok);
+
+        if target.ngl > 0 {
+            self.claim_l1_lease("tier_b_restore_legacy");
+        } else {
+            self.release_l1_lease(RecoveryReason::OwnerReleaseRequested);
+        }
+        self.reconcile_l1_lease(target.ngl > 0).await;
 
         self.health.update(
             "llama-server",
@@ -910,6 +1820,57 @@ impl Orchestrator {
             "orchestrator: Tier B restore complete"
         );
         Ok(())
+    }
+
+    pub async fn restore_from_cpu(&self) -> anyhow::Result<()> {
+        self.reload_to_vram().await
+    }
+}
+
+#[async_trait::async_trait]
+impl runtime::L1Runtime for Orchestrator {
+    fn snapshot(&self) -> OrchestratorSnapshot {
+        Orchestrator::snapshot(self)
+    }
+
+    fn residency(&self) -> L1Residency {
+        Orchestrator::l1_residency(self)
+    }
+
+    fn residency_metrics(&self) -> L1ResidencyMetrics {
+        Orchestrator::residency_metrics(self)
+    }
+
+    async fn ensure_ready(&self, reason: &str) -> anyhow::Result<()> {
+        Orchestrator::ensure_ready(self, reason).await
+    }
+
+    async fn release_if_idle(&self, reason: &str) -> anyhow::Result<bool> {
+        Orchestrator::release_if_idle(self, reason).await
+    }
+
+    async fn evict_to_ram(&self) -> anyhow::Result<()> {
+        Orchestrator::evict_to_ram(self).await
+    }
+
+    async fn reload_to_vram(&self) -> anyhow::Result<()> {
+        Orchestrator::reload_to_vram(self).await
+    }
+
+    async fn evict_to_cpu(&self) -> anyhow::Result<()> {
+        Orchestrator::evict_to_cpu(self).await
+    }
+
+    async fn restore_from_cpu(&self) -> anyhow::Result<()> {
+        Orchestrator::restore_from_cpu(self).await
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::resource::ResourceTelemetry for Orchestrator {
+    async fn sample(&self) -> anyhow::Result<ResourceSnapshot> {
+        let (ngl, _) = self.server_manager.current_params();
+        Ok(self.build_resource_snapshot(ngl > 0).await)
     }
 }
 
@@ -947,7 +1908,14 @@ impl Drop for Orchestrator {
 mod tests {
     use super::*;
     use crate::infra::health::ServiceStatus;
+    use crate::resource::ResourceTelemetry;
     use async_trait::async_trait;
+    use std::collections::VecDeque;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+
+    fn assert_l1_runtime_impl<T: runtime::L1Runtime>() {}
+    fn assert_resource_telemetry_impl<T: ResourceTelemetry>() {}
 
     struct TestTelemetry;
 
@@ -979,6 +1947,8 @@ mod tests {
                 "/tmp/kria_missing_model.gguf".into(),
                 None,
             )),
+            gpu_lease: Arc::new(GpuLeaseManager::default()),
+            l1_lease_token: StdMutex::new(None),
             telemetry: Arc::new(TestTelemetry),
             event_bus: Arc::new(EventBus::new(16)),
             health,
@@ -986,7 +1956,114 @@ mod tests {
             lifecycle_lock: Mutex::new(()),
             last_restart_at: Mutex::new(None),
             total_vram_mb: 0,
+            last_unload_latency_ms: AtomicU64::new(0),
+            last_load_latency_ms: AtomicU64::new(0),
+            last_slot_save_ok: AtomicBool::new(false),
+            last_slot_restore_ok: AtomicBool::new(false),
+            remote_tool_bridge: StdMutex::new(None),
+            remote_infra_observability: Arc::new(StdMutex::new(RemoteInfraObservabilityState::default())),
             _telemetry_actor: None,
+        }
+    }
+
+    #[derive(Default)]
+    struct MockEnvironment {
+        command_outcomes: Mutex<VecDeque<Result<CommandResult, EnvironmentError>>>,
+        read_result: Mutex<Option<Result<ReadFileResult, EnvironmentError>>>,
+        write_result: Mutex<Option<Result<WriteFileResult, EnvironmentError>>>,
+        list_result: Mutex<Option<Result<ListDirResult, EnvironmentError>>>,
+        reset_calls: AtomicUsize,
+        ensure_calls: AtomicUsize,
+    }
+
+    impl MockEnvironment {
+        async fn push_command_outcome(&self, outcome: Result<CommandResult, EnvironmentError>) {
+            self.command_outcomes.lock().await.push_back(outcome);
+        }
+
+        async fn set_read_result(&self, result: Result<ReadFileResult, EnvironmentError>) {
+            *self.read_result.lock().await = Some(result);
+        }
+
+        async fn set_write_result(&self, result: Result<WriteFileResult, EnvironmentError>) {
+            *self.write_result.lock().await = Some(result);
+        }
+
+        async fn set_list_result(&self, result: Result<ListDirResult, EnvironmentError>) {
+            *self.list_result.lock().await = Some(result);
+        }
+    }
+
+    #[async_trait]
+    impl CommandExecutor for MockEnvironment {
+        async fn execute_command(
+            &self,
+            _request: CommandRequest,
+            _shell_state_snapshot: ShellState,
+        ) -> Result<CommandResult, EnvironmentError> {
+            self.command_outcomes
+                .lock()
+                .await
+                .pop_front()
+                .unwrap_or_else(|| {
+                    Err(EnvironmentError::ProviderUnavailable {
+                        provider: "mock".to_string(),
+                        details: "missing command outcome".to_string(),
+                    })
+                })
+        }
+    }
+
+    #[async_trait]
+    impl FileSystemOps for MockEnvironment {
+        async fn read_file(
+            &self,
+            _request: ReadFileRequest,
+        ) -> Result<ReadFileResult, EnvironmentError> {
+            self.read_result.lock().await.take().unwrap_or_else(|| {
+                Err(EnvironmentError::ProviderUnavailable {
+                    provider: "mock".to_string(),
+                    details: "missing read_file result".to_string(),
+                })
+            })
+        }
+
+        async fn write_file(
+            &self,
+            _request: WriteFileRequest,
+        ) -> Result<WriteFileResult, EnvironmentError> {
+            self.write_result.lock().await.take().unwrap_or_else(|| {
+                Err(EnvironmentError::ProviderUnavailable {
+                    provider: "mock".to_string(),
+                    details: "missing write_file result".to_string(),
+                })
+            })
+        }
+
+        async fn list_dir(&self, _request: ListDirRequest) -> Result<ListDirResult, EnvironmentError> {
+            self.list_result.lock().await.take().unwrap_or_else(|| {
+                Err(EnvironmentError::ProviderUnavailable {
+                    provider: "mock".to_string(),
+                    details: "missing list_dir result".to_string(),
+                })
+            })
+        }
+    }
+
+    #[async_trait]
+    impl EnvironmentLifecycle for MockEnvironment {
+        async fn ensure_ready(&self) -> Result<(), EnvironmentError> {
+            self.ensure_calls.fetch_add(1, AtomicOrdering::AcqRel);
+            Ok(())
+        }
+
+        async fn reset_environment(&self, _reason: ResetReason) -> Result<(), EnvironmentError> {
+            self.reset_calls.fetch_add(1, AtomicOrdering::AcqRel);
+            Ok(())
+        }
+
+        async fn shutdown(&self) -> Result<(), EnvironmentError> {
+            Ok(())
         }
     }
 
@@ -1033,6 +2110,137 @@ mod tests {
                 .unwrap_or_default()
                 .contains("ensure_ready failed"),
             "llama health message should include ensure_ready failure context"
+        );
+    }
+
+    #[test]
+    fn orchestrator_implements_runtime_boundaries() {
+        assert_l1_runtime_impl::<Orchestrator>();
+        assert_resource_telemetry_impl::<Orchestrator>();
+    }
+
+    #[tokio::test]
+    async fn remote_tool_bridge_retries_once_after_reset_required() {
+        let env = Arc::new(MockEnvironment::default());
+        env.push_command_outcome(Err(EnvironmentError::EnvironmentResetRequired {
+            reason: "tainted generation".to_string(),
+        }))
+        .await;
+        env.push_command_outcome(Ok(CommandResult {
+            exit_code: 0,
+            stdout: "ok".to_string(),
+            stderr: String::new(),
+            truncated: false,
+        }))
+        .await;
+
+        let lifecycle_events = Arc::new(StdMutex::new(Vec::new()));
+        let event_sink = Arc::clone(&lifecycle_events);
+        let bridge = RemoteEnvironmentToolBridge::new(Arc::clone(&env)).with_reset_lifecycle_callback(
+            Arc::new(move |stage, reason| {
+                event_sink
+                    .lock()
+                    .expect("event sink lock poisoned")
+                    .push((stage, reason.to_string()));
+            }),
+        );
+
+        let outcome = bridge
+            .dispatch_tool_call(RemoteToolCallIntent::ExecuteCommand {
+                request: CommandRequest {
+                    program: "echo".to_string(),
+                    args: vec!["hello".to_string()],
+                    timeout_ms: 100,
+                    max_bytes: 4096,
+                    max_lines: 64,
+                },
+                shell_state: ShellState::default(),
+            })
+            .await
+            .expect("tool-call should succeed on single retry");
+
+        assert_eq!(
+            outcome,
+            RemoteToolCallOutcome::Command(CommandResult {
+                exit_code: 0,
+                stdout: "ok".to_string(),
+                stderr: String::new(),
+                truncated: false,
+            })
+        );
+        assert_eq!(env.reset_calls.load(AtomicOrdering::Acquire), 1);
+        assert_eq!(env.ensure_calls.load(AtomicOrdering::Acquire), 1);
+
+        let events = lifecycle_events
+            .lock()
+            .expect("event sink lock poisoned")
+            .clone();
+        assert_eq!(events.len(), 4);
+        assert_eq!(events[0].0, RemoteResetLifecycleStage::AgentPaused);
+        assert_eq!(events[1].0, RemoteResetLifecycleStage::ResetStarted);
+        assert_eq!(events[2].0, RemoteResetLifecycleStage::ResetHealthy);
+        assert_eq!(events[3].0, RemoteResetLifecycleStage::AgentResumed);
+    }
+
+    #[tokio::test]
+    async fn remote_tool_bridge_maps_filesystem_intents() {
+        let env = Arc::new(MockEnvironment::default());
+        env.set_read_result(Ok(ReadFileResult {
+            contents: b"abc".to_vec(),
+        }))
+        .await;
+        env.set_write_result(Ok(WriteFileResult { bytes_written: 3 }))
+            .await;
+        env.set_list_result(Ok(ListDirResult {
+            entries: vec![PathBuf::from("/tmp/a"), PathBuf::from("/tmp/b")],
+        }))
+        .await;
+
+        let bridge = RemoteEnvironmentToolBridge::new(env);
+
+        let read = bridge
+            .dispatch_tool_call(RemoteToolCallIntent::ReadFile {
+                request: ReadFileRequest {
+                    path: PathBuf::from("/tmp/input"),
+                },
+            })
+            .await
+            .expect("read_file intent should map into FileSystemOps::read_file");
+        assert_eq!(
+            read,
+            RemoteToolCallOutcome::ReadFile(ReadFileResult {
+                contents: b"abc".to_vec(),
+            })
+        );
+
+        let write = bridge
+            .dispatch_tool_call(RemoteToolCallIntent::WriteFile {
+                request: WriteFileRequest {
+                    path: PathBuf::from("/tmp/output"),
+                    contents: b"abc".to_vec(),
+                    create_parent: true,
+                },
+            })
+            .await
+            .expect("write_file intent should map into FileSystemOps::write_file");
+        assert_eq!(
+            write,
+            RemoteToolCallOutcome::WriteFile(WriteFileResult { bytes_written: 3 })
+        );
+
+        let list = bridge
+            .dispatch_tool_call(RemoteToolCallIntent::ListDir {
+                request: ListDirRequest {
+                    path: PathBuf::from("/tmp"),
+                },
+            })
+            .await
+            .expect("list_dir intent should map into FileSystemOps::list_dir");
+        assert_eq!(
+            list,
+            RemoteToolCallOutcome::ListDir(ListDirResult {
+                entries: vec![PathBuf::from("/tmp/a"), PathBuf::from("/tmp/b")],
+            })
         );
     }
 }

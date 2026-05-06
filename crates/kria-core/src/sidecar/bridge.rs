@@ -10,11 +10,13 @@ use tokio::sync::{oneshot, Mutex};
 use super::health::SidecarHealth;
 use super::protocol::{JsonRpcRequest, JsonRpcResponse};
 
+type PendingMap = Arc<Mutex<HashMap<u64, oneshot::Sender<JsonRpcResponse>>>>;
+
 /// Manages the Python sidecar process and JSON-RPC communication.
 pub struct SidecarBridge {
     child: Mutex<Option<Child>>,
     stdin: Mutex<Option<tokio::process::ChildStdin>>,
-    pending: Arc<Mutex<HashMap<u64, oneshot::Sender<JsonRpcResponse>>>>,
+    pending: PendingMap,
     next_id: AtomicU64,
     python_cmd: String,
     venv_path: Option<String>,
@@ -224,11 +226,10 @@ impl SidecarBridge {
 
                         match serde_json::from_str::<JsonRpcResponse>(trimmed) {
                             Ok(resp) => {
-                                if let Some(id) = resp.id {
-                                    let mut map = pending.lock().await;
-                                    if let Some(sender) = map.remove(&id) {
-                                        let _ = sender.send(resp);
-                                    }
+                                if !Self::dispatch_response(&pending, resp).await {
+                                    tracing::debug!(
+                                        "dropping stale sidecar response with no pending waiter"
+                                    );
                                 }
                             }
                             Err(e) => {
@@ -245,6 +246,11 @@ impl SidecarBridge {
                         break;
                     }
                 }
+            }
+
+            let drained = Self::drain_pending_waiters(&pending).await;
+            if drained > 0 {
+                tracing::warn!(drained, "sidecar reader exited; closed pending waiters");
             }
         });
 
@@ -289,8 +295,14 @@ impl SidecarBridge {
         {
             let mut stdin_guard = self.stdin.lock().await;
             if let Some(ref mut stdin) = *stdin_guard {
-                stdin.write_all(line.as_bytes()).await?;
-                stdin.flush().await?;
+                if let Err(e) = stdin.write_all(line.as_bytes()).await {
+                    self.pending.lock().await.remove(&id);
+                    return Err(e.into());
+                }
+                if let Err(e) = stdin.flush().await {
+                    self.pending.lock().await.remove(&id);
+                    return Err(e.into());
+                }
             } else {
                 self.pending.lock().await.remove(&id);
                 anyhow::bail!("sidecar stdin not available");
@@ -298,12 +310,40 @@ impl SidecarBridge {
         }
 
         // Wait for response with timeout
-        let resp = tokio::time::timeout(Duration::from_secs(120), rx)
-            .await
-            .map_err(|_| anyhow::anyhow!("sidecar request timed out after 120s"))?
-            .map_err(|_| anyhow::anyhow!("sidecar response channel closed"))?;
+        let resp = match tokio::time::timeout(Duration::from_secs(120), rx).await {
+            Ok(Ok(resp)) => resp,
+            Ok(Err(_)) => {
+                self.pending.lock().await.remove(&id);
+                anyhow::bail!("sidecar response channel closed");
+            }
+            Err(_) => {
+                self.pending.lock().await.remove(&id);
+                anyhow::bail!("sidecar request timed out after 120s");
+            }
+        };
 
         resp.into_result().map_err(|e| anyhow::anyhow!(e))
+    }
+
+    async fn dispatch_response(pending: &PendingMap, resp: JsonRpcResponse) -> bool {
+        let Some(id) = resp.id else {
+            return false;
+        };
+
+        let mut map = pending.lock().await;
+        if let Some(sender) = map.remove(&id) {
+            let _ = sender.send(resp);
+            true
+        } else {
+            false
+        }
+    }
+
+    async fn drain_pending_waiters(pending: &PendingMap) -> usize {
+        let mut map = pending.lock().await;
+        let drained = map.len();
+        map.clear();
+        drained
     }
 
     /// Ping the sidecar.
@@ -357,6 +397,11 @@ impl SidecarBridge {
         // Abort reader task
         if let Some(handle) = self.reader_task.lock().await.take() {
             handle.abort();
+        }
+
+        let drained = Self::drain_pending_waiters(&self.pending).await;
+        if drained > 0 {
+            tracing::debug!(drained, "shutdown closed pending sidecar waiters");
         }
 
         Ok(())
@@ -515,5 +560,47 @@ impl SidecarBridge {
         } else {
             ":"
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn drain_pending_waiters_closes_receivers() {
+        let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
+        let mut receivers = Vec::new();
+
+        for id in 1_u64..=3 {
+            let (tx, rx) = oneshot::channel();
+            pending.lock().await.insert(id, tx);
+            receivers.push(rx);
+        }
+
+        let drained = SidecarBridge::drain_pending_waiters(&pending).await;
+        assert_eq!(drained, 3);
+
+        for rx in receivers {
+            assert!(rx.await.is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn stale_late_response_is_rejected() {
+        let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
+
+        let was_dispatched = SidecarBridge::dispatch_response(
+            &pending,
+            JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id: Some(42),
+                result: Some(serde_json::json!({"ok": true})),
+                error: None,
+            },
+        )
+        .await;
+
+        assert!(!was_dispatched);
     }
 }

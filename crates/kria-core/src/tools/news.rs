@@ -11,7 +11,78 @@ use crate::safety::RiskLevel;
 use crate::sidecar::SidecarBridge;
 use crate::tools::registry::{ParamDef, ToolDef, ToolHandler, ToolRegistry};
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::de::DeserializeOwned;
+use serde::Deserialize;
+use serde::Serialize;
 use std::sync::Arc;
+use std::time::Duration;
+
+const SIDECAR_REQUEST_TIMEOUT_SECS: u64 = 20;
+
+fn parse_input<T: DeserializeOwned>(params: serde_json::Value) -> Result<T, ToolResult> {
+    let normalized = if params.is_null() {
+        serde_json::json!({})
+    } else {
+        params
+    };
+
+    serde_json::from_value(normalized)
+        .map_err(|error| ToolResult::err(format!("invalid parameters: {error}")))
+}
+
+fn require_non_empty(value: &str, field: &str) -> Result<(), ToolResult> {
+    if value.trim().is_empty() {
+        return Err(ToolResult::err(format!("{field} is required")));
+    }
+    Ok(())
+}
+
+#[derive(Debug, thiserror::Error)]
+enum ToolExecutionError {
+    #[error("news sidecar request timed out for method '{method}' after {timeout_secs}s")]
+    SidecarTimeout { method: String, timeout_secs: u64 },
+    #[error("news sidecar request failed for method '{method}': {reason}")]
+    SidecarRequest { method: String, reason: String },
+}
+
+fn sidecar_error_result(error: ToolExecutionError) -> ToolResult {
+    ToolResult::err(error.to_string())
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct GetNewsInput {
+    query: String,
+    #[serde(default)]
+    hours: Option<u64>,
+    #[serde(default)]
+    freshness_mode: Option<String>,
+    #[serde(default)]
+    min_trust: Option<u64>,
+    #[serde(default)]
+    limit: Option<u64>,
+    #[serde(default)]
+    use_gdelt: Option<bool>,
+    #[serde(default)]
+    country: Option<String>,
+    #[serde(default)]
+    region: Option<String>,
+    #[serde(default)]
+    language: Option<String>,
+    #[serde(default)]
+    source_profile: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct FetchArticleInput {
+    url: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct EmptyInput {}
 
 fn param(name: &str, ty: &str, desc: &str, required: bool) -> ParamDef {
     ParamDef {
@@ -28,18 +99,26 @@ fn param(name: &str, ty: &str, desc: &str, required: bool) -> ParamDef {
 struct Sidecar(Arc<SidecarBridge>);
 
 impl Sidecar {
-    async fn call(&self, method: &str, params: serde_json::Value) -> ToolResult {
-        match self.0.request(method, params).await {
-            Ok(v) => ToolResult {
-                success: true,
-                data: v,
-                error: None,
-            },
-            Err(e) => ToolResult {
-                success: false,
-                data: serde_json::Value::Null,
-                error: Some(e.to_string()),
-            },
+    async fn call(
+        &self,
+        method: &'static str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value, ToolExecutionError> {
+        match tokio::time::timeout(
+            Duration::from_secs(SIDECAR_REQUEST_TIMEOUT_SECS),
+            self.0.request(method, params),
+        )
+        .await
+        {
+            Ok(Ok(value)) => Ok(value),
+            Ok(Err(error)) => Err(ToolExecutionError::SidecarRequest {
+                method: method.to_string(),
+                reason: error.to_string(),
+            }),
+            Err(_) => Err(ToolExecutionError::SidecarTimeout {
+                method: method.to_string(),
+                timeout_secs: SIDECAR_REQUEST_TIMEOUT_SECS,
+            }),
         }
     }
 }
@@ -51,7 +130,28 @@ struct SearchNews(Sidecar);
 #[async_trait]
 impl ToolHandler for SearchNews {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        self.0.call("news.search", params).await
+        let input: GetNewsInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if let Err(error) = require_non_empty(&input.query, "query") {
+            return error;
+        }
+
+        let payload = match serde_json::to_value(input) {
+            Ok(payload) => payload,
+            Err(error) => {
+                return ToolResult::err(format!(
+                    "failed to serialize search_news input payload: {error}"
+                ));
+            }
+        };
+
+        match self.0.call("news.search", payload).await {
+            Ok(value) => ToolResult::ok(value),
+            Err(error) => sidecar_error_result(error),
+        }
     }
 }
 
@@ -62,7 +162,28 @@ struct FetchArticle(Sidecar);
 #[async_trait]
 impl ToolHandler for FetchArticle {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        self.0.call("news.fetch_article", params).await
+        let input: FetchArticleInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if let Err(error) = require_non_empty(&input.url, "url") {
+            return error;
+        }
+
+        let payload = match serde_json::to_value(input) {
+            Ok(payload) => payload,
+            Err(error) => {
+                return ToolResult::err(format!(
+                    "failed to serialize fetch_article input payload: {error}"
+                ));
+            }
+        };
+
+        match self.0.call("news.fetch_article", payload).await {
+            Ok(value) => ToolResult::ok(value),
+            Err(error) => sidecar_error_result(error),
+        }
     }
 }
 
@@ -73,7 +194,15 @@ struct ListNewsSources(Sidecar);
 #[async_trait]
 impl ToolHandler for ListNewsSources {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        self.0.call("news.list_sources", params).await
+        let _input: EmptyInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        match self.0.call("news.list_sources", serde_json::json!({})).await {
+            Ok(value) => ToolResult::ok(value),
+            Err(error) => sidecar_error_result(error),
+        }
     }
 }
 
@@ -84,7 +213,15 @@ struct NewsStatus(Sidecar);
 #[async_trait]
 impl ToolHandler for NewsStatus {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        self.0.call("news.get_status", params).await
+        let _input: EmptyInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        match self.0.call("news.get_status", serde_json::json!({})).await {
+            Ok(value) => ToolResult::ok(value),
+            Err(error) => sidecar_error_result(error),
+        }
     }
 }
 

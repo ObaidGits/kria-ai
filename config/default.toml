@@ -98,6 +98,11 @@ model = "qwen2.5-3b-instruct"
 mode = "on_low_confidence"   # always | on_low_confidence
 timeout_ms = 0               # 0 = use tier default
 
+[classifier]
+# Optional L0 ONNX classifier used as a late fallback hint inside TurnGate.
+enabled = true
+model_path = "~/.kria/models/classifier/model.onnx"
+
 
 [memory]
 max_facts = 10000
@@ -121,7 +126,7 @@ allowed_chat_ids = ""
 auto_start = true
 
 [ui]
-theme = "dark"
+theme = "light"
 font_size = 14
 
 [search]

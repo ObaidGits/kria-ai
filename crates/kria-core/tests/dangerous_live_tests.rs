@@ -72,8 +72,8 @@ fn dangerous_t1_delete_file_is_red_and_requires_approval() {
 }
 
 #[test]
-fn dangerous_t1_gmail_send_is_yellow_and_requires_approval() {
-    // Policy classifies gw_gmail_send as Yellow (reversible via Gmail Undo Send window)
+fn dangerous_t1_gmail_send_is_red_and_requires_approval() {
+    // Sending email leaves the assistant boundary and is treated as Red.
     let engine = PolicyEngine::new();
     let d = engine.evaluate(
         "gw_gmail_send",
@@ -81,10 +81,10 @@ fn dangerous_t1_gmail_send_is_yellow_and_requires_approval() {
     );
     assert_eq!(
         d.risk_level,
-        RiskLevel::Yellow,
-        "gw_gmail_send must be Yellow per policy"
+        RiskLevel::Red,
+        "gw_gmail_send must be Red per policy"
     );
-    assert!(!d.blocked, "gw_gmail_send must not be blocked");
+    assert!(d.requires_approval, "gw_gmail_send must require approval");
 }
 
 #[test]

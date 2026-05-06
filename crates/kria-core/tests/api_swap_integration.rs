@@ -59,14 +59,20 @@ fn strategy_cpu_only_backend_produces_cpu_vision_when_ram_sufficient() {
     // If not, it should be Disabled.
     match result.vision_mode {
         VisionMode::CpuVision => {
-            assert!(result.enable_vision,
-                "CpuVision mode must have enable_vision=true");
-            assert!(result.vision_mode.load_mmproj(),
-                "CpuVision mode must load mmproj");
+            assert!(
+                result.enable_vision,
+                "CpuVision mode must have enable_vision=true"
+            );
+            assert!(
+                result.vision_mode.load_mmproj(),
+                "CpuVision mode must load mmproj"
+            );
         }
         VisionMode::Disabled => {
-            assert!(!result.enable_vision,
-                "Disabled mode must have enable_vision=false");
+            assert!(
+                !result.enable_vision,
+                "Disabled mode must have enable_vision=false"
+            );
         }
         other => panic!("CpuOnly backend at ngl=0 should never produce {:?}", other),
     }
@@ -83,8 +89,12 @@ fn strategy_cuda_low_vram_falls_to_cpu_only_with_vision_mode() {
 
     // At ngl=0, vision_mode should be CpuVision or Disabled depending on RAM.
     assert!(
-        matches!(result.vision_mode, VisionMode::CpuVision | VisionMode::Disabled),
-        "ngl=0 vision_mode must be CpuVision or Disabled, got {:?}", result.vision_mode
+        matches!(
+            result.vision_mode,
+            VisionMode::CpuVision | VisionMode::Disabled
+        ),
+        "ngl=0 vision_mode must be CpuVision or Disabled, got {:?}",
+        result.vision_mode
     );
 }
 
@@ -99,9 +109,12 @@ fn vram_budget_integrates_with_preflight_for_6gb_gpu() {
 
     // Scenario: 6 GB GPU with model loaded, 1500 MB free VRAM, 300 ctx tokens used
     let budget = vram_budget::preflight_vision_check(
-        1024, 1024,     // 1024×1024 input image
-        1500, safety_margin,
-        &profile, 300,
+        1024,
+        1024, // 1024×1024 input image
+        1500,
+        safety_margin,
+        &profile,
+        300,
     );
 
     // 1500 - 512 = 988 MB headroom
@@ -152,12 +165,17 @@ fn evict_to_cpu_should_use_cpu_vision_not_disabled() {
 
     let vision_mode = vision_strategy::determine_vision_mode(&profile, eviction_ngl, free_ram_mb);
 
-    assert_eq!(vision_mode, VisionMode::CpuVision,
+    assert_eq!(
+        vision_mode,
+        VisionMode::CpuVision,
         "BUG: evict_to_cpu MUST produce CpuVision when RAM >= 2048 MB, \
-         not Disabled. Without this, --mmproj is dropped and the LLM is blind.");
+         not Disabled. Without this, --mmproj is dropped and the LLM is blind."
+    );
 
-    assert!(vision_mode.load_mmproj(),
-        "CpuVision mode MUST load mmproj — the projector weights live in system RAM.");
+    assert!(
+        vision_mode.load_mmproj(),
+        "CpuVision mode MUST load mmproj — the projector weights live in system RAM."
+    );
 }
 
 #[test]
@@ -186,8 +204,10 @@ fn vision_mode_determines_mmproj_flag_at_ngl_0() {
     // CpuVision.load_mmproj() must be true → spawn will include --mmproj
     assert_eq!(cpu_vision, VisionMode::CpuVision);
     let vision_requested = cpu_vision.load_mmproj();
-    assert!(vision_requested,
-        "CpuVision.load_mmproj() must be true so spawn() passes --mmproj to llama-server");
+    assert!(
+        vision_requested,
+        "CpuVision.load_mmproj() must be true so spawn() passes --mmproj to llama-server"
+    );
 
     // In spawn(), the actual flag is: vision_enabled = vision_requested && vision_configured()
     // vision_configured() checks if mmproj_path exists on disk.
@@ -223,11 +243,21 @@ fn reduced_gpu_vision_mode_at_partial_offload() {
 #[test]
 fn server_manager_state_constants_are_distinct() {
     use kria_core::llm::orchestrator::server_manager::*;
-    let states = [STATE_STOPPED, STATE_STARTING, STATE_READY, STATE_SWAPPING, STATE_ERROR];
+    let states = [
+        STATE_STOPPED,
+        STATE_STARTING,
+        STATE_READY,
+        STATE_SWAPPING,
+        STATE_ERROR,
+    ];
     for (i, a) in states.iter().enumerate() {
         for (j, b) in states.iter().enumerate() {
             if i != j {
-                assert_ne!(a, b, "Server states must be distinct: index {} and {} both = {}", i, j, a);
+                assert_ne!(
+                    a, b,
+                    "Server states must be distinct: index {} and {} both = {}",
+                    i, j, a
+                );
             }
         }
     }
@@ -252,7 +282,9 @@ fn server_manager_new_starts_stopped() {
 fn server_manager_cancel_token_is_renewable() {
     let config = OrchestratorConfig::default();
     let mgr = kria_core::llm::orchestrator::server_manager::LlamaServerManager::new(
-        config, "/tmp/test.gguf".into(), None,
+        config,
+        "/tmp/test.gguf".into(),
+        None,
     );
 
     // Get a token, cancel it, get a new one — the new one must NOT be cancelled.
@@ -261,10 +293,16 @@ fn server_manager_cancel_token_is_renewable() {
 
     mgr.cancel_streams(); // Cancels token1, mints token2
 
-    assert!(token1.is_cancelled(), "Old token must be cancelled after cancel_streams()");
+    assert!(
+        token1.is_cancelled(),
+        "Old token must be cancelled after cancel_streams()"
+    );
 
     let token2 = mgr.cancel_token();
-    assert!(!token2.is_cancelled(), "New token must be fresh (not already cancelled)");
+    assert!(
+        !token2.is_cancelled(),
+        "New token must be fresh (not already cancelled)"
+    );
 }
 
 // ────────────────────────────────────────────────────────────────────────
@@ -286,12 +324,17 @@ fn analyze_image_payload_contract() {
         "hard_visual_token_cap": visual_token_cap,
     });
 
-    assert!(payload.get("hard_visual_token_cap").is_some(),
-        "analyze_image payload MUST include hard_visual_token_cap");
+    assert!(
+        payload.get("hard_visual_token_cap").is_some(),
+        "analyze_image payload MUST include hard_visual_token_cap"
+    );
 
     let cap = payload["hard_visual_token_cap"].as_u64().unwrap();
-    assert!(cap > 0 && cap <= 4096,
-        "hard_visual_token_cap must be 0 < cap <= 4096, got {}", cap);
+    assert!(
+        cap > 0 && cap <= 4096,
+        "hard_visual_token_cap must be 0 < cap <= 4096, got {}",
+        cap
+    );
 }
 
 // ────────────────────────────────────────────────────────────────────────
@@ -304,7 +347,10 @@ fn end_to_end_strategy_to_vram_budget_pipeline() {
 
     // Step 1: Strategy calculator determines spawn params
     let target = strategy::calculate_target_params(&profile, 4000, 512, GpuBackend::Cuda);
-    assert!(target.ngl > 0, "4 GB free VRAM should allow some GPU layers");
+    assert!(
+        target.ngl > 0,
+        "4 GB free VRAM should allow some GPU layers"
+    );
 
     // Step 2: After spawn, some VRAM is consumed. Simulate 1500 MB free.
     let free_after_spawn = 1500u64;
@@ -317,15 +363,15 @@ fn end_to_end_strategy_to_vram_budget_pipeline() {
         1000, // 1000 tokens already in KV
     );
 
-    assert!(safe_cap > 0, "With 1500 MB free and 512 safety, should have some token budget");
+    assert!(
+        safe_cap > 0,
+        "With 1500 MB free and 512 safety, should have some token budget"
+    );
     assert!(safe_cap <= 4096, "Token cap must not exceed hard maximum");
 
     // Step 4: Preflight check on the actual image
-    let budget = vram_budget::preflight_vision_check(
-        1024, 1024,
-        free_after_spawn, 512,
-        &profile, 1000,
-    );
+    let budget =
+        vram_budget::preflight_vision_check(1024, 1024, free_after_spawn, 512, &profile, 1000);
 
     assert_eq!(budget.safe_visual_token_cap, safe_cap);
 }
@@ -341,8 +387,14 @@ fn text_only_model_never_enables_vision() {
     for ngl in [0, 10, 20, 28] {
         for ram in [0, 2048, 8000, 32000] {
             let mode = vision_strategy::determine_vision_mode(&profile, ngl, ram);
-            assert_eq!(mode, VisionMode::Disabled,
-                "Text-only model must always be Disabled, got {:?} at ngl={}, ram={}", mode, ngl, ram);
+            assert_eq!(
+                mode,
+                VisionMode::Disabled,
+                "Text-only model must always be Disabled, got {:?} at ngl={}, ram={}",
+                mode,
+                ngl,
+                ram
+            );
             assert!(!mode.load_mmproj());
         }
     }

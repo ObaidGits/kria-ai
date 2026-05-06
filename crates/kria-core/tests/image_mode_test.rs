@@ -37,6 +37,7 @@ fn with_cloud_env<F: FnOnce()>(val: &str, f: F) {
 
 /// M-T01: auto + cloud enabled + Tier C → CloudOnly
 #[test]
+#[serial]
 fn m_t01_auto_tier_c_cloud_always() {
     let r = resolve_image_mode("auto", "always", ImageTier::CRejectOrCloud).unwrap();
     assert_eq!(r, ResolvedMode::CloudOnly, "M-T01 failed");
@@ -44,6 +45,7 @@ fn m_t01_auto_tier_c_cloud_always() {
 
 /// M-T02: auto + cloud enabled + Tier B → LocalThenCloud
 #[test]
+#[serial]
 fn m_t02_auto_tier_b_cloud_always() {
     let r = resolve_image_mode("auto", "always", ImageTier::BDropSwap).unwrap();
     assert_eq!(r, ResolvedMode::LocalThenCloud, "M-T02 failed");
@@ -51,6 +53,7 @@ fn m_t02_auto_tier_b_cloud_always() {
 
 /// M-T03: auto + cloud OFF + Tier B → LocalOnly
 #[test]
+#[serial]
 fn m_t03_auto_tier_b_cloud_off() {
     let r = resolve_image_mode("auto", "off", ImageTier::BDropSwap).unwrap();
     assert_eq!(r, ResolvedMode::LocalOnly, "M-T03 failed");
@@ -58,6 +61,7 @@ fn m_t03_auto_tier_b_cloud_off() {
 
 /// M-T04: auto + cloud always + Tier S → LocalOnly
 #[test]
+#[serial]
 fn m_t04_auto_tier_s_cloud_always() {
     let r = resolve_image_mode("auto", "always", ImageTier::SHighRes).unwrap();
     assert_eq!(r, ResolvedMode::LocalOnly, "M-T04 failed");
@@ -67,6 +71,7 @@ fn m_t04_auto_tier_s_cloud_always() {
 
 /// M-T05: local_only + no GPU → Err(LocalRequestedNoGpu)
 #[test]
+#[serial]
 fn m_t05_local_only_tier_c_errors() {
     let e = resolve_image_mode("local_only", "always", ImageTier::CRejectOrCloud).unwrap_err();
     assert!(
@@ -77,6 +82,7 @@ fn m_t05_local_only_tier_c_errors() {
 
 /// M-T06: local_only + Tier B → LocalOnly
 #[test]
+#[serial]
 fn m_t06_local_only_tier_b() {
     let r = resolve_image_mode("local_only", "always", ImageTier::BDropSwap).unwrap();
     assert_eq!(r, ResolvedMode::LocalOnly, "M-T06 failed");
@@ -86,6 +92,7 @@ fn m_t06_local_only_tier_b() {
 
 /// M-T07: cloud_only + cloud enabled + Tier S → CloudOnly
 #[test]
+#[serial]
 fn m_t07_cloud_only_tier_s() {
     let r = resolve_image_mode("cloud_only", "always", ImageTier::SHighRes).unwrap();
     assert_eq!(r, ResolvedMode::CloudOnly, "M-T07 failed");
@@ -93,6 +100,7 @@ fn m_t07_cloud_only_tier_s() {
 
 /// M-T08: cloud_only + cloud OFF → Err(CloudRequestedButDisabled)
 #[test]
+#[serial]
 fn m_t08_cloud_only_cloud_off_errors() {
     let e = resolve_image_mode("cloud_only", "off", ImageTier::BDropSwap).unwrap_err();
     assert!(
@@ -105,6 +113,7 @@ fn m_t08_cloud_only_cloud_off_errors() {
 
 /// M-T09: local_with_cloud_fallback + Tier B → LocalThenCloud
 #[test]
+#[serial]
 fn m_t09_local_with_cloud_fallback_tier_b() {
     let r =
         resolve_image_mode("local_with_cloud_fallback", "always", ImageTier::BDropSwap).unwrap();
@@ -113,6 +122,7 @@ fn m_t09_local_with_cloud_fallback_tier_b() {
 
 /// M-T10: local_with_cloud_fallback + Tier C + cloud enabled → graceful CloudOnly
 #[test]
+#[serial]
 fn m_t10_local_with_cloud_fallback_tier_c_degrades() {
     let r = resolve_image_mode(
         "local_with_cloud_fallback",
@@ -131,6 +141,7 @@ fn m_t10_local_with_cloud_fallback_tier_c_degrades() {
 
 /// M-T11: cloud_with_local_fallback + Tier B → CloudThenLocal
 #[test]
+#[serial]
 fn m_t11_cloud_with_local_fallback_tier_b() {
     let r =
         resolve_image_mode("cloud_with_local_fallback", "always", ImageTier::BDropSwap).unwrap();
@@ -167,6 +178,7 @@ fn m_t13_env_cloud_fallback_false_overrides_config() {
 
 /// M-T14: unrecognised mode string → Err(Invalid)
 #[test]
+#[serial]
 fn m_t14_invalid_mode_string() {
     let e = resolve_image_mode("garbage_mode", "always", ImageTier::BDropSwap).unwrap_err();
     assert!(
@@ -179,6 +191,7 @@ fn m_t14_invalid_mode_string() {
 
 /// Empty string mode treats as "auto".
 #[test]
+#[serial]
 fn empty_mode_treated_as_auto() {
     let r = resolve_image_mode("", "always", ImageTier::BDropSwap).unwrap();
     assert_eq!(r, ResolvedMode::LocalThenCloud);
@@ -186,6 +199,7 @@ fn empty_mode_treated_as_auto() {
 
 /// Hyphenated variant parses correctly.
 #[test]
+#[serial]
 fn hyphen_variant_parses() {
     let r = resolve_image_mode("local-only", "always", ImageTier::BDropSwap).unwrap();
     assert_eq!(r, ResolvedMode::LocalOnly);
@@ -193,6 +207,7 @@ fn hyphen_variant_parses() {
 
 /// cloud_with_local_fallback + Tier C + cloud enabled → CloudOnly (no local).
 #[test]
+#[serial]
 fn cloud_with_local_fallback_no_gpu_stays_cloud() {
     let r = resolve_image_mode(
         "cloud_with_local_fallback",
@@ -205,6 +220,7 @@ fn cloud_with_local_fallback_no_gpu_stays_cloud() {
 
 /// local_with_cloud_fallback + cloud OFF + Tier C → error (no GPU, no cloud).
 #[test]
+#[serial]
 fn local_with_cloud_fallback_no_gpu_no_cloud_errors() {
     let e = resolve_image_mode(
         "local_with_cloud_fallback",
@@ -217,6 +233,7 @@ fn local_with_cloud_fallback_no_gpu_no_cloud_errors() {
 
 /// Tier A behaves like Tier B in Auto mode.
 #[test]
+#[serial]
 fn auto_tier_a_with_cloud() {
     let r = resolve_image_mode("auto", "always", ImageTier::AStandard).unwrap();
     assert_eq!(r, ResolvedMode::LocalThenCloud);

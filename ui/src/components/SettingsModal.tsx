@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { appStore } from "../stores/app";
 import { SUPPORTED_LANGUAGES, setLocale } from "../stores/i18n";
 
-type Tab = "llm" | "voice" | "safety" | "ui" | "assistant" | "labs" | "search" | "services" | "telegram" | "automation" | "hardware" | "knowledge" | "google" | "colab";
+type Tab = "llm" | "voice" | "safety" | "ui" | "assistant" | "labs" | "search" | "services" | "telegram" | "automation" | "hardware" | "knowledge" | "google" | "colab" | "ironclad";
 
 interface AssistantFrontendPrefs {
   persona: "operator" | "coach" | "researcher" | "chief_of_staff";
@@ -30,8 +30,28 @@ interface McpCatalogItem {
   enabled: boolean;
 }
 
+const FONT_SCALE_OPTIONS = [
+  { value: "0.8", label: "Small (80%)" },
+  { value: "0.9", label: "Compact (90%)" },
+  { value: "1.0", label: "Normal (100%)" },
+  { value: "1.2", label: "Large (120%)" },
+  { value: "1.5", label: "Extra Large (150%)" },
+  { value: "2.0", label: "Huge (200%)" },
+] as const;
+
+function normalizeFontScaleValue(value: unknown): string {
+  const parsed = Number.parseFloat(String(value ?? "1"));
+  if (Number.isNaN(parsed)) return "1.0";
+
+  const matched = FONT_SCALE_OPTIONS.find(
+    (option) => Math.abs(Number.parseFloat(option.value) - parsed) < 0.001
+  );
+
+  return matched?.value ?? "1.0";
+}
+
 const SettingsModal: Component = () => {
-  const { setShowSettings, settings, loadSettings, saveSettings, models, loadModels, audioDevices, loadAudioDevices, theme, applyTheme, mcpServers, loadMcpServers, addMcpServer, removeMcpServer, toggleMcpServer, healthInfo, loadHealth, scheduledTasks, loadScheduledTasks, addScheduledTask, removeScheduledTask, macros, loadMacros, deleteMacro, workflows, loadWorkflows, deleteWorkflow, hardwareInfo, loadHardwareInfo, knowledgeBase, loadKnowledgeBase, telegramConfig, telegramBotInfo, loadTelegramConfig, saveTelegramConfig, testTelegramConnection, startTelegramMcp, stopTelegramMcp, googleStatus, loadGoogleStatus, setGoogleAccount, connectGoogle, disconnectGoogle, colabStatus, loadColabStatus, connectColab, disconnectColab, setColabNotebook, reconcileMcpRuntime, restartMcpServerRuntime } = appStore;
+  const { setShowSettings, settings, loadSettings, saveSettings, models, loadModels, audioDevices, loadAudioDevices, theme, applyTheme, mcpServers, loadMcpServers, addMcpServer, removeMcpServer, toggleMcpServer, healthInfo, loadHealth, scheduledTasks, loadScheduledTasks, addScheduledTask, removeScheduledTask, macros, loadMacros, deleteMacro, workflows, loadWorkflows, deleteWorkflow, hardwareInfo, loadHardwareInfo, knowledgeBase, loadKnowledgeBase, telegramConfig, telegramBotInfo, loadTelegramConfig, saveTelegramConfig, testTelegramConnection, startTelegramMcp, stopTelegramMcp, googleStatus, loadGoogleStatus, setGoogleAccount, connectGoogle, disconnectGoogle, colabStatus, loadColabStatus, connectColab, disconnectColab, setColabNotebook, reconcileMcpRuntime, restartMcpServerRuntime, ironcladStatus, loadIroncladStatus, getIroncladConfig, updateIroncladConfig, requestIroncladSoftReset, requestIroncladHardReset, loadIroncladForensics, ironcladForensicsTotal } = appStore;
 
   const [activeTab, setActiveTab] = createSignal<Tab>("llm");
   const [draft, setDraft] = createSignal<Record<string, any>>({});
@@ -69,6 +89,17 @@ const SettingsModal: Component = () => {
   const [colabNotebookId, setColabNotebookId] = createSignal("");
   const [colabBusy, setColabBusy] = createSignal(false);
   const [colabMessage, setColabMessage] = createSignal("");
+
+  // Ironclad state
+  const [ironcladHighRecoverySlo, setIroncladHighRecoverySlo] = createSignal("500");
+  const [ironcladLeaseTtl, setIroncladLeaseTtl] = createSignal("120000");
+  const [ironcladHeartbeatGrace, setIroncladHeartbeatGrace] = createSignal("5000");
+  const [ironcladQuarantineCooldown, setIroncladQuarantineCooldown] = createSignal("60000");
+  const [ironcladHashDistance, setIroncladHashDistance] = createSignal("0.2");
+  const [ironcladResetReason, setIroncladResetReason] = createSignal("");
+  const [ironcladHardResetPhrase, setIroncladHardResetPhrase] = createSignal("");
+  const [ironcladBusy, setIroncladBusy] = createSignal(false);
+  const [ironcladMessage, setIroncladMessage] = createSignal("");
 
   // Frontend-only assistant/labs preferences
   const [assistantPrefs, setAssistantPrefs] = createSignal<AssistantFrontendPrefs>({
@@ -136,6 +167,9 @@ const SettingsModal: Component = () => {
       await loadTelegramConfig();
       const initialGoogleStatus = await loadGoogleStatus();
       const initialColabStatus = await loadColabStatus();
+      await loadIroncladStatus();
+      await hydrateIroncladConfig();
+      await loadIroncladForensics(64);
       if (disposed) return;
       if (initialGoogleStatus?.account) {
         setGwAccount(initialGoogleStatus.account);
@@ -403,6 +437,91 @@ const SettingsModal: Component = () => {
   };
 
   const colabDiscoveredTools = () => colabStatus()?.capabilities?.discovered_tools ?? [];
+  const selectedFontScale = () => normalizeFontScaleValue(draft()?.ui?.font_scale);
+
+  const hydrateIroncladConfig = async () => {
+    try {
+      const result = await getIroncladConfig();
+      setIroncladHighRecoverySlo(String(result.config.high_recovery_slo_ms));
+      setIroncladLeaseTtl(String(result.config.lease_ttl_ms));
+      setIroncladHeartbeatGrace(String(result.config.heartbeat_grace_ms));
+      setIroncladQuarantineCooldown(String(result.config.quarantine_cooldown_ms));
+      setIroncladHashDistance(String(result.config.max_normalized_hash_distance));
+    } catch (e) {
+      setIroncladMessage(`Failed to load Ironclad config: ${e}`);
+    }
+  };
+
+  const saveIroncladConfig = async () => {
+    setIroncladBusy(true);
+    setIroncladMessage("");
+    try {
+      const payload = {
+        high_recovery_slo_ms: Number.parseInt(ironcladHighRecoverySlo(), 10),
+        lease_ttl_ms: Number.parseInt(ironcladLeaseTtl(), 10),
+        heartbeat_grace_ms: Number.parseInt(ironcladHeartbeatGrace(), 10),
+        quarantine_cooldown_ms: Number.parseInt(ironcladQuarantineCooldown(), 10),
+        max_normalized_hash_distance: Number.parseFloat(ironcladHashDistance()),
+      };
+
+      if (
+        Number.isNaN(payload.high_recovery_slo_ms) ||
+        Number.isNaN(payload.lease_ttl_ms) ||
+        Number.isNaN(payload.heartbeat_grace_ms) ||
+        Number.isNaN(payload.quarantine_cooldown_ms) ||
+        Number.isNaN(payload.max_normalized_hash_distance)
+      ) {
+        setIroncladMessage("All Ironclad fields must be valid numbers.");
+        return;
+      }
+
+      const result = await updateIroncladConfig(payload);
+      if (result.updated) {
+        await Promise.all([hydrateIroncladConfig(), loadIroncladStatus(), loadIroncladForensics(64)]);
+        setIroncladMessage("Ironclad configuration applied.");
+      } else {
+        setIroncladMessage(result.reason || "No changes were applied.");
+      }
+    } catch (e) {
+      setIroncladMessage(`Failed to apply Ironclad config: ${e}`);
+    } finally {
+      setIroncladBusy(false);
+    }
+  };
+
+  const triggerIroncladSoftReset = async () => {
+    setIroncladBusy(true);
+    setIroncladMessage("");
+    try {
+      await requestIroncladSoftReset(ironcladResetReason().trim() || undefined);
+      setIroncladMessage("Soft reset queued.");
+      await loadIroncladStatus();
+    } catch (e) {
+      setIroncladMessage(`Soft reset failed: ${e}`);
+    } finally {
+      setIroncladBusy(false);
+    }
+  };
+
+  const triggerIroncladHardReset = async () => {
+    if (ironcladHardResetPhrase().trim() !== "HARD RESET") {
+      setIroncladMessage("Hard reset blocked: type HARD RESET exactly.");
+      return;
+    }
+
+    setIroncladBusy(true);
+    setIroncladMessage("");
+    try {
+      await requestIroncladHardReset("HARD RESET", ironcladResetReason().trim() || undefined);
+      setIroncladMessage("Hard reset queued.");
+      setIroncladHardResetPhrase("");
+      await loadIroncladStatus();
+    } catch (e) {
+      setIroncladMessage(`Hard reset failed: ${e}`);
+    } finally {
+      setIroncladBusy(false);
+    }
+  };
 
   const setAssistantPref = <K extends keyof AssistantFrontendPrefs>(key: K, value: AssistantFrontendPrefs[K]) => {
     setAssistantPrefs((prev) => ({ ...prev, [key]: value }));
@@ -517,6 +636,12 @@ const SettingsModal: Component = () => {
           label: "Hardware",
           icon: "R",
           description: "Review detected hardware and recommended runtime tiers and performance values.",
+        },
+        {
+          id: "ironclad",
+          label: "Ironclad",
+          icon: "I",
+          description: "Fleet health telemetry, reset controls, forensic audit feed, and advanced runtime config.",
         },
         {
           id: "knowledge",
@@ -968,20 +1093,18 @@ const SettingsModal: Component = () => {
               <div class="settings-field">
                 <label>Font Scale</label>
                 <select
-                  value={String(draft()?.ui?.font_scale ?? 1.0)}
+                  value={selectedFontScale()}
                   onChange={(e) => {
                     const scale = e.currentTarget.value;
                     updateField("ui", "font_scale", parseFloat(scale));
                     document.documentElement.setAttribute("data-font-scale", scale);
                   }}
                 >
-                  <option value="0.8">Small (80%)</option>
-                  <option value="0.9">Compact (90%)</option>
-                  <option value="1.0">Normal (100%)</option>
-                  <option value="1.2">Large (120%)</option>
-                  <option value="1.5">Extra Large (150%)</option>
-                  <option value="2.0">Huge (200%)</option>
+                  <For each={FONT_SCALE_OPTIONS}>
+                    {(option) => <option value={option.value}>{option.label}</option>}
+                  </For>
                 </select>
+                <span class="field-hint">Current scale: {Math.round(parseFloat(selectedFontScale()) * 100)}%</span>
               </div>
             </section>
           </Show>
@@ -2224,6 +2347,125 @@ const SettingsModal: Component = () => {
                   <li>Install numpy in the notebook and run a quick matrix multiplication demo.</li>
                   <li>Train a small classifier in the active notebook and show accuracy plus saved checkpoint path.</li>
                 </ol>
+              </div>
+            </section>
+          </Show>
+
+          {/* Ironclad Tab */}
+          <Show when={activeTab() === "ironclad"}>
+            <section class="settings-section">
+              <h3>Fleet &amp; QoS Signals</h3>
+              <p class="field-hint">
+                Operator-facing health for InventoryRegistry, reset lifecycle, and adaptive QoS.
+              </p>
+
+              <Show when={ironcladStatus()}>
+                {(status) => (
+                  <>
+                    <div class={`tg-status-banner ${status().fleet?.health_degraded ? "" : "tg-connected"}`}>
+                      <span class={`mcp-status-dot ${status().fleet?.health_degraded ? "degraded" : "running"}`}></span>
+                      <span>
+                        Fleet ready {status().fleet?.ready_targets ?? 0}/{status().fleet?.total_targets ?? 0} •
+                        QoS {status().qos?.traffic_light ?? "gray"} •
+                        Reset {status().reset?.phase ?? "idle"}
+                      </span>
+                    </div>
+
+                    <div class="settings-field" style="margin-top:0.8rem">
+                      <label>Current runtime metrics</label>
+                      <div style="display:flex;flex-wrap:wrap;gap:0.45rem;margin-top:0.35rem">
+                        <span class="mcp-server-trust">Ready: {status().fleet?.ready_targets ?? 0}</span>
+                        <span class="mcp-server-trust">Leased: {status().fleet?.leased_targets ?? 0}</span>
+                        <span class="mcp-server-trust">Tainted: {status().fleet?.tainted_targets ?? 0}</span>
+                        <span class="mcp-server-trust">Quarantined: {status().fleet?.quarantined_targets ?? 0}</span>
+                        <span class="mcp-server-trust">p95: {status().qos?.high_recovery_wait_p95_ms ?? 0} ms</span>
+                        <span class="mcp-server-trust">SLO: {status().qos?.high_recovery_slo_ms ?? 0} ms</span>
+                        <span class="mcp-server-trust">Forensics: {ironcladForensicsTotal()}</span>
+                      </div>
+                      <span class="field-hint">
+                        {status().reset?.detail || "No reset detail available"}
+                      </span>
+                    </div>
+                  </>
+                )}
+              </Show>
+
+              <Show when={ironcladMessage()}>
+                <div class={`tg-test-result ${ironcladMessage().toLowerCase().startsWith("failed") || ironcladMessage().toLowerCase().includes("blocked") ? "tg-error" : "tg-success"}`} style="margin-top:0.75rem">
+                  {ironcladMessage()}
+                </div>
+              </Show>
+
+              <h3 style="margin-top:1.4rem">Advanced Configuration</h3>
+              <div class="settings-row">
+                <div class="settings-field">
+                  <label>high_recovery_slo_ms</label>
+                  <input type="number" min="50" value={ironcladHighRecoverySlo()} onInput={(e) => setIroncladHighRecoverySlo(e.currentTarget.value)} disabled={ironcladBusy()} />
+                </div>
+                <div class="settings-field">
+                  <label>lease_ttl_ms</label>
+                  <input type="number" min="500" value={ironcladLeaseTtl()} onInput={(e) => setIroncladLeaseTtl(e.currentTarget.value)} disabled={ironcladBusy()} />
+                </div>
+                <div class="settings-field">
+                  <label>heartbeat_grace_ms</label>
+                  <input type="number" min="100" value={ironcladHeartbeatGrace()} onInput={(e) => setIroncladHeartbeatGrace(e.currentTarget.value)} disabled={ironcladBusy()} />
+                </div>
+                <div class="settings-field">
+                  <label>quarantine_cooldown_ms</label>
+                  <input type="number" min="1000" value={ironcladQuarantineCooldown()} onInput={(e) => setIroncladQuarantineCooldown(e.currentTarget.value)} disabled={ironcladBusy()} />
+                </div>
+                <div class="settings-field">
+                  <label>max_normalized_hash_distance</label>
+                  <input type="number" min="0" max="1" step="0.01" value={ironcladHashDistance()} onInput={(e) => setIroncladHashDistance(e.currentTarget.value)} disabled={ironcladBusy()} />
+                </div>
+              </div>
+
+              <div class="tg-actions">
+                <button class="btn-primary" disabled={ironcladBusy()} onClick={saveIroncladConfig}>
+                  {ironcladBusy() ? "Applying..." : "Apply config"}
+                </button>
+                <button class="btn-secondary" disabled={ironcladBusy()} onClick={() => { void hydrateIroncladConfig(); void loadIroncladStatus(); }}>
+                  Reload
+                </button>
+                <button class="btn-secondary" disabled={ironcladBusy()} onClick={() => { void loadIroncladForensics(64); setIroncladMessage("Forensic feed refreshed."); }}>
+                  Refresh forensics
+                </button>
+              </div>
+
+              <h3 style="margin-top:1.4rem">Recovery Controls</h3>
+              <div class="settings-row">
+                <div class="settings-field">
+                  <label>Reset reason</label>
+                  <input
+                    type="text"
+                    value={ironcladResetReason()}
+                    onInput={(e) => setIroncladResetReason(e.currentTarget.value)}
+                    placeholder="manual_operator_recovery"
+                    disabled={ironcladBusy()}
+                  />
+                </div>
+                <div class="settings-field">
+                  <label>Hard reset confirmation</label>
+                  <input
+                    type="text"
+                    value={ironcladHardResetPhrase()}
+                    onInput={(e) => setIroncladHardResetPhrase(e.currentTarget.value)}
+                    placeholder="Type HARD RESET"
+                    disabled={ironcladBusy()}
+                  />
+                </div>
+              </div>
+              <span class="field-hint">
+                Trust-first guard: hard reset requires exact confirmation phrase each time.
+              </span>
+
+              <div class="tg-actions" style="margin-top:0.8rem">
+                <button class="btn-secondary" disabled={ironcladBusy()} onClick={triggerIroncladSoftReset}>
+                  Soft reset
+                </button>
+                <button class="btn-danger" disabled={ironcladBusy()} onClick={triggerIroncladHardReset}>
+                  Hard reset
+                </button>
               </div>
             </section>
           </Show>

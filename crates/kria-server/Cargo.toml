@@ -7,6 +7,7 @@ description = "K.R.I.A. Server — Axum HTTP/WebSocket server for remote access"
 
 [dependencies]
 kria-core = { path = "../kria-core" }
+kria-connection-control = { path = "../kria-connection-control" }
 axum = { version = "0.8", features = ["ws", "json"] }
 axum-extra = { version = "0.10", features = ["typed-header"] }
 tower = "0.5"
@@ -21,6 +22,11 @@ anyhow = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 futures = { workspace = true }
+async-trait = { workspace = true }
+dirs = { workspace = true }
+async-stream = "0.3"
+tokio-stream = "0.1"
+tokio-postgres = "0.7"
 
 [dev-dependencies]
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }

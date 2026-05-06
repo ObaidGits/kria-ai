@@ -28,6 +28,13 @@ pub const STATE_READY: u8 = 2;
 pub const STATE_SWAPPING: u8 = 3;
 pub const STATE_ERROR: u8 = 4;
 
+const ROUTER_MODE_UNKNOWN: u8 = 0;
+const ROUTER_MODE_SUPPORTED: u8 = 1;
+const ROUTER_MODE_UNSUPPORTED: u8 = 2;
+
+pub(crate) const ACTIVE_SLOT_ID: u32 = 0;
+pub(crate) const ACTIVE_SLOT_FILENAME: &str = "kria_active_slot.bin";
+
 #[derive(Debug, Clone, Copy)]
 struct LaunchTuning {
     batch_size: u32,
@@ -43,7 +50,7 @@ fn launch_tuning(config_batch_size: u32, enable_vision: bool) -> LaunchTuning {
         // Vision inference on 6GB-class GPUs is unstable with auto parallel
         // slots + warmup. Use a conservative profile to avoid segfault/OOM
         // while keeping the endpoint responsive.
-        let safe_batch = configured.min(128).max(1);
+        let safe_batch = configured.clamp(1, 128);
         return LaunchTuning {
             batch_size: safe_batch,
             ubatch_size: Some(safe_batch),
@@ -87,6 +94,12 @@ pub struct LlamaServerManager {
     pre_api_unload_ngl: AtomicU32,
     /// Last vision flag before an API-level unload.
     pre_api_unload_vision: AtomicBool,
+    /// Router Mode capability cache.
+    ///
+    /// `ROUTER_MODE_UNKNOWN` => not yet probed for this process lifetime
+    /// `ROUTER_MODE_SUPPORTED` => unload/load endpoints responded successfully
+    /// `ROUTER_MODE_UNSUPPORTED` => endpoint returned 404/501 (or launch is not router-mode)
+    router_mode_capability: AtomicU8,
     /// The actual API URL (updated after port discovery).
     api_url: tokio::sync::RwLock<String>,
     /// The child process wrapped in a ChildGuard for safe lifecycle management.
@@ -119,6 +132,7 @@ impl LlamaServerManager {
             current_vision: AtomicBool::new(false),
             pre_api_unload_ngl: AtomicU32::new(0),
             pre_api_unload_vision: AtomicBool::new(false),
+            router_mode_capability: AtomicU8::new(ROUTER_MODE_UNKNOWN),
             api_url: tokio::sync::RwLock::new(String::new()),
             child: Mutex::new(None),
             cancel_token: std::sync::Mutex::new(CancellationToken::new()),
@@ -208,6 +222,26 @@ impl LlamaServerManager {
         } else {
             self.model_path.clone()
         }
+    }
+
+    fn router_mode_supported_cached(&self) -> Option<bool> {
+        match self.router_mode_capability.load(Ordering::Acquire) {
+            ROUTER_MODE_SUPPORTED => Some(true),
+            ROUTER_MODE_UNSUPPORTED => Some(false),
+            _ => None,
+        }
+    }
+
+    fn mark_router_mode_supported(&self) {
+        self.router_mode_capability
+            .store(ROUTER_MODE_SUPPORTED, Ordering::Release);
+    }
+
+    fn mark_router_mode_unsupported(&self) -> bool {
+        // Returns true only on the first transition to unsupported.
+        self.router_mode_capability
+            .swap(ROUTER_MODE_UNSUPPORTED, Ordering::AcqRel)
+            != ROUTER_MODE_UNSUPPORTED
     }
 
     /// Get the current API URL.
@@ -608,7 +642,7 @@ impl LlamaServerManager {
             .timeout(Duration::from_secs(5))
             .build()?;
 
-        let health_url = format!("{}", api_url.replace("/v1", "/health"));
+        let health_url = api_url.replace("/v1", "/health");
         let health_timeout_secs = self.config.health_check_timeout_secs.max(1);
         let deadline = tokio::time::Instant::now() + Duration::from_secs(health_timeout_secs);
         let mut backoff_ms: u64 = 50;
@@ -666,10 +700,27 @@ impl LlamaServerManager {
     pub async fn api_unload_model(&self) -> anyhow::Result<()> {
         let base_url = self.api_url();
         if base_url.is_empty() {
-            tracing::error!("server_manager: api_unload_model called but no API URL is set — \
-                             server is not running. Caller will fall back to process kill.");
+            tracing::error!(
+                "server_manager: api_unload_model called but no API URL is set — \
+                             server is not running. Caller will fall back to process kill."
+            );
             anyhow::bail!("api_unload_model: no API URL (server not running)");
         }
+
+        if self.router_models_dir().is_none() {
+            anyhow::bail!(
+                "api_unload_model: Router Mode not active (--models-dir unavailable). \
+                 Falling back to process restart."
+            );
+        }
+
+        if matches!(self.router_mode_supported_cached(), Some(false)) {
+            anyhow::bail!(
+                "api_unload_model: Router Mode not supported (cached HTTP 404/501). \
+                 Falling back to process restart."
+            );
+        }
+
         // Router Mode endpoint (OpenAI-compatible prefix included).
         let models_url = v1_models_endpoint(&base_url, "unload");
 
@@ -722,17 +773,25 @@ impl LlamaServerManager {
             // This is the EXPECTED path for single-model llama-server builds.
             let body = resp.text().await.unwrap_or_default();
             self.state.store(STATE_READY, Ordering::Release);
-            tracing::error!(
-                status = status.as_u16(),
-                elapsed_ms,
-                url = %models_url,
-                body = %body,
-                "server_manager: api_unload_model received HTTP {} (Router Mode not supported). \
-                 The server does not support zero-downtime model swaps. \
-                 Falling back to legacy SIGTERM→SIGKILL process restart (this takes ~5-12 seconds). \
-                 To enable zero-downtime swaps, upgrade llama-server to b5291+ and use --models-dir.",
-                status.as_u16()
-            );
+            let first_unsupported = self.mark_router_mode_unsupported();
+            if first_unsupported {
+                tracing::info!(
+                    status = status.as_u16(),
+                    elapsed_ms,
+                    url = %models_url,
+                    body = %body,
+                    "server_manager: api_unload_model received HTTP {} (Router Mode not supported). \
+                     Falling back to legacy restart path. \
+                     To enable zero-downtime swaps, upgrade llama-server to b5291+ and use --models-dir.",
+                    status.as_u16()
+                );
+            } else {
+                tracing::debug!(
+                    status = status.as_u16(),
+                    elapsed_ms,
+                    "server_manager: api_unload_model skipping zero-downtime path (Router Mode unsupported, cached)"
+                );
+            }
             anyhow::bail!(
                 "api_unload_model: Router Mode not supported (HTTP {status}). \
                  Falling back to process restart."
@@ -754,10 +813,13 @@ impl LlamaServerManager {
         // Model unloaded — GPU is clear. Keep process alive.
         self.pre_api_unload_ngl
             .store(self.current_ngl.load(Ordering::Acquire), Ordering::Release);
-        self.pre_api_unload_vision
-            .store(self.current_vision.load(Ordering::Acquire), Ordering::Release);
+        self.pre_api_unload_vision.store(
+            self.current_vision.load(Ordering::Acquire),
+            Ordering::Release,
+        );
         self.current_ngl.store(0, Ordering::Release);
         self.current_vision.store(false, Ordering::Release);
+        self.mark_router_mode_supported();
         // Stay in SWAPPING state — caller will transition to READY after reload
         self.swap_done.notify_waiters();
 
@@ -777,6 +839,21 @@ impl LlamaServerManager {
         if base_url.is_empty() {
             anyhow::bail!("api_load_model: no API URL (server not running)");
         }
+
+        if self.router_models_dir().is_none() {
+            anyhow::bail!(
+                "api_load_model: Router Mode not active (--models-dir unavailable). \
+                 Falling back to process restart."
+            );
+        }
+
+        if matches!(self.router_mode_supported_cached(), Some(false)) {
+            anyhow::bail!(
+                "api_load_model: Router Mode not supported (cached HTTP 404/501). \
+                 Falling back to process restart."
+            );
+        }
+
         let models_url = v1_models_endpoint(&base_url, "load");
 
         let client = reqwest::Client::builder()
@@ -801,6 +878,31 @@ impl LlamaServerManager {
             .map_err(|e| anyhow::anyhow!("api_load_model: transport error: {e}"))?;
 
         let status = resp.status();
+        if status.as_u16() == 501 || status.as_u16() == 404 {
+            let body = resp.text().await.unwrap_or_default();
+            self.state.store(STATE_READY, Ordering::Release);
+            let first_unsupported = self.mark_router_mode_unsupported();
+            if first_unsupported {
+                tracing::info!(
+                    status = status.as_u16(),
+                    url = %models_url,
+                    body = %body,
+                    "server_manager: api_load_model received HTTP {} (Router Mode not supported). \
+                     Falling back to legacy restart path.",
+                    status.as_u16()
+                );
+            } else {
+                tracing::debug!(
+                    status = status.as_u16(),
+                    "server_manager: api_load_model skipping zero-downtime path (Router Mode unsupported, cached)"
+                );
+            }
+            anyhow::bail!(
+                "api_load_model: Router Mode not supported (HTTP {status}). \
+                 Falling back to process restart."
+            );
+        }
+
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
             self.state.store(STATE_ERROR, Ordering::Release);
@@ -821,6 +923,7 @@ impl LlamaServerManager {
         if restored_ngl > 0 {
             self.current_ngl.store(restored_ngl, Ordering::Release);
         }
+        self.mark_router_mode_supported();
         self.current_vision
             .store(restored_vision, Ordering::Release);
         self.state.store(STATE_READY, Ordering::Release);
@@ -828,6 +931,46 @@ impl LlamaServerManager {
 
         tracing::info!("server_manager: model reloaded via API (GPU-resident)");
         Ok(())
+    }
+
+    pub(crate) async fn run_warmup_completion(&self) -> anyhow::Result<()> {
+        let base = self.api_url();
+        if base.is_empty() {
+            return Ok(());
+        }
+
+        let endpoint = format!("{}/chat/completions", base.trim_end_matches('/'));
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(8))
+            .build()
+            .map_err(|e| anyhow::anyhow!("warmup client build failed: {e}"))?;
+
+        let payload = serde_json::json!({
+            "model": self.router_model_id(),
+            "messages": [
+                { "role": "system", "content": "kria-internal-warmup" },
+                { "role": "user", "content": "hello" }
+            ],
+            "max_tokens": 1,
+            "temperature": 0.0,
+            "stream": false
+        });
+
+        let resp = client
+            .post(&endpoint)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("warmup transport error: {e}"))?;
+
+        let status = resp.status();
+        if status.is_success() {
+            tracing::debug!("server_manager: warmup completion succeeded");
+            Ok(())
+        } else {
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("warmup completion failed (HTTP {}): {}", status, body);
+        }
     }
 
     /// Graceful stop: send interrupt signal, wait for drain, then kill.
@@ -885,6 +1028,16 @@ impl LlamaServerManager {
         } else {
             std::path::PathBuf::from(raw)
         }
+    }
+
+    pub(crate) async fn save_active_slot(&self) -> bool {
+        self.save_slot_kv(ACTIVE_SLOT_ID, ACTIVE_SLOT_FILENAME)
+            .await
+    }
+
+    pub(crate) async fn restore_active_slot(&self) -> bool {
+        self.restore_slot_kv(ACTIVE_SLOT_ID, ACTIVE_SLOT_FILENAME)
+            .await
     }
 
     /// Best-effort: persist a single slot's KV cache to disk via

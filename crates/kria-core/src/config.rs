@@ -1,6 +1,6 @@
 use crate::platform::HardwareTier;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Root configuration loaded from TOML.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -8,6 +8,7 @@ use std::path::Path;
 pub struct KriaConfig {
     pub llm: LlmConfig,
     pub voice: VoiceConfig,
+    pub classifier: ClassifierConfig,
     pub memory: MemoryConfig,
     pub safety: SafetyConfig,
     pub agent: AgentConfig,
@@ -162,6 +163,15 @@ pub struct PostEditConfig {
     pub mode: String,
     /// Hard timeout per tier — overridden by `VoiceTier` when not set explicitly.
     pub timeout_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ClassifierConfig {
+    /// Enable TurnGate L0 ONNX fallback hinting.
+    pub enabled: bool,
+    /// Path to classifier ONNX model file.
+    pub model_path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -601,6 +611,205 @@ fn parse_env_bool(value: &str) -> Option<bool> {
     }
 }
 
+/// Unified operational controls for infra QoS, pooling, and snapshot restore.
+///
+/// This config is loaded from `kria_config.toml` via config-rs and is intended
+/// for SRE/runtime policy knobs that should not be hardcoded in infra modules.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct KriaSystemConfig {
+    pub qos: KriaSystemQosConfig,
+    pub target_pool: KriaSystemTargetPoolConfig,
+    pub snapshot: KriaSystemSnapshotConfig,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct KriaSystemQosConfig {
+    pub high_recovery_slo_ms: u64,
+    pub retry_after_defer_ms: u64,
+    pub max_latency_samples: usize,
+    pub max_medium_credits: u32,
+    pub medium_credit_per_high_completion: u32,
+    pub monitor_sample_interval_ms: u64,
+    pub max_adaptation_history: usize,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct KriaSystemTargetPoolConfig {
+    pub lease_ttl_ms: u64,
+    pub heartbeat_grace_ms: u64,
+    pub quarantine_cooldown_ms: u64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct KriaSystemSnapshotConfig {
+    pub max_normalized_hash_distance: f64,
+}
+
+impl Default for KriaSystemConfig {
+    fn default() -> Self {
+        Self {
+            qos: KriaSystemQosConfig::default(),
+            target_pool: KriaSystemTargetPoolConfig::default(),
+            snapshot: KriaSystemSnapshotConfig::default(),
+        }
+    }
+}
+
+impl Default for KriaSystemQosConfig {
+    fn default() -> Self {
+        Self {
+            high_recovery_slo_ms: 500,
+            retry_after_defer_ms: 50,
+            max_latency_samples: 128,
+            max_medium_credits: 32,
+            medium_credit_per_high_completion: 1,
+            monitor_sample_interval_ms: 100,
+            max_adaptation_history: 512,
+        }
+    }
+}
+
+impl Default for KriaSystemTargetPoolConfig {
+    fn default() -> Self {
+        Self {
+            lease_ttl_ms: 10_000,
+            heartbeat_grace_ms: 1_500,
+            quarantine_cooldown_ms: 2_000,
+        }
+    }
+}
+
+impl Default for KriaSystemSnapshotConfig {
+    fn default() -> Self {
+        Self {
+            max_normalized_hash_distance: 0.12,
+        }
+    }
+}
+
+impl KriaSystemConfig {
+    /// Load system config from `kria_config.toml` with fail-closed defaults.
+    ///
+    /// Search order:
+    /// 1) explicit `override_path`
+    /// 2) `KRIA_SYSTEM_CONFIG_PATH`
+    /// 3) discovered `kria_config.toml` by walking up from exe/CWD
+    /// 4) fallback to `./kria_config.toml`
+    pub fn load(override_path: Option<&Path>) -> Self {
+        let resolved_path = Self::resolve_path(override_path);
+
+        if !resolved_path.exists() {
+            tracing::warn!(
+                path = %resolved_path.display(),
+                "kria system config missing; using safe defaults"
+            );
+            return Self::default();
+        }
+
+        let loaded = ::config::Config::builder()
+            .add_source(::config::File::from(resolved_path.clone()).required(false))
+            .build();
+
+        let mut parsed = match loaded {
+            Ok(raw) => match raw.try_deserialize::<Self>() {
+                Ok(value) => value,
+                Err(error) => {
+                    tracing::warn!(
+                        path = %resolved_path.display(),
+                        error = %error,
+                        "kria system config parse failed; using safe defaults"
+                    );
+                    return Self::default();
+                }
+            },
+            Err(error) => {
+                tracing::warn!(
+                    path = %resolved_path.display(),
+                    error = %error,
+                    "kria system config load failed; using safe defaults"
+                );
+                return Self::default();
+            }
+        };
+
+        parsed.apply_safety_bounds();
+        parsed
+    }
+
+    fn resolve_path(override_path: Option<&Path>) -> PathBuf {
+        if let Some(path) = override_path {
+            return path.to_path_buf();
+        }
+
+        if let Ok(path) = std::env::var("KRIA_SYSTEM_CONFIG_PATH") {
+            let trimmed = path.trim();
+            if !trimmed.is_empty() {
+                return PathBuf::from(trimmed);
+            }
+        }
+
+        discover_kria_config_from_roots("kria_config.toml")
+            .unwrap_or_else(|| PathBuf::from("kria_config.toml"))
+    }
+
+    fn apply_safety_bounds(&mut self) {
+        self.qos.high_recovery_slo_ms = self.qos.high_recovery_slo_ms.max(1);
+        self.qos.retry_after_defer_ms = self.qos.retry_after_defer_ms.max(1);
+        self.qos.max_latency_samples = self.qos.max_latency_samples.max(1);
+        self.qos.monitor_sample_interval_ms = self.qos.monitor_sample_interval_ms.max(1);
+        self.qos.max_adaptation_history = self.qos.max_adaptation_history.max(1);
+
+        self.target_pool.lease_ttl_ms = self.target_pool.lease_ttl_ms.max(1);
+        self.target_pool.heartbeat_grace_ms = self.target_pool.heartbeat_grace_ms.max(1);
+        self.target_pool.quarantine_cooldown_ms =
+            self.target_pool.quarantine_cooldown_ms.max(1);
+
+        if !(0.0..=1.0).contains(&self.snapshot.max_normalized_hash_distance) {
+            tracing::warn!(
+                value = self.snapshot.max_normalized_hash_distance,
+                "kria system config snapshot tolerance invalid; clamping into [0.0, 1.0]"
+            );
+            self.snapshot.max_normalized_hash_distance =
+                self.snapshot.max_normalized_hash_distance.clamp(0.0, 1.0);
+        }
+    }
+}
+
+fn discover_kria_config_from_roots(file_name: &str) -> Option<PathBuf> {
+    let mut roots: Vec<PathBuf> = Vec::new();
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            roots.push(parent.to_path_buf());
+        }
+    }
+
+    if let Ok(cwd) = std::env::current_dir() {
+        roots.push(cwd);
+    }
+
+    for start in roots {
+        let mut dir = Some(start.as_path());
+        while let Some(current) = dir {
+            let candidate = current.join(file_name);
+            if candidate.exists() {
+                return Some(candidate);
+            }
+
+            dir = current.parent();
+            if dir.map(|path| path == Path::new("/")).unwrap_or(true) {
+                break;
+            }
+        }
+    }
+
+    None
+}
+
 // ── Defaults ────────────────────────────────────────────────────────
 
 impl Default for LlmConfig {
@@ -715,6 +924,15 @@ impl Default for PostEditConfig {
     }
 }
 
+impl Default for ClassifierConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            model_path: "~/.kria/models/classifier/model.onnx".into(),
+        }
+    }
+}
+
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
@@ -767,7 +985,7 @@ impl Default for ServerConfig {
 impl Default for UiConfig {
     fn default() -> Self {
         Self {
-            theme: "dark".into(),
+            theme: "light".into(),
             window_width: 1200,
             window_height: 800,
             language: "en".into(),
@@ -948,6 +1166,16 @@ pub fn load_config(
             config.colab.mcp_server_name = v;
         }
     }
+    if let Ok(v) = std::env::var("KRIA_ENABLE_ONNX_L0") {
+        if let Some(parsed) = parse_env_bool(&v) {
+            config.classifier.enabled = parsed;
+        }
+    }
+    if let Ok(v) = std::env::var("KRIA_ONNX_L0_MODEL_PATH") {
+        if !v.trim().is_empty() {
+            config.classifier.model_path = v;
+        }
+    }
 
     Ok(config)
 }
@@ -967,6 +1195,9 @@ fn merge_config(base: &mut KriaConfig, user: &KriaConfig) {
     }
     if user.voice != VoiceConfig::default() {
         base.voice = user.voice.clone();
+    }
+    if user.classifier != ClassifierConfig::default() {
+        base.classifier = user.classifier.clone();
     }
     if user.safety.emergency_mode {
         base.safety.emergency_mode = true;

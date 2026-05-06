@@ -6,13 +6,41 @@
 //! `KRIA_SKIP_NETWORK_TESTS=1` is set (CI environments without outbound HTTP).
 
 use kria_core::config::ImageGenerationConfig;
-use kria_core::image::{ImageOrchestrator, ImageRequest};
+use kria_core::image::{cloud::CloudError, ImageError, ImageOrchestrator, ImageRequest, ImageResult};
 use std::path::PathBuf;
 
 fn skip_if_no_network() -> bool {
     std::env::var("KRIA_SKIP_NETWORK_TESTS")
         .map(|v| v == "1")
         .unwrap_or(false)
+}
+
+fn is_transient_cloud_failure(err: &ImageError) -> bool {
+    match err {
+        ImageError::Cloud(CloudError::RateLimited)
+        | ImageError::Cloud(CloudError::AllFailed)
+        | ImageError::Cloud(CloudError::AllProvidersFailed(_)) => true,
+        ImageError::Cloud(CloudError::Http(http_err)) => {
+            http_err.is_timeout() || http_err.is_connect() || http_err.is_request()
+        }
+        _ => false,
+    }
+}
+
+fn unwrap_or_skip_transient(
+    test_name: &str,
+    result: Result<ImageResult, ImageError>,
+) -> Option<ImageResult> {
+    match result {
+        Ok(value) => Some(value),
+        Err(err) if is_transient_cloud_failure(&err) => {
+            println!(
+                "Skipping {test_name} due transient cloud provider error: {err:?}"
+            );
+            None
+        }
+        Err(err) => panic!("{test_name} failed: {err:?}"),
+    }
 }
 
 /// Build a minimal config with cloud fallback forced on and ComfyUI disabled.
@@ -64,56 +92,54 @@ async fn test_cloud_image_generation_saves_file() {
     };
 
     println!("Generating photorealistic image via Pollinations.ai…");
-    let result = orchestrator.generate(req, None, None).await;
+    let Some(img_result) = unwrap_or_skip_transient(
+        "test_cloud_image_generation_saves_file",
+        orchestrator.generate(req, None, None).await,
+    ) else {
+        return;
+    };
 
-    match result {
-        Ok(img_result) => {
-            assert!(
-                !img_result.images.is_empty(),
-                "Expected at least one generated image"
-            );
-            let img = &img_result.images[0];
-            println!("Generated image: {:?}", img.path);
-            println!("  sha256:     {}", img.sha256);
-            println!("  size:       {}×{}", img.width, img.height);
-            println!("  style:      {}", img.style);
-            println!("  provenance: {}", img.provenance);
-            println!("  seed:       {}", img.seed);
-            println!("  quality:    {}", img.quality);
-            println!("  steps:      {}", img.steps);
-            println!("  sampler:    {}", img.sampler);
-            println!("  enhance:    {}", img.enhance_mode);
-            println!("  elapsed:    {}ms", img_result.elapsed_ms);
-            println!("  tier:       {}", img_result.tier_used);
+    assert!(
+        !img_result.images.is_empty(),
+        "Expected at least one generated image"
+    );
+    let img = &img_result.images[0];
+    println!("Generated image: {:?}", img.path);
+    println!("  sha256:     {}", img.sha256);
+    println!("  size:       {}×{}", img.width, img.height);
+    println!("  style:      {}", img.style);
+    println!("  provenance: {}", img.provenance);
+    println!("  seed:       {}", img.seed);
+    println!("  quality:    {}", img.quality);
+    println!("  steps:      {}", img.steps);
+    println!("  sampler:    {}", img.sampler);
+    println!("  enhance:    {}", img.enhance_mode);
+    println!("  elapsed:    {}ms", img_result.elapsed_ms);
+    println!("  tier:       {}", img_result.tier_used);
 
-            assert!(
-                img.path.exists(),
-                "Output file should exist on disk: {:?}",
-                img.path
-            );
-            let bytes = std::fs::read(&img.path).expect("read output file");
-            assert!(!bytes.is_empty(), "Output file should not be empty");
+    assert!(
+        img.path.exists(),
+        "Output file should exist on disk: {:?}",
+        img.path
+    );
+    let bytes = std::fs::read(&img.path).expect("read output file");
+    assert!(!bytes.is_empty(), "Output file should not be empty");
 
-            // Verify PNG or JPEG magic bytes (Pollinations may return JPEG).
-            let is_png = bytes.len() >= 8 && bytes.starts_with(b"\x89PNG\r\n\x1a\n");
-            let is_jpeg = bytes.len() >= 3 && bytes.starts_with(b"\xff\xd8\xff");
-            assert!(
-                is_png || is_jpeg,
-                "Output should be a valid PNG or JPEG (got {} bytes, prefix: {:?})",
-                bytes.len(),
-                &bytes[..bytes.len().min(8)]
-            );
+    // Verify PNG or JPEG magic bytes (Pollinations may return JPEG).
+    let is_png = bytes.len() >= 8 && bytes.starts_with(b"\x89PNG\r\n\x1a\n");
+    let is_jpeg = bytes.len() >= 3 && bytes.starts_with(b"\xff\xd8\xff");
+    assert!(
+        is_png || is_jpeg,
+        "Output should be a valid PNG or JPEG (got {} bytes, prefix: {:?})",
+        bytes.len(),
+        &bytes[..bytes.len().min(8)]
+    );
 
-            println!(
-                "✅ Image saved to: {} ({} bytes)",
-                img.path.display(),
-                bytes.len()
-            );
-        }
-        Err(e) => {
-            panic!("Image generation failed: {e}");
-        }
-    }
+    println!(
+        "✅ Image saved to: {} ({} bytes)",
+        img.path.display(),
+        bytes.len()
+    );
 }
 
 #[tokio::test]
@@ -139,14 +165,12 @@ async fn test_cloud_image_generation_anime_style() {
     };
 
     println!("Generating anime-style image via Pollinations.ai…");
-    let result = orchestrator.generate(req, None, None).await;
-
-    assert!(
-        result.is_ok(),
-        "Anime image generation failed: {:?}",
-        result.err()
-    );
-    let img_result = result.unwrap();
+    let Some(img_result) = unwrap_or_skip_transient(
+        "test_cloud_image_generation_anime_style",
+        orchestrator.generate(req, None, None).await,
+    ) else {
+        return;
+    };
     let img = &img_result.images[0];
 
     assert!(
@@ -191,10 +215,12 @@ async fn test_cloud_image_metadata_fields() {
         enhance: Some(true),
     };
 
-    let result = orchestrator
-        .generate(req, None, None)
-        .await
-        .expect("cloud generation should succeed");
+    let Some(result) = unwrap_or_skip_transient(
+        "test_cloud_image_metadata_fields",
+        orchestrator.generate(req, None, None).await,
+    ) else {
+        return;
+    };
 
     let img = &result.images[0];
 
@@ -259,10 +285,12 @@ async fn test_cloud_count_two_unique_seeds() {
     };
 
     println!("Generating 2 images (testing seed uniqueness)…");
-    let result = orchestrator
-        .generate(req, None, None)
-        .await
-        .expect("count=2 generation should succeed");
+    let Some(result) = unwrap_or_skip_transient(
+        "test_cloud_count_two_unique_seeds",
+        orchestrator.generate(req, None, None).await,
+    ) else {
+        return;
+    };
 
     assert_eq!(result.images.len(), 2, "Should get exactly 2 images");
 
@@ -320,10 +348,12 @@ async fn test_prompt_enhancement_applied() {
         enhance: Some(true),
     };
 
-    let result = orchestrator
-        .generate(req, None, None)
-        .await
-        .expect("enhanced generation should succeed");
+    let Some(result) = unwrap_or_skip_transient(
+        "test_prompt_enhancement_applied",
+        orchestrator.generate(req, None, None).await,
+    ) else {
+        return;
+    };
 
     let img = &result.images[0];
 

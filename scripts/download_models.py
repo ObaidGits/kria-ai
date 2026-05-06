@@ -20,6 +20,9 @@ Dry run:        DRY_RUN=1 python scripts/download_models.py
 ComfyUI models (Tier B image generation):
   python scripts/download_models.py --comfyui
   KRIA_DATA_DIR=/custom/path python scripts/download_models.py --comfyui
+
+L0 classifier assets (included in tier downloads):
+    - ONNX model + tokenizer for TurnGate optional intent classifier
 """
 import os
 import sys
@@ -59,6 +62,11 @@ HF_TOKEN = os.getenv("HF_TOKEN", "")
 
 # HuggingFace download base
 HF_BASE = "https://huggingface.co"
+
+# openWakeWord now publishes canonical model assets under GitHub releases
+# rather than repo raw paths.
+OWW_RELEASE_TAG = "v0.5.1"
+OWW_RELEASE_BASE = f"https://github.com/dscripka/openWakeWord/releases/download/{OWW_RELEASE_TAG}"
 
 # ── Tier detection ────────────────────────────────────────────────
 # Priority: KRIA_TIER env var > ~/.kria/hardware_tier.env > default "standard"
@@ -171,7 +179,8 @@ COMMON_DOWNLOADS: list[dict] = [
         "desc": "Piper TTS male voice config — ryan high",
     },
     {
-        "url": f"{HF_BASE}/snakers4/silero-vad/resolve/master/src/silero_vad/data/silero_vad.onnx",
+        "url": f"{OWW_RELEASE_BASE}/silero_vad.onnx",
+        "fallback_url": f"{HF_BASE}/onnx-community/silero-vad/resolve/main/onnx/model.onnx",
         "dest": MODELS_DIR / "vad" / "silero_vad.onnx",
         "desc": "Silero VAD model (~2 MB)",
     },
@@ -181,19 +190,34 @@ COMMON_DOWNLOADS: list[dict] = [
     # "Hey Riya" / "Hello Ria" / "Hello Riya" aliases is a Phase 7 enhancement
     # (see plan, Phase 7 — Custom wake-word training).
     {
-        "url": "https://github.com/dscripka/openWakeWord/raw/main/openwakeword/resources/models/melspectrogram.onnx",
+        "url": f"{OWW_RELEASE_BASE}/melspectrogram.onnx",
         "dest": MODELS_DIR / "wake" / "melspectrogram.onnx",
         "desc": "openWakeWord mel-spectrogram frontend (~1 MB)",
     },
     {
-        "url": "https://github.com/dscripka/openWakeWord/raw/main/openwakeword/resources/models/embedding_model.onnx",
+        "url": f"{OWW_RELEASE_BASE}/embedding_model.onnx",
         "dest": MODELS_DIR / "wake" / "embedding_model.onnx",
         "desc": "openWakeWord shared speech embedding (~5 MB)",
     },
     {
-        "url": "https://github.com/dscripka/openWakeWord/raw/main/openwakeword/resources/models/hey_jarvis_v0.1.onnx",
+        "url": f"{OWW_RELEASE_BASE}/hey_jarvis_v0.1.onnx",
         "dest": MODELS_DIR / "wake" / "hey_ria.onnx",
         "desc": "openWakeWord generic keyword head (placeholder for hey_ria, ~5 MB)",
+    },
+]
+
+# Optional L0 ONNX classifier assets (used by TurnGate fallback routing).
+# Kept small for low-latency CPU inference.
+L0_CLASSIFIER_DOWNLOADS: list[dict] = [
+    {
+        "url": f"{HF_BASE}/Xenova/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx",
+        "dest": MODELS_DIR / "classifier" / "model.onnx",
+        "desc": "L0 classifier encoder ONNX (MiniLM-L6-v2, ~90 MB)",
+    },
+    {
+        "url": f"{HF_BASE}/Xenova/all-MiniLM-L6-v2/resolve/main/tokenizer.json",
+        "dest": MODELS_DIR / "classifier" / "tokenizer.json",
+        "desc": "L0 classifier tokenizer (tokenizer.json)",
     },
 ]
 
@@ -521,7 +545,7 @@ def _run_tier_downloads() -> None:
         print("DRY_RUN=1 — no files will be downloaded")
     print()
 
-    downloads = TIER_MODELS[_effective_tier] + COMMON_DOWNLOADS
+    downloads = TIER_MODELS[_effective_tier] + COMMON_DOWNLOADS + L0_CLASSIFIER_DOWNLOADS
 
     print(f"Models for tier '{TIER}':")
     for item in downloads:
@@ -534,7 +558,15 @@ def _run_tier_downloads() -> None:
     errors = []
     for item in downloads:
         try:
-            download_file(item["url"], item["dest"], item["desc"])
+            download_file(
+                item["url"],
+                item["dest"],
+                item["desc"],
+                token_required=item.get("token_required", False),
+                fallback_url=item.get("fallback_url", ""),
+                fallback_token_required=item.get("fallback_token_required", False),
+                fallback_license_url=item.get("fallback_license_url", ""),
+            )
         except Exception as exc:
             print(f"  [FAIL] {item['desc']}: {exc}")
             errors.append(item["desc"])

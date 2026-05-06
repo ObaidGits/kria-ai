@@ -389,6 +389,12 @@ impl RamTelemetry {
     }
 }
 
+impl Default for RamTelemetry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl GpuTelemetry for RamTelemetry {
     async fn snapshot(&self) -> TelemetrySnapshot {

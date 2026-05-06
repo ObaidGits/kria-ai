@@ -403,8 +403,12 @@ impl GpuWatchdog {
                                 );
                                 self.event_bus
                                     .publish(KriaEvent::VramPressure { free_vram_mb: free });
-                                self.execute_swap_with_target(&fresh_target, false, &mut normal_budget)
-                                    .await;
+                                self.execute_swap_with_target(
+                                    &fresh_target,
+                                    false,
+                                    &mut normal_budget,
+                                )
+                                .await;
                                 WatchdogState::Cooldown {
                                     until: Instant::now() + cooldown_dur,
                                 }
@@ -513,6 +517,7 @@ impl GpuWatchdog {
 
         // 1. Cancel in-flight streams.
         self.server.cancel_streams();
+        let _ = self.server.save_active_slot().await;
         self.event_bus.publish(KriaEvent::LlmStreamInterrupted);
 
         // 2. API-first zero-downtime path.
@@ -565,7 +570,9 @@ impl GpuWatchdog {
                 if !resp.status().is_success() {
                     let status = resp.status();
                     let body = resp.text().await.unwrap_or_default();
-                    return Err(format!("dynamic props update failed (HTTP {status}): {body}"));
+                    return Err(format!(
+                        "dynamic props update failed (HTTP {status}): {body}"
+                    ));
                 }
 
                 tracing::info!(
@@ -606,10 +613,13 @@ impl GpuWatchdog {
                 duration_ms = duration.as_millis(),
                 "watchdog: swap completed via API zero-downtime path"
             );
+            let _ = self.server.restore_active_slot().await;
             return;
         }
 
-        let api_err = api_swap_result.err().unwrap_or_else(|| "unknown API swap error".to_string());
+        let api_err = api_swap_result
+            .err()
+            .unwrap_or_else(|| "unknown API swap error".to_string());
         tracing::warn!(
             error = %api_err,
             old_ngl,
@@ -620,8 +630,16 @@ impl GpuWatchdog {
             "watchdog: API swap path failed; falling back to legacy process restart"
         );
 
-        // 3. Legacy fallback: kill old server (emergency = immediate, normal = graceful).
-        if emergency {
+        let router_unsupported = api_err.contains("HTTP 501") || api_err.contains("HTTP 404");
+
+        // 3. Legacy fallback: prefer graceful ladder when Router Mode is absent.
+        if router_unsupported {
+            self.server
+                .graceful_stop_with_timeout(Duration::from_secs(
+                    self.config.graceful_stop_timeout_secs.max(1),
+                ))
+                .await;
+        } else if emergency {
             self.server.kill().await;
         } else {
             self.server.graceful_stop().await;
@@ -663,6 +681,7 @@ impl GpuWatchdog {
                     duration_ms = duration.as_millis(),
                     "watchdog: swap completed"
                 );
+                let _ = self.server.restore_active_slot().await;
             }
             Err(e) => {
                 tracing::error!(?e, "watchdog: swap spawn failed");

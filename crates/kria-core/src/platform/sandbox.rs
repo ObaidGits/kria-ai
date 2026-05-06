@@ -21,7 +21,6 @@
 /// | `reboot` | Out of scope |
 /// | `swapon` / `swapoff` | Out of scope |
 /// | `pivot_root` / `chroot` | Container-escape primitives |
-
 /// Install the seccomp filter.  Returns `Ok(())` on success or if not on Linux.
 /// Returns `Err(reason)` if the filter could not be installed — callers should
 /// log the error but may choose to continue running (degraded Ring 4 protection).
@@ -133,5 +132,5 @@ fn libc_syscall_nr(name: &str) -> Result<i64, String> {
         return Err(format!("syscall '{name}' not mapped for this arch"));
     };
 
-    Ok(nr as i64)
+    Ok(nr)
 }

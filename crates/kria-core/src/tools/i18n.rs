@@ -19,6 +19,31 @@ fn supported_languages() -> Vec<(&'static str, &'static str)> {
     ]
 }
 
+fn looks_hinglish_latin(text: &str) -> bool {
+    // Lightweight lexical hints for common Hindi words written in Latin script.
+    // Require at least two matches to avoid false positives on English text.
+    const HINGLISH_HINTS: &[&str] = &[
+        "aaj", "kal", "abhi", "mausam", "bahut", "accha", "acha", "hai", "nahi", "kyu",
+        "kaise", "mera", "meri", "mujhe", "tum", "kya", "haan", "theek", "thik", "kripya",
+    ];
+
+    let mut hint_hits = 0usize;
+    let lower = text.to_ascii_lowercase();
+    for token in lower.split(|c: char| !c.is_ascii_alphabetic()) {
+        if token.is_empty() {
+            continue;
+        }
+        if HINGLISH_HINTS.contains(&token) {
+            hint_hits += 1;
+            if hint_hits >= 2 {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
 // ─── Handlers ───
 
 struct ListLanguages;
@@ -65,12 +90,17 @@ impl ToolHandler for DetectLanguage {
         } else if scripts.contains_key("latin_extended") {
             // Could be es, de, fr — just mark as "latin_extended"
             "es" // best guess for accented Latin
+        } else if scripts.contains_key("latin") && looks_hinglish_latin(text) {
+            "hinglish"
         } else {
             "en"
         };
 
         ToolResult::ok(serde_json::json!({
             "detected_language": detected,
+            "language": detected,
+            "detected": detected,
+            "code": detected,
             "confidence": "heuristic",
         }))
     }

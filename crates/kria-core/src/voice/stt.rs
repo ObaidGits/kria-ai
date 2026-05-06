@@ -1,6 +1,12 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use crate::resource::{
+    GpuLeaseError, GpuLeaseGuard, GpuLeaseManager, GpuOwner, ImageRuntimeSnapshot,
+    L1ResidencySnapshot, L1RuntimeSnapshot, RamSnapshot, ResourceSnapshot, VramSnapshot,
+};
 
 static STT_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -15,6 +21,7 @@ pub struct SpeechToText {
     language: String,
     threads: Option<usize>,
     command_timeout: Duration,
+    gpu_lease: Option<Arc<GpuLeaseManager>>,
 }
 
 /// STT result.
@@ -34,7 +41,12 @@ impl SpeechToText {
             language: "auto".into(),
             threads: None,
             command_timeout: Duration::from_secs(90),
+            gpu_lease: None,
         }
+    }
+
+    pub fn set_gpu_lease(&mut self, gpu_lease: Arc<GpuLeaseManager>) {
+        self.gpu_lease = Some(gpu_lease);
     }
 
     pub fn set_language(&mut self, lang: &str) {
@@ -55,9 +67,10 @@ impl SpeechToText {
         &self,
         wav_path: &std::path::Path,
     ) -> anyhow::Result<TranscriptionResult> {
-        let start = std::time::Instant::now();
+        let start = Instant::now();
+        let lease_guard = self.acquire_speech_lease("speech_stt_transcribe")?;
 
-        if let Some(ref binary) = self.binary_path {
+        let result: anyhow::Result<TranscriptionResult> = if let Some(ref binary) = self.binary_path {
             // CLI mode: call whisper.cpp binary
             let whisper_threads = self.threads.unwrap_or_else(default_whisper_threads);
             let mut args = vec![
@@ -90,21 +103,27 @@ impl SpeechToText {
 
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                anyhow::bail!("whisper.cpp failed: {stderr}");
+                Err(anyhow::anyhow!("whisper.cpp failed: {stderr}"))
+            } else {
+                let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                let detected_language = detect_language_hint(&self.language, &text);
+                let confidence = estimate_confidence(&text, start.elapsed().as_millis() as u64);
+                Ok(TranscriptionResult {
+                    text,
+                    language: detected_language,
+                    confidence,
+                    duration_ms: start.elapsed().as_millis() as u64,
+                })
             }
-
-            let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            let detected_language = detect_language_hint(&self.language, &text);
-            let confidence = estimate_confidence(&text, start.elapsed().as_millis() as u64);
-            Ok(TranscriptionResult {
-                text,
-                language: detected_language,
-                confidence,
-                duration_ms: start.elapsed().as_millis() as u64,
-            })
         } else {
-            anyhow::bail!("whisper-rs bindings not yet implemented; provide binary_path")
-        }
+            Err(anyhow::anyhow!(
+                "whisper-rs bindings not yet implemented; provide binary_path"
+            ))
+        };
+
+        drop(lease_guard);
+        self.reconcile_speech_lease_idle();
+        result
     }
 
     /// Transcribe raw PCM samples (saves to temp WAV first).
@@ -132,6 +151,70 @@ impl SpeechToText {
 
     pub fn model_path(&self) -> &PathBuf {
         &self.model_path
+    }
+
+    fn map_gpu_lease_error(error: GpuLeaseError) -> anyhow::Error {
+        let hint = match &error {
+            GpuLeaseError::Busy { owner } => {
+                format!("GPU is currently leased by {owner:?}. Retry after the active turn.")
+            }
+            GpuLeaseError::Recovering { reason } => {
+                format!("GPU is recovering ({reason:?}). Retry in a few seconds.")
+            }
+            GpuLeaseError::Degraded { reason } => {
+                format!("GPU lease manager is degraded: {reason}")
+            }
+        };
+        anyhow::anyhow!("speech GPU lease unavailable: {error}. {hint}")
+    }
+
+    fn acquire_speech_lease(&self, turn_label: &str) -> anyhow::Result<Option<GpuLeaseGuard>> {
+        let Some(gpu_lease) = &self.gpu_lease else {
+            return Ok(None);
+        };
+
+        gpu_lease
+            .acquire_guard(
+                GpuOwner::Speech,
+                turn_label,
+                Some(Duration::from_secs(120)),
+            )
+            .map(Some)
+            .map_err(Self::map_gpu_lease_error)
+    }
+
+    fn reconcile_speech_lease_idle(&self) {
+        let Some(gpu_lease) = &self.gpu_lease else {
+            return;
+        };
+
+        let mut sys = sysinfo::System::new();
+        sys.refresh_memory();
+
+        let snapshot = ResourceSnapshot {
+            vram: VramSnapshot {
+                free_mb: 0,
+                total_mb: 0,
+                used_mb: 0,
+            },
+            ram: RamSnapshot {
+                total_mb: sys.total_memory() / (1024 * 1024),
+                free_mb: sys.available_memory() / (1024 * 1024),
+            },
+            l1: L1RuntimeSnapshot {
+                residency: L1ResidencySnapshot::Stopped,
+                process_id: None,
+            },
+            image: ImageRuntimeSnapshot {
+                backend_id: "comfy_ui".to_string(),
+                is_generating: false,
+                process_id: None,
+            },
+            processes: Vec::new(),
+            sampled_at: Instant::now(),
+        };
+
+        gpu_lease.reconcile(&snapshot);
     }
 }
 

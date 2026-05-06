@@ -86,8 +86,7 @@ pub enum ModeError {
 ///
 /// # Parameters
 /// * `config_mode`     — `image_generation.image_mode` from config (e.g. `"auto"`).
-/// * `cloud_fallback`  — `image_generation.cloud_fallback` from config
-///                       (`"always"` | `"auto_offer"` | `"opt_in"` | `"off"`).
+/// * `cloud_fallback`  — `image_generation.cloud_fallback` from config (`"always"` | `"auto_offer"` | `"opt_in"` | `"off"`).
 /// * `tier`            — live hardware tier already resolved by the caller.
 ///
 /// Reads `KRIA_IMAGE_MODE` and `KRIA_IMAGE_CLOUD_FALLBACK` from the environment
@@ -115,7 +114,7 @@ pub fn resolve_image_mode(
         Some("true") | Some("1") | Some("yes") | Some("on") => true,
         Some("false") | Some("0") | Some("no") | Some("off") => false,
         // Env var not set or unrecognised — fall back to config value.
-        _ => cloud_fallback.trim().to_ascii_lowercase() != "off",
+        _ => !cloud_fallback.trim().eq_ignore_ascii_case("off"),
     };
 
     let has_gpu = tier != ImageTier::CRejectOrCloud;

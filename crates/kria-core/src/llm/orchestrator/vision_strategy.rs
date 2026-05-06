@@ -41,10 +41,10 @@ impl VisionMode {
     /// 0 = no limit (full resolution).
     pub fn max_image_dimension(&self) -> u32 {
         match self {
-            Self::FullGpu => 0,       // No limit
-            Self::ReducedGpu => 512,  // Cap to 512×512
-            Self::CpuVision => 256,   // Cap to 256×256 (CPU is slow)
-            Self::Disabled => 0,      // N/A
+            Self::FullGpu => 0,      // No limit
+            Self::ReducedGpu => 512, // Cap to 512×512
+            Self::CpuVision => 256,  // Cap to 256×256 (CPU is slow)
+            Self::Disabled => 0,     // N/A
         }
     }
 
@@ -80,11 +80,7 @@ const CPU_VISION_MIN_FREE_RAM_MB: u64 = 2048;
 /// * `profile` — model profile (has_vision_projector, vision_min_ngl)
 /// * `ngl` — number of GPU layers the server will be spawned with
 /// * `free_ram_mb` — current free system RAM (for CPU vision feasibility)
-pub fn determine_vision_mode(
-    profile: &ModelProfile,
-    ngl: u32,
-    free_ram_mb: u64,
-) -> VisionMode {
+pub fn determine_vision_mode(profile: &ModelProfile, ngl: u32, free_ram_mb: u64) -> VisionMode {
     if !profile.has_vision_projector {
         return VisionMode::Disabled;
     }
@@ -204,9 +200,11 @@ mod tests {
         // return true so --mmproj is passed to llama-server.
         let mode = determine_vision_mode(&vision_profile(), 0, 4000);
         assert_eq!(mode, VisionMode::CpuVision);
-        assert!(mode.load_mmproj(),
+        assert!(
+            mode.load_mmproj(),
             "BUG: CpuVision mode MUST load mmproj into system RAM. \
-             Without --mmproj the LLM is blind even though CPU vision is possible.");
+             Without --mmproj the LLM is blind even though CPU vision is possible."
+        );
         assert!(mode.has_vision());
         assert!(mode.is_enabled());
     }
@@ -223,7 +221,7 @@ mod tests {
 
     #[test]
     fn max_image_dimension_contract() {
-        assert_eq!(VisionMode::FullGpu.max_image_dimension(), 0);  // no limit
+        assert_eq!(VisionMode::FullGpu.max_image_dimension(), 0); // no limit
         assert_eq!(VisionMode::ReducedGpu.max_image_dimension(), 512);
         assert_eq!(VisionMode::CpuVision.max_image_dimension(), 256);
         assert_eq!(VisionMode::Disabled.max_image_dimension(), 0); // N/A
@@ -239,7 +237,12 @@ mod tests {
 
     #[test]
     fn display_matches_as_str() {
-        for mode in [VisionMode::FullGpu, VisionMode::ReducedGpu, VisionMode::CpuVision, VisionMode::Disabled] {
+        for mode in [
+            VisionMode::FullGpu,
+            VisionMode::ReducedGpu,
+            VisionMode::CpuVision,
+            VisionMode::Disabled,
+        ] {
             assert_eq!(format!("{mode}"), mode.as_str());
         }
     }

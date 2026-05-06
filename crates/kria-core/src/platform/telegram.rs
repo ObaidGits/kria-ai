@@ -17,7 +17,7 @@ use crate::config::TelegramConfig;
 use crate::llm::orchestrator::Orchestrator;
 use crate::llm::ChatMessage;
 use crate::memory::embeddings::EmbeddingModel;
-use crate::memory::store::MemoryStore;
+use crate::memory::{MemoryManager, MemoryRuntime, MemoryTurnWrite, SemanticMemoryParser};
 use crate::memory::vectors::VectorIndex;
 use crate::platform::detect::get_available_package_managers;
 use crate::safety::hitl::ApprovalResponse;
@@ -46,10 +46,11 @@ pub struct TelegramBridge {
 
 impl TelegramBridge {
     /// Spawn the Telegram polling loop as a background task.
+    #[allow(clippy::too_many_arguments)]
     pub fn spawn(
         config: TelegramConfig,
         agent_loop: Arc<AgentLoop>,
-        memory_store: Arc<MemoryStore>,
+        memory_store: Arc<dyn MemoryRuntime>,
         tool_registry: Arc<ToolRegistry>,
         embeddings: Arc<EmbeddingModel>,
         vectors: Arc<VectorIndex>,
@@ -228,7 +229,7 @@ fn conflict_backoff_duration(retry_count: u32) -> Duration {
 async fn telegram_poll_loop(
     config: TelegramConfig,
     agent_loop: Arc<AgentLoop>,
-    memory_store: Arc<MemoryStore>,
+    memory_store: Arc<dyn MemoryRuntime>,
     tool_registry: Arc<ToolRegistry>,
     embeddings: Arc<EmbeddingModel>,
     vectors: Arc<VectorIndex>,
@@ -454,10 +455,10 @@ pub async fn process_message(
     chat_id: i64,
     from_name: &str,
     agent_loop: &Arc<AgentLoop>,
-    memory_store: &Arc<MemoryStore>,
+    memory_store: &Arc<dyn MemoryRuntime>,
     tool_registry: &Arc<ToolRegistry>,
-    embeddings: &Arc<EmbeddingModel>,
-    vectors: &Arc<VectorIndex>,
+    _embeddings: &Arc<EmbeddingModel>,
+    _vectors: &Arc<VectorIndex>,
     hw_tier: &str,
     orchestrator: Option<&Arc<Orchestrator>>,
     // Whether the caller is the authenticated owner. Owner callers have their
@@ -466,6 +467,9 @@ pub async fn process_message(
     // denial for any RED-tier action.
     is_owner: bool,
 ) -> String {
+    let memory_writer: Arc<dyn MemoryManager> =
+        Arc::clone(memory_store) as Arc<dyn MemoryManager>;
+
     // Build system prompt (similar to desktop send_message)
     let tool_descriptions = tool_registry
         .list_for_tier(hw_tier)
@@ -563,18 +567,6 @@ pub async fn process_message(
         images: None,
     });
 
-    // Persist user turn
-    let _ = memory_store.store_turn(&crate::memory::store::ConversationTurn {
-        id: None,
-        session_id: session_id.clone(),
-        role: "user".into(),
-        content: text.to_string(),
-        tool_name: None,
-        tool_result: None,
-        tokens_used: None,
-        timestamp: chrono::Utc::now(),
-    });
-
     // Ensure the local LLM runtime is up before entering the agent loop.
     // Without this, messages arriving while the model server is starting up
     // produce "local LLM transport error" instead of a real response.
@@ -624,8 +616,32 @@ pub async fn process_message(
     let hitl = agent_loop.hitl_gateway();
 
     let mut full_response = String::new();
+    let mut active_turn_id: Option<String> = None;
     while let Some(event) = event_rx.recv().await {
+        if let StreamEvent::TurnAccepted {
+            session_id: event_session_id,
+            turn_id,
+        } = &event
+        {
+            if event_session_id == &session_id {
+                active_turn_id = Some(turn_id.clone());
+            }
+            continue;
+        }
+
+        if let Some(turn_id) = active_turn_id.as_deref() {
+            if !agent_loop.is_turn_active(&session_id, turn_id) {
+                tracing::debug!(
+                    session_id = %session_id,
+                    turn_id = %turn_id,
+                    "Telegram: dropping stale stream event"
+                );
+                continue;
+            }
+        }
+
         match event {
+            StreamEvent::TurnAccepted { .. } => {}
             StreamEvent::Token(t) => full_response.push_str(&t),
             StreamEvent::Done(final_text) => {
                 if !final_text.is_empty() && full_response.is_empty() {
@@ -710,29 +726,24 @@ pub async fn process_message(
     }
 
     if !is_transient_llm_error_text(&full_response) {
-        // Persist assistant turn
-        let _ = memory_store.store_turn(&crate::memory::store::ConversationTurn {
-            id: None,
+        let extraction = match agent_loop.memory_parser_backend() {
+            Some(parser_backend) => {
+                let parser = SemanticMemoryParser::new(parser_backend);
+                parser.parse_turn(text, &full_response).await
+            }
+            None => None,
+        };
+
+        let _ = memory_writer.store_turn(&MemoryTurnWrite {
             session_id: session_id.clone(),
-            role: "assistant".into(),
-            content: full_response.clone(),
+            user_prompt: text.to_string(),
+            assistant_response: full_response.clone(),
             tool_name: None,
             tool_result: None,
             tokens_used: None,
             timestamp: chrono::Utc::now(),
+            extraction,
         });
-
-        // Extract facts
-        let fact_mgr = crate::memory::facts::FactManager::new(memory_store, vectors, embeddings);
-        match fact_mgr.extract_from_turn(text, &full_response) {
-            Ok(ids) if !ids.is_empty() => {
-                tracing::info!(
-                    count = ids.len(),
-                    "telegram: extracted facts from conversation"
-                );
-            }
-            _ => {}
-        }
     }
 
     full_response

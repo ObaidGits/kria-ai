@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/kria-core", "crates/kria-desktop", "crates/kria-server"]
+members = ["crates/kria-core", "crates/kria-desktop", "crates/kria-server", "crates/kria-eval", "crates/kria-connection-control"]
 resolver = "2"
 
 [workspace.package]
@@ -34,6 +34,7 @@ rusqlite = { version = "0.32", features = ["bundled", "vtab"] }
 
 # Concurrent data structures
 dashmap = "6"
+arc-swap = "1"
 
 # System info
 sysinfo = "0.32"
@@ -72,6 +73,7 @@ rodio = "0.19"
 # ONNX Runtime (for VAD, TTS)
 ort = "2.0.0-rc.12"
 ndarray = "0.17"
+tokenizers = "0.20"
 
 # Image processing
 image = "0.25"
@@ -90,6 +92,7 @@ futures = "0.3"
 
 # Config
 dirs = "5"
+config = "0.14"
 
 # Open URLs/files in default app
 open = "5"

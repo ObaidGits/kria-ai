@@ -7,11 +7,13 @@ use async_trait::async_trait;
 use crate::image::orchestrator::FailureReport;
 use crate::image::styles::{AspectRatio, ImageStyle};
 use crate::image::ws_bridge::EventEmitter;
-use crate::image::{ImageOrchestrator, ImageRequest, QualityProfile};
+use crate::image::{ImageBackend, ImageExecutionContext, ImageRequest, QualityProfile};
 use crate::infra::ToolResult;
 use crate::llm::orchestrator::Orchestrator;
 use crate::safety::RiskLevel;
 use crate::tools::registry::{ParamDef, ToolDef, ToolHandler, ToolRegistry};
+
+type EmitFn = dyn Fn(&str, serde_json::Value) + Send + Sync + 'static;
 
 fn param(name: &str, ty: &str, desc: &str, required: bool) -> ParamDef {
     ParamDef {
@@ -26,13 +28,39 @@ fn param(name: &str, ty: &str, desc: &str, required: bool) -> ParamDef {
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
 struct GenerateImageHandler {
-    orchestrator: Arc<ImageOrchestrator>,
+    backend: Arc<dyn ImageBackend>,
     /// Closure that forwards image/voice events to the UI layer.
     /// Built by the caller (kria-desktop) as `move |name, payload| app.emit(name, payload)`.
-    emit_fn: Arc<dyn Fn(&str, serde_json::Value) + Send + Sync + 'static>,
+    emit_fn: Arc<EmitFn>,
     /// LLM hardware orchestrator — used to get the current llama-server API URL
     /// and NGL so the image orchestrator can pause it during Tier B VRAM swap.
     llm_orch: Arc<tokio::sync::RwLock<Option<Arc<Orchestrator>>>>,
+}
+
+struct GenerationCancelGuard {
+    backend: Option<Arc<dyn ImageBackend>>,
+}
+
+impl GenerationCancelGuard {
+    fn new(backend: Arc<dyn ImageBackend>) -> Self {
+        Self {
+            backend: Some(backend),
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.backend = None;
+    }
+}
+
+impl Drop for GenerationCancelGuard {
+    fn drop(&mut self) {
+        if let Some(backend) = self.backend.take() {
+            tokio::spawn(async move {
+                let _ = backend.cancel("active".to_string()).await;
+            });
+        }
+    }
 }
 
 #[async_trait]
@@ -95,11 +123,21 @@ impl ToolHandler for GenerateImageHandler {
                 .map(|o| o.clone() as Arc<dyn crate::image::swap::LlmEvictionController>)
         };
 
-        match self
-            .orchestrator
-            .generate(req, Some(emitter), llm_evictor)
-            .await
-        {
+        let mut cancel_guard = GenerationCancelGuard::new(self.backend.clone());
+        let generation = self
+            .backend
+            .generate(
+                req,
+                ImageExecutionContext {
+                    emitter: Some(emitter),
+                    llm_evictor,
+                    cancellation: None,
+                },
+            )
+            .await;
+        cancel_guard.disarm();
+
+        match generation {
             Ok(result) => ToolResult::ok(serde_json::json!({
                 "images": result.images.iter().map(|img| serde_json::json!({
                     "path": img.path.display().to_string(),
@@ -144,15 +182,15 @@ impl ToolHandler for GenerateImageHandler {
 
 /// Register the `generate_image` tool.
 ///
-/// - `orchestrator` — image generation orchestrator (ComfyUI + cloud).
+/// - `backend` — image backend façade (currently ComfyUI orchestrator).
 /// - `emit_fn` — closure that forwards `(event_name, payload)` to the UI layer.
 ///   Typically wraps `app_handle.emit(...)` from kria-desktop.
 /// - `llm_orch` — hardware orchestrator cell; may be `None` initially (before
 ///   llama-server starts). The handler reads it lazily at execution time.
 pub fn register(
     reg: &ToolRegistry,
-    orchestrator: Arc<ImageOrchestrator>,
-    emit_fn: Arc<dyn Fn(&str, serde_json::Value) + Send + Sync + 'static>,
+    backend: Arc<dyn ImageBackend>,
+    emit_fn: Arc<EmitFn>,
     llm_orch: Arc<tokio::sync::RwLock<Option<Arc<Orchestrator>>>>,
 ) {
     reg.register(
@@ -218,6 +256,6 @@ pub fn register(
                 ),
             ],
         },
-        Arc::new(GenerateImageHandler { orchestrator, emit_fn, llm_orch }),
+        Arc::new(GenerateImageHandler { backend, emit_fn, llm_orch }),
     );
 }

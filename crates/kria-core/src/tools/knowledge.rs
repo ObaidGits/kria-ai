@@ -1,5 +1,5 @@
 use crate::infra::ToolResult;
-use crate::memory::store::MemoryStore;
+use crate::memory::{MemoryFact, MemoryRuntime};
 use crate::safety::RiskLevel;
 use crate::tools::registry::{ParamDef, ToolDef, ToolHandler, ToolRegistry};
 use async_trait::async_trait;
@@ -16,9 +16,11 @@ fn param(name: &str, ty: &str, desc: &str, required: bool) -> ParamDef {
     }
 }
 
-/// Shared handle to MemoryStore, injected into each handler.
+/// Shared runtime-facing memory handle injected into each handler.
 #[derive(Clone)]
-struct StoreHandle(Arc<MemoryStore>);
+struct StoreHandle {
+    runtime: Arc<dyn MemoryRuntime>,
+}
 
 struct RememberFact(StoreHandle);
 #[async_trait]
@@ -26,7 +28,7 @@ impl ToolHandler for RememberFact {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
         let key = params["key"].as_str().unwrap_or("").to_string();
         let value = params["value"].as_str().unwrap_or("").to_string();
-        let fact = crate::memory::store::MemoryFact {
+        let fact = MemoryFact {
             id: None,
             text: format!("{}: {}", key, value),
             category: key.clone(),
@@ -36,7 +38,7 @@ impl ToolHandler for RememberFact {
             access_count: 0,
             decay_score: 1.0,
         };
-        match self.0 .0.store_fact(&fact) {
+        match self.0.runtime.store_fact(&fact) {
             Ok(id) => ToolResult::ok(serde_json::json!({
                 "stored": true, "key": key, "value": value, "fact_id": id,
             })),
@@ -54,12 +56,12 @@ struct RecallFact(StoreHandle);
 impl ToolHandler for RecallFact {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
         let query = params["query"].as_str().unwrap_or("");
-        match self.0 .0.search_facts(query, 10) {
+        match self.0.runtime.search_facts(query, 10) {
             Ok(facts) => {
                 // Update access timestamps for returned facts
                 for f in &facts {
                     if let Some(id) = f.id {
-                        let _ = self.0 .0.update_fact_access(id);
+                        let _ = self.0.runtime.update_fact_access(id);
                     }
                 }
                 let results: Vec<serde_json::Value> = facts
@@ -92,10 +94,10 @@ impl ToolHandler for SearchKnowledge {
         let max = params["max_results"].as_u64().unwrap_or(10) as usize;
 
         // Hybrid search: FTS facts + conversation search
-        let facts = self.0 .0.search_facts(query, max).unwrap_or_default();
+        let facts = self.0.runtime.search_facts(query, max).unwrap_or_default();
         let convos = self
             .0
-             .0
+            .runtime
             .search_conversations(query, max)
             .unwrap_or_default();
 
@@ -117,7 +119,7 @@ struct ListRemembered(StoreHandle);
 #[async_trait]
 impl ToolHandler for ListRemembered {
     async fn execute(&self, _params: serde_json::Value) -> ToolResult {
-        match self.0 .0.all_facts_with_decay(0.0) {
+        match self.0.runtime.all_facts_with_decay(0.0) {
             Ok(facts) => {
                 let results: Vec<serde_json::Value> = facts
                     .iter()
@@ -146,7 +148,7 @@ impl ToolHandler for SaveSnippet {
         let name = params["name"].as_str().unwrap_or("");
         let content = params["content"].as_str().unwrap_or("");
         let language = params["language"].as_str().unwrap_or("text");
-        match self.0 .0.save_snippet(name, content, language, &[]) {
+        match self.0.runtime.store_snippet(name, content, language, &[]) {
             Ok(()) => ToolResult::ok(serde_json::json!({
                 "saved": true, "name": name, "language": language, "size": content.len(),
             })),
@@ -164,7 +166,7 @@ struct GetSnippet(StoreHandle);
 impl ToolHandler for GetSnippet {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
         let name = params["name"].as_str().unwrap_or("");
-        match self.0 .0.get_snippet(name) {
+        match self.0.runtime.get_snippet(name) {
             Ok(Some((content, language, tags))) => ToolResult::ok(serde_json::json!({
                 "name": name, "content": content, "language": language, "tags": tags,
             })),
@@ -183,7 +185,7 @@ struct ListSnippets(StoreHandle);
 impl ToolHandler for ListSnippets {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
         let tag = params["tag"].as_str();
-        match self.0 .0.list_snippets(tag) {
+        match self.0.runtime.list_snippets(tag) {
             Ok(names) => {
                 ToolResult::ok(serde_json::json!({ "snippets": names, "count": names.len() }))
             }
@@ -209,7 +211,7 @@ impl ToolHandler for IngestDocument {
                 } else {
                     &content
                 };
-                let fact = crate::memory::store::MemoryFact {
+                let fact = MemoryFact {
                     id: None,
                     text: format!("[document:{}] {}", path, truncated),
                     category: "document".into(),
@@ -219,7 +221,7 @@ impl ToolHandler for IngestDocument {
                     access_count: 0,
                     decay_score: 1.0,
                 };
-                match self.0 .0.store_fact(&fact) {
+                match self.0.runtime.store_fact(&fact) {
                     Ok(id) => ToolResult::ok(serde_json::json!({
                         "ingested": true, "path": path, "fact_id": id,
                         "size_bytes": content.len(), "truncated": content.len() > 10_000,
@@ -240,8 +242,8 @@ impl ToolHandler for IngestDocument {
     }
 }
 
-pub fn register(reg: &ToolRegistry, store: Arc<MemoryStore>) {
-    let h = StoreHandle(store);
+pub fn register(reg: &ToolRegistry, store: Arc<dyn MemoryRuntime>) {
+    let h = StoreHandle { runtime: store };
     let tools: Vec<(ToolDef, Arc<dyn ToolHandler>)> = vec![
         (
             ToolDef {

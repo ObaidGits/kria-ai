@@ -802,15 +802,11 @@ const MessageBubble: Component<Props> = (props) => {
     if (!isAssistant()) return [] as string[];
     const contentPaths = props.message.content ? extractLocalImagePaths(props.message.content) : [];
     const toolTextPaths = extractGenerateImagePathsFromToolText(props.message.toolCalls);
-    const fallbackPaths = new Set<string>([...contentPaths, ...toolTextPaths]);
 
-    // Avoid duplicate cards when structured generate_image payload is already renderable.
-    const structuredPaths = new Set<string>(extractStructuredGenerateImagePaths(props.message.toolCalls));
-    for (const path of structuredPaths) {
-      fallbackPaths.delete(path);
-    }
-
-    return Array.from(fallbackPaths);
+    // Keep inline cards visible even when structured tool payload exists.
+    // This restores the previous UX where generated images are directly visible
+    // in chat with quick Open/Download actions, without requiring tool expansion.
+    return Array.from(new Set<string>([...contentPaths, ...toolTextPaths]));
   });
 
   const scheduleInlineImageRetry = (path: string) => {

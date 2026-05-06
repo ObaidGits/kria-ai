@@ -1,13 +1,19 @@
 pub mod circuit_breaker;
 pub mod component;
 pub mod download;
+pub mod environment;
 pub mod event_bus;
 pub mod hardware_profiler;
 pub mod health;
 pub mod isolation;
 pub mod logging;
+pub mod observability;
 pub mod pipeline_trace;
+pub mod pool;
 pub mod provisioning;
+pub mod qos;
+pub mod sandbox;
+pub mod snapshot;
 pub mod supervisor;
 
 pub use circuit_breaker::CircuitBreaker;

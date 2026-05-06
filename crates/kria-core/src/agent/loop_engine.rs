@@ -6,11 +6,13 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 
 use crate::agent::response_parser::{
     extract_text_response, parse_tool_calls_with_known, ParsedToolCall,
 };
-use crate::agent::router::IntentRouter;
+use crate::agent::turn_gate::{Operation, ResourcePlan, TurnGate};
+use crate::agent::turn_context::{TurnAdmission, TurnAdmissionDecision, TurnAdmissionError};
 use crate::infra::isolation::run_isolated;
 use crate::infra::pipeline_trace::{
     log_pipeline_step, sanitize_json_for_logs, sanitize_text_for_logs,
@@ -19,8 +21,8 @@ use crate::llm::orchestrator::vision_strategy::VisionMode;
 use crate::llm::orchestrator::vram_budget::{calculate_safe_visual_tokens, estimate_visual_tokens};
 use crate::llm::tokenize::count_tokens;
 use crate::llm::{
-    ChatMessage, ImageAttachment, LlmResponse, ModelRouter, ToolSchema, LLM_TOOL_RESULT_TOKEN_BUDGET,
-    LLM_TURN_TOOL_BUDGET, TOOL_RESULT_MAX_CHARS,
+    ChatMessage, ImageAttachment, LlmResponse, ModelRouter, ToolSchema,
+    LLM_TOOL_RESULT_TOKEN_BUDGET, LLM_TURN_TOOL_BUDGET, TOOL_RESULT_MAX_CHARS,
 };
 use crate::mcp::payload_shaper::shape_for_llm;
 use crate::safety::audit::{DecidedBy, Decision};
@@ -191,7 +193,105 @@ static SENSITIVE_JSON_FIELD_RE: Lazy<Regex> = Lazy::new(|| {
 static MULTI_NEWLINE_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\n{3,}").expect("valid multi newline regex"));
 
-fn detect_package_intent(user_text: &str) -> Option<PackageIntent> {
+static REMOTE_VM_INDEX_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)\bvm\s*#?\s*(\d{1,3})\b").expect("valid remote vm index regex")
+});
+
+static REMOTE_VM_TARGET_HINT_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"(?i)\b(?:on|in)\s+(?:my\s+)?(?:local\s+)?vm\s+([a-z0-9][a-z0-9_.:-]{0,63})\b",
+    )
+    .expect("valid remote vm target hint regex")
+});
+
+static REMOTE_CONNECTED_TARGET_HINT_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"(?i)\b(?:on|in)\s+(?:my\s+)?connected\s+(?:computer|machine|laptop|pc|host)\s+([a-z0-9][a-z0-9_.:-]{0,63})\b",
+    )
+    .expect("valid connected target hint regex")
+});
+
+static REMOTE_PACKAGE_LIST_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"(?i)\b(?:what|which|show|list|check|tell)\b.{0,40}\b(?:apps?|applications?|packages?|programs?)\b.{0,24}\b(?:installed|install)\b|\b(?:installed|install)\b.{0,24}\b(?:apps?|applications?|packages?|programs?)\b|\b(?:apps?|applications?|packages?|programs?)\b.{0,24}\b(?:installed|install)\b",
+    )
+    .expect("valid remote package list regex")
+});
+
+fn is_remote_command_context(user_text: &str) -> bool {
+    let text = user_text.to_ascii_lowercase();
+    text.contains(" via ssh")
+        || text.starts_with("ssh ")
+        || text.contains(" on my vm")
+        || text.contains(" on vm")
+        || text.contains(" in my vm")
+        || text.contains(" in vm")
+        || text.contains(" local vm")
+        || text.contains(" remote vm")
+        || text.contains(" remote host")
+        || text.contains(" remote computer")
+        || text.contains(" remote laptop")
+        || text.contains(" connected computer")
+        || text.contains(" connected machine")
+        || text.contains(" connected laptop")
+        || text.contains(" connected pc")
+        || REMOTE_VM_INDEX_RE.is_match(&text)
+}
+
+fn normalize_inferred_target_hint(raw: &str) -> Option<String> {
+    let cleaned = raw
+        .trim()
+        .trim_matches(|c: char| matches!(c, '"' | '\'' | ',' | ';' | ':' | '.' | '(' | ')'));
+    if cleaned.is_empty() {
+        return None;
+    }
+
+    if cleaned.chars().all(|c| c.is_ascii_digit()) {
+        return Some(format!("vm {}", cleaned));
+    }
+
+    Some(cleaned.to_string())
+}
+
+fn infer_remote_target_hint(user_text: &str) -> Option<String> {
+    if let Some(caps) = REMOTE_VM_INDEX_RE.captures(user_text) {
+        if let Some(index) = caps.get(1) {
+            return Some(format!("vm {}", index.as_str()));
+        }
+    }
+
+    if let Some(caps) = REMOTE_VM_TARGET_HINT_RE.captures(user_text) {
+        if let Some(value) = caps.get(1) {
+            return normalize_inferred_target_hint(value.as_str());
+        }
+    }
+
+    if let Some(caps) = REMOTE_CONNECTED_TARGET_HINT_RE.captures(user_text) {
+        if let Some(value) = caps.get(1) {
+            return normalize_inferred_target_hint(value.as_str());
+        }
+    }
+
+    None
+}
+
+fn is_remote_package_listing_request(user_text: &str) -> bool {
+    is_remote_command_context(user_text) && REMOTE_PACKAGE_LIST_RE.is_match(user_text)
+}
+
+fn build_remote_package_listing_command() -> String {
+    "if command -v apt >/dev/null 2>&1; then apt list --installed 2>/dev/null; \
+elif command -v dnf >/dev/null 2>&1; then dnf list installed; \
+elif command -v pacman >/dev/null 2>&1; then pacman -Q; \
+elif command -v zypper >/dev/null 2>&1; then zypper search --installed-only; \
+elif command -v brew >/dev/null 2>&1; then brew list --versions; \
+elif command -v snap >/dev/null 2>&1; then snap list; \
+elif command -v flatpak >/dev/null 2>&1; then flatpak list --app; \
+else echo 'No supported package manager found on remote target' >&2; exit 127; fi"
+        .to_string()
+}
+
+fn detect_package_intent_raw(user_text: &str) -> Option<PackageIntent> {
     let text = user_text.to_lowercase();
     if ["uninstall", "remove", "delete package"]
         .iter()
@@ -206,6 +306,13 @@ fn detect_package_intent(user_text: &str) -> Option<PackageIntent> {
         return Some(PackageIntent::Install);
     }
     None
+}
+
+fn detect_package_intent(user_text: &str) -> Option<PackageIntent> {
+    if is_remote_command_context(user_text) {
+        return None;
+    }
+    detect_package_intent_raw(user_text)
 }
 
 fn normalize_package_query(raw: &str) -> String {
@@ -289,6 +396,153 @@ fn extract_package_query(user_text: &str, intent: PackageIntent) -> Option<Strin
     Some(normalize_package_query(&compact))
 }
 
+fn sanitize_package_name_for_shell(raw: &str) -> Option<String> {
+    let cleaned = raw
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(*c, '-' | '_' | '.' | '+'))
+        .collect::<String>();
+    if cleaned.is_empty() {
+        None
+    } else {
+        Some(cleaned)
+    }
+}
+
+fn build_remote_package_manager_command(intent: PackageIntent, package_query: &str) -> Option<String> {
+    let package = sanitize_package_name_for_shell(&normalize_package_query(package_query))?;
+    let command = match intent {
+        PackageIntent::Install => format!(
+            "if command -v apt-get >/dev/null 2>&1; then sudo -n apt-get update && sudo -n apt-get install -y {package}; \
+elif command -v dnf >/dev/null 2>&1; then sudo -n dnf install -y {package}; \
+elif command -v pacman >/dev/null 2>&1; then sudo -n pacman -S --noconfirm {package}; \
+elif command -v zypper >/dev/null 2>&1; then sudo -n zypper --non-interactive install {package}; \
+elif command -v brew >/dev/null 2>&1; then brew install {package}; \
+elif command -v snap >/dev/null 2>&1; then sudo -n snap install {package}; \
+elif command -v flatpak >/dev/null 2>&1; then flatpak install -y --user {package} || sudo -n flatpak install -y {package}; \
+else echo 'No supported package manager found on remote target' >&2; exit 127; fi"
+        ),
+        PackageIntent::Uninstall => format!(
+            "if command -v apt-get >/dev/null 2>&1; then sudo -n apt-get remove -y {package}; \
+elif command -v dnf >/dev/null 2>&1; then sudo -n dnf remove -y {package}; \
+elif command -v pacman >/dev/null 2>&1; then sudo -n pacman -R --noconfirm {package}; \
+elif command -v zypper >/dev/null 2>&1; then sudo -n zypper --non-interactive remove {package}; \
+elif command -v brew >/dev/null 2>&1; then brew uninstall {package}; \
+elif command -v snap >/dev/null 2>&1; then sudo -n snap remove {package}; \
+elif command -v flatpak >/dev/null 2>&1; then flatpak uninstall -y --user {package} || sudo -n flatpak uninstall -y {package}; \
+else echo 'No supported package manager found on remote target' >&2; exit 127; fi"
+        ),
+    };
+    Some(command)
+}
+
+fn extract_ssh_target_and_shell(user_text: &str) -> Option<(Option<String>, String)> {
+    let lower = user_text.to_ascii_lowercase();
+    let ssh_start = lower.find("ssh ")?;
+    let ssh_segment = user_text.get(ssh_start..)?.trim();
+
+    let target_hint = ssh_segment
+        .split_whitespace()
+        .skip(1)
+        .find_map(|token| {
+            let trimmed = token.trim_matches(|c: char| c == '"' || c == '\'' || c == ',' || c == ';');
+            if trimmed.is_empty() || trimmed.starts_with('-') {
+                return None;
+            }
+            if let Some((_, host)) = trimmed.split_once('@') {
+                return Some(host.trim_end_matches(':').to_string());
+            }
+            if trimmed.contains('.') || trimmed.contains(':') {
+                return Some(trimmed.to_string());
+            }
+            None
+        });
+
+    let mut last_quoted: Option<String> = None;
+    for captures in QUOTED_TEXT_RE.captures_iter(ssh_segment) {
+        if let Some(value) = captures.get(1).or_else(|| captures.get(2)) {
+            let text = value.as_str().trim();
+            if !text.is_empty() {
+                last_quoted = Some(text.to_string());
+            }
+        }
+    }
+
+    if let Some(command) = last_quoted {
+        return Some((target_hint, command));
+    }
+
+    let ssh_passthrough = ssh_segment.to_string();
+    Some((target_hint, ssh_passthrough))
+}
+
+fn extract_ssh_passthrough_command(user_text: &str) -> Option<String> {
+    let lower = user_text.to_ascii_lowercase();
+    let ssh_start = lower.find("ssh ")?;
+    user_text.get(ssh_start..).map(|value| value.trim().to_string())
+}
+
+fn extract_remote_command_request(user_text: &str) -> Option<(String, Option<String>)> {
+    if let Some((target_hint, shell)) = extract_ssh_target_and_shell(user_text) {
+        let shell = shell.trim();
+        if !shell.is_empty() {
+            let command = if shell.to_ascii_lowercase().starts_with("ssh ") {
+                // If we only have a passthrough SSH command, keep it unchanged.
+                shell.to_string()
+            } else {
+                shell.to_string()
+            };
+            return Some((command, target_hint));
+        }
+    }
+
+    let lower = user_text.to_ascii_lowercase();
+    let inferred_target_hint = infer_remote_target_hint(user_text);
+    for marker in [
+        "run on my vm:",
+        "run on vm:",
+        "execute on my vm:",
+        "execute on vm:",
+        "remote command:",
+    ] {
+        if let Some(idx) = lower.find(marker) {
+            let rest = user_text[idx + marker.len()..].trim();
+            if !rest.is_empty() {
+                return Some((rest.to_string(), inferred_target_hint.clone()));
+            }
+        }
+    }
+
+    if !is_remote_command_context(user_text) {
+        return None;
+    }
+
+    if is_remote_package_listing_request(user_text) {
+        return Some((
+            build_remote_package_listing_command(),
+            inferred_target_hint,
+        ));
+    }
+
+    if let Some(intent) = detect_package_intent_raw(user_text) {
+        if let Some(package_query) = extract_package_query(user_text, intent) {
+            if let Some(command) = build_remote_package_manager_command(intent, &package_query) {
+                return Some((command, inferred_target_hint));
+            }
+        }
+    }
+
+    for captures in QUOTED_TEXT_RE.captures_iter(user_text) {
+        if let Some(value) = captures.get(1).or_else(|| captures.get(2)) {
+            let text = value.as_str().trim();
+            if !text.is_empty() {
+                return Some((text.to_string(), inferred_target_hint));
+            }
+        }
+    }
+
+    None
+}
+
 fn normalize_package_source_for_action(source: &str) -> Option<String> {
     match source.trim().to_lowercase().as_str() {
         "apt" | "dnf" | "pacman" | "zypper" | "brew" | "winget" | "choco" | "snap" | "flatpak" => {
@@ -297,6 +551,46 @@ fn normalize_package_source_for_action(source: &str) -> Option<String> {
         "brew-formula" | "brew-cask" => Some("brew".into()),
         _ => None,
     }
+}
+
+fn is_sidecar_backed_tool_name(tool_name: &str) -> bool {
+    matches!(
+        tool_name,
+        "search_news"
+            | "fetch_article"
+            | "list_news_sources"
+            | "news_status"
+            | "image_analyze"
+            | "document_extract"
+            | "code_analyze_ast"
+            | "web_extract_text"
+            | "compute_embeddings"
+            | "audio_preprocess"
+            | "ocr_image"
+            | "analyze_image"
+            | "screenshot_analyze"
+    )
+}
+
+fn user_requested_explicit_queue(user_text: &str) -> bool {
+    let lower = user_text.to_ascii_lowercase();
+    [
+        "queue this",
+        "queue it",
+        "put this in queue",
+        "put it in queue",
+        "add this to queue",
+        "add it to queue",
+        "after current",
+        "after this",
+        "when you're done",
+        "when you are done",
+        "do not interrupt",
+        "don't interrupt",
+        "wait your turn",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
 }
 
 fn infer_news_country_code(text_lower: &str) -> Option<&'static str> {
@@ -470,7 +764,6 @@ fn build_message_preview(messages: &[ChatMessage], max_messages: usize) -> serde
 }
 
 const MAX_ROUTED_TOOL_SCHEMAS_PER_TURN: usize = 8;
-const DIRECT_INTENT_HINT_MIN_CONFIDENCE: f32 = 0.55;
 const CONTEXT_HISTORY_ITEM_CHAR_CAP: usize = 900;
 const CONTEXT_TOTAL_CHAR_BUDGET: usize = 12_000;
 
@@ -741,10 +1034,10 @@ fn score_tool_relevance(query_text: &str, schema: &ToolSchema) -> i32 {
         }
     }
 
-    if query.contains("install") || query.contains("uninstall") || query.contains("package") {
-        if schema.name.contains("package") {
-            score += 8;
-        }
+    if (query.contains("install") || query.contains("uninstall") || query.contains("package"))
+        && schema.name.contains("package")
+    {
+        score += 8;
     }
     if query.contains("news") && schema.name == "search_news" {
         score += 10;
@@ -761,6 +1054,7 @@ fn score_tool_relevance(query_text: &str, schema: &ToolSchema) -> i32 {
     score
 }
 
+#[allow(clippy::too_many_arguments)]
 fn select_routed_tool_schemas(
     all_tool_schemas: &[ToolSchema],
     query_text: &str,
@@ -769,7 +1063,7 @@ fn select_routed_tool_schemas(
     fallback_tool_names: &HashSet<String>,
     forced_tool_name: Option<&str>,
     tool_lock_name: Option<&str>,
-    conversation_only: bool,
+    _conversation_only: bool,
 ) -> Vec<ToolSchema> {
     let mut include_names: HashSet<String> = if direct_tool_hint.is_some() {
         HashSet::new()
@@ -794,9 +1088,7 @@ fn select_routed_tool_schemas(
         pinned_names.extend(fallback_tool_names.iter().cloned());
     }
 
-    let filtered: Vec<ToolSchema> = if conversation_only && include_names.is_empty() {
-        Vec::new()
-    } else if include_names.is_empty() {
+    let filtered: Vec<ToolSchema> = if include_names.is_empty() {
         Vec::new()
     } else {
         all_tool_schemas
@@ -1384,7 +1676,7 @@ fn clean_content_candidate(candidate: &str) -> Option<String> {
         .trim()
         .trim_matches(|c: char| c == '"' || c == '\'' || c == '`')
         .trim()
-        .trim_end_matches(|c: char| matches!(c, '.' | ',' | ';' | '!'))
+        .trim_end_matches(['.', ',', ';', '!'])
         .trim();
 
     if cleaned.is_empty() {
@@ -1414,7 +1706,7 @@ fn extract_identifier_after_keyword(text: &str, keywords: &[&str]) -> Option<Str
             if let Some(rest) = text.get(start..) {
                 let candidate = rest
                     .trim_start()
-                    .trim_start_matches(|c: char| matches!(c, ':' | '=' | '#' | '/'))
+                    .trim_start_matches([':', '=', '#', '/'])
                     .split(|c: char| {
                         c.is_whitespace()
                             || matches!(
@@ -1568,7 +1860,7 @@ fn infer_sheet_single_value(user_text: &str) -> Option<String> {
             if let Some(rest) = user_text.get(start..) {
                 let candidate = rest
                     .trim_start()
-                    .split(|c: char| matches!(c, '\n' | '\r' | ',' | ';' | '!'))
+                    .split(['\n', '\r', ',', ';', '!'])
                     .next()
                     .unwrap_or("")
                     .trim();
@@ -1761,7 +2053,7 @@ fn extract_browser_search_intent(text: &str) -> (String, Option<String>) {
         // Fallback: strip "open <app> and" prefix, take the rest.
         let s = lower
             .strip_prefix("open ")
-            .and_then(|s| s.splitn(2, " and ").nth(1))
+            .and_then(|s| s.split_once(" and ").map(|x| x.1))
             .map(|s| s.trim().to_string())
             .unwrap_or_else(|| text.trim().to_string());
         s
@@ -2321,6 +2613,24 @@ fn build_fallback_call_for_hint(
     }
 
     let lower = user_query.to_lowercase();
+
+    // Semantic turn-gate hints can misclassify remote VM/SSH requests as
+    // open_application. Detect remote execution intent first and force the
+    // dedicated fleet tool when it is available.
+    if hint != "execute_fleet_command" && allowed_tool_names.contains("execute_fleet_command") {
+        if let Some((command, target_hint)) = extract_remote_command_request(user_query) {
+            if !command.trim().is_empty() {
+                let mut arguments = serde_json::json!({ "command": command });
+                if let Some(target) = target_hint {
+                    arguments["target"] = serde_json::Value::String(target);
+                }
+                return Some(ParsedToolCall {
+                    name: "execute_fleet_command".into(),
+                    arguments,
+                });
+            }
+        }
+    }
 
     match hint {
         "gw_gmail_inbox" if allowed_tool_names.contains("gw_gmail_inbox") => {
@@ -3004,9 +3314,7 @@ fn build_fallback_call_for_hint(
         }
         "kill_process" if allowed_tool_names.contains("kill_process") => {
             let pid = lower.split_whitespace().find_map(|w| w.parse::<u64>().ok());
-            let Some(pid) = pid else {
-                return None;
-            };
+            let pid = pid?;
             Some(ParsedToolCall {
                 name: "kill_process".into(),
                 arguments: serde_json::json!({ "pid": pid }),
@@ -3293,7 +3601,7 @@ fn build_fallback_call_for_hint(
                 .split_whitespace()
                 .find(|w| w.starts_with("http"))
                 .map(|w| {
-                    w.trim_end_matches(|c: char| c == '.' || c == ',' || c == '\'' || c == ')')
+                    w.trim_end_matches(['.', ',', '\'', ')'])
                 })
                 .unwrap_or("")
                 .to_string();
@@ -3411,6 +3719,28 @@ fn build_fallback_call_for_hint(
                 arguments: serde_json::json!({ "path": path }),
             })
         }
+        // ── Fleet / remote target execution ────────────────────────────────
+        "get_fleet_overview" if allowed_tool_names.contains("get_fleet_overview") => {
+            let mut arguments = serde_json::json!({});
+            if let Some(target) = infer_remote_target_hint(user_query) {
+                arguments["target"] = serde_json::Value::String(target);
+            }
+            Some(ParsedToolCall {
+                name: "get_fleet_overview".into(),
+                arguments,
+            })
+        }
+        "execute_fleet_command" if allowed_tool_names.contains("execute_fleet_command") => {
+            let (command, target_hint) = extract_remote_command_request(user_query)?;
+            let mut arguments = serde_json::json!({ "command": command });
+            if let Some(target) = target_hint {
+                arguments["target"] = serde_json::Value::String(target);
+            }
+            Some(ParsedToolCall {
+                name: "execute_fleet_command".into(),
+                arguments,
+            })
+        }
         // ── Package management ────────────────────────────────────────────────
         // install_package and the legacy install_application hint both route here
         "install_package" | "install_application"
@@ -3467,28 +3797,31 @@ fn build_fallback_call_for_hint(
         }
         // ── Shell execution ────────────────────────────────────────────────────
         "execute_bash" if allowed_tool_names.contains("execute_bash") => {
-            let command = [
-                "run: ",
-                "execute: ",
-                "bash: ",
-                "command: ",
-                "run bash: ",
-                "execute bash: ",
-                "run: bash ",
-            ]
-            .iter()
-            .find_map(|m| {
-                lower
-                    .find(m)
-                    .map(|i| user_query[i + m.len()..].trim().to_string())
-            })
-            .or_else(|| {
-                QUOTED_TEXT_RE
-                    .captures(user_query)
-                    .and_then(|c| c.get(1).or_else(|| c.get(2)))
-                    .map(|m| m.as_str().to_string())
-            })
-            .unwrap_or_else(|| user_query.trim().to_string());
+            let command = extract_ssh_passthrough_command(user_query)
+                .or_else(|| {
+                    [
+                        "run: ",
+                        "execute: ",
+                        "bash: ",
+                        "command: ",
+                        "run bash: ",
+                        "execute bash: ",
+                        "run: bash ",
+                    ]
+                    .iter()
+                    .find_map(|m| {
+                        lower
+                            .find(m)
+                            .map(|i| user_query[i + m.len()..].trim().to_string())
+                    })
+                })
+                .or_else(|| {
+                    QUOTED_TEXT_RE
+                        .captures(user_query)
+                        .and_then(|c| c.get(1).or_else(|| c.get(2)))
+                        .map(|m| m.as_str().to_string())
+                })
+                .unwrap_or_else(|| user_query.trim().to_string());
             Some(ParsedToolCall {
                 name: "execute_bash".into(),
                 arguments: serde_json::json!({ "command": command }),
@@ -3746,6 +4079,7 @@ fn infer_git_path(user_query: &str) -> String {
 /// Handles multi-tool scenarios (e.g. "system stats" → CPU + memory + disk) that
 /// `build_intent_fallback_tool_call` cannot express as a single call.
 /// Falls back to the single-call function for everything else.
+#[cfg(test)]
 fn build_multi_intent_fallback_calls(
     user_text: &str,
     allowed_tool_names: &HashSet<String>,
@@ -3818,6 +4152,7 @@ fn build_multi_intent_fallback_calls(
         .collect()
 }
 
+#[cfg(test)]
 fn build_intent_fallback_tool_call(
     user_text: &str,
     allowed_tool_names: &HashSet<String>,
@@ -3856,8 +4191,6 @@ fn build_intent_fallback_tool_call(
         return None;
     }
 
-    let intent = IntentRouter::classify(user_text);
-    let hint = intent.tool_hint?;
     let user_query = user_text.trim();
 
     // Colab requests: override hint with the correct Colab flow entry-point.
@@ -3920,7 +4253,31 @@ fn build_intent_fallback_tool_call(
         }
     }
 
-    build_fallback_call_for_hint(hint.as_str(), user_query, allowed_tool_names)
+    let gate = TurnGate::new();
+    let plan = gate.plan_turn(user_text, false);
+    for hint in gate.fallback_tool_hints(&plan, allowed_tool_names) {
+        if let Some(call) = build_fallback_call_for_hint(&hint, user_query, allowed_tool_names) {
+            return Some(call);
+        }
+    }
+
+    // Legacy fallback safety net for file/folder lookups. Some semantic-router
+    // classifications can resolve to conversational intents with no direct tool
+    // hint; preserve deterministic file search fallback in that case.
+    let lower = user_query.to_ascii_lowercase();
+    let is_file_lookup =
+        (lower.contains("find") || lower.contains("search") || lower.contains("locate"))
+            && (lower.contains("file")
+                || lower.contains("folder")
+                || lower.contains("directory"));
+    if is_file_lookup {
+        if let Some(call) = build_fallback_call_for_hint("search_files", user_query, allowed_tool_names)
+        {
+            return Some(call);
+        }
+    }
+
+    None
 }
 
 #[derive(Debug, Clone)]
@@ -5060,6 +5417,11 @@ impl PackageFlowState {
 /// Events emitted during agent loop execution.
 #[derive(Debug, Clone)]
 pub enum StreamEvent {
+    /// Marks the admitted turn identity for this stream.
+    TurnAccepted {
+        session_id: String,
+        turn_id: String,
+    },
     /// Text token from the LLM.
     Token(String),
     /// Tool is being called.
@@ -5238,10 +5600,10 @@ pub struct AgentLoop {
     hardware_tier: String,
     min_confidence_to_act: f32,
     clarify_threshold: f32,
-    /// Per-session cancellation tokens.  A token is inserted when a turn starts
-    /// and removed when it ends.  Calling `cancel_session` cancels all in-flight
-    /// work for that session.
-    active_cancels: Arc<dashmap::DashMap<String, tokio_util::sync::CancellationToken>>,
+    /// Per-session admission gate with supersession-aware cancellation.
+    turn_admission: Arc<TurnAdmission>,
+    /// Top-level planning boundary (Phase 3 scaffold).
+    turn_gate: Arc<TurnGate>,
 }
 
 impl AgentLoop {
@@ -5267,7 +5629,8 @@ impl AgentLoop {
             hardware_tier: "standard".into(),
             min_confidence_to_act: 0.55,
             clarify_threshold: 0.40,
-            active_cancels: Arc::new(dashmap::DashMap::new()),
+            turn_admission: Arc::new(TurnAdmission::new()),
+            turn_gate: Arc::new(TurnGate::new()),
         }
     }
 
@@ -5314,15 +5677,17 @@ impl AgentLoop {
     /// Safe to call from any thread/task.  If no turn is active for the session
     /// this is a no-op.
     pub fn cancel_session(&self, session_id: &str) {
-        if let Some(token) = self.active_cancels.get(session_id) {
-            token.cancel();
-        }
+        self.turn_admission.cancel_session(session_id);
     }
 
-    /// Returns a clone of the per-session cancel map so that the Tauri command
-    /// layer can cancel sessions without holding a reference to `AgentLoop`.
-    pub fn active_cancels(&self) -> Arc<dashmap::DashMap<String, CancellationToken>> {
-        Arc::clone(&self.active_cancels)
+    /// Return the local LLM backend used for semantic memory parsing.
+    pub fn memory_parser_backend(&self) -> Option<Arc<dyn crate::llm::LlmBackend>> {
+        self.model_router.get_local()
+    }
+
+    /// Fast stale-turn invalidation check for async callbacks.
+    pub fn is_turn_active(&self, session_id: &str, turn_id: &str) -> bool {
+        self.turn_admission.is_active(session_id, turn_id)
     }
 
     /// Returns a clone of the HITL gateway so that remote transports (e.g.
@@ -5364,7 +5729,10 @@ impl AgentLoop {
             };
         }
 
-        let free_vram_mb = crate::platform::vram::build_profiler().snapshot().await.free_mb;
+        let free_vram_mb = crate::platform::vram::build_profiler()
+            .snapshot()
+            .await
+            .free_mb;
         let safe_cap = calculate_safe_visual_tokens(
             free_vram_mb,
             safety_margin_mb,
@@ -5379,7 +5747,11 @@ impl AgentLoop {
 
         let cap = if safe_cap == 0 {
             // If telemetry is unavailable, fall back to the mode cap.
-            if mode_cap == u32::MAX { 4096 } else { mode_cap }
+            if mode_cap == u32::MAX {
+                4096
+            } else {
+                mode_cap
+            }
         } else if mode_cap == u32::MAX {
             safe_cap
         } else {
@@ -5417,25 +5789,103 @@ impl AgentLoop {
     ) {
         let execution_profile = execution_profile.unwrap_or_default();
 
-        // ── Per-turn cancellation token ────────────────────────────────────────
-        let turn_cancel = CancellationToken::new();
-        self.active_cancels
-            .insert(session_id.to_string(), turn_cancel.clone());
-        // Guard: remove the token from the map when this function returns,
-        // regardless of exit path.
-        struct CancelGuard {
-            map: Arc<dashmap::DashMap<String, CancellationToken>>,
-            key: String,
+        let last_user_text = messages
+            .iter()
+            .rev()
+            .find(|m| m.role == "user")
+            .map(|m| m.content.clone())
+            .unwrap_or_default();
+        let explicit_queue_requested = user_requested_explicit_queue(&last_user_text);
+
+        // ── Per-turn admission + cancellation tree ─────────────────────────────
+        let turn_id = Uuid::new_v4().to_string();
+        let turn_tree = match self.turn_admission.admit_or_enqueue_turn(
+            session_id.to_string(),
+            turn_id.clone(),
+            explicit_queue_requested,
+        ) {
+            Ok(TurnAdmissionDecision::Admitted(cancellation)) => cancellation,
+            Ok(TurnAdmissionDecision::Queued { depth }) => {
+                let _ = event_tx.send(StreamEvent::Plan(format!(
+                    "Current turn is busy. Queued this request at position {depth}."
+                )));
+
+                match self
+                    .turn_admission
+                    .wait_for_turn_activation(session_id, &turn_id)
+                    .await
+                {
+                    Some(cancellation) => {
+                        let _ = event_tx
+                            .send(StreamEvent::Plan("Starting queued turn now.".to_string()));
+                        cancellation
+                    }
+                    None => {
+                        let canceled_msg =
+                            "Queued request was canceled before execution.".to_string();
+                        let _ = event_tx.send(StreamEvent::Error(canceled_msg.clone()));
+                        let _ = event_tx.send(StreamEvent::Done(canceled_msg));
+                        return;
+                    }
+                }
+            }
+            Err(TurnAdmissionError::QueueFull { limit, .. }) => {
+                let queue_full_msg = format!(
+                    "A turn is already running and the queue is full (limit {limit}). Please wait and try again."
+                );
+                let _ = event_tx.send(StreamEvent::Error(queue_full_msg.clone()));
+                let _ = event_tx.send(StreamEvent::Done(queue_full_msg));
+                return;
+            }
+        };
+        let turn_tools_cancel = turn_tree.tools.clone();
+        let turn_sidecar_cancel = turn_tree.sidecar.clone();
+        let turn_mcp_cancel = turn_tree.mcp.clone();
+        let turn_image_cancel = turn_tree.image.clone();
+        let turn_id_for_checks = turn_id.clone();
+        let turn_admission_for_async = Arc::clone(&self.turn_admission);
+        let session_id_for_async = session_id.to_string();
+        let turn_id_for_async = turn_id_for_checks.clone();
+
+        // Guard: clear this turn only if it is still active on function exit.
+        struct TurnGuard {
+            admission: Arc<TurnAdmission>,
+            session_id: String,
+            turn_id: String,
         }
-        impl Drop for CancelGuard {
+        impl Drop for TurnGuard {
             fn drop(&mut self) {
-                self.map.remove(&self.key);
+                self.admission
+                    .complete_turn(&self.session_id, &self.turn_id);
             }
         }
-        let _cancel_guard = CancelGuard {
-            map: Arc::clone(&self.active_cancels),
-            key: session_id.to_string(),
+        let _turn_guard = TurnGuard {
+            admission: Arc::clone(&self.turn_admission),
+            session_id: session_id.to_string(),
+            turn_id,
         };
+
+        let is_turn_active = || self.turn_admission.is_active(session_id, &turn_id_for_checks);
+        let return_if_stale = || {
+            if is_turn_active() {
+                false
+            } else {
+                log_pipeline_step(
+                    session_id,
+                    "stale_turn_dropped",
+                    "Turn became stale; dropping in-flight result",
+                    Some(serde_json::json!({
+                        "turn_id": turn_id_for_checks,
+                    })),
+                );
+                true
+            }
+        };
+
+        let _ = event_tx.send(StreamEvent::TurnAccepted {
+            session_id: session_id.to_string(),
+            turn_id: turn_id_for_checks.clone(),
+        });
 
         // ── Per-turn error-loop guards ─────────────────────────────────────────
         // Maps call_dedup_hash(tool, args) -> (failure_count, last_error_msg).
@@ -5450,12 +5900,6 @@ impl AgentLoop {
 
         // Check if the user message contains images and route accordingly
         let has_images = messages.last().is_some_and(|m| m.has_images());
-        let last_user_text = messages
-            .iter()
-            .rev()
-            .find(|m| m.role == "user")
-            .map(|m| m.content.clone())
-            .unwrap_or_default();
         let mut routing_focus_text = routing_focus_text_from_user_content(&last_user_text);
         if execution_profile.uses_direct_strategy() {
             if let Some(tool_lock) = execution_profile.tool_lock.as_deref() {
@@ -5465,8 +5909,13 @@ impl AgentLoop {
             }
         }
         let routing_focus_lower = routing_focus_text.to_lowercase();
+        let mut turn_gate_plan = self.turn_gate.plan_turn(&last_user_text, has_images);
         let pure_image_analysis_turn =
-            has_images && looks_like_pure_image_analysis_request(&routing_focus_lower);
+            has_images && matches!(turn_gate_plan.intent.operation, Operation::AnalyzeImage);
+        let wants_vision_backend =
+            has_images && matches!(turn_gate_plan.resource_plan, ResourcePlan::L1Vision { .. });
+        let reflex_cancel_turn = matches!(turn_gate_plan.intent.operation, Operation::Cancel)
+            && matches!(turn_gate_plan.resource_plan, ResourcePlan::ReflexRust);
         let mut inline_images_allowed_for_turn = true;
         let mut inline_image_vision_mode = VisionMode::FullGpu;
         if has_images {
@@ -5482,16 +5931,48 @@ impl AgentLoop {
             Some(serde_json::json!({
                 "has_images": has_images,
                 "pure_image_analysis_turn": pure_image_analysis_turn,
+                "wants_vision_backend": wants_vision_backend,
+                "reflex_cancel_turn": reflex_cancel_turn,
                 "prompt_lab_mode": execution_profile.is_prompt_lab(),
                 "prompt_lab_strategy": format!("{:?}", execution_profile.prompt_lab_strategy),
                 "app_lock": execution_profile.app_lock.clone(),
                 "tool_lock": execution_profile.tool_lock.clone(),
+                "turn_gate": {
+                    "modality": format!("{:?}", turn_gate_plan.intent.modality),
+                    "operation": format!("{:?}", turn_gate_plan.intent.operation),
+                    "hazard_hint": format!("{:?}", turn_gate_plan.intent.hazard_hint),
+                    "compute": format!("{:?}", turn_gate_plan.intent.compute),
+                    "source": format!("{:?}", turn_gate_plan.intent.source),
+                    "confidence": turn_gate_plan.intent.confidence,
+                    "resource_plan": format!("{:?}", turn_gate_plan.resource_plan),
+                },
                 "message_count": messages.len(),
                 "prompt_preview": sanitize_text_for_logs(&routing_focus_text, 260),
             })),
         );
 
-        let backend = if has_images {
+        if reflex_cancel_turn {
+            let final_text = "Stopped current operation.";
+            log_pipeline_step(
+                session_id,
+                "turn_gate_reflex_short_circuit",
+                "TurnGate resolved a reflex cancel turn; skipping backend and tool routing",
+                Some(serde_json::json!({
+                    "turn_gate": {
+                        "operation": format!("{:?}", turn_gate_plan.intent.operation),
+                        "compute": format!("{:?}", turn_gate_plan.intent.compute),
+                    },
+                    "final_text": final_text,
+                })),
+            );
+            let _ = event_tx.send(StreamEvent::Plan(
+                "Stopping current operation immediately.".into(),
+            ));
+            let _ = event_tx.send(StreamEvent::Done(final_text.into()));
+            return;
+        }
+
+        let backend = if wants_vision_backend {
             if inline_images_allowed_for_turn {
                 match self.model_router.route_vision().await {
                     Some(b) => b,
@@ -5528,8 +6009,8 @@ impl AgentLoop {
                 match self.model_router.route("chat").await {
                     Some(b) => b,
                     None => {
-                        let _ = event_tx
-                            .send(StreamEvent::Error("no LLM backend available".into()));
+                        let _ =
+                            event_tx.send(StreamEvent::Error("no LLM backend available".into()));
                         return;
                     }
                 }
@@ -5709,21 +6190,12 @@ impl AgentLoop {
         let mut had_failed_gmail_tool = false;
         let mut last_successful_gmail_result: Option<serde_json::Value> = None;
         let mut last_successful_image_result: Option<serde_json::Value> = None;
-        let intent_result = IntentRouter::classify(&routing_focus_text);
         let forced_tool_directive = extract_forced_tool_directive(&routing_focus_text);
         let forced_tool_requested = forced_tool_directive.is_some();
         let forced_tool_name = forced_tool_directive.as_ref().map(|(name, _)| name.clone());
-        let direct_intent_tool_hint = match &intent_result.intent {
-            crate::agent::router::Intent::DirectTool(name)
-                if intent_result.confidence >= DIRECT_INTENT_HINT_MIN_CONFIDENCE =>
-            {
-                Some(name.as_str())
-            }
-            _ => intent_result
-                .tool_hint
-                .as_deref()
-                .filter(|_| intent_result.confidence >= self.min_confidence_to_act),
-        };
+        let initial_turn_gate_tool_hint =
+            self.turn_gate
+                .direct_tool_hint(&turn_gate_plan, &allowed_tool_names);
         let mut turn_modality = if let Some(router) = &self.semantic_router {
             let (_, modality, _) = router.route(&routing_focus_text).await;
             modality
@@ -5740,10 +6212,10 @@ impl AgentLoop {
             "intent_classified",
             "Intent classification complete",
             Some(serde_json::json!({
-                "intent": format!("{:?}", &intent_result.intent),
-                "category": intent_result.category.clone(),
-                "tool_hint": intent_result.tool_hint.clone(),
-                "confidence": intent_result.confidence,
+                "turn_gate_operation": format!("{:?}", turn_gate_plan.intent.operation),
+                "turn_gate_source": format!("{:?}", turn_gate_plan.intent.source),
+                "turn_gate_tool_hint": initial_turn_gate_tool_hint,
+                "confidence": turn_gate_plan.intent.confidence,
                 "forced_tool_requested": forced_tool_requested,
                 "package_flow_detected": package_flow.is_some(),
                 "colab_flow_detected": colab_flow.is_some(),
@@ -5751,6 +6223,10 @@ impl AgentLoop {
         );
 
         for round in 0..self.max_tool_rounds {
+            if return_if_stale() {
+                return;
+            }
+
             let round_user_text = messages
                 .iter()
                 .rev()
@@ -5768,9 +6244,12 @@ impl AgentLoop {
                     matches!(decision, crate::routing::RouteDecision::Conversation);
                 routed_tool_names.extend(trace.selected_tools.into_iter());
             }
+            let round_direct_tool_hint =
+                self.turn_gate
+                    .direct_tool_hint(&turn_gate_plan, &allowed_tool_names);
             let fallback_tool_names = fallback_routed_tool_candidates(
                 &round_focus_text,
-                intent_result.tool_hint.as_deref(),
+                round_direct_tool_hint.as_deref(),
                 &allowed_tool_names,
             );
 
@@ -5780,7 +6259,7 @@ impl AgentLoop {
                 select_routed_tool_schemas(
                     &tool_schemas,
                     &round_focus_text,
-                    direct_intent_tool_hint,
+                    round_direct_tool_hint.as_deref(),
                     &routed_tool_names,
                     &fallback_tool_names,
                     forced_tool_name.as_deref(),
@@ -5857,7 +6336,7 @@ impl AgentLoop {
                     "tool_schema_count": llm_tool_schemas.map(|schemas| schemas.len()).unwrap_or(0),
                     "routed_tool_count": routed_tool_names.len(),
                     "fallback_tool_count": fallback_tool_names.len(),
-                    "direct_hint_tool": direct_intent_tool_hint,
+                    "direct_hint_tool": round_direct_tool_hint,
                     "images_stripped_for_round": should_strip_images_for_round,
                     "history_message_count": messages.len(),
                     "messages_preview": build_message_preview(&llm_messages, 6),
@@ -5908,6 +6387,10 @@ impl AgentLoop {
                     }
                 }
             };
+
+            if return_if_stale() {
+                return;
+            }
 
             log_pipeline_step(
                 session_id,
@@ -6037,30 +6520,41 @@ impl AgentLoop {
 
             if tool_calls.is_empty() && !intent_fallback_used {
                 let intent_fallback_query =
-                    resolve_intent_fallback_query(&routing_focus_text, &messages);
-                let fallback_intent_result = IntentRouter::classify(&intent_fallback_query);
-                let fallback_confidence = fallback_intent_result
+                    resolve_intent_fallback_query(&routing_focus_text, messages);
+                let fallback_plan = self.turn_gate.plan_turn(&intent_fallback_query, has_images);
+                let fallback_confidence = fallback_plan
+                    .intent
                     .confidence
-                    .max(intent_result.confidence);
-
-                let fallback_calls =
-                    build_multi_intent_fallback_calls(&intent_fallback_query, &allowed_tool_names);
+                    .max(turn_gate_plan.intent.confidence);
+                let fallback_calls: Vec<ParsedToolCall> = self
+                    .turn_gate
+                    .fallback_tool_hints(&fallback_plan, &allowed_tool_names)
+                    .into_iter()
+                    .filter_map(|hint| {
+                        build_fallback_call_for_hint(
+                            &hint,
+                            &intent_fallback_query,
+                            &allowed_tool_names,
+                        )
+                    })
+                    .collect();
 
                 if !fallback_calls.is_empty() {
                     if forced_tool_requested || fallback_confidence >= self.min_confidence_to_act {
                         intent_fallback_used = true;
                         synthetic_intent_calls = true;
+                        turn_gate_plan = fallback_plan;
                         let names: Vec<&str> =
                             fallback_calls.iter().map(|c| c.name.as_str()).collect();
                         let plan_message = if intent_fallback_query == routing_focus_text {
                             format!(
-                                "No tool call returned; applying intent fallback via {}",
-                                names.join(", ")
+                                "No tool call returned; applying turn_gate fallback via {}",
+                                names.join(", "),
                             )
                         } else {
                             format!(
-                                "No tool call returned; applying context-aware intent fallback via {}",
-                                names.join(", ")
+                                "No tool call returned; applying context-aware turn_gate fallback via {}",
+                                names.join(", "),
                             )
                         };
                         let _ = event_tx.send(StreamEvent::Plan(plan_message));
@@ -6072,15 +6566,19 @@ impl AgentLoop {
                             Some(serde_json::json!({
                                 "round": round,
                                 "fallback_query": sanitize_text_for_logs(&intent_fallback_query, 220),
+                                "source": "turn_gate",
                                 "confidence": fallback_confidence,
                                 "tool_calls": build_tool_calls_preview(&tool_calls),
                             })),
                         );
                     } else if fallback_confidence >= self.clarify_threshold {
+                        let fallback_primary_hint =
+                            self.turn_gate
+                                .direct_tool_hint(&fallback_plan, &allowed_tool_names);
                         let candidates = build_tool_choice_candidates(
                             &intent_fallback_query,
                             &allowed_tool_names,
-                            fallback_intent_result.tool_hint.as_deref(),
+                            fallback_primary_hint.as_deref(),
                             fallback_confidence,
                         );
 
@@ -6113,6 +6611,10 @@ impl AgentLoop {
 
             // If no tool calls, we're done
             if tool_calls.is_empty() {
+                if return_if_stale() {
+                    return;
+                }
+
                 log_pipeline_step(
                     session_id,
                     "no_tool_calls",
@@ -6296,15 +6798,21 @@ impl AgentLoop {
 
             // Execute each tool call
             for call in &tool_calls {
+                if return_if_stale() {
+                    return;
+                }
+
                 let mut execution_args = call.arguments.clone();
                 if call.name == "analyze_image" {
                     let cap_decision = self.compute_visual_token_cap().await;
                     let mut payload_obj = match &execution_args {
                         serde_json::Value::Object(obj) => obj.clone(),
-                        serde_json::Value::String(raw) => serde_json::from_str::<serde_json::Value>(raw)
-                            .ok()
-                            .and_then(|v| v.as_object().cloned())
-                            .unwrap_or_default(),
+                        serde_json::Value::String(raw) => {
+                            serde_json::from_str::<serde_json::Value>(raw)
+                                .ok()
+                                .and_then(|v| v.as_object().cloned())
+                                .unwrap_or_default()
+                        }
                         _ => serde_json::Map::new(),
                     };
                     payload_obj.insert(
@@ -6409,7 +6917,21 @@ impl AgentLoop {
                             self.tool_registry.get_handler(&bootstrap.name)
                         {
                             let gate_handler = gate_handler.clone();
-                            gate_handler.execute(bootstrap.arguments.clone()).await
+                            let gate_args = bootstrap.arguments.clone();
+                            let gate_cancel = turn_mcp_cancel.clone();
+                            let gate_context = self.tool_registry.make_tool_context(gate_cancel.clone());
+                            run_isolated(
+                                "tool:mcp_colab-mcp_open_colab_browser_connection",
+                                std::time::Duration::from_secs(60),
+                                gate_cancel,
+                                None,
+                                move || async move {
+                                    gate_handler
+                                        .execute_with_context(gate_args, gate_context)
+                                        .await
+                                },
+                            )
+                            .await
                         } else {
                             crate::infra::isolation::ToolResult::err(
                                 "open_colab_browser_connection handler not found".to_string(),
@@ -6708,6 +7230,9 @@ impl AgentLoop {
                 let hb_cancel_clone = hb_cancel.clone();
                 let hb_tx = event_tx.clone();
                 let hb_tool = call.name.clone();
+                let hb_admission = Arc::clone(&turn_admission_for_async);
+                let hb_session_id = session_id_for_async.clone();
+                let hb_turn_id = turn_id_for_async.clone();
                 tokio::spawn(async move {
                     let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
                     interval.tick().await; // skip the immediate first tick
@@ -6716,6 +7241,9 @@ impl AgentLoop {
                             biased;
                             _ = hb_cancel_clone.cancelled() => break,
                             _ = interval.tick() => {
+                                if !hb_admission.is_active(&hb_session_id, &hb_turn_id) {
+                                    break;
+                                }
                                 let _ = hb_tx.send(StreamEvent::ToolProgress {
                                     call_id: hb_tool.clone(),
                                     message: format!("⏳ {} is still running…", hb_tool),
@@ -6737,34 +7265,41 @@ impl AgentLoop {
                         | "uninstall_application"
                         | "update_all_packages"
                         | "install_package"
-                        | "uninstall_package" => 300,
+                        | "uninstall_package"
+                        | "execute_fleet_command" => 300,
                         "generate_image" => 300,
                         "search_news" | "fetch_article" => 60,
                         "execute_bash" | "execute_python" | "execute_powershell" => 120,
                         "download_file" => 120,
                         _ => 30,
                     };
+                    let execution_cancel = if call.name == "generate_image" {
+                        turn_image_cancel.clone()
+                    } else if call.name.starts_with("mcp_") {
+                        turn_mcp_cancel.clone()
+                    } else if is_sidecar_backed_tool_name(&call.name) {
+                        turn_sidecar_cancel.clone()
+                    } else {
+                        turn_tools_cancel.clone()
+                    };
                     let isolation_name = format!("tool:{}", call.name);
-                    let exec_future = run_isolated(
+                    let tool_context = self
+                        .tool_registry
+                        .make_tool_context(execution_cancel.clone());
+                    run_isolated(
                         &isolation_name,
                         std::time::Duration::from_secs(timeout_secs),
-                        move || async move { handler.execute(args).await },
-                    );
-                    // Wrap execution in a cancellation select so "KRIA stop now"
-                    // can abort the entire turn immediately.
-                    let turn_cancel_ref = &turn_cancel;
-                    tokio::select! {
-                        biased;
-                        _ = turn_cancel_ref.cancelled() => {
-                            crate::infra::isolation::ToolResult::err(
-                                "turn cancelled by user".to_string(),
-                            )
-                        }
-                        result = exec_future => result,
-                    }
+                        execution_cancel,
+                        None,
+                        move || async move { handler.execute_with_context(args, tool_context).await },
+                    ).await
                 } else {
                     crate::infra::isolation::ToolResult::err(format!("unknown tool: {}", call.name))
                 };
+
+                if return_if_stale() {
+                    return;
+                }
 
                 // Stop the heartbeat task.
                 hb_cancel.cancel();
@@ -6783,6 +7318,33 @@ impl AgentLoop {
                     entry.0 += 1;
                     entry.1 = err_text;
                     consecutive_failures += 1;
+
+                    let replanned = self.turn_gate.replan_after_error(
+                        &turn_gate_plan,
+                        &round_focus_text,
+                        has_images,
+                        &call.name,
+                        &entry.1,
+                    );
+                    turn_gate_plan = replanned;
+
+                    log_pipeline_step(
+                        session_id,
+                        "executor_replan_requested",
+                        "Tool failure triggered TurnGate replanning",
+                        Some(serde_json::json!({
+                            "round": round,
+                            "failed_tool": call.name.clone(),
+                            "error": sanitize_text_for_logs(&entry.1, 220),
+                            "replanned_operation": format!("{:?}", turn_gate_plan.intent.operation),
+                            "replanned_compute": format!("{:?}", turn_gate_plan.intent.compute),
+                            "replanned_confidence": turn_gate_plan.intent.confidence,
+                        })),
+                    );
+                    let _ = event_tx.send(StreamEvent::Plan(format!(
+                        "Replanning via TurnGate after '{}' failed.",
+                        call.name
+                    )));
 
                     if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
                         tracing::warn!(
@@ -6849,13 +7411,21 @@ impl AgentLoop {
 
                 // Log GREEN/YELLOW auto-executed
                 if !decision.requires_approval {
+                    let eval_synthetic_approval = std::env::var("KRIA_EVAL_MODE").is_ok()
+                        && decision.reason.contains("EvalHarness auto-approved");
+                    let (audit_decision, decided_by) = if eval_synthetic_approval {
+                        (Decision::Approved, DecidedBy::Hardcoded)
+                    } else {
+                        (Decision::AutoExecuted, DecidedBy::Policy)
+                    };
+
                     self.audit_logger.log(
                         session_id,
                         &call.name,
                         &call.arguments,
                         decision.risk_level,
-                        Decision::AutoExecuted,
-                        DecidedBy::Policy,
+                        audit_decision,
+                        decided_by,
                     );
                 }
 
@@ -6876,8 +7446,10 @@ impl AgentLoop {
                     } else {
                         None
                     };
-                let extracted_tool_image_count =
-                    extracted_tool_images.as_ref().map(|imgs| imgs.len()).unwrap_or(0);
+                let extracted_tool_image_count = extracted_tool_images
+                    .as_ref()
+                    .map(|imgs| imgs.len())
+                    .unwrap_or(0);
                 if !inline_images_allowed_for_turn {
                     extracted_tool_images = None;
                 }
@@ -6997,6 +7569,10 @@ impl AgentLoop {
             // call entirely — that call would crash the GPU with ctx=2048 + 167 schemas.
             // Instead, emit a pre-built confirmation response and return immediately.
             if let Some(ref img_data) = last_successful_image_result {
+                if return_if_stale() {
+                    return;
+                }
+
                 let summary = build_image_success_response(img_data);
                 log_pipeline_step(
                     session_id,
@@ -7031,6 +7607,10 @@ impl AgentLoop {
                 "max_tool_rounds": self.max_tool_rounds,
             })),
         );
+
+        if !is_turn_active() {
+            return;
+        }
 
         let _ = event_tx.send(StreamEvent::Error(format!(
             "max tool rounds ({}) reached",
@@ -7078,8 +7658,14 @@ impl AgentLoop {
         if let Some(handler) = self.tool_registry.get_handler(target_tool) {
             let params = serde_json::json!({"file_path": path});
             let handler = handler.clone();
-            match tokio::time::timeout(std::time::Duration::from_secs(30), handler.execute(params))
-                .await
+            let tool_context = self
+                .tool_registry
+                .make_tool_context(CancellationToken::new());
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(30),
+                handler.execute_with_context(params, tool_context),
+            )
+            .await
             {
                 Ok(result) if result.success => {
                     // Return summary only to save tokens
@@ -7243,6 +7829,93 @@ mod tests {
     #[test]
     fn package_flow_ignores_non_package_text() {
         assert!(PackageFlowState::from_user_text("what time is it").is_none());
+    }
+
+    #[test]
+    fn package_flow_ignores_remote_vm_install_prompt() {
+        assert!(PackageFlowState::from_user_text("install htop on my vm").is_none());
+        assert!(PackageFlowState::from_user_text("run on my VM via SSH: ssh user@10.0.0.5 \"sudo apt install -y htop\"").is_none());
+    }
+
+    #[test]
+    fn remote_command_extraction_parses_embedded_ssh_command() {
+        let (command, target_hint) = extract_remote_command_request(
+            "Please run on my VM via SSH: ssh obaid@192.168.122.240 \"sudo apt update && sudo apt install -y htop\"",
+        )
+        .expect("expected remote command extraction");
+
+        assert_eq!(target_hint.as_deref(), Some("192.168.122.240"));
+        assert_eq!(command, "sudo apt update && sudo apt install -y htop");
+    }
+
+    #[test]
+    fn remote_command_extraction_builds_package_manager_command_for_vm_request() {
+        let (command, target_hint) =
+            extract_remote_command_request("install htop on my vm").expect("expected command");
+
+        assert!(target_hint.is_none());
+        assert!(command.contains("apt-get install -y htop"));
+        assert!(command.contains("dnf install -y htop"));
+    }
+
+    #[test]
+    fn remote_command_extraction_infers_target_hint_from_local_vm_name() {
+        let (command, target_hint) = extract_remote_command_request("install vlc in my local vm ubuntu")
+            .expect("expected command");
+
+        assert_eq!(target_hint.as_deref(), Some("ubuntu"));
+        assert!(command.contains("install -y vlc"));
+    }
+
+    #[test]
+    fn remote_command_extraction_supports_apps_installed_prompt_for_vm_index() {
+        let (command, target_hint) = extract_remote_command_request(
+            "Check what are the apps install in my vm 1",
+        )
+        .expect("expected command");
+
+        assert_eq!(target_hint.as_deref(), Some("vm 1"));
+        assert!(command.contains("apt list --installed"));
+    }
+
+    #[test]
+    fn fallback_hint_open_application_prefers_remote_fleet_tool_for_ssh_prompt() {
+        let allowed: HashSet<String> = ["open_application", "execute_fleet_command"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+
+        let call = build_fallback_call_for_hint(
+            "open_application",
+            "Please run on my VM via SSH: ssh obaid@192.168.122.240 \"sudo apt update && sudo apt install -y htop\"",
+            &allowed,
+        )
+        .expect("expected fallback tool call");
+
+        assert_eq!(call.name, "execute_fleet_command");
+        assert_eq!(call.arguments["target"], "192.168.122.240");
+        assert_eq!(
+            call.arguments["command"],
+            "sudo apt update && sudo apt install -y htop"
+        );
+    }
+
+    #[test]
+    fn fallback_hint_get_fleet_overview_builds_inventory_call() {
+        let allowed: HashSet<String> = ["get_fleet_overview"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+
+        let call = build_fallback_call_for_hint(
+            "get_fleet_overview",
+            "How many VMs i have?",
+            &allowed,
+        )
+        .expect("expected fallback tool call");
+
+        assert_eq!(call.name, "get_fleet_overview");
+        assert_eq!(call.arguments, serde_json::json!({}));
     }
 
     #[test]
@@ -8142,6 +8815,34 @@ print("hello")
 
         assert_eq!(call.name, "mcp_colab-mcp_execute_cell");
         assert_eq!(call.arguments["code"], "print('hello')");
+    }
+
+    #[test]
+    fn turn_gate_generate_image_fallback_builds_tool_call() {
+        let mut allowed = HashSet::new();
+        allowed.insert("generate_image".to_string());
+
+        let gate = TurnGate::new();
+        let plan = gate.plan_turn("Generate image of a red car under rain", false);
+
+        let calls: Vec<ParsedToolCall> = gate
+            .fallback_tool_hints(&plan, &allowed)
+            .into_iter()
+            .filter_map(|hint| {
+                build_fallback_call_for_hint(
+                    &hint,
+                    "Generate image of a red car under rain",
+                    &allowed,
+                )
+            })
+            .collect();
+
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "generate_image");
+        let prompt = calls[0].arguments["prompt"]
+            .as_str()
+            .expect("prompt should be string");
+        assert!(prompt.to_ascii_lowercase().contains("red car"));
     }
 
     #[test]

@@ -209,9 +209,10 @@ fn score_keywords(lower: &str, keywords: &[&str]) -> u32 {
 
 // ─── Aspect ratios ────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AspectRatio {
+    #[default]
     Square,    // 1:1  → 1024×1024
     Landscape, // 16:9 → 1024×576
     Portrait,  // 9:16 → 576×1024
@@ -226,12 +227,6 @@ impl AspectRatio {
             Self::Portrait => (576, 1024),
             Self::Wide => (1024, 428),
         }
-    }
-}
-
-impl Default for AspectRatio {
-    fn default() -> Self {
-        Self::Square
     }
 }
 

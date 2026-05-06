@@ -478,7 +478,9 @@ impl ComfySidecar {
     /// Cancel the currently running job.
     pub async fn interrupt(&self) -> Result<(), ComfyError> {
         let url = format!("{}/interrupt", self.base_url());
-        self.client.post(&url).send().await?;
+        tokio::time::timeout(Duration::from_secs(2), self.client.post(&url).send())
+            .await
+            .map_err(|_| ComfyError::Spawn("ComfyUI /interrupt timed out after 2s".into()))??;
         Ok(())
     }
 

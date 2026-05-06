@@ -5,6 +5,7 @@ import logo from "../assets/kria-logo.png";
 const SessionSidebar: Component = () => {
   const {
     sessions,
+    isSessionStartupLoading,
     currentSession,
     setShowSettings,
     createSession,
@@ -97,7 +98,10 @@ const SessionSidebar: Component = () => {
         </div>
 
         <div class="session-list">
-          <Show when={sessions().length === 0}>
+          <Show when={isSessionStartupLoading()}>
+            <div class="session-empty">Loading conversations...</div>
+          </Show>
+          <Show when={!isSessionStartupLoading() && sessions().length === 0}>
             <div class="session-empty">No conversations yet</div>
           </Show>
           <For each={sessions()}>

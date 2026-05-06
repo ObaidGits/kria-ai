@@ -10,6 +10,8 @@
 
 use async_trait::async_trait;
 use std::sync::Arc;
+#[cfg(feature = "nvidia")]
+use std::sync::RwLock;
 
 /// Snapshot of GPU memory at a point in time.
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
@@ -131,6 +133,7 @@ pub trait VramProfiler: Send + Sync {
 pub struct NvmlProfiler {
     nvml: nvml_wrapper::Nvml,
     device_idx: u32,
+    last_good: RwLock<Option<VramSnapshot>>,
 }
 
 #[cfg(feature = "nvidia")]
@@ -140,13 +143,36 @@ impl NvmlProfiler {
         match nvml_wrapper::Nvml::init() {
             Ok(nvml) => {
                 tracing::info!(device_idx, "NVML initialised — using NvmlProfiler");
-                Some(Arc::new(Self { nvml, device_idx }))
+                Some(Arc::new(Self {
+                    nvml,
+                    device_idx,
+                    last_good: RwLock::new(None),
+                }))
             }
             Err(e) => {
                 tracing::info!(error = %e, "NVML unavailable, will try ROCm / fallback");
                 None
             }
         }
+    }
+
+    fn cached_snapshot(&self) -> Option<VramSnapshot> {
+        self.last_good
+            .read()
+            .expect("nvml profiler cache lock poisoned")
+            .as_ref()
+            .copied()
+    }
+
+    fn remember_snapshot(&self, snapshot: VramSnapshot) {
+        if snapshot.total_mb == 0 {
+            return;
+        }
+        let mut guard = self
+            .last_good
+            .write()
+            .expect("nvml profiler cache lock poisoned");
+        *guard = Some(snapshot);
     }
 }
 
@@ -156,33 +182,41 @@ impl VramProfiler for NvmlProfiler {
     async fn snapshot(&self) -> VramSnapshot {
         match self.nvml.device_by_index(self.device_idx) {
             Ok(device) => {
-                let mem = device.memory_info().unwrap_or(
-                    nvml_wrapper::struct_wrappers::device::MemoryInfo {
-                        free: 0,
-                        total: 0,
-                        used: 0,
-                    },
-                );
+                let mem = match device.memory_info() {
+                    Ok(mem) => mem,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "NvmlProfiler: memory query failed");
+                        return self.cached_snapshot().unwrap_or(VramSnapshot {
+                            free_mb: 0,
+                            total_mb: 0,
+                            reserved_mb: 0,
+                            vendor: GpuVendor::Nvidia,
+                        });
+                    }
+                };
                 // Bar1 reserved (fragmentation pressure).
                 let reserved = device
                     .bar1_memory_info()
                     .map(|b| b.used / 1_048_576)
                     .unwrap_or(0);
-                VramSnapshot {
+
+                let snapshot = VramSnapshot {
                     free_mb: mem.free / 1_048_576,
                     total_mb: mem.total / 1_048_576,
                     reserved_mb: reserved,
                     vendor: GpuVendor::Nvidia,
-                }
+                };
+                self.remember_snapshot(snapshot);
+                snapshot
             }
             Err(e) => {
                 tracing::warn!(error = %e, "NvmlProfiler: device query failed");
-                VramSnapshot {
+                self.cached_snapshot().unwrap_or(VramSnapshot {
                     free_mb: 0,
                     total_mb: 0,
                     reserved_mb: 0,
                     vendor: GpuVendor::Nvidia,
-                }
+                })
             }
         }
     }
@@ -266,8 +300,14 @@ fn parse_rocm_json(bytes: &[u8]) -> (u64, u64) {
 pub struct NullProfiler;
 
 impl NullProfiler {
-    pub fn new() -> Arc<dyn VramProfiler> {
-        Arc::new(Self)
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for NullProfiler {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -298,7 +338,7 @@ pub fn build_profiler() -> Arc<dyn VramProfiler> {
     }
 
     tracing::info!("No GPU telemetry available — VramProfiler will report 0 free VRAM (Tier C)");
-    NullProfiler::new()
+    Arc::new(NullProfiler::new())
 }
 
 // ─── VRAM Barrier (deterministic eviction guard) ──────────────────────────────

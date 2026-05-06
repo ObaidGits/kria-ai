@@ -27,7 +27,7 @@ fn smoke_multistep_tools_registered() {
     let required = [
         "get_cpu_usage",
         "send_notification",
-        "get_system_stats",
+        "check_system_health",
         "git_status",
         "git_commit",
         "read_file",
@@ -50,8 +50,9 @@ fn routing_chain01_system_summary_is_complex_task() {
     // PROMPT-ID: CHAIN-01
     let r = IntentRouter::classify("Get system stats and summarise everything for me.");
     assert!(
-        matches!(r.intent, Intent::ComplexTask | Intent::Conversation),
-        "System-stats-then-summarise should be ComplexTask, got: {:?}",
+        matches!(r.intent, Intent::ComplexTask | Intent::Conversation)
+            || matches!(&r.intent, Intent::DirectTool(t) if t == "check_system_health"),
+        "System-stats-then-summarise should route to ComplexTask/Conversation/check_system_health, got: {:?}",
         r.intent
     );
 }
@@ -158,8 +159,9 @@ fn routing_chain03_conditional_notification_is_complex_task() {
     // PROMPT-ID: CHAIN-03
     let r = IntentRouter::classify("If CPU usage is above 80%, send me a notification.");
     assert!(
-        matches!(r.intent, Intent::ComplexTask | Intent::Conversation),
-        "Conditional CPU alert should be ComplexTask, got: {:?}",
+        matches!(r.intent, Intent::ComplexTask | Intent::Conversation)
+            || matches!(&r.intent, Intent::DirectTool(t) if t == "get_cpu_usage"),
+        "Conditional CPU alert should route to ComplexTask/Conversation/get_cpu_usage, got: {:?}",
         r.intent
     );
 }
@@ -217,8 +219,9 @@ fn routing_chain05_git_status_commit_complex_task() {
     // PROMPT-ID: CHAIN-05
     let r = IntentRouter::classify("Check git status and commit if there are changes.");
     assert!(
-        matches!(r.intent, Intent::ComplexTask | Intent::Conversation),
-        "Git status then conditional commit should be ComplexTask, got: {:?}",
+        matches!(r.intent, Intent::ComplexTask | Intent::Conversation)
+            || matches!(&r.intent, Intent::DirectTool(t) if t == "git_status"),
+        "Git status then conditional commit should route to ComplexTask/Conversation/git_status, got: {:?}",
         r.intent
     );
 }

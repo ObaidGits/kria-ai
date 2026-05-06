@@ -15,10 +15,67 @@ use crate::platform::detect::{
     get_available_package_managers, get_package_manager, PackageManager,
 };
 use crate::safety::RiskLevel;
+use crate::tools::exec::{CommandOutput, ExecWrapper, ToolExecutionError};
 use crate::tools::registry::{ParamDef, ToolDef, ToolHandler, ToolRegistry};
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::de::DeserializeOwned;
+use serde::Deserialize;
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::{error, info, warn};
+
+const QUERY_TIMEOUT_SECS: u64 = 30;
+const APPLY_TIMEOUT_SECS: u64 = 300;
+const MAX_OUTPUT_BYTES: usize = 100 * 1024;
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ListInstalledPackagesInput {
+    #[serde(default)]
+    limit: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SearchPackageInput {
+    #[serde(default)]
+    query: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    source: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct PackageNameInput {
+    name: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct PackageInfoInput {
+    name: String,
+    #[serde(default)]
+    source: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct InstallPackageInput {
+    name: String,
+    #[serde(default)]
+    source: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct UninstallPackageInput {
+    name: String,
+    #[serde(default)]
+    source: Option<String>,
+}
 
 fn param(name: &str, ty: &str, desc: &str, required: bool) -> ParamDef {
     ParamDef {
@@ -30,11 +87,15 @@ fn param(name: &str, ty: &str, desc: &str, required: bool) -> ParamDef {
     }
 }
 
+fn parse_input<T: DeserializeOwned>(params: serde_json::Value) -> Result<T, ToolResult> {
+    serde_json::from_value(params).map_err(|error| ToolResult::err(format!("invalid parameters: {error}")))
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /// Validate a package name: alphanumeric, dash, dot, underscore, plus, slash (for flatpak refs).
 fn validate_name(name: &str) -> Result<(), String> {
-    if name.is_empty() {
+    if name.trim().is_empty() {
         return Err("package name is required".into());
     }
     if !name
@@ -46,29 +107,86 @@ fn validate_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Run a command and capture its stdout as a String.
-async fn run_cmd(program: &str, args: &[&str]) -> Result<String, String> {
-    let out = tokio::process::Command::new(program)
-        .args(args)
-        .output()
-        .await
-        .map_err(|e| format!("failed to run {program}: {e}"))?;
+fn exec_wrapper(timeout_secs: u64) -> ExecWrapper {
+    ExecWrapper::new()
+        .with_timeout(Duration::from_secs(timeout_secs))
+        .with_max_output_bytes(MAX_OUTPUT_BYTES)
+}
 
-    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-
-    if out.status.success() || !stdout.is_empty() {
-        // Many tools (snap, flatpak, apt) write their output to stderr only.
-        // When stdout is empty, return stderr so callers can see what actually happened.
-        let output = if stdout.trim().is_empty() {
-            stderr.trim().to_string()
-        } else {
-            stdout
-        };
-        Ok(output)
+fn preferred_output(output: &CommandOutput) -> String {
+    if output.stdout.trim().is_empty() {
+        output.stderr.trim().to_string()
     } else {
-        Err(if stderr.is_empty() { stdout } else { stderr })
+        output.stdout.clone()
     }
+}
+
+fn non_zero_error(stderr: String, stdout: String) -> String {
+    if stderr.trim().is_empty() {
+        stdout
+    } else {
+        stderr
+    }
+}
+
+async fn run_cmd_with_timeout(
+    program: &str,
+    args: &[&str],
+    timeout_secs: u64,
+) -> Result<String, String> {
+    let wrapper = exec_wrapper(timeout_secs);
+    match wrapper.execute(program, args).await {
+        Ok(output) => Ok(preferred_output(&output)),
+        Err(ToolExecutionError::NonZeroExit { stdout, stderr, .. }) => {
+            if !stdout.trim().is_empty() {
+                Ok(stdout)
+            } else {
+                Err(non_zero_error(stderr, stdout))
+            }
+        }
+        Err(ToolExecutionError::TimedOut { stderr, stdout, timeout_secs, .. }) => {
+            let details = non_zero_error(stderr, stdout);
+            Err(format!("command timed out after {timeout_secs}s: {details}"))
+        }
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+/// Run a command and capture its output as text.
+async fn run_cmd(program: &str, args: &[&str]) -> Result<String, String> {
+    run_cmd_with_timeout(program, args, QUERY_TIMEOUT_SECS).await
+}
+
+/// Run a mutating/apply command and fail hard on any non-zero exit.
+async fn run_apply_cmd(program: &str, args: &[&str]) -> Result<String, String> {
+    let wrapper = exec_wrapper(APPLY_TIMEOUT_SECS);
+    match wrapper.execute(program, args).await {
+        Ok(output) => Ok(preferred_output(&output)),
+        Err(ToolExecutionError::NonZeroExit { stdout, stderr, .. }) => {
+            Err(non_zero_error(stderr, stdout))
+        }
+        Err(ToolExecutionError::TimedOut {
+            timeout_secs,
+            stdout,
+            stderr,
+            ..
+        }) => {
+            let details = non_zero_error(stderr, stdout);
+            Err(format!("command timed out after {timeout_secs}s: {details}"))
+        }
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+async fn is_binary_in_path(name: &str) -> bool {
+    let finder = if cfg!(target_os = "windows") {
+        "where.exe"
+    } else {
+        "which"
+    };
+    run_cmd_with_timeout(finder, &[name], QUERY_TIMEOUT_SECS)
+        .await
+        .is_ok()
 }
 
 /// Resolve the package manager to use, preferring an explicit `source` param.
@@ -115,61 +233,49 @@ async fn get_priv_esc(pm: PackageManager) -> Result<PrivEsc, String> {
     }
 
     // Try pkexec first — works in a desktop session even without TTY.
-    let pkexec_check = tokio::process::Command::new("pkexec")
-        .arg("--version")
-        .output()
-        .await;
-    if pkexec_check.map(|o| o.status.success()).unwrap_or(false) {
+    if run_cmd_with_timeout("pkexec", &["--version"], QUERY_TIMEOUT_SECS)
+        .await
+        .is_ok()
+    {
         info!("[packages] pkexec available — will use for privilege escalation");
         return Ok(PrivEsc::Pkexec);
     }
     warn!("[packages] pkexec not found or failed, falling back to sudo");
 
     // Fall back to sudo -n (only works if NOPASSWD or credentials are cached).
-    let sudo_check = tokio::process::Command::new("sudo")
-        .args(["-n", "true"])
-        .output()
-        .await;
-    match sudo_check {
-        Ok(o) if o.status.success() => {
+    match run_cmd_with_timeout("sudo", &["-n", "true"], QUERY_TIMEOUT_SECS).await {
+        Ok(_) => {
             info!("[packages] sudo -n succeeded — credentials cached or NOPASSWD configured");
             Ok(PrivEsc::Sudo)
         }
-        Ok(_) => {
+        Err(_) => {
             error!("[packages] sudo requires a password and pkexec is unavailable");
             Err("Cannot escalate privileges: pkexec is not installed on this system and 'sudo' requires a password. \
                  Install policykit-1 (Ubuntu/Debian: sudo apt install policykit-1) to enable graphical privilege escalation, \
                  or run 'sudo -v' in a terminal to cache credentials.".into())
         }
-        Err(e) => {
-            error!("[packages] sudo check failed: {e}");
-            Err(format!("Cannot escalate privileges: {e}"))
-        }
     }
 }
 
-/// Build a command that runs `program args` with the given privilege escalation.
-fn priv_cmd(priv_esc: PrivEsc, program: &str, args: &[&str]) -> tokio::process::Command {
+/// Build a command invocation that runs `program args` with privilege escalation.
+fn priv_invocation(priv_esc: PrivEsc, program: &str, args: &[&str]) -> (String, Vec<String>) {
     match priv_esc {
-        PrivEsc::None => {
-            let mut cmd = tokio::process::Command::new(program);
-            cmd.args(args);
-            cmd
-        }
+        PrivEsc::None => (
+            program.to_string(),
+            args.iter().map(|arg| (*arg).to_string()).collect(),
+        ),
         PrivEsc::Pkexec => {
-            let mut cmd = tokio::process::Command::new("pkexec");
-            // Preserve DEBIAN_FRONTEND so apt doesn't prompt interactively.
-            cmd.env("DEBIAN_FRONTEND", "noninteractive");
-            cmd.arg(program);
-            cmd.args(args);
-            cmd
+            let mut full_args = Vec::with_capacity(args.len() + 1);
+            full_args.push(program.to_string());
+            full_args.extend(args.iter().map(|arg| (*arg).to_string()));
+            ("pkexec".to_string(), full_args)
         }
         PrivEsc::Sudo => {
-            let mut cmd = tokio::process::Command::new("sudo");
-            cmd.env("DEBIAN_FRONTEND", "noninteractive");
-            cmd.arg(program);
-            cmd.args(args);
-            cmd
+            let mut full_args = Vec::with_capacity(args.len() + 2);
+            full_args.push("-n".to_string());
+            full_args.push(program.to_string());
+            full_args.extend(args.iter().map(|arg| (*arg).to_string()));
+            ("sudo".to_string(), full_args)
         }
     }
 }
@@ -179,29 +285,40 @@ async fn run_priv_cmd(priv_esc: PrivEsc, program: &str, args: &[&str]) -> Result
     let display_cmd = format!("{program} {}", args.join(" "));
     info!("[packages] Running (priv={priv_esc:?}): {display_cmd}");
 
-    let mut cmd = priv_cmd(priv_esc, program, args);
-    let out = cmd.output().await.map_err(|e| {
-        error!("[packages] Failed to spawn '{display_cmd}': {e}");
-        format!("failed to spawn '{program}': {e}")
-    })?;
+    let (runner, invocation_args) = priv_invocation(priv_esc, program, args);
+    let args_refs: Vec<&str> = invocation_args.iter().map(|arg| arg.as_str()).collect();
+    let wrapper = exec_wrapper(APPLY_TIMEOUT_SECS);
 
-    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-    let code = out.status.code().unwrap_or(-1);
-
-    info!("[packages] Command '{display_cmd}' exited with code {code}");
-    if !stdout.is_empty() {
-        info!("[packages] stdout: {}", &stdout[..stdout.len().min(500)]);
-    }
-    if !stderr.is_empty() {
-        warn!("[packages] stderr: {}", &stderr[..stderr.len().min(500)]);
-    }
-
-    if out.status.success() {
-        Ok(stdout)
-    } else {
-        let err_output = if !stderr.is_empty() { stderr } else { stdout };
-        Err(format!("command exited with code {code}: {err_output}"))
+    match wrapper.execute(&runner, &args_refs).await {
+        Ok(output) => {
+            let stdout = output.stdout;
+            let stderr = output.stderr;
+            if !stdout.is_empty() {
+                info!("[packages] stdout: {}", &stdout[..stdout.len().min(500)]);
+            }
+            if !stderr.is_empty() {
+                warn!("[packages] stderr: {}", &stderr[..stderr.len().min(500)]);
+            }
+            Ok(if stdout.trim().is_empty() { stderr } else { stdout })
+        }
+        Err(ToolExecutionError::NonZeroExit { exit_code, stdout, stderr, .. }) => {
+            if !stdout.is_empty() {
+                info!("[packages] stdout: {}", &stdout[..stdout.len().min(500)]);
+            }
+            if !stderr.is_empty() {
+                warn!("[packages] stderr: {}", &stderr[..stderr.len().min(500)]);
+            }
+            let err_output = non_zero_error(stderr, stdout);
+            Err(format!("command exited with code {exit_code:?}: {err_output}"))
+        }
+        Err(ToolExecutionError::TimedOut { timeout_secs, stdout, stderr, .. }) => {
+            let err_output = non_zero_error(stderr, stdout);
+            Err(format!("command timed out after {timeout_secs}s: {err_output}"))
+        }
+        Err(error) => {
+            error!("[packages] Failed to spawn '{display_cmd}': {error}");
+            Err(error.to_string())
+        }
     }
 }
 
@@ -215,77 +332,63 @@ struct ListInstalledPackages;
 #[async_trait]
 impl ToolHandler for ListInstalledPackages {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(500) as usize;
+        let input: ListInstalledPackagesInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+        let limit = input.limit.unwrap_or(500).min(5000) as usize;
 
         let mut sources: Vec<serde_json::Value> = Vec::new();
 
         // dpkg / apt
-        if let Ok(out) = tokio::process::Command::new("dpkg-query")
-            .args(["-W", "-f=${Package}\n"])
-            .output()
-            .await
-        {
-            if out.status.success() {
-                let names: Vec<String> = String::from_utf8_lossy(&out.stdout)
-                    .lines()
-                    .filter(|l| !l.trim().is_empty())
-                    .take(limit)
-                    .map(|l| l.trim().to_string())
-                    .collect();
-                if !names.is_empty() {
-                    sources.push(serde_json::json!({
-                        "manager": "apt",
-                        "count":   names.len(),
-                        "packages": names,
-                    }));
-                }
+        if let Ok(out) = run_cmd("dpkg-query", &["-W", "-f=${Package}\\n"]).await {
+            let names: Vec<String> = out
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .take(limit)
+                .map(|l| l.trim().to_string())
+                .collect();
+            if !names.is_empty() {
+                sources.push(serde_json::json!({
+                    "manager": "apt",
+                    "count":   names.len(),
+                    "packages": names,
+                }));
             }
         }
 
         // flatpak
-        if let Ok(out) = tokio::process::Command::new("flatpak")
-            .args(["list", "--app", "--columns=application"])
-            .output()
-            .await
-        {
-            if out.status.success() {
-                let names: Vec<String> = String::from_utf8_lossy(&out.stdout)
-                    .lines()
-                    .filter(|l| !l.trim().is_empty() && !l.starts_with("Application"))
-                    .take(limit)
-                    .map(|l| l.trim().to_string())
-                    .collect();
-                if !names.is_empty() {
-                    sources.push(serde_json::json!({
-                        "manager": "flatpak",
-                        "count":   names.len(),
-                        "packages": names,
-                    }));
-                }
+        if let Ok(out) = run_cmd("flatpak", &["list", "--app", "--columns=application"]).await {
+            let names: Vec<String> = out
+                .lines()
+                .filter(|l| !l.trim().is_empty() && !l.starts_with("Application"))
+                .take(limit)
+                .map(|l| l.trim().to_string())
+                .collect();
+            if !names.is_empty() {
+                sources.push(serde_json::json!({
+                    "manager": "flatpak",
+                    "count":   names.len(),
+                    "packages": names,
+                }));
             }
         }
 
         // snap
-        if let Ok(out) = tokio::process::Command::new("snap")
-            .arg("list")
-            .output()
-            .await
-        {
-            if out.status.success() {
-                let names: Vec<String> = String::from_utf8_lossy(&out.stdout)
-                    .lines()
-                    .skip(1) // header
-                    .filter_map(|l| l.split_whitespace().next().map(|s| s.to_string()))
-                    .filter(|n| !n.is_empty())
-                    .take(limit)
-                    .collect();
-                if !names.is_empty() {
-                    sources.push(serde_json::json!({
-                        "manager": "snap",
-                        "count":   names.len(),
-                        "packages": names,
-                    }));
-                }
+        if let Ok(out) = run_cmd("snap", &["list"]).await {
+            let names: Vec<String> = out
+                .lines()
+                .skip(1) // header
+                .filter_map(|l| l.split_whitespace().next().map(|s| s.to_string()))
+                .filter(|n| !n.is_empty())
+                .take(limit)
+                .collect();
+            if !names.is_empty() {
+                sources.push(serde_json::json!({
+                    "manager": "snap",
+                    "count":   names.len(),
+                    "packages": names,
+                }));
             }
         }
 
@@ -312,10 +415,15 @@ struct SearchPackage;
 #[async_trait]
 impl ToolHandler for SearchPackage {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let query = params
-            .get("query")
-            .and_then(|v| v.as_str())
-            .or_else(|| params.get("name").and_then(|v| v.as_str()))
+        let input: SearchPackageInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        let query = input
+            .query
+            .as_deref()
+            .or(input.name.as_deref())
             .map(str::trim)
             .filter(|q| !q.is_empty())
             .map(|q| q.to_string())
@@ -323,7 +431,7 @@ impl ToolHandler for SearchPackage {
         if query.is_empty() {
             return ToolResult::err("query parameter is required (or provide name as alias)");
         }
-        let source = params["source"].as_str();
+        let source = input.source.as_deref();
 
         let pms: Vec<PackageManager> = if let Some(s) = source {
             match resolve_pm(Some(s)) {
@@ -558,10 +666,14 @@ struct CheckPackageInstalled;
 #[async_trait]
 impl ToolHandler for CheckPackageInstalled {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let name = match params["name"].as_str() {
-            Some(n) if !n.is_empty() => n.to_string(),
-            _ => return ToolResult::err("name parameter is required"),
+        let input: PackageNameInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
         };
+        let name = input.name.trim().to_string();
+        if name.is_empty() {
+            return ToolResult::err("name parameter is required");
+        }
 
         if let Err(e) = validate_name(&name) {
             return ToolResult::err(e);
@@ -570,12 +682,7 @@ impl ToolHandler for CheckPackageInstalled {
         let pms = get_available_package_managers();
         if pms.is_empty() {
             // Fallback: check if binary exists in PATH
-            let in_path = tokio::process::Command::new("which")
-                .arg(&name)
-                .output()
-                .await
-                .map(|o| o.status.success())
-                .unwrap_or(false);
+            let in_path = is_binary_in_path(&name).await;
             return ToolResult::ok(serde_json::json!({
                 "name": name,
                 "installed": in_path,
@@ -591,13 +698,7 @@ impl ToolHandler for CheckPackageInstalled {
         }
 
         // Final fallback: which/where
-        let in_path =
-            tokio::process::Command::new(if cfg!(windows) { "where.exe" } else { "which" })
-                .arg(&name)
-                .output()
-                .await
-                .map(|o| o.status.success())
-                .unwrap_or(false);
+        let in_path = is_binary_in_path(&name).await;
 
         ToolResult::ok(serde_json::json!({
             "name": name,
@@ -772,9 +873,13 @@ struct CheckPackageUpdates;
 #[async_trait]
 impl ToolHandler for CheckPackageUpdates {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let name = match params["name"].as_str() {
-            Some(n) if !n.is_empty() => n.to_string(),
-            _ => return ToolResult::err("name parameter is required"),
+        let input: PackageNameInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+        let name = input.name.trim().to_string();
+        if name.is_empty() {
+            return ToolResult::err("name parameter is required");
         };
 
         if let Err(e) = validate_name(&name) {
@@ -989,11 +1094,15 @@ struct GetPackageInfo;
 #[async_trait]
 impl ToolHandler for GetPackageInfo {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let name = match params["name"].as_str() {
-            Some(n) if !n.is_empty() => n.to_string(),
-            _ => return ToolResult::err("name parameter is required"),
+        let input: PackageInfoInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
         };
-        let source = params["source"].as_str();
+        let name = input.name.trim().to_string();
+        if name.is_empty() {
+            return ToolResult::err("name parameter is required");
+        };
+        let source = input.source.as_deref();
 
         if let Err(e) = validate_name(&name) {
             return ToolResult::err(e);
@@ -1214,11 +1323,15 @@ struct InstallPackage;
 #[async_trait]
 impl ToolHandler for InstallPackage {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let name = match params["name"].as_str() {
-            Some(n) if !n.is_empty() => n.to_string(),
-            _ => return ToolResult::err("name parameter is required"),
+        let input: InstallPackageInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
         };
-        let source = params["source"].as_str();
+        let name = input.name.trim().to_string();
+        if name.is_empty() {
+            return ToolResult::err("name parameter is required");
+        };
+        let source = input.source.as_deref();
 
         if let Err(e) = validate_name(&name) {
             return ToolResult::err(e);
@@ -1234,6 +1347,20 @@ impl ToolHandler for InstallPackage {
             pm
         );
 
+        // Mandatory idempotency pre-flight: skip apply when already installed.
+        if let Some(installed) = check_installed_with_pm(pm, &name).await {
+            info!("[packages] install_package: '{name}' already installed, no-op");
+            return ToolResult::ok(serde_json::json!({
+                "package": name,
+                "success": true,
+                "changed": false,
+                "already_in_desired_state": true,
+                "source": pm.as_str(),
+                "preflight": installed,
+                "message": format!("'{name}' is already installed; no action taken"),
+            }));
+        }
+
         let priv_esc = match get_priv_esc(pm).await {
             Ok(p) => p,
             Err(e) => return ToolResult::err(e),
@@ -1248,6 +1375,8 @@ impl ToolHandler for InstallPackage {
                 ToolResult::ok(serde_json::json!({
                     "package": name,
                     "success": true,
+                    "changed": true,
+                    "already_in_desired_state": false,
                     "source": pm.as_str(),
                     "output": &out[..out.len().min(2000)],
                     "message": format!("Successfully installed '{name}'"),
@@ -1272,16 +1401,16 @@ async fn run_install(pm: PackageManager, name: &str, priv_esc: PrivEsc) -> Resul
         PackageManager::Zypper => run_priv_cmd(priv_esc, "zypper", &["install", "-y", name]).await,
         PackageManager::Brew => {
             info!("[packages] brew install: trying formula first");
-            match run_cmd("brew", &["install", name]).await {
+            match run_apply_cmd("brew", &["install", name]).await {
                 Ok(out) => Ok(out),
                 Err(e) => {
                     warn!("[packages] brew install formula failed ({e}), retrying as cask");
-                    run_cmd("brew", &["install", "--cask", name]).await
+                    run_apply_cmd("brew", &["install", "--cask", name]).await
                 }
             }
         }
         PackageManager::Winget => {
-            run_cmd(
+            run_apply_cmd(
                 "winget",
                 &[
                     "install",
@@ -1292,12 +1421,12 @@ async fn run_install(pm: PackageManager, name: &str, priv_esc: PrivEsc) -> Resul
             )
             .await
         }
-        PackageManager::Choco => run_cmd("choco", &["install", "-y", name]).await,
+        PackageManager::Choco => run_apply_cmd("choco", &["install", "-y", name]).await,
         PackageManager::Snap => {
             // snapd may allow install without root via the snapd socket;
             // try without sudo first, fall back to privileged if it fails.
             info!("[packages] snap install: trying without privilege escalation first");
-            match run_cmd("snap", &["install", name]).await {
+            match run_apply_cmd("snap", &["install", name]).await {
                 Ok(out) => Ok(out),
                 Err(e) => {
                     warn!("[packages] snap install without privilege failed ({e}), retrying with escalation");
@@ -1308,7 +1437,7 @@ async fn run_install(pm: PackageManager, name: &str, priv_esc: PrivEsc) -> Resul
         PackageManager::Flatpak => {
             // Try user install (no root) first.
             info!("[packages] flatpak install: trying --user install first");
-            match run_cmd("flatpak", &["install", "-y", "--user", name]).await {
+            match run_apply_cmd("flatpak", &["install", "-y", "--user", name]).await {
                 Ok(out) => Ok(out),
                 Err(e) => {
                     warn!("[packages] flatpak --user install failed ({e}), retrying system-wide");
@@ -1326,11 +1455,15 @@ struct UninstallPackage;
 #[async_trait]
 impl ToolHandler for UninstallPackage {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let name = match params["name"].as_str() {
-            Some(n) if !n.is_empty() => n.to_string(),
-            _ => return ToolResult::err("name parameter is required"),
+        let input: UninstallPackageInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
         };
-        let source = params["source"].as_str();
+        let name = input.name.trim().to_string();
+        if name.is_empty() {
+            return ToolResult::err("name parameter is required");
+        };
+        let source = input.source.as_deref();
 
         if let Err(e) = validate_name(&name) {
             return ToolResult::err(e);
@@ -1346,6 +1479,20 @@ impl ToolHandler for UninstallPackage {
             pm
         );
 
+        // Mandatory idempotency pre-flight: skip apply when already absent.
+        let installed = check_installed_with_pm(pm, &name).await;
+        if installed.is_none() {
+            info!("[packages] uninstall_package: '{name}' is not installed, no-op");
+            return ToolResult::ok(serde_json::json!({
+                "package": name,
+                "success": true,
+                "changed": false,
+                "already_in_desired_state": true,
+                "source": pm.as_str(),
+                "message": format!("'{name}' is not installed; no action taken"),
+            }));
+        }
+
         let priv_esc = match get_priv_esc(pm).await {
             Ok(p) => p,
             Err(e) => return ToolResult::err(e),
@@ -1360,6 +1507,8 @@ impl ToolHandler for UninstallPackage {
                 ToolResult::ok(serde_json::json!({
                     "package": name,
                     "success": true,
+                    "changed": true,
+                    "already_in_desired_state": false,
                     "source": pm.as_str(),
                     "output": &out[..out.len().min(2000)],
                     "message": format!("Successfully uninstalled '{name}'"),
@@ -1386,21 +1535,21 @@ async fn run_uninstall(
             run_priv_cmd(priv_esc, "pacman", &["-R", "--noconfirm", name]).await
         }
         PackageManager::Zypper => run_priv_cmd(priv_esc, "zypper", &["remove", "-y", name]).await,
-        PackageManager::Brew => match run_cmd("brew", &["uninstall", name]).await {
+        PackageManager::Brew => match run_apply_cmd("brew", &["uninstall", name]).await {
             Ok(out) => Ok(out),
             Err(e) => {
                 warn!("[packages] brew uninstall formula failed ({e}), retrying as cask");
-                run_cmd("brew", &["uninstall", "--cask", name]).await
+                run_apply_cmd("brew", &["uninstall", "--cask", name]).await
             }
         },
-        PackageManager::Winget => run_cmd("winget", &["uninstall", name]).await,
-        PackageManager::Choco => run_cmd("choco", &["uninstall", "-y", name]).await,
+        PackageManager::Winget => run_apply_cmd("winget", &["uninstall", name]).await,
+        PackageManager::Choco => run_apply_cmd("choco", &["uninstall", "-y", name]).await,
         PackageManager::Snap => {
             // snap exits 0 even when the package is not installed, writing
             // "snap '<name>' is not installed" to stderr. After our run_cmd
             // fix, that message comes back as Ok(msg). Treat it as an error
             // so the caller sees the real outcome instead of silent success.
-            match run_cmd("snap", &["remove", name]).await {
+            match run_apply_cmd("snap", &["remove", name]).await {
                 Ok(out) if out.contains("is not installed") => {
                     warn!("[packages] snap remove: {out}");
                     Err(out)
@@ -1413,7 +1562,7 @@ async fn run_uninstall(
             }
         }
         PackageManager::Flatpak => {
-            match run_cmd("flatpak", &["uninstall", "-y", "--user", name]).await {
+            match run_apply_cmd("flatpak", &["uninstall", "-y", "--user", name]).await {
                 Ok(out) => Ok(out),
                 Err(e) => {
                     warn!("[packages] flatpak --user uninstall failed ({e}), retrying system-wide");

@@ -2,6 +2,7 @@ use crate::memory::embeddings::EmbeddingModel;
 /// RAG (Retrieval-Augmented Generation) — document chunking, hybrid retrieval, citations.
 use crate::memory::store::{DocumentChunk, MemoryStore};
 use crate::memory::vectors::VectorIndex;
+use crate::memory::MemoryManager;
 use chrono::Utc;
 use std::sync::Arc;
 
@@ -33,6 +34,7 @@ pub struct RagResult {
 /// RAG engine: ingest documents, retrieve with hybrid scoring.
 pub struct RagEngine {
     store: Arc<MemoryStore>,
+    writer: Arc<dyn MemoryManager>,
     vectors: Arc<VectorIndex>,
     embeddings: Arc<EmbeddingModel>,
 }
@@ -44,6 +46,7 @@ impl RagEngine {
         embeddings: Arc<EmbeddingModel>,
     ) -> Self {
         Self {
+            writer: store.clone(),
             store,
             vectors,
             embeddings,
@@ -88,7 +91,7 @@ impl RagEngine {
                 created_at: now,
             };
 
-            let chunk_id = self.store.store_chunk(&chunk)?;
+            let chunk_id = self.writer.store_document_chunk(&chunk)?;
 
             // Embed and index
             let vec = self.embeddings.embed(chunk_text)?;
@@ -205,7 +208,7 @@ impl RagEngine {
                 self.vectors.remove(-id);
             }
         }
-        self.store.delete_document_chunks(doc_id)
+        self.writer.delete_document_chunks(doc_id)
     }
 }
 

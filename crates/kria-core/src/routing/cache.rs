@@ -1,7 +1,7 @@
 //! Cache state machine for tool embeddings.
 //!
 //! # State transitions
-//! ```
+//! ```text
 //! Empty → Loading → Validating → Ready
 //!                              ↓ (tool delta detected)
 //!                        Reconciling → Ready
@@ -11,7 +11,7 @@
 //! ```
 //!
 //! # On-disk layout  (~/.kria/cache/router/)
-//! ```
+//! ```text
 //! manifest.v1.json          — HashMap<tool_id, ToolCacheEntry>
 //! embeddings.v1.bin         — contiguous f32 vectors (mmap-able)
 //! embeddings.v1.bin.next    — double-buffer for atomic swap
@@ -268,25 +268,27 @@ impl RouterCache {
             anyhow::bail!("embeddings.v1.bin too short");
         }
 
-        let mut embs = self.embeddings.write().await;
-        let mut domains = self.tool_domains.write().await;
-        domains.clear();
-        for (id, entry) in &manifest.entries {
-            let start = entry.offset * 4;
-            let end = start + entry.dim * 4;
-            if end > emb_bytes.len() {
-                warn!("[RouterCache] skipping '{}': offset out of bounds", id);
-                continue;
+        {
+            let mut embs = self.embeddings.write().await;
+            let mut domains = self.tool_domains.write().await;
+            domains.clear();
+            for (id, entry) in &manifest.entries {
+                let start = entry.offset * 4;
+                let end = start + entry.dim * 4;
+                if end > emb_bytes.len() {
+                    warn!("[RouterCache] skipping '{}': offset out of bounds", id);
+                    continue;
+                }
+                let v: Vec<f32> = emb_bytes[start..end]
+                    .chunks_exact(4)
+                    .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+                    .collect();
+                embs.insert(id.clone(), v);
+                domains.insert(id.clone(), domain_from_str(&entry.domain));
             }
-            let v: Vec<f32> = emb_bytes[start..end]
-                .chunks_exact(4)
-                .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-                .collect();
-            embs.insert(id.clone(), v);
-            domains.insert(id.clone(), domain_from_str(&entry.domain));
         }
 
-        // Reload centroids
+        // Reload centroids after releasing write locks to avoid self-deadlock.
         self.recompute_centroids().await;
         // Load OOD distribution
         self.load_ood_calibration().await;
@@ -560,7 +562,7 @@ impl RouterCache {
         }
         let centroid_vecs: Vec<&Vec<f32>> = centroids.values().collect();
 
-        let prompts: Vec<&str> = ood_prompts.iter().map(|s| *s).collect();
+        let prompts: Vec<&str> = ood_prompts.to_vec();
         let Ok(embs) = embed::embed_batch(&prompts) else {
             return;
         };

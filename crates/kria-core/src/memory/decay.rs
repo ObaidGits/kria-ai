@@ -1,4 +1,5 @@
 use crate::memory::store::MemoryStore;
+use crate::memory::MemoryManager;
 use chrono::Utc;
 
 /// Recompute decay scores for all facts based on age and access patterns.
@@ -10,6 +11,7 @@ use chrono::Utc;
 ///   frequency = min(1.0, log(access_count + 1) / 5)
 pub fn recompute_decay(store: &MemoryStore) -> anyhow::Result<usize> {
     let facts = store.all_facts_with_decay(0.0)?;
+    let writer: &dyn MemoryManager = store;
     let now = Utc::now();
     let mut updated = 0;
 
@@ -20,7 +22,7 @@ pub fn recompute_decay(store: &MemoryStore) -> anyhow::Result<usize> {
         let new_score = recency * 0.7 + frequency * 0.3;
 
         if let Some(id) = fact.id {
-            store.update_fact_decay(id, new_score)?;
+            writer.update_fact_decay(id, new_score)?;
             updated += 1;
         }
     }
@@ -32,12 +34,13 @@ pub fn recompute_decay(store: &MemoryStore) -> anyhow::Result<usize> {
 /// Remove facts whose decay score has dropped below the threshold.
 pub fn prune_expired(store: &MemoryStore, threshold: f64) -> anyhow::Result<usize> {
     let facts = store.all_facts_with_decay(0.0)?;
+    let writer: &dyn MemoryManager = store;
     let mut pruned = 0;
 
     for fact in &facts {
         if fact.decay_score < threshold {
             if let Some(id) = fact.id {
-                store.delete_fact(id)?;
+                writer.delete_fact(id)?;
                 pruned += 1;
             }
         }

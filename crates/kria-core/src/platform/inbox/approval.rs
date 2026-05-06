@@ -117,11 +117,7 @@ impl ApprovalBroker {
         self.pending
             .iter()
             .map(|e| {
-                (
-                    e.key().clone(),
-                    e.message.conversation.clone(),
-                    e.reason.clone(),
-                )
+                (*e.key(), e.message.conversation.clone(), e.reason.clone())
             })
             .collect()
     }

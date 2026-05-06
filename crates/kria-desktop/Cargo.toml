@@ -10,6 +10,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 kria-core = { path = "../kria-core" }
+kria-connection-control = { path = "../kria-connection-control" }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
@@ -21,6 +22,7 @@ tauri-plugin-shell = "2"
 tauri-plugin-process = "2"
 serde = { workspace = true }
 serde_json = { workspace = true }
+toml = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 anyhow = { workspace = true }
@@ -34,7 +36,9 @@ futures = { workspace = true }
 base64 = { workspace = true }
 sha2 = { workspace = true }
 dirs = { workspace = true }
-axum = { version = "0.8", features = ["json"] }
+axum = { version = "0.8", features = ["json", "ws"] }
+async-stream = "0.3"
+tower-http = { version = "0.6", features = ["cors"] }
 
 [features]
 nvidia = ["kria-core/nvidia"]

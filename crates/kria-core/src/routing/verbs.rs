@@ -108,10 +108,8 @@ pub fn classify_modality(text: &str) -> ModalityResult {
     let mut found: Vec<IntentModality> = Vec::new();
 
     for (re, modality) in VERB_PATTERNS.iter() {
-        if re.is_match(text) {
-            if !found.contains(modality) {
-                found.push(*modality);
-            }
+        if re.is_match(text) && !found.contains(modality) {
+            found.push(*modality);
         }
     }
 

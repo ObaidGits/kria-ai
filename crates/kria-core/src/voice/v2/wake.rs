@@ -158,13 +158,13 @@ impl WakeWordDetector {
                 "wake-word requested but voice-wake-oww feature not compiled; disabled"
             );
             let _ = (sensitivity, &aliases);
-            return Self {
+            Self {
                 models,
                 sensitivity,
                 phrase,
                 aliases,
                 backend: Backend::Disabled,
-            };
+            }
         }
 
         #[cfg(feature = "voice-wake-oww")]
@@ -222,29 +222,27 @@ impl WakeWordDetector {
         #[allow(unused_variables)] event_tx: mpsc::UnboundedSender<WakeWordEvent>,
     ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
-            if !self.is_active() {
-                return;
-            }
-
-            #[cfg(feature = "voice-wake-oww")]
-            {
-                let phrase = self.phrase.clone();
-                let sensitivity = self.sensitivity;
-                let Backend::OpenWakeWord(ref backend) = self.backend else {
-                    return;
-                };
-                let mut state = oww::StreamingState::new();
-                while let Ok(chunk) = _frame_rx.recv().await {
-                    let pcm = ensure_16k_mono(&chunk);
-                    state.feed(&pcm);
-                    while let Some(score) = backend.try_step(&mut state) {
-                        if score >= sensitivity {
-                            state.note_fire();
-                            let _ = event_tx.send(WakeWordEvent {
-                                phrase: phrase.clone(),
-                                score,
-                                source: "oww".into(),
-                            });
+            if self.is_active() {
+                #[cfg(feature = "voice-wake-oww")]
+                {
+                    let phrase = self.phrase.clone();
+                    let sensitivity = self.sensitivity;
+                    let Backend::OpenWakeWord(ref backend) = self.backend else {
+                        return;
+                    };
+                    let mut state = oww::StreamingState::new();
+                    while let Ok(chunk) = _frame_rx.recv().await {
+                        let pcm = ensure_16k_mono(&chunk);
+                        state.feed(&pcm);
+                        while let Some(score) = backend.try_step(&mut state) {
+                            if score >= sensitivity {
+                                state.note_fire();
+                                let _ = event_tx.send(WakeWordEvent {
+                                    phrase: phrase.clone(),
+                                    score,
+                                    source: "oww".into(),
+                                });
+                            }
                         }
                     }
                 }

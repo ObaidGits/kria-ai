@@ -62,13 +62,14 @@ impl VoiceActivityDetector {
     /// chunk (default 100 ms).
     ///
     /// Call this after `new()` or `with_silero()` to apply the config value:
-    /// ```
-    /// vad = VoiceActivityDetector::new(0.02).with_silence_ms(500, 100);
+    /// ```ignore
+    /// use kria_core::voice::VoiceActivityDetector;
+    /// let vad = VoiceActivityDetector::new(0.02).with_silence_ms(500, 100);
     /// ```
     pub fn with_silence_ms(mut self, silence_ms: u64, chunk_ms: u64) -> Self {
         let chunk_ms = chunk_ms.max(1);
         // Round up to ensure we always wait at least `silence_ms`.
-        let chunks = ((silence_ms + chunk_ms - 1) / chunk_ms).max(2) as usize;
+        let chunks = silence_ms.div_ceil(chunk_ms).max(2) as usize;
         self.silence_timeout_chunks = chunks;
         tracing::debug!(
             silence_ms,

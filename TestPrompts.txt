@@ -1,6 +1,6 @@
 ================================================================================
   KRIA  —  COMPREHENSIVE TOOL TEST PROMPTS
-  Date: April 21, 2026
+  Date: May 05, 2026
   Purpose: Validate every registered tool, routing, policy gating, multi-step
            flows, Hinglish variants, and expected outcomes.
   How to use: Say or type each prompt. Compare actual result with EXPECTED.
@@ -62,6 +62,14 @@ SECTION 1 — SYSTEM INFORMATION & HEALTH
           EXPECTED: 🗣️ Must-work critical task. "Yes, connected." or "No, offline."
           Notes  : 3-host balanced probe per preferences.
 
+[SYS-11]  Prompt : "Show memory usage details."
+          Tool   : get_memory_info
+          EXPECTED: ✅ GREEN — Total/used/free memory with swap details.
+
+[SYS-12]  Prompt : "Show disk space details."
+          Tool   : get_disk_space
+          EXPECTED: ✅ GREEN — Per-mount disk usage summary.
+
 ────────────────────────────────────────────────────────────────────────────────
 SECTION 2 — POWER MANAGEMENT
 ────────────────────────────────────────────────────────────────────────────────
@@ -87,16 +95,21 @@ SECTION 2 — POWER MANAGEMENT
           EXPECTED: ⚠️ WARN — "System will suspend. Confirm?" (non-destructive but
                     affects session; ask before proceeding per preferences).
 
-[PWR-06]  Prompt : "Shutdown the system in 5 minutes."
+[PWR-06]  Prompt : "Hibernate the system."
+          Tool   : hibernate
+          EXPECTED: ⚠️ WARN — "System will hibernate. Confirm?"
+                    After yes: system hibernates.
+
+[PWR-07]  Prompt : "Shutdown the system in 5 minutes."
           Tool   : shutdown_system (delay_minutes: 5)
           EXPECTED: 🔒 PIN — Destructive. Requires explicit approval + PIN.
                     After PIN: "System will shut down in 5 minutes."
 
-[PWR-07]  Prompt : "Reboot."
+[PWR-08]  Prompt : "Reboot."
           Tool   : reboot_system
           EXPECTED: 🔒 PIN — Destructive. Requires explicit approval + PIN.
 
-[PWR-08]  Prompt : "Cancel shutdown."
+[PWR-09]  Prompt : "Cancel shutdown."
           Tool   : execute_bash (command: "shutdown -c")
           EXPECTED: ✅ GREEN — Scheduled shutdown cancelled if one was pending.
 
@@ -129,17 +142,22 @@ SECTION 3 — SYSTEM CONFIGURATION
           Tool   : get_wifi_networks
           EXPECTED: ✅ GREEN — List of SSIDs with signal strength.
 
-[CFG-07]  Prompt : "What is the value of the HOME environment variable?"
+[CFG-07]  Prompt : "Connect to WiFi network 'OfficeNet' with password 'example123'."
+          Tool   : connect_wifi (ssid: "OfficeNet", password: "example123")
+          EXPECTED: ⚠️ WARN — Shows SSID and asks confirmation before attempting connect.
+                    On success: IP/connection summary returned.
+
+[CFG-08]  Prompt : "What is the value of the HOME environment variable?"
           Tool   : get_environment_variable (name: "HOME")
           EXPECTED: ✅ GREEN — Returns "/home/obaid".
 
-[CFG-08]  Prompt : "List all environment variables."
+[CFG-09]  Prompt : "List all environment variables."
           Tool   : list_environment_variables
           EXPECTED: ✅ GREEN — Full env dump (may be long; paginated or truncated).
 
-[CFG-09]  Prompt : "Set environment variable TEST_VAR to hello123."
+[CFG-10]  Prompt : "Set environment variable TEST_VAR to hello123."
           Tool   : set_environment_variable (name: "TEST_VAR", value: "hello123")
-          EXPECTED: ✅ GREEN — Confirmation. (Note: only persists for current session.)
+          EXPECTED: 🔒 PIN — RED tier. Shows variable name/value impact before approval.
 
 ────────────────────────────────────────────────────────────────────────────────
 SECTION 4 — FILE SYSTEM TOOLS
@@ -159,7 +177,7 @@ SECTION 4 — FILE SYSTEM TOOLS
           EXPECTED: ✅ GREEN — List of matching paths or "No matches found."
 
 [FS-04]   Prompt : "Create a folder at /home/obaid/kria_test"
-          Tool   : create_directory (path: "/home/obaid/kria_test", recursive: true)
+          Tool   : create_directory (path: "/home/obaid/kria_test")
           EXPECTED: ✅ GREEN — "Directory created."
 
 [FS-05]   Prompt : "Write 'Hello KRIA' to /home/obaid/kria_test/hello.txt"
@@ -194,12 +212,12 @@ SECTION 4 — FILE SYSTEM TOOLS
                     Enter PIN to confirm." (per safety policy).
 
 [FS-12]   Prompt : "Delete /home/obaid/kria_test directory"
-          Tool   : delete_directory (path: "/home/obaid/kria_test", recursive: true)
+          Tool   : delete_directory (path: "/home/obaid/kria_test")
           EXPECTED: 🔒 PIN — RED tier. Full path + impact shown before PIN prompt.
 
 [FS-13]   Prompt : "Search for 'TODO' in all .py files under /home/obaid/projects"
           Tool   : search_file_contents (directory: "/home/obaid/projects",
-                                         pattern: "TODO")
+                                         query: "TODO")
           EXPECTED: ✅ GREEN — Lines containing TODO with file paths and line numbers.
 
 [FS-14]   Prompt : "Show me the project structure of /media/obaid/SSD/KRIA"
@@ -207,7 +225,7 @@ SECTION 4 — FILE SYSTEM TOOLS
           EXPECTED: ✅ GREEN — Tree view of the workspace.
 
 [FS-15]   Prompt : "Count lines of code in /media/obaid/SSD/KRIA/crates"
-          Tool   : count_lines_of_code (path: "/media/obaid/SSD/KRIA/crates")
+          Tool   : count_lines_of_code (directory: "/media/obaid/SSD/KRIA/crates")
           EXPECTED: ✅ GREEN — Per-language breakdown + total.
 
 [FS-16]   Prompt : "Find all TODO and FIXME comments in /media/obaid/SSD/KRIA"
@@ -223,8 +241,13 @@ SECTION 4 — FILE SYSTEM TOOLS
           EXPECTED: ⚠️ WARN — Shows files to be deleted, requires confirmation.
 
 [FS-19]   Prompt : "Analyse the code in /media/obaid/SSD/KRIA/crates/kria-core/src/agent/loop_engine.rs"
-          Tool   : analyze_code (file_path: "...loop_engine.rs", language: "rust")
+          Tool   : analyze_code (path: "...loop_engine.rs")
           EXPECTED: ✅ GREEN — AST stats: functions, structs, complexity metrics.
+
+[FS-20]   Prompt : "Find all Rust files under /media/obaid/SSD/KRIA/crates using advanced pattern search."
+          Tool   : find_files_by_pattern (directory: "/media/obaid/SSD/KRIA/crates",
+                                          pattern: "*.rs", type: "file", max_results: 200)
+          EXPECTED: ✅ GREEN — Matching paths returned with optional metadata.
 
 ────────────────────────────────────────────────────────────────────────────────
 SECTION 5 — PROCESS & SERVICE MANAGEMENT
@@ -252,15 +275,19 @@ SECTION 5 — PROCESS & SERVICE MANAGEMENT
 
 [PROC-06] Prompt : "Check status of docker service."
           Tool   : manage_service (name: "docker", action: "status")
-          EXPECTED: ✅ GREEN — Active/inactive state, uptime.
+          EXPECTED: 🔒 PIN — RED tier tool. Shows service + action before approval.
 
 [PROC-07] Prompt : "Start the docker service."
           Tool   : manage_service (name: "docker", action: "start")
-          EXPECTED: ⚠️ WARN — Requires confirmation; sudo needed.
+          EXPECTED: 🔒 PIN — RED tier. Explicit approval + PIN required.
 
 [PROC-08] Prompt : "Get active network connections."
           Tool   : get_active_connections
           EXPECTED: ✅ GREEN — TCP/UDP connections with local/remote addresses.
+
+[PROC-09] Prompt : "Set process priority of PID 12345 to 10."
+          Tool   : set_process_priority (pid: 12345, priority: 10)
+          EXPECTED: 🔒 PIN — RED tier. Explicit approval + PIN before changing niceness.
 
 ────────────────────────────────────────────────────────────────────────────────
 SECTION 6 — NETWORK & WEB TOOLS
@@ -305,20 +332,36 @@ SECTION 6 — NETWORK & WEB TOOLS
           Tool   : searxng_search (query: "machine learning tutorials")
           EXPECTED: ✅ GREEN — Results from SearXNG meta-search (if running locally).
 
-[NET-10]  Prompt : "What time is it?"
-          Tool   : get_current_time (stub)
-          EXPECTED: ✅ GREEN — Current time in Asia/India timezone.
+[NET-10]  Prompt : "What time is it in IST?"
+          Tool   : get_current_time (timezone: "IST")
+          EXPECTED: ✅ GREEN — Current date/time for IST timezone.
 
 [NET-11]  Prompt : "What is the weather today?"
-          Tool   : get_weather (stub)
-          EXPECTED: ✅ GREEN or STUB notice — Weather summary or "not configured yet."
+          Tool   : get_weather (location: "Bengaluru")
+          EXPECTED: ✅ GREEN — Current weather + short forecast.
+
+[NET-12]  Prompt : "Convert 100 USD to INR."
+          Tool   : get_exchange_rate (base_currency: "USD", target_currency: "INR", amount: 100)
+          EXPECTED: ✅ GREEN — Converted amount and exchange rate returned.
+
+[NET-13]  Prompt : "Get latest 5 Hacker News headlines."
+          Tool   : get_news (max_items: 5)
+          EXPECTED: ✅ GREEN — Headlines list with title + URL + published time.
+
+[NET-14]  Prompt : "Calculate 2^10 + sqrt(144)."
+          Tool   : calculate (expression: "2^10 + sqrt(144)")
+          EXPECTED: ✅ GREEN — Numeric result returned.
+
+[NET-15]  Prompt : "Open browser and search YouTube for lo-fi coding music."
+          Tool   : browser_search (query: "lo-fi coding music", site: "youtube")
+          EXPECTED: ✅ GREEN — Default browser opens YouTube search results.
 
 ────────────────────────────────────────────────────────────────────────────────
 SECTION 7 — DOCUMENT & NEWS TOOLS
 ────────────────────────────────────────────────────────────────────────────────
 
 [DOC-01]  Prompt : "Parse the document at /home/obaid/Documents/report.pdf"
-          Tool   : parse_document (path: "...", operations: ["extract_text"])
+          Tool   : parse_document (path: "...")
           EXPECTED: ✅ GREEN — Extracted text. If missing: "File not found."
 
 [DOC-02]  Prompt : "Parse the CSV at /home/obaid/data.csv and give me a summary."
@@ -326,7 +369,7 @@ SECTION 7 — DOCUMENT & NEWS TOOLS
           EXPECTED: ✅ GREEN — Row count, column names, sample rows, basic stats.
 
 [DOC-03]  Prompt : "Summarize the document at /home/obaid/Documents/report.pdf"
-          Tool   : summarize_document (path: "...", length: "short")
+          Tool   : summarize_document (path: "...")
           EXPECTED: ✅ GREEN — 3-5 sentence summary. Voice reads it aloud.
 
 [DOC-04]  Prompt : "Search for latest tech news from the last 6 hours."
@@ -374,6 +417,16 @@ SECTION 8 — VISION & IMAGE TOOLS
           Tool   : get_clipboard → ocr_image (chained)
           EXPECTED: ✅➡️ — Clipboard path extracted, then OCR run on it.
 
+[VIS-07]  Prompt : "Run sidecar image analysis on /home/obaid/Pictures/photo.jpg with OCR and metadata."
+          Tool   : image_analyze (file_path: "/home/obaid/Pictures/photo.jpg",
+                                  operations: ["ocr", "metadata"])
+          EXPECTED: ✅ GREEN — Sidecar output includes OCR text + metadata fields.
+
+[VIS-08]  Prompt : "Generate an anime style image of a robot reading a Rust book."
+          Tool   : generate_image (prompt: "a robot reading a Rust programming book",
+                                  style: "anime", count: 1, aspect: "square")
+          EXPECTED: ⚠️ WARN / ✅ GREEN — Generation starts, returns image path(s).
+
 ────────────────────────────────────────────────────────────────────────────────
 SECTION 9 — INTERACTION & DESKTOP TOOLS
 ────────────────────────────────────────────────────────────────────────────────
@@ -420,6 +473,14 @@ SECTION 9 — INTERACTION & DESKTOP TOOLS
                                  windows: ["Visual Studio Code", "Firefox"])
           EXPECTED: ✅ GREEN — Both windows tiled on primary monitor.
 
+[DT-11]   Prompt : "Move VS Code window to x=50, y=50."
+          Tool   : move_window (title: "Visual Studio Code", x: 50, y: 50)
+          EXPECTED: ⚠️ WARN / ✅ GREEN — Window moved to requested coordinates.
+
+[DT-12]   Prompt : "Resize VS Code window to 1280x800."
+          Tool   : resize_window (title: "Visual Studio Code", width: 1280, height: 800)
+          EXPECTED: ⚠️ WARN / ✅ GREEN — Window resized to requested dimensions.
+
 ────────────────────────────────────────────────────────────────────────────────
 SECTION 10 — NOTIFICATIONS & COMMUNICATION
 ────────────────────────────────────────────────────────────────────────────────
@@ -438,6 +499,12 @@ SECTION 10 — NOTIFICATIONS & COMMUNICATION
                                   body: "Hello.")
           EXPECTED: ✅ GREEN — Opens email client with pre-filled draft. Does NOT
                     auto-send (Gmail send flow requires explicit approval).
+
+[COM-04]  Prompt : "Draft a WhatsApp message to Rahul saying 'I will join in 10 minutes'."
+          Tool   : send_message (app: "whatsapp", contact_name: "Rahul",
+                                 contact_identifier: "+919999999999",
+                                 body: "I will join in 10 minutes")
+          EXPECTED: ⚠️ WARN / ✅ GREEN — Draft opens in target app; user must manually send.
 
 ────────────────────────────────────────────────────────────────────────────────
 SECTION 11 — SHELL EXECUTION
@@ -468,6 +535,11 @@ SECTION 11 — SHELL EXECUTION
 [SH-06]   Prompt : "Execute this bash and give me output: df -h"
           Tool   : execute_bash (command: "df -h")
           EXPECTED: ✅ GREEN — Disk usage for all filesystems.
+
+[SH-07]   Prompt : "Run PowerShell command: Get-Date"
+          Tool   : execute_powershell (command: "Get-Date", timeout: 10)
+          EXPECTED: ✅ GREEN or clear error — Executes if PowerShell is available,
+                    otherwise returns a readable "powershell not installed" type error.
 
 ────────────────────────────────────────────────────────────────────────────────
 SECTION 12 — PACKAGE MANAGEMENT
@@ -508,6 +580,10 @@ SECTION 12 — PACKAGE MANAGEMENT
           EXPECTED: ✅➡️ — search_package → not found → clear error:
                     "Package 'xyz_nonexistent_package_99' not found in any source."
 
+[PKG-09]  Prompt : "List installed packages on this system (limit 30)."
+          Tool   : list_installed_packages (limit: 30)
+          EXPECTED: ✅ GREEN — Package list returned across available managers.
+
 ────────────────────────────────────────────────────────────────────────────────
 SECTION 13 — TASK SCHEDULING (CRON)
 ────────────────────────────────────────────────────────────────────────────────
@@ -519,7 +595,7 @@ SECTION 13 — TASK SCHEDULING (CRON)
 [SCHED-02] Prompt : "Create a cron job to run 'echo hello' every day at 9 AM."
            Tool   : create_scheduled_task (schedule: "0 9 * * *",
                                            command: "echo hello")
-           EXPECTED: ⚠️ WARN — Show full cron entry before creating. After confirm: ✅.
+           EXPECTED: 🔒 PIN — RED tier. Show full cron entry + impact before approval.
 
 [SCHED-03] Prompt : "Delete the cron job matching 'echo hello'."
            Tool   : delete_scheduled_task (pattern: "echo hello")
@@ -563,15 +639,19 @@ SECTION 14 — MEMORY & KNOWLEDGE BASE
           Tool   : ingest_document_rag (path: "...", chunk_size: 512, overlap: 64)
           EXPECTED: ✅ GREEN — "Document ingested. X chunks stored."
 
-[MEM-09]  Prompt : "Ask my knowledge base: What is the KRIA system?"
+[MEM-09]  Prompt : "Ingest /home/obaid/Documents/notes.pdf into knowledge index (non-RAG path)."
+          Tool   : ingest_document (path: "/home/obaid/Documents/notes.pdf")
+          EXPECTED: ✅ GREEN — Knowledge ingestion confirmation returned.
+
+[MEM-10]  Prompt : "Ask my knowledge base: What is the KRIA system?"
           Tool   : rag_query (query: "What is the KRIA system?", limit: 5)
           EXPECTED: ✅ GREEN — Ranked relevant chunks from ingested documents.
 
-[MEM-10]  Prompt : "List all documents in my knowledge base."
+[MEM-11]  Prompt : "List all documents in my knowledge base."
           Tool   : list_knowledge_base
           EXPECTED: ✅ GREEN — Ingested docs with doc_id, path, chunk count.
 
-[MEM-11]  Prompt : "Delete knowledge item with ID doc-001."
+[MEM-12]  Prompt : "Delete knowledge item with ID doc-001."
           Tool   : delete_knowledge_item (doc_id: "doc-001")
           EXPECTED: 🔒 PIN — Destructive delete. Confirm + PIN.
 
@@ -611,7 +691,7 @@ SECTION 15 — GIT & DEVELOPER TOOLS
           EXPECTED: ✅ GREEN — "Changes stashed."
 
 [GIT-08]  Prompt : "Push to main."
-          Tool   : git_push (if exists) or execute_bash("git push origin main")
+          Tool   : execute_bash (command: "git push origin main")
           EXPECTED: 🔒 PIN — Per policy: NEVER push to main without explicit approval.
                     Full approval prompt with action/args/impact/rollback shown.
 
@@ -621,9 +701,17 @@ SECTION 15 — GIT & DEVELOPER TOOLS
 
 [GIT-10]  Prompt : "Query the SQLite database at /home/obaid/kria.db:
                     SELECT * FROM facts LIMIT 5"
-          Tool   : query_sqlite (database: "/home/obaid/kria.db",
-                                  query: "SELECT * FROM facts LIMIT 5")
+          Tool   : query_sqlite (db_path: "/home/obaid/kria.db",
+                                  sql: "SELECT * FROM facts LIMIT 5")
           EXPECTED: ✅ GREEN — Table result. If DB missing: "Database not found."
+
+[GIT-11]  Prompt : "Describe database schema for /home/obaid/kria.db"
+          Tool   : describe_database (db_path: "/home/obaid/kria.db")
+          EXPECTED: ✅ GREEN — Tables/views list returned.
+
+[GIT-12]  Prompt : "Show unified diff between /tmp/a.txt and /tmp/b.txt"
+          Tool   : diff_files_unified (file_a: "/tmp/a.txt", file_b: "/tmp/b.txt")
+          EXPECTED: ✅ GREEN — Unified diff returned.
 
 ────────────────────────────────────────────────────────────────────────────────
 SECTION 16 — PROACTIVE & AUTOMATION TOOLS
@@ -678,6 +766,7 @@ SECTION 18 — GOOGLE WORKSPACE TOOLS
           Tool   : gw_gmail_inbox → gw_gmail_read (chained)
           EXPECTED: ✅➡️ — Inbox fetched, top email ID extracted, content read.
                     Voice reads sender + subject + first paragraph.
+          Notes  : gw_gmail_read expects message_id from inbox/search results.
 
 [GW-04]   Prompt : "Send an email to test@example.com saying 'Hello, this is a test.'"
           Tool   : gw_gmail_send (to: "test@example.com", subject: ..., body: ...)
@@ -689,7 +778,7 @@ SECTION 18 — GOOGLE WORKSPACE TOOLS
                     5. Send executes.
 
 [GW-05]   Prompt : "Delete email with ID 123abc."
-          Tool   : gw_gmail_delete (id: "123abc")
+          Tool   : gw_gmail_delete (message_id: "123abc")
           EXPECTED: 🔒 PIN — RED tier per preferences. Full email shown before PIN.
 
 -- GOOGLE CALENDAR --
@@ -704,12 +793,12 @@ SECTION 18 — GOOGLE WORKSPACE TOOLS
           EXPECTED: ✅ GREEN — Matching events with date/time.
 
 [GW-08]   Prompt : "Create a calendar event: 'KRIA Demo' on April 25 2026 at 3 PM for 1 hour."
-          Tool   : gw_calendar_create (title: "KRIA Demo", start: "2026-04-25T15:00",
-                                       end: "2026-04-25T16:00")
+          Tool   : gw_calendar_create (summary: "KRIA Demo", start: "2026-04-25T15:00:00+05:30",
+                                       end: "2026-04-25T16:00:00+05:30")
           EXPECTED: ⚠️ WARN — Show event details before creating. After confirm: ✅.
 
 [GW-09]   Prompt : "Delete calendar event with ID event-001."
-          Tool   : gw_calendar_delete (id: "event-001")
+          Tool   : gw_calendar_delete (event_id: "event-001")
           EXPECTED: 🔒 PIN — RED tier. Event details shown; PIN required.
 
 -- GOOGLE DRIVE --
@@ -723,17 +812,17 @@ SECTION 18 — GOOGLE WORKSPACE TOOLS
           EXPECTED: ✅ GREEN — Files and folders in Drive root.
 
 [GW-12]   Prompt : "Read the Drive file with ID 1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms."
-          Tool   : gw_drive_read (id: "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms")
+          Tool   : gw_drive_read (file_id: "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms")
           EXPECTED: ✅ GREEN — File content or "File not found / permission denied."
 
 [GW-13]   Prompt : "Delete Drive file with ID abc123."
-          Tool   : gw_drive_delete (id: "abc123")
+          Tool   : gw_drive_delete (file_id: "abc123")
           EXPECTED: 🔒 PIN — RED tier. File name confirmed before PIN prompt.
 
 -- GOOGLE DOCS --
 
 [GW-14]   Prompt : "Read the Google Doc with ID docid123."
-          Tool   : gw_docs_read (id: "docid123")
+          Tool   : gw_docs_read (document_id: "docid123")
           EXPECTED: ✅ GREEN — Document text returned.
 
 [GW-15]   Prompt : "Create a new Google Doc titled 'KRIA Test Notes'."
@@ -741,49 +830,68 @@ SECTION 18 — GOOGLE WORKSPACE TOOLS
           EXPECTED: ⚠️ WARN — Confirm creation. After yes: ✅ Document ID returned.
 
 [GW-16]   Prompt : "Edit Google Doc docid123: append 'This line was added by KRIA.'"
-          Tool   : gw_docs_edit (id: "docid123", operation: "append",
-                                 content: "This line was added by KRIA.")
+          Tool   : gw_docs_edit (document_id: "docid123",
+                                 text: "This line was added by KRIA.")
           EXPECTED: ⚠️ WARN — Preview change before applying.
 
 -- GOOGLE SHEETS --
 
 [GW-17]   Prompt : "Read my Google Sheet with ID sheetid456."
-          Tool   : gw_sheets_read (id: "sheetid456")
+          Tool   : gw_sheets_read (spreadsheet_id: "sheetid456")
           EXPECTED: ✅ GREEN — Spreadsheet data returned as table.
 
-[GW-18]   Prompt : "Create a new Google Sheet named 'Expense Tracker'."
+[GW-18]   Prompt : "Write values into Google Sheet sheetid456 range Sheet1!A1:B2."
+          Tool   : gw_sheets_edit (spreadsheet_id: "sheetid456",
+                                   range: "Sheet1!A1:B2",
+                                   values: "[[\"Item\",\"Cost\"],[\"Tea\",\"15\"]]")
+          EXPECTED: ⚠️ WARN — Preview write operation before applying. After confirm: ✅.
+
+[GW-19]   Prompt : "Create a new Google Sheet named 'Expense Tracker'."
           Tool   : gw_sheets_create (title: "Expense Tracker")
           EXPECTED: ⚠️ WARN — Confirm. After yes: ✅ Sheet ID returned.
 
 -- GOOGLE SLIDES --
 
-[GW-19]   Prompt : "Read my Google Slides presentation with ID slides789."
-          Tool   : gw_slides_read (id: "slides789")
+[GW-20]   Prompt : "Read my Google Slides presentation with ID slides789."
+          Tool   : gw_slides_read (presentation_id: "slides789")
           EXPECTED: ✅ GREEN — Slide titles and content text.
 
-[GW-20]   Prompt : "Create a new presentation titled 'KRIA Overview'."
+[GW-21]   Prompt : "Create a new presentation titled 'KRIA Overview'."
           Tool   : gw_slides_create (title: "KRIA Overview")
           EXPECTED: ⚠️ WARN — Confirm. After yes: ✅ Presentation ID returned.
 
 -- GOOGLE FORMS --
 
-[GW-21]   Prompt : "List my Google Forms."
+[GW-22]   Prompt : "List my Google Forms."
           Tool   : gw_forms_list
           EXPECTED: ✅ GREEN — Form names, IDs, response counts.
+
+[GW-23]   Prompt : "Create a Google Form titled 'KRIA Feedback Form'."
+          Tool   : gw_forms_create (title: "KRIA Feedback Form")
+          EXPECTED: ⚠️ WARN — Confirm create action. After yes: ✅ Form metadata returned.
+
+[GW-24]   Prompt : "Read Gmail message by ID 18c2f_example_msg_id."
+          Tool   : gw_gmail_read (message_id: "18c2f_example_msg_id")
+          EXPECTED: ✅ GREEN — Full message content returned for the given message_id.
 
 ────────────────────────────────────────────────────────────────────────────────
 SECTION 19 — GOOGLE COLAB (MCP)
 ────────────────────────────────────────────────────────────────────────────────
 
+Note: MCP tool names in this section are dynamic and only available when the
+  corresponding MCP server is mounted and healthy.
+
 [COLAB-01] Prompt : "Create a Google Colab notebook named mcp_test.ipynb"
            Tools  : gw_drive_create → mcp_colab-mcp_open_colab_browser_connection
            EXPECTED: ✅➡️ MULTI-STEP FLOW (ColabFlowState):
                      📋 Plan event: "Creating notebook mcp_test.ipynb on Drive..."
-                     Step 1: gw_drive_create(title="mcp_test.ipynb",
-                             mime_type="application/vnd.google.colab") → Drive file ID
+                     Step 1: If gw_drive_create is mounted, use it with
+                             title="mcp_test.ipynb", mime_type="application/vnd.google.colab"
+                             to create file on Drive.
                      📋 Plan event: "Opening Colab notebook in browser..."
                      Step 2: open_colab_browser_connection → browser opens notebook
                      Voice: "Notebook mcp_test.ipynb created and opened in browser."
+           Notes  : gw_drive_create may be dynamic/conditional depending on mounted tool set.
            ❌ WRONG: Plain text "Tool call: colab create mcp_test.ipynb" (hallucination)
 
 [COLAB-02] Prompt : "Open the Colab browser connection."
@@ -816,12 +924,14 @@ SECTION 19 — GOOGLE COLAB (MCP)
 SECTION 20 — MCP FILESYSTEM SERVER TOOLS
 ────────────────────────────────────────────────────────────────────────────────
 
+Note: These prompts are conditional on the filesystem MCP server being mounted.
+
 [MCP-FS-01] Prompt : "List files in /home/obaid using the filesystem MCP."
-            Tool   : mcp_fs_list_directory or fs:list (via MCP)
+            Tool   : mcp_fs_list_directory (canonical prefixed MCP tool name)
             EXPECTED: ✅ GREEN — Files listed via MCP fs server.
 
 [MCP-FS-02] Prompt : "Read /home/obaid/kria_test/hello.txt via MCP."
-            Tool   : mcp_fs_read_file or fs:read
+            Tool   : mcp_fs_read_file
             EXPECTED: ✅ GREEN — File contents returned through MCP layer.
 
 [MCP-FS-03] Prompt : "Search for 'KRIA' in files under /home/obaid via MCP."
@@ -932,7 +1042,8 @@ SECTION 23 — ROUTING & INTENT DISAMBIGUATION TESTS
                      file, or ID before proceeding."
 
 [ROUTE-05] Prompt : "Mujhe kal ka schedule dikhao."  (Show tomorrow's schedule)
-           Tool   : gw_calendar_search (date: tomorrow)
+           Tool   : gw_calendar_search (time_min: "<tomorrow-start-iso>",
+                                        time_max: "<tomorrow-end-iso>")
            EXPECTED: ✅ GREEN — Tomorrow's calendar events in Hinglish-friendly voice.
 
 [ROUTE-06] Prompt : "What is the capital of France?"  (General knowledge — no tool needed)
@@ -983,8 +1094,7 @@ SECTION 25 — SIDECAR / PRE-COGNITIVE TOOLS
 ────────────────────────────────────────────────────────────────────────────────
 
 [SIDE-01] Prompt : "Extract text from /home/obaid/Documents/report.pdf"
-          Tool   : document_extract (file_path: "...", operations: ["extract_text"],
-                                     max_chars: 50000)
+          Tool   : document_extract (file_path: "...", max_chars: 50000)
           EXPECTED: ✅ GREEN — Raw text from sidecar extraction pipeline.
 
 [SIDE-02] Prompt : "Analyze the AST of /media/obaid/SSD/KRIA/crates/kria-core/src/config.rs"
@@ -1026,5 +1136,5 @@ Low battery detected                   Warn + reduce background heavy tasks.
 
 ================================================================================
 END OF TEST PROMPTS FILE
-Total prompts: ~175 across 25 sections
+Total prompts: updated for current built-in registry + conditional MCP tools
 ================================================================================

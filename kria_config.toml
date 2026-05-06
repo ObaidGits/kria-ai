@@ -1,0 +1,21 @@
+# KRIA unified infra runtime controls
+#
+# This file centralizes SRE-sensitive constants used by the QoS scheduler,
+# target pool leasing, and snapshot recovery guardrails.
+
+[qos]
+high_recovery_slo_ms = 500
+retry_after_defer_ms = 50
+max_latency_samples = 128
+max_medium_credits = 32
+medium_credit_per_high_completion = 1
+monitor_sample_interval_ms = 100
+max_adaptation_history = 512
+
+[target_pool]
+lease_ttl_ms = 10000
+heartbeat_grace_ms = 1500
+quarantine_cooldown_ms = 2000
+
+[snapshot]
+max_normalized_hash_distance = 0.12

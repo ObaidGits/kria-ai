@@ -1,12 +1,13 @@
 use crate::memory::embeddings::EmbeddingModel;
-use crate::memory::store::{MemoryFact, MemoryStore};
+use crate::memory::MemoryFact;
 use crate::memory::vectors::VectorIndex;
+use crate::memory::MemoryManager;
 use chrono::Utc;
 
 /// LLM-driven fact extraction and management.
 /// Replaces Mem0: extracts user facts from conversation, stores in SQLite + vector index.
 pub struct FactManager<'a> {
-    store: &'a MemoryStore,
+    writer: &'a dyn MemoryManager,
     vectors: &'a VectorIndex,
     embeddings: &'a EmbeddingModel,
     similarity_threshold: f32,
@@ -14,12 +15,12 @@ pub struct FactManager<'a> {
 
 impl<'a> FactManager<'a> {
     pub fn new(
-        store: &'a MemoryStore,
+        writer: &'a dyn MemoryManager,
         vectors: &'a VectorIndex,
         embeddings: &'a EmbeddingModel,
     ) -> Self {
         Self {
-            store,
+            writer,
             vectors,
             embeddings,
             similarity_threshold: 0.92,
@@ -45,7 +46,7 @@ impl<'a> FactManager<'a> {
                     "duplicate fact detected, skipping"
                 );
                 // Update access on existing instead
-                let _ = self.store.update_fact_access(*existing_id);
+                let _ = self.writer.update_fact_access(*existing_id);
                 return Ok(None);
             }
         }
@@ -62,7 +63,7 @@ impl<'a> FactManager<'a> {
             decay_score: 1.0,
         };
 
-        let id = self.store.store_fact(&fact)?;
+        let id = self.writer.store_fact(&fact)?;
         self.vectors.add(id, vec)?;
 
         tracing::info!(id, category, "stored new fact");
@@ -75,7 +76,7 @@ impl<'a> FactManager<'a> {
         self.vectors.remove(id);
 
         // Delete and re-insert (simpler than UPDATE for FTS)
-        self.store.delete_fact(id)?;
+        self.writer.delete_fact(id)?;
 
         let vec = self.embeddings.embed(new_text)?;
         let now = Utc::now();
@@ -89,7 +90,7 @@ impl<'a> FactManager<'a> {
             access_count: 0,
             decay_score: 1.0,
         };
-        let new_id = self.store.store_fact(&fact)?;
+        let new_id = self.writer.store_fact(&fact)?;
         self.vectors.add(new_id, vec)?;
 
         tracing::info!(old_id = id, new_id, "updated fact");
@@ -99,7 +100,7 @@ impl<'a> FactManager<'a> {
     /// Delete a fact and its vector.
     pub fn delete_fact(&self, id: i64) -> anyhow::Result<()> {
         self.vectors.remove(id);
-        self.store.delete_fact(id)?;
+        self.writer.delete_fact(id)?;
         tracing::info!(id, "deleted fact");
         Ok(())
     }

@@ -8,10 +8,19 @@
 
 mod common;
 
-use common::assert_tool_success;
 use kria_core::agent::router::{Intent, IntentRouter};
+use kria_core::memory::MemoryStore;
 use kria_core::safety::policy::{PolicyEngine, RiskLevel};
 use kria_core::tools::registry;
+use std::sync::Arc;
+
+fn build_memory_backed_registry() -> (tempfile::TempDir, registry::ToolRegistry) {
+    let tmp = tempfile::tempdir().expect("create tempdir for memory-backed registry");
+    let db_path = tmp.path().join("memory_tools_test.db");
+    let store = Arc::new(MemoryStore::open(&db_path).expect("open memory store"));
+    let reg = registry::build_registry_with_store(Some(store));
+    (tmp, reg)
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Smoke — all memory/knowledge tools must be registered
@@ -118,13 +127,13 @@ fn routing_mem05_save_snippet_routes_correctly() {
 #[tokio::test]
 async fn functional_mem01_mem02_remember_recall_roundtrip() {
     // PROMPT-ID: MEM-01, MEM-02
-    let reg = registry::build_default_registry();
+    let (_tmp, reg) = build_memory_backed_registry();
 
     // Store a fact
     let store_handler = reg.get_handler("remember_fact").unwrap().clone();
     let store_result = store_handler
         .execute(serde_json::json!({
-            "key": "test_project_deadline",
+            "key": "test project deadline",
             "value": "May 1 2026"
         }))
         .await;
@@ -137,28 +146,34 @@ async fn functional_mem01_mem02_remember_recall_roundtrip() {
     // Recall it
     let recall_handler = reg.get_handler("recall_fact").unwrap().clone();
     let recall_result = recall_handler
-        .execute(serde_json::json!({ "query": "test_project_deadline" }))
+        .execute(serde_json::json!({ "query": "project deadline" }))
         .await;
     assert!(
         recall_result.success,
         "recall_fact should succeed: {:?}",
         recall_result.error
     );
-    let value = recall_result.data["value"]
-        .as_str()
-        .or(recall_result.data["result"].as_str())
-        .or(recall_result.data.as_str())
-        .unwrap_or("");
+
+    let results = recall_result.data["results"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let value = results
+        .iter()
+        .filter_map(|row| row["text"].as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
     assert!(
-        value.contains("May 1 2026") || !value.is_empty(),
-        "recall_fact should return the stored value"
+        value.contains("May 1 2026"),
+        "recall_fact should return the stored value; payload: {}",
+        recall_result.data
     );
 }
 
 #[tokio::test]
 async fn functional_mem04_list_remembered() {
     // PROMPT-ID: MEM-04
-    let reg = registry::build_default_registry();
+    let (_tmp, reg) = build_memory_backed_registry();
     let handler = reg.get_handler("list_remembered").unwrap().clone();
     let result = handler.execute(serde_json::json!({})).await;
     assert!(
@@ -170,7 +185,7 @@ async fn functional_mem04_list_remembered() {
 #[tokio::test]
 async fn functional_mem03_search_knowledge() {
     // PROMPT-ID: MEM-03
-    let reg = registry::build_default_registry();
+    let (_tmp, reg) = build_memory_backed_registry();
     let handler = reg.get_handler("search_knowledge").unwrap().clone();
     let result = handler
         .execute(serde_json::json!({ "query": "Python", "max_results": 5 }))
@@ -188,7 +203,7 @@ async fn functional_mem03_search_knowledge() {
 #[tokio::test]
 async fn functional_mem05_mem06_snippet_save_get() {
     // PROMPT-ID: MEM-05, MEM-06
-    let reg = registry::build_default_registry();
+    let (_tmp, reg) = build_memory_backed_registry();
 
     // Save snippet
     let save_handler = reg.get_handler("save_snippet").unwrap().clone();
@@ -222,14 +237,15 @@ async fn functional_mem05_mem06_snippet_save_get() {
         .unwrap_or("");
     assert!(
         code.contains("println"),
-        "get_snippet should return saved code content, got: {code}"
+        "get_snippet should return saved code content, payload: {}",
+        get_result.data
     );
 }
 
 #[tokio::test]
 async fn functional_mem07_list_snippets() {
     // PROMPT-ID: MEM-07
-    let reg = registry::build_default_registry();
+    let (_tmp, reg) = build_memory_backed_registry();
     let handler = reg.get_handler("list_snippets").unwrap().clone();
     let result = handler.execute(serde_json::json!({})).await;
     assert!(
@@ -241,14 +257,15 @@ async fn functional_mem07_list_snippets() {
 #[tokio::test]
 async fn functional_mem06_get_missing_snippet_clean_error() {
     // PROMPT-ID: MEM-06 — missing snippet must return clean error
-    let reg = registry::build_default_registry();
+    let (_tmp, reg) = build_memory_backed_registry();
     let handler = reg.get_handler("get_snippet").unwrap().clone();
     let result = handler
         .execute(serde_json::json!({ "name": "nonexistent_snippet_kria_xyz" }))
         .await;
     assert!(
-        !result.success || result.data.is_null(),
-        "get_snippet for missing snippet should return success=false or null data"
+        !result.success || result.data.is_null() || result.data["found"] == serde_json::json!(false),
+        "get_snippet for missing snippet should return success=false, null, or found=false; payload: {}",
+        result.data
     );
 }
 

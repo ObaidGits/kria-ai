@@ -3,13 +3,13 @@
 use std::sync::Arc;
 
 fn make_test_rag() -> (
-    Arc<kria_core::memory::store::MemoryStore>,
+    Arc<kria_core::memory::MemoryStore>,
     Arc<kria_core::memory::vectors::VectorIndex>,
     Arc<kria_core::memory::embeddings::EmbeddingModel>,
     Arc<kria_core::memory::rag::RagEngine>,
 ) {
     let tmp = tempfile::NamedTempFile::new().unwrap();
-    let store = Arc::new(kria_core::memory::store::MemoryStore::open(tmp.path()).unwrap());
+    let store = Arc::new(kria_core::memory::MemoryStore::open(tmp.path()).unwrap());
     let vectors = Arc::new(kria_core::memory::vectors::VectorIndex::in_memory(384));
     let embeddings = Arc::new(kria_core::memory::embeddings::EmbeddingModel::load(384).unwrap());
     let rag = Arc::new(kria_core::memory::rag::RagEngine::new(
@@ -82,7 +82,7 @@ fn chunk_text_preserves_content() {
 #[test]
 fn store_and_retrieve_chunks() {
     let (store, _, _, _) = make_test_rag();
-    let chunk = kria_core::memory::store::DocumentChunk {
+    let chunk = kria_core::memory::DocumentChunk {
         id: None,
         doc_id: "test_doc_1".to_string(),
         doc_name: "test.txt".to_string(),
@@ -113,7 +113,7 @@ fn list_documents_empty() {
 #[test]
 fn list_documents_after_store() {
     let (store, _, _, _) = make_test_rag();
-    let chunk = kria_core::memory::store::DocumentChunk {
+    let chunk = kria_core::memory::DocumentChunk {
         id: None,
         doc_id: "doc_abc123".to_string(),
         doc_name: "readme.md".to_string(),
@@ -133,7 +133,7 @@ fn list_documents_after_store() {
 fn delete_document_chunks() {
     let (store, _, _, _) = make_test_rag();
     for i in 0..3 {
-        let chunk = kria_core::memory::store::DocumentChunk {
+        let chunk = kria_core::memory::DocumentChunk {
             id: None,
             doc_id: "doc_del".to_string(),
             doc_name: "file.txt".to_string(),
@@ -218,7 +218,7 @@ fn rag_tools_registered() {
     // RAG tools require RagEngine, so build_default_registry doesn't include them
     // But we can test with the full builder
     let tmp = tempfile::NamedTempFile::new().unwrap();
-    let store = Arc::new(kria_core::memory::store::MemoryStore::open(tmp.path()).unwrap());
+    let store = Arc::new(kria_core::memory::MemoryStore::open(tmp.path()).unwrap());
     let vectors = Arc::new(kria_core::memory::vectors::VectorIndex::in_memory(384));
     let embeddings = Arc::new(kria_core::memory::embeddings::EmbeddingModel::load(384).unwrap());
     let rag = Arc::new(kria_core::memory::rag::RagEngine::new(
@@ -236,7 +236,7 @@ fn rag_tools_registered() {
 #[test]
 fn rag_tools_in_knowledge_category() {
     let tmp = tempfile::NamedTempFile::new().unwrap();
-    let store = Arc::new(kria_core::memory::store::MemoryStore::open(tmp.path()).unwrap());
+    let store = Arc::new(kria_core::memory::MemoryStore::open(tmp.path()).unwrap());
     let vectors = Arc::new(kria_core::memory::vectors::VectorIndex::in_memory(384));
     let embeddings = Arc::new(kria_core::memory::embeddings::EmbeddingModel::load(384).unwrap());
     let rag = Arc::new(kria_core::memory::rag::RagEngine::new(
@@ -257,7 +257,7 @@ fn rag_tools_in_knowledge_category() {
 #[tokio::test]
 async fn rag_query_tool_requires_query() {
     let tmp = tempfile::NamedTempFile::new().unwrap();
-    let store = Arc::new(kria_core::memory::store::MemoryStore::open(tmp.path()).unwrap());
+    let store = Arc::new(kria_core::memory::MemoryStore::open(tmp.path()).unwrap());
     let vectors = Arc::new(kria_core::memory::vectors::VectorIndex::in_memory(384));
     let embeddings = Arc::new(kria_core::memory::embeddings::EmbeddingModel::load(384).unwrap());
     let rag = Arc::new(kria_core::memory::rag::RagEngine::new(
@@ -275,7 +275,7 @@ async fn rag_query_tool_requires_query() {
 #[tokio::test]
 async fn ingest_tool_invalid_path() {
     let tmp = tempfile::NamedTempFile::new().unwrap();
-    let store = Arc::new(kria_core::memory::store::MemoryStore::open(tmp.path()).unwrap());
+    let store = Arc::new(kria_core::memory::MemoryStore::open(tmp.path()).unwrap());
     let vectors = Arc::new(kria_core::memory::vectors::VectorIndex::in_memory(384));
     let embeddings = Arc::new(kria_core::memory::embeddings::EmbeddingModel::load(384).unwrap());
     let rag = Arc::new(kria_core::memory::rag::RagEngine::new(

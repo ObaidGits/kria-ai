@@ -1,8 +1,15 @@
 use crate::infra::ToolResult;
+use crate::infra::environment::{
+    EnvironmentProvider, LocalEnvironment, ShellState, SharedShellState,
+};
 use crate::safety::RiskLevel;
+use crate::tools::ToolContext;
 use async_trait::async_trait;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
+use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 
 /// Tool parameter schema for LLM function-calling format.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -65,7 +72,14 @@ impl ToolDef {
 /// Trait for tool execution handlers.
 #[async_trait]
 pub trait ToolHandler: Send + Sync {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult;
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let _ = params;
+        ToolResult::err("tool does not implement execute")
+    }
+
+    async fn execute_with_context(&self, params: serde_json::Value, _ctx: ToolContext) -> ToolResult {
+        self.execute(params).await
+    }
 }
 
 /// Central tool registry. Holds all tool definitions and their handlers.
@@ -73,14 +87,53 @@ pub trait ToolHandler: Send + Sync {
 pub struct ToolRegistry {
     defs: RwLock<HashMap<String, ToolDef>>,
     handlers: RwLock<HashMap<String, Arc<dyn ToolHandler>>>,
+    env_provider: RwLock<Arc<dyn EnvironmentProvider>>,
+    shell_state: SharedShellState,
+}
+
+fn default_shell_state() -> ShellState {
+    ShellState {
+        cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        env_vars: HashMap::new(),
+        generation: 0,
+    }
 }
 
 impl ToolRegistry {
     pub fn new() -> Self {
+        let env_provider: Arc<dyn EnvironmentProvider> = Arc::new(LocalEnvironment::new());
         Self {
             defs: RwLock::new(HashMap::new()),
             handlers: RwLock::new(HashMap::new()),
+            env_provider: RwLock::new(env_provider),
+            shell_state: Arc::new(Mutex::new(default_shell_state())),
         }
+    }
+
+    pub fn set_environment_provider(&self, provider: Arc<dyn EnvironmentProvider>) {
+        *self
+            .env_provider
+            .write()
+            .expect("tool registry env provider lock poisoned") = provider;
+    }
+
+    pub fn environment_provider(&self) -> Arc<dyn EnvironmentProvider> {
+        self.env_provider
+            .read()
+            .expect("tool registry env provider lock poisoned")
+            .clone()
+    }
+
+    pub fn shell_state(&self) -> SharedShellState {
+        Arc::clone(&self.shell_state)
+    }
+
+    pub fn make_tool_context(&self, cancellation: CancellationToken) -> ToolContext {
+        ToolContext::new(
+            self.environment_provider(),
+            self.shell_state(),
+            cancellation,
+        )
     }
 
     /// Register a tool with its definition and handler.
@@ -238,14 +291,14 @@ pub fn build_default_registry() -> ToolRegistry {
 
 /// Build with MemoryStore only (no RAG).
 pub fn build_registry_with_store(
-    store: Option<std::sync::Arc<crate::memory::store::MemoryStore>>,
+    store: Option<std::sync::Arc<dyn crate::memory::MemoryRuntime>>,
 ) -> ToolRegistry {
     build_registry_full(store, None, None)
 }
 
 /// Build the full tool registry with a MemoryStore, optional RagEngine, and optional ProactiveEngine.
 pub fn build_registry_full(
-    store: Option<std::sync::Arc<crate::memory::store::MemoryStore>>,
+    store: Option<std::sync::Arc<dyn crate::memory::MemoryRuntime>>,
     rag: Option<std::sync::Arc<crate::memory::rag::RagEngine>>,
     proactive: Option<std::sync::Arc<crate::automation::proactive::ProactiveEngine>>,
 ) -> ToolRegistry {
@@ -271,10 +324,18 @@ pub fn build_registry_full(
     super::disk::register(&reg);
     super::packages::register(&reg);
     super::scheduler::register(&reg);
-    super::vision::register(&reg, None);
+    super::vision::register(&reg, None, None);
     super::desktop::register(&reg);
     super::developer::register(&reg);
     super::i18n::register(&reg);
+
+    // Keep Google Workspace tools visible in the core registry even when MCP is
+    // not connected yet. Desktop runtime will later wire a live client into its
+    // own GwClientRef and can re-register with the active sidecar bridge.
+    let gw_ref = super::google_workspace::new_client_ref();
+    let gw_sidecar = std::sync::Arc::new(crate::sidecar::SidecarBridge::new("python3", None));
+    super::google_workspace::register(&reg, gw_ref, gw_sidecar);
+
     if let Some(rag_engine) = rag {
         super::rag::register(&reg, rag_engine);
     }

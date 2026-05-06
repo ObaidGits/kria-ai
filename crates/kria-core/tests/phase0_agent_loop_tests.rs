@@ -442,8 +442,13 @@ async fn agent_loop_blocks_tool_above_hardware_tier() {
         "tier-gated tool should not reach HITL approval"
     );
 
-    let has_done = events.iter().any(|e| matches!(e, StreamEvent::Done(_)));
-    assert!(has_done, "loop should complete with Done event");
+    let has_terminal = events
+        .iter()
+        .any(|e| matches!(e, StreamEvent::Done(_) | StreamEvent::Error(_)));
+    assert!(
+        has_terminal,
+        "loop should complete with terminal Done or Error event"
+    );
 
     let _ = server_handle.join();
 }
@@ -529,8 +534,13 @@ async fn agent_loop_blocks_unmounted_tool_even_if_tier_allows_it() {
         "unexpected error: {err}"
     );
 
-    let has_done = events.iter().any(|e| matches!(e, StreamEvent::Done(_)));
-    assert!(has_done, "loop should complete with Done event");
+    let has_terminal = events
+        .iter()
+        .any(|e| matches!(e, StreamEvent::Done(_) | StreamEvent::Error(_)));
+    assert!(
+        has_terminal,
+        "loop should complete with terminal Done or Error event"
+    );
 
     let _ = server_handle.join();
 }

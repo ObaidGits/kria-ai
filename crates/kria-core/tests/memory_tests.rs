@@ -6,7 +6,7 @@
 
 use chrono::Utc;
 use kria_core::memory::embeddings::EmbeddingModel;
-use kria_core::memory::store::{ConversationTurn, MemoryFact, MemoryStore};
+use kria_core::memory::{AuditEntry, ConversationTurn, MemoryFact, MemoryStore};
 use kria_core::memory::vectors::VectorIndex;
 use std::path::Path;
 
@@ -35,6 +35,23 @@ fn make_fact(text: &str, category: &str) -> MemoryFact {
         last_accessed: Utc::now(),
         access_count: 0,
         decay_score: 1.0,
+    }
+}
+
+fn make_audit(session: &str, risk: &str, action: &str) -> AuditEntry {
+    AuditEntry {
+        id: None,
+        session_id: session.into(),
+        action: action.into(),
+        parameters: "{}".into(),
+        risk_level: risk.into(),
+        decision: "allow".into(),
+        decided_by: "test".into(),
+        result: Some("ok".into()),
+        error_msg: None,
+        rollback_id: None,
+        duration_ms: Some(5),
+        timestamp: Utc::now(),
     }
 }
 
@@ -142,6 +159,33 @@ fn missing_preference_returns_none() {
     let store = MemoryStore::open(Path::new(":memory:")).unwrap();
     let val = store.get_preference("nonexistent").unwrap();
     assert!(val.is_none());
+}
+
+#[test]
+fn query_audit_uses_bound_params_and_rejects_injection_payload() {
+    let store = MemoryStore::open(Path::new(":memory:")).unwrap();
+
+    store
+        .log_audit(&make_audit("sess-safe", "red", "delete_file"))
+        .unwrap();
+    store
+        .log_audit(&make_audit("sess-other", "red", "delete_file"))
+        .unwrap();
+
+    let injected_session = "' OR 1=1 --";
+    let injected = store
+        .query_audit(50, Some("red"), Some(injected_session))
+        .unwrap();
+    assert!(
+        injected.is_empty(),
+        "injection payload should not bypass session filter"
+    );
+
+    let scoped = store
+        .query_audit(50, Some("red"), Some("sess-safe"))
+        .unwrap();
+    assert_eq!(scoped.len(), 1);
+    assert_eq!(scoped[0].session_id, "sess-safe");
 }
 
 // ── VectorIndex ─────────────────────────────────────────────────────

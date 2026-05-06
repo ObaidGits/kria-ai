@@ -239,6 +239,46 @@ describe("appStore session history hydration", () => {
     });
     expect(hydrated[0].toolCalls?.[0].metadata?.sourceCount).toBe(3);
   });
+
+  it("rehydrates assistant-role tool rows in the new persistence format", async () => {
+    setSessionHistory([
+      {
+        role: "assistant",
+        content: "Tool 'generate_image' generated 1 image. Saved to: /tmp/kria-cat.png",
+        tool_name: "generate_image",
+        tool_result: JSON.stringify({
+          name: "generate_image",
+          args: { prompt: "cat astronaut" },
+          success: true,
+          result: {
+            images: [{ path: "/tmp/kria-cat.png" }],
+          },
+          metadata: {
+            confidence: 0.78,
+            source_count: null,
+            freshness_age_hours: null,
+            region_match: null,
+          },
+        }),
+        timestamp: "2026-04-18T10:00:02Z",
+      },
+    ]);
+
+    await appStore.switchSession("session-2");
+
+    const hydrated = appStore.messages();
+    expect(hydrated).toHaveLength(1);
+    expect(hydrated[0].role).toBe("assistant");
+    expect(hydrated[0].toolCalls).toHaveLength(1);
+    expect(hydrated[0].toolCalls?.[0]).toMatchObject({
+      name: "generate_image",
+      status: "done",
+      args: { prompt: "cat astronaut" },
+    });
+    expect((hydrated[0].toolCalls?.[0].result as any)?.images?.[0]?.path).toBe(
+      "/tmp/kria-cat.png",
+    );
+  });
 });
 
 describe("appStore stream scope parity", () => {

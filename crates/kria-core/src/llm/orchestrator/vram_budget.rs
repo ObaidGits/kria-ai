@@ -51,12 +51,10 @@ pub fn calculate_safe_visual_tokens(
     }
 
     // How many total tokens can fit in the available headroom?
-    let total_tokens_from_headroom =
-        (headroom * 1024) / profile.kv_per_1k_ctx_mb as u64;
+    let total_tokens_from_headroom = (headroom * 1024) / profile.kv_per_1k_ctx_mb as u64;
 
     // Subtract tokens already in use
-    let available_token_budget =
-        total_tokens_from_headroom.saturating_sub(current_ctx_used as u64);
+    let available_token_budget = total_tokens_from_headroom.saturating_sub(current_ctx_used as u64);
 
     // Cap at a sane maximum (no image should ever generate more than 4096 visual tokens)
     available_token_budget.min(4096) as u32
@@ -71,8 +69,8 @@ pub fn calculate_safe_visual_tokens(
 /// Default patch size is 14 (standard ViT-L/14).
 pub fn estimate_visual_tokens(width: u32, height: u32, patch_size: u32) -> u32 {
     let patch = patch_size.max(1);
-    let patches_w = (width + patch - 1) / patch;
-    let patches_h = (height + patch - 1) / patch;
+    let patches_w = width.div_ceil(patch);
+    let patches_h = height.div_ceil(patch);
     patches_w * patches_h
 }
 
@@ -87,12 +85,8 @@ pub fn preflight_vision_check(
 ) -> VramBudget {
     let patch_size = 14u32; // ViT-L/14 default
     let estimated = estimate_visual_tokens(image_width, image_height, patch_size);
-    let safe_cap = calculate_safe_visual_tokens(
-        free_vram_mb,
-        safety_margin_mb,
-        profile,
-        current_ctx_used,
-    );
+    let safe_cap =
+        calculate_safe_visual_tokens(free_vram_mb, safety_margin_mb, profile, current_ctx_used);
 
     let requires_downscale = estimated > safe_cap && safe_cap > 0;
 
@@ -205,22 +199,30 @@ mod tests {
     fn verify_6gb_profile_dynamic_caps() {
         let profile = get_6gb_profile();
         let safety_margin = 512; // 512MB margin
-        
+
         // Scenario A: Cap at ~1369 tokens (512x512)
-        // 1369 tokens require ~133MB headroom. 
+        // 1369 tokens require ~133MB headroom.
         // 512 (safety) + 133 (headroom) = 645MB Free VRAM
         let cap_512 = calculate_safe_visual_tokens(645, safety_margin, &profile, 0);
-        
-        // 133MB * 1024 / 100 = 1361.92 tokens. 
-        assert!(cap_512 >= 1361 && cap_512 <= 1362, "Math failed: expected ~1361 tokens, got {}", cap_512);
+
+        // 133MB * 1024 / 100 = 1361.92 tokens.
+        assert!(
+            cap_512 >= 1361 && cap_512 <= 1362,
+            "Math failed: expected ~1361 tokens, got {}",
+            cap_512
+        );
 
         // Scenario B: Cap at ~361 tokens (256x256)
         // 361 tokens require ~35MB headroom.
         // 512 (safety) + 35 (headroom) = 547MB Free VRAM
         let cap_256 = calculate_safe_visual_tokens(547, safety_margin, &profile, 0);
-        
+
         // 35MB * 1024 / 100 = 358.4 tokens.
-        assert!(cap_256 >= 358 && cap_256 <= 359, "Math failed: expected ~358 tokens, got {}", cap_256);
+        assert!(
+            cap_256 >= 358 && cap_256 <= 359,
+            "Math failed: expected ~358 tokens, got {}",
+            cap_256
+        );
     }
 
     // ── New tests: edge cases and regression coverage ─────────────────
@@ -291,10 +293,15 @@ mod tests {
         // 1920×1080 → lots of tokens, restricted budget
         let budget = preflight_vision_check(1920, 1080, 300, 100, &p, 0);
         if budget.requires_downscale {
-            assert_eq!(budget.suggested_max_width % 14, 0,
-                "suggested_max_width must be a multiple of patch_size (14)");
-            assert!(budget.suggested_max_width >= 14,
-                "suggested_max_width must be at least one patch wide");
+            assert_eq!(
+                budget.suggested_max_width % 14,
+                0,
+                "suggested_max_width must be a multiple of patch_size (14)"
+            );
+            assert!(
+                budget.suggested_max_width >= 14,
+                "suggested_max_width must be at least one patch wide"
+            );
         }
     }
 }

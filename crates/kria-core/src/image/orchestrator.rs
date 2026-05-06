@@ -5,15 +5,20 @@
 
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tokio::sync::{oneshot, Semaphore};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 use crate::config::ImageGenerationConfig;
+use crate::image::backend::{
+    ImageBackend, ImageBackendCapabilities, ImageBackendHealth, ImageBackendId as TraitImageBackendId,
+    ImageEstimate, ImageExecutionContext, ImageJobId,
+};
 use crate::image::capabilities::{resolve as resolve_workflow, QualityProfile, ResolvedWorkflow};
 use crate::image::cloud::{CloudError, CloudFallback};
 use crate::image::comfy::{ComfyError, ComfyLaunchConfig, ComfySidecar};
@@ -21,8 +26,13 @@ use crate::image::mode::{resolve_image_mode, ResolvedMode};
 use crate::image::prompt_enhancer::{enhance, EnhancedPrompt};
 use crate::image::styles::{classify_style_from_prompt, AspectRatio, ImageStyle};
 use crate::image::swap::{EvictionToken, SwapCoordinator, SwapError};
-use crate::image::ws_bridge::{spawn_ws_listener, EventEmitter};
+use crate::image::ws_bridge::{spawn_ws_listener, EventEmitter, WsBridgeError};
 use crate::platform::vram::{build_profiler, ImageTier, VramProfiler};
+use crate::resource::{
+    GpuLeaseError, GpuLeaseGuard, GpuLeaseManager, GpuLeaseState, GpuOwner, ImageLeaseBackendId,
+    ImageRuntimeSnapshot, L1ResidencySnapshot, L1RuntimeSnapshot, RamSnapshot, RecoveryReason,
+    ResourceSnapshot, VramSnapshot,
+};
 
 // ─── Public request / response types ─────────────────────────────────────────
 
@@ -167,7 +177,7 @@ impl FailureReport {
                 message: "Cloud fallback declined by user policy".into(),
                 hint: "Set image_generation.cloud_fallback to \"always\" or \"auto_offer\"".into(),
             },
-            ImageError::Comfy(ce) => {
+            ImageError::ComfyUiError(ce) => {
                 let msg = ce.to_string();
                 let lower = msg.to_lowercase();
                 let is_oom = lower.contains("out of memory") || lower.contains("oom");
@@ -230,7 +240,7 @@ impl FailureReport {
                 message: se.to_string(),
                 hint: "VRAM swap failed. Try closing other GPU applications.".into(),
             },
-            ImageError::WsBridge(msg) => Self {
+            ImageError::WebSocketError(msg) => Self {
                 stage: FailureStage::VaeDecode,
                 provider: "local:comfyui".into(),
                 http_status: None,
@@ -238,15 +248,55 @@ impl FailureReport {
                 message: msg.clone(),
                 hint: "ComfyUI WebSocket disconnected. The job may have completed — check ~/.kria/uploads/generated.".into(),
             },
-            ImageError::Reported(r) => *r.clone(),
-            _ => Self {
+            ImageError::HttpError(msg) => {
+                let lower = msg.to_lowercase();
+                let is_cloud = lower.contains("cloud")
+                    || lower.contains("pollinations")
+                    || lower.contains("huggingface");
+                Self {
+                    stage: if is_cloud {
+                        FailureStage::CloudHttp
+                    } else {
+                        FailureStage::Sidecar
+                    },
+                    provider: if is_cloud {
+                        "cloud"
+                    } else {
+                        "local:comfyui:http"
+                    }
+                    .into(),
+                    http_status: None,
+                    attempt: 0,
+                    message: msg.clone(),
+                    hint: "HTTP request failed. Check service availability and network connectivity."
+                        .into(),
+                }
+            }
+            ImageError::OutputDir(msg) => Self {
+                stage: FailureStage::OutputCopy,
+                provider: "local:filesystem".into(),
+                http_status: None,
+                attempt: 0,
+                message: msg.clone(),
+                hint: "Ensure output directories exist and are writable.".into(),
+            },
+            ImageError::Io(err) => Self {
+                stage: FailureStage::OutputCopy,
+                provider: "local:filesystem".into(),
+                http_status: None,
+                attempt: 0,
+                message: err.to_string(),
+                hint: "Filesystem I/O failed while saving or reading generated images.".into(),
+            },
+            ImageError::Unknown(msg) => Self {
                 stage: FailureStage::Unknown,
                 provider: "unknown".into(),
                 http_status: None,
                 attempt: 0,
-                message: e.to_string(),
-                hint: "Check the KRIA logs for details.".into(),
+                message: msg.clone(),
+                hint: "Check the KRIA logs for full error context.".into(),
             },
+            ImageError::Reported(r) => *r.clone(),
         }
     }
 }
@@ -260,15 +310,19 @@ pub enum ImageError {
     #[error("Swap failed: {0}")]
     Swap(#[from] SwapError),
     #[error("ComfyUI error: {0}")]
-    Comfy(#[from] ComfyError),
+    ComfyUiError(#[from] ComfyError),
     #[error("Cloud error: {0}")]
     Cloud(#[from] CloudError),
-    #[error("WebSocket bridge error: {0}")]
-    WsBridge(String),
+    #[error("HTTP error: {0}")]
+    HttpError(String),
+    #[error("WebSocket error: {0}")]
+    WebSocketError(String),
     #[error("Output directory error: {0}")]
     OutputDir(String),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("Unknown image error: {0}")]
+    Unknown(String),
     #[error("Image generation failed: {0}")]
     Reported(Box<FailureReport>),
 }
@@ -295,6 +349,7 @@ pub struct ImageOrchestrator {
     cfg: ImageGenerationConfig,
     sidecar: Arc<ComfySidecar>,
     cloud: Arc<CloudFallback>,
+    gpu_lease: Arc<GpuLeaseManager>,
     swap_coord: Arc<SwapCoordinator>,
     profiler: Arc<dyn VramProfiler>,
     job_sem: Arc<Semaphore>,
@@ -311,6 +366,32 @@ pub struct ImageOrchestrator {
     audio_resume_fn: OnceLock<Arc<dyn Fn() + Send + Sync>>,
     /// Cache directory for KV-cache snapshots and conditioning blobs.
     cache_dir: PathBuf,
+}
+
+fn log_missing_style_lora_once(style: ImageStyle, lora_file: &str, lora_path: &Path) {
+    static MISSING_STYLE_LORA_CACHE: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
+    let cache = MISSING_STYLE_LORA_CACHE.get_or_init(|| Mutex::new(HashSet::new()));
+
+    let first_seen = {
+        let mut guard = cache.lock().expect("missing style LoRA cache lock poisoned");
+        guard.insert(lora_path.to_path_buf())
+    };
+
+    if first_seen {
+        info!(
+            style = style.as_str(),
+            lora_file,
+            path = %lora_path.display(),
+            "Style LoRA not found on disk — continuing without style LoRA"
+        );
+    } else {
+        tracing::debug!(
+            style = style.as_str(),
+            lora_file,
+            path = %lora_path.display(),
+            "Style LoRA still missing on disk"
+        );
+    }
 }
 
 impl ImageOrchestrator {
@@ -344,6 +425,7 @@ impl ImageOrchestrator {
 
         let sidecar = ComfySidecar::new(comfy_cfg);
         let cloud = CloudFallback::new(&cfg.pollinations_base_url, cfg.cloud_fallback != "off");
+        let gpu_lease = GpuLeaseManager::shared(Duration::from_secs(180), Duration::from_secs(20));
         let swap_coord = SwapCoordinator::new(cfg.defrag_every_n_swaps);
         let profiler = build_profiler();
         let job_sem = Arc::new(Semaphore::new(cfg.max_concurrent_jobs.max(1)));
@@ -355,6 +437,7 @@ impl ImageOrchestrator {
             cfg,
             sidecar,
             cloud,
+            gpu_lease,
             swap_coord,
             profiler,
             job_sem,
@@ -395,11 +478,91 @@ impl ImageOrchestrator {
         self.hang_count.store(0, Ordering::Release);
     }
 
+    /// Best-effort cancellation hook for active local backend work.
+    pub async fn cancel_backend(&self) {
+        let _ = tokio::time::timeout(Duration::from_secs(2), self.sidecar.interrupt()).await;
+    }
+
+    pub fn gpu_lease_state(&self) -> GpuLeaseState {
+        self.gpu_lease.state()
+    }
+
+    fn map_gpu_lease_error(&self, error: GpuLeaseError) -> ImageError {
+        let hint = match &error {
+            GpuLeaseError::Busy { owner } => {
+                format!("GPU is currently leased by {owner:?}. Retry after the active turn.")
+            }
+            GpuLeaseError::Recovering { reason } => {
+                format!("GPU is recovering ({reason:?}). Retry in a few seconds.")
+            }
+            GpuLeaseError::Degraded { reason } => {
+                format!("GPU lease manager is degraded: {reason}")
+            }
+        };
+
+        ImageError::Reported(Box::new(FailureReport {
+            stage: FailureStage::TierAdmission,
+            provider: "resource_plane".into(),
+            http_status: None,
+            attempt: 0,
+            message: format!("GPU lease unavailable: {error}"),
+            hint,
+        }))
+    }
+
+    fn acquire_local_lease(&self, turn_label: &str) -> Result<GpuLeaseGuard, ImageError> {
+        self.gpu_lease
+            .acquire_guard(
+                GpuOwner::ImageBackend(ImageLeaseBackendId::ComfyUi),
+                turn_label,
+                Some(Duration::from_secs(180)),
+            )
+            .map_err(|e| self.map_gpu_lease_error(e))
+    }
+
+    async fn reconcile_gpu_lease(&self, l1_gpu_resident: bool) {
+        let vram = self.profiler.snapshot().await;
+
+        let mut sys = sysinfo::System::new();
+        sys.refresh_memory();
+
+        let residency = if l1_gpu_resident {
+            L1ResidencySnapshot::GpuHot
+        } else {
+            L1ResidencySnapshot::RamHotVramCold
+        };
+
+        let snapshot = ResourceSnapshot {
+            vram: VramSnapshot {
+                free_mb: vram.free_mb,
+                total_mb: vram.total_mb,
+                used_mb: vram.total_mb.saturating_sub(vram.free_mb),
+            },
+            ram: RamSnapshot {
+                total_mb: sys.total_memory() / (1024 * 1024),
+                free_mb: sys.available_memory() / (1024 * 1024),
+            },
+            l1: L1RuntimeSnapshot {
+                residency,
+                process_id: None,
+            },
+            image: ImageRuntimeSnapshot {
+                backend_id: "comfy_ui".to_string(),
+                is_generating: self.sidecar.is_ready(),
+                process_id: None,
+            },
+            processes: Vec::new(),
+            sampled_at: Instant::now(),
+        };
+
+        self.gpu_lease.reconcile(&snapshot);
+    }
+
     // ─── Public API ────────────────────────────────────────────────────────────
 
     /// Generate images per the given request. Handles all tier routing.
     pub async fn generate(
-        self: &Arc<Self>,
+        &self,
         req: ImageRequest,
         emitter: Option<EventEmitter>,
         llm_evictor: Option<Arc<dyn crate::image::swap::LlmEvictionController>>,
@@ -572,12 +735,27 @@ impl ImageOrchestrator {
         let result: Result<ImageResult, ImageError> = match resolved_mode {
             ResolvedMode::LocalOnly => match tier {
                 ImageTier::SHighRes | ImageTier::AStandard => {
-                    self.generate_local(&job, emitter).await
+                    match self.acquire_local_lease("image_local_only") {
+                        Ok(lease) => {
+                            let local = self.generate_local(&job, emitter).await;
+                            drop(lease);
+                            self.reconcile_gpu_lease(false).await;
+                            local
+                        }
+                        Err(e) => Err(e),
+                    }
                 }
-                ImageTier::BDropSwap => {
-                    self.generate_with_swap(&job, emitter, llm_evictor.clone())
-                        .await
-                }
+                ImageTier::BDropSwap => match self.acquire_local_lease("image_local_only_swap") {
+                    Ok(lease) => {
+                        let local = self
+                            .generate_with_swap(&job, emitter, llm_evictor.clone())
+                            .await;
+                        drop(lease);
+                        self.reconcile_gpu_lease(false).await;
+                        local
+                    }
+                    Err(e) => Err(e),
+                },
                 ImageTier::CRejectOrCloud => {
                     // resolve_image_mode already rejected this combination;
                     // this arm is unreachable in practice.
@@ -597,12 +775,29 @@ impl ImageOrchestrator {
             ResolvedMode::LocalThenCloud => {
                 let local_result = match tier {
                     ImageTier::SHighRes | ImageTier::AStandard => {
-                        self.generate_local(&job, emitter).await
+                        match self.acquire_local_lease("image_local_then_cloud") {
+                            Ok(lease) => {
+                                let local = self.generate_local(&job, emitter).await;
+                                drop(lease);
+                                self.reconcile_gpu_lease(false).await;
+                                local
+                            }
+                            Err(e) => Err(e),
+                        }
                     }
-                    ImageTier::BDropSwap => {
-                        self.generate_with_swap(&job, emitter, llm_evictor.clone())
-                            .await
-                    }
+                    ImageTier::BDropSwap => match self.acquire_local_lease(
+                        "image_local_then_cloud_swap",
+                    ) {
+                        Ok(lease) => {
+                            let local = self
+                                .generate_with_swap(&job, emitter, llm_evictor.clone())
+                                .await;
+                            drop(lease);
+                            self.reconcile_gpu_lease(false).await;
+                            local
+                        }
+                        Err(e) => Err(e),
+                    },
                     ImageTier::CRejectOrCloud => {
                         Err(ImageError::Reported(Box::new(FailureReport {
                             stage: FailureStage::TierAdmission,
@@ -632,11 +827,28 @@ impl ImageOrchestrator {
                     warn!(error = %e, "CloudThenLocal: cloud failed, trying local fallback");
                     match tier {
                         ImageTier::SHighRes | ImageTier::AStandard => {
-                            self.generate_local(&job, emitter).await
+                            match self.acquire_local_lease("image_cloud_then_local") {
+                                Ok(lease) => {
+                                    let local = self.generate_local(&job, emitter).await;
+                                    drop(lease);
+                                    self.reconcile_gpu_lease(false).await;
+                                    local
+                                }
+                                Err(err) => Err(err),
+                            }
                         }
                         ImageTier::BDropSwap => {
-                            self.generate_with_swap(&job, emitter, llm_evictor.clone())
-                                .await
+                            match self.acquire_local_lease("image_cloud_then_local_swap") {
+                                Ok(lease) => {
+                                    let local = self
+                                        .generate_with_swap(&job, emitter, llm_evictor.clone())
+                                        .await;
+                                    drop(lease);
+                                    self.reconcile_gpu_lease(false).await;
+                                    local
+                                }
+                                Err(err) => Err(err),
+                            }
                         }
                         ImageTier::CRejectOrCloud => Err(e),
                     }
@@ -687,10 +899,24 @@ impl ImageOrchestrator {
             .job_sem
             .acquire()
             .await
-            .map_err(|_| ImageError::Comfy(ComfyError::NotRunning))?;
+            .map_err(|e| {
+                error!(
+                    stage = FailureStage::TierAdmission.as_str(),
+                    error = %e,
+                    "Image generation semaphore acquisition failed"
+                );
+                ImageError::Unknown(format!("image generation semaphore acquire failed: {e}"))
+            })?;
 
         // Ensure sidecar is running.
-        self.sidecar.ensure_running().await?;
+        self.sidecar.ensure_running().await.map_err(|e| {
+            error!(
+                stage = FailureStage::Sidecar.as_str(),
+                error = %e,
+                "ComfyUI sidecar ensure_running failed"
+            );
+            ImageError::ComfyUiError(e)
+        })?;
 
         let mut all_images = Vec::new();
 
@@ -705,7 +931,7 @@ impl ImageOrchestrator {
                     job.width,
                     job.height,
                     img_seed,
-                )?
+                )
             } else {
                 self.build_schnell_workflow(
                     &job.positive_prompt,
@@ -714,20 +940,54 @@ impl ImageOrchestrator {
                     job.height,
                     img_seed,
                     &job.wf,
-                )?
-            };
+                )
+            }
+            .map_err(|e| {
+                error!(
+                    stage = FailureStage::Workflow.as_str(),
+                    error = %e,
+                    seed = img_seed,
+                    "Workflow build failed"
+                );
+                e
+            })?;
 
             // Submit job.
-            let queued = self.sidecar.submit_workflow(workflow).await?;
+            let queued = self.sidecar.submit_workflow(workflow).await.map_err(|e| {
+                error!(
+                    stage = FailureStage::Workflow.as_str(),
+                    error = %e,
+                    seed = img_seed,
+                    "ComfyUI workflow submission failed"
+                );
+                ImageError::ComfyUiError(e)
+            })?;
             info!(prompt_id = %queued.prompt_id, img_index = i, "ComfyUI job queued");
 
             // Wait for completion.
             let outputs = self
                 .wait_for_job(queued, if i == 0 { emitter.clone() } else { None })
-                .await?;
+                .await
+                .map_err(|e| {
+                    error!(
+                        stage = FailureStage::VaeDecode.as_str(),
+                        error = %e,
+                        seed = img_seed,
+                        "ComfyUI job failed while waiting for completion"
+                    );
+                    e
+                })?;
 
             // Collect output files.
-            let imgs = self.collect_outputs(outputs, job, img_seed).await?;
+            let imgs = self.collect_outputs(outputs, job, img_seed).await.map_err(|e| {
+                error!(
+                    stage = FailureStage::OutputCopy.as_str(),
+                    error = %e,
+                    seed = img_seed,
+                    "ComfyUI output collection failed"
+                );
+                e
+            })?;
             all_images.extend(imgs);
         }
 
@@ -886,12 +1146,18 @@ impl ImageOrchestrator {
             serde_json::json!({
                 "free_mb": required_mb,
                 "required_mb": required_mb,
-                "stage": "ready"
+                "stage": "ready",
+                "kv_snapshot": true
             }),
         );
 
         // ── Phase 3: run image generation ─────────────────────────────────────
         let result = self.generate_local(job, emitter).await;
+        if result.is_err() {
+            // Ensure ComfyUI backend work is explicitly interrupted before
+            // lease restoration so VRAM can be reclaimed deterministically.
+            let _ = tokio::time::timeout(Duration::from_secs(2), self.sidecar.interrupt()).await;
+        }
 
         // ── Phase 4: restore LLM ──────────────────────────────────────────────
         token.restore().await;
@@ -907,7 +1173,10 @@ impl ImageOrchestrator {
         // tokens. No additional `/completion` poke is needed here.
         emit_event(
             "image:tier_blackout",
-            serde_json::json!({ "stage": "restored" }),
+            serde_json::json!({
+                "stage": "restored",
+                "kv_restored": true
+            }),
         );
 
         // ── Phase 5: defrag check ─────────────────────────────────────────────
@@ -940,14 +1209,42 @@ impl ImageOrchestrator {
             let result = self
                 .cloud
                 .generate(&styled_prompt, job.width, job.height, Some(img_seed))
-                .await?;
+                .await
+                .map_err(|e| match e {
+                    CloudError::Http(http_err) => {
+                        error!(
+                            stage = FailureStage::CloudHttp.as_str(),
+                            error = %http_err,
+                            seed = img_seed,
+                            "Cloud generation HTTP request failed"
+                        );
+                        ImageError::HttpError(format!("Cloud HTTP request failed: {http_err}"))
+                    }
+                    other => {
+                        error!(
+                            stage = FailureStage::CloudDecode.as_str(),
+                            error = %other,
+                            seed = img_seed,
+                            "Cloud generation failed"
+                        );
+                        ImageError::Cloud(other)
+                    }
+                })?;
 
             let ext = if result.png_bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
                 "png"
             } else {
                 "jpg"
             };
-            let out_path = self.save_bytes(&result.png_bytes, ext).await?;
+            let out_path = self.save_bytes(&result.png_bytes, ext).await.map_err(|e| {
+                error!(
+                    stage = FailureStage::OutputCopy.as_str(),
+                    error = %e,
+                    seed = img_seed,
+                    "Failed to persist cloud-generated image"
+                );
+                e
+            })?;
             let sha = sha256_hex(&result.png_bytes);
 
             all_images.push(GeneratedImage {
@@ -993,7 +1290,7 @@ impl ImageOrchestrator {
         // Flux requires the T5 encoder for correct conditioning. Using CLIP-L
         // for both DualCLIP slots can produce near-black outputs.
         if !self.t5_model_available() {
-            return Err(ImageError::Comfy(ComfyError::InstallMissing(
+            return Err(ImageError::ComfyUiError(ComfyError::InstallMissing(
                 "Flux T5 encoder missing: clip/t5xxl_fp8_e4m3fn.safetensors. Run `KRIA_DOWNLOAD_T5=1 python scripts/download_models.py --comfyui`.".into(),
             )));
         }
@@ -1004,12 +1301,7 @@ impl ImageOrchestrator {
             if lora_path.exists() {
                 Some(lora_file)
             } else {
-                warn!(
-                    style = style.as_str(),
-                    lora_file,
-                    path = %lora_path.display(),
-                    "Style LoRA not found on disk — building Flux workflow without it"
-                );
+                log_missing_style_lora_once(style, lora_file, &lora_path);
                 None
             }
         });
@@ -1236,9 +1528,51 @@ impl ImageOrchestrator {
             });
         }
 
-        rx.await
-            .map_err(|_| ImageError::WsBridge("channel dropped".into()))?
-            .map_err(|e| ImageError::WsBridge(e.to_string()))
+        match rx.await {
+            Ok(Ok(outputs)) => Ok(outputs),
+            Ok(Err(e)) => {
+                // WS bridge ended with error/cancel/timeout — explicitly interrupt
+                // ComfyUI so orphaned backend generations do not keep consuming VRAM.
+                let _ = tokio::time::timeout(Duration::from_secs(2), self.sidecar.interrupt()).await;
+                match e {
+                    WsBridgeError::Http { status, message } => {
+                        let status_text =
+                            status.map_or_else(|| "unknown".to_string(), |s| s.to_string());
+                        error!(
+                            stage = FailureStage::Sidecar.as_str(),
+                            prompt_id = %job.prompt_id,
+                            http_status = ?status,
+                            error = %message,
+                            "ComfyUI history HTTP request failed while waiting for job completion"
+                        );
+                        Err(ImageError::HttpError(format!(
+                            "ComfyUI history HTTP error (status {status_text}): {message}"
+                        )))
+                    }
+                    other => {
+                        error!(
+                            stage = FailureStage::VaeDecode.as_str(),
+                            prompt_id = %job.prompt_id,
+                            error = %other,
+                            "ComfyUI websocket bridge failed while waiting for job completion"
+                        );
+                        Err(ImageError::WebSocketError(other.to_string()))
+                    }
+                }
+            }
+            Err(e) => {
+                let _ = tokio::time::timeout(Duration::from_secs(2), self.sidecar.interrupt()).await;
+                error!(
+                    stage = FailureStage::VaeDecode.as_str(),
+                    prompt_id = %job.prompt_id,
+                    error = %e,
+                    "ComfyUI websocket completion channel dropped"
+                );
+                Err(ImageError::Unknown(format!(
+                    "websocket completion channel dropped: {e}"
+                )))
+            }
+        }
     }
 
     /// Move ComfyUI output files to `output_dir`, compute hashes, and tag with generation metadata.
@@ -1250,7 +1584,15 @@ impl ImageOrchestrator {
     ) -> Result<Vec<GeneratedImage>, ImageError> {
         tokio::fs::create_dir_all(&self.output_dir)
             .await
-            .map_err(|e| ImageError::OutputDir(e.to_string()))?;
+            .map_err(|e| {
+                error!(
+                    stage = FailureStage::OutputCopy.as_str(),
+                    path = %self.output_dir.display(),
+                    error = %e,
+                    "Failed to create image output directory"
+                );
+                ImageError::OutputDir(e.to_string())
+            })?;
 
         let comfy_output_dir = self.output_dir.clone();
         let mut results = Vec::new();
@@ -1259,7 +1601,15 @@ impl ImageOrchestrator {
             let src = comfy_output_dir.join(&out.filename);
             let dst = self.output_dir.join(&out.filename);
 
-            let bytes = tokio::fs::read(&src).await.unwrap_or_default();
+            let bytes = tokio::fs::read(&src).await.map_err(|e| {
+                error!(
+                    stage = FailureStage::OutputCopy.as_str(),
+                    path = %src.display(),
+                    error = %e,
+                    "Failed to read generated image output"
+                );
+                ImageError::Io(e)
+            })?;
             let sha = sha256_hex(&bytes);
 
             results.push(GeneratedImage {
@@ -1285,7 +1635,15 @@ impl ImageOrchestrator {
     async fn save_bytes(&self, bytes: &[u8], ext: &str) -> Result<PathBuf, ImageError> {
         tokio::fs::create_dir_all(&self.output_dir)
             .await
-            .map_err(|e| ImageError::OutputDir(e.to_string()))?;
+            .map_err(|e| {
+                error!(
+                    stage = FailureStage::OutputCopy.as_str(),
+                    path = %self.output_dir.display(),
+                    error = %e,
+                    "Failed to create output directory for cloud image"
+                );
+                ImageError::OutputDir(e.to_string())
+            })?;
 
         let ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1293,7 +1651,15 @@ impl ImageOrchestrator {
             .as_millis();
         let filename = format!("kria_{}.{}", ts, ext);
         let path = self.output_dir.join(&filename);
-        tokio::fs::write(&path, bytes).await?;
+        tokio::fs::write(&path, bytes).await.map_err(|e| {
+            error!(
+                stage = FailureStage::OutputCopy.as_str(),
+                path = %path.display(),
+                error = %e,
+                "Failed to persist generated image bytes"
+            );
+            ImageError::Io(e)
+        })?;
         Ok(path)
     }
 
@@ -1355,14 +1721,159 @@ impl ImageOrchestrator {
 
     /// Idle cleanup: unload Flux from VRAM.
     pub async fn on_idle(&self) {
+        self.gpu_lease.mark_recovering(
+            Some(GpuOwner::ImageBackend(ImageLeaseBackendId::ComfyUi)),
+            RecoveryReason::OwnerReleaseRequested,
+        );
         if let Err(e) = self.sidecar.unload_models().await {
             warn!(error = %e, "ImageOrchestrator: idle unload failed");
         }
+        self.reconcile_gpu_lease(false).await;
     }
 
     /// Shut down sidecar cleanly.
     pub async fn shutdown(&self) {
+        self.gpu_lease.mark_recovering(
+            Some(GpuOwner::ImageBackend(ImageLeaseBackendId::ComfyUi)),
+            RecoveryReason::ShutdownRequested,
+        );
         self.sidecar.stop().await;
+        self.reconcile_gpu_lease(false).await;
+    }
+}
+
+#[async_trait::async_trait]
+impl ImageBackend for ImageOrchestrator {
+    fn id(&self) -> TraitImageBackendId {
+        TraitImageBackendId::ComfyUi
+    }
+
+    fn capabilities(&self) -> ImageBackendCapabilities {
+        ImageBackendCapabilities {
+            supports_local_gpu: true,
+            supports_cloud: true,
+            supports_cancel: true,
+            supports_release: true,
+        }
+    }
+
+    async fn health(&self) -> ImageBackendHealth {
+        if !self.cfg.enabled {
+            return ImageBackendHealth::unhealthy("image generation disabled in config");
+        }
+
+        if self.sidecar.is_ready() {
+            ImageBackendHealth::healthy("comfy sidecar ready")
+        } else {
+            ImageBackendHealth::healthy("backend available; sidecar cold")
+        }
+    }
+
+    async fn estimate(&self, request: &ImageRequest) -> ImageEstimate {
+        let snapshot = self.profiler.snapshot().await;
+        let tier = if request.force_cloud {
+            ImageTier::CRejectOrCloud
+        } else {
+            ImageTier::from_snapshot(&snapshot)
+        };
+
+        let expected_seconds = match tier {
+            ImageTier::SHighRes => Some(6),
+            ImageTier::AStandard => Some(8),
+            ImageTier::BDropSwap => Some(14),
+            ImageTier::CRejectOrCloud => Some(10),
+        };
+
+        let expected_vram_mb = match tier {
+            ImageTier::SHighRes => Some(4_500),
+            ImageTier::AStandard => Some(3_000),
+            ImageTier::BDropSwap => Some(1_800),
+            ImageTier::CRejectOrCloud => None,
+        };
+
+        let backend = if matches!(tier, ImageTier::CRejectOrCloud) || request.force_cloud {
+            TraitImageBackendId::CloudFallback
+        } else {
+            TraitImageBackendId::ComfyUi
+        };
+
+        ImageEstimate {
+            backend,
+            requires_gpu: !matches!(tier, ImageTier::CRejectOrCloud) && !request.force_cloud,
+            expected_seconds,
+            expected_vram_mb,
+            notes: Some(format!("tier={} force_cloud={}", tier.as_str(), request.force_cloud)),
+        }
+    }
+
+    async fn generate(
+        &self,
+        request: ImageRequest,
+        ctx: ImageExecutionContext,
+    ) -> Result<ImageResult, ImageError> {
+        let ImageExecutionContext {
+            emitter,
+            llm_evictor,
+            cancellation,
+        } = ctx;
+
+        if cancellation
+            .as_ref()
+            .is_some_and(|cancel| cancel.is_cancelled())
+        {
+            error!(
+                stage = FailureStage::TierAdmission.as_str(),
+                "Image generation cancelled before dispatch"
+            );
+            return Err(ImageError::Reported(Box::new(FailureReport {
+                stage: FailureStage::TierAdmission,
+                provider: "local:comfyui".into(),
+                http_status: None,
+                attempt: 0,
+                message: "generation cancelled before start".into(),
+                hint: "Retry image generation when ready.".into(),
+            })));
+        }
+
+        let cancel_watchdog = cancellation.as_ref().map(|token| {
+            let token = token.clone();
+            let sidecar = Arc::clone(&self.sidecar);
+
+            tokio::spawn(async move {
+                token.cancelled().await;
+                let _ = tokio::time::timeout(Duration::from_secs(2), sidecar.interrupt()).await;
+            })
+        });
+
+        let result = ImageOrchestrator::generate(self, request, emitter, llm_evictor)
+            .await
+            .map_err(|e| {
+                let report = FailureReport::from_error(&e);
+                error!(
+                    stage = report.stage.as_str(),
+                    provider = %report.provider,
+                    message = %report.message,
+                    hint = %report.hint,
+                    "Image backend generate failed"
+                );
+                e
+            });
+
+        if let Some(watchdog) = cancel_watchdog {
+            watchdog.abort();
+        }
+
+        result
+    }
+
+    async fn cancel(&self, _job_id: ImageJobId) -> Result<(), ImageError> {
+        self.cancel_backend().await;
+        Ok(())
+    }
+
+    async fn release(&self) -> Result<(), ImageError> {
+        self.on_idle().await;
+        Ok(())
     }
 }
 

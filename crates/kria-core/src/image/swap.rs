@@ -258,7 +258,7 @@ impl SwapCoordinator {
     /// Increment the swap counter; return `true` if a defrag pass is due.
     pub fn tick(&self) -> bool {
         let n = self.swap_count.fetch_add(1, Ordering::AcqRel) + 1;
-        if self.defrag_threshold > 0 && n % self.defrag_threshold == 0 {
+        if self.defrag_threshold > 0 && n.is_multiple_of(self.defrag_threshold) {
             info!(
                 swap_count = n,
                 defrag_threshold = self.defrag_threshold,

@@ -218,7 +218,11 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             "gw_drive_delete",
         ),
         (
-            r"(?i)\b(latest|recent|today|current|updates?)\b.*\b(google\s+calendar|calendar|schedule|events?)\b",
+            r"(?i)\b(today'?s?|todays)\b.*\b(google\s+calendar|calendar|schedule|events?)\b|\b(google\s+calendar|calendar|schedule|events?)\b.*\b(today'?s?|todays)\b",
+            "gw_calendar_today",
+        ),
+        (
+            r"(?i)\b(latest|recent|current|updates?)\b.*\b(google\s+calendar|calendar|schedule|events?)\b",
             "gw_calendar_search",
         ),
         // File ops
@@ -246,9 +250,15 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
         ),
         (r"(?i)\b(write|create|save)\s+(a\s+)?file\b", "write_file"),
         (r"(?i)\b(delete|remove|rm)\s+(the\s+)?file\b", "delete_file"),
-        // Clipboard
-        (r"(?i)\b(clipboard|paste|what.*copied)\b", "get_clipboard"),
-        (r"(?i)\b(copy|set\s+clipboard)\b", "set_clipboard"),
+        // Clipboard (set rule must run before generic get rule)
+        (
+            r"(?i)\b(copy|set)\b.{0,24}\bclipboard\b|\bclipboard\b.{0,12}\b(to|with)\b",
+            "set_clipboard",
+        ),
+        (
+            r"(?i)\b(get|show|read|paste)\b.{0,24}\bclipboard\b|\bwhat.*copied\b|\bclipboard\b",
+            "get_clipboard",
+        ),
         (r"(?i)\bscreenshot\b", "screenshot"),
         // Power
         (
@@ -549,6 +559,24 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\b(installed|all)\s+(applications?|apps?|packages?|programs?)\b",
             "list_installed_packages",
         ),
+        // Fleet inventory / VM count queries
+        (
+            r"(?i)\b(how\s+many|count|number\s+of)\s+(?:my\s+)?(?:vms?|virtual\s+machines?|connected\s+(?:machines?|computers?|hosts?|laptops?)|remote\s+(?:machines?|hosts?|computers?))\b",
+            "get_fleet_overview",
+        ),
+        (
+            r"(?i)\b(list|show|which)\s+(?:all\s+)?(?:my\s+)?(?:vms?|virtual\s+machines?|connected\s+(?:machines?|computers?|hosts?|laptops?)|remote\s+(?:machines?|hosts?|computers?))\b",
+            "get_fleet_overview",
+        ),
+        // Remote VM / connected target command execution
+        (
+            r"(?i)\b(?:run|execute|install|uninstall|update|upgrade)\b.{0,80}\b(?:on|in)\s+(?:my\s+)?(?:vm|remote\s+(?:vm|host|machine|computer)|connected\s+(?:vm|computer|machine|host))\b",
+            "execute_fleet_command",
+        ),
+        (
+            r"(?i)\bvia\s+ssh\b|\bssh\s+[a-z0-9_.-]+@[a-z0-9_.:-]+\b",
+            "execute_fleet_command",
+        ),
         // Package — use correct tool name
         (r"(?i)\binstall\s+\w+\b", "install_package"),
         (r"(?i)\buninstall\s+\w+\b", "uninstall_package"),
@@ -784,6 +812,13 @@ mod tests {
     }
 
     #[test]
+    fn routes_todays_calendar_phrase_to_calendar_today_tool() {
+        let result = IntentRouter::classify("today's calendar");
+        assert!(matches!(result.intent, Intent::DirectTool(_)));
+        assert_eq!(result.tool_hint.as_deref(), Some("gw_calendar_today"));
+    }
+
+    #[test]
     fn routes_drive_listing_prompts_to_drive_list_tool() {
         let result = IntentRouter::classify("List files in my Google drive");
         assert!(matches!(result.intent, Intent::DirectTool(_)));
@@ -837,5 +872,19 @@ mod tests {
         let result = IntentRouter::classify("What is on my screen right now?");
         assert!(matches!(result.intent, Intent::DirectTool(_)));
         assert_eq!(result.tool_hint.as_deref(), Some("screenshot_analyze"));
+    }
+
+    #[test]
+    fn routes_vm_count_queries_to_fleet_overview() {
+        let result = IntentRouter::classify("How many VMs i have?");
+        assert!(matches!(result.intent, Intent::DirectTool(_)));
+        assert_eq!(result.tool_hint.as_deref(), Some("get_fleet_overview"));
+    }
+
+    #[test]
+    fn routes_connected_machine_listing_to_fleet_overview() {
+        let result = IntentRouter::classify("List my connected machines");
+        assert!(matches!(result.intent, Intent::DirectTool(_)));
+        assert_eq!(result.tool_hint.as_deref(), Some("get_fleet_overview"));
     }
 }

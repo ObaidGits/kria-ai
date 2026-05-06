@@ -131,9 +131,9 @@ impl InboxQueue {
             .open_partition(PARTITION_NAME, PartitionCreateOptions::default())
             .map_err(|e| anyhow::anyhow!("partition open: {e}"))?;
 
-        Ok(partition
+        partition
             .len()
-            .map_err(|e| anyhow::anyhow!("fjall len: {e}"))? as usize)
+            .map_err(|e| anyhow::anyhow!("fjall len: {e}"))
     }
 
     /// Drain all queued messages into a `Vec` (for migration / inspection).

@@ -21,6 +21,20 @@ pub struct ConversationTurn {
     pub timestamp: DateTime<Utc>,
 }
 
+/// Typed read request for fetching recent memories from a session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryFetchRequest {
+    pub session_id: String,
+    pub limit: usize,
+}
+
+/// Typed preference update payload.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PreferenceRecord {
+    pub key: String,
+    pub value: String,
+}
+
 /// A persisted image or uploaded file associated with a chat session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMediaRecord {
@@ -261,6 +275,10 @@ impl MemoryStore {
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(turns.into_iter().rev().collect())
+    }
+
+    pub fn fetch_memories(&self, request: &MemoryFetchRequest) -> anyhow::Result<Vec<ConversationTurn>> {
+        self.get_recent_turns(&request.session_id, request.limit)
     }
 
     /// Persist a media record (generated or uploaded image) for a session.
@@ -507,13 +525,20 @@ impl MemoryStore {
 
     // ── Preferences ─────────────────────────────────────────────────
 
-    pub fn set_preference(&self, key: &str, value: &str) -> anyhow::Result<()> {
+    pub fn set_preference_record(&self, preference: &PreferenceRecord) -> anyhow::Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT OR REPLACE INTO preferences (key, value) VALUES (?1, ?2)",
-            params![key, value],
+            params![preference.key, preference.value],
         )?;
         Ok(())
+    }
+
+    pub fn set_preference(&self, key: &str, value: &str) -> anyhow::Result<()> {
+        self.set_preference_record(&PreferenceRecord {
+            key: key.to_string(),
+            value: value.to_string(),
+        })
     }
 
     pub fn get_preference(&self, key: &str) -> anyhow::Result<Option<String>> {
@@ -556,35 +581,100 @@ impl MemoryStore {
         session_id: Option<&str>,
     ) -> anyhow::Result<Vec<AuditEntry>> {
         let conn = self.conn.lock().unwrap();
-        let sql = match (risk_level, session_id) {
-            (Some(rl), Some(sid)) =>
-                format!("SELECT * FROM audit_log WHERE risk_level = '{}' AND session_id = '{}' ORDER BY id DESC LIMIT {}", rl, sid, limit),
-            (Some(rl), None) =>
-                format!("SELECT * FROM audit_log WHERE risk_level = '{}' ORDER BY id DESC LIMIT {}", rl, limit),
-            (None, Some(sid)) =>
-                format!("SELECT * FROM audit_log WHERE session_id = '{}' ORDER BY id DESC LIMIT {}", sid, limit),
-            (None, None) =>
-                format!("SELECT * FROM audit_log ORDER BY id DESC LIMIT {}", limit),
+        let entries = match (risk_level, session_id) {
+            (Some(rl), Some(sid)) => {
+                let mut stmt = conn.prepare(
+                    "SELECT * FROM audit_log
+                     WHERE risk_level = ?1 AND session_id = ?2
+                     ORDER BY id DESC LIMIT ?3",
+                )?;
+                let rows = stmt.query_map(params![rl, sid, limit as i64], |row| {
+                    Ok(AuditEntry {
+                        id: Some(row.get(0)?),
+                        session_id: row.get(1)?,
+                        action: row.get(2)?,
+                        parameters: row.get(3)?,
+                        risk_level: row.get(4)?,
+                        decision: row.get(5)?,
+                        decided_by: row.get(6)?,
+                        result: row.get(7)?,
+                        error_msg: row.get(8)?,
+                        rollback_id: row.get(9)?,
+                        duration_ms: row.get(10)?,
+                        timestamp: parse_dt(row.get::<_, String>(11)?),
+                    })
+                })?;
+                rows.collect::<Result<Vec<_>, _>>()?
+            }
+            (Some(rl), None) => {
+                let mut stmt = conn.prepare(
+                    "SELECT * FROM audit_log
+                     WHERE risk_level = ?1
+                     ORDER BY id DESC LIMIT ?2",
+                )?;
+                let rows = stmt.query_map(params![rl, limit as i64], |row| {
+                    Ok(AuditEntry {
+                        id: Some(row.get(0)?),
+                        session_id: row.get(1)?,
+                        action: row.get(2)?,
+                        parameters: row.get(3)?,
+                        risk_level: row.get(4)?,
+                        decision: row.get(5)?,
+                        decided_by: row.get(6)?,
+                        result: row.get(7)?,
+                        error_msg: row.get(8)?,
+                        rollback_id: row.get(9)?,
+                        duration_ms: row.get(10)?,
+                        timestamp: parse_dt(row.get::<_, String>(11)?),
+                    })
+                })?;
+                rows.collect::<Result<Vec<_>, _>>()?
+            }
+            (None, Some(sid)) => {
+                let mut stmt = conn.prepare(
+                    "SELECT * FROM audit_log
+                     WHERE session_id = ?1
+                     ORDER BY id DESC LIMIT ?2",
+                )?;
+                let rows = stmt.query_map(params![sid, limit as i64], |row| {
+                    Ok(AuditEntry {
+                        id: Some(row.get(0)?),
+                        session_id: row.get(1)?,
+                        action: row.get(2)?,
+                        parameters: row.get(3)?,
+                        risk_level: row.get(4)?,
+                        decision: row.get(5)?,
+                        decided_by: row.get(6)?,
+                        result: row.get(7)?,
+                        error_msg: row.get(8)?,
+                        rollback_id: row.get(9)?,
+                        duration_ms: row.get(10)?,
+                        timestamp: parse_dt(row.get::<_, String>(11)?),
+                    })
+                })?;
+                rows.collect::<Result<Vec<_>, _>>()?
+            }
+            (None, None) => {
+                let mut stmt = conn.prepare("SELECT * FROM audit_log ORDER BY id DESC LIMIT ?1")?;
+                let rows = stmt.query_map(params![limit as i64], |row| {
+                    Ok(AuditEntry {
+                        id: Some(row.get(0)?),
+                        session_id: row.get(1)?,
+                        action: row.get(2)?,
+                        parameters: row.get(3)?,
+                        risk_level: row.get(4)?,
+                        decision: row.get(5)?,
+                        decided_by: row.get(6)?,
+                        result: row.get(7)?,
+                        error_msg: row.get(8)?,
+                        rollback_id: row.get(9)?,
+                        duration_ms: row.get(10)?,
+                        timestamp: parse_dt(row.get::<_, String>(11)?),
+                    })
+                })?;
+                rows.collect::<Result<Vec<_>, _>>()?
+            }
         };
-        let mut stmt = conn.prepare(&sql)?;
-        let entries = stmt
-            .query_map([], |row| {
-                Ok(AuditEntry {
-                    id: Some(row.get(0)?),
-                    session_id: row.get(1)?,
-                    action: row.get(2)?,
-                    parameters: row.get(3)?,
-                    risk_level: row.get(4)?,
-                    decision: row.get(5)?,
-                    decided_by: row.get(6)?,
-                    result: row.get(7)?,
-                    error_msg: row.get(8)?,
-                    rollback_id: row.get(9)?,
-                    duration_ms: row.get(10)?,
-                    timestamp: parse_dt(row.get::<_, String>(11)?),
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
         Ok(entries)
     }
 

@@ -1,8 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@solidjs/testing-library";
 
-const { sendMessageMock } = vi.hoisted(() => ({
+const { sendMessageMock, invokeMock } = vi.hoisted(() => ({
   sendMessageMock: vi.fn(),
+  invokeMock: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: invokeMock,
 }));
 
 vi.mock("../stores/app", () => ({
@@ -16,7 +21,52 @@ import MessageBubble from "./MessageBubble";
 describe("MessageBubble structured tool rendering", () => {
   beforeEach(() => {
     sendMessageMock.mockReset();
+    invokeMock.mockReset();
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === "read_local_image") {
+        const requestedPath = String(args?.path || "");
+        return `data:image/png;base64,mock-${requestedPath}`;
+      }
+      return null;
+    });
     vi.spyOn(window, "open").mockImplementation(() => null);
+  });
+
+  it("renders inline generated image actions from structured generate_image payload", async () => {
+    const message = {
+      id: "m-generate-inline-1",
+      role: "assistant" as const,
+      content: "Tool 'generate_image' generated 1 image. Saved to: /home/obaid/.kria/uploads/generated/kria_00042_.png",
+      timestamp: 1710000000000,
+      toolCalls: [
+        {
+          name: "generate_image",
+          args: { prompt: "Swimming Dog" },
+          status: "done" as const,
+          result: {
+            images: [
+              {
+                path: "/home/obaid/.kria/uploads/generated/kria_00042_.png",
+                width: 1024,
+                height: 1024,
+                style: "realistic",
+                provenance: "local",
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    render(() => <MessageBubble message={message} />);
+
+    // Inline cards should expose quick actions without expanding tool rows.
+    expect(await screen.findByRole("button", { name: "Open" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Download" })).toBeInTheDocument();
+
+    expect(invokeMock).toHaveBeenCalledWith("read_local_image", {
+      path: "/home/obaid/.kria/uploads/generated/kria_00042_.png",
+    });
   });
 
   it("renders structured news cards with quick actions and metadata", async () => {
@@ -78,7 +128,7 @@ describe("MessageBubble structured tool rendering", () => {
       "Fetch and summarize this article: https://example.com/chips",
     );
 
-    const toolCalls = container.querySelector(".tool-calls");
+    const toolCalls = container.querySelector(".msg-tool-calls");
     expect(toolCalls).toBeTruthy();
     expect(toolCalls?.innerHTML).toMatchSnapshot();
   });

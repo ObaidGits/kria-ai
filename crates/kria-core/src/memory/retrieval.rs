@@ -1,10 +1,12 @@
 use crate::memory::embeddings::EmbeddingModel;
 use crate::memory::store::{MemoryFact, MemoryStore};
 use crate::memory::vectors::VectorIndex;
+use crate::memory::MemoryManager;
 
 /// Hybrid context builder: vector similarity + relational scoring.
 pub struct ContextBuilder<'a> {
     store: &'a MemoryStore,
+    writer: &'a dyn MemoryManager,
     vectors: &'a VectorIndex,
     embeddings: &'a EmbeddingModel,
 }
@@ -23,6 +25,7 @@ impl<'a> ContextBuilder<'a> {
     ) -> Self {
         Self {
             store,
+            writer: store,
             vectors,
             embeddings,
         }
@@ -93,7 +96,7 @@ impl<'a> ContextBuilder<'a> {
         // Update access counts for retrieved facts
         for rf in &scored {
             if let Some(id) = rf.fact.id {
-                let _ = self.store.update_fact_access(id);
+                let _ = self.writer.update_fact_access(id);
             }
         }
 

@@ -54,10 +54,10 @@ pub use wake::{WakeWordDetector, WakeWordEvent};
 
 /// Construct a [`VoicePipelineV2`] using the v1 CLI engines (`whisper-cpp`
 /// + `piper`) wrapped in the v2 streaming traits. This is the path used
-/// when `voice.engine = "v2"` is set but native backends are not compiled
-/// in — it gives the user the v2 concurrency model (streaming sentence
-/// playback, hard barge-in, persistent in-process orchestration) without
-/// requiring clang/cmake on their build path.
+///   when `voice.engine = "v2"` is set but native backends are not compiled
+///   in — it gives the user the v2 concurrency model (streaming sentence
+///   playback, hard barge-in, persistent in-process orchestration) without
+///   requiring clang/cmake on their build path.
 ///
 /// Returns the pipeline plus its state-watch + telemetry receivers so the
 /// caller can plumb them into the UI event bus.

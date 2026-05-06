@@ -11,6 +11,7 @@
 //! - `orchestrator`   — top-level facade wiring all pieces together
 
 pub mod capabilities;
+pub mod backend;
 pub mod cloud;
 pub mod comfy;
 pub mod mode;
@@ -21,6 +22,10 @@ pub mod swap;
 pub mod ws_bridge;
 
 pub use capabilities::QualityProfile;
+pub use backend::{
+    ImageBackend, ImageBackendCapabilities, ImageBackendHealth, ImageBackendId,
+    ImageBackendRegistry, ImageEstimate, ImageExecutionContext, ImageJobId,
+};
 pub use mode::{resolve_image_mode, ImageMode, ModeError, ResolvedMode};
 pub use orchestrator::{
     FailureReport, FailureStage, ImageError, ImageOrchestrator, ImageRequest, ImageResult,

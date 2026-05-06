@@ -1,8 +1,18 @@
 use crate::infra::ToolResult;
 use crate::safety::RiskLevel;
+use crate::tools::exec::{CommandOutput, ExecWrapper, ToolExecutionError};
 use crate::tools::registry::{ParamDef, ToolDef, ToolHandler, ToolRegistry};
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::de::DeserializeOwned;
+use serde::Deserialize;
 use std::sync::Arc;
+use std::time::Duration;
+use tracing::warn;
+
+const QUERY_TIMEOUT_SECS: u64 = 15;
+const APPLY_TIMEOUT_SECS: u64 = 30;
+const MAX_OUTPUT_BYTES: usize = 100 * 1024;
 
 fn param(name: &str, ty: &str, desc: &str, required: bool) -> ParamDef {
     ParamDef {
@@ -14,340 +24,798 @@ fn param(name: &str, ty: &str, desc: &str, required: bool) -> ParamDef {
     }
 }
 
-// ── Active Window Detection ──
+fn parse_input<T: DeserializeOwned>(params: serde_json::Value) -> Result<T, ToolResult> {
+    serde_json::from_value(params).map_err(|error| ToolResult::err(format!("invalid parameters: {error}")))
+}
 
-struct GetActiveWindow;
-#[async_trait]
-impl ToolHandler for GetActiveWindow {
-    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
-        if cfg!(target_os = "linux") {
-            // Try xdotool first
-            let output = tokio::process::Command::new("xdotool")
-                .args(["getactivewindow", "getwindowname"])
-                .output()
-                .await;
-            match output {
-                Ok(o) if o.status.success() => {
-                    let title = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                    // Also get the PID
-                    let pid_out = tokio::process::Command::new("xdotool")
-                        .args(["getactivewindow", "getwindowpid"])
-                        .output()
-                        .await;
-                    let pid = pid_out
-                        .ok()
-                        .filter(|o| o.status.success())
-                        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-                        .unwrap_or_default();
-                    // Get WM_CLASS for app identification
-                    let wid_out = tokio::process::Command::new("xdotool")
-                        .args(["getactivewindow"])
-                        .output()
-                        .await;
-                    let wm_class = if let Ok(wid) = wid_out {
-                        let wid_str = String::from_utf8_lossy(&wid.stdout).trim().to_string();
-                        let xprop = tokio::process::Command::new("xprop")
-                            .args(["-id", &wid_str, "WM_CLASS"])
-                            .output()
-                            .await;
-                        xprop
-                            .ok()
-                            .filter(|o| o.status.success())
-                            .map(|o| {
-                                let s = String::from_utf8_lossy(&o.stdout);
-                                s.split('=')
-                                    .nth(1)
-                                    .map(|v| v.trim().replace('"', ""))
-                                    .unwrap_or_default()
-                            })
-                            .unwrap_or_default()
-                    } else {
-                        String::new()
-                    };
-                    ToolResult::ok(serde_json::json!({
-                        "title": title,
-                        "pid": pid,
-                        "wm_class": wm_class,
-                    }))
-                }
-                _ => ToolResult::err(
-                    "xdotool not available — install it with: sudo apt install xdotool",
-                ),
-            }
-        } else {
-            ToolResult::err("get_active_window not implemented for this OS")
-        }
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct EmptyInput {}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct WindowMatchInput {
+    title: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct MoveWindowInput {
+    title: String,
+    x: i64,
+    y: i64,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ResizeWindowInput {
+    title: String,
+    width: i64,
+    height: i64,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct TileWindowsInput {
+    windows: Vec<String>,
+    #[serde(default = "default_tile_layout")]
+    layout: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct OpenUrlInput {
+    url: String,
+}
+
+fn default_tile_layout() -> String {
+    "side-by-side".to_string()
+}
+
+#[derive(Debug, Clone)]
+struct WindowEntry {
+    id: String,
+    title: String,
+    x: Option<i64>,
+    y: Option<i64>,
+    width: Option<i64>,
+    height: Option<i64>,
+}
+
+fn exec_wrapper(timeout_secs: u64) -> ExecWrapper {
+    ExecWrapper::new()
+        .with_timeout(Duration::from_secs(timeout_secs))
+        .with_max_output_bytes(MAX_OUTPUT_BYTES)
+}
+
+fn preferred_output(output: &CommandOutput) -> String {
+    if output.stdout.trim().is_empty() {
+        output.stderr.trim().to_string()
+    } else {
+        output.stdout.trim().to_string()
     }
 }
 
-// ── Window Management ──
+fn non_zero_error(stderr: String, stdout: String) -> String {
+    let trimmed_stderr = stderr.trim().to_string();
+    if trimmed_stderr.is_empty() {
+        stdout.trim().to_string()
+    } else {
+        trimmed_stderr
+    }
+}
+
+fn format_exec_error(error: ToolExecutionError) -> String {
+    match error {
+        ToolExecutionError::NonZeroExit { stderr, stdout, .. } => {
+            let details = non_zero_error(stderr, stdout);
+            if details.is_empty() {
+                "command exited with non-zero status".to_string()
+            } else {
+                details
+            }
+        }
+        ToolExecutionError::TimedOut {
+            timeout_secs,
+            stderr,
+            stdout,
+            ..
+        } => {
+            let details = non_zero_error(stderr, stdout);
+            if details.is_empty() {
+                format!("command timed out after {timeout_secs}s")
+            } else {
+                format!("command timed out after {timeout_secs}s: {details}")
+            }
+        }
+        other => other.to_string(),
+    }
+}
+
+async fn run_cmd(program: &str, args: &[&str], timeout_secs: u64) -> Result<CommandOutput, String> {
+    exec_wrapper(timeout_secs)
+        .execute(program, args)
+        .await
+        .map_err(format_exec_error)
+}
+
+async fn run_query(program: &str, args: &[&str]) -> Result<String, String> {
+    let output = run_cmd(program, args, QUERY_TIMEOUT_SECS).await?;
+    Ok(preferred_output(&output))
+}
+
+async fn run_apply(program: &str, args: &[&str]) -> Result<String, String> {
+    let output = run_cmd(program, args, APPLY_TIMEOUT_SECS).await?;
+    Ok(preferred_output(&output))
+}
+
+async fn run_apply_owned(program: &str, args: Vec<String>) -> Result<String, String> {
+    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    run_apply(program, &refs).await
+}
+
+fn parse_wmctrl_list_line(line: &str) -> Option<WindowEntry> {
+    let mut parts = line.split_whitespace();
+    let id = parts.next()?.to_string();
+    let _desktop = parts.next()?;
+    let _host = parts.next()?;
+    let title = parts.collect::<Vec<_>>().join(" ").trim().to_string();
+
+    if title.is_empty() {
+        return None;
+    }
+
+    Some(WindowEntry {
+        id,
+        title,
+        x: None,
+        y: None,
+        width: None,
+        height: None,
+    })
+}
+
+fn parse_wmctrl_geometry_line(line: &str) -> Option<WindowEntry> {
+    let mut parts = line.split_whitespace();
+
+    let id = parts.next()?.to_string();
+    let _desktop = parts.next()?;
+    let x = parts.next()?.parse::<i64>().ok()?;
+    let y = parts.next()?.parse::<i64>().ok()?;
+    let width = parts.next()?.parse::<i64>().ok()?;
+    let height = parts.next()?.parse::<i64>().ok()?;
+    let _host = parts.next()?;
+    let title = parts.collect::<Vec<_>>().join(" ").trim().to_string();
+
+    if title.is_empty() {
+        return None;
+    }
+
+    Some(WindowEntry {
+        id,
+        title,
+        x: Some(x),
+        y: Some(y),
+        width: Some(width),
+        height: Some(height),
+    })
+}
+
+fn normalize_title(title: &str) -> String {
+    title.trim().to_ascii_lowercase()
+}
+
+fn find_window_by_title(entries: &[WindowEntry], title: &str) -> Option<WindowEntry> {
+    let wanted = normalize_title(title);
+    entries
+        .iter()
+        .find(|entry| normalize_title(&entry.title).contains(&wanted))
+        .cloned()
+}
+
+async fn query_windows_for_matching() -> Result<Vec<WindowEntry>, String> {
+    let output = run_query("wmctrl", &["-l"]).await?;
+    Ok(output
+        .lines()
+        .filter_map(parse_wmctrl_list_line)
+        .collect::<Vec<_>>())
+}
+
+async fn query_window_geometries() -> Result<Vec<WindowEntry>, String> {
+    let output = run_query("wmctrl", &["-lG"]).await?;
+    Ok(output
+        .lines()
+        .filter_map(parse_wmctrl_geometry_line)
+        .collect::<Vec<_>>())
+}
+
+async fn query_window_id_by_title(title: &str) -> Result<Option<String>, String> {
+    let entries = query_windows_for_matching().await?;
+    Ok(find_window_by_title(&entries, title).map(|entry| entry.id))
+}
+
+fn parse_wm_class(raw: &str) -> String {
+    raw.split('=')
+        .nth(1)
+        .map(|value| value.trim().replace('"', ""))
+        .unwrap_or_default()
+}
+
+fn parse_screen_dimensions(output: &str) -> Option<(i64, i64)> {
+    for line in output.lines() {
+        if !line.contains("dimensions:") {
+            continue;
+        }
+
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if let Some(dimensions) = parts.get(1) {
+            let axis: Vec<&str> = dimensions.split('x').collect();
+            if axis.len() == 2 {
+                let width = axis[0].parse::<i64>().ok()?;
+                let height = axis[1].parse::<i64>().ok()?;
+                return Some((width, height));
+            }
+        }
+    }
+    None
+}
+
+async fn query_screen_dimensions() -> Result<(i64, i64), String> {
+    let output = run_query("xdpyinfo", &[]).await?;
+    parse_screen_dimensions(&output).ok_or_else(|| "failed to parse screen dimensions".to_string())
+}
+
+async fn query_maximized_state(window_id: &str) -> Result<Option<bool>, String> {
+    let output = run_query("xprop", &["-id", window_id, "_NET_WM_STATE"]).await?;
+    let lower = output.to_ascii_lowercase();
+
+    if !lower.contains("_net_wm_state") {
+        return Ok(None);
+    }
+
+    let maximized_vert = lower.contains("_net_wm_state_maximized_vert");
+    let maximized_horz = lower.contains("_net_wm_state_maximized_horz");
+    Ok(Some(maximized_vert && maximized_horz))
+}
+
+async fn query_minimized_state(window_id: &str) -> Result<Option<bool>, String> {
+    let output = run_query("xprop", &["-id", window_id, "_NET_WM_STATE"]).await?;
+    let lower = output.to_ascii_lowercase();
+
+    if !lower.contains("_net_wm_state") {
+        return Ok(None);
+    }
+
+    Ok(Some(lower.contains("_net_wm_state_hidden")))
+}
+
+fn geometry_matches_position(entry: &WindowEntry, x: i64, y: i64) -> bool {
+    entry.x == Some(x) && entry.y == Some(y)
+}
+
+fn geometry_matches_size(entry: &WindowEntry, width: i64, height: i64) -> bool {
+    entry.width == Some(width) && entry.height == Some(height)
+}
+
+fn side_by_side_already_tiled(entries: &[WindowEntry], windows: &[String], sw: i64, sh: i64) -> bool {
+    if windows.len() < 2 {
+        return false;
+    }
+
+    let half_width = sw / 2;
+    let left = find_window_by_title(entries, &windows[0]);
+    let right = find_window_by_title(entries, &windows[1]);
+
+    match (left, right) {
+        (Some(left), Some(right)) => {
+            left.x == Some(0)
+                && left.y == Some(0)
+                && left.width == Some(half_width)
+                && left.height == Some(sh)
+                && right.x == Some(half_width)
+                && right.y == Some(0)
+                && right.width == Some(half_width)
+                && right.height == Some(sh)
+        }
+        _ => false,
+    }
+}
+
+fn grid_already_tiled(entries: &[WindowEntry], windows: &[String], sw: i64, sh: i64) -> bool {
+    if windows.len() < 2 {
+        return false;
+    }
+
+    let half_width = sw / 2;
+    let half_height = sh / 2;
+    let expected = [(0, 0), (half_width, 0), (0, half_height), (half_width, half_height)];
+
+    for (index, title) in windows.iter().enumerate().take(4) {
+        let Some(window) = find_window_by_title(entries, title) else {
+            return false;
+        };
+
+        let (x, y) = expected[index];
+        if window.x != Some(x)
+            || window.y != Some(y)
+            || window.width != Some(half_width)
+            || window.height != Some(half_height)
+        {
+            return false;
+        }
+    }
+
+    true
+}
+
+async fn apply_window_move(title: &str, x: i64, y: i64) -> Result<(), String> {
+    let geometry = format!("0,{x},{y},-1,-1");
+    run_apply("wmctrl", &["-r", title, "-e", &geometry]).await?;
+    Ok(())
+}
+
+async fn apply_window_resize(title: &str, width: i64, height: i64) -> Result<(), String> {
+    let geometry = format!("0,-1,-1,{width},{height}");
+    run_apply("wmctrl", &["-r", title, "-e", &geometry]).await?;
+    Ok(())
+}
+
+async fn apply_window_maximize(title: &str) -> Result<(), String> {
+    run_apply(
+        "wmctrl",
+        &["-r", title, "-b", "add,maximized_vert,maximized_horz"],
+    )
+    .await?;
+    Ok(())
+}
+
+async fn apply_window_minimize(title: &str) -> Result<(), String> {
+    run_apply("xdotool", &["search", "--name", title, "windowminimize"]).await?;
+    Ok(())
+}
+
+async fn apply_tile_side_by_side(windows: &[String], sw: i64, sh: i64) -> Result<(), String> {
+    let half_width = sw / 2;
+
+    run_apply(
+        "wmctrl",
+        &[
+            "-r",
+            &windows[0],
+            "-b",
+            "remove,maximized_vert,maximized_horz",
+        ],
+    )
+    .await?;
+    let left_geometry = format!("0,0,0,{half_width},{sh}");
+    run_apply("wmctrl", &["-r", &windows[0], "-e", &left_geometry]).await?;
+
+    run_apply(
+        "wmctrl",
+        &[
+            "-r",
+            &windows[1],
+            "-b",
+            "remove,maximized_vert,maximized_horz",
+        ],
+    )
+    .await?;
+    let right_geometry = format!("0,{half_width},0,{half_width},{sh}");
+    run_apply("wmctrl", &["-r", &windows[1], "-e", &right_geometry]).await?;
+
+    Ok(())
+}
+
+async fn apply_tile_grid(windows: &[String], sw: i64, sh: i64) -> Result<(), String> {
+    let half_width = sw / 2;
+    let half_height = sh / 2;
+    let positions = [(0, 0), (half_width, 0), (0, half_height), (half_width, half_height)];
+
+    for (index, title) in windows.iter().enumerate().take(4) {
+        let (x, y) = positions[index];
+        run_apply(
+            "wmctrl",
+            &["-r", title, "-b", "remove,maximized_vert,maximized_horz"],
+        )
+        .await?;
+
+        let geometry = format!("0,{x},{y},{half_width},{half_height}");
+        run_apply("wmctrl", &["-r", title, "-e", &geometry]).await?;
+    }
+
+    Ok(())
+}
+
+struct GetActiveWindow;
+
+#[async_trait]
+impl ToolHandler for GetActiveWindow {
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let _input: EmptyInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if !cfg!(target_os = "linux") {
+            return ToolResult::err("get_active_window not implemented for this OS");
+        }
+
+        let title = match run_query("xdotool", &["getactivewindow", "getwindowname"]).await {
+            Ok(output) => output,
+            Err(error) => return ToolResult::err(error),
+        };
+
+        let pid = run_query("xdotool", &["getactivewindow", "getwindowpid"])
+            .await
+            .unwrap_or_default();
+
+        let window_id = run_query("xdotool", &["getactivewindow"])
+            .await
+            .unwrap_or_default();
+
+        let wm_class = if window_id.is_empty() {
+            String::new()
+        } else {
+            run_query("xprop", &["-id", &window_id, "WM_CLASS"])
+                .await
+                .map(|raw| parse_wm_class(&raw))
+                .unwrap_or_default()
+        };
+
+        ToolResult::ok(serde_json::json!({
+            "title": title,
+            "pid": pid,
+            "window_id": window_id,
+            "wm_class": wm_class,
+        }))
+    }
+}
 
 struct MoveWindow;
+
 #[async_trait]
 impl ToolHandler for MoveWindow {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let title = params["title"].as_str().unwrap_or("");
-        let x = params["x"].as_i64().unwrap_or(0);
-        let y = params["y"].as_i64().unwrap_or(0);
-        if cfg!(target_os = "linux") {
-            let result = tokio::process::Command::new("wmctrl")
-                .args(["-r", title, "-e", &format!("0,{x},{y},-1,-1")])
-                .output()
-                .await;
-            match result {
-                Ok(o) if o.status.success() => {
-                    ToolResult::ok(serde_json::json!({ "moved": title, "x": x, "y": y }))
+        let input: MoveWindowInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if !cfg!(target_os = "linux") {
+            return ToolResult::err("move_window not implemented for this OS");
+        }
+
+        let title = input.title.trim();
+        if title.is_empty() {
+            return ToolResult::err("title parameter is required");
+        }
+
+        match query_window_geometries().await {
+            Ok(entries) => {
+                if let Some(entry) = find_window_by_title(&entries, title) {
+                    if geometry_matches_position(&entry, input.x, input.y) {
+                        return ToolResult::ok(serde_json::json!({
+                            "moved": title,
+                            "x": input.x,
+                            "y": input.y,
+                            "changed": false,
+                            "already_in_desired_state": true,
+                        }));
+                    }
                 }
-                _ => ToolResult::err(format!("failed to move window '{title}' (wmctrl required)")),
             }
-        } else {
-            ToolResult::err("move_window not implemented for this OS")
+            Err(error) => warn!("move_window pre-flight query failed: {error}"),
+        }
+
+        match apply_window_move(title, input.x, input.y).await {
+            Ok(()) => ToolResult::ok(serde_json::json!({
+                "moved": title,
+                "x": input.x,
+                "y": input.y,
+                "changed": true,
+                "already_in_desired_state": false,
+            })),
+            Err(error) => ToolResult::err(error),
         }
     }
 }
 
 struct ResizeWindow;
+
 #[async_trait]
 impl ToolHandler for ResizeWindow {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let title = params["title"].as_str().unwrap_or("");
-        let w = params["width"].as_i64().unwrap_or(800);
-        let h = params["height"].as_i64().unwrap_or(600);
-        if cfg!(target_os = "linux") {
-            let result = tokio::process::Command::new("wmctrl")
-                .args(["-r", title, "-e", &format!("0,-1,-1,{w},{h}")])
-                .output()
-                .await;
-            match result {
-                Ok(o) if o.status.success() => {
-                    ToolResult::ok(serde_json::json!({ "resized": title, "width": w, "height": h }))
+        let input: ResizeWindowInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if !cfg!(target_os = "linux") {
+            return ToolResult::err("resize_window not implemented for this OS");
+        }
+
+        let title = input.title.trim();
+        if title.is_empty() {
+            return ToolResult::err("title parameter is required");
+        }
+
+        if input.width <= 0 || input.height <= 0 {
+            return ToolResult::err("width and height must be positive integers");
+        }
+
+        match query_window_geometries().await {
+            Ok(entries) => {
+                if let Some(entry) = find_window_by_title(&entries, title) {
+                    if geometry_matches_size(&entry, input.width, input.height) {
+                        return ToolResult::ok(serde_json::json!({
+                            "resized": title,
+                            "width": input.width,
+                            "height": input.height,
+                            "changed": false,
+                            "already_in_desired_state": true,
+                        }));
+                    }
                 }
-                _ => ToolResult::err(format!(
-                    "failed to resize window '{title}' (wmctrl required)"
-                )),
             }
-        } else {
-            ToolResult::err("resize_window not implemented for this OS")
+            Err(error) => warn!("resize_window pre-flight query failed: {error}"),
+        }
+
+        match apply_window_resize(title, input.width, input.height).await {
+            Ok(()) => ToolResult::ok(serde_json::json!({
+                "resized": title,
+                "width": input.width,
+                "height": input.height,
+                "changed": true,
+                "already_in_desired_state": false,
+            })),
+            Err(error) => ToolResult::err(error),
         }
     }
 }
 
 struct MaximizeWindow;
+
 #[async_trait]
 impl ToolHandler for MaximizeWindow {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let title = params["title"].as_str().unwrap_or("");
-        if cfg!(target_os = "linux") {
-            let result = tokio::process::Command::new("wmctrl")
-                .args(["-r", title, "-b", "add,maximized_vert,maximized_horz"])
-                .output()
-                .await;
-            match result {
-                Ok(o) if o.status.success() => {
-                    ToolResult::ok(serde_json::json!({ "maximized": title }))
+        let input: WindowMatchInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if !cfg!(target_os = "linux") {
+            return ToolResult::err("maximize_window not implemented for this OS");
+        }
+
+        let title = input.title.trim();
+        if title.is_empty() {
+            return ToolResult::err("title parameter is required");
+        }
+
+        match query_window_id_by_title(title).await {
+            Ok(Some(window_id)) => match query_maximized_state(&window_id).await {
+                Ok(Some(true)) => {
+                    return ToolResult::ok(serde_json::json!({
+                        "maximized": title,
+                        "window_id": window_id,
+                        "changed": false,
+                        "already_in_desired_state": true,
+                    }));
                 }
-                _ => ToolResult::err(format!("failed to maximize '{title}'")),
-            }
-        } else {
-            ToolResult::err("maximize_window not implemented for this OS")
+                Ok(Some(false)) | Ok(None) => {}
+                Err(error) => warn!("maximize_window pre-flight state query failed: {error}"),
+            },
+            Ok(None) => {}
+            Err(error) => warn!("maximize_window pre-flight window lookup failed: {error}"),
+        }
+
+        match apply_window_maximize(title).await {
+            Ok(()) => ToolResult::ok(serde_json::json!({
+                "maximized": title,
+                "changed": true,
+                "already_in_desired_state": false,
+            })),
+            Err(error) => ToolResult::err(error),
         }
     }
 }
 
 struct MinimizeWindow;
+
 #[async_trait]
 impl ToolHandler for MinimizeWindow {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let title = params["title"].as_str().unwrap_or("");
-        if cfg!(target_os = "linux") {
-            let result = tokio::process::Command::new("xdotool")
-                .args(["search", "--name", title, "windowminimize"])
-                .output()
-                .await;
-            match result {
-                Ok(o) if o.status.success() => {
-                    ToolResult::ok(serde_json::json!({ "minimized": title }))
+        let input: WindowMatchInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if !cfg!(target_os = "linux") {
+            return ToolResult::err("minimize_window not implemented for this OS");
+        }
+
+        let title = input.title.trim();
+        if title.is_empty() {
+            return ToolResult::err("title parameter is required");
+        }
+
+        match query_window_id_by_title(title).await {
+            Ok(Some(window_id)) => match query_minimized_state(&window_id).await {
+                Ok(Some(true)) => {
+                    return ToolResult::ok(serde_json::json!({
+                        "minimized": title,
+                        "window_id": window_id,
+                        "changed": false,
+                        "already_in_desired_state": true,
+                    }));
                 }
-                _ => ToolResult::err(format!("failed to minimize '{title}'")),
-            }
-        } else {
-            ToolResult::err("minimize_window not implemented for this OS")
+                Ok(Some(false)) | Ok(None) => {}
+                Err(error) => warn!("minimize_window pre-flight state query failed: {error}"),
+            },
+            Ok(None) => {}
+            Err(error) => warn!("minimize_window pre-flight window lookup failed: {error}"),
+        }
+
+        match apply_window_minimize(title).await {
+            Ok(()) => ToolResult::ok(serde_json::json!({
+                "minimized": title,
+                "changed": true,
+                "already_in_desired_state": false,
+            })),
+            Err(error) => ToolResult::err(error),
         }
     }
 }
 
 struct TileWindows;
+
 #[async_trait]
 impl ToolHandler for TileWindows {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let layout = params["layout"].as_str().unwrap_or("side-by-side");
-        let windows: Vec<String> = params["windows"]
-            .as_array()
-            .map(|a| {
-                a.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let input: TileWindowsInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
 
-        if cfg!(target_os = "linux") {
-            // Get screen dimensions
-            let xdp = tokio::process::Command::new("xdpyinfo").output().await;
-            let (sw, sh) = xdp
-                .ok()
-                .filter(|o| o.status.success())
-                .and_then(|o| {
-                    let text = String::from_utf8_lossy(&o.stdout).to_string();
-                    text.lines()
-                        .find(|l| l.contains("dimensions:"))
-                        .and_then(|l| {
-                            let parts: Vec<&str> = l.split_whitespace().collect();
-                            parts.get(1).and_then(|dim| {
-                                let xy: Vec<&str> = dim.split('x').collect();
-                                Some((
-                                    xy.first()?.parse::<i64>().ok()?,
-                                    xy.get(1)?.parse::<i64>().ok()?,
-                                ))
-                            })
-                        })
-                })
-                .unwrap_or((1920, 1080));
+        if !cfg!(target_os = "linux") {
+            return ToolResult::err("tile_windows not implemented for this OS");
+        }
 
-            if windows.len() < 2 {
-                return ToolResult::err("at least 2 window titles required for tiling");
-            }
+        let windows: Vec<String> = input
+            .windows
+            .iter()
+            .map(|title| title.trim().to_string())
+            .filter(|title| !title.is_empty())
+            .collect();
 
-            match layout {
-                "side-by-side" => {
-                    let half_w = sw / 2;
-                    // Left half
-                    let _ = tokio::process::Command::new("wmctrl")
-                        .args([
-                            "-r",
-                            &windows[0],
-                            "-b",
-                            "remove,maximized_vert,maximized_horz",
-                        ])
-                        .output()
-                        .await;
-                    let _ = tokio::process::Command::new("wmctrl")
-                        .args(["-r", &windows[0], "-e", &format!("0,0,0,{half_w},{sh}")])
-                        .output()
-                        .await;
-                    // Right half
-                    let _ = tokio::process::Command::new("wmctrl")
-                        .args([
-                            "-r",
-                            &windows[1],
-                            "-b",
-                            "remove,maximized_vert,maximized_horz",
-                        ])
-                        .output()
-                        .await;
-                    let _ = tokio::process::Command::new("wmctrl")
-                        .args([
-                            "-r",
-                            &windows[1],
-                            "-e",
-                            &format!("0,{half_w},0,{half_w},{sh}"),
-                        ])
-                        .output()
-                        .await;
-                    ToolResult::ok(
-                        serde_json::json!({ "layout": "side-by-side", "windows": windows }),
-                    )
+        if windows.len() < 2 {
+            return ToolResult::err("at least 2 window titles required for tiling");
+        }
+
+        let (sw, sh) = query_screen_dimensions().await.unwrap_or((1920, 1080));
+        let layout = input.layout.trim().to_ascii_lowercase();
+
+        match query_window_geometries().await {
+            Ok(entries) => {
+                if layout == "side-by-side" && side_by_side_already_tiled(&entries, &windows, sw, sh) {
+                    return ToolResult::ok(serde_json::json!({
+                        "layout": "side-by-side",
+                        "windows": windows,
+                        "changed": false,
+                        "already_in_desired_state": true,
+                    }));
                 }
-                "grid" => {
-                    let half_w = sw / 2;
-                    let half_h = sh / 2;
-                    let positions = [(0, 0), (half_w, 0), (0, half_h), (half_w, half_h)];
-                    for (i, win) in windows.iter().enumerate().take(4) {
-                        let (px, py) = positions.get(i).copied().unwrap_or((0, 0));
-                        let _ = tokio::process::Command::new("wmctrl")
-                            .args(["-r", win, "-b", "remove,maximized_vert,maximized_horz"])
-                            .output()
-                            .await;
-                        let _ = tokio::process::Command::new("wmctrl")
-                            .args(["-r", win, "-e", &format!("0,{px},{py},{half_w},{half_h}")])
-                            .output()
-                            .await;
-                    }
-                    ToolResult::ok(serde_json::json!({ "layout": "grid", "windows": windows }))
+
+                if layout == "grid" && grid_already_tiled(&entries, &windows, sw, sh) {
+                    return ToolResult::ok(serde_json::json!({
+                        "layout": "grid",
+                        "windows": windows,
+                        "changed": false,
+                        "already_in_desired_state": true,
+                    }));
                 }
-                _ => ToolResult::err(format!(
-                    "unknown layout '{layout}'. Supported: side-by-side, grid"
-                )),
             }
-        } else {
-            ToolResult::err("tile_windows not implemented for this OS")
+            Err(error) => warn!("tile_windows pre-flight query failed: {error}"),
+        }
+
+        let apply_result = match layout.as_str() {
+            "side-by-side" => apply_tile_side_by_side(&windows, sw, sh).await,
+            "grid" => apply_tile_grid(&windows, sw, sh).await,
+            _ => {
+                return ToolResult::err(format!(
+                    "unknown layout '{}'. Supported: side-by-side, grid",
+                    input.layout
+                ));
+            }
+        };
+
+        match apply_result {
+            Ok(()) => ToolResult::ok(serde_json::json!({
+                "layout": layout,
+                "windows": windows,
+                "changed": true,
+                "already_in_desired_state": false,
+            })),
+            Err(error) => ToolResult::err(error),
         }
     }
 }
 
-// ── Browser / URL ──
-
 struct OpenUrl;
+
 #[async_trait]
 impl ToolHandler for OpenUrl {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let url = params["url"].as_str().unwrap_or("");
+        let input: OpenUrlInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        let url = input.url.trim();
         if url.is_empty() {
             return ToolResult::err("url parameter is required");
         }
-        // Validate URL
+
         if !url.starts_with("http://") && !url.starts_with("https://") {
             return ToolResult::err("url must start with http:// or https://");
         }
-        let result = if cfg!(target_os = "linux") {
-            tokio::process::Command::new("xdg-open").arg(url).spawn()
+
+        let open_result = if cfg!(target_os = "linux") {
+            run_apply_owned("xdg-open", vec![url.to_string()]).await
         } else if cfg!(target_os = "macos") {
-            tokio::process::Command::new("open").arg(url).spawn()
+            run_apply_owned("open", vec![url.to_string()]).await
+        } else if cfg!(target_os = "windows") {
+            run_apply_owned(
+                "cmd",
+                vec!["/C".into(), "start".into(), "".into(), url.to_string()],
+            )
+            .await
         } else {
-            tokio::process::Command::new("cmd")
-                .args(["/C", "start", "", url])
-                .spawn()
+            Err("open_url not implemented for this OS".to_string())
         };
-        match result {
+
+        match open_result {
             Ok(_) => ToolResult::ok(serde_json::json!({ "opened": url })),
-            Err(e) => ToolResult::err(format!("failed to open URL: {e}")),
+            Err(error) => ToolResult::err(format!("failed to open URL: {error}")),
         }
     }
 }
 
 struct ListWindows;
+
 #[async_trait]
 impl ToolHandler for ListWindows {
-    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
-        if cfg!(target_os = "linux") {
-            let output = tokio::process::Command::new("wmctrl")
-                .args(["-l"])
-                .output()
-                .await;
-            match output {
-                Ok(o) if o.status.success() => {
-                    let text = String::from_utf8_lossy(&o.stdout);
-                    let windows: Vec<serde_json::Value> = text
-                        .lines()
-                        .filter(|l| !l.is_empty())
-                        .map(|line| {
-                            let parts: Vec<&str> = line.splitn(4, char::is_whitespace).collect();
-                            serde_json::json!({
-                                "id": parts.first().unwrap_or(&""),
-                                "desktop": parts.get(1).unwrap_or(&""),
-                                "title": parts.get(3).unwrap_or(&"").trim(),
-                            })
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let _input: EmptyInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if !cfg!(target_os = "linux") {
+            return ToolResult::err("list_windows not implemented for this OS");
+        }
+
+        match run_query("wmctrl", &["-l"]).await {
+            Ok(output) => {
+                let windows: Vec<serde_json::Value> = output
+                    .lines()
+                    .filter(|line| !line.trim().is_empty())
+                    .map(|line| {
+                        let parts: Vec<&str> = line.splitn(4, char::is_whitespace).collect();
+                        serde_json::json!({
+                            "id": parts.first().copied().unwrap_or_default(),
+                            "desktop": parts.get(1).copied().unwrap_or_default(),
+                            "title": parts.get(3).copied().unwrap_or_default().trim(),
                         })
-                        .collect();
-                    ToolResult::ok(
-                        serde_json::json!({ "windows": windows, "count": windows.len() }),
-                    )
-                }
-                _ => ToolResult::err(
-                    "wmctrl not available — install it with: sudo apt install wmctrl",
-                ),
+                    })
+                    .collect();
+
+                ToolResult::ok(serde_json::json!({
+                    "windows": windows,
+                    "count": windows.len(),
+                }))
             }
-        } else {
-            ToolResult::err("list_windows not implemented for this OS")
+            Err(error) => ToolResult::err(error),
         }
     }
 }
@@ -475,6 +943,7 @@ pub fn register(reg: &ToolRegistry) {
             Arc::new(OpenUrl),
         ),
     ];
+
     for (def, handler) in tools {
         reg.register(def, handler);
     }

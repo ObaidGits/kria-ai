@@ -219,9 +219,7 @@ fn layer_count_for(name: &str) -> Option<u32> {
     let n = name.to_ascii_lowercase();
     if n.contains("qwen2.5-vl-7b") || n.contains("qwen2.5-7b") || n.contains("qwen3-7b") {
         Some(28)
-    } else if n.contains("qwen2.5-3b") || n.contains("qwen3-3b") {
-        Some(36)
-    } else if n.contains("qwen3-8b") {
+    } else if n.contains("qwen2.5-3b") || n.contains("qwen3-3b") || n.contains("qwen3-8b") {
         Some(36)
     } else if n.contains("qwen3-0.6b") {
         Some(28)

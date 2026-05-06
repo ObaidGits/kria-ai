@@ -44,7 +44,7 @@ pub fn embed_batch(texts: &[&str]) -> Result<Vec<Vec<f32>>> {
     let mut model = cell
         .lock()
         .map_err(|_| anyhow::anyhow!("embedding model mutex poisoned"))?;
-    let raw = model.embed(texts.to_vec(), None)?;
+    let raw = model.embed(texts, None)?;
     Ok(raw.into_iter().map(l2_normalise).collect())
 }
 

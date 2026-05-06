@@ -1,8 +1,17 @@
+use crate::infra::sandbox::resolve_path;
+use crate::infra::environment::{
+    EnvironmentError, ListDirRequest, ReadFileRequest, WriteFileRequest,
+};
 use crate::infra::ToolResult;
 use crate::safety::RiskLevel;
 use crate::tools::registry::{ParamDef, ToolDef, ToolHandler, ToolRegistry};
+use crate::tools::ToolContext;
 use async_trait::async_trait;
-use std::path::PathBuf;
+use schemars::JsonSchema;
+use serde::de::DeserializeOwned;
+use serde::Deserialize;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 fn param(name: &str, ty: &str, desc: &str, required: bool) -> ParamDef {
@@ -15,27 +24,322 @@ fn param(name: &str, ty: &str, desc: &str, required: bool) -> ParamDef {
     }
 }
 
+fn parse_input<T: DeserializeOwned>(params: serde_json::Value) -> Result<T, ToolResult> {
+    serde_json::from_value(params).map_err(|error| ToolResult::err(format!("invalid parameters: {error}")))
+}
+
+fn require_non_empty(value: &str, field: &str) -> Result<(), ToolResult> {
+    if value.trim().is_empty() {
+        return Err(ToolResult::err(format!("{field} parameter is required")));
+    }
+    Ok(())
+}
+
+#[derive(Debug, thiserror::Error)]
+enum ToolExecutionError {
+    #[error("{operation} failed for '{path}': {reason}")]
+    Io {
+        operation: &'static str,
+        path: String,
+        reason: String,
+    },
+    #[error("{operation} failed: {reason}")]
+    Operation {
+        operation: &'static str,
+        reason: String,
+    },
+}
+
+impl ToolExecutionError {
+    fn io(operation: &'static str, path: impl Into<String>, error: std::io::Error) -> Self {
+        Self::Io {
+            operation,
+            path: path.into(),
+            reason: error.to_string(),
+        }
+    }
+
+    fn operation(operation: &'static str, reason: impl Into<String>) -> Self {
+        Self::Operation {
+            operation,
+            reason: reason.into(),
+        }
+    }
+}
+
+fn io_error(operation: &'static str, path: impl Into<String>, error: std::io::Error) -> ToolResult {
+    ToolResult::err(ToolExecutionError::io(operation, path, error).to_string())
+}
+
+fn op_error(operation: &'static str, reason: impl Into<String>) -> ToolResult {
+    ToolResult::err(ToolExecutionError::operation(operation, reason).to_string())
+}
+
+fn env_error(operation: &'static str, error: EnvironmentError) -> ToolResult {
+    op_error(operation, error.to_string())
+}
+
+async fn env_read_bytes(ctx: &ToolContext, path: PathBuf) -> Result<Vec<u8>, ToolResult> {
+    let display = path.to_string_lossy().to_string();
+    ctx.env
+        .read_file(ReadFileRequest { path })
+        .await
+        .map(|result| result.contents)
+        .map_err(|error| {
+            ToolResult::err(ToolExecutionError::operation(
+                "read_file",
+                format!("{display}: {error}"),
+            )
+            .to_string())
+        })
+}
+
+async fn env_read_string(ctx: &ToolContext, path: PathBuf) -> Result<String, ToolResult> {
+    let bytes = env_read_bytes(ctx, path).await?;
+    Ok(String::from_utf8_lossy(&bytes).to_string())
+}
+
+async fn env_write_bytes(
+    ctx: &ToolContext,
+    path: PathBuf,
+    contents: Vec<u8>,
+    create_parent: bool,
+) -> Result<usize, ToolResult> {
+    let display = path.to_string_lossy().to_string();
+    ctx.env
+        .write_file(WriteFileRequest {
+            path,
+            contents,
+            create_parent,
+        })
+        .await
+        .map(|result| result.bytes_written)
+        .map_err(|error| {
+            ToolResult::err(ToolExecutionError::operation(
+                "write_file",
+                format!("{display}: {error}"),
+            )
+            .to_string())
+        })
+}
+
+async fn env_list_entries(ctx: &ToolContext, path: PathBuf) -> Result<Vec<PathBuf>, ToolResult> {
+    ctx.env
+        .list_dir(ListDirRequest { path })
+        .await
+        .map(|result| result.entries)
+        .map_err(|error| env_error("list_directory", error))
+}
+
+fn default_read_max_chars() -> usize {
+    50_000
+}
+
+fn default_search_max_results() -> usize {
+    50
+}
+
+fn default_search_file_contents_max_results() -> usize {
+    20
+}
+
+fn default_context_lines() -> usize {
+    2
+}
+
+fn default_find_files_max_results() -> usize {
+    100
+}
+
+fn default_file_type() -> String {
+    "any".to_string()
+}
+
+fn default_max_depth() -> usize {
+    4
+}
+
+fn default_find_todos_max_results() -> usize {
+    50
+}
+
+fn default_write_overwrite() -> bool {
+    true
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ReadFileInput {
+    path: String,
+    #[serde(default = "default_read_max_chars")]
+    max_chars: usize,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SearchFilesInput {
+    directory: String,
+    pattern: String,
+    #[serde(default = "default_search_max_results")]
+    max_results: usize,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ListDirectoryInput {
+    path: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct GetFileInfoInput {
+    path: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CalculateDirSizeInput {
+    path: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct WriteFileInput {
+    path: String,
+    content: String,
+    #[serde(default = "default_write_overwrite")]
+    overwrite: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CreateDirectoryInput {
+    path: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct RenameFileInput {
+    source: String,
+    destination: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CopyFileInput {
+    source: String,
+    destination: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DeleteFileInput {
+    path: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DeleteDirectoryInput {
+    path: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct MoveFileInput {
+    source: String,
+    destination: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SearchFileContentsInput {
+    directory: String,
+    query: String,
+    #[serde(default = "default_search_file_contents_max_results")]
+    max_results: usize,
+    #[serde(default = "default_context_lines")]
+    context_lines: usize,
+    #[serde(default)]
+    case_sensitive: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct FindFilesByPatternInput {
+    directory: String,
+    pattern: String,
+    #[serde(default = "default_find_files_max_results")]
+    max_results: usize,
+    min_size: Option<u64>,
+    max_size: Option<u64>,
+    #[serde(rename = "type", default = "default_file_type")]
+    file_type: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct GetProjectStructureInput {
+    path: String,
+    #[serde(default = "default_max_depth")]
+    max_depth: usize,
+    #[serde(default)]
+    show_hidden: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CountLinesOfCodeInput {
+    directory: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DiffFilesInput {
+    file_a: String,
+    file_b: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct FindTodosInput {
+    directory: String,
+    #[serde(default = "default_find_todos_max_results")]
+    max_results: usize,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct AnalyzeCodeInput {
+    path: String,
+}
+
 struct ReadFile;
 #[async_trait]
 impl ToolHandler for ReadFile {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let path = params["path"].as_str().unwrap_or("");
-        match tokio::fs::read_to_string(path).await {
+    async fn execute_with_context(&self, params: serde_json::Value, ctx: ToolContext) -> ToolResult {
+        let input: ReadFileInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if let Err(error) = require_non_empty(&input.path, "path") {
+            return error;
+        }
+
+        match env_read_string(&ctx, PathBuf::from(&input.path)).await {
             Ok(content) => {
-                let max = params["max_chars"].as_u64().unwrap_or(50000) as usize;
-                let truncated = if content.len() > max {
-                    &content[..max]
-                } else {
-                    &content
-                };
+                let mut chars = content.chars();
+                let truncated_content: String = chars.by_ref().take(input.max_chars).collect();
+                let truncated = chars.next().is_some();
+
                 ToolResult::ok(serde_json::json!({
-                    "path": path,
-                    "content": truncated,
+                    "path": input.path,
+                    "content": truncated_content,
                     "size_bytes": content.len(),
-                    "truncated": content.len() > max,
+                    "truncated": truncated,
                 }))
             }
-            Err(e) => ToolResult::err(format!("read_file failed: {e}")),
+            Err(error) => error,
         }
     }
 }
@@ -43,80 +347,125 @@ impl ToolHandler for ReadFile {
 struct SearchFiles;
 #[async_trait]
 impl ToolHandler for SearchFiles {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let dir = params["directory"].as_str().unwrap_or(".");
-        let pattern = params["pattern"].as_str().unwrap_or("*");
-        let max = params["max_results"].as_u64().unwrap_or(50) as usize;
+    async fn execute_with_context(&self, params: serde_json::Value, _ctx: ToolContext) -> ToolResult {
+        let input: SearchFilesInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
 
-        let glob = globset::GlobBuilder::new(pattern)
+        if let Err(error) = require_non_empty(&input.directory, "directory") {
+            return error;
+        }
+        if let Err(error) = require_non_empty(&input.pattern, "pattern") {
+            return error;
+        }
+
+        let glob = match globset::GlobBuilder::new(&input.pattern)
             .case_insensitive(true)
             .build()
-            .map(|g| g.compile_matcher());
+        {
+            Ok(value) => value.compile_matcher(),
+            Err(error) => return op_error("search_files", format!("invalid pattern: {error}")),
+        };
 
         let mut results = Vec::new();
-        for entry in walkdir::WalkDir::new(dir)
+        for entry in walkdir::WalkDir::new(&input.directory)
             .max_depth(10)
             .into_iter()
-            .filter_map(|e| e.ok())
+            .filter_map(|entry| entry.ok())
         {
-            if results.len() >= max {
+            if results.len() >= input.max_results {
                 break;
             }
-            if let Ok(m) = glob.as_ref() {
-                if m.is_match(entry.file_name().to_string_lossy().as_ref()) {
-                    results.push(entry.path().to_string_lossy().to_string());
-                }
+
+            if glob.is_match(entry.file_name().to_string_lossy().as_ref()) {
+                results.push(entry.path().to_string_lossy().to_string());
             }
         }
-        ToolResult::ok(serde_json::json!({ "matches": results, "count": results.len() }))
+
+        ToolResult::ok(serde_json::json!({
+            "matches": results,
+            "count": results.len(),
+        }))
     }
 }
 
 struct ListDirectory;
 #[async_trait]
 impl ToolHandler for ListDirectory {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let path = params["path"].as_str().unwrap_or(".");
-        match tokio::fs::read_dir(path).await {
-            Ok(mut entries) => {
-                let mut items = Vec::new();
-                while let Ok(Some(entry)) = entries.next_entry().await {
-                    let meta = entry.metadata().await.ok();
-                    items.push(serde_json::json!({
-                        "name": entry.file_name().to_string_lossy(),
-                        "is_dir": meta.as_ref().map(|m| m.is_dir()).unwrap_or(false),
-                        "size": meta.as_ref().map(|m| m.len()).unwrap_or(0),
-                    }));
-                }
-                ToolResult::ok(serde_json::json!({ "path": path, "entries": items }))
-            }
-            Err(e) => ToolResult::err(format!("list_directory failed: {e}")),
+    async fn execute_with_context(&self, params: serde_json::Value, ctx: ToolContext) -> ToolResult {
+        let input: ListDirectoryInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if let Err(error) = require_non_empty(&input.path, "path") {
+            return error;
         }
+
+        let entries = match env_list_entries(&ctx, PathBuf::from(&input.path)).await {
+            Ok(entries) => entries,
+            Err(error) => return error,
+        };
+
+        let mut items = Vec::new();
+        for entry in entries {
+            let entry_path = entry.to_string_lossy().to_string();
+            let metadata = match std::fs::metadata(&entry) {
+                Ok(metadata) => metadata,
+                Err(error) => return io_error("list_directory", entry_path, error),
+            };
+            let name = entry
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default()
+                .to_string();
+            items.push(serde_json::json!({
+                "name": name,
+                "is_dir": metadata.is_dir(),
+                "size": metadata.len(),
+            }));
+        }
+
+        ToolResult::ok(serde_json::json!({
+            "path": input.path,
+            "entries": items,
+        }))
     }
 }
 
 struct GetFileInfo;
 #[async_trait]
 impl ToolHandler for GetFileInfo {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let path = params["path"].as_str().unwrap_or("");
-        match tokio::fs::metadata(path).await {
-            Ok(meta) => {
-                let modified = meta.modified().ok().and_then(|t| {
-                    t.duration_since(std::time::UNIX_EPOCH)
+    async fn execute_with_context(&self, params: serde_json::Value, ctx: ToolContext) -> ToolResult {
+        let input: GetFileInfoInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if let Err(error) = require_non_empty(&input.path, "path") {
+            return error;
+        }
+
+        let _ = &ctx;
+        match std::fs::metadata(&input.path) {
+            Ok(metadata) => {
+                let modified = metadata.modified().ok().and_then(|time| {
+                    time.duration_since(std::time::UNIX_EPOCH)
                         .ok()
-                        .map(|d| d.as_secs())
+                        .map(|duration| duration.as_secs())
                 });
+
                 ToolResult::ok(serde_json::json!({
-                    "path": path,
-                    "size_bytes": meta.len(),
-                    "is_dir": meta.is_dir(),
-                    "is_file": meta.is_file(),
+                    "path": input.path,
+                    "size_bytes": metadata.len(),
+                    "is_dir": metadata.is_dir(),
+                    "is_file": metadata.is_file(),
                     "modified_epoch": modified,
-                    "readonly": meta.permissions().readonly(),
+                    "readonly": metadata.permissions().readonly(),
                 }))
             }
-            Err(e) => ToolResult::err(format!("get_file_info failed: {e}")),
+            Err(error) => io_error("get_file_info", input.path, error),
         }
     }
 }
@@ -124,16 +473,25 @@ impl ToolHandler for GetFileInfo {
 struct CalculateDirSize;
 #[async_trait]
 impl ToolHandler for CalculateDirSize {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let path = params["path"].as_str().unwrap_or(".");
-        let total: u64 = walkdir::WalkDir::new(path)
+    async fn execute_with_context(&self, params: serde_json::Value, _ctx: ToolContext) -> ToolResult {
+        let input: CalculateDirSizeInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if let Err(error) = require_non_empty(&input.path, "path") {
+            return error;
+        }
+
+        let total: u64 = walkdir::WalkDir::new(&input.path)
             .into_iter()
-            .filter_map(|e| e.ok())
-            .filter_map(|e| e.metadata().ok())
-            .map(|m| m.len())
+            .filter_map(|entry| entry.ok())
+            .filter_map(|entry| entry.metadata().ok())
+            .map(|metadata| metadata.len())
             .sum();
+
         ToolResult::ok(serde_json::json!({
-            "path": path,
+            "path": input.path,
             "total_bytes": total,
             "total_mb": total / (1024 * 1024),
         }))
@@ -143,28 +501,71 @@ impl ToolHandler for CalculateDirSize {
 struct WriteFile;
 #[async_trait]
 impl ToolHandler for WriteFile {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let path = params["path"].as_str().unwrap_or("");
-        let content = params["content"].as_str().unwrap_or("");
-        let overwrite = params["overwrite"].as_bool().unwrap_or(true);
-        let max_size = 10 * 1024 * 1024; // 10MB
-        if content.len() > max_size {
-            return ToolResult::err("content exceeds 10MB limit");
+    async fn execute_with_context(&self, params: serde_json::Value, ctx: ToolContext) -> ToolResult {
+        const MAX_SIZE_BYTES: usize = 10 * 1024 * 1024;
+
+        let input: WriteFileInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if let Err(error) = require_non_empty(&input.path, "path") {
+            return error;
         }
-        if !overwrite && tokio::fs::metadata(path).await.is_ok() {
-            return ToolResult::err(format!(
-                "write_file failed: file already exists and overwrite is false: {path}"
-            ));
+
+        let resolved_path = resolve_path(&input.path);
+
+        if input.content.len() > MAX_SIZE_BYTES {
+            return op_error("write_file", "content exceeds 10MB limit");
         }
-        if let Some(parent) = PathBuf::from(path).parent() {
-            let _ = tokio::fs::create_dir_all(parent).await;
+
+        let existing_content = match std::fs::read_to_string(&resolved_path) {
+            Ok(content) => Some(content),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return io_error("write_file", input.path.clone(), error),
+        };
+
+        if let Some(existing) = existing_content.as_ref() {
+            if existing == &input.content {
+                return ToolResult::ok(serde_json::json!({
+                    "path": input.path,
+                    "bytes_written": 0,
+                    "changed": false,
+                    "already_in_desired_state": true,
+                }));
+            }
         }
-        match tokio::fs::write(path, content).await {
-            Ok(_) => ToolResult::ok(serde_json::json!({
-                "path": path,
-                "bytes_written": content.len(),
+
+        if !input.overwrite && existing_content.is_some() {
+            return op_error(
+                "write_file",
+                format!(
+                    "file already exists and overwrite is false: {}",
+                    input.path
+                ),
+            );
+        }
+
+        if let Some(parent) = resolved_path.parent() {
+            if !parent.as_os_str().is_empty() {
+                if let Err(error) = std::fs::create_dir_all(parent) {
+                    return io_error(
+                        "write_file",
+                        parent.to_string_lossy().to_string(),
+                        error,
+                    );
+                }
+            }
+        }
+
+        match env_write_bytes(&ctx, resolved_path, input.content.clone().into_bytes(), true).await {
+            Ok(bytes_written) => ToolResult::ok(serde_json::json!({
+                "path": input.path,
+                "bytes_written": bytes_written,
+                "changed": true,
+                "already_in_desired_state": false,
             })),
-            Err(e) => ToolResult::err(format!("write_file failed: {e}")),
+            Err(error) => error,
         }
     }
 }
@@ -172,11 +573,46 @@ impl ToolHandler for WriteFile {
 struct CreateDirectory;
 #[async_trait]
 impl ToolHandler for CreateDirectory {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let path = params["path"].as_str().unwrap_or("");
-        match tokio::fs::create_dir_all(path).await {
-            Ok(_) => ToolResult::ok(serde_json::json!({ "path": path, "created": true })),
-            Err(e) => ToolResult::err(format!("create_directory failed: {e}")),
+    async fn execute_with_context(&self, params: serde_json::Value, ctx: ToolContext) -> ToolResult {
+        let input: CreateDirectoryInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if let Err(error) = require_non_empty(&input.path, "path") {
+            return error;
+        }
+
+        let resolved_path = resolve_path(&input.path);
+
+        let _ = &ctx;
+        match std::fs::metadata(&resolved_path) {
+            Ok(metadata) => {
+                if metadata.is_dir() {
+                    return ToolResult::ok(serde_json::json!({
+                        "path": input.path,
+                        "created": false,
+                        "changed": false,
+                        "already_in_desired_state": true,
+                    }));
+                }
+                return op_error(
+                    "create_directory",
+                    format!("path exists but is not a directory: {}", input.path),
+                );
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return io_error("create_directory", input.path.clone(), error),
+        }
+
+        match std::fs::create_dir_all(&resolved_path) {
+            Ok(_) => ToolResult::ok(serde_json::json!({
+                "path": input.path,
+                "created": true,
+                "changed": true,
+                "already_in_desired_state": false,
+            })),
+            Err(error) => io_error("create_directory", input.path, error),
         }
     }
 }
@@ -184,14 +620,30 @@ impl ToolHandler for CreateDirectory {
 struct RenameFile;
 #[async_trait]
 impl ToolHandler for RenameFile {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let source = params["source"].as_str().unwrap_or("");
-        let destination = params["destination"].as_str().unwrap_or("");
-        match tokio::fs::rename(source, destination).await {
-            Ok(_) => {
-                ToolResult::ok(serde_json::json!({ "source": source, "destination": destination }))
-            }
-            Err(e) => ToolResult::err(format!("rename_file failed: {e}")),
+    async fn execute_with_context(&self, params: serde_json::Value, ctx: ToolContext) -> ToolResult {
+        let input: RenameFileInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if let Err(error) = require_non_empty(&input.source, "source") {
+            return error;
+        }
+        if let Err(error) = require_non_empty(&input.destination, "destination") {
+            return error;
+        }
+
+        let resolved_source = resolve_path(&input.source);
+        let resolved_destination = resolve_path(&input.destination);
+
+        let operation_path = format!("{} -> {}", input.source, input.destination);
+        let _ = &ctx;
+        match std::fs::rename(&resolved_source, &resolved_destination) {
+            Ok(_) => ToolResult::ok(serde_json::json!({
+                "source": input.source,
+                "destination": input.destination,
+            })),
+            Err(error) => io_error("rename_file", operation_path, error),
         }
     }
 }
@@ -199,14 +651,31 @@ impl ToolHandler for RenameFile {
 struct CopyFile;
 #[async_trait]
 impl ToolHandler for CopyFile {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let source = params["source"].as_str().unwrap_or("");
-        let destination = params["destination"].as_str().unwrap_or("");
-        match tokio::fs::copy(source, destination).await {
-            Ok(bytes) => ToolResult::ok(serde_json::json!({
-                "source": source, "destination": destination, "bytes_copied": bytes,
+    async fn execute_with_context(&self, params: serde_json::Value, ctx: ToolContext) -> ToolResult {
+        let input: CopyFileInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if let Err(error) = require_non_empty(&input.source, "source") {
+            return error;
+        }
+        if let Err(error) = require_non_empty(&input.destination, "destination") {
+            return error;
+        }
+
+        let resolved_source = resolve_path(&input.source);
+        let resolved_destination = resolve_path(&input.destination);
+
+        let operation_path = format!("{} -> {}", input.source, input.destination);
+        let _ = &ctx;
+        match std::fs::copy(&resolved_source, &resolved_destination) {
+            Ok(bytes_copied) => ToolResult::ok(serde_json::json!({
+                "source": input.source,
+                "destination": input.destination,
+                "bytes_copied": bytes_copied,
             })),
-            Err(e) => ToolResult::err(format!("copy_file failed: {e}")),
+            Err(error) => io_error("copy_file", operation_path, error),
         }
     }
 }
@@ -214,11 +683,47 @@ impl ToolHandler for CopyFile {
 struct DeleteFile;
 #[async_trait]
 impl ToolHandler for DeleteFile {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let path = params["path"].as_str().unwrap_or("");
-        match tokio::fs::remove_file(path).await {
-            Ok(_) => ToolResult::ok(serde_json::json!({ "path": path, "deleted": true })),
-            Err(e) => ToolResult::err(format!("delete_file failed: {e}")),
+    async fn execute_with_context(&self, params: serde_json::Value, ctx: ToolContext) -> ToolResult {
+        let input: DeleteFileInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if let Err(error) = require_non_empty(&input.path, "path") {
+            return error;
+        }
+
+        let resolved_path = resolve_path(&input.path);
+
+        let _ = &ctx;
+        match std::fs::metadata(&resolved_path) {
+            Ok(metadata) => {
+                if !metadata.is_file() {
+                    return op_error(
+                        "delete_file",
+                        format!("path exists but is not a file: {}", input.path),
+                    );
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return ToolResult::ok(serde_json::json!({
+                    "path": input.path,
+                    "deleted": false,
+                    "changed": false,
+                    "already_in_desired_state": true,
+                }));
+            }
+            Err(error) => return io_error("delete_file", input.path.clone(), error),
+        }
+
+        match std::fs::remove_file(&resolved_path) {
+            Ok(_) => ToolResult::ok(serde_json::json!({
+                "path": input.path,
+                "deleted": true,
+                "changed": true,
+                "already_in_desired_state": false,
+            })),
+            Err(error) => io_error("delete_file", input.path, error),
         }
     }
 }
@@ -226,11 +731,47 @@ impl ToolHandler for DeleteFile {
 struct DeleteDirectory;
 #[async_trait]
 impl ToolHandler for DeleteDirectory {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let path = params["path"].as_str().unwrap_or("");
-        match tokio::fs::remove_dir_all(path).await {
-            Ok(_) => ToolResult::ok(serde_json::json!({ "path": path, "deleted": true })),
-            Err(e) => ToolResult::err(format!("delete_directory failed: {e}")),
+    async fn execute_with_context(&self, params: serde_json::Value, ctx: ToolContext) -> ToolResult {
+        let input: DeleteDirectoryInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if let Err(error) = require_non_empty(&input.path, "path") {
+            return error;
+        }
+
+        let resolved_path = resolve_path(&input.path);
+
+        let _ = &ctx;
+        match std::fs::metadata(&resolved_path) {
+            Ok(metadata) => {
+                if !metadata.is_dir() {
+                    return op_error(
+                        "delete_directory",
+                        format!("path exists but is not a directory: {}", input.path),
+                    );
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return ToolResult::ok(serde_json::json!({
+                    "path": input.path,
+                    "deleted": false,
+                    "changed": false,
+                    "already_in_desired_state": true,
+                }));
+            }
+            Err(error) => return io_error("delete_directory", input.path.clone(), error),
+        }
+
+        match std::fs::remove_dir_all(&resolved_path) {
+            Ok(_) => ToolResult::ok(serde_json::json!({
+                "path": input.path,
+                "deleted": true,
+                "changed": true,
+                "already_in_desired_state": false,
+            })),
+            Err(error) => io_error("delete_directory", input.path, error),
         }
     }
 }
@@ -238,110 +779,142 @@ impl ToolHandler for DeleteDirectory {
 struct MoveFile;
 #[async_trait]
 impl ToolHandler for MoveFile {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let source = params["source"].as_str().unwrap_or("");
-        let destination = params["destination"].as_str().unwrap_or("");
-        // Try rename first (same filesystem), fallback to copy+delete
-        if tokio::fs::rename(source, destination).await.is_ok() {
-            return ToolResult::ok(serde_json::json!({
-                "source": source, "destination": destination
-            }));
+    async fn execute_with_context(&self, params: serde_json::Value, ctx: ToolContext) -> ToolResult {
+        let input: MoveFileInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if let Err(error) = require_non_empty(&input.source, "source") {
+            return error;
         }
-        match tokio::fs::copy(source, destination).await {
+        if let Err(error) = require_non_empty(&input.destination, "destination") {
+            return error;
+        }
+
+        let resolved_source = resolve_path(&input.source);
+        let resolved_destination = resolve_path(&input.destination);
+
+        let operation_path = format!("{} -> {}", input.source, input.destination);
+        let _ = &ctx;
+        match std::fs::rename(&resolved_source, &resolved_destination) {
             Ok(_) => {
-                let _ = tokio::fs::remove_file(source).await;
-                ToolResult::ok(serde_json::json!({
-                    "source": source, "destination": destination
-                }))
+                return ToolResult::ok(serde_json::json!({
+                    "source": input.source,
+                    "destination": input.destination,
+                }));
             }
-            Err(e) => ToolResult::err(format!("move_file failed: {e}")),
+            Err(error) => {
+                let is_cross_device_rename = error.raw_os_error() == Some(18);
+                if !is_cross_device_rename {
+                    return io_error("move_file", operation_path, error);
+                }
+            }
+        }
+
+        match std::fs::copy(&resolved_source, &resolved_destination) {
+            Ok(_) => match std::fs::remove_file(&resolved_source) {
+                Ok(_) => ToolResult::ok(serde_json::json!({
+                    "source": input.source,
+                    "destination": input.destination,
+                })),
+                Err(error) => io_error("move_file", input.source, error),
+            },
+            Err(error) => io_error("move_file", operation_path, error),
         }
     }
 }
 
-// ─── Phase 3: Enhanced file search & code intelligence ───
+// Phase 3: Enhanced file search and code intelligence.
 
 struct SearchFileContents;
 #[async_trait]
 impl ToolHandler for SearchFileContents {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let dir = params["directory"].as_str().unwrap_or(".");
-        let query = params["query"].as_str().unwrap_or("");
-        let max = params["max_results"].as_u64().unwrap_or(20) as usize;
-        let context_lines = params["context_lines"].as_u64().unwrap_or(2) as usize;
-        let case_sensitive = params["case_sensitive"].as_bool().unwrap_or(false);
+    async fn execute_with_context(&self, params: serde_json::Value, _ctx: ToolContext) -> ToolResult {
+        let input: SearchFileContentsInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
 
-        if query.is_empty() {
-            return ToolResult::err("query parameter is required");
+        if let Err(error) = require_non_empty(&input.directory, "directory") {
+            return error;
+        }
+        if let Err(error) = require_non_empty(&input.query, "query") {
+            return error;
         }
 
-        let search_query = if case_sensitive {
-            query.to_string()
+        let search_query = if input.case_sensitive {
+            input.query.clone()
         } else {
-            query.to_lowercase()
+            input.query.to_lowercase()
         };
-        let mut results = Vec::new();
 
-        for entry in walkdir::WalkDir::new(dir)
+        let binary_extensions = [
+            "png", "jpg", "jpeg", "gif", "bmp", "ico", "woff", "woff2", "ttf", "otf", "mp3",
+            "mp4", "avi", "mov", "zip", "tar", "gz", "rar", "7z", "exe", "dll", "so", "o",
+            "a", "dylib", "bin", "dat", "db", "sqlite", "gguf", "onnx", "pdf",
+        ];
+
+        let mut results = Vec::new();
+        for entry in walkdir::WalkDir::new(&input.directory)
             .max_depth(10)
             .into_iter()
-            .filter_map(|e| e.ok())
+            .filter_map(|entry| entry.ok())
         {
-            if results.len() >= max {
+            if results.len() >= input.max_results {
                 break;
             }
             if !entry.file_type().is_file() {
                 continue;
             }
+
             let path = entry.path();
-            // Skip binary files by extension
-            let ext = path
+            let extension = path
                 .extension()
-                .and_then(|e| e.to_str())
+                .and_then(|value| value.to_str())
                 .unwrap_or("")
                 .to_lowercase();
-            let binary_exts = [
-                "png", "jpg", "jpeg", "gif", "bmp", "ico", "woff", "woff2", "ttf", "otf", "mp3",
-                "mp4", "avi", "mov", "zip", "tar", "gz", "rar", "7z", "exe", "dll", "so", "o", "a",
-                "dylib", "bin", "dat", "db", "sqlite", "gguf", "onnx", "pdf",
-            ];
-            if binary_exts.contains(&ext.as_str()) {
+
+            if binary_extensions.contains(&extension.as_str()) {
                 continue;
             }
-            // Skip files larger than 1MB
-            if entry.metadata().map(|m| m.len()).unwrap_or(0) > 1_048_576 {
+
+            if entry.metadata().map(|metadata| metadata.len()).unwrap_or(0) > 1_048_576 {
                 continue;
             }
 
             if let Ok(content) = std::fs::read_to_string(path) {
                 let lines: Vec<&str> = content.lines().collect();
-                for (i, line) in lines.iter().enumerate() {
-                    if results.len() >= max {
+                for (index, line) in lines.iter().enumerate() {
+                    if results.len() >= input.max_results {
                         break;
                     }
-                    let matches = if case_sensitive {
+
+                    let matches = if input.case_sensitive {
                         line.contains(&search_query)
                     } else {
                         line.to_lowercase().contains(&search_query)
                     };
+
                     if matches {
-                        let start = i.saturating_sub(context_lines);
-                        let end = (i + context_lines + 1).min(lines.len());
+                        let start = index.saturating_sub(input.context_lines);
+                        let end = (index + input.context_lines + 1).min(lines.len());
                         let context: Vec<String> = lines[start..end]
                             .iter()
                             .enumerate()
-                            .map(|(j, l)| {
+                            .map(|(offset, value)| {
                                 format!(
                                     "{:>4} {}{}",
-                                    start + j + 1,
-                                    if start + j == i { ">" } else { " " },
-                                    l
+                                    start + offset + 1,
+                                    if start + offset == index { ">" } else { " " },
+                                    value
                                 )
                             })
                             .collect();
+
                         results.push(serde_json::json!({
                             "file": path.to_string_lossy(),
-                            "line": i + 1,
+                            "line": index + 1,
                             "match": line.trim(),
                             "context": context.join("\n"),
                         }));
@@ -349,107 +922,127 @@ impl ToolHandler for SearchFileContents {
                 }
             }
         }
-        ToolResult::ok(serde_json::json!({ "matches": results, "count": results.len() }))
+
+        ToolResult::ok(serde_json::json!({
+            "matches": results,
+            "count": results.len(),
+        }))
     }
 }
 
 struct FindFilesByPattern;
 #[async_trait]
 impl ToolHandler for FindFilesByPattern {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let dir = params["directory"].as_str().unwrap_or(".");
-        let pattern = params["pattern"].as_str().unwrap_or("*");
-        let max = params["max_results"].as_u64().unwrap_or(100) as usize;
-        let min_size = params["min_size"].as_u64();
-        let max_size = params["max_size"].as_u64();
-        let file_type = params["type"].as_str().unwrap_or("any"); // "file", "dir", "any"
+    async fn execute_with_context(&self, params: serde_json::Value, _ctx: ToolContext) -> ToolResult {
+        let input: FindFilesByPatternInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
 
-        let glob = match globset::GlobBuilder::new(pattern)
+        if let Err(error) = require_non_empty(&input.directory, "directory") {
+            return error;
+        }
+        if let Err(error) = require_non_empty(&input.pattern, "pattern") {
+            return error;
+        }
+
+        let glob = match globset::GlobBuilder::new(&input.pattern)
             .case_insensitive(true)
             .build()
         {
-            Ok(g) => g.compile_matcher(),
-            Err(e) => return ToolResult::err(format!("invalid pattern: {e}")),
+            Ok(value) => value.compile_matcher(),
+            Err(error) => {
+                return op_error("find_files_by_pattern", format!("invalid pattern: {error}"));
+            }
         };
 
         let mut results = Vec::new();
-        for entry in walkdir::WalkDir::new(dir)
+        for entry in walkdir::WalkDir::new(&input.directory)
             .max_depth(15)
             .into_iter()
-            .filter_map(|e| e.ok())
+            .filter_map(|entry| entry.ok())
         {
-            if results.len() >= max {
+            if results.len() >= input.max_results {
                 break;
             }
-            let meta = match entry.metadata() {
-                Ok(m) => m,
+
+            let metadata = match entry.metadata() {
+                Ok(metadata) => metadata,
                 Err(_) => continue,
             };
-            // Filter by type
-            match file_type {
-                "file" if !meta.is_file() => continue,
-                "dir" if !meta.is_dir() => continue,
+
+            match input.file_type.as_str() {
+                "file" if !metadata.is_file() => continue,
+                "dir" if !metadata.is_dir() => continue,
                 _ => {}
             }
-            // Filter by size
-            if let Some(min) = min_size {
-                if meta.len() < min {
+
+            if let Some(min_size) = input.min_size {
+                if metadata.len() < min_size {
                     continue;
                 }
             }
-            if let Some(max_s) = max_size {
-                if meta.len() > max_s {
+
+            if let Some(max_size) = input.max_size {
+                if metadata.len() > max_size {
                     continue;
                 }
             }
 
             if glob.is_match(entry.file_name().to_string_lossy().as_ref()) {
-                let modified = meta.modified().ok().and_then(|t| {
-                    t.duration_since(std::time::UNIX_EPOCH)
+                let modified = metadata.modified().ok().and_then(|time| {
+                    time.duration_since(std::time::UNIX_EPOCH)
                         .ok()
-                        .map(|d| d.as_secs())
+                        .map(|duration| duration.as_secs())
                 });
+
                 results.push(serde_json::json!({
                     "path": entry.path().to_string_lossy(),
-                    "size": meta.len(),
-                    "is_dir": meta.is_dir(),
+                    "size": metadata.len(),
+                    "is_dir": metadata.is_dir(),
                     "modified_epoch": modified,
                 }));
             }
         }
-        ToolResult::ok(serde_json::json!({ "matches": results, "count": results.len() }))
+
+        ToolResult::ok(serde_json::json!({
+            "matches": results,
+            "count": results.len(),
+        }))
     }
 }
 
 struct GetProjectStructure;
 #[async_trait]
 impl ToolHandler for GetProjectStructure {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let dir = params["path"].as_str().unwrap_or(".");
-        let max_depth = params["max_depth"].as_u64().unwrap_or(4) as usize;
-        let show_hidden = params["show_hidden"].as_bool().unwrap_or(false);
+    async fn execute_with_context(&self, params: serde_json::Value, _ctx: ToolContext) -> ToolResult {
+        let input: GetProjectStructureInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
 
-        fn build_tree(
-            path: &std::path::Path,
-            depth: usize,
-            max_depth: usize,
-            show_hidden: bool,
-        ) -> Vec<serde_json::Value> {
+        if let Err(error) = require_non_empty(&input.path, "path") {
+            return error;
+        }
+
+        fn build_tree(path: &Path, depth: usize, max_depth: usize, show_hidden: bool) -> Vec<serde_json::Value> {
             if depth >= max_depth {
                 return vec![];
             }
+
             let mut entries: Vec<_> = match std::fs::read_dir(path) {
-                Ok(rd) => rd.filter_map(|e| e.ok()).collect(),
+                Ok(read_dir) => read_dir.filter_map(|entry| entry.ok()).collect(),
                 Err(_) => return vec![],
             };
-            entries.sort_by_key(|e| e.file_name());
+            entries.sort_by_key(|entry| entry.file_name());
+
             let mut tree = Vec::new();
             for entry in entries {
                 let name = entry.file_name().to_string_lossy().to_string();
                 if !show_hidden && name.starts_with('.') {
                     continue;
                 }
-                // Skip common non-essential dirs
+
                 if depth == 0
                     && [
                         "node_modules",
@@ -467,73 +1060,94 @@ impl ToolHandler for GetProjectStructure {
                 {
                     continue;
                 }
-                let meta = match entry.metadata() {
-                    Ok(m) => m,
+
+                let metadata = match entry.metadata() {
+                    Ok(metadata) => metadata,
                     Err(_) => continue,
                 };
-                if meta.is_dir() {
+
+                if metadata.is_dir() {
                     let children = build_tree(&entry.path(), depth + 1, max_depth, show_hidden);
                     tree.push(serde_json::json!({
-                        "name": name, "type": "dir", "children": children,
+                        "name": name,
+                        "type": "dir",
+                        "children": children,
                     }));
                 } else {
                     tree.push(serde_json::json!({
-                        "name": name, "type": "file", "size": meta.len(),
+                        "name": name,
+                        "type": "file",
+                        "size": metadata.len(),
                     }));
                 }
             }
+
             tree
         }
 
-        let tree = build_tree(std::path::Path::new(dir), 0, max_depth, show_hidden);
-        ToolResult::ok(serde_json::json!({ "path": dir, "tree": tree }))
+        let tree = build_tree(Path::new(&input.path), 0, input.max_depth, input.show_hidden);
+        ToolResult::ok(serde_json::json!({
+            "path": input.path,
+            "tree": tree,
+        }))
     }
 }
 
 struct CountLinesOfCode;
 #[async_trait]
 impl ToolHandler for CountLinesOfCode {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let dir = params["directory"].as_str().unwrap_or(".");
-        let mut by_lang: std::collections::HashMap<String, (usize, usize)> =
-            std::collections::HashMap::new(); // lang -> (files, lines)
+    async fn execute_with_context(&self, params: serde_json::Value, _ctx: ToolContext) -> ToolResult {
+        let input: CountLinesOfCodeInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if let Err(error) = require_non_empty(&input.directory, "directory") {
+            return error;
+        }
+
+        let mut by_language: HashMap<String, (usize, usize)> = HashMap::new();
         let mut total_files = 0usize;
         let mut total_lines = 0usize;
 
-        for entry in walkdir::WalkDir::new(dir)
+        for entry in walkdir::WalkDir::new(&input.directory)
             .max_depth(15)
             .into_iter()
-            .filter_map(|e| e.ok())
+            .filter_map(|entry| entry.ok())
         {
             if !entry.file_type().is_file() {
                 continue;
             }
+
             let path = entry.path();
-            let lang = crate::preprocessing::code::CodeProcessor::detect_language(path);
-            if lang == "unknown" {
+            let language = crate::preprocessing::code::CodeProcessor::detect_language(path);
+            if language == "unknown" {
                 continue;
             }
+
             if let Ok(content) = std::fs::read_to_string(path) {
                 let lines = content.lines().count();
-                let entry = by_lang.entry(lang).or_insert((0, 0));
-                entry.0 += 1;
-                entry.1 += lines;
+                let stats = by_language.entry(language).or_insert((0, 0));
+                stats.0 += 1;
+                stats.1 += lines;
                 total_files += 1;
                 total_lines += lines;
             }
         }
 
-        let breakdown: Vec<serde_json::Value> = by_lang
+        let breakdown: Vec<serde_json::Value> = by_language
             .iter()
-            .map(|(lang, (files, lines))| {
+            .map(|(language, (files, lines))| {
                 serde_json::json!({
-                    "language": lang, "files": files, "lines": lines,
+                    "language": language,
+                    "files": files,
+                    "lines": lines,
                 })
             })
             .collect();
 
         ToolResult::ok(serde_json::json!({
-            "directory": dir,
+            "directory": input.directory,
             "total_files": total_files,
             "total_lines": total_lines,
             "breakdown": breakdown,
@@ -544,17 +1158,26 @@ impl ToolHandler for CountLinesOfCode {
 struct DiffFiles;
 #[async_trait]
 impl ToolHandler for DiffFiles {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let file_a = params["file_a"].as_str().unwrap_or("");
-        let file_b = params["file_b"].as_str().unwrap_or("");
-
-        let content_a = match tokio::fs::read_to_string(file_a).await {
-            Ok(c) => c,
-            Err(e) => return ToolResult::err(format!("read file_a failed: {e}")),
+    async fn execute_with_context(&self, params: serde_json::Value, ctx: ToolContext) -> ToolResult {
+        let input: DiffFilesInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
         };
-        let content_b = match tokio::fs::read_to_string(file_b).await {
-            Ok(c) => c,
-            Err(e) => return ToolResult::err(format!("read file_b failed: {e}")),
+
+        if let Err(error) = require_non_empty(&input.file_a, "file_a") {
+            return error;
+        }
+        if let Err(error) = require_non_empty(&input.file_b, "file_b") {
+            return error;
+        }
+
+        let content_a = match env_read_string(&ctx, PathBuf::from(&input.file_a)).await {
+            Ok(content) => content,
+            Err(error) => return error,
+        };
+        let content_b = match env_read_string(&ctx, PathBuf::from(&input.file_b)).await {
+            Ok(content) => content,
+            Err(error) => return error,
         };
 
         let lines_a: Vec<&str> = content_a.lines().collect();
@@ -562,21 +1185,21 @@ impl ToolHandler for DiffFiles {
         let mut diffs = Vec::new();
         let max_len = lines_a.len().max(lines_b.len());
 
-        for i in 0..max_len {
-            let a = lines_a.get(i).copied().unwrap_or("");
-            let b = lines_b.get(i).copied().unwrap_or("");
-            if a != b {
+        for index in 0..max_len {
+            let line_a = lines_a.get(index).copied().unwrap_or("");
+            let line_b = lines_b.get(index).copied().unwrap_or("");
+            if line_a != line_b {
                 diffs.push(serde_json::json!({
-                    "line": i + 1,
-                    "file_a": a,
-                    "file_b": b,
+                    "line": index + 1,
+                    "file_a": line_a,
+                    "file_b": line_b,
                 }));
             }
         }
 
         ToolResult::ok(serde_json::json!({
-            "file_a": file_a,
-            "file_b": file_b,
+            "file_a": input.file_a,
+            "file_b": input.file_b,
             "lines_a": lines_a.len(),
             "lines_b": lines_b.len(),
             "differences": diffs.len(),
@@ -588,55 +1211,65 @@ impl ToolHandler for DiffFiles {
 struct FindTodos;
 #[async_trait]
 impl ToolHandler for FindTodos {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let dir = params["directory"].as_str().unwrap_or(".");
-        let max = params["max_results"].as_u64().unwrap_or(50) as usize;
-        let pattern =
-            regex::Regex::new(r"(?i)\b(TODO|FIXME|HACK|XXX|BUG|OPTIMIZE|REFACTOR)\b[:\s]*(.*)")
-                .unwrap();
+    async fn execute_with_context(&self, params: serde_json::Value, _ctx: ToolContext) -> ToolResult {
+        let input: FindTodosInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
 
-        let binary_exts = [
-            "png", "jpg", "jpeg", "gif", "bmp", "ico", "woff", "woff2", "ttf", "otf", "mp3", "mp4",
-            "zip", "tar", "gz", "rar", "exe", "dll", "so", "o", "a", "bin", "dat", "db", "sqlite",
-            "gguf", "onnx", "pdf",
+        if let Err(error) = require_non_empty(&input.directory, "directory") {
+            return error;
+        }
+
+        let pattern = match regex::Regex::new(r"(?i)\b(TODO|FIXME|HACK|XXX|BUG|OPTIMIZE|REFACTOR)\b[:\s]*(.*)") {
+            Ok(pattern) => pattern,
+            Err(error) => return op_error("find_todos", format!("invalid todo regex: {error}")),
+        };
+
+        let binary_extensions = [
+            "png", "jpg", "jpeg", "gif", "bmp", "ico", "woff", "woff2", "ttf", "otf", "mp3",
+            "mp4", "zip", "tar", "gz", "rar", "exe", "dll", "so", "o", "a", "bin", "dat",
+            "db", "sqlite", "gguf", "onnx", "pdf",
         ];
 
         let mut results = Vec::new();
-        for entry in walkdir::WalkDir::new(dir)
+        for entry in walkdir::WalkDir::new(&input.directory)
             .max_depth(10)
             .into_iter()
-            .filter_map(|e| e.ok())
+            .filter_map(|entry| entry.ok())
         {
-            if results.len() >= max {
+            if results.len() >= input.max_results {
                 break;
             }
             if !entry.file_type().is_file() {
                 continue;
             }
+
             let path = entry.path();
-            let ext = path
+            let extension = path
                 .extension()
-                .and_then(|e| e.to_str())
+                .and_then(|value| value.to_str())
                 .unwrap_or("")
                 .to_lowercase();
-            if binary_exts.contains(&ext.as_str()) {
+            if binary_extensions.contains(&extension.as_str()) {
                 continue;
             }
-            if entry.metadata().map(|m| m.len()).unwrap_or(0) > 1_048_576 {
+
+            if entry.metadata().map(|metadata| metadata.len()).unwrap_or(0) > 1_048_576 {
                 continue;
             }
 
             if let Ok(content) = std::fs::read_to_string(path) {
-                for (i, line) in content.lines().enumerate() {
-                    if results.len() >= max {
+                for (index, line) in content.lines().enumerate() {
+                    if results.len() >= input.max_results {
                         break;
                     }
-                    if let Some(cap) = pattern.captures(line) {
-                        let tag = cap.get(1).map(|m| m.as_str()).unwrap_or("TODO");
-                        let message = cap.get(2).map(|m| m.as_str().trim()).unwrap_or("");
+                    if let Some(captures) = pattern.captures(line) {
+                        let tag = captures.get(1).map(|value| value.as_str()).unwrap_or("TODO");
+                        let message = captures.get(2).map(|value| value.as_str().trim()).unwrap_or("");
                         results.push(serde_json::json!({
                             "file": path.to_string_lossy(),
-                            "line": i + 1,
+                            "line": index + 1,
                             "tag": tag.to_uppercase(),
                             "message": message,
                             "context": line.trim(),
@@ -647,7 +1280,7 @@ impl ToolHandler for FindTodos {
         }
 
         ToolResult::ok(serde_json::json!({
-            "directory": dir,
+            "directory": input.directory,
             "count": results.len(),
             "items": results,
         }))
@@ -657,12 +1290,20 @@ impl ToolHandler for FindTodos {
 struct AnalyzeCode;
 #[async_trait]
 impl ToolHandler for AnalyzeCode {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let path = params["path"].as_str().unwrap_or("");
-        let p = std::path::Path::new(path);
-        match crate::preprocessing::code::CodeProcessor::analyze(p) {
+    async fn execute_with_context(&self, params: serde_json::Value, _ctx: ToolContext) -> ToolResult {
+        let input: AnalyzeCodeInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if let Err(error) = require_non_empty(&input.path, "path") {
+            return error;
+        }
+
+        let path = Path::new(&input.path);
+        match crate::preprocessing::code::CodeProcessor::analyze(path) {
             Ok(info) => ToolResult::ok(serde_json::json!({
-                "path": path,
+                "path": input.path,
                 "language": info.language,
                 "line_count": info.line_count,
                 "functions": info.functions,
@@ -670,12 +1311,12 @@ impl ToolHandler for AnalyzeCode {
                 "function_count": info.functions.len(),
                 "import_count": info.imports.len(),
             })),
-            Err(e) => ToolResult::err(format!("analyze failed: {e}")),
+            Err(error) => op_error("analyze_code", error.to_string()),
         }
     }
 }
 
-// ─── Registration ───
+// Registration.
 
 pub fn register(reg: &ToolRegistry) {
     let tools: Vec<(ToolDef, Arc<dyn ToolHandler>)> = vec![
@@ -758,6 +1399,7 @@ pub fn register(reg: &ToolRegistry) {
                 parameters: vec![
                     param("path", "string", "File path", true),
                     param("content", "string", "Content to write", true),
+                    param("overwrite", "boolean", "Overwrite existing file (default true)", false),
                 ],
             },
             Arc::new(WriteFile),

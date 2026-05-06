@@ -25,8 +25,12 @@ use crate::sidecar::SidecarBridge;
 use crate::tools::google_workspace_contract as gw_contract;
 use crate::tools::registry::{ParamDef, ToolDef, ToolHandler, ToolRegistry};
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::de::DeserializeOwned;
+use serde::Deserialize;
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::Duration;
 
 /// Lazy reference to the gworkspace MCP client.
 /// Starts as None; populated by `set_client()` once the MCP server connects.
@@ -61,6 +65,39 @@ struct GwBridge {
     sidecar: Arc<SidecarBridge>,
 }
 
+fn parse_input<T: DeserializeOwned>(params: serde_json::Value) -> Result<T, ToolResult> {
+    let normalized = if params.is_null() {
+        serde_json::json!({})
+    } else {
+        params
+    };
+
+    serde_json::from_value(normalized)
+        .map_err(|error| ToolResult::err(format!("invalid parameters: {error}")))
+}
+
+fn require_non_empty(value: &str, field: &str) -> Result<(), ToolResult> {
+    if value.trim().is_empty() {
+        return Err(ToolResult::err(format!("{field} is required")));
+    }
+    Ok(())
+}
+
+#[derive(Debug, thiserror::Error)]
+enum ToolExecutionError {
+    #[error("google_workspace mcp request timed out for tool '{tool}' after {timeout_secs}s")]
+    McpTimeout { tool: String, timeout_secs: u64 },
+    #[error("google_workspace mcp request failed for tool '{tool}': {reason}")]
+    McpRequest { tool: String, reason: String },
+    #[error("google_workspace sidecar request timed out for method '{method}' after {timeout_secs}s")]
+    SidecarTimeout {
+        method: String,
+        timeout_secs: u64,
+    },
+    #[error("google_workspace sidecar request failed for method '{method}': {reason}")]
+    SidecarRequest { method: String, reason: String },
+}
+
 fn active_google_account() -> String {
     std::env::var("KRIA_GW_ACCOUNT").unwrap_or_else(|_| "personal".into())
 }
@@ -68,6 +105,204 @@ fn active_google_account() -> String {
 const GMAIL_MAX_RESULTS_CAP: u64 = 200;
 const GMAIL_PAGE_SIZE_CAP: u64 = 50;
 const GMAIL_MAX_PAGE_FETCHES: usize = 6;
+const MCP_REQUEST_TIMEOUT_SECS: u64 = 30;
+const SIDECAR_REQUEST_TIMEOUT_SECS: u64 = 20;
+
+fn default_gmail_max_results() -> u64 {
+    10
+}
+
+fn default_calendar_max_results() -> u64 {
+    20
+}
+
+fn default_calendar_today_max_results() -> u64 {
+    50
+}
+
+fn default_sheet_range() -> String {
+    "A1".to_string()
+}
+
+fn default_untitled_title() -> String {
+    "Untitled".to_string()
+}
+
+fn default_untitled_form_title() -> String {
+    "Untitled Form".to_string()
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct EmptyInput {}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct GmailInboxInput {
+    #[serde(default)]
+    query: Option<String>,
+    #[serde(default = "default_gmail_max_results")]
+    max_results: u64,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct GmailSearchInput {
+    query: String,
+    #[serde(default = "default_gmail_max_results")]
+    max_results: u64,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ReadEmailInput {
+    message_id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SendEmailInput {
+    to: String,
+    subject: String,
+    body: String,
+    #[serde(default)]
+    cc: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DeleteEmailInput {
+    message_id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CalendarSearchInput {
+    #[serde(default)]
+    query: Option<String>,
+    #[serde(default)]
+    time_min: Option<String>,
+    #[serde(default)]
+    time_max: Option<String>,
+    #[serde(default = "default_calendar_max_results")]
+    max_results: u64,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CreateCalendarEventInput {
+    summary: String,
+    start: String,
+    end: String,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    location: Option<String>,
+    #[serde(default)]
+    attendees: Option<Vec<serde_json::Value>>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DeleteCalendarEventInput {
+    event_id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DriveSearchInput {
+    query: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DriveListInput {
+    #[serde(default)]
+    folder_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DriveReadInput {
+    file_id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DriveDeleteInput {
+    file_id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DocsReadInput {
+    document_id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CreateDocumentInput {
+    #[serde(default = "default_untitled_title")]
+    title: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct EditDocumentInput {
+    document_id: String,
+    text: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SheetsReadInput {
+    spreadsheet_id: String,
+    #[serde(default)]
+    range: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CreateSpreadsheetInput {
+    #[serde(default = "default_untitled_title")]
+    title: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct EditSpreadsheetInput {
+    spreadsheet_id: String,
+    #[serde(default = "default_sheet_range")]
+    range: String,
+    values: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SlidesReadInput {
+    presentation_id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CreatePresentationInput {
+    #[serde(default = "default_untitled_title")]
+    title: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct FormsListInput {
+    #[serde(default)]
+    query: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CreateFormInput {
+    #[serde(default = "default_untitled_form_title")]
+    title: String,
+}
 
 fn new_correlation_id() -> String {
     gw_contract::new_correlation_id()
@@ -416,33 +651,12 @@ fn build_google_resource_url(resource_kind: &str, resource_id: &str) -> Option<S
     }
 }
 
-fn calendar_param_str(params: &serde_json::Value, primary: &str, fallback: &str) -> String {
-    params
-        .get(primary)
-        .and_then(|v| v.as_str())
-        .or_else(|| params.get(fallback).and_then(|v| v.as_str()))
-        .unwrap_or("")
-        .to_string()
-}
-
-fn calendar_create_args(params: &serde_json::Value, alternate_shape: bool) -> serde_json::Value {
-    let summary = params
-        .get("summary")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let start = calendar_param_str(params, "start", "startDateTime");
-    let end = calendar_param_str(params, "end", "endDateTime");
-    let description = params
-        .get("description")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let location = params
-        .get("location")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+fn calendar_create_args(input: &CreateCalendarEventInput, alternate_shape: bool) -> serde_json::Value {
+    let summary = input.summary.clone();
+    let start = input.start.clone();
+    let end = input.end.clone();
+    let description = input.description.clone().unwrap_or_default();
+    let location = input.location.clone().unwrap_or_default();
 
     let mut args = if alternate_shape {
         serde_json::json!({
@@ -462,11 +676,7 @@ fn calendar_create_args(params: &serde_json::Value, alternate_shape: bool) -> se
         })
     };
 
-    if let Some(attendees) = params
-        .get("attendees")
-        .and_then(|v| v.as_array())
-        .filter(|arr| !arr.is_empty())
-    {
+    if let Some(attendees) = input.attendees.as_ref().filter(|arr| !arr.is_empty()) {
         args["attendees"] = serde_json::Value::Array(attendees.clone());
     }
 
@@ -516,7 +726,7 @@ impl GwBridge {
             Some(c) => c.clone(),
             None => {
                 let msg = format!(
-                    "Google Workspace is not connected. \
+                    "Google Workspace credentials are not connected/authenticated. \
                      Run: npx google-workspace-mcp accounts add personal  \
                      Then restart KRIA. (tool={tool})"
                 );
@@ -543,8 +753,14 @@ impl GwBridge {
         };
         drop(guard);
 
-        match client.call_tool(tool, Some(args)).await {
-            Ok(result) => {
+        let timed_call = tokio::time::timeout(
+            Duration::from_secs(MCP_REQUEST_TIMEOUT_SECS),
+            client.call_tool(tool, Some(args)),
+        )
+        .await;
+
+        match timed_call {
+            Ok(Ok(result)) => {
                 let text: String = result
                     .content
                     .iter()
@@ -579,10 +795,40 @@ impl GwBridge {
                     }
                 }
             }
-            Err(e) => {
-                tracing::error!("[GW] tool '{}' call error: {}", tool, e);
-                let user_error = format!("MCP call failed: {e}");
+            Ok(Err(error)) => {
+                let execution_error = ToolExecutionError::McpRequest {
+                    tool: tool.to_string(),
+                    reason: error.to_string(),
+                };
+                tracing::error!("[GW] tool '{}' call error: {}", tool, execution_error);
+                let user_error = execution_error.to_string();
                 let gw_error = mcp_transport_error(&user_error);
+                ToolResult {
+                    success: false,
+                    data: envelope_result_with_meta(
+                        tool,
+                        serde_json::json!({ "error": gw_error_payload(&gw_error, Some(&user_error)) }),
+                        None,
+                        Some(&correlation_id),
+                        Some(&account),
+                    ),
+                    error: Some(user_error),
+                }
+            }
+            Err(_) => {
+                let execution_error = ToolExecutionError::McpTimeout {
+                    tool: tool.to_string(),
+                    timeout_secs: MCP_REQUEST_TIMEOUT_SECS,
+                };
+                tracing::error!("[GW] tool '{}' call timeout: {}", tool, execution_error);
+                let user_error = execution_error.to_string();
+                let gw_error = GwErrorDescriptor {
+                    code: "mcp_timeout",
+                    category: "transient",
+                    recovery_action: "retry",
+                    retryable: true,
+                    user_facing: user_error.clone(),
+                };
                 ToolResult {
                     success: false,
                     data: envelope_result_with_meta(
@@ -641,8 +887,14 @@ impl GwBridge {
         let raw_text = raw_result.data.as_str().unwrap_or("").to_string();
 
         let buffer_params = serde_json::json!({ "raw": raw_result.data });
-        match self.sidecar.request(sidecar_method, buffer_params).await {
-            Ok(digest) => {
+        let timed_sidecar_call = tokio::time::timeout(
+            Duration::from_secs(SIDECAR_REQUEST_TIMEOUT_SECS),
+            self.sidecar.request(sidecar_method, buffer_params),
+        )
+        .await;
+
+        match timed_sidecar_call {
+            Ok(Ok(digest)) => {
                 tracing::info!("[GW] sidecar '{}' digest produced", sidecar_method);
                 ToolResult {
                     success: true,
@@ -656,17 +908,71 @@ impl GwBridge {
                     error: None,
                 }
             }
-            Err(e) => {
+            Ok(Err(error)) => {
+                let execution_error = ToolExecutionError::SidecarRequest {
+                    method: sidecar_method.to_string(),
+                    reason: error.to_string(),
+                };
                 tracing::warn!(
                     "[GW] sidecar '{}' failed ({}), returning raw",
                     sidecar_method,
-                    e
+                    execution_error
                 );
+
+                let mut fallback_data = parse_json_or_text(&raw_text);
+                if let Some(object) = fallback_data.as_object_mut() {
+                    object.insert(
+                        "sidecar_warning".into(),
+                        serde_json::json!(execution_error.to_string()),
+                    );
+                } else {
+                    fallback_data = serde_json::json!({
+                        "data": fallback_data,
+                        "sidecar_warning": execution_error.to_string(),
+                    });
+                }
+
                 ToolResult {
                     success: true,
                     data: envelope_result_with_meta(
                         mcp_tool,
-                        parse_json_or_text(&raw_text),
+                        fallback_data,
+                        Some(&raw_text),
+                        Some(&correlation_id),
+                        Some(&account),
+                    ),
+                    error: None,
+                }
+            }
+            Err(_) => {
+                let execution_error = ToolExecutionError::SidecarTimeout {
+                    method: sidecar_method.to_string(),
+                    timeout_secs: SIDECAR_REQUEST_TIMEOUT_SECS,
+                };
+                tracing::warn!(
+                    "[GW] sidecar '{}' failed ({}), returning raw",
+                    sidecar_method,
+                    execution_error
+                );
+
+                let mut fallback_data = parse_json_or_text(&raw_text);
+                if let Some(object) = fallback_data.as_object_mut() {
+                    object.insert(
+                        "sidecar_warning".into(),
+                        serde_json::json!(execution_error.to_string()),
+                    );
+                } else {
+                    fallback_data = serde_json::json!({
+                        "data": fallback_data,
+                        "sidecar_warning": execution_error.to_string(),
+                    });
+                }
+
+                ToolResult {
+                    success: true,
+                    data: envelope_result_with_meta(
+                        mcp_tool,
+                        fallback_data,
                         Some(&raw_text),
                         Some(&correlation_id),
                         Some(&account),
@@ -811,13 +1117,14 @@ impl GwBridge {
     }
 }
 
-fn gmail_max_results(params: &serde_json::Value, default: u64) -> u64 {
-    params
-        .get("max_results")
-        .and_then(|v| v.as_u64())
-        .filter(|count| *count > 0)
-        .map(|count| count.min(GMAIL_MAX_RESULTS_CAP))
-        .unwrap_or(default)
+fn gmail_max_results(max_results: u64, default: u64) -> u64 {
+    let normalized = if max_results == 0 {
+        default
+    } else {
+        max_results
+    };
+
+    normalized.clamp(1, GMAIL_MAX_RESULTS_CAP)
 }
 
 fn normalize_gmail_inbox_query(query: Option<&str>) -> String {
@@ -865,11 +1172,16 @@ struct GwGmailInbox(GwBridge);
 #[async_trait]
 impl ToolHandler for GwGmailInbox {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let input: GmailInboxInput = match parse_input(params) {
+            Ok(value) => value,
+            Err(err) => return err,
+        };
+
         // searchGmail returns sender, subject, date, labels, preview, and IDs.
         // That is much more useful for "check my inbox" flows than listGmailMessages,
         // which only returns IDs and links.
-        let query = normalize_gmail_inbox_query(params.get("query").and_then(|v| v.as_str()));
-        let requested = gmail_max_results(&params, 10);
+        let query = normalize_gmail_inbox_query(input.query.as_deref());
+        let requested = gmail_max_results(input.max_results, default_gmail_max_results());
         self.0.grounded_gmail_search(query, requested).await
     }
 }
@@ -878,12 +1190,17 @@ struct GwGmailSearch(GwBridge);
 #[async_trait]
 impl ToolHandler for GwGmailSearch {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let input: GmailSearchInput = match parse_input(params) {
+            Ok(value) => value,
+            Err(err) => return err,
+        };
+        if let Err(err) = require_non_empty(&input.query, "query") {
+            return err;
+        }
+
         // searchGmail: account, query, maxResults?
-        let query = params.get("query").and_then(|v| v.as_str()).unwrap_or("");
-        let requested = gmail_max_results(&params, 10);
-        self.0
-            .grounded_gmail_search(query.to_string(), requested)
-            .await
+        let requested = gmail_max_results(input.max_results, default_gmail_max_results());
+        self.0.grounded_gmail_search(input.query, requested).await
     }
 }
 
@@ -891,12 +1208,16 @@ struct GwGmailRead(GwBridge);
 #[async_trait]
 impl ToolHandler for GwGmailRead {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let input: ReadEmailInput = match parse_input(params) {
+            Ok(value) => value,
+            Err(err) => return err,
+        };
+        if let Err(err) = require_non_empty(&input.message_id, "message_id") {
+            return err;
+        }
+
         // readGmailMessage: account, messageId
-        let msg_id = params
-            .get("message_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let args = serde_json::json!({ "messageId": msg_id });
+        let args = serde_json::json!({ "messageId": input.message_id });
         self.0.mcp_call("readGmailMessage", args).await
     }
 }
@@ -905,14 +1226,26 @@ struct GwGmailSend(GwBridge);
 #[async_trait]
 impl ToolHandler for GwGmailSend {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let input: SendEmailInput = match parse_input(params) {
+            Ok(value) => value,
+            Err(err) => return err,
+        };
+        if let Err(err) = require_non_empty(&input.to, "to") {
+            return err;
+        }
+
         // Safe send workflow: create draft first, then send it
         // Step 1: createGmailDraft
-        let draft_args = serde_json::json!({
-            "to": params.get("to").and_then(|v| v.as_str()).unwrap_or(""),
-            "subject": params.get("subject").and_then(|v| v.as_str()).unwrap_or(""),
-            "body": params.get("body").and_then(|v| v.as_str()).unwrap_or(""),
-            "cc": params.get("cc").and_then(|v| v.as_str()).unwrap_or(""),
+        // TODO (ADR Pillar 4): Implement pre-flight idempotency check when Sidecar API supports read-before-write
+        let mut draft_args = serde_json::json!({
+            "to": input.to,
+            "subject": input.subject,
+            "body": input.body,
         });
+        if let Some(cc) = input.cc.filter(|value| !value.trim().is_empty()) {
+            draft_args["cc"] = serde_json::json!(cc);
+        }
+
         let draft_result = self.0.mcp_call("createGmailDraft", draft_args).await;
         if !draft_result.success {
             return draft_result;
@@ -944,14 +1277,19 @@ struct GwGmailDelete(GwBridge);
 #[async_trait]
 impl ToolHandler for GwGmailDelete {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let msg_id = params
-            .get("message_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let input: DeleteEmailInput = match parse_input(params) {
+            Ok(value) => value,
+            Err(err) => return err,
+        };
+        if let Err(err) = require_non_empty(&input.message_id, "message_id") {
+            return err;
+        }
+
+        // TODO (ADR Pillar 4): Implement pre-flight idempotency check when Sidecar API supports read-before-write
         self.0
             .mcp_call(
                 "deleteGmailMessage",
-                serde_json::json!({ "messageId": msg_id }),
+                serde_json::json!({ "messageId": input.message_id }),
             )
             .await
     }
@@ -960,7 +1298,12 @@ impl ToolHandler for GwGmailDelete {
 struct GwCalendarToday(GwBridge);
 #[async_trait]
 impl ToolHandler for GwCalendarToday {
-    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let _: EmptyInput = match parse_input(params) {
+            Ok(value) => value,
+            Err(err) => return err,
+        };
+
         // listCalendarEvents with today's date range
         let now = chrono::Utc::now();
         let start = now
@@ -975,7 +1318,11 @@ impl ToolHandler for GwCalendarToday {
             .unwrap()
             .and_utc()
             .to_rfc3339();
-        let args = serde_json::json!({ "timeMin": start, "timeMax": end, "maxResults": 50 });
+        let args = serde_json::json!({
+            "timeMin": start,
+            "timeMax": end,
+            "maxResults": default_calendar_today_max_results(),
+        });
         self.0.mcp_call("listCalendarEvents", args).await
     }
 }
@@ -984,14 +1331,25 @@ struct GwCalendarSearch(GwBridge);
 #[async_trait]
 impl ToolHandler for GwCalendarSearch {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let mut args = serde_json::json!({ "maxResults": 20 });
-        if let Some(q) = params.get("query").and_then(|v| v.as_str()) {
+        let input: CalendarSearchInput = match parse_input(params) {
+            Ok(value) => value,
+            Err(err) => return err,
+        };
+
+        let max_results = if input.max_results == 0 {
+            default_calendar_max_results()
+        } else {
+            input.max_results
+        };
+
+        let mut args = serde_json::json!({ "maxResults": max_results });
+        if let Some(q) = input.query.filter(|value| !value.trim().is_empty()) {
             args["q"] = serde_json::json!(q);
         }
-        if let Some(t) = params.get("time_min").and_then(|v| v.as_str()) {
+        if let Some(t) = input.time_min.filter(|value| !value.trim().is_empty()) {
             args["timeMin"] = serde_json::json!(t);
         }
-        if let Some(t) = params.get("time_max").and_then(|v| v.as_str()) {
+        if let Some(t) = input.time_max.filter(|value| !value.trim().is_empty()) {
             args["timeMax"] = serde_json::json!(t);
         }
         self.0.mcp_call("listCalendarEvents", args).await
@@ -1002,7 +1360,22 @@ struct GwCalendarCreate(GwBridge);
 #[async_trait]
 impl ToolHandler for GwCalendarCreate {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let primary_args = calendar_create_args(&params, false);
+        let input: CreateCalendarEventInput = match parse_input(params) {
+            Ok(value) => value,
+            Err(err) => return err,
+        };
+        if let Err(err) = require_non_empty(&input.summary, "summary") {
+            return err;
+        }
+        if let Err(err) = require_non_empty(&input.start, "start") {
+            return err;
+        }
+        if let Err(err) = require_non_empty(&input.end, "end") {
+            return err;
+        }
+
+        // TODO (ADR Pillar 4): Implement pre-flight idempotency check when Sidecar API supports read-before-write
+        let primary_args = calendar_create_args(&input, false);
         let primary_result = self.0.mcp_call("createCalendarEvent", primary_args).await;
         if primary_result.success
             || !should_retry_calendar_with_alternate_shape(primary_result.error.as_deref())
@@ -1015,7 +1388,7 @@ impl ToolHandler for GwCalendarCreate {
         );
         let alternate_result = self
             .0
-            .mcp_call("createCalendarEvent", calendar_create_args(&params, true))
+            .mcp_call("createCalendarEvent", calendar_create_args(&input, true))
             .await;
         if alternate_result.success {
             return alternate_result;
@@ -1045,14 +1418,19 @@ struct GwCalendarDelete(GwBridge);
 #[async_trait]
 impl ToolHandler for GwCalendarDelete {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let event_id = params
-            .get("event_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let input: DeleteCalendarEventInput = match parse_input(params) {
+            Ok(value) => value,
+            Err(err) => return err,
+        };
+        if let Err(err) = require_non_empty(&input.event_id, "event_id") {
+            return err;
+        }
+
+        // TODO (ADR Pillar 4): Implement pre-flight idempotency check when Sidecar API supports read-before-write
         self.0
             .mcp_call(
                 "deleteCalendarEvent",
-                serde_json::json!({ "eventId": event_id }),
+                serde_json::json!({ "eventId": input.event_id }),
             )
             .await
     }
@@ -1065,8 +1443,12 @@ struct GwDriveSearch(GwBridge);
 #[async_trait]
 impl ToolHandler for GwDriveSearch {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let query = params.get("query").and_then(|v| v.as_str()).unwrap_or("");
-        if query.trim().is_empty() || looks_like_drive_listing_phrase(query) {
+        let input: DriveSearchInput = match parse_input(params) {
+            Ok(value) => value,
+            Err(err) => return err,
+        };
+
+        if input.query.trim().is_empty() || looks_like_drive_listing_phrase(&input.query) {
             return self
                 .0
                 .fetch_and_buffer(
@@ -1077,7 +1459,7 @@ impl ToolHandler for GwDriveSearch {
                 .await;
         }
 
-        let args = serde_json::json!({ "query": query });
+        let args = serde_json::json!({ "query": input.query });
         self.0
             .fetch_and_buffer("searchGoogleDocs", args, "google.summarize_drive_folder")
             .await
@@ -1088,8 +1470,12 @@ struct GwDriveList(GwBridge);
 #[async_trait]
 impl ToolHandler for GwDriveList {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let folder_id = params.get("folder_id").and_then(|v| v.as_str());
-        let args = if let Some(id) = folder_id {
+        let input: DriveListInput = match parse_input(params) {
+            Ok(value) => value,
+            Err(err) => return err,
+        };
+
+        let args = if let Some(id) = input.folder_id.filter(|value| !value.trim().is_empty()) {
             serde_json::json!({ "folderId": id })
         } else {
             serde_json::json!({})
@@ -1104,9 +1490,16 @@ struct GwDriveRead(GwBridge);
 #[async_trait]
 impl ToolHandler for GwDriveRead {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let input: DriveReadInput = match parse_input(params) {
+            Ok(value) => value,
+            Err(err) => return err,
+        };
+        if let Err(err) = require_non_empty(&input.file_id, "file_id") {
+            return err;
+        }
+
         // Try as a Doc first; format=text is safe for all readable files
-        let file_id = params.get("file_id").and_then(|v| v.as_str()).unwrap_or("");
-        let args = serde_json::json!({ "documentId": file_id, "format": "text" });
+        let args = serde_json::json!({ "documentId": input.file_id, "format": "text" });
         self.0.mcp_call("readGoogleDoc", args).await
     }
 }
@@ -1115,9 +1508,17 @@ struct GwDriveDelete(GwBridge);
 #[async_trait]
 impl ToolHandler for GwDriveDelete {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let file_id = params.get("file_id").and_then(|v| v.as_str()).unwrap_or("");
+        let input: DriveDeleteInput = match parse_input(params) {
+            Ok(value) => value,
+            Err(err) => return err,
+        };
+        if let Err(err) = require_non_empty(&input.file_id, "file_id") {
+            return err;
+        }
+
+        // TODO (ADR Pillar 4): Implement pre-flight idempotency check when Sidecar API supports read-before-write
         self.0
-            .mcp_call("deleteFile", serde_json::json!({ "fileId": file_id }))
+            .mcp_call("deleteFile", serde_json::json!({ "fileId": input.file_id }))
             .await
     }
 }
@@ -1129,11 +1530,15 @@ struct GwDocsRead(GwBridge);
 #[async_trait]
 impl ToolHandler for GwDocsRead {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let doc_id = params
-            .get("document_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let args = serde_json::json!({ "documentId": doc_id, "format": "markdown" });
+        let input: DocsReadInput = match parse_input(params) {
+            Ok(value) => value,
+            Err(err) => return err,
+        };
+        if let Err(err) = require_non_empty(&input.document_id, "document_id") {
+            return err;
+        }
+
+        let args = serde_json::json!({ "documentId": input.document_id, "format": "markdown" });
         self.0
             .fetch_and_buffer("readGoogleDoc", args, "google.extract_doc")
             .await
@@ -1144,14 +1549,16 @@ struct GwDocsCreate(GwBridge);
 #[async_trait]
 impl ToolHandler for GwDocsCreate {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let title = params
-            .get("title")
-            .and_then(|v| v.as_str())
-            .unwrap_or("Untitled");
+        let input: CreateDocumentInput = match parse_input(params) {
+            Ok(value) => value,
+            Err(err) => return err,
+        };
+        let title = input.title;
 
+        // TODO (ADR Pillar 4): Implement pre-flight idempotency check when Sidecar API supports read-before-write
         let create_result = self
             .0
-            .mcp_call_raw("createDocument", serde_json::json!({ "title": title }))
+            .mcp_call_raw("createDocument", serde_json::json!({ "title": title.clone() }))
             .await;
         if !create_result.success {
             return create_result;
@@ -1169,7 +1576,7 @@ impl ToolHandler for GwDocsCreate {
 
         let mut result_data = serde_json::json!({
             "resource": "document",
-            "title": title,
+            "title": title.clone(),
             "status": "created_unverified",
             "verified": false,
             "create": create_data,
@@ -1216,16 +1623,20 @@ struct GwDocsEdit(GwBridge);
 #[async_trait]
 impl ToolHandler for GwDocsEdit {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let doc_id = params
-            .get("document_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let text = params.get("text").and_then(|v| v.as_str()).unwrap_or("");
+        let input: EditDocumentInput = match parse_input(params) {
+            Ok(value) => value,
+            Err(err) => return err,
+        };
+        if let Err(err) = require_non_empty(&input.document_id, "document_id") {
+            return err;
+        }
+
         // Default to append operation
+        // TODO (ADR Pillar 4): Implement pre-flight idempotency check when Sidecar API supports read-before-write
         self.0
             .mcp_call(
                 "appendToGoogleDoc",
-                serde_json::json!({ "documentId": doc_id, "text": text }),
+                serde_json::json!({ "documentId": input.document_id, "text": input.text }),
             )
             .await
     }
@@ -1238,12 +1649,16 @@ struct GwSheetsRead(GwBridge);
 #[async_trait]
 impl ToolHandler for GwSheetsRead {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let id = params
-            .get("spreadsheet_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let mut args = serde_json::json!({ "spreadsheetId": id });
-        if let Some(r) = params.get("range").and_then(|v| v.as_str()) {
+        let input: SheetsReadInput = match parse_input(params) {
+            Ok(value) => value,
+            Err(err) => return err,
+        };
+        if let Err(err) = require_non_empty(&input.spreadsheet_id, "spreadsheet_id") {
+            return err;
+        }
+
+        let mut args = serde_json::json!({ "spreadsheetId": input.spreadsheet_id });
+        if let Some(r) = input.range.filter(|value| !value.trim().is_empty()) {
             args["range"] = serde_json::json!(r);
         }
         self.0
@@ -1256,14 +1671,16 @@ struct GwSheetsCreate(GwBridge);
 #[async_trait]
 impl ToolHandler for GwSheetsCreate {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let title = params
-            .get("title")
-            .and_then(|v| v.as_str())
-            .unwrap_or("Untitled");
+        let input: CreateSpreadsheetInput = match parse_input(params) {
+            Ok(value) => value,
+            Err(err) => return err,
+        };
+        let title = input.title;
 
+        // TODO (ADR Pillar 4): Implement pre-flight idempotency check when Sidecar API supports read-before-write
         let create_result = self
             .0
-            .mcp_call_raw("createSpreadsheet", serde_json::json!({ "title": title }))
+            .mcp_call_raw("createSpreadsheet", serde_json::json!({ "title": title.clone() }))
             .await;
         if !create_result.success {
             return create_result;
@@ -1287,7 +1704,7 @@ impl ToolHandler for GwSheetsCreate {
 
         let mut result_data = serde_json::json!({
             "resource": "spreadsheet",
-            "title": title,
+            "title": title.clone(),
             "status": "created_unverified",
             "verified": false,
             "create": create_data,
@@ -1334,22 +1751,24 @@ struct GwSheetsEdit(GwBridge);
 #[async_trait]
 impl ToolHandler for GwSheetsEdit {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let id = params
-            .get("spreadsheet_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let range = params.get("range").and_then(|v| v.as_str()).unwrap_or("A1");
-        let values_str = params
-            .get("values")
-            .and_then(|v| v.as_str())
-            .unwrap_or("[]");
+        let input: EditSpreadsheetInput = match parse_input(params) {
+            Ok(value) => value,
+            Err(err) => return err,
+        };
+        if let Err(err) = require_non_empty(&input.spreadsheet_id, "spreadsheet_id") {
+            return err;
+        }
+
+        let values_str = input.values;
         let values: serde_json::Value =
-            serde_json::from_str(values_str).unwrap_or(serde_json::json!([]));
+            serde_json::from_str(&values_str).unwrap_or(serde_json::json!([]));
+
+        // TODO (ADR Pillar 4): Implement pre-flight idempotency check when Sidecar API supports read-before-write
         self.0
             .mcp_call(
                 "writeSpreadsheet",
                 serde_json::json!({
-                    "spreadsheetId": id, "range": range, "values": values
+                    "spreadsheetId": input.spreadsheet_id, "range": input.range, "values": values
                 }),
             )
             .await
@@ -1363,14 +1782,18 @@ struct GwSlidesRead(GwBridge);
 #[async_trait]
 impl ToolHandler for GwSlidesRead {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let id = params
-            .get("presentation_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let input: SlidesReadInput = match parse_input(params) {
+            Ok(value) => value,
+            Err(err) => return err,
+        };
+        if let Err(err) = require_non_empty(&input.presentation_id, "presentation_id") {
+            return err;
+        }
+
         self.0
             .fetch_and_buffer(
                 "readPresentation",
-                serde_json::json!({ "presentationId": id }),
+                serde_json::json!({ "presentationId": input.presentation_id }),
                 "google.extract_slides",
             )
             .await
@@ -1381,14 +1804,16 @@ struct GwSlidesCreate(GwBridge);
 #[async_trait]
 impl ToolHandler for GwSlidesCreate {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let title = params
-            .get("title")
-            .and_then(|v| v.as_str())
-            .unwrap_or("Untitled");
+        let input: CreatePresentationInput = match parse_input(params) {
+            Ok(value) => value,
+            Err(err) => return err,
+        };
+        let title = input.title;
 
+        // TODO (ADR Pillar 4): Implement pre-flight idempotency check when Sidecar API supports read-before-write
         let create_result = self
             .0
-            .mcp_call_raw("createPresentation", serde_json::json!({ "title": title }))
+            .mcp_call_raw("createPresentation", serde_json::json!({ "title": title.clone() }))
             .await;
         if !create_result.success {
             return create_result;
@@ -1412,7 +1837,7 @@ impl ToolHandler for GwSlidesCreate {
 
         let mut result_data = serde_json::json!({
             "resource": "presentation",
-            "title": title,
+            "title": title.clone(),
             "status": "created_unverified",
             "verified": false,
             "create": create_data,
@@ -1462,8 +1887,13 @@ struct GwFormsList(GwBridge);
 #[async_trait]
 impl ToolHandler for GwFormsList {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let input: FormsListInput = match parse_input(params) {
+            Ok(value) => value,
+            Err(err) => return err,
+        };
+
         let mut args = serde_json::json!({});
-        if let Some(query) = params.get("query").and_then(|v| v.as_str()) {
+        if let Some(query) = input.query.filter(|value| !value.trim().is_empty()) {
             args["query"] = serde_json::json!(query);
         }
         self.0.mcp_call("listForms", args).await
@@ -1474,12 +1904,14 @@ struct GwFormsCreate(GwBridge);
 #[async_trait]
 impl ToolHandler for GwFormsCreate {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let title = params
-            .get("title")
-            .and_then(|v| v.as_str())
-            .unwrap_or("Untitled Form");
+        let input: CreateFormInput = match parse_input(params) {
+            Ok(value) => value,
+            Err(err) => return err,
+        };
+
+        // TODO (ADR Pillar 4): Implement pre-flight idempotency check when Sidecar API supports read-before-write
         self.0
-            .mcp_call("createForm", serde_json::json!({ "title": title }))
+            .mcp_call("createForm", serde_json::json!({ "title": input.title }))
             .await
     }
 }
@@ -1839,7 +2271,7 @@ mod tests {
         build_google_resource_url, calendar_create_args, envelope_result, extract_gmail_draft_id,
         extract_google_resource_id, gmail_max_results, gmail_messages_from_payload,
         gmail_next_page_token, looks_like_drive_listing_phrase, normalize_gmail_inbox_query,
-        parse_gmail_messages_from_text, parse_gw_error,
+        parse_gmail_messages_from_text, parse_gw_error, CreateCalendarEventInput,
     };
 
     #[test]
@@ -1854,15 +2286,9 @@ mod tests {
 
     #[test]
     fn gmail_max_results_uses_param_and_caps_values() {
-        assert_eq!(gmail_max_results(&serde_json::json!({}), 10), 10);
-        assert_eq!(
-            gmail_max_results(&serde_json::json!({"max_results": 3}), 10),
-            3
-        );
-        assert_eq!(
-            gmail_max_results(&serde_json::json!({"max_results": 500}), 10),
-            200
-        );
+        assert_eq!(gmail_max_results(0, 10), 10);
+        assert_eq!(gmail_max_results(3, 10), 3);
+        assert_eq!(gmail_max_results(500, 10), 200);
     }
 
     #[test]
@@ -1995,12 +2421,14 @@ Total estimate: 201 messages
 
     #[test]
     fn calendar_create_args_supports_primary_and_alternate_shapes() {
-        let params = serde_json::json!({
-            "summary": "Google Meet",
-            "start": "2026-04-19T09:30:00Z",
-            "end": "2026-04-19T10:00:00Z",
-            "attendees": [{"email":"example@domain.com"}],
-        });
+        let params = CreateCalendarEventInput {
+            summary: "Google Meet".to_string(),
+            start: "2026-04-19T09:30:00Z".to_string(),
+            end: "2026-04-19T10:00:00Z".to_string(),
+            description: None,
+            location: None,
+            attendees: Some(vec![serde_json::json!({"email":"example@domain.com"})]),
+        };
 
         let primary = calendar_create_args(&params, false);
         assert_eq!(primary["start"]["dateTime"], "2026-04-19T09:30:00Z");
