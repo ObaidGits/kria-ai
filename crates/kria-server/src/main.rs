@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio_postgres::NoTls;
 
 const FLEET_SCHEMA_SQL: &str =
-    include_str!("../../kria-connection-control/sql/0001_fleet_orchestration.sql");
+    include_str!("../../kria-connection-control/sql/0001_device_orchestration.sql");
 
 async fn initialize_fleet_schema() -> anyhow::Result<()> {
     let database_url = match std::env::var("KRIA_FLEET_DATABASE_URL") {
@@ -40,7 +40,7 @@ async fn main() -> anyhow::Result<()> {
 
     let config = kria_core::config::KriaConfig::load(None)?;
     initialize_fleet_schema().await?;
-    let fleet = Arc::new(kria_server::fleet::FleetRuntime::initialize(&config).await?);
+    let fleet = Arc::new(kria_server::inventory::FleetRuntime::initialize(&config).await?);
     let bind_addr = format!("{}:{}", config.server.host, config.server.port,);
 
     let state = Arc::new(ServerState { config, fleet });

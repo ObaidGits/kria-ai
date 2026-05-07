@@ -1,5 +1,5 @@
 pub mod auth;
-pub mod fleet;
+pub mod inventory;
 pub mod routes;
 pub mod ws;
 
@@ -10,7 +10,7 @@ use tower_http::trace::TraceLayer;
 
 pub struct ServerState {
     pub config: kria_core::config::KriaConfig,
-    pub fleet: Arc<fleet::FleetRuntime>,
+    pub fleet: Arc<inventory::FleetRuntime>,
 }
 
 /// Build the full application router (used by both main and integration tests).

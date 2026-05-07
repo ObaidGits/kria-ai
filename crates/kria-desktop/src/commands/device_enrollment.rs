@@ -9,7 +9,8 @@ pub struct NewTargetRequest {
     pub username: String,
     pub ssh_private_key_path: Option<String>,
     pub expected_hostkey_sha256: Option<String>,
-    pub commander_epoch: Option<i64>,
+    #[serde(alias = "commanderEpoch")]
+    pub controller_epoch: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -20,7 +21,7 @@ pub(crate) struct NormalizedNewTargetRequest {
     pub(crate) username: String,
     pub(crate) ssh_private_key_path: PathBuf,
     pub(crate) expected_hostkey_sha256_b64: Option<String>,
-    pub(crate) commander_epoch: Option<i64>,
+    pub(crate) controller_epoch: Option<i64>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -35,7 +36,7 @@ pub struct RegisterNewTargetResponse {
     pub ssh_hostkey_sha256_b64: String,
     pub ssh_private_key_path: String,
     pub ssh_public_key_path: String,
-    pub commander_epoch: i64,
+    pub controller_epoch: i64,
     pub created_new_target: bool,
     pub created_local_key: bool,
     pub enrolled_at_unix_ms: i64,
@@ -105,7 +106,8 @@ pub(crate) struct EnrolledTargetRecord {
     pub(crate) ssh_private_key_path: String,
     pub(crate) ssh_public_key_path: String,
     pub(crate) ssh_hostkey_sha256_b64: String,
-    pub(crate) commander_epoch: i64,
+    #[serde(alias = "commanderEpoch")]
+    pub(crate) controller_epoch: i64,
     pub(crate) enrolled_at_unix_ms: i64,
     pub(crate) last_verified_unix_ms: i64,
 }
@@ -119,7 +121,7 @@ pub(crate) struct EnrolledTargetStatusSnapshot {
     pub(crate) username: String,
     pub(crate) mode: String,
     pub(crate) ssh_hostkey_sha256_b64: String,
-    pub(crate) commander_epoch: i64,
+    pub(crate) controller_epoch: i64,
     pub(crate) enrolled_at_unix_ms: i64,
     pub(crate) last_verified_unix_ms: i64,
 }
@@ -261,7 +263,7 @@ pub(crate) fn normalize_new_target_request(
         username,
         ssh_private_key_path,
         expected_hostkey_sha256_b64,
-        commander_epoch: request.commander_epoch,
+        controller_epoch: request.controller_epoch,
     })
 }
 
@@ -698,7 +700,7 @@ pub(crate) fn load_enrolled_target_status_snapshots() -> (Vec<EnrolledTargetStat
                 username: target.username,
                 mode: target.mode,
                 ssh_hostkey_sha256_b64: target.ssh_hostkey_sha256_b64,
-                commander_epoch: target.commander_epoch,
+                controller_epoch: target.controller_epoch,
                 enrolled_at_unix_ms: target.enrolled_at_unix_ms,
                 last_verified_unix_ms: target.last_verified_unix_ms,
             })

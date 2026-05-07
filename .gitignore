@@ -83,6 +83,12 @@ test.png
 # ── AI Context (generated) ───────────────────────────────────────
 /ai-context/
 
+# ── Graphify artifacts (generated) ───────────────────────────────
+/graphify-out/
+/.graphify/
+/.graphify-cache/
+/.graphify-tmp/
+
 # ── Test sandboxes & eval reports (generated) ────────────────────
 /target/test-sandbox/
 /target/quality-report.json

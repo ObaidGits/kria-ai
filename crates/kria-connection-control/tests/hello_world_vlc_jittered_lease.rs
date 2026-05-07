@@ -5,7 +5,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use kria_connection_control::manager::{
-    spawn_jittered_heartbeat_loop, CommandInput, CommanderRole, ConnectionManager,
+    spawn_jittered_heartbeat_loop, CommandInput, ControllerRole, ConnectionManager,
     ConnectionManagerConfig, Connector, ConnectorRegistry, DispatchResult, DockerEvalSummary,
     FleetStore, HaControlState, IdentityProof, KeyAttestationMaterial, SecurityAlert,
     TargetIdentity, TargetMode, TargetState, TerminalGapMarker, ClockDriftAlert,
@@ -33,13 +33,13 @@ impl MockStore {
 
 #[async_trait]
 impl FleetStore for MockStore {
-    async fn heartbeat_commander(&self, _commander_id: Uuid, _epoch: i64) -> Result<()> {
+    async fn heartbeat_controller(&self, _controller_id: Uuid, _epoch: i64) -> Result<()> {
         Ok(())
     }
 
     async fn promote_if_stale(
         &self,
-        _commander_id: Uuid,
+        _controller_id: Uuid,
         expected_old_epoch: i64,
         _failover_timeout: Duration,
     ) -> Result<(bool, i64, i64)> {
@@ -48,8 +48,8 @@ impl FleetStore for MockStore {
 
     async fn takeover_active_leases(
         &self,
-        _commander_id: Uuid,
-        _commander_epoch: i64,
+        _controller_id: Uuid,
+        _controller_epoch: i64,
         _fence_token: i64,
     ) -> Result<u64> {
         Ok(0)
@@ -245,9 +245,9 @@ async fn hello_world_vlc_install_over_jittered_lease() {
         None,
         None,
         HaControlState {
-            commander_id: Uuid::new_v4(),
-            role: CommanderRole::Primary,
-            commander_epoch: 7,
+            controller_id: Uuid::new_v4(),
+            role: ControllerRole::Primary,
+            controller_epoch: 7,
             lease_fence_token: 11,
             failover_timeout: Duration::from_secs(5),
         },

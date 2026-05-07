@@ -7,9 +7,9 @@ const DEFAULT_RECONNECT_BASE_MS = 800;
 const DEFAULT_RECONNECT_MAX_MS = 12_000;
 const DEFAULT_MAX_ALERTS = 120;
 
-export type FleetConnectionState = "idle" | "connecting" | "online" | "degraded" | "stopped";
+export type DeviceConnectionState = "idle" | "connecting" | "online" | "degraded" | "stopped";
 
-export interface FleetTargetView {
+export interface DeviceTargetView {
   targetId: string;
   displayName: string;
   mode: string;
@@ -26,7 +26,7 @@ export interface FleetTargetView {
   updatedAtUnixMs: number;
 }
 
-export interface FleetAlertView {
+export interface DeviceAlertView {
   category: string;
   message: string;
   targetId: string | null;
@@ -34,7 +34,7 @@ export interface FleetAlertView {
   createdAtUnixMs: number;
 }
 
-export interface FleetClockDriftView {
+export interface DeviceClockDriftView {
   targetId: string;
   previousBufferMs: number;
   nextBufferMs: number;
@@ -42,7 +42,7 @@ export interface FleetClockDriftView {
   createdAtUnixMs: number;
 }
 
-export interface FleetDockerUpdateView {
+export interface DeviceDockerUpdateView {
   targetId: string;
   runId: string;
   dockerHealth: "unknown" | "running" | "pass" | "fail";
@@ -52,7 +52,7 @@ export interface FleetDockerUpdateView {
   updatedAtUnixMs: number;
 }
 
-export interface FleetTestResultView {
+export interface DeviceTestResultView {
   targetId: string;
   suiteName: string;
   zone: string;
@@ -61,7 +61,7 @@ export interface FleetTestResultView {
   reportPath: string;
 }
 
-export interface FleetTerminalLine {
+export interface DeviceTerminalLine {
   targetId: string;
   offset: number;
   stream: "stdout" | "stderr" | "system";
@@ -71,7 +71,7 @@ export interface FleetTerminalLine {
 
 type MaybeAccessor<T> = T | Accessor<T>;
 
-export interface UseFleetHeartbeatOptions {
+export interface UseDeviceStatusOptions {
   commanderBaseUrl?: MaybeAccessor<string | null | undefined>;
   fleetSseUrl?: MaybeAccessor<string>;
   terminalWsBaseUrl?: MaybeAccessor<string>;
@@ -87,18 +87,18 @@ export interface UseFleetHeartbeatOptions {
   webSocketFactory?: (url: string) => WebSocket;
 }
 
-export interface FleetHeartbeatController {
-  targets: Accessor<FleetTargetView[]>;
+export interface DeviceStatusController {
+  targets: Accessor<DeviceTargetView[]>;
   focusedTargetId: Accessor<string | null>;
   focusTarget: (targetId: string | null) => void;
-  focusedTerminalLines: Accessor<FleetTerminalLine[]>;
-  terminalLinesFor: (targetId: string) => FleetTerminalLine[];
-  alerts: Accessor<FleetAlertView[]>;
-  clockDriftAlerts: Accessor<FleetClockDriftView[]>;
-  dockerUpdates: Accessor<FleetDockerUpdateView[]>;
-  testResults: Accessor<FleetTestResultView[]>;
-  lastTestResultByTarget: (targetId: string) => FleetTestResultView | null;
-  streamState: Accessor<FleetConnectionState>;
+  focusedTerminalLines: Accessor<DeviceTerminalLine[]>;
+  terminalLinesFor: (targetId: string) => DeviceTerminalLine[];
+  alerts: Accessor<DeviceAlertView[]>;;
+  clockDriftAlerts: Accessor<DeviceClockDriftView[]>;;
+  dockerUpdates: Accessor<DeviceDockerUpdateView[]>;;
+  testResults: Accessor<DeviceTestResultView[]>;;
+  lastTestResultByTarget: (targetId: string) => DeviceTestResultView | null;
+  streamState: Accessor<DeviceConnectionState>;
   lastHeartbeatAtUnixMs: Accessor<number | null>;
   leaseHealthy: Accessor<boolean>;
   lastError: Accessor<string | null>;
@@ -107,7 +107,7 @@ export interface FleetHeartbeatController {
   stop: () => void;
 }
 
-type FleetConnectionIssueSource = "sse" | "terminal_ws" | "heartbeat";
+type DeviceConnectionIssueSource = "sse" | "terminal_ws" | "heartbeat";
 
 class FixedRingBuffer<T> {
   private readonly storage: Array<T | undefined>;
@@ -194,7 +194,7 @@ function withJitter(baseMs: number, jitterPct: number): number {
   return Math.max(100, baseMs + delta);
 }
 
-export function useFleetHeartbeat(options: UseFleetHeartbeatOptions): FleetHeartbeatController {
+export function useDeviceStatus(options: UseDeviceStatusOptions): DeviceStatusController {
   const resolveInput = <T,>(value: MaybeAccessor<T> | undefined): T | undefined => {
     if (typeof value === "function") {
       return (value as Accessor<T>)();
@@ -281,20 +281,20 @@ export function useFleetHeartbeat(options: UseFleetHeartbeatOptions): FleetHeart
     return `${base}/api/fleet/leases/${encodeURIComponent(lease)}/heartbeat`;
   });
 
-  const [streamState, setStreamState] = createSignal<FleetConnectionState>(
+  const [streamState, setStreamState] = createSignal<DeviceConnectionState>(
     options.autoStart === false ? "idle" : "connecting",
   );
   const [focusedTargetId, setFocusedTargetId] = createSignal<string | null>(null);
-  const [targetsMap, setTargetsMap] = createSignal<Map<string, FleetTargetView>>(new Map());
-  const [alerts, setAlerts] = createSignal<FleetAlertView[]>([]);
-  const [clockDriftAlerts, setClockDriftAlerts] = createSignal<FleetClockDriftView[]>([]);
-  const [dockerUpdates, setDockerUpdates] = createSignal<FleetDockerUpdateView[]>([]);
-  const [testResults, setTestResults] = createSignal<FleetTestResultView[]>([]);
+  const [targetsMap, setTargetsMap] = createSignal<Map<string, DeviceTargetView>>(new Map());
+  const [alerts, setAlerts] = createSignal<DeviceAlertView[]>([]);
+  const [clockDriftAlerts, setClockDriftAlerts] = createSignal<DeviceClockDriftView[]>([]);
+  const [dockerUpdates, setDockerUpdates] = createSignal<DeviceDockerUpdateView[]>([]);
+  const [testResults, setTestResults] = createSignal<DeviceTestResultView[]>([]);
   const [lastHeartbeatAtUnixMs, setLastHeartbeatAtUnixMs] = createSignal<number | null>(null);
   const [lastError, setLastError] = createSignal<string | null>(null);
   const [terminalVersion, setTerminalVersion] = createSignal(0);
 
-  const ringBuffers = new Map<string, FixedRingBuffer<FleetTerminalLine>>();
+  const ringBuffers = new Map<string, FixedRingBuffer<DeviceTerminalLine>>();
   const maxAlerts = options.maxAlerts ?? DEFAULT_MAX_ALERTS;
   const heartbeatIntervalMs = Math.max(1000, options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS);
   const heartbeatJitterPct = Math.max(0, Math.min(0.4, options.heartbeatJitterPct ?? DEFAULT_HEARTBEAT_JITTER_PCT));
@@ -352,7 +352,7 @@ export function useFleetHeartbeat(options: UseFleetHeartbeatOptions): FleetHeart
     return now - lastBeat <= healthyWindowMs;
   });
 
-  const upsertTarget = (targetPatch: Partial<FleetTargetView> & { targetId: string }) => {
+  const upsertTarget = (targetPatch: Partial<DeviceTargetView> & { targetId: string }) => {
     setTargetsMap((current) => {
       const next = new Map(current);
       const existing = next.get(targetPatch.targetId);
@@ -376,15 +376,15 @@ export function useFleetHeartbeat(options: UseFleetHeartbeatOptions): FleetHeart
     });
   };
 
-  const appendAlert = (alert: FleetAlertView) => {
+  const appendAlert = (alert: DeviceAlertView) => {
     setAlerts((current) => [alert, ...current].slice(0, maxAlerts));
   };
 
-  const appendClockDriftAlert = (alert: FleetClockDriftView) => {
+  const appendClockDriftAlert = (alert: DeviceClockDriftView) => {
     setClockDriftAlerts((current) => [alert, ...current].slice(0, maxAlerts));
   };
 
-  const appendDockerUpdate = (update: FleetDockerUpdateView) => {
+  const appendDockerUpdate = (update: DeviceDockerUpdateView) => {
     setDockerUpdates((current) => [update, ...current].slice(0, maxAlerts));
     upsertTarget({
       targetId: update.targetId,
@@ -396,10 +396,10 @@ export function useFleetHeartbeat(options: UseFleetHeartbeatOptions): FleetHeart
     });
   };
 
-  const appendTerminalLines = (targetId: string, lines: FleetTerminalLine[]) => {
+  const appendTerminalLines = (targetId: string, lines: DeviceTerminalLine[]) => {
     let buffer = ringBuffers.get(targetId);
     if (!buffer) {
-      buffer = new FixedRingBuffer<FleetTerminalLine>(TERMINAL_RING_CAPACITY);
+      buffer = new FixedRingBuffer<DeviceTerminalLine>(TERMINAL_RING_CAPACITY);
       ringBuffers.set(targetId, buffer);
     }
 
@@ -410,20 +410,20 @@ export function useFleetHeartbeat(options: UseFleetHeartbeatOptions): FleetHeart
     setTerminalVersion((value) => value + 1);
   };
 
-  const terminalLinesFor = (targetId: string): FleetTerminalLine[] => {
+  const terminalLinesFor = (targetId: string): DeviceTerminalLine[] => {
     terminalVersion();
     const buffer = ringBuffers.get(targetId);
     return buffer ? buffer.toArray() : [];
   };
 
-  const lastTestResultByTarget = (targetId: string): FleetTestResultView | null => {
+  const lastTestResultByTarget = (targetId: string): DeviceTestResultView | null => {
     const results = testResults();
     return results.find((r) => r.targetId === targetId) ?? null;
   };
 
   const setConnectionIssue = (
-    source: FleetConnectionIssueSource,
-    state: FleetConnectionState,
+    source: DeviceConnectionIssueSource,
+    state: DeviceConnectionState,
     reason: string | null,
   ) => {
     setStreamState(state);
@@ -525,7 +525,7 @@ export function useFleetHeartbeat(options: UseFleetHeartbeatOptions): FleetHeart
         targetId,
         displayName: asString(payload.display_name) ?? asString(payload.displayName) ?? targetId,
         mode: asString(payload.mode) ?? "unknown",
-        state: (asString(payload.state) ?? asString(payload.status) ?? "unknown") as FleetTargetView["state"],
+        state: (asString(payload.state) ?? asString(payload.status) ?? "unknown") as DeviceTargetView["state"],
         tainted: asBoolean(payload.tainted) ?? false,
         taintReason: asString(payload.reason) ?? asString(payload.taint_reason),
         healthScore: asNumber(payload.health_score) ?? asNumber(payload.healthScore) ?? undefined,
@@ -533,7 +533,7 @@ export function useFleetHeartbeat(options: UseFleetHeartbeatOptions): FleetHeart
         recentFailureRate:
           asNumber(payload.recent_failure_rate) ?? asNumber(payload.recentFailureRate) ?? undefined,
         dockerHealth:
-          ((asString(payload.docker_health) ?? asString(payload.dockerHealth) ?? undefined) as FleetTargetView["dockerHealth"] | undefined),
+          ((asString(payload.docker_health) ?? asString(payload.dockerHealth) ?? undefined) as DeviceTargetView["dockerHealth"] | undefined),
         dockerPassCount: asNumber(payload.docker_pass_count) ?? asNumber(payload.dockerPassCount) ?? undefined,
         dockerFailCount: asNumber(payload.docker_fail_count) ?? asNumber(payload.dockerFailCount) ?? undefined,
         dockerLastRunAtUnixMs:
@@ -600,7 +600,7 @@ export function useFleetHeartbeat(options: UseFleetHeartbeatOptions): FleetHeart
         targetId,
         runId,
         dockerHealth:
-          ((asString(payload.docker_health) ?? asString(payload.dockerHealth) ?? "unknown") as FleetDockerUpdateView["dockerHealth"]),
+          ((asString(payload.docker_health) ?? asString(payload.dockerHealth) ?? "unknown") as DeviceDockerUpdateView["dockerHealth"]),
         dockerPassCount: asNumber(payload.docker_pass_count) ?? asNumber(payload.dockerPassCount) ?? 0,
         dockerFailCount: asNumber(payload.docker_fail_count) ?? asNumber(payload.dockerFailCount) ?? 0,
         dockerLastRunAtUnixMs:
@@ -648,7 +648,7 @@ export function useFleetHeartbeat(options: UseFleetHeartbeatOptions): FleetHeart
           targetId,
           suiteName: asString(payload.suite_name) ?? asString(payload.suiteName) ?? "unknown",
           zone: asString(payload.zone) ?? "unknown",
-          status: normalizedStatus as FleetTestResultView["status"],
+          status: normalizedStatus as DeviceTestResultView["status"],
           timestampUnixMs: asNumber(payload.timestamp_unix_ms) ?? asNumber(payload.timestampUnixMs) ?? Date.now(),
           reportPath: asString(payload.report_path) ?? asString(payload.reportPath) ?? "",
         }, ...current].slice(0, maxAlerts),
@@ -671,7 +671,7 @@ export function useFleetHeartbeat(options: UseFleetHeartbeatOptions): FleetHeart
           targetId,
           displayName: asString(record.display_name) ?? asString(record.displayName) ?? targetId,
           mode: asString(record.mode) ?? "unknown",
-          state: (asString(record.state) ?? asString(record.status) ?? "unknown") as FleetTargetView["state"],
+          state: (asString(record.state) ?? asString(record.status) ?? "unknown") as DeviceTargetView["state"],
           tainted: asBoolean(record.tainted) ?? false,
           taintReason: asString(record.reason) ?? asString(record.taint_reason),
           healthScore: asNumber(record.health_score) ?? asNumber(record.healthScore) ?? undefined,
@@ -679,7 +679,7 @@ export function useFleetHeartbeat(options: UseFleetHeartbeatOptions): FleetHeart
           recentFailureRate:
             asNumber(record.recent_failure_rate) ?? asNumber(record.recentFailureRate) ?? undefined,
           dockerHealth:
-            ((asString(record.docker_health) ?? asString(record.dockerHealth) ?? undefined) as FleetTargetView["dockerHealth"] | undefined),
+            ((asString(record.docker_health) ?? asString(record.dockerHealth) ?? undefined) as DeviceTargetView["dockerHealth"] | undefined),
           dockerPassCount: asNumber(record.docker_pass_count) ?? asNumber(record.dockerPassCount) ?? undefined,
           dockerFailCount: asNumber(record.docker_fail_count) ?? asNumber(record.dockerFailCount) ?? undefined,
           dockerLastRunAtUnixMs:
@@ -699,12 +699,8 @@ export function useFleetHeartbeat(options: UseFleetHeartbeatOptions): FleetHeart
 
     if (!hasSseTransport()) {
       closeEventSource();
-      setConnectionIssue(
-        "sse",
-        "connecting",
-        "Waiting for fleet commander endpoint from runtime status.",
-      );
-      scheduleSseReconnect();
+      // Silent Discovery: no controller configured → stay idle, no false alerts
+      setConnectionIssue("sse", "idle", null);
       return;
     }
 
@@ -752,10 +748,10 @@ export function useFleetHeartbeat(options: UseFleetHeartbeatOptions): FleetHeart
     };
   };
 
-  const parseWsTerminalMessage = (targetId: string, raw: string): FleetTerminalLine[] => {
+  const parseWsTerminalMessage = (targetId: string, raw: string): DeviceTerminalLine[] => {
     const parsed = parseJsonObject(raw);
     if (!parsed) {
-      const line: FleetTerminalLine = {
+      const line: DeviceTerminalLine = {
         targetId,
         offset: terminalOffsetCounter,
         stream: "stdout",
@@ -769,10 +765,10 @@ export function useFleetHeartbeat(options: UseFleetHeartbeatOptions): FleetHeart
     const kind = normalizeEventType(parsed);
     if (kind === "terminalline" || kind === "terminal_line" || kind === "line") {
       const lineTargetId = asString(parsed.target_id) ?? asString(parsed.targetId) ?? targetId;
-      const line: FleetTerminalLine = {
+      const line: DeviceTerminalLine = {
         targetId: lineTargetId,
         offset: asNumber(parsed.offset) ?? terminalOffsetCounter,
-        stream: ((asString(parsed.stream) ?? "stdout") as FleetTerminalLine["stream"]),
+        stream: ((asString(parsed.stream) ?? "stdout") as DeviceTerminalLine["stream"]),
         text: asString(parsed.text) ?? "",
         tsUnixMs: asNumber(parsed.ts_unix_ms) ?? Date.now(),
       };
@@ -785,7 +781,7 @@ export function useFleetHeartbeat(options: UseFleetHeartbeatOptions): FleetHeart
       if (!Array.isArray(linesValue)) {
         return [];
       }
-      const lines: FleetTerminalLine[] = [];
+      const lines: DeviceTerminalLine[] = [];
       for (const entry of linesValue) {
         if (!entry || typeof entry !== "object") {
           continue;
@@ -796,7 +792,7 @@ export function useFleetHeartbeat(options: UseFleetHeartbeatOptions): FleetHeart
         lines.push({
           targetId: rowTarget,
           offset: rowOffset,
-          stream: ((asString(row.stream) ?? "stdout") as FleetTerminalLine["stream"]),
+          stream: ((asString(row.stream) ?? "stdout") as DeviceTerminalLine["stream"]),
           text: asString(row.text) ?? "",
           tsUnixMs: asNumber(row.ts_unix_ms) ?? Date.now(),
         });
@@ -807,7 +803,7 @@ export function useFleetHeartbeat(options: UseFleetHeartbeatOptions): FleetHeart
 
     if (kind === "terminalgap" || kind === "terminal_gap" || kind === "gap") {
       const lineTargetId = asString(parsed.target_id) ?? asString(parsed.targetId) ?? targetId;
-      const line: FleetTerminalLine = {
+      const line: DeviceTerminalLine = {
         targetId: lineTargetId,
         offset: terminalOffsetCounter,
         stream: "system",
@@ -868,7 +864,7 @@ export function useFleetHeartbeat(options: UseFleetHeartbeatOptions): FleetHeart
         return;
       }
 
-      const grouped = new Map<string, FleetTerminalLine[]>();
+      const grouped = new Map<string, DeviceTerminalLine[]>();
       for (const line of lines) {
         const arr = grouped.get(line.targetId) ?? [];
         arr.push(line);

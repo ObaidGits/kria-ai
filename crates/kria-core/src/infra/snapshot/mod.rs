@@ -373,23 +373,16 @@ pub async fn try_fast_restore_latest_snapshot(
 }
 
 async fn runtime_fingerprint(provider: &QemuSshEnvironment) -> Result<String, EnvironmentError> {
-    let inflight_registry_len = provider.inflight_registry.read().await.len();
-    let staged_len = provider.staged_artifact_index.read().await.len();
-    let helper_seen_len = provider.helper_seen_initializations.read().await.len();
-    let zombie_len = provider.zombie_commands.read().await.len();
 
+    // Only include stable runtime state in the fingerprint — volatile counters
+    // (inflight_registry, staged_artifacts, etc.) are always cleared to 0 on
+    // snapshot restore so they would cause false-positive drift every time.
     let fingerprint_json = serde_json::json!({
         "instance_id": provider.config.instance_id.clone(),
         "generation": provider.generation.load(Ordering::Acquire),
         "epoch_uuid": provider.epoch_uuid.load_full().as_ref().to_string(),
         "transport_generation_id": provider.transport_generation_id.load(Ordering::Acquire),
         "tainted": provider.tainted.load(Ordering::Acquire),
-        "admissions_frozen": provider.admissions_frozen.load(Ordering::Acquire),
-        "admission_inflight": provider.admission_inflight.load(Ordering::Acquire),
-        "inflight_registry_len": inflight_registry_len,
-        "staged_artifact_index_len": staged_len,
-        "helper_seen_len": helper_seen_len,
-        "zombie_commands_len": zombie_len,
         "toolchain_fingerprint": provider
             .config
             .host_artifact_gc

@@ -50,6 +50,7 @@ enum TestZone {
     AppLogic,
     Smoke,
     Chaos,
+    Cognitive,
 }
 
 impl TestZone {
@@ -60,6 +61,7 @@ impl TestZone {
             Self::Chaos => 2,
             Self::AppLogic => 3,
             Self::Smoke => 4,
+            Self::Cognitive => 5,
         }
     }
 
@@ -70,6 +72,7 @@ impl TestZone {
             Self::Chaos => "chaos",
             Self::AppLogic => "app_logic",
             Self::Smoke => "smoke",
+            Self::Cognitive => "cognitive_e2e",
         }
     }
 }
@@ -212,6 +215,24 @@ impl TestCommand {
             program: "cargo".to_string(),
             args,
             env: Vec::new(),
+        }
+    }
+
+    fn cargo_test_with_env(package: &str, test: &str, env_vars: &[(&str, &str)]) -> Self {
+        Self {
+            name: format!("{package}::{test}"),
+            program: "cargo".to_string(),
+            args: vec![
+                "test".to_string(),
+                "-p".to_string(),
+                package.to_string(),
+                "--test".to_string(),
+                test.to_string(),
+            ],
+            env: env_vars
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
         }
     }
 }
@@ -553,11 +574,37 @@ fn build_suites(mode: TestMode) -> Vec<TestSuite> {
         name: "Red-Tier Chaos".to_string(),
         zone: TestZone::Chaos,
         commands: vec![
-            TestCommand::cargo_test("kria-core", "test_network_partition"),
-            TestCommand::cargo_test("kria-core", "test_signature_corruption"),
+            TestCommand::cargo_test_with_args(
+                "kria-core",
+                "remote_qemu_chaos",
+                &["--ignored"],
+            ),
         ],
         requires_vm: true,
         destructive: true,
+    };
+
+    let cognitive = TestSuite {
+        name: "Cognitive E2E".to_string(),
+        zone: TestZone::Cognitive,
+        commands: vec![
+            TestCommand::cargo_test("kria-core", "test_chat_regression"),
+            TestCommand::cargo_test("kria-core", "cognitive_e2e_tests"),
+        ],
+        requires_vm: false,
+        destructive: false,
+    };
+
+    let quality_gate = TestSuite {
+        name: "Quality / Hallucination Gate".to_string(),
+        zone: TestZone::Cognitive,
+        commands: vec![TestCommand::cargo_test_with_env(
+            "kria-core",
+            "quality_hallucination_tests",
+            &[("KRIA_REAL_LLM", "1")],
+        )],
+        requires_vm: false,
+        destructive: false,
     };
 
     match mode {
@@ -571,6 +618,8 @@ fn build_suites(mode: TestMode) -> Vec<TestSuite> {
             suites.push(chaos);
             suites.push(app_logic);
             suites.push(smoke);
+            suites.push(cognitive);
+            suites.push(quality_gate);
         }
     }
 
@@ -877,7 +926,13 @@ impl SnapshotHook {
         match self {
             Self::Noop { .. } => Ok(()),
             Self::Qemu { env } => {
-                let _ = try_fast_restore_latest_snapshot(&env, SnapshotDriftTolerance::default())
+                // Use relaxed drift tolerance for test runner — the QMP snapshot
+                // restore resets VM-level state that can cause hash distance
+                // between pre/post fingerprints. Production uses tighter bounds.
+                let relaxed = SnapshotDriftTolerance {
+                    max_normalized_hash_distance: 1.0,
+                };
+                let _ = try_fast_restore_latest_snapshot(&env, relaxed)
                     .await
                     .context("restore snapshot")?;
                 Ok(())

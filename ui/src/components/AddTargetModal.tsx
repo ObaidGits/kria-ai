@@ -268,7 +268,7 @@ const AddTargetModal: Component<AddTargetModalProps> = (props) => {
       <div class="modal add-target-modal" onClick={(event) => event.stopPropagation()}>
         <form onSubmit={submit}>
           <div class="modal-header add-target-header">
-            <h2>Add New Soldier</h2>
+            <h2>Add New Device</h2>
             <button
               type="button"
               class="close-btn"
@@ -398,7 +398,7 @@ const AddTargetModal: Component<AddTargetModalProps> = (props) => {
               Cancel
             </button>
             <button type="submit" class="btn-primary" disabled={!canSubmit()}>
-              {isSubmitting() ? "Enrolling..." : "Enroll Soldier"}
+              {isSubmitting() ? "Enrolling..." : "Enroll Device"}
             </button>
           </div>
         </form>

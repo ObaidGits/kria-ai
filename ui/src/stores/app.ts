@@ -1027,7 +1027,7 @@ export interface IroncladEnrolledTargetSnapshot {
   username: string;
   mode: string;
   ssh_hostkey_sha256_b64: string;
-  commander_epoch: number;
+  controller_epoch: number;
   enrolled_at_unix_ms: number;
   last_verified_unix_ms: number;
 }

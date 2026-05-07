@@ -9,10 +9,10 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TABLE IF NOT EXISTS commander_control_plane (
-    commander_id UUID PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS controller_control_plane (
+    controller_id UUID PRIMARY KEY,
     role TEXT NOT NULL CHECK (role IN ('primary', 'warm_standby')),
-    commander_epoch BIGINT NOT NULL CHECK (commander_epoch >= 0),
+    controller_epoch BIGINT NOT NULL CHECK (controller_epoch >= 0),
     lease_fence_token BIGINT NOT NULL CHECK (lease_fence_token >= 0),
     failover_timeout_ms INTEGER NOT NULL CHECK (failover_timeout_ms > 0),
     last_heartbeat_at TIMESTAMPTZ NOT NULL,
@@ -21,12 +21,12 @@ CREATE TABLE IF NOT EXISTS commander_control_plane (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS ux_commander_primary_role
-    ON commander_control_plane ((role))
+CREATE UNIQUE INDEX IF NOT EXISTS ux_controller_primary_role
+    ON controller_control_plane ((role))
     WHERE role = 'primary';
 
-CREATE INDEX IF NOT EXISTS ix_commander_last_heartbeat
-    ON commander_control_plane (last_heartbeat_at DESC);
+CREATE INDEX IF NOT EXISTS ix_controller_last_heartbeat
+    ON controller_control_plane (last_heartbeat_at DESC);
 
 CREATE TABLE IF NOT EXISTS target_identity (
     target_id UUID PRIMARY KEY,
@@ -83,8 +83,8 @@ CREATE TABLE IF NOT EXISTS lease_sessions (
     expires_at TIMESTAMPTZ NOT NULL,
     sequence_high_watermark BIGINT NOT NULL DEFAULT 0 CHECK (sequence_high_watermark >= 0),
     last_heartbeat_at TIMESTAMPTZ NOT NULL,
-    owner_commander_id UUID NOT NULL REFERENCES commander_control_plane(commander_id) ON UPDATE CASCADE ON DELETE RESTRICT,
-    owner_commander_epoch BIGINT NOT NULL CHECK (owner_commander_epoch >= 0),
+    owner_controller_id UUID NOT NULL REFERENCES controller_control_plane(controller_id) ON UPDATE CASCADE ON DELETE RESTRICT,
+    owner_controller_epoch BIGINT NOT NULL CHECK (owner_controller_epoch >= 0),
     lease_fence_token BIGINT NOT NULL CHECK (lease_fence_token >= 0),
     release_reason TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -100,7 +100,7 @@ CREATE INDEX IF NOT EXISTS ix_lease_sessions_expires
     WHERE state = 'active';
 
 CREATE INDEX IF NOT EXISTS ix_lease_sessions_owner_epoch
-    ON lease_sessions (owner_commander_id, owner_commander_epoch);
+    ON lease_sessions (owner_controller_id, owner_controller_epoch);
 
 CREATE TABLE IF NOT EXISTS envelope_nonce_window (
     target_id UUID NOT NULL REFERENCES target_identity(target_id) ON UPDATE CASCADE ON DELETE CASCADE,
@@ -223,9 +223,9 @@ CREATE TABLE IF NOT EXISTS docker_eval_cases (
 CREATE INDEX IF NOT EXISTS ix_docker_eval_cases_status
     ON docker_eval_cases (status);
 
-DROP TRIGGER IF EXISTS trg_commander_control_plane_updated_at ON commander_control_plane;
-CREATE TRIGGER trg_commander_control_plane_updated_at
-BEFORE UPDATE ON commander_control_plane
+DROP TRIGGER IF EXISTS trg_controller_control_plane_updated_at ON controller_control_plane;
+CREATE TRIGGER trg_controller_control_plane_updated_at
+BEFORE UPDATE ON controller_control_plane
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 

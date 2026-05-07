@@ -602,7 +602,7 @@ async fn local_api_chat_rejects_empty_messages() {
     let state = LocalApiBridgeState {
         responder: std::sync::Arc::new(EchoLocalApiResponder),
         fleet_control_runtime: std::sync::Arc::new(
-            crate::fleet_control::DesktopFleetControlRuntime::empty(),
+            crate::device_control::DesktopFleetControlRuntime::empty(),
         ),
     };
 
@@ -627,7 +627,7 @@ async fn local_api_chat_uses_responder_payload() {
     let state = LocalApiBridgeState {
         responder: std::sync::Arc::new(EchoLocalApiResponder),
         fleet_control_runtime: std::sync::Arc::new(
-            crate::fleet_control::DesktopFleetControlRuntime::empty(),
+            crate::device_control::DesktopFleetControlRuntime::empty(),
         ),
     };
 

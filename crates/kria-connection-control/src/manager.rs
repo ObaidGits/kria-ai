@@ -62,7 +62,7 @@ pub enum DockerHealthStatus {
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub enum CommanderRole {
+pub enum ControllerRole {
     Primary,
     WarmStandby,
 }
@@ -110,8 +110,8 @@ pub struct LeaseRecord {
     pub expires_at: Instant,
     pub sequence_high_watermark: u64,
     pub last_heartbeat_at: Instant,
-    pub owner_commander_id: Uuid,
-    pub owner_commander_epoch: i64,
+    pub owner_controller_id: Uuid,
+    pub owner_controller_epoch: i64,
     pub lease_fence_token: i64,
 }
 
@@ -263,9 +263,9 @@ pub enum ControlPlaneEvent {
 
 #[derive(Clone, Debug)]
 pub struct HaControlState {
-    pub commander_id: Uuid,
-    pub role: CommanderRole,
-    pub commander_epoch: i64,
+    pub controller_id: Uuid,
+    pub role: ControllerRole,
+    pub controller_epoch: i64,
     pub lease_fence_token: i64,
     pub failover_timeout: Duration,
 }
@@ -294,7 +294,7 @@ pub struct KeyAttestationPayload {
 pub struct ConnectionManagerConfig {
     pub ssh_parallel_limit: usize,
     pub reaper_interval: Duration,
-    pub commander_heartbeat_interval: Duration,
+    pub controller_heartbeat_interval: Duration,
     pub max_dispatch_attempts: usize,
     pub dispatch_timeout: Duration,
     pub dispatch_backoff_base_ms: u64,
@@ -314,7 +314,7 @@ impl Default for ConnectionManagerConfig {
         Self {
             ssh_parallel_limit: 8,
             reaper_interval: Duration::from_secs(1),
-            commander_heartbeat_interval: Duration::from_secs(2),
+            controller_heartbeat_interval: Duration::from_secs(2),
             max_dispatch_attempts: DEFAULT_MAX_DISPATCH_ATTEMPTS,
             dispatch_timeout: Duration::from_secs(180),
             dispatch_backoff_base_ms: DEFAULT_DISPATCH_BACKOFF_BASE_MS,
@@ -379,17 +379,17 @@ pub trait TerminalStreamBridge: Send + Sync {
 
 #[async_trait]
 pub trait FleetStore: Send + Sync {
-    async fn heartbeat_commander(&self, commander_id: Uuid, epoch: i64) -> Result<()>;
+    async fn heartbeat_controller(&self, controller_id: Uuid, epoch: i64) -> Result<()>;
     async fn promote_if_stale(
         &self,
-        commander_id: Uuid,
+        controller_id: Uuid,
         expected_old_epoch: i64,
         failover_timeout: Duration,
     ) -> Result<(bool, i64, i64)>;
     async fn takeover_active_leases(
         &self,
-        commander_id: Uuid,
-        commander_epoch: i64,
+        controller_id: Uuid,
+        controller_epoch: i64,
         fence_token: i64,
     ) -> Result<u64>;
     async fn cas_lease_owner(
@@ -475,7 +475,7 @@ pub enum ManagerCommand {
     ReverseTunnelKeepaliveTick {
         target_id: Uuid,
     },
-    CommanderHeartbeatTick,
+    ControllerHeartbeatTick,
     ReapExpired {
         now: Instant,
     },
@@ -800,14 +800,14 @@ impl ConnectionManager {
             }
         });
 
-        let commander_tick = config.commander_heartbeat_interval;
-        let tx_commander = tx.clone();
+        let controller_tick = config.controller_heartbeat_interval;
+        let tx_controller = tx.clone();
         tokio::spawn(async move {
-            let mut ticker = interval_at(Instant::now() + commander_tick, commander_tick);
+            let mut ticker = interval_at(Instant::now() + controller_tick, controller_tick);
             loop {
                 ticker.tick().await;
-                if tx_commander
-                    .send(ManagerCommand::CommanderHeartbeatTick)
+                if tx_controller
+                    .send(ManagerCommand::ControllerHeartbeatTick)
                     .await
                     .is_err()
                 {
@@ -889,9 +889,9 @@ impl ConnectionManager {
                             warn!(target_id = %target_id, error = %err, "reverse tunnel keepalive tick failed");
                         }
                     }
-                    ManagerCommand::CommanderHeartbeatTick => {
-                        if let Err(err) = manager.handle_commander_heartbeat_tick().await {
-                            warn!(error = %err, "commander heartbeat tick failed");
+                    ManagerCommand::ControllerHeartbeatTick => {
+                        if let Err(err) = manager.handle_controller_heartbeat_tick().await {
+                            warn!(error = %err, "controller heartbeat tick failed");
                         }
                     }
                     ManagerCommand::ReapExpired { now } => {
@@ -919,12 +919,12 @@ impl ConnectionManager {
         (0.50 * health) + (0.30 * latency_component) + (0.20 * failure_component)
     }
 
-    async fn handle_commander_heartbeat_tick(&self) -> Result<()> {
-        if self.ha.role == CommanderRole::Primary {
+    async fn handle_controller_heartbeat_tick(&self) -> Result<()> {
+        if self.ha.role == ControllerRole::Primary {
             self.store
-                .heartbeat_commander(self.ha.commander_id, self.ha.commander_epoch)
+                .heartbeat_controller(self.ha.controller_id, self.ha.controller_epoch)
                 .await
-                .context("heartbeat_commander failed")?;
+                .context("heartbeat_controller failed")?;
         }
         Ok(())
     }
@@ -984,8 +984,8 @@ impl ConnectionManager {
             expires_at,
             sequence_high_watermark: 0,
             last_heartbeat_at: now,
-            owner_commander_id: self.ha.commander_id,
-            owner_commander_epoch: self.ha.commander_epoch,
+            owner_controller_id: self.ha.controller_id,
+            owner_controller_epoch: self.ha.controller_epoch,
             lease_fence_token: self.ha.lease_fence_token,
         };
         self.leases.insert(lease_id, lease);
@@ -2000,19 +2000,19 @@ impl ConnectionManager {
     }
 
     async fn handle_promote_standby(&mut self) -> Result<()> {
-        if self.ha.role == CommanderRole::Primary {
+        if self.ha.role == ControllerRole::Primary {
             self.store
-                .heartbeat_commander(self.ha.commander_id, self.ha.commander_epoch)
+                .heartbeat_controller(self.ha.controller_id, self.ha.controller_epoch)
                 .await
-                .context("heartbeat_commander failed")?;
+                .context("heartbeat_controller failed")?;
             return Ok(());
         }
 
         let (promoted, next_epoch, next_fence_token) = self
             .store
             .promote_if_stale(
-                self.ha.commander_id,
-                self.ha.commander_epoch,
+                self.ha.controller_id,
+                self.ha.controller_epoch,
                 self.ha.failover_timeout,
             )
             .await
@@ -2024,18 +2024,18 @@ impl ConnectionManager {
 
         let stolen = self
             .store
-            .takeover_active_leases(self.ha.commander_id, next_epoch, next_fence_token)
+            .takeover_active_leases(self.ha.controller_id, next_epoch, next_fence_token)
             .await
             .context("takeover_active_leases failed")?;
 
-        self.ha.role = CommanderRole::Primary;
-        self.ha.commander_epoch = next_epoch;
+        self.ha.role = ControllerRole::Primary;
+        self.ha.controller_epoch = next_epoch;
         self.ha.lease_fence_token = next_fence_token;
 
         for lease in self.leases.values_mut() {
             if lease.state == LeaseState::Active {
-                lease.owner_commander_id = self.ha.commander_id;
-                lease.owner_commander_epoch = self.ha.commander_epoch;
+                lease.owner_controller_id = self.ha.controller_id;
+                lease.owner_controller_epoch = self.ha.controller_epoch;
                 lease.lease_fence_token = self.ha.lease_fence_token;
             }
         }
@@ -2046,13 +2046,13 @@ impl ConnectionManager {
             category: "standby_promoted".to_string(),
             message: format!(
                 "warm standby promoted to primary; epoch={} fence={} stolen_leases={}",
-                self.ha.commander_epoch, self.ha.lease_fence_token, stolen
+                self.ha.controller_epoch, self.ha.lease_fence_token, stolen
             ),
         });
 
         info!(
-            commander_id = %self.ha.commander_id,
-            epoch = self.ha.commander_epoch,
+            controller_id = %self.ha.controller_id,
+            epoch = self.ha.controller_epoch,
             fence = self.ha.lease_fence_token,
             stolen_leases = stolen,
             "warm standby promoted to primary"

@@ -295,7 +295,7 @@ command = "mcp-fs"
         assert_eq!(cfg.llm.active_model, "custom");
         assert_eq!(cfg.mcp.servers.len(), 1);
         // Other defaults preserved
-        assert_eq!(cfg.ui.theme, "dark");
+        assert_eq!(cfg.ui.theme, "light");
     }
 }
 

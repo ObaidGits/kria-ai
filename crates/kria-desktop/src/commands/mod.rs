@@ -6,12 +6,12 @@ pub(crate) mod colab;
 pub(crate) mod colab_dispatch;
 pub(crate) mod command_helpers;
 pub(crate) mod constants;
-pub(crate) mod fleet_enrollment;
-pub(crate) mod fleet_tools;
+pub(crate) mod device_enrollment;
+pub(crate) mod device_tools;
 pub(crate) mod google_workspace;
 pub(crate) mod history_helpers;
 pub(crate) mod image_chat;
-pub(crate) mod ironclad;
+pub(crate) mod runtime_status;
 pub(crate) mod local_api;
 pub(crate) mod mcp;
 pub(crate) mod media;
@@ -31,12 +31,12 @@ use colab::{build_colab_tier_status_payload, migrate_legacy_colab_server_command
 use colab_dispatch::*;
 use command_helpers::*;
 use constants::*;
-use fleet_enrollment::*;
-use fleet_tools::*;
+use device_enrollment::*;
+use device_tools::*;
 #[cfg(test)]
 use google_workspace::{build_google_workspace_status_payload, GoogleWorkspaceRuntimeSnapshot};
 use history_helpers::*;
-use ironclad::collect_ironclad_status_from_parts;
+use runtime_status::collect_ironclad_status_from_parts;
 #[cfg(test)]
 use local_api::{local_api_chat, LocalApiBridgeState, LocalApiChatRequest};
 use local_api::{start_local_api_bridge, AgentLoopLocalApiResponder, LocalApiResponder};
@@ -77,7 +77,7 @@ pub use google_workspace::{
 #[allow(unused_imports)]
 pub use image_chat::send_image_message;
 #[allow(unused_imports)]
-pub use ironclad::{
+pub use runtime_status::{
     get_ironclad_config, get_ironclad_forensics, get_ironclad_status, get_orchestrator_status,
     register_new_target, request_ironclad_hard_reset, request_ironclad_soft_reset,
     update_ironclad_config,
@@ -185,7 +185,7 @@ use tokio::time::timeout;
 use tower_http::cors::CorsLayer;
 use uuid::Uuid;
 
-use crate::fleet_control::DesktopFleetControlRuntime;
+use crate::device_control::DesktopFleetControlRuntime;
 use kria_core::platform::telegram::TelegramBridge;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

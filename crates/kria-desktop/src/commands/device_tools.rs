@@ -81,7 +81,7 @@ pub(crate) fn register_fleet_runtime_tools(
 }
 
 fn fleet_target_matches_hint(
-    target: &crate::fleet_control::FleetTargetProjection,
+    target: &crate::device_control::FleetTargetProjection,
     hint: &str,
 ) -> bool {
     let needle = hint.to_ascii_lowercase();

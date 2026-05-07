@@ -1,22 +1,22 @@
 import { Component, For, Show, createMemo } from "solid-js";
 import {
-  FleetAlertView,
-  FleetConnectionState,
-  FleetTerminalLine,
-  FleetTargetView,
-  FleetTestResultView,
-} from "../hooks/useFleetHeartbeat";
+  DeviceAlertView,
+  DeviceConnectionState,
+  DeviceTerminalLine,
+  DeviceTargetView,
+  DeviceTestResultView,
+} from "../hooks/useDeviceStatus";
 
-export interface FleetMatrixProps {
-  fleet: FleetTargetView[];
+export interface DeviceMatrixProps {
+  fleet: DeviceTargetView[];
   focusedTerminalTargetId: string | null;
-  terminalLines: FleetTerminalLine[];
-  alerts: FleetAlertView[];
-  streamState: FleetConnectionState;
+  terminalLines: DeviceTerminalLine[];
+  alerts: DeviceAlertView[];
+  streamState: DeviceConnectionState;
   lastHeartbeatAtUnixMs: number | null;
   leaseHealthy: boolean;
   lastError: string | null;
-  lastTestResultByTarget: (targetId: string) => FleetTestResultView | null;
+  lastTestResultByTarget: (targetId: string) => DeviceTestResultView | null;
   onAddTarget: () => void;
   onReconnectStreams: () => void;
   onFocusTerminal: (targetId: string | null) => void;
@@ -43,18 +43,18 @@ function formatAgo(unixMs: number | null): string {
   return `${Math.floor(diffMs / 3_600_000)}h ago`;
 }
 
-function healthPct(target: FleetTargetView): number {
+function healthPct(target: DeviceTargetView): number {
   const score = Math.max(0, Math.min(1, target.healthScore));
   const penalty = Math.max(0, Math.min(1, target.recentFailureRate));
   const adjusted = Math.max(0, score * (1 - penalty * 0.5));
   return Math.round(adjusted * 100);
 }
 
-function stateClass(state: FleetTargetView["state"]): string {
+function stateClass(state: DeviceTargetView["state"]): string {
   return `state-${state}`;
 }
 
-function formatTestBadge(result: FleetTestResultView | null): { label: string; cssClass: string } {
+function formatTestBadge(result: DeviceTestResultView | null): { label: string; cssClass: string } {
   if (!result) {
     return { label: "—", cssClass: "fleet-test-unknown" };
   }
@@ -71,23 +71,23 @@ function formatRunAt(unixMs: number | null): string {
   return new Date(unixMs).toLocaleString();
 }
 
-function streamStateLabel(state: FleetConnectionState): string {
-  if (state === "online") return "Online";
-  if (state === "connecting") return "Loading";
+function streamStateLabel(state: DeviceConnectionState): string {
+  if (state === "online") return "Live";
+  if (state === "connecting") return "Connecting";
   if (state === "degraded") return "Offline";
   if (state === "stopped") return "Stopped";
-  return "Idle";
+  return "Local Only";
 }
 
-function emptyTelemetryLabel(state: FleetConnectionState): string {
-  if (state === "connecting") return "Loading fleet telemetry...";
-  if (state === "online") return "Connected. Waiting for fleet telemetry events...";
-  if (state === "degraded") return "Fleet telemetry is currently offline.";
-  if (state === "stopped") return "Fleet telemetry is paused.";
-  return "Fleet telemetry is idle.";
+function emptyTelemetryLabel(state: DeviceConnectionState): string {
+  if (state === "connecting") return "Loading device status...";
+  if (state === "online") return "Connected. Waiting for device status events...";
+  if (state === "degraded") return "Live status is currently offline. Devices shown from local registry.";
+  if (state === "stopped") return "Live status is paused.";
+  return "No controller configured. Devices shown from local registry.";
 }
 
-const FleetMatrix: Component<FleetMatrixProps> = (props) => {
+const DeviceMatrix: Component<DeviceMatrixProps> = (props) => {
   const selectedTarget = createMemo(() => {
     const selectedId = props.focusedTerminalTargetId;
     if (!selectedId) {
@@ -108,13 +108,13 @@ const FleetMatrix: Component<FleetMatrixProps> = (props) => {
     <section class={`fleet-matrix ${props.class ?? ""}`.trim()}>
       <header class="fleet-matrix-head">
         <div>
-          <div class="fleet-matrix-kicker">Ironclad Fleet</div>
-          <h3>{props.title ?? "Live Orchestration Matrix"}</h3>
+          <div class="fleet-matrix-kicker">Device Fleet</div>
+          <h3>{props.title ?? "Live Device Status"}</h3>
         </div>
 
         <div class="fleet-matrix-head-metrics">
           <button class="btn-secondary" onClick={props.onAddTarget}>
-            Add Soldier
+            Add Device
           </button>
           <span class="fleet-stream-status-wrap">
             <span class={`fleet-stream-state ${props.streamState}`}>
@@ -146,12 +146,12 @@ const FleetMatrix: Component<FleetMatrixProps> = (props) => {
 
       <div class="fleet-matrix-grid">
         <div class="fleet-target-pane">
-          <div class="fleet-pane-title">Targets</div>
+          <div class="fleet-pane-title">Devices</div>
           <div class="fleet-table-wrap">
             <table class="fleet-table">
               <thead>
                 <tr>
-                  <th>Target</th>
+                  <th>Device</th>
                   <th>Mode</th>
                   <th>State</th>
                   <th>Health</th>
@@ -251,7 +251,7 @@ const FleetMatrix: Component<FleetMatrixProps> = (props) => {
           <div class="fleet-pane-title">Focused Terminal</div>
           <Show
             when={selectedTarget()}
-            fallback={<div class="fleet-terminal-empty">Select a target to attach terminal stream.</div>}
+            fallback={<div class="fleet-terminal-empty">Select a device to attach terminal stream.</div>}
           >
             <div class="fleet-terminal-head">
               <div>
@@ -292,7 +292,7 @@ const FleetMatrix: Component<FleetMatrixProps> = (props) => {
                     <Show when={alert.targetId || alert.leaseId}>
                       <div class="fleet-alert-meta">
                         <Show when={alert.targetId}>
-                          <span>target {alert.targetId}</span>
+                          <span>device {alert.targetId}</span>
                         </Show>
                         <Show when={alert.leaseId}>
                           <span>lease {alert.leaseId}</span>
@@ -311,4 +311,4 @@ const FleetMatrix: Component<FleetMatrixProps> = (props) => {
   );
 };
 
-export default FleetMatrix;
+export default DeviceMatrix;

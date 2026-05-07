@@ -3,7 +3,7 @@ name = "kria-connection-control"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Ironclad fleet orchestration control-plane for KRIA"
+description = "Device orchestration control-plane for KRIA"
 
 [dependencies]
 tokio = { workspace = true }

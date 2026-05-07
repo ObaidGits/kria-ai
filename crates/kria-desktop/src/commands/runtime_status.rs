@@ -425,11 +425,11 @@ pub async fn register_new_target(
     }
 
     let now_unix_ms = unix_now_ms() as i64;
-    let commander_epoch = request
-        .commander_epoch
+    let controller_epoch = request
+        .controller_epoch
         .or(existing_record
             .as_ref()
-            .map(|record| record.commander_epoch))
+            .map(|record| record.controller_epoch))
         .unwrap_or(0);
     let enrolled_at_unix_ms = existing_record
         .as_ref()
@@ -455,7 +455,7 @@ pub async fn register_new_target(
         ssh_private_key_path: private_key_path.clone(),
         ssh_public_key_path: public_key_path_str.clone(),
         ssh_hostkey_sha256_b64: observed_hostkey_sha256_b64.clone(),
-        commander_epoch,
+        controller_epoch,
         enrolled_at_unix_ms,
         last_verified_unix_ms: now_unix_ms,
     };
@@ -525,7 +525,7 @@ pub async fn register_new_target(
         ssh_hostkey_sha256_b64: observed_hostkey_sha256_b64,
         ssh_private_key_path: private_key_path,
         ssh_public_key_path: public_key_path_str,
-        commander_epoch,
+        controller_epoch,
         created_new_target,
         created_local_key,
         enrolled_at_unix_ms,

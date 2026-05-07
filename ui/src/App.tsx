@@ -2,7 +2,7 @@ import { Component, Show, For, createSignal, createMemo, createEffect, onMount, 
 import { appStore } from "./stores/app";
 import { provisioningStore } from "./stores/provisioning";
 import ChatView from "./components/ChatView";
-import FleetMatrix from "./components/FleetMatrix";
+import DeviceMatrix from "./components/DeviceMatrix";
 import AddTargetModal from "./components/AddTargetModal";
 import PromptLabView from "./components/PromptLabView";
 import SessionSidebar from "./components/SessionSidebar";
@@ -10,7 +10,7 @@ import SettingsModal from "./components/SettingsModal";
 import HitlModal from "./components/HitlModal";
 import VoiceOverlay from "./components/VoiceOverlay";
 import SetupWizard from "./components/SetupWizard";
-import { FleetTargetView, useFleetHeartbeat } from "./hooks/useFleetHeartbeat";
+import { DeviceTargetView, useDeviceStatus } from "./hooks/useDeviceStatus";
 
 interface Toast {
   id: number;
@@ -29,7 +29,7 @@ export function addToast(message: string, type: Toast["type"] = "info") {
 }
 
 const [toasts, setToasts] = createSignal<Toast[]>([]);
-const IRONCLAD_EXPANDED_STORAGE_KEY = "kria_ironclad_expanded";
+const CONTROL_PANEL_EXPANDED_STORAGE_KEY = "kria_control_panel_expanded";
 const FLEET_MATRIX_VISIBLE_STORAGE_KEY = "kria_fleet_matrix_visible";
 
 const App: Component = () => {
@@ -45,16 +45,16 @@ const App: Component = () => {
   const [showWizard, setShowWizard] = createSignal(false);
   const [wizardLoading, setWizardLoading] = createSignal(true);
   const [showForensics, setShowForensics] = createSignal(false);
-  const initialIroncladExpanded =
+  const initialControlPanelExpanded =
     typeof window === "undefined"
       ? false
-      : window.localStorage.getItem(IRONCLAD_EXPANDED_STORAGE_KEY) === "true";
-  const initialFleetMatrixVisible =
+      : window.localStorage.getItem(CONTROL_PANEL_EXPANDED_STORAGE_KEY) === "true";
+  const initialDeviceMatrixVisible =
     typeof window === "undefined"
       ? true
       : window.localStorage.getItem(FLEET_MATRIX_VISIBLE_STORAGE_KEY) !== "false";
-  const [ironcladExpanded, setIroncladExpanded] = createSignal<boolean>(initialIroncladExpanded);
-  const [showFleetMatrix, setShowFleetMatrix] = createSignal<boolean>(initialFleetMatrixVisible);
+  const [controlPanelExpanded, setControlPanelExpanded] = createSignal<boolean>(initialControlPanelExpanded);
+  const [showDeviceMatrix, setShowDeviceMatrix] = createSignal<boolean>(initialDeviceMatrixVisible);
   const [showAddTargetModal, setShowAddTargetModal] = createSignal(false);
   const [resetReason, setResetReason] = createSignal("");
   const [hardResetConfirmation, setHardResetConfirmation] = createSignal("");
@@ -114,26 +114,26 @@ const App: Component = () => {
       : "status-dot disconnected";
   });
 
-  const commanderBaseUrl = createMemo<string | null>(() => {
+  const controllerBaseUrl = createMemo<string | null>(() => {
     const status = ironcladStatus() as Record<string, any> | null;
     const settings = appStore.settings() as Record<string, any> | null;
     const candidates: unknown[] = [
-      status?.fleet?.pool_packet?.commander_base_url,
-      status?.fleet?.pool_packet?.commanderBaseUrl,
-      status?.fleet?.commander_base_url,
-      status?.fleet?.commanderBaseUrl,
-      status?.commander_base_url,
-      status?.commanderBaseUrl,
-      settings?.ironclad?.commander_url,
-      settings?.ironclad?.commanderUrl,
-      settings?.ironclad?.commander_base_url,
-      settings?.ironclad?.commanderBaseUrl,
-      settings?.fleet?.commander_base_url,
-      settings?.fleet?.commanderBaseUrl,
-      settings?.fleet?.commander_url,
-      settings?.fleet?.commanderUrl,
-      settings?.server?.commander_base_url,
-      settings?.server?.commanderBaseUrl,
+      status?.fleet?.pool_packet?.controller_base_url,
+      status?.fleet?.pool_packet?.controllerBaseUrl,
+      status?.fleet?.controller_base_url,
+      status?.fleet?.controllerBaseUrl,
+      status?.controller_base_url,
+      status?.controllerBaseUrl,
+      settings?.ironclad?.controller_url,
+      settings?.ironclad?.controllerUrl,
+      settings?.ironclad?.controller_base_url,
+      settings?.ironclad?.controllerBaseUrl,
+      settings?.fleet?.controller_base_url,
+      settings?.fleet?.controllerBaseUrl,
+      settings?.fleet?.controller_url,
+      settings?.fleet?.controllerUrl,
+      settings?.server?.controller_base_url,
+      settings?.server?.controllerBaseUrl,
       settings?.server?.base_url,
       settings?.server?.baseUrl,
     ];
@@ -198,14 +198,14 @@ const App: Component = () => {
     return null;
   });
 
-  const fleetHeartbeat = useFleetHeartbeat({
-    commanderBaseUrl,
+  const fleetHeartbeat = useDeviceStatus({
+    commanderBaseUrl: controllerBaseUrl,
     leaseId: fleetLeaseId,
     heartbeatIntervalMs: 15_000,
     autoStart: false,
   });
 
-  const fleetTargets = createMemo<FleetTargetView[]>(() => fleetHeartbeat.targets());
+  const fleetTargets = createMemo<DeviceTargetView[]>(() => fleetHeartbeat.targets());
 
   const ocrStartupWarning = createMemo(() => {
     const info = appStore.healthInfo();
@@ -239,18 +239,18 @@ const App: Component = () => {
     return new Date(value).toLocaleString();
   };
 
-  const toggleIroncladExpanded = () => {
-    setIroncladExpanded((prev) => {
+  const toggleControlPanelExpanded = () => {
+    setControlPanelExpanded((prev) => {
       const next = !prev;
       if (typeof window !== "undefined") {
-        window.localStorage.setItem(IRONCLAD_EXPANDED_STORAGE_KEY, String(next));
+        window.localStorage.setItem(CONTROL_PANEL_EXPANDED_STORAGE_KEY, String(next));
       }
       return next;
     });
   };
 
-  const toggleFleetMatrix = () => {
-    setShowFleetMatrix((prev) => {
+  const toggleDeviceMatrix = () => {
+    setShowDeviceMatrix((prev) => {
       const next = !prev;
       if (typeof window !== "undefined") {
         window.localStorage.setItem(FLEET_MATRIX_VISIBLE_STORAGE_KEY, String(next));
@@ -296,7 +296,7 @@ const App: Component = () => {
   };
 
   const handleTargetRegistered = () => {
-    addToast("Soldier enrolled successfully", "success");
+    addToast("Device enrolled successfully", "success");
     void appStore.loadIroncladStatus();
     fleetHeartbeat.reconnectNow();
   };
@@ -411,7 +411,7 @@ const App: Component = () => {
   });
 
   createEffect(() => {
-    const shouldStreamFleet = ironcladExpanded() && showFleetMatrix();
+    const shouldStreamFleet = controlPanelExpanded() && showDeviceMatrix();
     if (shouldStreamFleet) {
       fleetHeartbeat.start();
       return;
@@ -447,7 +447,7 @@ const App: Component = () => {
           <div class="assistant-header">
             <div>
               <div class="assistant-header-kicker">Adaptive Workspace Assistant</div>
-              <h1>KRIA Command Center</h1>
+              <h1>KRIA Control Center</h1>
               <p>{assistantStatus().detail}</p>
             </div>
             <div class="assistant-header-chips">
@@ -471,22 +471,22 @@ const App: Component = () => {
             </div>
           </Show>
 
-          <section class={`ironclad-strip ${ironcladExpanded() ? "" : "collapsed"}`}>
+          <section class={`ironclad-strip ${controlPanelExpanded() ? "" : "collapsed"}`}>
             <div class="ironclad-strip-top">
               <div class="ironclad-strip-title">
-                <span>Ironclad Runtime</span>
+                <span>Runtime Status</span>
                 <span class="ironclad-strip-subtitle">Non-blocking + trust-first controls</span>
               </div>
               <div class="ironclad-strip-actions">
                 <button class="btn-secondary" onClick={() => { void appStore.loadIroncladStatus(); void appStore.loadIroncladForensics(); }}>
                   Refresh
                 </button>
-                <button class="btn-secondary" onClick={toggleIroncladExpanded}>
-                  {ironcladExpanded() ? "Collapse" : "Expand"}
+                <button class="btn-secondary" onClick={toggleControlPanelExpanded}>
+                  {controlPanelExpanded() ? "Collapse" : "Expand"}
                 </button>
-                <Show when={ironcladExpanded()}>
-                  <button class="btn-secondary" onClick={toggleFleetMatrix}>
-                    {showFleetMatrix() ? "Hide Fleet" : "Show Fleet"}
+                <Show when={controlPanelExpanded()}>
+                  <button class="btn-secondary" onClick={toggleDeviceMatrix}>
+                    {showDeviceMatrix() ? "Hide Devices" : "Show Devices"}
                   </button>
                   <button class="btn-secondary" onClick={() => setShowForensics((v) => !v)}>
                     {showForensics() ? "Hide Forensics" : "View Forensics"}
@@ -495,7 +495,7 @@ const App: Component = () => {
               </div>
             </div>
 
-            <Show when={!ironcladExpanded()}>
+            <Show when={!controlPanelExpanded()}>
               <div class="ironclad-collapsed-row">
                 <span class={qosTrafficLightClass()} />
                 <span>Ready {ironcladStatus()?.fleet?.ready_targets ?? 0}</span>
@@ -606,8 +606,8 @@ const App: Component = () => {
             </Show>
           </section>
 
-          <Show when={ironcladExpanded() && showFleetMatrix()}>
-            <FleetMatrix
+          <Show when={ironcladExpanded() && showDeviceMatrix()}>
+            <DeviceMatrix
               title="Live Orchestration Matrix"
               fleet={fleetTargets()}
               focusedTerminalTargetId={fleetHeartbeat.focusedTargetId()}

@@ -159,7 +159,7 @@ async fn fleet_events(
                         }
                     }
 
-                    let payload = crate::fleet::control_plane_event_json(&event).to_string();
+                    let payload = crate::inventory::control_plane_event_json(&event).to_string();
                     yield Ok(Event::default().data(payload));
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
@@ -279,7 +279,7 @@ async fn handle_fleet_terminal_socket(
                             continue;
                         }
 
-                        let payload = crate::fleet::control_plane_event_json(&event).to_string();
+                        let payload = crate::inventory::control_plane_event_json(&event).to_string();
                         if sender.send(Message::Text(payload.into())).await.is_err() {
                             let _ = state
                                 .fleet

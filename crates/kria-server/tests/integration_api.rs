@@ -13,19 +13,24 @@ use tokio::net::TcpListener;
 // ── Test helpers ────────────────────────────────────────────────────
 
 /// Build the full application router with a default config.
-fn build_test_app() -> Router {
+async fn build_test_app() -> Router {
     use kria_core::config::KriaConfig;
 
-    let state = Arc::new(kria_server::ServerState {
-        config: KriaConfig::default(),
-    });
+    let config = KriaConfig::default();
+    let fleet = Arc::new(
+        kria_server::inventory::FleetRuntime::initialize(&config)
+            .await
+            .expect("fleet runtime init"),
+    );
+
+    let state = Arc::new(kria_server::ServerState { config, fleet });
 
     kria_server::build_router(state)
 }
 
 /// Start the test server on a random OS-assigned port and return its base URL.
 async fn spawn_test_server() -> String {
-    let app = build_test_app();
+    let app = build_test_app().await;
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr: SocketAddr = listener.local_addr().unwrap();
     tokio::spawn(async move {
