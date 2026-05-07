@@ -44,6 +44,18 @@ fn record_cognitive(result: CognitiveResult) {
     results.push(result);
 }
 
+fn write_cognitive_score(report: &serde_json::Value) {
+    let root = find_workspace_root();
+    let target_dir = root.join("target");
+    if std::fs::create_dir_all(&target_dir).is_err() {
+        return;
+    }
+    let path = target_dir.join("cognitive-score.json");
+    if let Ok(json) = serde_json::to_string_pretty(report) {
+        let _ = std::fs::write(path, json);
+    }
+}
+
 fn flush_cognitive_report() {
     let results = COGNITIVE_RESULTS.lock().unwrap();
     let total = results.len();
@@ -82,10 +94,7 @@ fn flush_cognitive_report() {
         }).collect::<Vec<_>>(),
     });
 
-    let path = std::path::Path::new("target/cognitive-score.json");
-    if let Ok(json) = serde_json::to_string_pretty(&report) {
-        let _ = std::fs::write(path, json);
-    }
+    write_cognitive_score(&report);
 
     eprintln!("\n═══════════════════════════════════════════════════");
     eprintln!("  COGNITIVE E2E SCORE: {score:.1}%  ({passed}/{total} passed)");
@@ -475,10 +484,7 @@ fn cognitive_aggregate_score_report() {
         "failures": failures,
     });
 
-    let path = std::path::Path::new("target/cognitive-score.json");
-    if let Ok(json) = serde_json::to_string_pretty(&report) {
-        let _ = std::fs::write(path, json);
-    }
+    write_cognitive_score(&report);
 
     eprintln!("\n═══════════════════════════════════════════════════");
     eprintln!("  COGNITIVE E2E AGGREGATE SCORE: {score:.1}%  ({passed}/{total})");

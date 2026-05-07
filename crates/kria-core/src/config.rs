@@ -1341,6 +1341,44 @@ pub struct RoutingConfig {
     pub ood_entropy_threshold: f32,
     /// Margin below which two domains trigger multi-intent check.
     pub multi_intent_margin: f32,
+
+    // ── Phase 1: Context-Aware Routing ──────────────────────────────────
+    /// Enable context-aware routing (topic continuation, correction detection).
+    pub context_enabled: bool,
+    /// Seconds of inactivity before context is considered stale.
+    pub context_stale_secs: u64,
+
+    // ── Phase 2: Fine-Tuned Intent Classifier ───────────────────────────
+    /// Enable the new intent classifier (replaces regex + legacy ONNX).
+    pub intent_classifier_enabled: bool,
+    /// Path to the fine-tuned ONNX model file.
+    pub intent_classifier_path: String,
+    /// Path to the tokenizer file.
+    pub intent_classifier_tokenizer_path: String,
+    /// Timeout for classifier inference in milliseconds.
+    pub intent_classifier_timeout_ms: u64,
+
+    // ── Phase 3: Tool Semantic Index ────────────────────────────────────
+    /// Enable tool-level semantic matching (skip LLM for obvious matches).
+    pub tool_index_enabled: bool,
+    /// Confidence threshold for direct tool execution (skip LLM).
+    pub tool_index_threshold: f32,
+
+    // ── Phase 4: Speculative Pre-Warming ────────────────────────────────
+    /// Enable speculative pre-warming on partial voice transcripts.
+    pub speculative_enabled: bool,
+    /// Minimum confidence to trigger speculation.
+    pub speculative_min_confidence: f32,
+    /// Minimum tokens in partial transcript to trigger speculation.
+    pub speculative_min_tokens: usize,
+
+    // ── Phase 5: Online Learning ────────────────────────────────────────
+    /// Enable online learning feedback collection.
+    pub feedback_enabled: bool,
+    /// Learning rate for centroid adjustment.
+    pub feedback_learning_rate: f32,
+    /// Maximum feedback buffer before flush to disk.
+    pub feedback_max_buffer: usize,
 }
 
 impl Default for RoutingConfig {
@@ -1352,6 +1390,25 @@ impl Default for RoutingConfig {
             ood_z_threshold: 0.5,
             ood_entropy_threshold: 0.85,
             multi_intent_margin: 0.04,
+            // Phase 1
+            context_enabled: true,
+            context_stale_secs: 60,
+            // Phase 2
+            intent_classifier_enabled: false,
+            intent_classifier_path: "~/.kria/models/classifier/intent_v2.onnx".into(),
+            intent_classifier_tokenizer_path: "~/.kria/models/classifier/tokenizer.json".into(),
+            intent_classifier_timeout_ms: 25,
+            // Phase 3
+            tool_index_enabled: true,
+            tool_index_threshold: 0.85,
+            // Phase 4
+            speculative_enabled: false,
+            speculative_min_confidence: 0.7,
+            speculative_min_tokens: 2,
+            // Phase 5
+            feedback_enabled: true,
+            feedback_learning_rate: 0.01,
+            feedback_max_buffer: 1000,
         }
     }
 }

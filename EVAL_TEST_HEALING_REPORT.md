@@ -197,6 +197,30 @@ assertion `left == right` failed
 - **Files:** `crates/kria-core/src/test_runner/mod.rs`, `crates/kria-core/tests/cognitive_e2e_tests.rs` (new)
 - **Change:** Added `Cognitive` zone to `TestZone` enum. Created `cognitive_e2e_tests.rs` that parses both prompt matrix files (254 prompts total) and validates IntentRouter tool selection. Wired `test_chat_regression`, `cognitive_e2e_tests`, and `quality_hallucination_tests` into the runner as Zone 6 (Cognitive E2E) and Zone 7 (Quality Gate).
 
+### Fix #6: Zone 0 UI Pre-Flight Gate
+
+**Iteration:** 4  
+**Zone:** Zone 0 (UI Pre-Flight)  
+**Error:** UI type regressions could slip through to infrastructure and destructive zones.
+
+**Root Cause:** The test runner started at Zone 1 and had no mandatory frontend syntax/type validation step before infra execution.
+
+**Fix Applied:**
+- **File:** `crates/kria-core/src/test_runner/mod.rs`
+- **Change:** Added `UI_Build` as the first `TestZone` variant and introduced `Zone 0: UI Pre-Flight` to run `npm run check` from `ui/` with `PATH` extended to include `ui/node_modules/.bin`. Added fail-fast `SystemAbort` behavior so Zone 1+ never execute if Zone 0 fails.
+
+### Fix #7: Redundant Semicolon Type Signatures
+
+**Iteration:** 4  
+**Zone:** UI Type Integrity  
+**Error:** Redundant `;;` terminators in `DeviceStatusController` accessor declarations.
+
+**Root Cause:** A syntax hygiene regression left duplicate semicolons in interface field declarations.
+
+**Fix Applied:**
+- **File:** `ui/src/hooks/useDeviceStatus.ts`
+- **Change:** Removed duplicate semicolons and normalized accessor declarations (`alerts`, `clockDriftAlerts`, `dockerUpdates`, `testResults`) to single-terminator syntax.
+
 ---
 
 ## Three Pillars Verification

@@ -166,3 +166,4 @@ data/logs/
 # Backup files
 *.bak
 *.backup
+.aider*

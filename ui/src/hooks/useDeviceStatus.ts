@@ -13,7 +13,7 @@ export interface DeviceTargetView {
   targetId: string;
   displayName: string;
   mode: string;
-  state: "ready" | "leased" | "quarantine" | "tainted" | "disabled" | "unknown";
+  state: "ready" | "leased" | "quarantine" | "tainted" | "disabled" | "degraded" | "unreachable" | "unknown";
   tainted: boolean;
   taintReason: string | null;
   healthScore: number;
@@ -73,6 +73,7 @@ type MaybeAccessor<T> = T | Accessor<T>;
 
 export interface UseDeviceStatusOptions {
   commanderBaseUrl?: MaybeAccessor<string | null | undefined>;
+  initialTargets?: MaybeAccessor<DeviceTargetView[]>;
   fleetSseUrl?: MaybeAccessor<string>;
   terminalWsBaseUrl?: MaybeAccessor<string>;
   leaseId?: MaybeAccessor<string | null | undefined>;
@@ -93,10 +94,10 @@ export interface DeviceStatusController {
   focusTarget: (targetId: string | null) => void;
   focusedTerminalLines: Accessor<DeviceTerminalLine[]>;
   terminalLinesFor: (targetId: string) => DeviceTerminalLine[];
-  alerts: Accessor<DeviceAlertView[]>;;
-  clockDriftAlerts: Accessor<DeviceClockDriftView[]>;;
-  dockerUpdates: Accessor<DeviceDockerUpdateView[]>;;
-  testResults: Accessor<DeviceTestResultView[]>;;
+  alerts: Accessor<DeviceAlertView[]>;
+  clockDriftAlerts: Accessor<DeviceClockDriftView[]>;
+  dockerUpdates: Accessor<DeviceDockerUpdateView[]>;
+  testResults: Accessor<DeviceTestResultView[]>;
   lastTestResultByTarget: (targetId: string) => DeviceTestResultView | null;
   streamState: Accessor<DeviceConnectionState>;
   lastHeartbeatAtUnixMs: Accessor<number | null>;
@@ -171,6 +172,37 @@ function normalizeEventType(payload: Record<string, unknown>): string {
   return candidate.trim().toLowerCase();
 }
 
+function normalizeTargetState(raw: unknown, reason: unknown): DeviceTargetView["state"] {
+  const state = (typeof raw === "string" ? raw : "unknown").trim().toLowerCase();
+  const why = (typeof reason === "string" ? reason : "").toLowerCase();
+  if (
+    why.includes("connection refused") ||
+    why.includes("permission denied") ||
+    why.includes("publickey") ||
+    why.includes("timed out") ||
+    why.includes("no route to host") ||
+    why.includes("host unreachable")
+  ) {
+    return "unreachable";
+  }
+  if (why.includes("dispatch") || why.includes("degraded") || why.includes("handshake")) {
+    return "degraded";
+  }
+  if (
+    state === "ready" ||
+    state === "leased" ||
+    state === "quarantine" ||
+    state === "tainted" ||
+    state === "disabled" ||
+    state === "degraded" ||
+    state === "unreachable" ||
+    state === "unknown"
+  ) {
+    return state;
+  }
+  return "unknown";
+}
+
 function toWsUrl(baseUrl: string, targetId: string, leaseId: string | null): string {
   const url = new URL(baseUrl, window.location.href);
   url.searchParams.set("target_id", targetId);
@@ -195,6 +227,20 @@ function withJitter(baseMs: number, jitterPct: number): number {
 }
 
 export function useDeviceStatus(options: UseDeviceStatusOptions): DeviceStatusController {
+  const toTargetMap = (targets: DeviceTargetView[] | undefined): Map<string, DeviceTargetView> => {
+    const seeded = new Map<string, DeviceTargetView>();
+    if (!Array.isArray(targets)) {
+      return seeded;
+    }
+    for (const target of targets) {
+      if (!target?.targetId) {
+        continue;
+      }
+      seeded.set(target.targetId, target);
+    }
+    return seeded;
+  };
+
   const resolveInput = <T,>(value: MaybeAccessor<T> | undefined): T | undefined => {
     if (typeof value === "function") {
       return (value as Accessor<T>)();
@@ -285,7 +331,9 @@ export function useDeviceStatus(options: UseDeviceStatusOptions): DeviceStatusCo
     options.autoStart === false ? "idle" : "connecting",
   );
   const [focusedTargetId, setFocusedTargetId] = createSignal<string | null>(null);
-  const [targetsMap, setTargetsMap] = createSignal<Map<string, DeviceTargetView>>(new Map());
+  const [targetsMap, setTargetsMap] = createSignal<Map<string, DeviceTargetView>>(
+    toTargetMap(resolveInput(options.initialTargets)),
+  );
   const [alerts, setAlerts] = createSignal<DeviceAlertView[]>([]);
   const [clockDriftAlerts, setClockDriftAlerts] = createSignal<DeviceClockDriftView[]>([]);
   const [dockerUpdates, setDockerUpdates] = createSignal<DeviceDockerUpdateView[]>([]);
@@ -360,7 +408,7 @@ export function useDeviceStatus(options: UseDeviceStatusOptions): DeviceStatusCo
         targetId: targetPatch.targetId,
         displayName: targetPatch.displayName ?? existing?.displayName ?? targetPatch.targetId,
         mode: targetPatch.mode ?? existing?.mode ?? "unknown",
-        state: targetPatch.state ?? existing?.state ?? "unknown",
+        state: normalizeTargetState(targetPatch.state ?? existing?.state ?? "unknown", targetPatch.taintReason ?? existing?.taintReason),
         tainted: targetPatch.tainted ?? existing?.tainted ?? false,
         taintReason: targetPatch.taintReason ?? existing?.taintReason ?? null,
         healthScore: targetPatch.healthScore ?? existing?.healthScore ?? 0,
@@ -375,6 +423,23 @@ export function useDeviceStatus(options: UseDeviceStatusOptions): DeviceStatusCo
       return next;
     });
   };
+
+  createEffect(() => {
+    const seededTargets = resolveInput(options.initialTargets);
+    if (!Array.isArray(seededTargets) || seededTargets.length === 0) {
+      return;
+    }
+    setTargetsMap((current) => {
+      const next = new Map(current);
+      for (const target of seededTargets) {
+        if (!target?.targetId || next.has(target.targetId)) {
+          continue;
+        }
+        next.set(target.targetId, target);
+      }
+      return next;
+    });
+  });
 
   const appendAlert = (alert: DeviceAlertView) => {
     setAlerts((current) => [alert, ...current].slice(0, maxAlerts));
@@ -525,7 +590,10 @@ export function useDeviceStatus(options: UseDeviceStatusOptions): DeviceStatusCo
         targetId,
         displayName: asString(payload.display_name) ?? asString(payload.displayName) ?? targetId,
         mode: asString(payload.mode) ?? "unknown",
-        state: (asString(payload.state) ?? asString(payload.status) ?? "unknown") as DeviceTargetView["state"],
+        state: normalizeTargetState(
+          asString(payload.state) ?? asString(payload.status) ?? "unknown",
+          asString(payload.reason) ?? asString(payload.taint_reason),
+        ),
         tainted: asBoolean(payload.tainted) ?? false,
         taintReason: asString(payload.reason) ?? asString(payload.taint_reason),
         healthScore: asNumber(payload.health_score) ?? asNumber(payload.healthScore) ?? undefined,
@@ -671,7 +739,10 @@ export function useDeviceStatus(options: UseDeviceStatusOptions): DeviceStatusCo
           targetId,
           displayName: asString(record.display_name) ?? asString(record.displayName) ?? targetId,
           mode: asString(record.mode) ?? "unknown",
-          state: (asString(record.state) ?? asString(record.status) ?? "unknown") as DeviceTargetView["state"],
+          state: normalizeTargetState(
+            asString(record.state) ?? asString(record.status) ?? "unknown",
+            asString(record.reason) ?? asString(record.taint_reason),
+          ),
           tainted: asBoolean(record.tainted) ?? false,
           taintReason: asString(record.reason) ?? asString(record.taint_reason),
           healthScore: asNumber(record.health_score) ?? asNumber(record.healthScore) ?? undefined,

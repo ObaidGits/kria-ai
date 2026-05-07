@@ -19,15 +19,24 @@
 //! Embedding failures degrade gracefully to the legacy `IntentRouter` (regex).
 
 pub mod cache;
+pub mod context;
 pub mod decide;
 pub mod domain;
 pub mod embed;
+pub mod feedback;
+pub mod intent_classifier;
 pub mod ood;
 pub mod segment;
+pub mod speculative;
+pub mod tool_index;
 pub mod trace;
 pub mod verbs;
 
 pub use cache::{RouterCache, RouterCacheEvent};
+pub use context::{
+    detect_correction, enrich_with_context, CorrectionSignal, EnrichedInput, EnrichmentReason,
+    RoutingContext,
+};
 pub use decide::RouteDecision;
 pub use domain::Domain;
 pub use trace::RouterTrace;
@@ -74,24 +83,45 @@ impl Router {
         (router, event_tx)
     }
 
-    /// Route a user prompt.
+    /// Route a user prompt with optional conversation context.
+    ///
+    /// When `ctx` is provided, the router will:
+    /// 1. Enrich short/ambiguous inputs with context from previous turns
+    /// 2. Detect correction phrases ("no, I meant X")
+    /// 3. Carry domain across topic-continuation turns
+    ///
     /// Returns `(RouteDecision, ModalityResult, RouterTrace)`.
     pub async fn route(&self, text: &str) -> (RouteDecision, ModalityResult, RouterTrace) {
+        self.route_with_context(text, &RoutingContext::default()).await
+    }
+
+    /// Route a user prompt with conversation context.
+    ///
+    /// This is the primary routing entry point that supports context-aware routing.
+    pub async fn route_with_context(
+        &self,
+        text: &str,
+        ctx: &RoutingContext,
+    ) -> (RouteDecision, ModalityResult, RouterTrace) {
         let start = Instant::now();
 
+        // ── Stage 0: Context enrichment (Phase 1) ────────────────────────
+        let enriched = enrich_with_context(text, ctx);
+        let route_text = enriched.effective_text();
+
         // ── Stage B: verb/modality (always runs, no embedding needed) ────
-        let modality = verbs::classify_modality(text);
+        let modality = verbs::classify_modality(route_text);
 
         // ── Stage A: embedding (degrade to regex if not ready) ───────────
         let cache_state = self.cache.state().await;
         let cache_state_str = format!("{:?}", cache_state);
 
         if !embed::is_ready() || cache_state == cache::CacheState::Empty {
-            let decision = self.regex_fallback(text);
+            let decision = self.regex_fallback(route_text);
             let trace = RouterTrace::from_parts(
                 text,
                 &modality,
-                &[text.to_string()],
+                &[route_text.to_string()],
                 &[],
                 &decision,
                 vec![],
@@ -101,11 +131,11 @@ impl Router {
             return (decision, modality, trace);
         }
 
-        // Segment into sub-prompts
-        let segments = segment::segment(text, modality.imperative_verb_count);
+        // Segment into sub-prompts (using enriched text)
+        let segments = segment::segment(route_text, modality.imperative_verb_count);
 
         // Embed prompt (and segments if multi)
-        let all_texts: Vec<&str> = std::iter::once(text)
+        let all_texts: Vec<&str> = std::iter::once(route_text)
             .chain(segments.iter().map(|s| s.as_str()))
             .collect();
 
@@ -165,6 +195,7 @@ impl Router {
             segments: &segments,
             segment_sims: &segment_sims,
             config: &self.config,
+            context: ctx,
         };
 
         let decision = decide::decide(&input);

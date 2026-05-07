@@ -27,6 +27,17 @@ struct GetFleetOverviewTool {
     fleet_control_runtime: Arc<DesktopFleetControlRuntime>,
 }
 
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+struct CheckDeviceHealthToolInput {
+    #[serde(default)]
+    target: Option<String>,
+}
+
+#[derive(Clone)]
+struct CheckDeviceHealthTool {
+    fleet_control_runtime: Arc<DesktopFleetControlRuntime>,
+}
+
 fn fleet_tool_param(name: &str, param_type: &str, description: &str, required: bool) -> ParamDef {
     ParamDef {
         name: name.to_string(),
@@ -75,9 +86,27 @@ pub(crate) fn register_fleet_runtime_tools(
     };
 
     let overview_handler: Arc<dyn ToolHandler> = Arc::new(GetFleetOverviewTool {
-        fleet_control_runtime,
+        fleet_control_runtime: fleet_control_runtime.clone(),
     });
     tool_registry.register(overview_definition, overview_handler);
+
+    let health_definition = ToolDef {
+        name: "check_device_health".to_string(),
+        description: "Check whether an enrolled VM/server is reachable and active by running lightweight health commands (hostname, uptime, and whoami).".to_string(),
+        category: "fleet".to_string(),
+        default_tier: RiskLevel::Green,
+        min_tier: "lite",
+        parameters: vec![fleet_tool_param(
+            "target",
+            "string",
+            "Optional target hint (target_id, alias, display name, host, user@host, VM1). Omit to use primary enrolled target.",
+            false,
+        )],
+    };
+    let health_handler: Arc<dyn ToolHandler> = Arc::new(CheckDeviceHealthTool {
+        fleet_control_runtime: fleet_control_runtime.clone(),
+    });
+    tool_registry.register(health_definition, health_handler);
 }
 
 fn fleet_target_matches_hint(
@@ -121,6 +150,23 @@ fn remote_command_error_excerpt(stderr: &str) -> Option<String> {
     }
 }
 
+fn classify_dispatch_error(raw: &str) -> String {
+    let lower = raw.to_ascii_lowercase();
+    if lower.contains("permission denied (publickey)") {
+        return "Permission Denied (Publickey)".to_string();
+    }
+    if lower.contains("connection refused") {
+        return "Connection Refused".to_string();
+    }
+    if lower.contains("timed out") || lower.contains("timeout") {
+        return "SSH Timeout".to_string();
+    }
+    if lower.contains("no route to host") || lower.contains("host unreachable") {
+        return "Host Unreachable".to_string();
+    }
+    raw.to_string()
+}
+
 #[async_trait]
 impl ToolHandler for ExecuteFleetCommandTool {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
@@ -156,7 +202,10 @@ impl ToolHandler for ExecuteFleetCommandTool {
         let outcome = match result {
             Ok(value) => value,
             Err(error) => {
-                return ToolResult::err(format!("fleet command dispatch failed: {error:#}"))
+                return ToolResult::err(format!(
+                    "fleet command dispatch failed: {}",
+                    classify_dispatch_error(&format!("{error:#}"))
+                ))
             }
         };
 
@@ -190,6 +239,61 @@ impl ToolHandler for ExecuteFleetCommandTool {
             }
 
             ToolResult::err_with_data(message, data)
+        }
+    }
+}
+
+#[async_trait]
+impl ToolHandler for CheckDeviceHealthTool {
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let input: CheckDeviceHealthToolInput = match serde_json::from_value(params) {
+            Ok(value) => value,
+            Err(error) => return ToolResult::err(format!("invalid parameters: {error}")),
+        };
+        let target_hint = input
+            .target
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+
+        let command = "hostname && whoami && uptime".to_string();
+        let result = self
+            .fleet_control_runtime
+            .run_shell_command(
+                command.as_str(),
+                target_hint,
+                Duration::from_secs(180),
+                Duration::from_secs(45),
+                2,
+            )
+            .await;
+
+        let outcome = match result {
+            Ok(value) => value,
+            Err(error) => {
+                return ToolResult::err(format!(
+                    "device health check failed: {}",
+                    classify_dispatch_error(&format!("{error:#}"))
+                ))
+            }
+        };
+
+        let payload = serde_json::json!({
+            "target_id": outcome.target_id,
+            "target_display_name": outcome.target_display_name,
+            "target_host": outcome.target_host,
+            "target_username": outcome.target_username,
+            "exit_code": outcome.exit_code,
+            "stdout": outcome.stdout,
+            "stderr": outcome.stderr,
+            "duration_ms": outcome.duration_ms,
+            "healthy": outcome.exit_code == 0,
+        });
+
+        if outcome.exit_code == 0 {
+            ToolResult::ok(payload)
+        } else {
+            ToolResult::err_with_data("device is degraded or unreachable".to_string(), payload)
         }
     }
 }

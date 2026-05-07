@@ -9,6 +9,7 @@
 //! Produces a `RouteDecision` with no static numeric thresholds for
 //! OOD or multi-intent detection.
 
+use super::context::RoutingContext;
 use super::domain::Domain;
 use super::ood::{self, OodContext};
 use super::verbs::ModalityResult;
@@ -41,12 +42,43 @@ pub struct DecideInput<'a> {
     pub segment_sims: &'a [Vec<(Domain, f32)>],
     /// Routing config thresholds.
     pub config: &'a RoutingConfig,
+    /// Context from previous turns (for context-aware routing).
+    pub context: &'a RoutingContext,
 }
 
 pub fn decide(input: &DecideInput<'_>) -> RouteDecision {
     let sims = input.domain_sims;
     if sims.is_empty() {
         return RouteDecision::Conversation;
+    }
+
+    // ── Step 0: Context-aware shortcuts ──────────────────────────────────
+    //
+    // These checks run BEFORE the OOD check to allow context to override
+    // potentially incorrect OOD classification for ambiguous short inputs.
+
+    // Correction: if user is correcting previous routing, boost the previous domain
+    if input.context.correction_pending {
+        if let Some(last_domain) = input.context.last_domain {
+            // If the top domain is NOT the previous domain, check if previous
+            // domain is still in the top 3 — if so, boost it to #1
+            let prev_in_top3 = sims.iter().take(3).any(|(d, _)| *d == last_domain);
+            if prev_in_top3 {
+                return RouteDecision::SingleDomain(last_domain);
+            }
+        }
+    }
+
+    // Topic continuation: if short input + strong context + same domain
+    if input.context.turn_count_in_topic >= 2 && input.segments.len() <= 1 {
+        if let Some((top_domain, top_sim)) = sims.first() {
+            if let Some(last_domain) = input.context.last_domain {
+                if *top_domain == last_domain && *top_sim > 0.3 {
+                    // High confidence in same domain → shortcut
+                    return RouteDecision::SingleDomain(*top_domain);
+                }
+            }
+        }
     }
 
     // ── Step 1: OOD check ────────────────────────────────────────────────

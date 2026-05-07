@@ -100,6 +100,38 @@ struct FleetTargetConnectionMeta {
     username: String,
 }
 
+fn normalize_hint_tokens(raw: &str) -> Vec<String> {
+    let cleaned = raw.trim().to_ascii_lowercase();
+    if cleaned.is_empty() {
+        return Vec::new();
+    }
+    let compact = cleaned
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(*c, '_' | '-' | '@' | '.'))
+        .collect::<String>();
+    let collapsed = cleaned.replace(char::is_whitespace, "");
+    let mut out = vec![cleaned];
+    if !compact.is_empty() {
+        out.push(compact);
+    }
+    if !collapsed.is_empty() {
+        out.push(collapsed);
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn looks_like_generic_vm_reference(raw: &str) -> bool {
+    let lower = raw.trim().to_ascii_lowercase();
+    lower == "my vm"
+        || lower == "the vm"
+        || lower == "vm"
+        || lower == "server"
+        || lower == "the server"
+        || lower.starts_with("vm")
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct FleetRemoteCommandOutcome {
     pub lease_id: String,
@@ -246,7 +278,10 @@ impl DesktopFleetControlRuntime {
 
     async fn resolve_target_id_from_hint(&self, target_hint: Option<&str>) -> Result<Option<Uuid>> {
         let Some(raw_hint) = target_hint else {
-            return Ok(None);
+            let guard = self.projections.read().await;
+            let mut rows = guard.values().collect::<Vec<_>>();
+            rows.sort_by(|a, b| a.display_name.cmp(&b.display_name));
+            return Ok(rows.first().and_then(|row| Uuid::parse_str(&row.target_id).ok()));
         };
 
         let hint = raw_hint.trim();
@@ -264,15 +299,19 @@ impl DesktopFleetControlRuntime {
             }
         }
 
-        let needle = hint.to_ascii_lowercase();
+        let needles = normalize_hint_tokens(hint);
         let projection_matches = {
             let guard = self.projections.read().await;
             guard
                 .iter()
                 .filter_map(|(target_id, row)| {
                     let target_id_str = target_id.to_string();
-                    let matches = row.display_name.to_ascii_lowercase().contains(&needle)
-                        || target_id_str.starts_with(&needle);
+                    let display = row.display_name.to_ascii_lowercase();
+                    let matches = needles.iter().any(|token| {
+                        display.contains(token)
+                            || target_id_str.starts_with(token)
+                            || display.replace(char::is_whitespace, "").contains(token)
+                    });
                     if matches {
                         Some(*target_id)
                     } else {
@@ -289,7 +328,10 @@ impl DesktopFleetControlRuntime {
                 .filter_map(|(target_id, meta)| {
                     let host = meta.host.to_ascii_lowercase();
                     let user_host = format!("{}@{}", meta.username.to_ascii_lowercase(), host);
-                    if host == needle || host.contains(&needle) || user_host.contains(&needle) {
+                    if needles
+                        .iter()
+                        .any(|token| host == *token || host.contains(token) || user_host.contains(token))
+                    {
                         Some(*target_id)
                     } else {
                         None
@@ -306,6 +348,16 @@ impl DesktopFleetControlRuntime {
         }
 
         if merged.is_empty() {
+            if looks_like_generic_vm_reference(hint) {
+                let guard = self.projections.read().await;
+                let mut rows = guard.values().collect::<Vec<_>>();
+                rows.sort_by(|a, b| a.display_name.cmp(&b.display_name));
+                if let Some(primary) = rows.first() {
+                    if let Ok(uuid) = Uuid::parse_str(&primary.target_id) {
+                        return Ok(Some(uuid));
+                    }
+                }
+            }
             return Err(anyhow!("no enrolled fleet target matched hint '{}'", hint));
         }
 
@@ -696,12 +748,15 @@ impl SshConnector {
     async fn verify_connectivity(&self, profile: &SshTargetProfile) -> Result<()> {
         let output = self.run_ssh_shell(profile, "true").await?;
         if output.status_code != 0 {
+            let classified = classify_ssh_error(&output.stderr).unwrap_or("SSH connectivity failure");
             return Err(anyhow!(
-                "ssh connectivity probe failed for {}@{}:{} (exit={})",
+                "{} for {}@{}:{} (exit={}): {}",
+                classified,
                 profile.username,
                 profile.host,
                 profile.port,
-                output.status_code
+                output.status_code,
+                output.stderr.trim()
             ));
         }
         Ok(())
@@ -873,6 +928,23 @@ async fn run_external(binary: &str, args: Vec<String>) -> Result<CommandOutput> 
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
         stderr: String::from_utf8_lossy(&output.stderr).to_string(),
     })
+}
+
+fn classify_ssh_error(stderr: &str) -> Option<&'static str> {
+    let lower = stderr.to_ascii_lowercase();
+    if lower.contains("permission denied (publickey)") {
+        return Some("Permission Denied (Publickey)");
+    }
+    if lower.contains("connection timed out") || lower.contains("operation timed out") {
+        return Some("SSH Timeout");
+    }
+    if lower.contains("connection refused") {
+        return Some("Connection Refused");
+    }
+    if lower.contains("no route to host") || lower.contains("name or service not known") {
+        return Some("Host Unreachable");
+    }
+    None
 }
 
 fn default_ssh_port() -> u16 {

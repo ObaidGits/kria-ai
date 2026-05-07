@@ -45,6 +45,7 @@ impl TestMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TestZone {
+    UiBuild,
     Infrastructure,
     OsLevel,
     AppLogic,
@@ -56,17 +57,19 @@ enum TestZone {
 impl TestZone {
     fn order(self) -> u8 {
         match self {
-            Self::Infrastructure => 0,
-            Self::OsLevel => 1,
-            Self::Chaos => 2,
-            Self::AppLogic => 3,
-            Self::Smoke => 4,
-            Self::Cognitive => 5,
+            Self::UiBuild => 0,
+            Self::Infrastructure => 1,
+            Self::OsLevel => 2,
+            Self::Chaos => 3,
+            Self::AppLogic => 4,
+            Self::Smoke => 5,
+            Self::Cognitive => 6,
         }
     }
 
     fn label(&self) -> &'static str {
         match self {
+            Self::UiBuild => "ui_build",
             Self::Infrastructure => "infrastructure",
             Self::OsLevel => "os_level",
             Self::Chaos => "chaos",
@@ -137,6 +140,7 @@ struct RunnerConfig {
     report_root: PathBuf,
     vm: VmEnvironment,
     fail_fast_infra: bool,
+    fail_fast_ui: bool,
 }
 
 impl RunnerConfig {
@@ -178,6 +182,7 @@ impl RunnerConfig {
             report_root,
             vm,
             fail_fast_infra: true,
+            fail_fast_ui: true,
         })
     }
 }
@@ -188,6 +193,7 @@ struct TestCommand {
     program: String,
     args: Vec<String>,
     env: Vec<(String, String)>,
+    current_dir: Option<PathBuf>,
 }
 
 impl TestCommand {
@@ -197,6 +203,7 @@ impl TestCommand {
             program: "cargo".to_string(),
             args: vec!["test".to_string(), "-p".to_string(), package.to_string(), "--test".to_string(), test.to_string()],
             env: Vec::new(),
+            current_dir: None,
         }
     }
 
@@ -215,6 +222,7 @@ impl TestCommand {
             program: "cargo".to_string(),
             args,
             env: Vec::new(),
+            current_dir: None,
         }
     }
 
@@ -233,6 +241,7 @@ impl TestCommand {
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
+            current_dir: None,
         }
     }
 }
@@ -378,9 +387,7 @@ async fn execute_plan(config: &RunnerConfig) -> Result<TestReport> {
         let snapshot_hook = if suite.destructive {
             SnapshotHook::prepare(&config.vm, &run_dir).await?
         } else {
-            SnapshotHook::Noop {
-                reason: "not destructive".to_string(),
-            }
+            SnapshotHook::Noop
         };
 
         let suite_report = run_suite(&suite, &run_dir).await?;
@@ -419,11 +426,20 @@ async fn execute_plan(config: &RunnerConfig) -> Result<TestReport> {
 
         snapshot_hook.restore().await?;
 
+        let ui_failed = suite.zone == TestZone::UiBuild
+            && suite_report.status == SuiteStatus::Failed
+            && config.fail_fast_ui;
         let infra_failed = suite.zone == TestZone::Infrastructure
             && suite_report.status == SuiteStatus::Failed
             && config.fail_fast_infra;
 
         suite_reports.push(suite_report);
+
+        if ui_failed {
+            return Err(anyhow!(
+                "SystemAbort: Zone 0 UI pre-flight failed; refusing to continue to infrastructure and later zones"
+            ));
+        }
 
         if infra_failed {
             break;
@@ -482,6 +498,9 @@ async fn run_suite(suite: &TestSuite, run_dir: &Path) -> Result<SuiteReport> {
 async fn run_command(command: &TestCommand, run_dir: &Path) -> Result<CommandReport> {
     let mut cmd = Command::new(&command.program);
     cmd.args(&command.args);
+    if let Some(dir) = &command.current_dir {
+        cmd.current_dir(dir);
+    }
     for (key, value) in &command.env {
         cmd.env(key, value);
     }
@@ -522,6 +541,13 @@ async fn run_command(command: &TestCommand, run_dir: &Path) -> Result<CommandRep
 
 fn build_suites(mode: TestMode) -> Vec<TestSuite> {
     let mut suites = Vec::new();
+    let ui_zone = TestSuite {
+        name: "Zone 0: UI Pre-Flight".to_string(),
+        zone: TestZone::UiBuild,
+        commands: vec![ui_build_command()],
+        requires_vm: false,
+        destructive: false,
+    };
 
     let infra = TestSuite {
         name: "Zone 1: Infrastructure".to_string(),
@@ -609,10 +635,14 @@ fn build_suites(mode: TestMode) -> Vec<TestSuite> {
 
     match mode {
         TestMode::Smoke => suites.push(smoke),
-        TestMode::Infra => suites.push(infra),
+        TestMode::Infra => {
+            suites.push(ui_zone.clone());
+            suites.push(infra);
+        }
         TestMode::Destructive => suites.push(destructive),
         TestMode::AppLogic => suites.push(app_logic),
         TestMode::Full => {
+            suites.push(ui_zone);
             suites.push(infra);
             suites.push(destructive);
             suites.push(chaos);
@@ -624,6 +654,33 @@ fn build_suites(mode: TestMode) -> Vec<TestSuite> {
     }
 
     suites
+}
+
+fn ui_build_command() -> TestCommand {
+    let workspace_root = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let ui_dir = workspace_root.join("ui");
+    let local_bin = ui_dir.join("node_modules").join(".bin");
+    let mut path_segments: Vec<PathBuf> = vec![local_bin];
+    if let Some(existing) = env::var_os("PATH") {
+        path_segments.extend(env::split_paths(&existing));
+    }
+    let merged_path = env::join_paths(path_segments)
+        .ok()
+        .and_then(|value| value.into_string().ok())
+        .unwrap_or_else(|| {
+            env::var("PATH").unwrap_or_default()
+        });
+
+    TestCommand {
+        name: "ui::npm_check".to_string(),
+        program: "bash".to_string(),
+        args: vec![
+            "-lc".to_string(),
+            format!("cd '{}' && npm run check", ui_dir.display()),
+        ],
+        env: vec![("PATH".to_string(), merged_path)],
+        current_dir: None,
+    }
 }
 
 fn summarize(suites: &[SuiteReport]) -> SummaryReport {
@@ -890,16 +947,14 @@ fn verify_credential_integrity(sequence: u64) -> bool {
 }
 
 enum SnapshotHook {
-    Noop { reason: String },
+    Noop,
     Qemu { env: rq::QemuSshEnvironment },
 }
 
 impl SnapshotHook {
     async fn prepare(vm: &VmEnvironment, run_dir: &Path) -> Result<Self> {
         if env::var("KRIA_TEST_SNAPSHOT").ok().as_deref() != Some("1") {
-            return Ok(Self::Noop {
-                reason: "KRIA_TEST_SNAPSHOT not set".to_string(),
-            });
+            return Ok(Self::Noop);
         }
 
         let remote_control_dir = env::var("KRIA_TEST_REMOTE_CONTROL_DIR")
@@ -924,7 +979,7 @@ impl SnapshotHook {
 
     async fn restore(self) -> Result<()> {
         match self {
-            Self::Noop { .. } => Ok(()),
+            Self::Noop => Ok(()),
             Self::Qemu { env } => {
                 // Use relaxed drift tolerance for test runner — the QMP snapshot
                 // restore resets VM-level state that can cause hash distance

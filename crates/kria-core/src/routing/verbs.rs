@@ -78,22 +78,22 @@ static VERB_PATTERNS: Lazy<Vec<(Regex, IntentModality)>> = Lazy::new(|| {
         ),
         // Write / create / modify
         (
-            r"(?i)\b(write|create|edit|update|modify|rename|move|copy|save|draft|compose|banao|likhao|badlo)\b",
+            r"(?i)\b(write|create|edit|update|modify|rename|move|copy|save|draft|compose|banao|likhao|badlo|banado|bana\s*do|likh\s*do)\b",
             IntentModality::Write,
         ),
         // Schedule
         (
-            r"(?i)\b(schedule|remind|set\s+a?\s*(reminder|alarm)|book|calendar|plan|add\s+event|yaad\s*dilao|schedule\s*karo)\b",
+            r"(?i)\b(schedule|remind|set\s+a?\s*(reminder|alarm)|book|calendar|plan|add\s+event|yaad\s*dilao|schedule\s*karo|reminder\s*laga)\b",
             IntentModality::Schedule,
         ),
         // Read / open / show
         (
-            r"(?i)\b(read|open|show|display|list|view|get|fetch|load|check|preview|padhao|dikhao)\b",
+            r"(?i)\b(read|open|show|display|list|view|get|fetch|load|check|preview|padhao|dikhao|batao|khulega|kholo|badhao|ghatao)\b",
             IntentModality::Read,
         ),
         // Query / search / find
         (
-            r"(?i)\b(search|find|look\s*(for|up)|query|what\s+is|what\s+are|who\s+is|how\s+does|dhundo|batao|kya\s+hai)\b",
+            r"(?i)\b(search|find|look\s*(for|up)|query|what\s+is|what\s+are|who\s+is|how\s+does|dhundo|batao|kya\s+hai|pata\s+karo|google\s+karo)\b",
             IntentModality::Query,
         ),
     ];

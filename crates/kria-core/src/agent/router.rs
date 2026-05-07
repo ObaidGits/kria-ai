@@ -187,6 +187,18 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             "execute_fleet_command",
         ),
         (
+            r"(?i)\bremote\s+command\s*:\s*.+",
+            "execute_fleet_command",
+        ),
+        (
+            r"(?i)\b(?:is\s+it\s+(?:active|up)|check\s+status|status\s+check|is\s+(?:my\s+)?(?:vm|server|vm\d+)\s+up)\b",
+            "check_device_health",
+        ),
+        (
+            r"(?i)\b(?:health|heartbeat|reachability)\b.{0,30}\b(?:my\s+vm|server|vm\d+|remote\s+host)\b",
+            "check_device_health",
+        ),
+        (
             r"(?i)\bvia\s+ssh\b|\bssh\s+[a-z0-9_.-]+@[a-z0-9_.:-]+\b",
             "execute_fleet_command",
         ),
@@ -886,5 +898,19 @@ mod tests {
         let result = IntentRouter::classify("List my connected machines");
         assert!(matches!(result.intent, Intent::DirectTool(_)));
         assert_eq!(result.tool_hint.as_deref(), Some("get_fleet_overview"));
+    }
+
+    #[test]
+    fn routes_generic_vm_health_prompt_to_check_device_health() {
+        let result = IntentRouter::classify("is my VM up?");
+        assert!(matches!(result.intent, Intent::DirectTool(_)));
+        assert_eq!(result.tool_hint.as_deref(), Some("check_device_health"));
+    }
+
+    #[test]
+    fn routes_server_status_prompt_to_check_device_health() {
+        let result = IntentRouter::classify("check status of the server");
+        assert!(matches!(result.intent, Intent::DirectTool(_)));
+        assert_eq!(result.tool_hint.as_deref(), Some("check_device_health"));
     }
 }

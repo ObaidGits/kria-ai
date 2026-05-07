@@ -198,8 +198,58 @@ const App: Component = () => {
     return null;
   });
 
+  const initialRegistryTargets = createMemo<DeviceTargetView[]>(() => {
+    const status = ironcladStatus() as Record<string, any> | null;
+    const fleet = (status?.fleet ?? {}) as Record<string, any>;
+    const rawTargets: unknown[] = [];
+
+    if (Array.isArray(fleet.enrolled_targets)) {
+      rawTargets.push(...fleet.enrolled_targets);
+    }
+    if (Array.isArray(fleet.connection_control_targets)) {
+      rawTargets.push(...fleet.connection_control_targets);
+    }
+
+    const map = new Map<string, DeviceTargetView>();
+    for (const entry of rawTargets) {
+      if (!entry || typeof entry !== "object") {
+        continue;
+      }
+      const row = entry as Record<string, unknown>;
+      const targetIdRaw = row.target_id ?? row.targetId ?? row.id;
+      const targetId = typeof targetIdRaw === "string" ? targetIdRaw.trim() : "";
+      if (!targetId || map.has(targetId)) {
+        continue;
+      }
+
+      const displayNameRaw = row.display_name ?? row.displayName;
+      const modeRaw = row.mode;
+      map.set(targetId, {
+        targetId,
+        displayName: typeof displayNameRaw === "string" && displayNameRaw.trim().length > 0
+          ? displayNameRaw.trim()
+          : targetId,
+        mode: typeof modeRaw === "string" && modeRaw.trim().length > 0 ? modeRaw.trim() : "ssh_bootstrap",
+        state: "unknown",
+        tainted: false,
+        taintReason: null,
+        healthScore: 0,
+        latencyEwmaMs: 0,
+        recentFailureRate: 0,
+        dockerHealth: "unknown",
+        dockerPassCount: 0,
+        dockerFailCount: 0,
+        dockerLastRunAtUnixMs: null,
+        updatedAtUnixMs: Date.now(),
+      });
+    }
+
+    return Array.from(map.values());
+  });
+
   const fleetHeartbeat = useDeviceStatus({
     commanderBaseUrl: controllerBaseUrl,
+    initialTargets: initialRegistryTargets,
     leaseId: fleetLeaseId,
     heartbeatIntervalMs: 15_000,
     autoStart: false,
@@ -266,7 +316,7 @@ const App: Component = () => {
       return;
     }
 
-    const commander = commanderBaseUrl();
+    const commander = controllerBaseUrl();
     if (!commander) {
       addToast("Fleet commander endpoint unavailable", "error");
       return;
@@ -504,7 +554,7 @@ const App: Component = () => {
               </div>
             </Show>
 
-            <Show when={ironcladExpanded()}>
+            <Show when={controlPanelExpanded()}>
               <div class="ironclad-metric-row">
                 <div class="ironclad-card">
                   <div class="ironclad-card-label">Fleet Health</div>
@@ -606,7 +656,7 @@ const App: Component = () => {
             </Show>
           </section>
 
-          <Show when={ironcladExpanded() && showDeviceMatrix()}>
+          <Show when={controlPanelExpanded() && showDeviceMatrix()}>
             <DeviceMatrix
               title="Live Orchestration Matrix"
               fleet={fleetTargets()}

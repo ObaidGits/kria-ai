@@ -8,6 +8,7 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use crate::agent::router::{Intent, IntentResult, IntentRouter};
+use crate::routing::context::{detect_correction, CorrectionSignal, RoutingContext};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Modality {
@@ -177,6 +178,8 @@ pub struct TurnGatePlan {
 #[derive(Debug)]
 pub struct TurnGate {
     onnx_classifier: Option<crate::agent::onnx_classifier::OnnxClassifier>,
+    /// Conversation context for context-aware routing.
+    context: RoutingContext,
 }
 
 impl Default for TurnGate {
@@ -208,16 +211,41 @@ impl TurnGate {
             None
         };
 
-        Self { onnx_classifier }
+        Self {
+            onnx_classifier,
+            context: RoutingContext::default(),
+        }
     }
 
     #[cfg(test)]
     fn with_onnx_classifier(
         onnx_classifier: Option<crate::agent::onnx_classifier::OnnxClassifier>,
     ) -> Self {
-        Self { onnx_classifier }
+        Self {
+            onnx_classifier,
+            context: RoutingContext::default(),
+        }
     }
 
+    /// Get a reference to the current routing context.
+    pub fn context(&self) -> &RoutingContext {
+        &self.context
+    }
+
+    /// Get a mutable reference to the routing context.
+    pub fn context_mut(&mut self) -> &mut RoutingContext {
+        &mut self.context
+    }
+
+    /// Set the routing context (e.g., from conversation history).
+    pub fn set_context(&mut self, ctx: RoutingContext) {
+        self.context = ctx;
+    }
+
+    /// Plan a turn with context-aware routing.
+    ///
+    /// This method is `&self` to remain compatible with `Arc<TurnGate>`.
+    /// Context updates should be done externally via `update_context()`.
     pub fn plan_turn(&self, user_text: &str, has_images: bool) -> TurnGatePlan {
         let router_result = IntentRouter::classify(user_text);
         let intent = self.classify(user_text, has_images, &router_result);
@@ -231,6 +259,27 @@ impl TurnGate {
             direct_tool_hint,
             fallback_tool_hints,
         }
+    }
+
+    /// Check if user text contains a correction phrase.
+    pub fn detect_correction(&self, user_text: &str) -> CorrectionSignal {
+        detect_correction(user_text, &self.context)
+    }
+
+    /// Update the routing context after a successful routing decision.
+    pub fn update_context(
+        &mut self,
+        domain: crate::routing::domain::Domain,
+        tool: Option<String>,
+        modality: crate::routing::verbs::IntentModality,
+        embedding: Vec<f32>,
+    ) {
+        self.context.record_turn(domain, tool, modality, embedding);
+    }
+
+    /// Mark that a correction is pending (user is correcting previous routing).
+    pub fn mark_correction_pending(&mut self) {
+        self.context.set_correction_pending();
     }
 
     pub fn replan_after_error(
