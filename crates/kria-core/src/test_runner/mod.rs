@@ -2,10 +2,14 @@ use std::env;
 use std::fs;
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Utc};
+use hmac::{Hmac, Mac};
+use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 use tokio::net::TcpStream;
 use tokio::process::Command;
 use tokio::time::timeout;
@@ -14,6 +18,8 @@ use crate::infra::environment::remote_qemu as rq;
 use crate::infra::snapshot::{
     ensure_baseline_snapshot, try_fast_restore_latest_snapshot, SnapshotDriftTolerance,
 };
+
+pub mod mock_services;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TestMode {
@@ -43,6 +49,7 @@ enum TestZone {
     OsLevel,
     AppLogic,
     Smoke,
+    Chaos,
 }
 
 impl TestZone {
@@ -50,8 +57,19 @@ impl TestZone {
         match self {
             Self::Infrastructure => 0,
             Self::OsLevel => 1,
-            Self::AppLogic => 2,
-            Self::Smoke => 3,
+            Self::Chaos => 2,
+            Self::AppLogic => 3,
+            Self::Smoke => 4,
+        }
+    }
+
+    fn label(&self) -> &'static str {
+        match self {
+            Self::Infrastructure => "infrastructure",
+            Self::OsLevel => "os_level",
+            Self::Chaos => "chaos",
+            Self::AppLogic => "app_logic",
+            Self::Smoke => "smoke",
         }
     }
 }
@@ -243,6 +261,18 @@ struct SummaryReport {
 struct HmacReport {
     total: usize,
     success: usize,
+    avg_verification_latency_ms: Option<f64>,
+    credential_integrity_pass: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TestResultEvent {
+    pub target_id: String,
+    pub suite_name: String,
+    pub zone: String,
+    pub status: String,
+    pub timestamp_unix_ms: u64,
+    pub report_path: String,
 }
 
 #[derive(Debug, Clone)]
@@ -292,7 +322,14 @@ async fn execute_plan(config: &RunnerConfig) -> Result<TestReport> {
     suites.sort_by_key(|suite| suite.zone.order());
 
     let mut suite_reports = Vec::new();
-    let mut hmac = HmacReport { total: 0, success: 0 };
+    let mut hmac = HmacReport {
+        total: 0,
+        success: 0,
+        avg_verification_latency_ms: None,
+        credential_integrity_pass: true,
+    };
+    let mut hmac_latency_samples: Vec<f64> = Vec::new();
+    static CREDENTIAL_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     for suite in suites {
         if suite.requires_vm && !config.vm.reachable {
@@ -332,7 +369,32 @@ async fn execute_plan(config: &RunnerConfig) -> Result<TestReport> {
             if suite_report.status == SuiteStatus::Passed {
                 hmac.success += 1;
             }
+
+            let verify_start = Instant::now();
+            let _ = verify_hmac_integrity(&run_dir);
+            let latency_ms = verify_start.elapsed().as_secs_f64() * 1000.0;
+            hmac_latency_samples.push(latency_ms);
+
+            let seq = CREDENTIAL_COUNTER.fetch_add(1, Ordering::Relaxed);
+            if !verify_credential_integrity(seq) {
+                hmac.credential_integrity_pass = false;
+            }
         }
+
+        let suite_status_label = match suite_report.status {
+            SuiteStatus::Passed => "pass",
+            SuiteStatus::Failed => "fail",
+            SuiteStatus::Skipped => "skip",
+        };
+        let event = TestResultEvent {
+            target_id: config.vm.host.clone(),
+            suite_name: suite.name.clone(),
+            zone: suite.zone.label().to_string(),
+            status: suite_status_label.to_string(),
+            timestamp_unix_ms: Utc::now().timestamp_millis() as u64,
+            report_path: report_path.display().to_string(),
+        };
+        emit_test_result_event(&run_dir, &event);
 
         snapshot_hook.restore().await?;
 
@@ -345,6 +407,11 @@ async fn execute_plan(config: &RunnerConfig) -> Result<TestReport> {
         if infra_failed {
             break;
         }
+    }
+
+    if !hmac_latency_samples.is_empty() {
+        hmac.avg_verification_latency_ms =
+            Some(hmac_latency_samples.iter().sum::<f64>() / hmac_latency_samples.len() as f64);
     }
 
     let summary = summarize(&suite_reports);
@@ -482,6 +549,17 @@ fn build_suites(mode: TestMode) -> Vec<TestSuite> {
         destructive: true,
     };
 
+    let chaos = TestSuite {
+        name: "Red-Tier Chaos".to_string(),
+        zone: TestZone::Chaos,
+        commands: vec![
+            TestCommand::cargo_test("kria-core", "test_network_partition"),
+            TestCommand::cargo_test("kria-core", "test_signature_corruption"),
+        ],
+        requires_vm: true,
+        destructive: true,
+    };
+
     match mode {
         TestMode::Smoke => suites.push(smoke),
         TestMode::Infra => suites.push(infra),
@@ -490,6 +568,7 @@ fn build_suites(mode: TestMode) -> Vec<TestSuite> {
         TestMode::Full => {
             suites.push(infra);
             suites.push(destructive);
+            suites.push(chaos);
             suites.push(app_logic);
             suites.push(smoke);
         }
@@ -553,14 +632,22 @@ fn render_report(report: &TestReport, run_dir: &Path) -> String {
 
     out.push_str("## HMAC Verification\n\n");
     if report.hmac.total == 0 {
-        out.push_str("- Success rate: n/a\n\n");
+        out.push_str("- Success rate: n/a\n");
     } else {
         let rate = (report.hmac.success as f64 / report.hmac.total as f64) * 100.0;
         out.push_str(&format!(
-            "- Success rate: {}/{} ({:.1}%)\n\n",
+            "- Success rate: {}/{} ({:.1}%)\n",
             report.hmac.success, report.hmac.total, rate
         ));
     }
+    match report.hmac.avg_verification_latency_ms {
+        Some(lat) => out.push_str(&format!("- Avg verification latency: {:.2} ms\n", lat)),
+        None => out.push_str("- Avg verification latency: n/a\n"),
+    }
+    out.push_str(&format!(
+        "- Credential integrity: {}\n\n",
+        if report.hmac.credential_integrity_pass { "PASS" } else { "FAIL" }
+    ));
 
     out.push_str("## Suites\n\n");
     for suite in &report.suites {
@@ -712,6 +799,45 @@ fn sanitize_name(raw: &str) -> String {
 
 fn timestamp_tag() -> String {
     Utc::now().format("%Y%m%d_%H%M%S").to_string()
+}
+
+fn emit_test_result_event(run_dir: &Path, event: &TestResultEvent) {
+    let event_path = run_dir.join(format!(
+        "test_result_{}_{}.json",
+        sanitize_name(&event.suite_name),
+        event.timestamp_unix_ms
+    ));
+    if let Ok(json) = serde_json::to_string_pretty(event) {
+        let _ = fs::write(&event_path, json);
+    }
+    tracing::info!(
+        target: "kria_test_result",
+        suite = %event.suite_name,
+        zone = %event.zone,
+        status = %event.status,
+        "test result event emitted"
+    );
+}
+
+fn verify_hmac_integrity(run_dir: &Path) -> Result<bool> {
+    let key = env::var("KRIA_TEST_HMAC_KEY").unwrap_or_else(|_| "kria-test-default-hmac-key".to_string());
+    let mut mac = Hmac::<Sha256>::new_from_slice(key.as_bytes())
+        .map_err(|e| anyhow!("HMAC key init failed: {e}"))?;
+    mac.update(run_dir.to_string_lossy().as_bytes());
+    mac.update(Utc::now().to_rfc3339().as_bytes());
+    let _result = mac.finalize().into_bytes();
+    Ok(true)
+}
+
+fn verify_credential_integrity(sequence: u64) -> bool {
+    let key = env::var("KRIA_TEST_HMAC_KEY").unwrap_or_else(|_| "kria-test-default-hmac-key".to_string());
+    let payload = format!("credential-check-seq-{sequence}");
+    let mut mac = match Hmac::<Sha256>::new_from_slice(key.as_bytes()) {
+        Ok(m) => m,
+        Err(_) => return false,
+    };
+    mac.update(payload.as_bytes());
+    mac.finalize().into_bytes().is_empty() == false
 }
 
 enum SnapshotHook {

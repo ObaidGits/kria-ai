@@ -622,6 +622,7 @@ const App: Component = () => {
               onFocusTerminal={fleetHeartbeat.focusTarget}
               onRunDockerEvals={runFleetDockerEvals}
               dockerActionDisabled={!fleetLeaseId()}
+              lastTestResultByTarget={fleetHeartbeat.lastTestResultByTarget}
             />
           </Show>
 

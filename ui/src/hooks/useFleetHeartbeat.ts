@@ -52,6 +52,15 @@ export interface FleetDockerUpdateView {
   updatedAtUnixMs: number;
 }
 
+export interface FleetTestResultView {
+  targetId: string;
+  suiteName: string;
+  zone: string;
+  status: "pass" | "fail" | "skip";
+  timestampUnixMs: number;
+  reportPath: string;
+}
+
 export interface FleetTerminalLine {
   targetId: string;
   offset: number;
@@ -87,6 +96,8 @@ export interface FleetHeartbeatController {
   alerts: Accessor<FleetAlertView[]>;
   clockDriftAlerts: Accessor<FleetClockDriftView[]>;
   dockerUpdates: Accessor<FleetDockerUpdateView[]>;
+  testResults: Accessor<FleetTestResultView[]>;
+  lastTestResultByTarget: (targetId: string) => FleetTestResultView | null;
   streamState: Accessor<FleetConnectionState>;
   lastHeartbeatAtUnixMs: Accessor<number | null>;
   leaseHealthy: Accessor<boolean>;
@@ -278,6 +289,7 @@ export function useFleetHeartbeat(options: UseFleetHeartbeatOptions): FleetHeart
   const [alerts, setAlerts] = createSignal<FleetAlertView[]>([]);
   const [clockDriftAlerts, setClockDriftAlerts] = createSignal<FleetClockDriftView[]>([]);
   const [dockerUpdates, setDockerUpdates] = createSignal<FleetDockerUpdateView[]>([]);
+  const [testResults, setTestResults] = createSignal<FleetTestResultView[]>([]);
   const [lastHeartbeatAtUnixMs, setLastHeartbeatAtUnixMs] = createSignal<number | null>(null);
   const [lastError, setLastError] = createSignal<string | null>(null);
   const [terminalVersion, setTerminalVersion] = createSignal(0);
@@ -402,6 +414,11 @@ export function useFleetHeartbeat(options: UseFleetHeartbeatOptions): FleetHeart
     terminalVersion();
     const buffer = ringBuffers.get(targetId);
     return buffer ? buffer.toArray() : [];
+  };
+
+  const lastTestResultByTarget = (targetId: string): FleetTestResultView | null => {
+    const results = testResults();
+    return results.find((r) => r.targetId === targetId) ?? null;
   };
 
   const setConnectionIssue = (
@@ -616,6 +633,26 @@ export function useFleetHeartbeat(options: UseFleetHeartbeatOptions): FleetHeart
 
     if (eventType === "heartbeatack" || eventType === "heartbeat_ack") {
       setLastHeartbeatAtUnixMs(asNumber(payload.ts_unix_ms) ?? Date.now());
+      return;
+    }
+
+    if (eventType === "testresult" || eventType === "test_result") {
+      const targetId = asString(payload.target_id) ?? asString(payload.targetId);
+      if (!targetId) {
+        return;
+      }
+      const rawStatus = asString(payload.status) ?? "skip";
+      const normalizedStatus = rawStatus === "pass" ? "pass" : rawStatus === "fail" ? "fail" : "skip";
+      setTestResults((current) =>
+        [{
+          targetId,
+          suiteName: asString(payload.suite_name) ?? asString(payload.suiteName) ?? "unknown",
+          zone: asString(payload.zone) ?? "unknown",
+          status: normalizedStatus as FleetTestResultView["status"],
+          timestampUnixMs: asNumber(payload.timestamp_unix_ms) ?? asNumber(payload.timestampUnixMs) ?? Date.now(),
+          reportPath: asString(payload.report_path) ?? asString(payload.reportPath) ?? "",
+        }, ...current].slice(0, maxAlerts),
+      );
       return;
     }
 
@@ -1020,6 +1057,8 @@ export function useFleetHeartbeat(options: UseFleetHeartbeatOptions): FleetHeart
     alerts,
     clockDriftAlerts,
     dockerUpdates,
+    testResults,
+    lastTestResultByTarget,
     streamState,
     lastHeartbeatAtUnixMs,
     leaseHealthy,

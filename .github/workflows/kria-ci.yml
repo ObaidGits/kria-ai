@@ -1,0 +1,140 @@
+# ──────────────────────────────────────────────────────────────────────
+# KRIA Test-Suite CI — Runs Smoke and Application tests on every push.
+#
+# Jobs:
+#   1. smoke-test     — kria-test --mode smoke (Zone 1 infra gate + smoke)
+#   2. app-logic-test — kria-test --mode app_logic (Zone 3 app logic)
+#   3. full-test      — kria-test --mode full (all zones, requires VM + secrets)
+# ──────────────────────────────────────────────────────────────────────
+
+name: KRIA Test Suite
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ── Smoke Test (Zone 1 + Zone 4) ────────────────────────────────
+  smoke-test:
+    name: "KRIA — Smoke Test"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+            libssl-dev libasound2-dev pkg-config
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build kria-test binary
+        run: cargo build -p kria-core --bin kria-test
+
+      - name: Run smoke test suite
+        run: |
+          cargo run -p kria-core --bin kria-test -- --mode smoke \
+            --report-dir target/kria-test/smoke
+
+      - name: Upload smoke test report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kria-smoke-report
+          path: target/kria-test/smoke/
+
+  # ── Application Logic Test (Zone 3) ─────────────────────────────
+  app-logic-test:
+    name: "KRIA — App Logic Test"
+    runs-on: ubuntu-latest
+    needs: smoke-test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+            libssl-dev libasound2-dev pkg-config
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build kria-test binary
+        run: cargo build -p kria-core --bin kria-test
+
+      - name: Run app logic test suite
+        env:
+          KRIA_TEST_HMAC_KEY: "ci-hmac-key-${{ github.sha }}"
+        run: |
+          cargo run -p kria-core --bin kria-test -- --mode app_logic \
+            --report-dir target/kria-test/app-logic
+
+      - name: Upload app logic test report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kria-app-logic-report
+          path: target/kria-test/app-logic/
+
+  # ── Full Test Suite (all zones, requires VM + destructive flag) ─
+  full-test:
+    name: "KRIA — Full Test Suite"
+    runs-on: ubuntu-latest
+    needs: [smoke-test, app-logic-test]
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+            libssl-dev libasound2-dev pkg-config \
+            qemu-system-x86
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build kria-test binary
+        run: cargo build -p kria-core --bin kria-test
+
+      - name: Run full test suite
+        env:
+          KRIA_TEST_VM_HOST: ${{ secrets.KRIA_TEST_VM_HOST }}
+          KRIA_TEST_VM_USER: ${{ secrets.KRIA_TEST_VM_USER }}
+          KRIA_TEST_VM_SSH_KEY: ${{ secrets.KRIA_TEST_VM_SSH_KEY }}
+          KRIA_TEST_ALLOW_DESTRUCTIVE: "1"
+          KRIA_TEST_SNAPSHOT: "1"
+          KRIA_TEST_HMAC_KEY: "ci-hmac-key-${{ github.sha }}"
+        run: |
+          cargo run -p kria-core --bin kria-test -- --mode full \
+            --report-dir target/kria-test/full
+
+      - name: Upload full test report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kria-full-report
+          path: target/kria-test/full/

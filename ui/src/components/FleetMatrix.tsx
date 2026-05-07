@@ -4,6 +4,7 @@ import {
   FleetConnectionState,
   FleetTerminalLine,
   FleetTargetView,
+  FleetTestResultView,
 } from "../hooks/useFleetHeartbeat";
 
 export interface FleetMatrixProps {
@@ -15,6 +16,7 @@ export interface FleetMatrixProps {
   lastHeartbeatAtUnixMs: number | null;
   leaseHealthy: boolean;
   lastError: string | null;
+  lastTestResultByTarget: (targetId: string) => FleetTestResultView | null;
   onAddTarget: () => void;
   onReconnectStreams: () => void;
   onFocusTerminal: (targetId: string | null) => void;
@@ -50,6 +52,16 @@ function healthPct(target: FleetTargetView): number {
 
 function stateClass(state: FleetTargetView["state"]): string {
   return `state-${state}`;
+}
+
+function formatTestBadge(result: FleetTestResultView | null): { label: string; cssClass: string } {
+  if (!result) {
+    return { label: "—", cssClass: "fleet-test-unknown" };
+  }
+  const ago = formatAgo(result.timestampUnixMs);
+  const statusLabel = result.status === "pass" ? "PASS" : result.status === "fail" ? "FAIL" : "SKIP";
+  const cssClass = result.status === "pass" ? "fleet-test-pass" : result.status === "fail" ? "fleet-test-fail" : "fleet-test-skip";
+  return { label: `${statusLabel} (${ago})`, cssClass };
 }
 
 function formatRunAt(unixMs: number | null): string {
@@ -146,6 +158,7 @@ const FleetMatrix: Component<FleetMatrixProps> = (props) => {
                   <th>Latency</th>
                   <th>Failures</th>
                   <th>Docker</th>
+                  <th>Test</th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -154,7 +167,7 @@ const FleetMatrix: Component<FleetMatrixProps> = (props) => {
                   when={props.fleet.length > 0}
                   fallback={
                     <tr>
-                      <td colspan={8} class="fleet-empty-row">
+                      <td colspan={9} class="fleet-empty-row">
                         {emptyTelemetryLabel(props.streamState)}
                       </td>
                     </tr>
@@ -195,6 +208,12 @@ const FleetMatrix: Component<FleetMatrixProps> = (props) => {
                             pass {target.dockerPassCount} / fail {target.dockerFailCount}
                           </div>
                           <div class="fleet-docker-meta">{formatRunAt(target.dockerLastRunAtUnixMs)}</div>
+                        </td>
+                        <td>
+                          {(() => {
+                            const badge = formatTestBadge(props.lastTestResultByTarget(target.targetId));
+                            return <span class={`fleet-test-badge ${badge.cssClass}`}>{badge.label}</span>;
+                          })()}
                         </td>
                         <td class="fleet-actions-cell">
                           <button
