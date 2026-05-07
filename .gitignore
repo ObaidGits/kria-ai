@@ -67,6 +67,7 @@ dist/
 /target/test-sandbox/
 /target/quality-report.json
 /target-tests/
+/eval_reports/
 
 # IDE
 .idea/
@@ -93,15 +94,17 @@ desktop.ini
 .env.production.local
 
 # Models (large binary files)
-/models/llm/*.gguf
-/models/stt/*.bin
-/models/piper/*.onnx
+/models/**
+!/models/**/.gitkeep
+*.onnx
+*.tflite
 *.bin
 *.pt
 *.safetensors
 
 # Logs
 *.log
+*.log.*
 /logs/
 data/logs/
 
