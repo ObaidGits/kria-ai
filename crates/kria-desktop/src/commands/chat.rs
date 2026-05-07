@@ -1,0 +1,930 @@
+use super::*;
+
+async fn send_message_with_profile(
+    message: String,
+    execution_profile: TurnExecutionProfile,
+    state: State<'_, AppStateCell>,
+    app: AppHandle,
+) -> Result<serde_json::Value, String> {
+    let state = state
+        .get()
+        .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
+
+    enforce_colab_dispatch_requirements(state, &app).await?;
+
+    touch_orchestrator_activity(&state.orchestrator_last_activity_at).await;
+    let orchestrator_snapshot = state.orchestrator.read().await.clone();
+    if orchestrator_snapshot.is_some() {
+        emit_agent_stage(
+            &app,
+            "ensuring_local_runtime",
+            "Ensuring local LLM runtime is ready",
+            None,
+        );
+    }
+    if let Err(e) =
+        ensure_orchestrator_ready_for_turn(orchestrator_snapshot.as_ref(), "ui_turn").await
+    {
+        emit_agent_stage(
+            &app,
+            "failed",
+            "Local runtime preflight failed",
+            Some(serde_json::json!({ "error": e.clone() })),
+        );
+        return Err(e);
+    }
+
+    tracing::info!(chars = message.chars().count(), "user prompt received");
+    if kria_core::infra::pipeline_trace::pipeline_debug_enabled() {
+        tracing::debug!(
+            target: "kria_pipeline",
+            prompt = %kria_core::infra::pipeline_trace::sanitize_text_for_logs(&message, 320),
+            "send_message prompt preview"
+        );
+    }
+
+    emit_agent_stage(
+        &app,
+        "input_received",
+        "Prompt received from UI",
+        Some(serde_json::json!({
+            "chars": message.chars().count(),
+        })),
+    );
+
+    let event_scope_prefix = match execution_profile.mode {
+        TurnExecutionMode::Assistant => "agent",
+        TurnExecutionMode::PromptLab => "prompt_lab",
+    };
+    let ev_thinking = format!("{event_scope_prefix}:thinking");
+    let ev_token = format!("{event_scope_prefix}:token");
+    let ev_done = format!("{event_scope_prefix}:done");
+    let ev_tool_call = format!("{event_scope_prefix}:tool_call");
+    let ev_tool_result = format!("{event_scope_prefix}:tool_result");
+    let ev_approval_required = format!("{event_scope_prefix}:approval_required");
+    let ev_approval_result = format!("{event_scope_prefix}:approval_result");
+    let ev_tool_choice_required = format!("{event_scope_prefix}:tool_choice_required");
+
+    let _ = app.emit(&ev_thinking, serde_json::json!({"status": "processing"}));
+
+    let agent_loop = state.agent_loop.clone();
+    let memory_store = state.memory_store.clone();
+    let tool_registry = state.tool_registry.clone();
+    let event_bus = state.event_bus.clone();
+    let config = state.config.read().await;
+    let hw_tier = state.hardware_info.tier.as_str();
+
+    emit_agent_stage(
+        &app,
+        "preparing_tool_context",
+        "Collecting tool descriptions for this hardware tier",
+        Some(serde_json::json!({ "hardware_tier": hw_tier })),
+    );
+
+    // Build the system prompt with tool descriptions and user context
+    let tool_defs = tool_registry.list_for_tier(hw_tier);
+    let tool_descriptions = build_tool_descriptions_for_prompt(&tool_defs);
+
+    emit_agent_stage(
+        &app,
+        "tool_context_ready",
+        "Tool descriptions prepared",
+        Some(serde_json::json!({ "tool_count": tool_defs.len() })),
+    );
+
+    // Retrieve user context from memory
+    let user_name = memory_store
+        .get_preference("user_name")
+        .unwrap_or(None)
+        .unwrap_or_else(|| "User".to_string());
+    let os_name = std::env::consts::OS;
+
+    // Detect all available package managers and format as "primary (also: alt1, alt2)"
+    let pm_string = {
+        let pms = get_available_package_managers();
+        match pms.as_slice() {
+            [] => "unknown".to_string(),
+            [only] => only.as_str().to_string(),
+            [primary, rest @ ..] => {
+                let alts: Vec<&str> = rest.iter().map(|p| p.as_str()).collect();
+                format!("{} (also available: {})", primary.as_str(), alts.join(", "))
+            }
+        }
+    };
+
+    // Get recent memory facts for context injection
+    emit_agent_stage(
+        &app,
+        "loading_memory_context",
+        "Searching memory for relevant user facts",
+        None,
+    );
+
+    let memory_context = match memory_store.search_facts(&message, 5) {
+        Ok(facts) if !facts.is_empty() => {
+            let fact_lines: Vec<String> = facts.iter().map(|f| format!("- {}", f.text)).collect();
+            format!("Known facts about the user:\n{}", fact_lines.join("\n"))
+        }
+        _ => String::new(),
+    };
+
+    emit_agent_stage(
+        &app,
+        "memory_context_ready",
+        "Memory context prepared",
+        Some(serde_json::json!({
+            "has_context": !memory_context.is_empty(),
+        })),
+    );
+
+    let system_prompt = kria_core::agent::prompts::build_system_prompt(
+        &tool_descriptions,
+        &user_name,
+        os_name,
+        hw_tier,
+        &pm_string,
+        &memory_context,
+    );
+
+    emit_agent_stage(
+        &app,
+        "system_prompt_ready",
+        "System prompt prepared and ready for LLM",
+        Some(serde_json::json!({
+            "prompt_chars": system_prompt.chars().count(),
+        })),
+    );
+
+    drop(config);
+
+    // Use the persistent session ID from AppState
+    let session_id = state.current_session_id.read().await.clone();
+    let memory_writer: Arc<dyn MemoryManager> = memory_store.clone();
+
+    emit_agent_stage(
+        &app,
+        "building_message_history",
+        "Building conversation history for LLM input",
+        Some(serde_json::json!({
+            "session_id": session_id.clone(),
+        })),
+    );
+
+    // Build conversation messages (system + recent history + current message)
+    let recent_turns = memory_store
+        .get_recent_turns(&session_id, 5)
+        .unwrap_or_default();
+
+    let mut messages = Vec::with_capacity(recent_turns.len() + 2);
+    messages.push(ChatMessage {
+        role: "system".into(),
+        content: system_prompt,
+        name: None,
+        images: None,
+    });
+
+    // Add recent conversation history (with compact shaping for 4K context servers)
+    append_recent_turns_for_llm(&mut messages, &recent_turns);
+
+    // Add current user message
+    messages.push(ChatMessage {
+        role: "user".into(),
+        content: message.clone(),
+        name: None,
+        images: None,
+    });
+
+    // Persist user turn
+    let _ = memory_writer.store_turn(&memory_turn_write(
+        session_id.clone(),
+        message.clone(),
+        String::new(),
+        None,
+        None,
+        None,
+    ));
+
+    emit_agent_stage(
+        &app,
+        "user_turn_saved",
+        "User prompt stored in session memory",
+        Some(serde_json::json!({
+            "history_turns": recent_turns.len() + 1,
+        })),
+    );
+
+    // Auto-title: if this is the first message in the session, generate a title
+    {
+        let title_key = format!("session_title:{}", session_id);
+        if memory_store
+            .get_preference(&title_key)
+            .unwrap_or(None)
+            .is_none()
+        {
+            let title = if message.len() > 50 {
+                format!("{}...", &message[..50])
+            } else {
+                message.clone()
+            };
+            let _ = memory_writer.set_preference(&preference_record(title_key, title));
+        }
+    }
+
+    // Publish event
+    event_bus.publish(kria_core::infra::event_bus::KriaEvent::MessageReceived {
+        session_id: session_id.clone(),
+        content: message.clone(),
+    });
+
+    emit_agent_stage(
+        &app,
+        "dispatching_to_llm",
+        "Dispatching prepared prompt to agent loop",
+        None,
+    );
+
+    // Create event channel and run agent loop
+    let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel::<StreamEvent>();
+    state
+        .orchestrator_active_turns
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let active_turns_for_tracking = state.orchestrator_active_turns.clone();
+    let last_activity_for_tracking = state.orchestrator_last_activity_at.clone();
+
+    let app_handle = app.clone();
+    let session_id_clone = session_id.clone();
+    let memory_store_clone = memory_store.clone();
+    let memory_writer_clone = memory_writer.clone();
+    let embeddings_clone = state.embeddings.clone();
+    let vectors_clone = state.vectors.clone();
+    let user_message_clone = message.clone();
+    let orchestrator_for_recovery = state.orchestrator.read().await.clone();
+    let ironclad_orchestrator_cell_for_stream = state.orchestrator.clone();
+    let ironclad_reset_for_stream = state.ironclad_reset.clone();
+    let ironclad_forensic_for_stream = state.ironclad_forensic_log.clone();
+    let retry_agent = agent_loop.clone();
+    let stale_guard_agent = agent_loop.clone();
+    let retry_session_id = session_id.clone();
+    let retry_execution_profile = execution_profile.clone();
+    let retry_messages_seed = messages.clone();
+
+    // Spawn agent loop in background
+    let agent = agent_loop.clone();
+    let sid = session_id.clone();
+    let run_profile = execution_profile.clone();
+    tauri::async_runtime::spawn(async move {
+        agent
+            .run_with_profile(&sid, &mut messages, event_tx, Some(run_profile))
+            .await;
+    });
+
+    emit_agent_stage(
+        &app,
+        "agent_loop_started",
+        "Agent loop started; waiting for streamed events",
+        None,
+    );
+
+    // Spawn event consumer that forwards to frontend
+    tauri::async_runtime::spawn(async move {
+        let mut full_response = String::new();
+        let mut saw_first_token = false;
+        let mut successful_tool_count = 0usize;
+        let mut last_successful_tool: Option<(String, serde_json::Value)> = None;
+        let mut recovery_attempted = false;
+        let mut active_rx = event_rx;
+        let mut active_turn_id: Option<String> = None;
+        let mut pending_tool_params: std::collections::HashMap<String, serde_json::Value> =
+            std::collections::HashMap::new();
+
+        emit_agent_stage(
+            &app_handle,
+            "awaiting_llm_output",
+            "Prompt sent to LLM; waiting for first response token",
+            None,
+        );
+
+        loop {
+            let event = match tokio::time::timeout(
+                std::time::Duration::from_secs(AGENT_EVENT_IDLE_TIMEOUT_SECS),
+                active_rx.recv(),
+            )
+            .await
+            {
+                Ok(Some(event)) => event,
+                Ok(None) => break,
+                Err(_) => {
+                    emit_agent_stage(
+                        &app_handle,
+                        "timed_out_waiting_for_llm",
+                        "No agent events received within timeout window",
+                        Some(serde_json::json!({
+                            "timeout_secs": AGENT_EVENT_IDLE_TIMEOUT_SECS,
+                        })),
+                    );
+                    full_response = AGENT_TIMEOUT_MESSAGE.to_string();
+                    let _ = app_handle.emit(
+                        &ev_token,
+                        serde_json::json!({
+                            "text": AGENT_TIMEOUT_MESSAGE,
+                        }),
+                    );
+                    break;
+                }
+            };
+
+            if let StreamEvent::TurnAccepted {
+                session_id,
+                turn_id,
+            } = &event
+            {
+                if session_id == &session_id_clone {
+                    active_turn_id = Some(turn_id.clone());
+                }
+                continue;
+            }
+
+            if let Some(turn_id) = active_turn_id.as_deref() {
+                if !stale_guard_agent.is_turn_active(&session_id_clone, turn_id) {
+                    tracing::debug!(
+                        session_id = %session_id_clone,
+                        turn_id = %turn_id,
+                        "Dropping stale stream event in send_message consumer"
+                    );
+                    continue;
+                }
+            }
+
+            match event {
+                StreamEvent::TurnAccepted { .. } => {}
+                StreamEvent::Token(text) => {
+                    if !saw_first_token {
+                        saw_first_token = true;
+                        emit_agent_stage(
+                            &app_handle,
+                            "llm_streaming",
+                            "LLM started streaming tokens",
+                            None,
+                        );
+                    }
+                    full_response.push_str(&text);
+                    let _ = app_handle.emit(
+                        &ev_token,
+                        serde_json::json!({
+                            "text": text,
+                        }),
+                    );
+                }
+                StreamEvent::ToolStart { name, params } => {
+                    if kria_core::infra::pipeline_trace::pipeline_debug_enabled() {
+                        tracing::debug!(
+                            target: "kria_pipeline",
+                            tool = %name,
+                            params = ?kria_core::infra::pipeline_trace::sanitize_json_for_logs(&params, 280, 8),
+                            "tool call event"
+                        );
+                    }
+                    pending_tool_params.insert(name.clone(), params.clone());
+                    emit_agent_stage(
+                        &app_handle,
+                        "tool_started",
+                        "Tool execution started",
+                        Some(serde_json::json!({
+                            "tool": name.clone(),
+                        })),
+                    );
+                    let _ = app_handle.emit(
+                        &ev_tool_call,
+                        serde_json::json!({
+                            "name": name,
+                            "params": params,
+                        }),
+                    );
+                }
+                StreamEvent::ToolEnd {
+                    name,
+                    result,
+                    success,
+                } => {
+                    if success {
+                        successful_tool_count = successful_tool_count.saturating_add(1);
+                        last_successful_tool = Some((name.clone(), result.clone()));
+                    }
+
+                    if kria_core::infra::pipeline_trace::pipeline_debug_enabled() {
+                        tracing::debug!(
+                            target: "kria_pipeline",
+                            tool = %name,
+                            success,
+                            result = ?kria_core::infra::pipeline_trace::sanitize_json_for_logs(&result, 280, 8),
+                            "tool result event"
+                        );
+                    }
+                    emit_agent_stage(
+                        &app_handle,
+                        "tool_finished",
+                        "Tool execution completed",
+                        Some(serde_json::json!({
+                            "tool": name.clone(),
+                            "success": success,
+                        })),
+                    );
+                    let args = pending_tool_params
+                        .remove(&name)
+                        .unwrap_or_else(|| serde_json::json!({}));
+                    let payload = build_tool_result_event_payload(&name, &result, success);
+                    let metadata = payload
+                        .get("metadata")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null);
+                    let _ = app_handle.emit(&ev_tool_result, payload);
+
+                    let persisted_payload = serde_json::json!({
+                        "name": name,
+                        "args": args,
+                        "success": success,
+                        "result": result,
+                        "metadata": metadata,
+                    });
+                    let _ = memory_writer_clone.store_turn(&memory_turn_write(
+                        session_id_clone.clone(),
+                        String::new(),
+                        summarize_tool_turn_for_history(
+                            &name,
+                            success,
+                            &result,
+                            persisted_payload
+                                .get("metadata")
+                                .unwrap_or(&serde_json::Value::Null),
+                        ),
+                        Some(name),
+                        Some(persisted_payload.to_string()),
+                        None,
+                    ));
+                }
+                StreamEvent::ToolProgress {
+                    call_id,
+                    message,
+                    percent,
+                } => {
+                    let _ = app_handle.emit(
+                        "kria:tool-progress",
+                        serde_json::json!({
+                            "call_id": call_id,
+                            "message": message,
+                            "percent": percent,
+                            "session_id": session_id_clone,
+                        }),
+                    );
+                }
+                StreamEvent::ToolPayloadChunk {
+                    call_id,
+                    seq,
+                    is_final,
+                    data,
+                } => {
+                    let _ = app_handle.emit(
+                        "kria:tool-payload-chunk",
+                        serde_json::json!({
+                            "call_id": call_id,
+                            "seq": seq,
+                            "is_final": is_final,
+                            "data": data,
+                            "session_id": session_id_clone,
+                        }),
+                    );
+                }
+                StreamEvent::ApprovalRequired {
+                    request_id,
+                    action,
+                    risk_level,
+                    parameters,
+                } => {
+                    emit_agent_stage(
+                        &app_handle,
+                        "approval_required",
+                        "Agent requested user approval",
+                        Some(serde_json::json!({
+                            "action": action.clone(),
+                            "risk_level": risk_level.clone(),
+                        })),
+                    );
+                    let _ = app_handle.emit(
+                        &ev_approval_required,
+                        serde_json::json!({
+                            "requestId": request_id,
+                            "toolName": action,
+                            "riskLevel": risk_level,
+                            "args": parameters,
+                            "reason": "",
+                        }),
+                    );
+                }
+                StreamEvent::ApprovalResult { action, approved } => {
+                    emit_agent_stage(
+                        &app_handle,
+                        "approval_result",
+                        "User approval decision received",
+                        Some(serde_json::json!({
+                            "action": action.clone(),
+                            "approved": approved,
+                        })),
+                    );
+                    let _ = app_handle.emit(
+                        &ev_approval_result,
+                        serde_json::json!({
+                            "action": action,
+                            "approved": approved,
+                        }),
+                    );
+                }
+                StreamEvent::ToolChoiceRequired {
+                    query,
+                    confidence,
+                    min_confidence,
+                    candidates,
+                } => {
+                    emit_agent_stage(
+                        &app_handle,
+                        "tool_choice_required",
+                        "Low-confidence routing requires user tool selection",
+                        Some(serde_json::json!({
+                            "confidence": confidence,
+                            "min_confidence": min_confidence,
+                            "candidate_count": candidates.len(),
+                        })),
+                    );
+                    let list: Vec<serde_json::Value> = candidates
+                        .into_iter()
+                        .map(|c| {
+                            serde_json::json!({
+                                "name": c.name,
+                                "label": c.label,
+                                "reason": c.reason,
+                                "confidence": c.confidence,
+                            })
+                        })
+                        .collect();
+                    let _ = app_handle.emit(
+                        &ev_tool_choice_required,
+                        serde_json::json!({
+                            "query": query,
+                            "confidence": confidence,
+                            "minConfidence": min_confidence,
+                            "candidates": list,
+                        }),
+                    );
+                }
+                StreamEvent::Plan(plan) => {
+                    emit_agent_stage(
+                        &app_handle,
+                        "planning",
+                        "Agent is updating execution plan",
+                        Some(serde_json::json!({
+                            "plan": plan.clone(),
+                        })),
+                    );
+                    let _ = app_handle.emit(
+                        &ev_thinking,
+                        serde_json::json!({
+                            "status": "planning",
+                            "plan": plan,
+                        }),
+                    );
+                }
+                StreamEvent::Error(err) => {
+                    tracing::error!("Agent error: {}", err);
+                    let is_transport_failure = is_likely_local_llm_transport_error(&err);
+
+                    append_ironclad_forensic_record(
+                        &ironclad_forensic_for_stream,
+                        &app_handle,
+                        "agent_stream_error",
+                        if is_transport_failure {
+                            "warning"
+                        } else {
+                            "error"
+                        },
+                        if is_transport_failure {
+                            "Agent stream transport failure detected"
+                        } else {
+                            "Agent stream error detected"
+                        },
+                        err.clone(),
+                        "agent.stream",
+                    )
+                    .await;
+
+                    let status_payload = collect_ironclad_status_from_parts(
+                        &ironclad_orchestrator_cell_for_stream,
+                        &ironclad_reset_for_stream,
+                        &ironclad_forensic_for_stream,
+                    )
+                    .await;
+                    let _ = app_handle.emit("ironclad:status", status_payload);
+
+                    if is_transport_failure
+                        && full_response.is_empty()
+                        && successful_tool_count == 0
+                        && !recovery_attempted
+                    {
+                        recovery_attempted = true;
+                        emit_agent_stage(
+                            &app_handle,
+                            "llm_transport_error_recovery_started",
+                            "LLM transport failed early; attempting orchestrator recovery and single retry",
+                            Some(serde_json::json!({
+                                "mode": match retry_execution_profile.mode {
+                                    TurnExecutionMode::Assistant => "assistant",
+                                    TurnExecutionMode::PromptLab => "prompt_lab",
+                                },
+                            })),
+                        );
+
+                        if let Some(orchestrator) = orchestrator_for_recovery.as_ref() {
+                            let mut recovered = false;
+
+                            if orchestrator.server_manager.is_swapping() {
+                                emit_agent_stage(
+                                    &app_handle,
+                                    "llm_transport_error_waiting_for_swap",
+                                    "LLM transport failed during active swap; waiting for runtime to become ready",
+                                    None,
+                                );
+                                let _ = orchestrator
+                                    .server_manager
+                                    .wait_for_swap_done(std::time::Duration::from_secs(45))
+                                    .await;
+                                match ensure_orchestrator_ready_for_turn(
+                                    Some(orchestrator),
+                                    "transport_failure_wait_for_swap",
+                                )
+                                .await
+                                {
+                                    Ok(()) => {
+                                        recovered = true;
+                                    }
+                                    Err(wait_err) => {
+                                        tracing::warn!(
+                                            error = %wait_err,
+                                            "runtime still not ready after swap wait; escalating to restart"
+                                        );
+                                    }
+                                }
+                            }
+
+                            if !recovered {
+                                match orchestrator.restart("transport_failure").await {
+                                    Ok(()) => {
+                                        recovered = true;
+                                    }
+                                    Err(restart_err) => {
+                                        tracing::error!(
+                                            ?restart_err,
+                                            "orchestrator restart failed after transport error"
+                                        );
+                                        emit_agent_stage(
+                                            &app_handle,
+                                            "llm_transport_error_recovery_failed",
+                                            "Orchestrator recovery failed; falling back to error handling",
+                                            Some(serde_json::json!({
+                                                "error": restart_err.to_string(),
+                                            })),
+                                        );
+                                    }
+                                }
+                            }
+
+                            if recovered {
+                                emit_agent_stage(
+                                    &app_handle,
+                                    "llm_transport_error_recovery_succeeded",
+                                    "Orchestrator recovered; retrying this turn once",
+                                    None,
+                                );
+
+                                let (retry_tx, retry_rx) =
+                                    tokio::sync::mpsc::unbounded_channel::<StreamEvent>();
+                                let mut retry_messages = retry_messages_seed.clone();
+                                let retry_agent_clone = retry_agent.clone();
+                                let retry_sid_clone = retry_session_id.clone();
+                                let retry_profile_clone = retry_execution_profile.clone();
+
+                                tauri::async_runtime::spawn(async move {
+                                    retry_agent_clone
+                                        .run_with_profile(
+                                            &retry_sid_clone,
+                                            &mut retry_messages,
+                                            retry_tx,
+                                            Some(retry_profile_clone),
+                                        )
+                                        .await;
+                                });
+
+                                active_rx = retry_rx;
+                                continue;
+                            }
+                        } else {
+                            emit_agent_stage(
+                                &app_handle,
+                                "llm_transport_error_recovery_unavailable",
+                                "No orchestrator active; skipping auto-recovery",
+                                None,
+                            );
+                        }
+                    }
+
+                    if is_transport_failure && full_response.is_empty() && successful_tool_count > 0
+                    {
+                        if let Some((tool_name, tool_result)) = last_successful_tool.as_ref() {
+                            let fallback_text =
+                                build_tool_only_fallback_message(tool_name, true, tool_result);
+                            full_response = fallback_text.clone();
+                            emit_agent_stage(
+                                &app_handle,
+                                "llm_transport_error_tool_fallback",
+                                "LLM transport failed after tool success; returning tool-only fallback",
+                                Some(serde_json::json!({
+                                    "tool": tool_name,
+                                    "successful_tool_count": successful_tool_count,
+                                })),
+                            );
+                            let _ = app_handle.emit(
+                                &ev_token,
+                                serde_json::json!({
+                                    "text": fallback_text,
+                                }),
+                            );
+                            continue;
+                        }
+                    }
+
+                    if is_transport_failure && !full_response.is_empty() {
+                        emit_agent_stage(
+                            &app_handle,
+                            "llm_transport_error_after_partial_output",
+                            "LLM transport failed after partial response; preserving generated content",
+                            Some(serde_json::json!({
+                                "response_chars": full_response.chars().count(),
+                            })),
+                        );
+                        continue;
+                    }
+
+                    let user_visible_error = format!("⚠️ {err}");
+                    if full_response.is_empty() {
+                        full_response = user_visible_error.clone();
+                    }
+                    emit_agent_stage(
+                        &app_handle,
+                        "failed",
+                        "Agent stream reported an error",
+                        Some(serde_json::json!({
+                            "error": err.clone(),
+                        })),
+                    );
+                    let _ = app_handle.emit(
+                        &ev_token,
+                        serde_json::json!({
+                            "text": user_visible_error,
+                        }),
+                    );
+                }
+                StreamEvent::Done(final_text) => {
+                    if !final_text.is_empty() && full_response.is_empty() {
+                        full_response = final_text;
+                    }
+                    emit_agent_stage(
+                        &app_handle,
+                        "llm_done",
+                        "LLM stream completed",
+                        Some(serde_json::json!({
+                            "response_chars": full_response.chars().count(),
+                        })),
+                    );
+                }
+            }
+        }
+
+        // Persist assistant response (skip transient runtime errors so they don't bloat future context)
+        if !full_response.is_empty() && !is_transient_llm_error_text(&full_response) {
+            let _ = memory_writer_clone.store_turn(&memory_turn_write(
+                session_id_clone,
+                String::new(),
+                full_response.clone(),
+                None,
+                None,
+                None,
+            ));
+
+            emit_agent_stage(
+                &app_handle,
+                "assistant_turn_saved",
+                "Assistant response stored in session memory",
+                Some(serde_json::json!({
+                    "response_chars": full_response.chars().count(),
+                })),
+            );
+
+            // Automatic fact extraction from user message + assistant response
+            let fact_mgr = kria_core::memory::facts::FactManager::new(
+                memory_store_clone.as_ref(),
+                &vectors_clone,
+                &embeddings_clone,
+            );
+            match fact_mgr.extract_from_turn(&user_message_clone, &full_response) {
+                Ok(ids) if !ids.is_empty() => {
+                    tracing::info!(count = ids.len(), "auto-extracted facts from conversation");
+                    emit_agent_stage(
+                        &app_handle,
+                        "facts_extracted",
+                        "New user facts extracted from the conversation",
+                        Some(serde_json::json!({
+                            "fact_count": ids.len(),
+                        })),
+                    );
+                }
+                Ok(_) => {}
+                Err(e) => tracing::warn!("fact extraction failed: {}", e),
+            }
+        }
+
+        emit_agent_stage(
+            &app_handle,
+            "completed",
+            "Pipeline completed and UI will finalize rendering",
+            None,
+        );
+
+        let _ = app_handle.emit(&ev_done, serde_json::json!({}));
+        decrement_active_turn_counter(&active_turns_for_tracking);
+        touch_orchestrator_activity(&last_activity_for_tracking).await;
+    });
+
+    Ok(serde_json::json!({
+        "status": "processing",
+    }))
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(default)]
+pub struct LabExecutionProfileInput {
+    pub app_lock: Option<String>,
+    pub tool_lock: Option<String>,
+    pub strategy: Option<String>,
+}
+
+impl LabExecutionProfileInput {
+    fn tool_selection_strategy(&self) -> PromptLabToolSelectionStrategy {
+        match self
+            .strategy
+            .as_deref()
+            .map(|value| value.trim().to_ascii_lowercase())
+        {
+            Some(value)
+                if value == "direct"
+                    || value == "direct_locked_tool"
+                    || value == "direct-locked-tool" =>
+            {
+                PromptLabToolSelectionStrategy::DirectLockedTool
+            }
+            _ => PromptLabToolSelectionStrategy::RoutedWithinLock,
+        }
+    }
+
+    fn to_core_profile(&self) -> TurnExecutionProfile {
+        TurnExecutionProfile::prompt_lab(
+            self.app_lock.clone(),
+            self.tool_lock.clone(),
+            self.tool_selection_strategy(),
+        )
+    }
+}
+
+#[tauri::command]
+pub async fn send_message(
+    message: String,
+    state: State<'_, AppStateCell>,
+    app: AppHandle,
+) -> Result<serde_json::Value, String> {
+    send_message_with_profile(message, TurnExecutionProfile::assistant(), state, app).await
+}
+
+#[tauri::command]
+pub async fn send_lab_message(
+    message: String,
+    profile: Option<LabExecutionProfileInput>,
+    state: State<'_, AppStateCell>,
+    app: AppHandle,
+) -> Result<serde_json::Value, String> {
+    let execution_profile = profile
+        .map(|value| value.to_core_profile())
+        .unwrap_or_else(|| {
+            TurnExecutionProfile::prompt_lab(
+                None,
+                None,
+                PromptLabToolSelectionStrategy::RoutedWithinLock,
+            )
+        });
+    send_message_with_profile(message, execution_profile, state, app).await
+}

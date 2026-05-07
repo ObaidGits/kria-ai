@@ -226,7 +226,10 @@ impl DesktopFleetControlRuntime {
                 match rx.recv().await {
                     Ok(event) => apply_event_to_projection(&projections, &event).await,
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                        tracing::warn!(skipped, "desktop fleet-control projection receiver lagged; continuing");
+                        tracing::warn!(
+                            skipped,
+                            "desktop fleet-control projection receiver lagged; continuing"
+                        );
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
@@ -303,10 +306,7 @@ impl DesktopFleetControlRuntime {
         }
 
         if merged.is_empty() {
-            return Err(anyhow!(
-                "no enrolled fleet target matched hint '{}'",
-                hint
-            ));
+            return Err(anyhow!("no enrolled fleet target matched hint '{}'", hint));
         }
 
         if merged.len() > 1 {
@@ -596,7 +596,10 @@ impl FleetStore for InMemoryFleetStore {
         Ok(())
     }
 
-    async fn load_target_attestation_material(&self, target_id: Uuid) -> Result<KeyAttestationMaterial> {
+    async fn load_target_attestation_material(
+        &self,
+        target_id: Uuid,
+    ) -> Result<KeyAttestationMaterial> {
         let guard = self.attestation.lock().await;
         Ok(guard
             .get(&target_id)
@@ -704,7 +707,11 @@ impl SshConnector {
         Ok(())
     }
 
-    async fn run_ssh_shell(&self, profile: &SshTargetProfile, shell: &str) -> Result<CommandOutput> {
+    async fn run_ssh_shell(
+        &self,
+        profile: &SshTargetProfile,
+        shell: &str,
+    ) -> Result<CommandOutput> {
         let known_hosts = self.keyscan_entries(profile).await?;
         let known_hosts_path = std::env::temp_dir().join(format!(
             "kria_desktop_fleet_known_hosts_{}_{}.tmp",
@@ -758,7 +765,11 @@ impl Connector for SshConnector {
         self.verify_connectivity(&profile).await
     }
 
-    async fn probe_identity(&self, target: &TargetIdentity, _endpoint: IpAddr) -> Result<IdentityProof> {
+    async fn probe_identity(
+        &self,
+        target: &TargetIdentity,
+        _endpoint: IpAddr,
+    ) -> Result<IdentityProof> {
         let profile = self.profile_for(target.target_id).await?;
         let keyscan = self.keyscan_entries(&profile).await?;
 
@@ -816,7 +827,9 @@ impl Connector for SshConnector {
                 .ok_or_else(|| anyhow!("docker_eval.run_case payload missing shell"))?
                 .to_string()
         } else if envelope.op == "trust.rotate_attest" {
-            return Err(anyhow!("trust.rotate_attest is not supported by OpenSSH connector"));
+            return Err(anyhow!(
+                "trust.rotate_attest is not supported by OpenSSH connector"
+            ));
         } else if let Some(shell) = envelope.payload.get("shell").and_then(|v| v.as_str()) {
             shell.to_string()
         } else if let Some(cmd) = envelope.payload.get("command").and_then(|v| v.as_str()) {
@@ -877,7 +890,8 @@ fn load_registry(path: &Path) -> Result<FleetEnrollmentRegistry> {
         });
     }
 
-    let bytes = std::fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let bytes =
+        std::fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
     if bytes.is_empty() {
         return Ok(FleetEnrollmentRegistry {
             targets: Vec::new(),
@@ -888,7 +902,9 @@ fn load_registry(path: &Path) -> Result<FleetEnrollmentRegistry> {
         .with_context(|| format!("invalid JSON in {}", path.display()))
 }
 
-fn map_record_to_target(record: EnrolledTargetRecord) -> Result<(TargetIdentity, SshTargetProfile)> {
+fn map_record_to_target(
+    record: EnrolledTargetRecord,
+) -> Result<(TargetIdentity, SshTargetProfile)> {
     let target_id = Uuid::parse_str(record.target_id.trim())
         .with_context(|| format!("invalid target_id {}", record.target_id))?;
 

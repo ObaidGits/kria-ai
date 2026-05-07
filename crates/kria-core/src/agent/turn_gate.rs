@@ -188,10 +188,8 @@ impl Default for TurnGate {
 impl TurnGate {
     pub fn new() -> Self {
         let onnx_classifier = if crate::agent::onnx_classifier::enabled_from_env() {
-            let classifier = crate::agent::onnx_classifier::OnnxClassifier::new(
-                8,
-                Duration::from_millis(25),
-            );
+            let classifier =
+                crate::agent::onnx_classifier::OnnxClassifier::new(8, Duration::from_millis(25));
 
             match classifier.status() {
                 crate::agent::onnx_classifier::OnnxClassifierStatus::Ready => {
@@ -491,6 +489,13 @@ impl TurnGate {
 
         if let Some(router_hint) = router_result.tool_hint.as_deref() {
             push_hint_unique(&mut fallback_hints, router_hint);
+
+            // Fleet intents should stay narrow; avoid injecting unrelated generic hints
+            // (for example file/network hints) after a specific fleet tool is selected.
+            if matches!(router_hint, "get_fleet_overview" | "execute_fleet_command") {
+                let direct_tool_hint = fallback_hints.first().cloned();
+                return (direct_tool_hint, fallback_hints);
+            }
         }
 
         if looks_like_system_stats_request(&lower) {
@@ -525,7 +530,11 @@ impl TurnGate {
                 }
             }
             Operation::Read if looks_like_file_search_request(&lower) => {
-                for hint in ["search_files", "find_files_by_pattern", "mcp_fs_search_files"] {
+                for hint in [
+                    "search_files",
+                    "find_files_by_pattern",
+                    "mcp_fs_search_files",
+                ] {
                     push_hint_unique(&mut fallback_hints, hint);
                 }
             }
@@ -605,7 +614,9 @@ fn looks_like_memory_recall_request(text_lower: &str) -> bool {
 
 fn looks_like_file_search_request(text_lower: &str) -> bool {
     (text_lower.contains("find") || text_lower.contains("search") || text_lower.contains("locate"))
-        && (text_lower.contains("file") || text_lower.contains("folder") || text_lower.contains("directory"))
+        && (text_lower.contains("file")
+            || text_lower.contains("folder")
+            || text_lower.contains("directory"))
 }
 
 fn push_hint_unique(hints: &mut Vec<String>, hint: &str) {
@@ -913,11 +924,45 @@ mod tests {
     }
 
     #[test]
-    fn onnx_hint_can_route_ambiguous_memory_prompt() {
-        let classifier = crate::agent::onnx_classifier::OnnxClassifier::new(
-            4,
-            Duration::from_millis(25),
+    fn vm_inventory_hint_does_not_expand_to_file_tools() {
+        let gate = TurnGate::new();
+        let plan = gate.plan_turn("How many VMs i have?", false);
+        let allowed = ["get_fleet_overview", "list_directory", "read_file"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<HashSet<_>>();
+
+        assert_eq!(
+            gate.direct_tool_hint(&plan, &allowed),
+            Some("get_fleet_overview".to_string())
         );
+
+        let hints = gate.fallback_tool_hints(&plan, &allowed);
+        assert_eq!(hints, vec!["get_fleet_overview".to_string()]);
+    }
+
+    #[test]
+    fn vm_execute_hint_does_not_expand_to_local_network_tools() {
+        let gate = TurnGate::new();
+        let plan = gate.plan_turn("Run this on my VM: \"ping -c 1 8.8.8.8\"", false);
+        let allowed = ["execute_fleet_command", "ping_host", "get_network_status"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<HashSet<_>>();
+
+        assert_eq!(
+            gate.direct_tool_hint(&plan, &allowed),
+            Some("execute_fleet_command".to_string())
+        );
+
+        let hints = gate.fallback_tool_hints(&plan, &allowed);
+        assert_eq!(hints, vec!["execute_fleet_command".to_string()]);
+    }
+
+    #[test]
+    fn onnx_hint_can_route_ambiguous_memory_prompt() {
+        let classifier =
+            crate::agent::onnx_classifier::OnnxClassifier::new(4, Duration::from_millis(25));
         let gate = TurnGate::with_onnx_classifier(Some(classifier));
 
         let plan = gate.plan_turn("memory notes about my gym routine", false);
@@ -928,10 +973,8 @@ mod tests {
 
     #[test]
     fn deterministic_rules_still_beat_onnx_hints() {
-        let classifier = crate::agent::onnx_classifier::OnnxClassifier::new(
-            4,
-            Duration::from_millis(25),
-        );
+        let classifier =
+            crate::agent::onnx_classifier::OnnxClassifier::new(4, Duration::from_millis(25));
         let gate = TurnGate::with_onnx_classifier(Some(classifier));
 
         let plan = gate.plan_turn("stop now", false);

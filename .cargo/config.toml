@@ -1,0 +1,2 @@
+[alias]
+kria-test = "run -p kria-core --bin kria-test --"

@@ -181,6 +181,15 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\b(open|go\s+to|navigate\s+to|visit)\s+https?://\S+",
             "open_url",
         ),
+        // Remote VM / connected target command execution
+        (
+            r"(?i)\b(?:run|execute|install|uninstall|update|upgrade)\b.{0,80}\b(?:on|in)\s+(?:my\s+)?(?:vm|remote\s+(?:vm|host|machine|computer)|connected\s+(?:vm|computer|machine|host))\b",
+            "execute_fleet_command",
+        ),
+        (
+            r"(?i)\bvia\s+ssh\b|\bssh\s+[a-z0-9_.-]+@[a-z0-9_.:-]+\b",
+            "execute_fleet_command",
+        ),
         // open_application: generic — last resort for "open/launch/start <app>"
         (
             r"(?i)\b(open|launch|start|run)\s+(\w+)\b",
@@ -567,15 +576,6 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
         (
             r"(?i)\b(list|show|which)\s+(?:all\s+)?(?:my\s+)?(?:vms?|virtual\s+machines?|connected\s+(?:machines?|computers?|hosts?|laptops?)|remote\s+(?:machines?|hosts?|computers?))\b",
             "get_fleet_overview",
-        ),
-        // Remote VM / connected target command execution
-        (
-            r"(?i)\b(?:run|execute|install|uninstall|update|upgrade)\b.{0,80}\b(?:on|in)\s+(?:my\s+)?(?:vm|remote\s+(?:vm|host|machine|computer)|connected\s+(?:vm|computer|machine|host))\b",
-            "execute_fleet_command",
-        ),
-        (
-            r"(?i)\bvia\s+ssh\b|\bssh\s+[a-z0-9_.-]+@[a-z0-9_.:-]+\b",
-            "execute_fleet_command",
         ),
         // Package — use correct tool name
         (r"(?i)\binstall\s+\w+\b", "install_package"),

@@ -11,8 +11,8 @@ use std::time::{Duration, Instant};
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use kria_connection_control::signer::{
-    DEFAULT_DRIFT_BUFFER_MS, DualKeyHmacEnvelopeSigner, KeyMaterial, SignedEnvelope,
-    SignedEnvelopeInput,
+    DualKeyHmacEnvelopeSigner, KeyMaterial, SignedEnvelope, SignedEnvelopeInput,
+    DEFAULT_DRIFT_BUFFER_MS,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -21,9 +21,9 @@ use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWrite
 use tokio::net::TcpStream;
 #[cfg(unix)]
 use tokio::net::UnixStream;
-use tokio::process::Command;
 #[cfg(not(windows))]
 use tokio::process::Child;
+use tokio::process::Command;
 use tokio::runtime::Handle;
 use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
@@ -32,7 +32,7 @@ use uuid::Uuid;
 use crate::config::KriaSystemConfig;
 use crate::infra::qos::{AdaptiveQosScheduler, QosAdmission};
 use crate::infra::snapshot::{
-    SnapshotDriftTolerance, ensure_baseline_snapshot, try_fast_restore_latest_snapshot,
+    ensure_baseline_snapshot, try_fast_restore_latest_snapshot, SnapshotDriftTolerance,
 };
 
 use super::traits::{
@@ -344,12 +344,11 @@ impl RemoteConfig {
     ) -> Result<(), RemoteConfigValidationError> {
         self.validate_static_contracts()?;
 
-        let required_disk = self
-            .max_command_payload_bytes
-            .checked_mul(2)
-            .ok_or(RemoteConfigValidationError::DiskGuardrailOverflow {
+        let required_disk = self.max_command_payload_bytes.checked_mul(2).ok_or(
+            RemoteConfigValidationError::DiskGuardrailOverflow {
                 max_command_payload_bytes: self.max_command_payload_bytes,
-            })?;
+            },
+        )?;
 
         if snapshot.available_space_bytes <= required_disk {
             return Err(RemoteConfigValidationError::DiskHeadroomViolation {
@@ -530,7 +529,10 @@ impl NonceReplayCache {
         }
 
         let max_nonces = self.current.max_nonces;
-        let old_current = std::mem::replace(&mut self.current, NonceEpochBucket::new(new_epoch, max_nonces));
+        let old_current = std::mem::replace(
+            &mut self.current,
+            NonceEpochBucket::new(new_epoch, max_nonces),
+        );
         self.previous = Some(old_current);
     }
 }
@@ -593,7 +595,10 @@ impl ActiveLeaseSession {
 enum QmpEndpoint {
     #[cfg(unix)]
     Unix(PathBuf),
-    Tcp { host: String, port: u16 },
+    Tcp {
+        host: String,
+        port: u16,
+    },
 }
 
 /// RFC-002 Section 5.2: Provider state and runtime handles for remote execution lifecycle.
@@ -618,7 +623,8 @@ pub struct QemuSshEnvironment {
     pub zombie_commands: RwLock<HashSet<String>>,
     pub reset_in_progress: AtomicBool,
     pub inflight_registry: RwLock<HashMap<String, InflightCommandHandle>>,
-    pub staged_artifact_index: RwLock<HashMap<String, HashMap<PathBuf, StagedArtifactLeaseMetadata>>>,
+    pub staged_artifact_index:
+        RwLock<HashMap<String, HashMap<PathBuf, StagedArtifactLeaseMetadata>>>,
     pub nonce_replay_cache: RwLock<NonceReplayCache>,
     pub helper_seen_initializations: RwLock<HashSet<(String, Uuid)>>,
     pub helper_worker_stdout_stderr_local_logs: AtomicBool,
@@ -738,7 +744,11 @@ impl QemuSshEnvironment {
         }
 
         let mut lease_guard = self.active_lease.lock().await;
-        *lease_guard = Some(ActiveLeaseSession::new(lease_id, heartbeat_ttl, Instant::now()));
+        *lease_guard = Some(ActiveLeaseSession::new(
+            lease_id,
+            heartbeat_ttl,
+            Instant::now(),
+        ));
         Ok(())
     }
 
@@ -854,7 +864,11 @@ impl QemuSshEnvironment {
     pub async fn probe_disk_headroom(&self) -> Result<(), EnvironmentError> {
         let control_dir = self.config.remote_control_dir.clone();
         let staging_dir = self.config.file_commit_policy.remote_staging_dir.clone();
-        let min_free_bytes = self.config.guest_filesystem_policy.min_free_bytes_floor.max(1);
+        let min_free_bytes = self
+            .config
+            .guest_filesystem_policy
+            .min_free_bytes_floor
+            .max(1);
 
         self.run_infra_control_op("target_pool::health_gate_disk_headroom", async move {
             Self::check_disk_headroom(&control_dir, min_free_bytes)?;
@@ -877,7 +891,8 @@ impl QemuSshEnvironment {
                     })
                 })?;
 
-                let probe_file = directory.join(format!(".kria_writeability_probe_{}", Uuid::new_v4()));
+                let probe_file =
+                    directory.join(format!(".kria_writeability_probe_{}", Uuid::new_v4()));
                 let mut file = std::fs::File::create(&probe_file).map_err(|error| {
                     InfraExecutionError::Environment(EnvironmentError::Io {
                         operation: "probe_writeability::create".to_string(),
@@ -933,7 +948,10 @@ impl QemuSshEnvironment {
         .await
     }
 
-    pub async fn restore_snapshot_via_qmp(&self, snapshot_name: &str) -> Result<(), EnvironmentError> {
+    pub async fn restore_snapshot_via_qmp(
+        &self,
+        snapshot_name: &str,
+    ) -> Result<(), EnvironmentError> {
         if self.config.target_kind != TargetKind::LocalQemuVm {
             return Ok(());
         }
@@ -1085,13 +1103,12 @@ impl QemuSshEnvironment {
                 continue;
             }
 
-            let value: serde_json::Value =
-                serde_json::from_str(line.trim()).map_err(|error| {
-                    Self::infra_io_error(
-                        "snapshot::qmp_parse_greeting",
-                        format!("{} ({})", error, line.trim()),
-                    )
-                })?;
+            let value: serde_json::Value = serde_json::from_str(line.trim()).map_err(|error| {
+                Self::infra_io_error(
+                    "snapshot::qmp_parse_greeting",
+                    format!("{} ({})", error, line.trim()),
+                )
+            })?;
 
             if value.get("QMP").is_some() {
                 return Ok(());
@@ -1125,7 +1142,10 @@ impl QemuSshEnvironment {
             if let Some(error_payload) = value.get("error") {
                 return Err(InfraExecutionError::Environment(
                     EnvironmentError::EnvironmentResetRequired {
-                        reason: format!("qmp operation {} returned error: {}", operation, error_payload),
+                        reason: format!(
+                            "qmp operation {} returned error: {}",
+                            operation, error_payload
+                        ),
                     },
                 ));
             }
@@ -1240,10 +1260,12 @@ impl QemuSshEnvironment {
 
     fn parse_boot_command(boot_cmd: &str) -> Result<(OsString, Vec<OsString>), EnvironmentError> {
         let mut split = boot_cmd.split_whitespace();
-        let program = split.next().ok_or_else(|| EnvironmentError::StartupPolicyNotReady {
-            policy: "qemu_boot_cmd".to_string(),
-            details: "qemu_boot_cmd is empty".to_string(),
-        })?;
+        let program = split
+            .next()
+            .ok_or_else(|| EnvironmentError::StartupPolicyNotReady {
+                policy: "qemu_boot_cmd".to_string(),
+                details: "qemu_boot_cmd is empty".to_string(),
+            })?;
 
         let args = split.map(OsString::from).collect::<Vec<_>>();
         Ok((OsString::from(program), args))
@@ -1253,24 +1275,26 @@ impl QemuSshEnvironment {
         #[cfg(target_os = "linux")]
         {
             let stat_path = format!("/proc/{pid}/stat");
-            let stat_contents = std::fs::read_to_string(&stat_path).map_err(|error| {
-                EnvironmentError::Io {
+            let stat_contents =
+                std::fs::read_to_string(&stat_path).map_err(|error| EnvironmentError::Io {
                     operation: "process_start_time_ticks::read_proc_stat".to_string(),
                     details: format!("{} ({})", error, stat_path),
-                }
-            })?;
-
-            let command_end = stat_contents.rfind(')').ok_or_else(|| EnvironmentError::Io {
-                operation: "process_start_time_ticks::parse_proc_stat".to_string(),
-                details: format!("malformed proc stat for pid {pid}"),
-            })?;
-
-            let tail = stat_contents
-                .get(command_end + 2..)
-                .ok_or_else(|| EnvironmentError::Io {
-                    operation: "process_start_time_ticks::slice_proc_stat".to_string(),
-                    details: format!("failed to slice proc stat tail for pid {pid}"),
                 })?;
+
+            let command_end = stat_contents
+                .rfind(')')
+                .ok_or_else(|| EnvironmentError::Io {
+                    operation: "process_start_time_ticks::parse_proc_stat".to_string(),
+                    details: format!("malformed proc stat for pid {pid}"),
+                })?;
+
+            let tail =
+                stat_contents
+                    .get(command_end + 2..)
+                    .ok_or_else(|| EnvironmentError::Io {
+                        operation: "process_start_time_ticks::slice_proc_stat".to_string(),
+                        details: format!("failed to slice proc stat tail for pid {pid}"),
+                    })?;
 
             let fields = tail.split_whitespace().collect::<Vec<_>>();
             let start_time = fields
@@ -1322,13 +1346,7 @@ impl QemuSshEnvironment {
             };
 
             let ok = unsafe {
-                GetProcessTimes(
-                    handle,
-                    &mut created,
-                    &mut exited,
-                    &mut kernel,
-                    &mut user,
-                )
+                GetProcessTimes(handle, &mut created, &mut exited, &mut kernel, &mut user)
             };
             unsafe {
                 CloseHandle(handle);
@@ -1427,9 +1445,10 @@ impl QemuSshEnvironment {
         envelope: &ExecutionEnvelope,
         lease_id: Uuid,
     ) -> Result<SignedExecutionEnvelope, EnvironmentError> {
-        let payload = serde_json::to_value(envelope).map_err(|error| EnvironmentError::Serialization {
-            details: format!("failed to serialize execution envelope: {error}"),
-        })?;
+        let payload =
+            serde_json::to_value(envelope).map_err(|error| EnvironmentError::Serialization {
+                details: format!("failed to serialize execution envelope: {error}"),
+            })?;
         let sequence_id = self.signing_sequence.fetch_add(1, Ordering::AcqRel) + 1;
         let control_envelope = self
             .envelope_signer
@@ -1456,7 +1475,10 @@ impl QemuSshEnvironment {
         })
     }
 
-    fn validate_parent_identity_triple(expected: &ParentIdentity, observed: &ParentIdentity) -> bool {
+    fn validate_parent_identity_triple(
+        expected: &ParentIdentity,
+        observed: &ParentIdentity,
+    ) -> bool {
         expected.pid == observed.pid
             && expected.start_time_ticks == observed.start_time_ticks
             && expected.session_nonce == observed.session_nonce
@@ -1533,13 +1555,17 @@ impl QemuSshEnvironment {
             Ok(guard) => guard,
             Err(error) => {
                 if admitted {
-                    self.qos_scheduler
-                        .finish_task(qos_class, qos_started.elapsed().as_millis() as u64, false);
+                    self.qos_scheduler.finish_task(
+                        qos_class,
+                        qos_started.elapsed().as_millis() as u64,
+                        false,
+                    );
                 }
                 return Err(error);
             }
         };
-        let timeout = Duration::from_millis(self.config.reset_policy.network_call_timeout_ms.max(1));
+        let timeout =
+            Duration::from_millis(self.config.reset_policy.network_call_timeout_ms.max(1));
         let join = self.infra_runtime.spawn(fut);
         let joined = tokio::time::timeout(timeout, join).await;
 
@@ -1614,7 +1640,11 @@ impl QemuSshEnvironment {
     }
 
     async fn probe_guest_capabilities(&self) -> Result<(), EnvironmentError> {
-        let helper_version = self.config.helper_provisioning.required_helper_version.clone();
+        let helper_version = self
+            .config
+            .helper_provisioning
+            .required_helper_version
+            .clone();
         let capabilities = self
             .run_infra_control_op("ensure_ready::probe_guest_capabilities", async move {
                 Ok(GuestCapabilities {
@@ -1664,7 +1694,8 @@ impl QemuSshEnvironment {
 
     #[cfg(target_os = "linux")]
     fn spawn_qemu_linux_pre_exec(qemu_boot_cmd: &str) -> Result<Child, InfraExecutionError> {
-        let (program, args) = Self::parse_boot_command(qemu_boot_cmd).map_err(InfraExecutionError::Environment)?;
+        let (program, args) =
+            Self::parse_boot_command(qemu_boot_cmd).map_err(InfraExecutionError::Environment)?;
         let mut command = Command::new(program);
         command
             .args(args)
@@ -1689,7 +1720,9 @@ impl QemuSshEnvironment {
     }
 
     #[cfg(windows)]
-    fn spawn_qemu_windows_raw(qemu_boot_cmd: &str) -> Result<WindowsQemuProcess, InfraExecutionError> {
+    fn spawn_qemu_windows_raw(
+        qemu_boot_cmd: &str,
+    ) -> Result<WindowsQemuProcess, InfraExecutionError> {
         windows_spawn::spawn_qemu_windows_raw(qemu_boot_cmd)
     }
 
@@ -1698,14 +1731,12 @@ impl QemuSshEnvironment {
             return Ok(());
         }
 
-        let qemu_boot_cmd = self
-            .config
-            .qemu_boot_cmd
-            .clone()
-            .ok_or_else(|| EnvironmentError::StartupPolicyNotReady {
+        let qemu_boot_cmd = self.config.qemu_boot_cmd.clone().ok_or_else(|| {
+            EnvironmentError::StartupPolicyNotReady {
                 policy: "qemu_boot_cmd".to_string(),
                 details: "LocalQemuVm requires qemu_boot_cmd".to_string(),
-            })?;
+            }
+        })?;
 
         #[cfg(target_os = "linux")]
         {
@@ -1930,13 +1961,11 @@ impl QemuSshEnvironment {
                     stderr,
                 };
 
-                Some(
-                    serde_json::to_string(&packet).map_err(|error| {
-                        InfraExecutionError::Environment(EnvironmentError::Serialization {
-                            details: format!("failed to serialize last-gasp packet: {error}"),
-                        })
-                    })?,
-                )
+                Some(serde_json::to_string(&packet).map_err(|error| {
+                    InfraExecutionError::Environment(EnvironmentError::Serialization {
+                        details: format!("failed to serialize last-gasp packet: {error}"),
+                    })
+                })?)
             };
 
             Ok(HelperExecutionEvidence {
@@ -2017,7 +2046,10 @@ impl QemuSshEnvironment {
     }
 
     fn count_lines(text: &str) -> usize {
-        text.as_bytes().iter().filter(|byte| **byte == b'\n').count()
+        text.as_bytes()
+            .iter()
+            .filter(|byte| **byte == b'\n')
+            .count()
     }
 
     fn enforce_output_limits(
@@ -2130,14 +2162,19 @@ impl QemuSshEnvironment {
     }
 
     async fn verify_emergency_status_buffer(&self) -> Result<(), EnvironmentError> {
-        if self.config.helper_provisioning.emergency_status_buffer_bytes
+        if self
+            .config
+            .helper_provisioning
+            .emergency_status_buffer_bytes
             < EMERGENCY_STATUS_BUFFER_MIN_BYTES
         {
             return Err(EnvironmentError::StartupPolicyNotReady {
                 policy: "helper_emergency_status_buffer_bytes".to_string(),
                 details: format!(
                     "configured={} must be >= {} bytes",
-                    self.config.helper_provisioning.emergency_status_buffer_bytes,
+                    self.config
+                        .helper_provisioning
+                        .emergency_status_buffer_bytes,
                     EMERGENCY_STATUS_BUFFER_MIN_BYTES
                 ),
             });
@@ -2165,7 +2202,8 @@ impl QemuSshEnvironment {
         operation: &'static str,
         priority: InfrastructureTaskPriority,
     ) -> Result<(), EnvironmentError> {
-        self.run_infra_control_op(operation, async { Ok(()) }).await?;
+        self.run_infra_control_op(operation, async { Ok(()) })
+            .await?;
 
         if priority == InfrastructureTaskPriority::HighRecovery && quota.on_high_recovery_step() {
             let host = self.config.host.clone();
@@ -2190,7 +2228,8 @@ impl QemuSshEnvironment {
     async fn wait_for_admission_barrier_or_zombie_reap(
         &self,
     ) -> Result<AdmissionBarrierOutcome, EnvironmentError> {
-        let freeze_timeout = Duration::from_millis(self.config.reset_policy.admission_freeze_timeout_ms.max(1));
+        let freeze_timeout =
+            Duration::from_millis(self.config.reset_policy.admission_freeze_timeout_ms.max(1));
         let freeze_deadline = Instant::now() + freeze_timeout;
 
         while !self.admission_dual_barrier_satisfied().await && Instant::now() < freeze_deadline {
@@ -2223,7 +2262,10 @@ impl QemuSshEnvironment {
     async fn orphan_inflight_handles_to_zombies(&self) -> usize {
         let orphaned = {
             let mut inflight = self.inflight_registry.write().await;
-            inflight.drain().map(|(_, handle)| handle).collect::<Vec<_>>()
+            inflight
+                .drain()
+                .map(|(_, handle)| handle)
+                .collect::<Vec<_>>()
         };
 
         let mut zombies = self.zombie_commands.write().await;
@@ -2244,11 +2286,14 @@ impl QemuSshEnvironment {
     }
 
     fn is_command_fence_current(&self, generation: u64, epoch_uuid: Uuid) -> bool {
-        self.generation.load(Ordering::Acquire) == generation && self.current_epoch_uuid() == epoch_uuid
+        self.generation.load(Ordering::Acquire) == generation
+            && self.current_epoch_uuid() == epoch_uuid
     }
 
     fn classify_infra_slot(operation: &str) -> InfraSlotClass {
-        if operation == "reset_environment::medium_reconnect_slot" || operation.contains("reconnect") {
+        if operation == "reset_environment::medium_reconnect_slot"
+            || operation.contains("reconnect")
+        {
             return InfraSlotClass::Medium;
         }
 
@@ -2280,14 +2325,16 @@ impl QemuSshEnvironment {
         reserved.max(1).min(high_capacity)
     }
 
-    fn acquire_infra_slot(&self, operation: &'static str) -> Result<InfraPrioritySlotGuard<'_>, EnvironmentError> {
+    fn acquire_infra_slot(
+        &self,
+        operation: &'static str,
+    ) -> Result<InfraPrioritySlotGuard<'_>, EnvironmentError> {
         let slot_class = Self::classify_infra_slot(operation);
-        let mut counters = self
-            .infra_priority_counters
-            .lock()
-            .map_err(|error| EnvironmentError::EnvironmentResetRequired {
+        let mut counters = self.infra_priority_counters.lock().map_err(|error| {
+            EnvironmentError::EnvironmentResetRequired {
                 reason: format!("infra priority counter lock poisoned: {error}"),
-            })?;
+            }
+        })?;
 
         let high_capacity = self
             .config
@@ -2417,8 +2464,8 @@ impl QemuSshEnvironment {
         owner_triple_check_failed: bool,
     ) -> bool {
         let expired = now_unix_ms.saturating_sub(metadata.created_unix_ms) > staging_sweep_ttl_ms;
-        let no_recent_heartbeat =
-            now_unix_ms.saturating_sub(metadata.lease_heartbeat_unix_ms) > staging_heartbeat_timeout_ms;
+        let no_recent_heartbeat = now_unix_ms.saturating_sub(metadata.lease_heartbeat_unix_ms)
+            > staging_heartbeat_timeout_ms;
 
         expired && no_recent_heartbeat && owner_triple_check_failed
     }
@@ -2518,7 +2565,9 @@ impl QemuSshEnvironment {
         metadata: StagedArtifactLeaseMetadata,
     ) {
         let mut index = self.staged_artifact_index.write().await;
-        let artifacts = index.entry(command_id.to_string()).or_insert_with(HashMap::new);
+        let artifacts = index
+            .entry(command_id.to_string())
+            .or_insert_with(HashMap::new);
         artifacts.insert(staged_active_path, metadata);
     }
 
@@ -2760,9 +2809,7 @@ impl Drop for InfraPrioritySlotGuard<'_> {
             InfraSlotClass::Medium => {
                 counters.medium_inflight = counters.medium_inflight.saturating_sub(1)
             }
-            InfraSlotClass::Low => {
-                counters.low_inflight = counters.low_inflight.saturating_sub(1)
-            }
+            InfraSlotClass::Low => counters.low_inflight = counters.low_inflight.saturating_sub(1),
         }
     }
 }
@@ -2779,17 +2826,16 @@ impl HostGarbageCollector {
         observed_pid_start_time_ticks: u64,
         active_binary_sha256_or_build_id: &str,
     ) -> bool {
-        let (owner_pid, owner_pid_start_time_ticks, owner_binary_sha256_or_build_id) =
-            match (
-                owner_pid,
-                owner_pid_start_time_ticks,
-                owner_binary_sha256_or_build_id,
-            ) {
-                (Some(pid), Some(start_ticks), Some(binary_fingerprint)) => {
-                    (pid, start_ticks, binary_fingerprint)
-                }
-                _ => return false,
-            };
+        let (owner_pid, owner_pid_start_time_ticks, owner_binary_sha256_or_build_id) = match (
+            owner_pid,
+            owner_pid_start_time_ticks,
+            owner_binary_sha256_or_build_id,
+        ) {
+            (Some(pid), Some(start_ticks), Some(binary_fingerprint)) => {
+                (pid, start_ticks, binary_fingerprint)
+            }
+            _ => return false,
+        };
 
         owner_pid == observed_pid
             && owner_pid_start_time_ticks == observed_pid_start_time_ticks
@@ -2903,7 +2949,9 @@ impl CommandExecutor for QemuSshEnvironment {
             });
         }
 
-        request.timeout_ms = request.timeout_ms.min(self.config.command_timeout_ms.max(1));
+        request.timeout_ms = request
+            .timeout_ms
+            .min(self.config.command_timeout_ms.max(1));
         let _admission_guard = AdmissionInflightGuard::new(&self.admission_inflight);
 
         let command_id = Uuid::new_v4().to_string();
@@ -2937,7 +2985,8 @@ impl CommandExecutor for QemuSshEnvironment {
         );
         let signed_envelope = self.sign_execution_envelope(&envelope, lease_id).await?;
 
-        self.helper_accepts_initialize(&command_id, epoch_uuid).await?;
+        self.helper_accepts_initialize(&command_id, epoch_uuid)
+            .await?;
 
         {
             let mut inflight = self.inflight_registry.write().await;
@@ -2964,11 +3013,7 @@ impl CommandExecutor for QemuSshEnvironment {
         }
 
         let evidence = self
-            .execute_over_control_channel(
-                signed_envelope,
-                request.clone(),
-                shell_state_snapshot,
-            )
+            .execute_over_control_channel(signed_envelope, request.clone(), shell_state_snapshot)
             .await;
 
         self.remove_inflight_command(&command_id).await;
@@ -3015,7 +3060,10 @@ impl CommandExecutor for QemuSshEnvironment {
 
 #[async_trait]
 impl FileSystemOps for QemuSshEnvironment {
-    async fn read_file(&self, request: ReadFileRequest) -> Result<ReadFileResult, EnvironmentError> {
+    async fn read_file(
+        &self,
+        request: ReadFileRequest,
+    ) -> Result<ReadFileResult, EnvironmentError> {
         let path = self.resolve_requested_path(&request.path)?;
         let read_limit = self.config.max_read_file_bytes.max(1);
 
@@ -3171,20 +3219,25 @@ impl FileSystemOps for QemuSshEnvironment {
         let promote_sidecar_active_path = sidecar_active_path.clone();
         let promote_result = self
             .run_infra_control_op("write_file::promote_to_active", async move {
-                std::fs::rename(&promote_incomplete_path, &promote_active_path).map_err(|error| {
-                    InfraExecutionError::Environment(EnvironmentError::Io {
-                        operation: "write_file::rename_incomplete_to_active".to_string(),
-                        details: format!(
-                            "{} ({} -> {})",
-                            error,
-                            promote_incomplete_path.display(),
-                            promote_active_path.display()
-                        ),
-                    })
-                })?;
+                std::fs::rename(&promote_incomplete_path, &promote_active_path).map_err(
+                    |error| {
+                        InfraExecutionError::Environment(EnvironmentError::Io {
+                            operation: "write_file::rename_incomplete_to_active".to_string(),
+                            details: format!(
+                                "{} ({} -> {})",
+                                error,
+                                promote_incomplete_path.display(),
+                                promote_active_path.display()
+                            ),
+                        })
+                    },
+                )?;
 
-                std::fs::rename(&promote_sidecar_incomplete_path, &promote_sidecar_active_path)
-                    .map_err(|error| {
+                std::fs::rename(
+                    &promote_sidecar_incomplete_path,
+                    &promote_sidecar_active_path,
+                )
+                .map_err(|error| {
                     InfraExecutionError::Environment(EnvironmentError::Io {
                         operation: "write_file::rename_sidecar_to_active".to_string(),
                         details: format!(
@@ -3278,12 +3331,12 @@ impl FileSystemOps for QemuSshEnvironment {
 #[async_trait]
 impl EnvironmentLifecycle for QemuSshEnvironment {
     async fn ensure_ready(&self) -> Result<(), EnvironmentError> {
-        self.config
-            .validate_static_contracts()
-            .map_err(|error| EnvironmentError::StartupPolicyNotReady {
+        self.config.validate_static_contracts().map_err(|error| {
+            EnvironmentError::StartupPolicyNotReady {
                 policy: "remote_config".to_string(),
                 details: error.to_string(),
-            })?;
+            }
+        })?;
 
         self.run_control_health_check().await?;
         self.enforce_helper_output_pipe_safety().await?;
@@ -3309,7 +3362,8 @@ impl EnvironmentLifecycle for QemuSshEnvironment {
         .await?;
 
         let reset_started = Instant::now();
-        let total_deadline = Duration::from_millis(self.config.reset_policy.total_reset_deadline_ms.max(1));
+        let total_deadline =
+            Duration::from_millis(self.config.reset_policy.total_reset_deadline_ms.max(1));
         let ensure_deadline = |stage: &str| -> Result<(), EnvironmentError> {
             if reset_started.elapsed() > total_deadline {
                 return Err(EnvironmentError::EnvironmentResetFailed {
@@ -3491,7 +3545,9 @@ impl EnvironmentLifecycle for QemuSshEnvironment {
         {
             let mut guard = self.qemu_child.lock().await;
             if let Some(process) = guard.take() {
-                process.force_terminate(Duration::from_millis(self.config.shutdown_timeout_ms.max(1)))?;
+                process.force_terminate(Duration::from_millis(
+                    self.config.shutdown_timeout_ms.max(1),
+                ))?;
             }
         }
 
@@ -3558,643 +3614,7 @@ impl Drop for WindowsQemuProcess {
 }
 
 #[cfg(windows)]
-mod windows_spawn {
-    use std::ffi::OsStr;
-    use std::mem;
-    use std::os::windows::ffi::OsStrExt;
-    use std::ptr;
-
-    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError};
-    use windows_sys::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
-        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-    };
-    use windows_sys::Win32::System::Threading::{
-        CreateProcessW, ResumeThread, TerminateProcess, CREATE_NEW_PROCESS_GROUP,
-        CREATE_SUSPENDED, PROCESS_INFORMATION, STARTUPINFOW,
-    };
-
-    use super::{EnvironmentError, InfraExecutionError, WindowsQemuProcess};
-
-    fn win32_error(operation: &str) -> InfraExecutionError {
-        let code = unsafe { GetLastError() };
-        InfraExecutionError::Environment(EnvironmentError::Io {
-            operation: operation.to_string(),
-            details: format!("win32_error_code={code}"),
-        })
-    }
-
-    pub(super) fn spawn_qemu_windows_raw(
-        qemu_boot_cmd: &str,
-    ) -> Result<WindowsQemuProcess, InfraExecutionError> {
-        let mut startup_info: STARTUPINFOW = unsafe { mem::zeroed() };
-        startup_info.cb = mem::size_of::<STARTUPINFOW>() as u32;
-        let mut process_info: PROCESS_INFORMATION = unsafe { mem::zeroed() };
-
-        let mut command_line = OsStr::new(qemu_boot_cmd)
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect::<Vec<u16>>();
-
-        let created = unsafe {
-            CreateProcessW(
-                ptr::null(),
-                command_line.as_mut_ptr(),
-                ptr::null(),
-                ptr::null(),
-                0,
-                CREATE_SUSPENDED | CREATE_NEW_PROCESS_GROUP,
-                ptr::null(),
-                ptr::null(),
-                &mut startup_info,
-                &mut process_info,
-            )
-        };
-
-        if created == 0 {
-            return Err(win32_error("CreateProcessW"));
-        }
-
-        let job = unsafe { CreateJobObjectW(ptr::null(), ptr::null()) };
-        if job == 0 {
-            unsafe {
-                let _ = TerminateProcess(process_info.hProcess, 1);
-                CloseHandle(process_info.hThread);
-                CloseHandle(process_info.hProcess);
-            }
-            return Err(win32_error("CreateJobObjectW"));
-        }
-
-        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { mem::zeroed() };
-        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-        let set_info = unsafe {
-            SetInformationJobObject(
-                job,
-                JobObjectExtendedLimitInformation,
-                &info as *const _ as *const _,
-                mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-            )
-        };
-        if set_info == 0 {
-            unsafe {
-                let _ = TerminateProcess(process_info.hProcess, 1);
-                CloseHandle(job);
-                CloseHandle(process_info.hThread);
-                CloseHandle(process_info.hProcess);
-            }
-            return Err(win32_error("SetInformationJobObject"));
-        }
-
-        let assigned = unsafe { AssignProcessToJobObject(job, process_info.hProcess) };
-        if assigned == 0 {
-            unsafe {
-                let _ = TerminateProcess(process_info.hProcess, 1);
-                CloseHandle(job);
-                CloseHandle(process_info.hThread);
-                CloseHandle(process_info.hProcess);
-            }
-            return Err(win32_error("AssignProcessToJobObject"));
-        }
-
-        let resumed = unsafe { ResumeThread(process_info.hThread) };
-        if resumed == u32::MAX {
-            unsafe {
-                let _ = TerminateProcess(process_info.hProcess, 1);
-                CloseHandle(job);
-                CloseHandle(process_info.hThread);
-                CloseHandle(process_info.hProcess);
-            }
-            return Err(win32_error("ResumeThread"));
-        }
-
-        unsafe {
-            CloseHandle(process_info.hThread);
-        }
-
-        Ok(WindowsQemuProcess {
-            process_handle: process_info.hProcess,
-            job_handle: job,
-            pid: process_info.dwProcessId,
-        })
-    }
-}
+mod windows_spawn;
 
 #[cfg(test)]
-mod tests {
-    use std::collections::HashSet;
-    use std::sync::atomic::Ordering;
-
-    use tokio::runtime::Handle;
-    use tokio_util::sync::CancellationToken;
-    use uuid::Uuid;
-
-    use super::{
-        AdmissionBarrierOutcome, ControlPlaneTransport, EvidenceSource, ExecutionEnvelope,
-        FileCommitPolicy, GuestFilesystemPolicy, GuestOsFamily, HelperExecutionEvidence,
-        HelperProvisioning, HostArtifactGcConfig, HostGarbageCollector, HostPlatform,
-        InflightCommandHandle, InfrastructureRuntimeConfig, JournalTerminalFooter,
-        LastGaspPacket, ParentIdentity, PrivilegedCommitMode, QemuSshEnvironment, RemoteConfig,
-        ReplayCachePolicy, ResetPolicy, ResetPriorityQuota, SshMultiplexingConfig,
-        SshPoolConfig, SshTransportBackend, StagedArtifactLeaseMetadata, TargetKind,
-    };
-
-    fn test_root(name: &str) -> std::path::PathBuf {
-        let root = std::env::temp_dir().join(format!(
-            "kria-remote-qemu-test-{}-{}",
-            name,
-            Uuid::new_v4()
-        ));
-        std::fs::create_dir_all(&root).expect("create test root");
-        root
-    }
-
-    fn test_remote_config(root: &std::path::Path) -> RemoteConfig {
-        let workspace_root = root.join("workspace");
-        let staging_root = root.join("staging");
-        let control_root = root.join("control");
-        std::fs::create_dir_all(&workspace_root).expect("create workspace root");
-        std::fs::create_dir_all(&staging_root).expect("create staging root");
-        std::fs::create_dir_all(&control_root).expect("create control root");
-
-        RemoteConfig {
-            host_platform: HostPlatform::Linux,
-            host: "127.0.0.1".to_string(),
-            port: 22,
-            username: "tester".to_string(),
-            ssh_key_path: root.join("id_ed25519"),
-            guest_os_family: GuestOsFamily::Posix,
-            target_kind: TargetKind::PhysicalRemoteHost,
-            qemu_boot_cmd: None,
-            qemu_pid_state_file: root.join("qemu.pid"),
-            instance_id: format!("test-instance-{}", Uuid::new_v4()),
-            remote_control_dir: control_root,
-            transport_backend: SshTransportBackend::OpenSshControlMaster,
-            ssh_multiplexing: SshMultiplexingConfig {
-                enable_control_master: false,
-                control_path_cmd: root.join("cmd.sock"),
-                control_path_bulk: root.join("bulk.sock"),
-                control_persist_secs: 30,
-                establish_timeout_ms: 500,
-                control_check_timeout_ms: 500,
-                allow_no_mux_for_test: true,
-                rust_ssh_max_parallel_channels: 8,
-            },
-            helper_provisioning: HelperProvisioning {
-                required_helper_version: "test".to_string(),
-                helper_manifest_path: root.join("helper.manifest"),
-                helper_manifest_sig_path: root.join("helper.manifest.sig"),
-                helper_public_key_path: root.join("helper.pub"),
-                host_helper_cache_dir: root.join("helper_cache"),
-                remote_helper_dir: root.join("remote_helper"),
-                remote_helper_lock_dir: root.join("remote_helper_lock"),
-                helper_lock_timeout_ms: 100,
-                helper_lock_claim_retry_ms: 10,
-                supervisor_heartbeat_interval_ms: 50,
-                supervisor_heartbeat_timeout_ms: 200,
-                worker_journal_silence_timeout_ms: 200,
-                emergency_status_buffer_bytes: 512 * 1024,
-                last_gasp_packet_timeout_ms: 100,
-                max_helper_rss_bytes: 64 * 1024 * 1024,
-            },
-            control_transport: ControlPlaneTransport::EphemeralSftpFile,
-            envelope_ttl_ms: 1_000,
-            max_command_payload_bytes: 4096,
-            file_commit_policy: FileCommitPolicy {
-                remote_staging_dir: staging_root,
-                privileged_commit_mode: PrivilegedCommitMode::Disabled,
-                privileged_commit_helper_path: None,
-                staging_sweep_ttl_secs: 1,
-                staging_lease_heartbeat_timeout_ms: 1,
-                staging_sweep_batch_limit: 32,
-                enforce_linux_openat2: true,
-                privileged_probe_timeout_ms: 200,
-                privileged_commit_timeout_ms: 200,
-                disable_privileged_on_probe_failure: true,
-            },
-            guest_filesystem_policy: GuestFilesystemPolicy {
-                require_control_dir_writable: true,
-                require_staging_dir_writable: true,
-                require_non_readonly_mount: true,
-                min_free_bytes_floor: 64 * 1024 * 1024,
-            },
-            reset_policy: ResetPolicy {
-                admission_freeze_timeout_ms: 1,
-                zombie_reap_timeout_ms: 1,
-                lock_acquire_timeout_ms: 50,
-                network_call_timeout_ms: 250,
-                total_reset_deadline_ms: 5_000,
-            },
-            replay_cache_policy: ReplayCachePolicy {
-                retained_epoch_buckets: 2,
-                max_nonces_per_epoch: 128,
-            },
-            ssh_pool: SshPoolConfig {
-                max_active_targets_hard_cap: 8,
-                idle_ttl_secs: 30,
-                sweep_interval_secs: 30,
-                fd_soft_limit: 4096,
-                fd_reserve: 64,
-                fd_per_command_budget: 4,
-                fd_telemetry_sample_ms: 100,
-            },
-            host_artifact_gc: HostArtifactGcConfig {
-                enable_gc: true,
-                gc_ttl_secs: 60,
-                state_root_dir: root.join("state"),
-                host_binary_sha256_or_build_id: "test-binary".to_string(),
-            },
-            infrastructure_runtime: InfrastructureRuntimeConfig {
-                infra_worker_threads: 2,
-                high_priority_queue_capacity: 16,
-                medium_priority_queue_capacity: 16,
-                low_priority_queue_capacity: 16,
-                infra_spawn_timeout_ms: 500,
-            },
-            ssh_connect_timeout_ms: 500,
-            command_timeout_ms: 500,
-            boot_wait_timeout_ms: 500,
-            poll_interval_ms: 10,
-            shutdown_timeout_ms: 500,
-            soft_reset_grace_ms: 50,
-            soft_reset_kill_timeout_ms: 50,
-            max_soft_reset_attempts: 2,
-            inflight_drain_timeout_ms: 100,
-            local_cancel_kill_timeout_ms: 100,
-            max_stdout_bytes: 1024 * 1024,
-            max_stderr_bytes: 1024 * 1024,
-            max_read_file_bytes: 1024 * 1024,
-            command_timeout_requires_reset: true,
-            known_hosts_path: None,
-            strict_host_key_checking: false,
-            pinned_host_key_sha256: None,
-            remote_workspace_root: Some(workspace_root),
-        }
-    }
-
-    fn staged_metadata(now_unix_ms: u64) -> StagedArtifactLeaseMetadata {
-        StagedArtifactLeaseMetadata {
-            owner_instance_id: "instance-a".to_string(),
-            owner_pid: None,
-            owner_pid_start_time_ticks: None,
-            owner_binary_sha256_or_build_id: None,
-            generation: 1,
-            epoch_uuid: Uuid::new_v4(),
-            artifact_nonce: "artifact-nonce".to_string(),
-            created_unix_ms: now_unix_ms,
-            lease_heartbeat_unix_ms: now_unix_ms,
-            expected_sha256: "abc123".to_string(),
-            bytes: 16,
-        }
-    }
-
-    fn parent_identity(pid: u32, start_time_ticks: u64, nonce: &str) -> ParentIdentity {
-        ParentIdentity {
-            pid,
-            start_time_ticks,
-            session_nonce: nonce.to_string(),
-        }
-    }
-
-    fn evidence_envelope(command_id: &str) -> ExecutionEnvelope {
-        ExecutionEnvelope {
-            command_id: command_id.to_string(),
-            generation: 7,
-            epoch_uuid: Uuid::new_v4().into_bytes(),
-            transport_generation_id: 13,
-            instance_id: "instance-test".to_string(),
-            issued_at_host_unix_ms_info_only: 1,
-            ttl_ms_from_receipt: 500,
-            nonce: "nonce-1".to_string(),
-            parent_session_nonce: "nonce-parent".to_string(),
-            parent_ssh_session_pid: Some(1234),
-            parent_ssh_session_start_time_ticks: Some(5678),
-            cwd: "/tmp".to_string(),
-            env: Default::default(),
-            program: "echo".to_string(),
-            args: vec!["hello".to_string()],
-            command_sha256: "sha256-test".to_string(),
-            stdin_mode: "none".to_string(),
-        }
-    }
-
-    #[test]
-    fn triple_check_identity_accepts_exact_match() {
-        let expected = parent_identity(1234, 5678, "nonce-a");
-        let observed = parent_identity(1234, 5678, "nonce-a");
-        assert!(QemuSshEnvironment::validate_parent_identity_triple(
-            &expected, &observed
-        ));
-    }
-
-    #[test]
-    fn triple_check_identity_rejects_pid_reuse() {
-        let expected = parent_identity(1234, 5678, "nonce-a");
-        let observed = parent_identity(4321, 5678, "nonce-a");
-        assert!(!QemuSshEnvironment::validate_parent_identity_triple(
-            &expected, &observed
-        ));
-    }
-
-    #[test]
-    fn triple_check_identity_rejects_start_time_mismatch() {
-        let expected = parent_identity(1234, 5678, "nonce-a");
-        let observed = parent_identity(1234, 9999, "nonce-a");
-        assert!(!QemuSshEnvironment::validate_parent_identity_triple(
-            &expected, &observed
-        ));
-    }
-
-    #[test]
-    fn triple_check_identity_rejects_session_nonce_mismatch() {
-        let expected = parent_identity(1234, 5678, "nonce-a");
-        let observed = parent_identity(1234, 5678, "nonce-b");
-        assert!(!QemuSshEnvironment::validate_parent_identity_triple(
-            &expected, &observed
-        ));
-    }
-
-    #[test]
-    fn host_gc_binary_fingerprint_triple_check_rejects_mismatch() {
-        assert!(HostGarbageCollector::validate_owner_triple_with_fingerprint(
-            Some(100),
-            Some(200),
-            Some("build-a"),
-            100,
-            200,
-            "build-a",
-        ));
-
-        assert!(!HostGarbageCollector::validate_owner_triple_with_fingerprint(
-            Some(100),
-            Some(200),
-            Some("build-a"),
-            100,
-            200,
-            "build-b",
-        ));
-    }
-
-    #[test]
-    fn high_to_medium_priority_fairness_every_third_high() {
-        let mut quota = ResetPriorityQuota::default();
-        let observed = (0..7)
-            .map(|_| quota.on_high_recovery_step())
-            .collect::<Vec<_>>();
-
-        assert_eq!(
-            observed,
-            vec![false, false, true, false, false, true, false]
-        );
-    }
-
-    #[tokio::test]
-    async fn reserved_reset_slots_preserve_high_priority_capacity() {
-        let root = test_root("reserved-reset-slots");
-        let mut config = test_remote_config(&root);
-        config.infrastructure_runtime.high_priority_queue_capacity = 10;
-        let handle = Handle::current();
-        let env = QemuSshEnvironment::new(config, handle.clone(), handle)
-            .expect("construct qemu ssh environment");
-
-        let mut guards = Vec::new();
-        for _ in 0..7 {
-            guards.push(
-                env.acquire_infra_slot("cancel_inflight::flood")
-                    .expect("high-non-reset slot should be available"),
-            );
-        }
-
-        assert!(env.acquire_infra_slot("cancel_inflight::flood").is_err());
-        assert!(
-            env.acquire_infra_slot("reset_environment::admission_barrier")
-                .is_ok()
-        );
-
-        drop(guards);
-    }
-
-    #[test]
-    fn journal_footer_is_authoritative_over_last_gasp() {
-        let envelope = evidence_envelope("cmd-journal-authority");
-        let last_gasp = serde_json::to_string(&LastGaspPacket {
-            command_id: envelope.command_id.clone(),
-            generation: envelope.generation,
-            epoch_uuid: envelope.epoch_uuid,
-            nonce: envelope.nonce.clone(),
-            terminal_state: "Exited".to_string(),
-            exit_code_or_signal: 0,
-            last_error: String::new(),
-            stdout: "last-gasp-stdout".to_string(),
-            stderr: String::new(),
-        })
-        .expect("serialize last-gasp packet");
-
-        let resolved = QemuSshEnvironment::resolve_terminal_evidence(
-            &envelope,
-            HelperExecutionEvidence {
-                journal_footer: Some(JournalTerminalFooter {
-                    command_id: envelope.command_id.clone(),
-                    generation: envelope.generation,
-                    epoch_uuid: envelope.epoch_uuid,
-                    nonce: envelope.nonce.clone(),
-                    exit_code: 42,
-                    stdout: "journal-stdout".to_string(),
-                    stderr: "journal-stderr".to_string(),
-                    journal_complete: true,
-                }),
-                last_gasp_packet_raw: Some(last_gasp),
-            },
-        )
-        .expect("resolve evidence");
-
-        assert_eq!(resolved.source, EvidenceSource::Journal);
-        assert_eq!(resolved.exit_code, 42);
-        assert_eq!(resolved.stdout, "journal-stdout");
-    }
-
-    #[test]
-    fn incomplete_journal_falls_back_to_last_gasp() {
-        let envelope = evidence_envelope("cmd-last-gasp-fallback");
-        let last_gasp = serde_json::to_string(&LastGaspPacket {
-            command_id: envelope.command_id.clone(),
-            generation: envelope.generation,
-            epoch_uuid: envelope.epoch_uuid,
-            nonce: envelope.nonce.clone(),
-            terminal_state: "Exited".to_string(),
-            exit_code_or_signal: 3,
-            last_error: "fallback".to_string(),
-            stdout: "last-gasp-stdout".to_string(),
-            stderr: "last-gasp-stderr".to_string(),
-        })
-        .expect("serialize last-gasp packet");
-
-        let resolved = QemuSshEnvironment::resolve_terminal_evidence(
-            &envelope,
-            HelperExecutionEvidence {
-                journal_footer: Some(JournalTerminalFooter {
-                    command_id: envelope.command_id.clone(),
-                    generation: envelope.generation,
-                    epoch_uuid: envelope.epoch_uuid,
-                    nonce: envelope.nonce.clone(),
-                    exit_code: 0,
-                    stdout: "journal-stdout".to_string(),
-                    stderr: String::new(),
-                    journal_complete: false,
-                }),
-                last_gasp_packet_raw: Some(last_gasp),
-            },
-        )
-        .expect("resolve evidence");
-
-        assert_eq!(resolved.source, EvidenceSource::LastGasp);
-        assert_eq!(resolved.exit_code, 3);
-        assert_eq!(resolved.stderr, "last-gasp-stderr");
-    }
-
-    #[tokio::test]
-    async fn zombie_reaping_orphans_handles_after_barrier_timeout() {
-        let root = test_root("zombie-reaping");
-        let config = test_remote_config(&root);
-        let handle = Handle::current();
-        let env = QemuSshEnvironment::new(config, handle.clone(), handle)
-            .expect("construct qemu ssh environment");
-
-        env.admission_inflight.store(1, Ordering::Release);
-        env.inflight_registry.write().await.insert(
-            "cmd-zombie".to_string(),
-            InflightCommandHandle {
-                command_id: "cmd-zombie".to_string(),
-                generation: 0,
-                epoch_uuid: Uuid::new_v4(),
-                transport_generation_id: 0,
-                cancel_token: CancellationToken::new(),
-                local_process_ids: Vec::new(),
-                remote_status_path: root.join("cmd-zombie.status"),
-                remote_tmp_paths: HashSet::new(),
-                parent_identity: None,
-                helper_supervisor_pid: None,
-                helper_worker_pid: None,
-                helper_worker_start_time_ticks: None,
-            },
-        );
-
-        let outcome = env
-            .wait_for_admission_barrier_or_zombie_reap()
-            .await
-            .expect("zombie reaping outcome");
-
-        match outcome {
-            AdmissionBarrierOutcome::ZombieReaping { orphaned_handles } => {
-                assert_eq!(orphaned_handles, 1);
-            }
-            AdmissionBarrierOutcome::BarrierReached => {
-                panic!("expected ZombieReaping outcome");
-            }
-        }
-
-        assert!(env.inflight_registry.read().await.is_empty());
-        assert!(env.zombie_commands.read().await.contains("cmd-zombie"));
-        assert_eq!(env.admission_inflight.load(Ordering::Acquire), 0);
-    }
-
-    #[tokio::test]
-    async fn barrier_requires_admission_and_registry_empty() {
-        let root = test_root("dual-barrier");
-        let config = test_remote_config(&root);
-        let handle = Handle::current();
-        let env = QemuSshEnvironment::new(config, handle.clone(), handle)
-            .expect("construct qemu ssh environment");
-
-        env.admission_inflight.store(0, Ordering::Release);
-        env.inflight_registry.write().await.insert(
-            "cmd-dual-barrier".to_string(),
-            InflightCommandHandle {
-                command_id: "cmd-dual-barrier".to_string(),
-                generation: 0,
-                epoch_uuid: Uuid::new_v4(),
-                transport_generation_id: 0,
-                cancel_token: CancellationToken::new(),
-                local_process_ids: Vec::new(),
-                remote_status_path: root.join("cmd-dual-barrier.status"),
-                remote_tmp_paths: HashSet::new(),
-                parent_identity: None,
-                helper_supervisor_pid: None,
-                helper_worker_pid: None,
-                helper_worker_start_time_ticks: None,
-            },
-        );
-
-        let outcome = env
-            .wait_for_admission_barrier_or_zombie_reap()
-            .await
-            .expect("dual barrier outcome");
-
-        match outcome {
-            AdmissionBarrierOutcome::ZombieReaping { orphaned_handles } => {
-                assert_eq!(orphaned_handles, 1);
-            }
-            AdmissionBarrierOutcome::BarrierReached => {
-                panic!("expected ZombieReaping outcome");
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn stale_epoch_or_generation_fence_is_rejected() {
-        let root = test_root("stale-fence");
-        let config = test_remote_config(&root);
-        let handle = Handle::current();
-        let env = QemuSshEnvironment::new(config, handle.clone(), handle)
-            .expect("construct qemu ssh environment");
-
-        let generation = env.generation.load(Ordering::Acquire);
-        let epoch_uuid = env.current_epoch_uuid();
-        assert!(env.is_command_fence_current(generation, epoch_uuid));
-
-        env.generation.fetch_add(1, Ordering::AcqRel);
-        assert!(!env.is_command_fence_current(generation, epoch_uuid));
-    }
-
-    #[test]
-    fn global_sweep_predicate_requires_all_three_conditions() {
-        let now = 20_000;
-        let mut metadata = staged_metadata(1_000);
-        metadata.lease_heartbeat_unix_ms = 1_000;
-
-        let ttl_ms = 5_000;
-        let heartbeat_timeout_ms = 500;
-
-        assert!(QemuSshEnvironment::should_delete_staged_artifact(
-            &metadata,
-            now,
-            ttl_ms,
-            heartbeat_timeout_ms,
-            true,
-        ));
-
-        assert!(!QemuSshEnvironment::should_delete_staged_artifact(
-            &metadata,
-            4_000,
-            ttl_ms,
-            heartbeat_timeout_ms,
-            true,
-        ));
-
-        assert!(!QemuSshEnvironment::should_delete_staged_artifact(
-            &metadata,
-            now,
-            ttl_ms,
-            25_000,
-            true,
-        ));
-
-        assert!(!QemuSshEnvironment::should_delete_staged_artifact(
-            &metadata,
-            now,
-            ttl_ms,
-            heartbeat_timeout_ms,
-            false,
-        ));
-    }
-}
+mod tests;
