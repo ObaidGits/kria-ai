@@ -25,11 +25,25 @@ async fn send_message_with_profile(
     if let Err(e) =
         ensure_orchestrator_ready_for_turn(orchestrator_snapshot.as_ref(), "ui_turn").await
     {
+        let user_visible_error = format!("⚠️ {e}");
         emit_agent_stage(
             &app,
             "failed",
             "Local runtime preflight failed",
             Some(serde_json::json!({ "error": e.clone() })),
+        );
+        // Also emit error as token so it shows in the chat UI
+        let ev_prefix = match execution_profile.mode {
+            TurnExecutionMode::Assistant => "agent",
+            TurnExecutionMode::PromptLab => "prompt_lab",
+        };
+        let _ = app.emit(
+            &format!("{ev_prefix}:token"),
+            serde_json::json!({ "text": &user_visible_error }),
+        );
+        let _ = app.emit(
+            &format!("{ev_prefix}:done"),
+            serde_json::json!({}),
         );
         return Err(e);
     }

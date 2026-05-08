@@ -1754,6 +1754,10 @@ pub struct AgentLoop {
     rollback_mgr: Arc<RollbackManager>,
     /// Semantic router — None until initialised (falls back to regex router).
     semantic_router: Option<Arc<crate::routing::Router>>,
+    /// Tool-level semantic index for direct execution fast path.
+    tool_index: Option<Arc<crate::routing::tool_index::SharedToolIndex>>,
+    /// Feedback collector for online learning.
+    feedback_collector: Option<Arc<tokio::sync::Mutex<crate::routing::feedback::FeedbackCollector>>>,
     max_tool_rounds: usize,
     hardware_tier: String,
     min_confidence_to_act: f32,
@@ -1783,6 +1787,8 @@ impl AgentLoop {
             audit_logger,
             rollback_mgr,
             semantic_router: None,
+            tool_index: None,
+            feedback_collector: None,
             max_tool_rounds: 10,
             hardware_tier: "standard".into(),
             min_confidence_to_act: 0.55,
@@ -1796,6 +1802,46 @@ impl AgentLoop {
     pub fn with_semantic_router(mut self, router: Arc<crate::routing::Router>) -> Self {
         self.semantic_router = Some(router);
         self
+    }
+
+    /// Attach a tool-level semantic index for direct execution.
+    pub fn with_tool_index(mut self, index: Arc<crate::routing::tool_index::SharedToolIndex>) -> Self {
+        self.tool_index = Some(index);
+        self
+    }
+
+    /// Attach a feedback collector for online learning.
+    pub fn with_feedback_collector(
+        mut self,
+        collector: Arc<tokio::sync::Mutex<crate::routing::feedback::FeedbackCollector>>,
+    ) -> Self {
+        self.feedback_collector = Some(collector);
+        self
+    }
+
+    /// Try direct tool execution via semantic tool index (Phase 3 fast path).
+    /// Returns Some(tool_schema) if a high-confidence direct match is found.
+    async fn try_direct_tool_match(&self, query_text: &str) -> Option<ToolSchema> {
+        let tool_index = self.tool_index.as_ref()?;
+        if !crate::config::RoutingConfig::default().tool_index_enabled {
+            return None;
+        }
+        let tier = &self.hardware_tier;
+        let match_result = tool_index.match_by_text(query_text, tier).await?;
+        if !match_result.direct_execution {
+            return None;
+        }
+        // Find the matching ToolSchema
+        let schema = self.tool_registry
+            .list_defs()
+            .iter()
+            .find(|def| def.name == match_result.name)
+            .map(|def| ToolSchema {
+                name: def.name.clone(),
+                description: def.description.clone(),
+                parameters: def.to_function_schema(),
+            });
+        schema
     }
 
     /// Override the maximum tool rounds for a single user turn.
@@ -2358,7 +2404,8 @@ impl AgentLoop {
             .turn_gate
             .direct_tool_hint(&turn_gate_plan, &allowed_tool_names);
         let mut turn_modality = if let Some(router) = &self.semantic_router {
-            let (_, modality, _) = router.route(&routing_focus_text).await;
+            let ctx = self.turn_gate.context();
+            let (_, modality, _) = router.route_with_context(&routing_focus_text, ctx).await;
             modality
         } else {
             crate::routing::verbs::classify_modality(&routing_focus_text)
@@ -2399,7 +2446,8 @@ impl AgentLoop {
             let mut conversation_only_route = false;
 
             if let Some(router) = &self.semantic_router {
-                let (decision, modality, trace) = router.route(&round_focus_text).await;
+                let ctx = self.turn_gate.context();
+                let (decision, modality, trace) = router.route_with_context(&round_focus_text, ctx).await;
                 turn_modality = modality;
                 conversation_only_route =
                     matches!(decision, crate::routing::RouteDecision::Conversation);
@@ -2417,16 +2465,25 @@ impl AgentLoop {
             let round_tool_schemas = if pure_image_analysis_turn {
                 Vec::new()
             } else {
-                select_routed_tool_schemas(
-                    &tool_schemas,
-                    &round_focus_text,
-                    round_direct_tool_hint.as_deref(),
-                    &routed_tool_names,
-                    &fallback_tool_names,
-                    forced_tool_name.as_deref(),
-                    execution_profile.tool_lock.as_deref(),
-                    conversation_only_route,
-                )
+                // Phase 3: Try direct tool match first (skip LLM)
+                if let Some(direct_schema) = self.try_direct_tool_match(&round_focus_text).await {
+                    tracing::info!(
+                        tool = %direct_schema.name,
+                        "Direct tool match via semantic index — skipping LLM"
+                    );
+                    vec![direct_schema]
+                } else {
+                    select_routed_tool_schemas(
+                        &tool_schemas,
+                        &round_focus_text,
+                        round_direct_tool_hint.as_deref(),
+                        &routed_tool_names,
+                        &fallback_tool_names,
+                        forced_tool_name.as_deref(),
+                        execution_profile.tool_lock.as_deref(),
+                        conversation_only_route,
+                    )
+                }
             };
 
             if let Some(template) = base_system_prompt_template.as_ref() {
@@ -3465,6 +3522,37 @@ impl AgentLoop {
 
                 // Stop the heartbeat task.
                 hb_cancel.cancel();
+
+                // Phase 5: Record routing feedback for online learning
+                if let Some(ref feedback_collector) = self.feedback_collector {
+                    let outcome = crate::routing::feedback::detect_outcome(
+                        crate::routing::domain::Domain::Conversation, // Will be resolved by context
+                        Some(&call.name),
+                        None, // next_text unknown at this point
+                        tool_result.success,
+                        tool_result.error.as_deref(),
+                    );
+                    let mut collector = feedback_collector.lock().await;
+                    collector.record(crate::routing::feedback::RoutingFeedback {
+                        input_text_hash: {
+                            use std::hash::{Hash, Hasher};
+                            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                            routing_focus_text.hash(&mut hasher);
+                            hasher.finish()
+                        },
+                        domain_selected: crate::routing::domain::Domain::Conversation,
+                        tool_selected: Some(call.name.clone()),
+                        intent_source: format!("{:?}", turn_gate_plan.intent.source),
+                        confidence: turn_gate_plan.intent.confidence,
+                        outcome,
+                        timestamp: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs(),
+                        session_id: session_id.to_string(),
+                        embedding: Vec::new(),
+                    });
+                }
 
                 // ── Update error-loop counters ─────────────────────────────────
                 if tool_result.success {

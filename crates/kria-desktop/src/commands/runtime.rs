@@ -474,11 +474,29 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         }
     };
     let (semantic_router, _router_event_tx) = kria_core::routing::Router::new(
-        routing_config,
+        routing_config.clone(),
         routing_cache_dir,
-        router_tool_descriptions,
+        router_tool_descriptions.clone(),
     )
     .await;
+
+    // Phase 3: Build tool-level semantic index
+    let tool_defs_for_index: Vec<kria_core::tools::registry::ToolDef> = tool_registry
+        .list_defs()
+        .iter()
+        .cloned()
+        .collect();
+    let tool_index = kria_core::routing::tool_index::SharedToolIndex::new(
+        tool_defs_for_index,
+        routing_config.clone(),
+    )
+    .await;
+    tracing::info!("Tool semantic index initialized");
+
+    // Phase 5: Build feedback collector
+    let feedback_collector = Arc::new(tokio::sync::Mutex::new(
+        kria_core::routing::feedback::FeedbackCollector::default_config(),
+    ));
 
     // Build the agent loop
     let max_tool_rounds = config.agent.max_tool_rounds.max(1);
@@ -495,6 +513,8 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
             rollback_mgr,
         )
         .with_semantic_router(semantic_router)
+        .with_tool_index(tool_index)
+        .with_feedback_collector(feedback_collector)
         .with_max_tool_rounds(max_tool_rounds)
         .with_confidence_thresholds(min_confidence_to_act, clarify_threshold)
         .with_hardware_tier(hardware_info.tier.as_str()),

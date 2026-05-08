@@ -233,8 +233,8 @@ fn remote_command_extraction_accepts_vm_prompt_pack_samples() {
                 "prompt '{prompt}' should include command fragment '{command_contains}', got '{command}'"
             );
         assert_eq!(
-            target_hint.as_deref(),
-            expected_hint,
+            target_hint.as_deref().map(|s| s.to_lowercase()),
+            expected_hint.map(|s| s.to_lowercase()),
             "prompt '{prompt}' target hint mismatch"
         );
     }

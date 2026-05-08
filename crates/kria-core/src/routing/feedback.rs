@@ -32,10 +32,8 @@ use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use super::domain::Domain;
 
@@ -133,13 +131,11 @@ pub struct FeedbackCollector {
     max_buffer: usize,
     /// Path to feedback directory.
     feedback_dir: PathBuf,
-    /// Learning rate for centroid adjustment.
-    learning_rate: f32,
 }
 
 impl FeedbackCollector {
     /// Create a new feedback collector.
-    pub fn new(feedback_dir: &str, max_buffer: usize, learning_rate: f32) -> Self {
+    pub fn new(feedback_dir: &str, max_buffer: usize, _learning_rate: f32) -> Self {
         let dir = if feedback_dir.starts_with('~') {
             if let Some(home) = std::env::var_os("HOME") {
                 PathBuf::from(home).join(&feedback_dir[1..])
@@ -154,7 +150,6 @@ impl FeedbackCollector {
             buffer: Vec::new(),
             max_buffer,
             feedback_dir: dir,
-            learning_rate,
         }
     }
 
@@ -363,7 +358,7 @@ fn l2_normalize(v: &mut [f32]) {
 ///
 /// Detected `RoutingOutcome`.
 pub fn detect_outcome(
-    current_domain: Domain,
+    _current_domain: Domain,
     current_tool: Option<&str>,
     next_text: Option<&str>,
     tool_success: bool,

@@ -41,7 +41,6 @@ const ENV_INTENT_TOKENIZER_PATH: &str = "KRIA_INTENT_TOKENIZER_PATH";
 const DEFAULT_MODEL_PATH: &str = "~/.kria/models/classifier/intent_v2.onnx";
 const DEFAULT_TOKENIZER_PATH: &str = "~/.kria/models/classifier/tokenizer.json";
 
-const MIN_CONFIDENCE_FOR_DIRECT: f32 = 0.85;
 const SOFTMAX_TEMPERATURE: f32 = 8.0;
 const WORKER_TIMEOUT: Duration = Duration::from_millis(25);
 

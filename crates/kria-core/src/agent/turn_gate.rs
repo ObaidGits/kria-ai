@@ -178,6 +178,8 @@ pub struct TurnGatePlan {
 #[derive(Debug)]
 pub struct TurnGate {
     onnx_classifier: Option<crate::agent::onnx_classifier::OnnxClassifier>,
+    /// New intent classifier (replaces regex + legacy ONNX when enabled).
+    intent_classifier: Option<crate::routing::intent_classifier::IntentClassifier>,
     /// Conversation context for context-aware routing.
     context: RoutingContext,
 }
@@ -213,6 +215,7 @@ impl TurnGate {
 
         Self {
             onnx_classifier,
+            intent_classifier: None,
             context: RoutingContext::default(),
         }
     }
@@ -223,6 +226,7 @@ impl TurnGate {
     ) -> Self {
         Self {
             onnx_classifier,
+            intent_classifier: None,
             context: RoutingContext::default(),
         }
     }
@@ -242,11 +246,46 @@ impl TurnGate {
         self.context = ctx;
     }
 
+    /// Attach the new intent classifier (Phase 2).
+    pub fn with_intent_classifier(
+        mut self,
+        classifier: crate::routing::intent_classifier::IntentClassifier,
+    ) -> Self {
+        self.intent_classifier = Some(classifier);
+        self
+    }
+
     /// Plan a turn with context-aware routing.
     ///
     /// This method is `&self` to remain compatible with `Arc<TurnGate>`.
     /// Context updates should be done externally via `update_context()`.
     pub fn plan_turn(&self, user_text: &str, has_images: bool) -> TurnGatePlan {
+        // Phase 2: Try new intent classifier first if enabled
+        if let Some(ref classifier) = self.intent_classifier {
+            if crate::routing::intent_classifier::is_enabled() {
+                if let Some(classification) = classifier.classify(user_text, &self.context) {
+                    let intent = IntentEnvelope::new(
+                        self.user_text_to_modality(user_text, has_images),
+                        classification.operation,
+                        classification.hazard,
+                        classification.compute,
+                        classification.confidence,
+                        classification.source,
+                    );
+                    let resource_plan = self.compile_resource_plan(&intent);
+                    let (direct_tool_hint, fallback_tool_hints) =
+                        self.compile_hints_from_classification(&classification, user_text);
+                    return TurnGatePlan {
+                        intent,
+                        resource_plan,
+                        direct_tool_hint,
+                        fallback_tool_hints,
+                    };
+                }
+            }
+        }
+
+        // Legacy path: regex router + ONNX classifier
         let router_result = IntentRouter::classify(user_text);
         let intent = self.classify(user_text, has_images, &router_result);
         let resource_plan = self.compile_resource_plan(&intent);
@@ -525,6 +564,76 @@ impl TurnGate {
         }
 
         None
+    }
+
+    /// Convert user text to modality (helper for new classifier path).
+    fn user_text_to_modality(&self, user_text: &str, has_images: bool) -> Modality {
+        if has_images {
+            Modality::Image
+        } else {
+            let lower = user_text.to_ascii_lowercase();
+            if lower.starts_with("check") || lower.starts_with("get") || lower.starts_with("list") || lower.starts_with("show") {
+                Modality::Text
+            } else if lower.starts_with("set") || lower.starts_with("update") || lower.starts_with("create") {
+                Modality::Text
+            } else {
+                Modality::Text
+            }
+        }
+    }
+
+    /// Compile tool hints from IntentClassification (new classifier path).
+    fn compile_hints_from_classification(
+        &self,
+        classification: &crate::routing::intent_classifier::IntentClassification,
+        user_text: &str,
+    ) -> (Option<String>, Vec<String>) {
+        let lower = user_text.to_ascii_lowercase();
+        let mut fallback_hints: Vec<String> = Vec::new();
+
+        // Map domain to tool hints
+        match classification.domain {
+            crate::routing::domain::Domain::SystemInfo => {
+                if lower.contains("cpu") { fallback_hints.push("get_cpu_usage".into()); }
+                if lower.contains("memory") || lower.contains("ram") { fallback_hints.push("get_memory_info".into()); }
+                if lower.contains("disk") { fallback_hints.push("get_disk_space".into()); }
+                if lower.contains("battery") { fallback_hints.push("get_battery_status".into()); }
+                if lower.contains("network") { fallback_hints.push("get_network_status".into()); }
+                if lower.contains("uptime") || lower.contains("running") { fallback_hints.push("get_system_uptime".into()); }
+                if fallback_hints.is_empty() { fallback_hints.push("check_system_health".into()); }
+            }
+            crate::routing::domain::Domain::FileOps => {
+                if lower.contains("read") || lower.contains("open") { fallback_hints.push("read_file".into()); }
+                if lower.contains("write") || lower.contains("create") { fallback_hints.push("write_file".into()); }
+                if lower.contains("delete") { fallback_hints.push("delete_file".into()); }
+                if lower.contains("search") || lower.contains("find") { fallback_hints.push("search_files".into()); }
+                if lower.contains("list") { fallback_hints.push("list_directory".into()); }
+            }
+            crate::routing::domain::Domain::Power => {
+                if lower.contains("volume") { fallback_hints.push("set_volume".into()); }
+                if lower.contains("brightness") { fallback_hints.push("set_brightness".into()); }
+                if lower.contains("shutdown") || lower.contains("shut down") { fallback_hints.push("shutdown_system".into()); }
+                if lower.contains("reboot") { fallback_hints.push("reboot_system".into()); }
+            }
+            crate::routing::domain::Domain::Comms => {
+                if lower.contains("email") || lower.contains("mail") { fallback_hints.push("gw_gmail_send".into()); }
+                if lower.contains("calendar") || lower.contains("schedule") { fallback_hints.push("gw_calendar_today".into()); }
+            }
+            crate::routing::domain::Domain::Developer => {
+                if lower.contains("git") { fallback_hints.push("git_status".into()); }
+                if lower.contains("run") || lower.contains("shell") { fallback_hints.push("execute_command".into()); }
+            }
+            _ => {}
+        }
+
+        // Direct tool hint: if exactly one fallback, use it as direct
+        let direct = if fallback_hints.len() == 1 {
+            Some(fallback_hints[0].clone())
+        } else {
+            None
+        };
+
+        (direct, fallback_hints)
     }
 
     fn compile_tool_hints(

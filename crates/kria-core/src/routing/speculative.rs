@@ -30,7 +30,7 @@
 //! - Latency saved on hit: 200-400ms
 
 use std::time::{Duration, Instant};
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use super::domain::Domain;
 use super::embed;
