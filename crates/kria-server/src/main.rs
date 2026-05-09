@@ -43,7 +43,41 @@ async fn main() -> anyhow::Result<()> {
     let fleet = Arc::new(kria_server::inventory::FleetRuntime::initialize(&config).await?);
     let bind_addr = format!("{}:{}", config.server.host, config.server.port,);
 
-    let state = Arc::new(ServerState { config, fleet });
+    // ─── Executive Controller (feature-gated) ─────────────────────────
+    let executive_sender = if config.executive.enabled {
+        let gpu_lease = kria_core::resource::gpu_lease::GpuLeaseManager::shared(
+            std::time::Duration::from_secs(180),
+            std::time::Duration::from_secs(15),
+        );
+        let policy_gate: Arc<dyn kria_core::safety::policy_gate::PolicyGate> =
+            Arc::new(kria_core::safety::policy_gate::CapabilityPolicyGate::new());
+
+        let executive_config = kria_core::agent::executive::ExecutiveConfig {
+            max_background_tasks: config.executive.max_background_tasks,
+            preemption_grace_ms: config.executive.preemption_grace_ms,
+            ..Default::default()
+        };
+
+        let (mut controller, sender) =
+            kria_core::agent::executive::ExecutiveController::new(
+                executive_config,
+                gpu_lease,
+                policy_gate,
+            );
+
+        // Spawn the controller's dispatch loop in the background.
+        tokio::spawn(async move {
+            controller.run().await;
+        });
+
+        tracing::info!("ExecutiveController enabled — dispatch loop started");
+        Some(sender)
+    } else {
+        tracing::info!("ExecutiveController disabled — using legacy AgentLoop");
+        None
+    };
+
+    let state = Arc::new(ServerState { config, fleet, executive_sender });
     let app = build_router(state);
 
     tracing::info!("KRIA server listening on {bind_addr}");

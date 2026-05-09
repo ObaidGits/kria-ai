@@ -22,6 +22,13 @@ pub struct KriaConfig {
     pub colab: ColabConfig,
     pub routing: RoutingConfig,
     pub image_generation: ImageGenerationConfig,
+    // ─── Intelligence Enhancement (Phase A–F) ───
+    pub executive: ExecutiveConfig,
+    pub planner: PlannerConfig,
+    pub uncertainty: UncertaintyConfig,
+    pub skill_compiler: SkillCompilerConfig,
+    pub curiosity: CuriosityLoopConfig,
+    pub browser_agent: BrowserAgentConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1550,6 +1557,141 @@ impl Default for ImageGenerationConfig {
             hf_inference_token: String::new(),
             prompt_enhance_mode: "auto".into(),
             image_mode: "auto".into(),
+        }
+    }
+}
+
+// ─── Intelligence Enhancement Config (Phase A–F) ────────────────────────────
+
+/// Executive Controller feature flag and tuning.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ExecutiveConfig {
+    /// Master switch. When false, all input routes through legacy AgentLoop.
+    pub enabled: bool,
+    /// Maximum concurrent background tasks (P3/P4).
+    pub max_background_tasks: usize,
+    /// Grace period (ms) before force-killing a preempted task.
+    pub preemption_grace_ms: u64,
+}
+
+impl Default for ExecutiveConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_background_tasks: 3,
+            preemption_grace_ms: 500,
+        }
+    }
+}
+
+/// Structured Branching Planner feature flag and tuning.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct PlannerConfig {
+    pub enabled: bool,
+    pub max_steps: usize,
+    pub max_replans: usize,
+    pub working_set_max_tokens: usize,
+    pub fallback_to_cloud: bool,
+    pub cloud_api_key: String,
+}
+
+impl Default for PlannerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_steps: 20,
+            max_replans: 3,
+            working_set_max_tokens: 2048,
+            fallback_to_cloud: true,
+            cloud_api_key: String::new(),
+        }
+    }
+}
+
+/// Uncertainty Engine feature flag.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct UncertaintyConfig {
+    pub enabled: bool,
+    pub plan_threshold: f32,
+    pub gather_threshold: f32,
+    pub ask_threshold: f32,
+    pub belief_decay_rate_per_hour: f32,
+}
+
+impl Default for UncertaintyConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            plan_threshold: 0.8,
+            gather_threshold: 0.6,
+            ask_threshold: 0.3,
+            belief_decay_rate_per_hour: 0.05,
+        }
+    }
+}
+
+/// Skill Compiler feature flag.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct SkillCompilerConfig {
+    pub enabled: bool,
+    pub min_successes: usize,
+    pub quarantine_enabled: bool,
+    pub circuit_breaker_threshold: usize,
+}
+
+impl Default for SkillCompilerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            min_successes: 3,
+            quarantine_enabled: true,
+            circuit_breaker_threshold: 3,
+        }
+    }
+}
+
+/// Curiosity Loop feature flag.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct CuriosityLoopConfig {
+    pub enabled: bool,
+    pub max_cpu_percent: f32,
+    pub cooldown_secs: u64,
+    pub max_commands_per_cycle: usize,
+}
+
+impl Default for CuriosityLoopConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_cpu_percent: 10.0,
+            cooldown_secs: 60,
+            max_commands_per_cycle: 10,
+        }
+    }
+}
+
+/// Browser Agent feature flag.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct BrowserAgentConfig {
+    pub enabled: bool,
+    pub docker_image: String,
+    pub task_timeout_secs: u64,
+    pub max_steps: usize,
+}
+
+impl Default for BrowserAgentConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            docker_image: "kria-browser-use:latest".into(),
+            task_timeout_secs: 120,
+            max_steps: 20,
         }
     }
 }

@@ -23,7 +23,11 @@ async fn build_test_app() -> Router {
             .expect("fleet runtime init"),
     );
 
-    let state = Arc::new(kria_server::ServerState { config, fleet });
+    let state = Arc::new(kria_server::ServerState {
+        config,
+        fleet,
+        executive_sender: None,
+    });
 
     kria_server::build_router(state)
 }

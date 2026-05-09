@@ -18,7 +18,11 @@ async fn spawn_ws_server() -> String {
             .await
             .expect("fleet runtime init"),
     );
-    let state = std::sync::Arc::new(kria_server::ServerState { config, fleet });
+    let state = std::sync::Arc::new(kria_server::ServerState {
+        config,
+        fleet,
+        executive_sender: None,
+    });
     let app = kria_server::build_router(state);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

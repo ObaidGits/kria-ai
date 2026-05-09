@@ -184,9 +184,9 @@ impl UncertaintyEngine {
 - "Make my VM faster" → confidence 0.4 → gather: `top -bn1`, `free -h`, `df -h`, `systemctl list-units --state=running`
 - After gathering → confidence 0.85 → proceed to planning
 
-### Tree-of-Thoughts Planning (Layer 3)
+### Structured Branching (Layer 3)
 
-**Linear planning is abolished.** The 7B model generates and scores multiple paths before executing.
+**Open-ended Tree-of-Thoughts is rejected.** 7B models fail at unguided ToT — they produce verbose, hallucinated branches. Instead, the Planner is **forced** to generate exactly 3 structured paths with specific templates:
 
 ```
 User: "Make my VM faster"
@@ -198,22 +198,39 @@ Evidence: nginx 80% CPU, 64 workers, 2GB RAM free
 Confidence: 0.85 → Proceed to Planning
     ↓
 ┌─────────────────────────────────────────────────────────┐
-│  TREE-OF-THOUGHTS (3 parallel paths)                    │
+│  STRUCTURED BRANCHING (3 forced templates)              │
 │                                                         │
-│  Path A: Reduce nginx workers (64→4)                    │
-│    Score: 0.92 | Risk: Low | Impact: CPU 80%→12%       │
+│  PATH A — DIAGNOSE-FIRST (read-only, safe)              │
+│  Steps: [top -bn1, systemctl status nginx, free -h]     │
+│  Risk: None (read-only)                                 │
+│  Confidence: 0.95                                       │
 │                                                         │
-│  Path B: Kill nginx, use caddy                          │
-│    Score: 0.65 | Risk: High | Impact: Unknown           │
+│  PATH B — MINIMAL-RISK FIX                              │
+│  Steps: [reduce nginx workers 64→4, restart nginx]      │
+│  Risk: Low (config change, reversible)                  │
+│  Confidence: 0.88                                       │
 │                                                         │
-│  Path C: Add more RAM via swap file                     │
-│    Score: 0.71 | Risk: Medium | Impact: RAM +2GB        │
+│  PATH C — AGGRESSIVE FIX                                │
+│  Steps: [kill nginx, install caddy, migrate config]     │
+│  Risk: High (service replacement, hard to rollback)     │
+│  Confidence: 0.60                                       │
 │                                                         │
-│  Winner: Path A (highest score, lowest risk)            │
+│  SELF-MODEL EVALUATION:                                 │
+│  Path A: nginx_status tool success rate = 98%           │
+│  Path B: config_edit tool success rate = 85%            │
+│  Path C: service_replace tool success rate = 45%        │
+│                                                         │
+│  Winner: Path B (best risk/reward ratio)                │
 └─────────────────────────────────────────────────────────┘
     ↓
-Execute Path A → Observe → CPU 12% → Goal achieved ✅
+Execute Path B → Observe → CPU 12% → Goal achieved ✅
 ```
+
+**Why structured branching beats open-ended ToT:**
+- **Deterministic output format** — 7B model always produces exactly 3 paths
+- **Risk-graduated** — Each path has a clear risk level (safe/medium/high)
+- **Self-model integration** — Paths are scored against historical success rates
+- **Lower latency** — Structured prompts produce faster, shorter responses than open-ended ToT
 
 ### Architecture: Plan-Execute-Reflect Loop (Rust-Native)
 
@@ -502,16 +519,19 @@ pub struct TaskPattern {
 
 Saving past actions to a database is **logging**, not learning. KRIA will endlessly re-solve similar issues from scratch because it doesn't generalize.
 
-### The Skill Compiler Solution
+### The Skill Compiler Solution (Calibrated Compilation)
 
-When the ToT planner successfully resolves a novel task, the execution graph is abstracted and compiled into a **reusable tool schema**.
+When the planner successfully resolves a novel task, the execution graph is abstracted and compiled into a **reusable tool schema** — but ONLY after it has succeeded in **3 slightly varied contexts**. This prevents over-generalization from a single lucky execution.
 
 ```
-First time: "Make my VM faster"
-    ↓
-ToT Planner generates: [ssh top → ssh systemctl status nginx → ssh sed → ssh systemctl restart]
-    ↓
-Execution succeeds → CPU 80%→12%
+Attempt 1: "Make my VM faster" → reduce nginx workers → success ✅
+    → Stored as uncompiled "playbook" (requires Planner oversight)
+
+Attempt 2: "Optimize my web server" → reduce nginx workers → success ✅
+    → Same pattern, different phrasing → playbook confidence: 0.7
+
+Attempt 3: "Fix slow VM1" → reduce nginx workers → success ✅
+    → 3 varied successes → READY FOR COMPILATION
     ↓
 SKILL COMPILER:
     - Abstract: hardcoded IP → variable {target_host}
@@ -521,6 +541,7 @@ SKILL COMPILER:
 Compiled Skill: optimize_service_workers(target_host, service_name, config_key, new_value)
     ↓
 Registered as new tool schema in ToolRegistry
+    → Success count: 3, Confidence: 0.85
 ```
 
 ```
@@ -528,8 +549,14 @@ Next time: "Make my VM faster"
     ↓
 0.5B Router matches intent → finds compiled skill "optimize_service_workers"
     ↓
-Direct execution (50ms) → No 7B model needed → No VRAM swap → No LLM cost
+Direct execution (50ms) → No 7B model needed → No LLM cost
 ```
+
+**Calibration Rules:**
+- **N=3 minimum** — A pattern must succeed 3 times in varied contexts before compilation
+- **Variation required** — The 3 successes must use different phrasings or targets
+- **Failure resets counter** — If the pattern fails once, the counter resets to 0
+- **Confidence decay** — Compiled skills lose 0.01 confidence per week without use
 
 ### Implementation
 
@@ -587,6 +614,505 @@ NEW: crates/kria-core/src/agent/skill_compiler/
 ├── graph_parameterizer.rs — Abstract hardcoded values into parameters
 └── trigger_generator.rs — Generate trigger patterns from goal descriptions
 ```
+
+
+
+
+---
+
+## Critical Gap Analysis: What's Still Missing for True Intelligence
+
+The plan above describes **architecture** (how to build the system) but not **cognition** (how the system thinks). After deep analysis, five critical gaps remain that separate "orchestrated tool router" from "true intelligent agent."
+
+### Gap 1: No Failure Learning
+
+**Problem:** The Skill Compiler only learns from **success**. But intelligence comes equally from failure. If KRIA tries "restart nginx" and it makes things worse, that knowledge is lost.
+
+**Solution:** Failure Analyzer
+
+```rust
+pub struct FailureAnalyzer {
+    failure_patterns: Vec<FailurePattern>,
+}
+
+pub struct FailurePattern {
+    pub trigger: String,              // "make VM faster"
+    pub failed_plan: Vec<Step>,       // [restart nginx]
+    pub failure_reason: String,       // "nginx config was wrong, restart crashed site"
+    pub what_would_have_worked: Option<Vec<Step>>, // [fix config first, then restart]
+    pub confidence: f32,
+}
+
+impl FailureAnalyzer {
+    /// After a failed plan, extract what went wrong.
+    pub fn analyze_failure(&mut self, plan: &FailedPlan) -> FailurePattern {
+        FailurePattern {
+            trigger: plan.goal.clone(),
+            failed_plan: plan.steps.clone(),
+            failure_reason: self.extract_root_cause(plan),
+            what_would_have_worked: self.suggest_alternative(plan),
+            confidence: 0.7,
+        }
+    }
+
+    /// Before executing a plan, check if it matches known failure patterns.
+    pub fn check_plan_against_failures(&self, plan: &PlannedSteps) -> Option<&FailurePattern> {
+        self.failure_patterns.iter().find(|f| {
+            f.failed_plan.iter().any(|step| {
+                plan.steps.iter().any(|p| similarity(&p.command, &step.command) > 0.8)
+            })
+        })
+    }
+}
+```
+
+**How it works in practice:**
+
+```
+First time: "Make my VM faster"
+  → Plan: restart nginx
+  → Result: site crashed ❌
+  → Failure Analyzer: "restart nginx without checking config → crash"
+  → Stored: FailurePattern { trigger: "make VM faster", failed: [restart nginx], reason: "config wrong" }
+
+Next time: "Make my VM faster"
+  → Plan: restart nginx
+  → Failure Analyzer: MATCH! This plan matches a known failure pattern
+  → Modified plan: [check nginx config → fix if wrong → then restart]
+  → Result: site stays up ✅
+```
+
+### Gap 2: No Reasoning Scaffolding
+
+**Problem:** The plan assumes the 7B model can "just think." But small models need **explicit reasoning scaffolding** — structured prompts that force step-by-step thinking. Without this, the 7B model will jump to conclusions.
+
+**Solution:** Chain-of-Thought System Prompt (built into the planner)
+
+```
+You are KRIA's planning engine. You MUST follow this reasoning process:
+
+STEP 1 — UNDERSTAND:
+  What is the user actually asking? (paraphrase in your own words)
+  What domain is this? (system admin, file ops, communication, etc.)
+  What do I already know about this system? (check belief graph)
+
+STEP 2 — HYPOTHESIZE:
+  What are the possible causes/solutions? (list 3)
+  What evidence would confirm each hypothesis?
+  What's the risk of each approach?
+
+STEP 3 — PLAN:
+  Select the highest-confidence, lowest-risk path
+  List exact commands/steps
+  Predict what each step will produce
+  Identify rollback steps if something goes wrong
+
+STEP 4 — VERIFY:
+  How will I know the goal is achieved?
+  What metrics should I check after execution?
+  What's the "undo" command if this fails?
+
+Current system state: {belief_graph}
+Available tools: {tool_descriptions}
+User goal: {goal}
+
+Think step by step. Do not skip steps.
+```
+
+### Gap 3: No World Model Persistence
+
+**Problem:** The system starts fresh every conversation. It doesn't maintain a persistent understanding of the user's world (machines, services, preferences, history).
+
+**Solution:** Persistent World Model (SQLite + vector embeddings)
+
+```rust
+pub struct WorldModel {
+    /// Facts about the user's systems
+    system_facts: Vec<SystemFact>,
+    /// Facts about the user's preferences
+    user_facts: Vec<UserFact>,
+    /// Facts about the user's current projects
+    project_facts: Vec<ProjectFact>,
+}
+
+pub struct SystemFact {
+    pub subject: String,     // "VM1"
+    pub predicate: String,   // "runs"
+    pub object: String,      // "Ubuntu 24.04"
+    pub confidence: f32,
+    pub last_verified: DateTime,
+    pub source: String,      // "detected via SSH" or "user told me"
+}
+
+// Examples of what the World Model stores:
+// "VM1" → "runs" → "Ubuntu 24.04" (confidence: 0.95, verified: today)
+// "VM1" → "has IP" → "192.168.122.240" (confidence: 0.99, verified: today)
+// "VM1" → "runs service" → "nginx" (confidence: 0.9, verified: yesterday)
+// "User" → "prefers" → "Hinglish" (confidence: 0.99, source: explicit)
+// "User" → "works on" → "KRIA project" (confidence: 0.95, source: observed)
+// "User" → "has GPU" → "RTX 4050 6GB" (confidence: 0.99, source: detected)
+```
+
+**How it integrates:**
+
+```
+User: "Make my VM faster"
+    ↓
+Planner reads World Model:
+  - VM1: Ubuntu 24.04, IP 192.168.122.240, runs nginx, 8GB RAM
+  - User: prefers voice, Hinglish, 2-second response
+  - Last task: fixed nginx workers 2 days ago
+    ↓
+Planner uses this context to generate BETTER plans
+  (not generic "check system" but specific "check nginx on VM1 at 192.168.122.240")
+```
+
+### Gap 4: No Prompt Self-Improvement
+
+**Problem:** The system prompt never changes. But the best prompts are learned from experience.
+
+**Solution:** DSPy-style prompt optimization (simplified, no Python)
+
+```rust
+pub struct PromptOptimizer {
+    /// Current system prompt template
+    template: String,
+    /// Performance history: (prompt_variant, task_type, success_rate)
+    history: Vec<(String, String, f32)>,
+}
+
+impl PromptOptimizer {
+    /// After each task, record whether the prompt variant worked.
+    pub fn record_outcome(&mut self, variant: &str, task_type: &str, success: bool) {
+        // Track which prompt variants work best for which task types
+    }
+
+    /// Periodically, try small variations and keep what works.
+    pub fn optimize(&mut self) {
+        // For each task type, find the variant with highest success rate
+        // Gradually shift the template toward the best variants
+    }
+}
+```
+
+**Example:**
+
+```
+Week 1: System prompt says "Generate 3 plans"
+  → Success rate: 70%
+
+Week 2: Try "Generate 3 plans, each with rollback steps"
+  → Success rate: 85%
+
+Week 3: Try "Generate 3 plans, each with rollback steps and verification commands"
+  → Success rate: 92%
+
+Week 4: Prompt automatically adopts the best variant
+```
+
+### Gap 5: No Confidence Calibration
+
+**Problem:** The Uncertainty Engine uses arbitrary thresholds (0.6, 0.8). But these need to be calibrated against actual outcomes.
+
+**Solution:** Adaptive Thresholds
+
+```rust
+pub struct ConfidenceCalibrator {
+    /// Historical outcomes: (predicted_confidence, actual_success)
+    outcomes: Vec<(f32, bool)>,
+    /// Calibrated thresholds
+    plan_threshold: f32,      // Start at 0.8, adjust based on outcomes
+    gather_threshold: f32,    // Start at 0.6, adjust based on outcomes
+    ask_threshold: f32,       // Start at 0.3, adjust based on outcomes
+}
+
+impl ConfidenceCalibrator {
+    /// After each task, update thresholds based on actual outcomes.
+    pub fn calibrate(&mut self) {
+        // If the system planned at 0.7 confidence and succeeded → threshold is fine
+        // If it planned at 0.7 and failed → threshold should be higher
+        // If it gathered evidence at 0.5 and the evidence was useful → threshold is fine
+        // If it asked user at 0.3 but the answer was obvious → threshold should be lower
+    }
+}
+```
+
+### Gap 6: Working Memory Bloat
+
+**Problem:** The 7B model's context window gets filled with irrelevant conversation history, causing reasoning fragmentation. The planner loses focus.
+
+**Solution:** WorkingSet — A cognitive scratchpad
+
+```rust
+pub struct WorkingSet {
+    /// The active goal stack (what we're trying to achieve)
+    pub goal_stack: Vec<Goal>,
+    /// Unresolved questions from the current task
+    pub open_questions: Vec<String>,
+    /// Immediate constraints (e.g., "don't restart nginx during business hours")
+    pub constraints: Vec<Constraint>,
+    /// Key evidence gathered so far (compressed summaries, not raw output)
+    pub evidence_summary: Vec<String>,
+    /// Max tokens for the WorkingSet (prevents context bloat)
+    pub max_tokens: usize,
+}
+
+impl WorkingSet {
+    /// Build a WorkingSet from the current task state.
+    /// The Planner ONLY reads this, not the entire conversation history.
+    pub fn build(goal: &str, world_model: &WorldModel, evidence: &[String]) -> Self {
+        Self {
+            goal_stack: vec![Goal::new(goal)],
+            open_questions: Vec::new(),
+            constraints: world_model.active_constraints(),
+            evidence_summary: evidence.iter().map(|e| summarize(e)).collect(),
+            max_tokens: 2048, // Fits comfortably in 7B context window
+        }
+    }
+
+    /// Serialize to a compact string for the Planner's system prompt.
+    pub fn to_prompt_context(&self) -> String {
+        // Only includes: goal, constraints, evidence summary
+        // Excludes: full conversation history, raw tool output, system prompt boilerplate
+    }
+}
+```
+
+**Why this matters:**
+- 7B model with 8K context → if 6K is conversation history, only 2K for reasoning
+- WorkingSet compresses to ~2K tokens → leaves 6K for actual reasoning
+- Result: **dramatically better plan quality** from the same model
+
+### Gap 7: No Capability Awareness (SelfModel)
+
+**Problem:** The planner doesn't know its own strengths and weaknesses. It might try to use a tool that has a 30% success rate when a better alternative exists.
+
+**Solution:** SelfModel — A capability graph with historical success rates
+
+```rust
+pub struct SelfModel {
+    /// Per-tool success rates
+    tool_stats: HashMap<String, ToolStats>,
+    /// Per-domain routing accuracy
+    domain_accuracy: HashMap<Domain, f32>,
+    /// Known failure modes
+    failure_modes: Vec<FailureMode>,
+}
+
+pub struct ToolStats {
+    pub tool_name: String,
+    pub total_calls: usize,
+    pub successful_calls: usize,
+    pub success_rate: f32,
+    pub avg_latency: Duration,
+    pub last_used: DateTime,
+    pub known_failure_modes: Vec<String>,
+}
+
+impl SelfModel {
+    /// When the planner generates paths, score them against the SelfModel.
+    pub fn score_path(&self, path: &PlannedPath) -> f32 {
+        let tool_scores: Vec<f32> = path.steps.iter()
+            .map(|step| self.tool_stats.get(&step.tool_name)
+                .map(|s| s.success_rate)
+                .unwrap_or(0.5)) // Unknown tools get neutral score
+            .collect();
+        // Geometric mean (path fails if any step fails)
+        tool_scores.iter().product::<f32>().powf(1.0 / tool_scores.len() as f32)
+    }
+
+    /// After execution, update success rates.
+    pub fn record_outcome(&mut self, tool_name: &str, success: bool, latency: Duration) {
+        let stats = self.tool_stats.entry(tool_name.to_string())
+            .or_insert_with(|| ToolStats::new(tool_name));
+        stats.record(success, latency);
+    }
+}
+```
+
+**How it integrates with Structured Branching:**
+```
+Planner generates 3 paths
+    ↓
+SelfModel scores each path:
+  Path A (diagnose): nginx_status(98%) × free_h(95%) = 0.93
+  Path B (fix):      config_edit(85%) × restart(90%) = 0.87
+  Path C (aggressive): service_replace(45%) × install(80%) = 0.60
+    ↓
+Winner: Path A (highest SelfModel score, though Path B has better impact)
+    ↓
+Decision: Execute Path A first (gather more evidence), then Path B
+```
+
+### Gap 8: Passive Reactivity (CuriosityLoop)
+
+**Problem:** The system only acts when spoken to. It never proactively investigates anomalies or learns about the environment.
+
+**Solution:** CuriosityLoop — Background diagnostic engine
+
+```rust
+pub struct CuriosityLoop {
+    /// Novelty detector: flags unusual system events
+    novelty_detector: NoveltyDetector,
+    /// Inquiry scheduler: runs low-priority diagnostics
+    inquiry_scheduler: InquiryScheduler,
+    /// World model to update with findings
+    world_model: Arc<RwLock<WorldModel>>,
+}
+
+impl CuriosityLoop {
+    /// Run in background when GPU is idle (Planner loaded but not busy).
+    pub async fn run_background(&self) {
+        loop {
+            // Only run when Planner is idle (no active tasks)
+            if !self.planner_is_idle() {
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                continue;
+            }
+
+            // Check for novelties
+            if let Some(novelty) = self.novelty_detector.check() {
+                // Run read-only diagnostics on the novelty
+                let diagnosis = self.investigate(novelty).await;
+                // Update World Model with findings
+                self.world_model.write().await.update(diagnosis);
+            }
+
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        }
+    }
+}
+```
+
+**What triggers curiosity:**
+- New service started on VM → "What is this? Is it expected?"
+- Disk usage spike → "What's consuming space?"
+- New device connected → "What device is this?"
+- Unusual network traffic → "What's connecting outbound?"
+
+**Safety:** CuriosityLoop only runs **read-only** diagnostics. It NEVER modifies system state without explicit user approval.
+
+---
+
+## Updated Cognitive Architecture (Complete)
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    KRIA COGNITIVE BRAIN (Complete)                       │
+│                                                                         │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │  LAYER 0: Perceive (Event-Driven)                               │   │
+│  │  Voice · Vision · Screen · Files                                │   │
+│  │  inotify · dbus · netlink (sub-ms, no polling)                  │   │
+│  │  + CuriosityLoop (background novelty detection)                 │   │
+│  └──────────────────────────┬──────────────────────────────────────┘   │
+│                              ↓                                          │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │  LAYER 1: Route & Classify (Phases 1-5, Already Built)          │   │
+│  │  Intent Classification · Tool Semantic Index · Context-Aware     │   │
+│  └──────────────────────────┬──────────────────────────────────────┘   │
+│                              ↓                                          │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │  LAYER 2: World Model + Uncertainty Engine + WorkingSet          │   │
+│  │  Persistent facts · Confidence scoring · Cognitive scratchpad    │   │
+│  │  → Low: Gather Evidence or Ask User · High: Proceed to Plan     │   │
+│  │  → WorkingSet compresses context for 7B model                   │   │
+│  └──────────────────────────┬──────────────────────────────────────┘   │
+│                              ↓                                          │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │  LAYER 3: Structured Branching Planner                          │   │
+│  │  3 forced templates (Diagnose/Minimal-Risk/Aggressive)          │   │
+│  │  SelfModel scoring (historical success rates per tool)          │   │
+│  │  Failure pattern checking · Chain-of-Thought scaffolding        │   │
+│  │  Pure Rust orchestration (no Python sidecar)                    │   │
+│  └──────────────────────────┬──────────────────────────────────────┘   │
+│                              ↓                                          │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │  LAYER 4: Act & Execute                                         │   │
+│  │  Tool Execution · Open Shell · Code Interpreter                 │   │
+│  │  Browser Agent · VM Control · File Operations                   │   │
+│  └──────────────────────────┬──────────────────────────────────────┘   │
+│                              ↓                                          │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │  LAYER 5: Learn & Improve (Calibrated)                          │   │
+│  │  Skill Compiler (N=3 gating, success → reusable tool)           │   │
+│  │  Failure Analyzer (failure → avoid pattern)                     │   │
+│  │  SelfModel (per-tool success rates, updated after each task)    │   │
+│  │  Confidence Calibrator (adaptive thresholds)                    │   │
+│  └──────────────────────────┬──────────────────────────────────────┘   │
+│                              ↓                                          │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │  SAFETY & CONTROL                                               │   │
+│  │  HITL · PIN Guard · Risk Levels · Audit Log · Rollback          │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                                                         │
+│  HARDWARE ISOLATION:                                                    │
+│  CPU: Router(0.5B) + TTS + VAD + Embeddings — always resident          │
+│  GPU: Planner(7B) — permanently hot, evicted only for Vision/Image      │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### What Gets Added (Final)
+
+```
+NEW: crates/kria-core/src/agent/
+├── planner/
+│   ├── mod.rs              — Structured Branching planner orchestrator
+│   ├── decomposer.rs       — Goal → 3 forced-template decomposition
+│   ├── executor.rs         — Step execution dispatcher
+│   ├── reflector.rs        — Result evaluation + replanning
+│   └── scaffolding.rs      — Chain-of-Thought prompt templates
+├── skill_compiler/
+│   ├── mod.rs              — Calibrated skill compiler (N=3 gating)
+│   ├── pattern_extractor.rs — Extract variables from execution graphs
+│   ├── graph_parameterizer.rs — Abstract hardcoded values
+│   └── trigger_generator.rs — Generate trigger patterns
+├── failure_analyzer/
+│   ├── mod.rs              — Failure pattern extraction
+│   ├── root_cause.rs       — Root cause analysis
+│   └── alternative_suggester.rs — "What would have worked"
+├── world_model/
+│   ├── mod.rs              — Persistent fact store (SQLite)
+│   ├── system_facts.rs     — Facts about user's machines/services
+│   ├── user_facts.rs       — Facts about user preferences
+│   └── project_facts.rs    — Facts about current projects
+├── working_set/
+│   ├── mod.rs              — Cognitive scratchpad for Planner
+│   └── compressor.rs       — Context compression for 7B model
+├── self_model/
+│   ├── mod.rs              — Capability graph with success rates
+│   └── tool_stats.rs       — Per-tool historical performance
+├── uncertainty_engine/
+│   ├── mod.rs              — Belief graph + confidence scoring
+│   ├── evidence_gatherer.rs — Read-only diagnostic commands
+│   └── calibrator.rs       — Adaptive threshold adjustment
+├── curiosity_loop/
+│   ├── mod.rs              — Background novelty detection
+│   ├── novelty_detector.rs — Flags unusual system events
+│   └── inquiry_scheduler.rs — Low-priority diagnostic scheduling
+└── prompt_optimizer/
+    ├── mod.rs              — Prompt variant tracking
+    └── template_evolver.rs — Gradual template improvement
+```
+
+### The Complete Learning Loop
+
+```
+Task completed
+    ↓
+Was it successful?
+    ├─ Yes → Skill Compiler: abstract into reusable tool
+    └─ No  → Failure Analyzer: extract what went wrong
+              ↓
+Both outcomes update:
+    - World Model (new facts learned)
+    - Confidence Calibrator (adjust thresholds)
+    - Prompt Optimizer (track which prompts worked)
+    ↓
+Next task benefits from ALL previous experience
+```
+
+
 
 
 ## Dual-Model Architecture (6GB VRAM Optimized)
@@ -648,27 +1174,57 @@ RTX 4050 — 6GB VRAM, 16GB System RAM
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-### VRAM Swap Strategy
+### Strict Hardware Isolation Protocol (No Dynamic Swapping)
 
-The existing `GpuLeaseManager` + `LlmEvictionController` already handle model swapping. The Planner LLM integrates as another GPU owner:
+**Dynamic VRAM swapping is rejected.** It introduces catastrophic latency spikes and unpredictable behavior. Instead, models are **permanently locked** to specific hardware:
+
+```text
+CPU RESIDENCY (System RAM — always available):
+├── Qwen2.5-0.5B Q4_K_M (Router LLM)     → ~400MB RAM
+├── Piper TTS                                → ~200MB RAM
+├── Silero VAD                               → ~50MB RAM
+└── FastEmbed (multilingual-e5-small)        → ~100MB RAM
+
+GPU RESIDENCY (6GB VRAM — always hot):
+├── Qwen2.5-7B-Instruct Q4_K_M (Planner)  → ~4.5GB VRAM
+└── Headroom for inference KV cache          → ~1.5GB VRAM
+
+EXPLICIT EVICTION ONLY (user-invoked):
+├── Vision Model (Qwen2.5-VL)              → Evicts Planner ONLY when user attaches image
+└── Image Generator (ComfyUI)               → Evicts Planner ONLY when user requests image gen
+```
+
+**Critical Rule:** The Planner LLM is **permanently resident in VRAM**. It is NEVER evicted for TTS, routing, or background tasks. The cognitive loop stays hot for instantaneous multi-step reasoning.
 
 ```rust
-pub enum GpuOwner {
-    LlmServer,           // Existing: main chat LLM
-    VisionModel,         // Existing: Qwen2.5-VL
-    TtsModel,            // Existing: Piper
-    PlannerModel,        // NEW: Qwen2.5-7B planner
-    ImageGenerator,      // Existing: ComfyUI
+pub enum VramResident {
+    /// Always in VRAM unless explicitly evicted by user action
+    Planner,          // Qwen2.5-7B Q4_K_M — ~4.5GB
+    /// Only loaded when user explicitly requests vision/image
+    VisionModel,      // Qwen2.5-VL — evicts Planner temporarily
+    ImageGenerator,   // ComfyUI — evicts Planner temporarily
+}
+
+pub enum CpuResident {
+    /// Always in System RAM — never evicted
+    Router,           // Qwen2.5-0.5B — ~400MB
+    Tts,              // Piper — ~200MB
+    Vad,              // Silero — ~50MB
+    Embeddings,       // FastEmbed — ~100MB
 }
 ```
 
-**Swap priority (highest wins VRAM):**
-1. Emergency HITL (instant)
-2. Active LLM inference
-3. Planner (when complex task pending)
-4. Vision (when image attached)
-5. TTS (voice response)
-6. ImageGenerator (background)
+**Why this is better than dynamic swapping:**
+- **Zero swap latency** — Planner is always ready (0ms cold start)
+- **Predictable memory** — No surprise OOM from swap contention
+- **Simpler code** — No eviction logic, no swap coordination
+- **Voice latency** — TTS runs on CPU, never competes with Planner
+
+**When Planner must be evicted (rare, user-invoked only):**
+1. User attaches an image → Planner evicts, Vision loads (~800ms)
+2. User requests image generation → Planner evicts, ComfyUI loads (~1200ms)
+3. Task complete → Planner reloads (~800ms)
+4. During eviction: cloud fallback (Gemini Flash) handles planning if needed
 
 ### Cloud Fallback (Zero VRAM Cost)
 
@@ -956,32 +1512,47 @@ pip install graphifyy
 # Python frameworks (LangGraph, CrewAI, AutoGen) are NOT used
 ```
 
-## Appendix B: System Prompt Template for ToT Planning
+## Appendix B: System Prompt Template for Structured Branching
 
 ```
-You are KRIA's planning engine. You have access to the following system state:
+You are KRIA's planning engine. You MUST generate exactly 3 plans using these templates:
 
-{belief_graph}
+SYSTEM STATE:
+{working_set}
 
-Available tools: {tool_descriptions}
+WORLD MODEL FACTS:
+{world_model_facts}
 
-User goal: {goal}
+SELF-MODEL (tool success rates):
+{self_model_stats}
 
-Generate exactly 3 distinct plans to achieve this goal. For each plan:
-1. List the specific commands/steps
-2. Predict the outcome
-3. Assess the risk level (low/medium/high)
-4. Assign a confidence score (0.0-1.0)
+USER GOAL: {goal}
 
-Format:
-PLAN A: [description]
-  Steps: [step1, step2, ...]
-  Predicted outcome: [what happens]
-  Risk: [low/medium/high]
+Generate exactly 3 plans:
+
+PATH A — DIAGNOSE-FIRST (read-only, gather information):
+  Steps: [list exact commands]
+  Predicted outcome: [what you'll learn]
+  Risk: None (read-only)
   Confidence: [0.0-1.0]
+  SelfModel score: [geometric mean of tool success rates]
 
-PLAN B: ...
-PLAN C: ...
+PATH B — MINIMAL-RISK FIX (reversible changes):
+  Steps: [list exact commands]
+  Predicted outcome: [what will change]
+  Risk: Low (reversible)
+  Confidence: [0.0-1.0]
+  SelfModel score: [geometric mean of tool success rates]
 
-SELECT: [A/B/C] because [reasoning]
+PATH C — AGGRESSIVE FIX (may be hard to reverse):
+  Steps: [list exact commands]
+  Predicted outcome: [what will change]
+  Risk: High (potentially irreversible)
+  Confidence: [0.0-1.0]
+  SelfModel score: [geometric mean of tool success rates]
+
+FAILURE CHECK: Do any of these paths match known failure patterns?
+{failure_patterns}
+
+SELECT: [A/B/C] because [reasoning based on risk, confidence, and SelfModel score]
 ```

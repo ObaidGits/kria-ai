@@ -128,6 +128,9 @@ fastembed = "5"
 # Grammar-constrained LLM decoding
 llguidance = "0.7"
 
+# D-Bus async interaction (perception layer)
+zbus = { version = "4", default-features = false, features = ["tokio"] }
+
 # POSIX bindings (prctl, setsid, kill — Unix only)
 libc = "0.2"
 

@@ -19,3 +19,42 @@ quarantine_cooldown_ms = 2000
 
 [snapshot]
 max_normalized_hash_distance = 0.12
+
+
+
+
+
+
+
+
+
+
+
+
+[executive]
+enabled = true
+max_background_tasks = 2
+
+[policy_gate]
+enabled = true
+
+[uncertainty]
+enabled = true
+
+[planner]
+enabled = true
+max_steps = 15
+fallback_to_cloud = true
+
+[self_model]
+enabled = true
+
+[skill_compiler]
+enabled = true
+
+[world_model]
+enabled = true
+
+[curiosity]
+enabled = true
+max_cpu_percent = 10

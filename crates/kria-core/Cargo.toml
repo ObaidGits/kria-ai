@@ -50,6 +50,7 @@ unicode-normalization = { workspace = true }
 tokio-util = { workspace = true }
 bollard = "0.18"
 tar = "0.4"
+zbus = { workspace = true, optional = true }
 nvml-wrapper = { workspace = true, optional = true }
 tokio-tungstenite = { workspace = true }
 urlencoding = { workspace = true }
@@ -74,6 +75,8 @@ webrtc-audio-processing = { version = "0.5", optional = true }
 
 [features]
 nvidia = ["nvml-wrapper"]
+# D-Bus perception layer (Linux only, optional)
+dbus-perception = ["dep:zbus"]
 # ── Voice v2 native backends (all default-OFF; v2 falls back to CLI engines) ──
 # Per-backend feature flags. None of these are enabled by default — a fresh
 # `cargo build` produces a working v2 stack that uses the CLI fallbacks

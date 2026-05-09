@@ -124,6 +124,352 @@ const [lastPromptLabProfile, setLastPromptLabProfile] = createSignal<PromptLabPr
 const [latestAgentStage, setLatestAgentStage] = createSignal<AgentStageEvent | null>(null);
 const [colabDispatchWarning, setColabDispatchWarning] = createSignal<string | null>(null);
 
+// ─── Intelligence Enhancement Signals (Phase A-F Frontend) ──────────────────
+import type {
+  ExecutiveTask,
+  ExecutiveSnapshot,
+  ExecutiveTaskStarted,
+  ExecutiveTaskCompleted,
+  ExecutivePreemption,
+  GpuLeaseEvent,
+  PolicyGateEvaluation,
+  QuarantinedTool,
+  QuarantineApprovalRequest,
+  QuarantinePromotionEvent,
+  QuarantineDisabledEvent,
+  PlanGenerated,
+  PlanStepResult,
+  GoalVerification,
+  ToolStatsSnapshot,
+  SelfModelSnapshot,
+  IntelligenceState,
+  RiskLevel,
+  UncertaintyEvaluation,
+} from "../types/intelligence";
+
+// Executive Controller state
+const [executiveSnapshot, setExecutiveSnapshot] = createSignal<ExecutiveSnapshot | null>(null);
+const [executiveRecentEvents, setExecutiveRecentEvents] = createSignal<ExecutiveTaskCompleted[]>([]);
+
+// Policy Gate log (ring buffer, most recent first)
+const [policyGateLog, setPolicyGateLog] = createSignal<PolicyGateEvaluation[]>([]);
+
+// Quarantine state
+const [quarantinedTools, setQuarantinedTools] = createSignal<QuarantinedTool[]>([]);
+const [quarantinePendingApproval, setQuarantinePendingApproval] = createSignal<QuarantineApprovalRequest[]>([]);
+
+// Plan visualization
+const [latestPlan, setLatestPlan] = createSignal<PlanGenerated | null>(null);
+const [planStepResults, setPlanStepResults] = createSignal<PlanStepResult[]>([]);
+const [latestGoalVerification, setLatestGoalVerification] = createSignal<GoalVerification | null>(null);
+
+// Self Model
+const [selfModelSnapshot, setSelfModelSnapshot] = createSignal<SelfModelSnapshot | null>(null);
+
+// Intelligence summary
+const [intelligenceState, setIntelligenceState] = createSignal<IntelligenceState>({
+  uncertainty_confidence: 0,
+  working_set_tokens: 0,
+  self_model_tool_count: 0,
+  compiled_skill_count: 0,
+  quarantined_skill_count: 0,
+  curiosity_findings: 0,
+});
+
+// Uncertainty engine
+const [latestUncertainty, setLatestUncertainty] = createSignal<UncertaintyEvaluation | null>(null);
+
+// ─── Throttled IPC Event Batching ───────────────────────────────────────────
+//
+// The backend fires events at high frequency. We batch them into a micro-queue
+// and flush to SolidJS signals at most once per frame (via requestAnimationFrame)
+// or every 50ms as a fallback. This prevents the UI from freezing under load.
+
+type PendingEvent =
+  | { kind: "executive:task_started"; payload: ExecutiveTaskStarted }
+  | { kind: "executive:task_completed"; payload: ExecutiveTaskCompleted }
+  | { kind: "executive:preemption"; payload: ExecutivePreemption }
+  | { kind: "executive:gpu_lease"; payload: GpuLeaseEvent }
+  | { kind: "policy_gate:evaluation"; payload: PolicyGateEvaluation }
+  | { kind: "quarantine:pending_approval"; payload: QuarantineApprovalRequest }
+  | { kind: "quarantine:promoted"; payload: QuarantinePromotionEvent }
+  | { kind: "quarantine:disabled"; payload: QuarantineDisabledEvent }
+  | { kind: "intelligence:plan"; payload: PlanGenerated }
+  | { kind: "intelligence:step_result"; payload: PlanStepResult }
+  | { kind: "intelligence:goal_verification"; payload: GoalVerification }
+  | { kind: "intelligence:uncertainty"; payload: UncertaintyEvaluation }
+  | { kind: "intelligence:self_model"; payload: SelfModelSnapshot };
+
+const _pendingEvents: PendingEvent[] = [];
+let _flushScheduled = false;
+
+function enqueueEvent(event: PendingEvent) {
+  _pendingEvents.push(event);
+  if (!_flushScheduled) {
+    _flushScheduled = true;
+    if (typeof requestAnimationFrame !== "undefined") {
+      requestAnimationFrame(flushPendingEvents);
+    } else {
+      setTimeout(flushPendingEvents, 50);
+    }
+  }
+}
+
+function flushPendingEvents() {
+  _flushScheduled = false;
+  if (_pendingEvents.length === 0) return;
+
+  // Drain the queue atomically.
+  const batch = _pendingEvents.splice(0);
+
+  // Apply batch to signals.
+  for (const event of batch) {
+    applyEvent(event);
+  }
+}
+
+function applyEvent(event: PendingEvent) {
+  switch (event.kind) {
+    case "executive:task_started": {
+      // Update snapshot: add to active tasks.
+      setExecutiveSnapshot((prev) => {
+        if (!prev) return prev;
+        const task: ExecutiveTask = {
+          id: event.payload.task_id,
+          priority: event.payload.priority,
+          source: event.payload.source,
+          state: "Running",
+          description: event.payload.description,
+          submitted_at: event.payload.ts,
+          started_at: event.payload.ts,
+          completed_at: null,
+          duration_ms: null,
+          error: null,
+          requires_gpu: false,
+        };
+        return {
+          ...prev,
+          active_background: [...prev.active_background, task],
+        };
+      });
+      break;
+    }
+
+    case "executive:task_completed": {
+      // Add to recent events ring buffer (max 200).
+      setExecutiveRecentEvents((prev) => {
+        const next = [event.payload, ...prev];
+        return next.length > 200 ? next.slice(0, 200) : next;
+      });
+      // Remove from active tasks.
+      setExecutiveSnapshot((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          active_background: prev.active_background.filter(
+            (t) => t.id !== event.payload.task_id
+          ),
+          total_completed: prev.total_completed + (event.payload.success ? 1 : 0),
+          total_failed: prev.total_failed + (event.payload.success ? 0 : 1),
+        };
+      });
+      break;
+    }
+
+    case "executive:preemption": {
+      // Log as a recent event with preemption context.
+      setExecutiveRecentEvents((prev) => {
+        const synthetic: ExecutiveTaskCompleted = {
+          task_id: event.payload.victim_id,
+          success: false,
+          duration_ms: 0,
+          output_summary: `Preempted by ${event.payload.replacement_priority} task`,
+          error: null,
+          ts: event.payload.ts,
+        };
+        const next = [synthetic, ...prev];
+        return next.length > 200 ? next.slice(0, 200) : next;
+      });
+      break;
+    }
+
+    case "executive:gpu_lease": {
+      setExecutiveSnapshot((prev) => {
+        if (!prev) return prev;
+        if (event.payload.action === "acquired") {
+          return { ...prev, gpu_lease_holder: event.payload.task_id };
+        }
+        if (event.payload.action === "released" || event.payload.action === "expired") {
+          return { ...prev, gpu_lease_holder: null, gpu_lease_remaining_ms: null };
+        }
+        return prev;
+      });
+      break;
+    }
+
+    case "policy_gate:evaluation": {
+      setPolicyGateLog((prev) => {
+        const next = [event.payload, ...prev];
+        return next.length > 500 ? next.slice(0, 500) : next;
+      });
+      break;
+    }
+
+    case "quarantine:pending_approval": {
+      setQuarantinePendingApproval((prev) => {
+        // Deduplicate by tool_id.
+        if (prev.some((p) => p.tool_id === event.payload.tool_id)) return prev;
+        return [...prev, event.payload];
+      });
+      break;
+    }
+
+    case "quarantine:promoted": {
+      setQuarantinePendingApproval((prev) =>
+        prev.filter((p) => p.tool_id !== event.payload.tool_id)
+      );
+      setQuarantinedTools((prev) =>
+        prev.map((t) =>
+          t.id === event.payload.tool_id ? { ...t, status: "Active" as const } : t
+        )
+      );
+      break;
+    }
+
+    case "quarantine:disabled": {
+      setQuarantinePendingApproval((prev) =>
+        prev.filter((p) => p.tool_id !== event.payload.tool_id)
+      );
+      setQuarantinedTools((prev) =>
+        prev.map((t) =>
+          t.id === event.payload.tool_id ? { ...t, status: "Disabled" as const } : t
+        )
+      );
+      break;
+    }
+
+    case "intelligence:plan": {
+      setLatestPlan(event.payload);
+      setPlanStepResults([]);
+      break;
+    }
+
+    case "intelligence:step_result": {
+      setPlanStepResults((prev) => [...prev, event.payload]);
+      break;
+    }
+
+    case "intelligence:goal_verification": {
+      setLatestGoalVerification(event.payload);
+      break;
+    }
+
+    case "intelligence:uncertainty": {
+      setLatestUncertainty(event.payload);
+      setIntelligenceState((prev) => ({
+        ...prev,
+        uncertainty_confidence: event.payload.confidence,
+      }));
+      break;
+    }
+
+    case "intelligence:self_model": {
+      setSelfModelSnapshot(event.payload);
+      setIntelligenceState((prev) => ({
+        ...prev,
+        self_model_tool_count: event.payload.tools.length,
+      }));
+      break;
+    }
+  }
+}
+
+// ─── Backend API calls for Intelligence ─────────────────────────────────────
+
+async function loadExecutiveSnapshot() {
+  try {
+    const snapshot = await invoke<ExecutiveSnapshot>("get_executive_snapshot");
+    setExecutiveSnapshot(snapshot);
+  } catch (e) {
+    console.warn("Failed to load executive snapshot:", e);
+  }
+}
+
+async function cancelExecutiveTask(taskId: string) {
+  try {
+    await invoke("cancel_executive_task", { taskId });
+  } catch (e) {
+    console.error("Failed to cancel task:", e);
+  }
+}
+
+async function loadQuarantinedTools() {
+  try {
+    const tools = await invoke<QuarantinedTool[]>("list_quarantined_tools");
+    setQuarantinedTools(tools);
+    setQuarantinePendingApproval(tools.filter((t) => t.status === "PendingApproval").map((t) => ({
+      tool_id: t.id,
+      tool_name: t.name,
+      risk_level: t.risk_level,
+      source: t.source,
+      success_count: t.success_count,
+      description: t.description,
+      ts: t.last_tested,
+    })));
+  } catch (e) {
+    console.warn("Failed to load quarantined tools:", e);
+  }
+}
+
+async function approveQuarantinedTool(toolId: string) {
+  try {
+    await invoke("approve_quarantined_tool", { toolId });
+    // Optimistic update.
+    setQuarantinePendingApproval((prev) => prev.filter((p) => p.tool_id !== toolId));
+    setQuarantinedTools((prev) =>
+      prev.map((t) => (t.id === toolId ? { ...t, status: "Active" as const } : t))
+    );
+  } catch (e) {
+    console.error("Failed to approve tool:", e);
+    throw e;
+  }
+}
+
+async function rejectQuarantinedTool(toolId: string) {
+  try {
+    await invoke("reject_quarantined_tool", { toolId });
+    setQuarantinePendingApproval((prev) => prev.filter((p) => p.tool_id !== toolId));
+    setQuarantinedTools((prev) =>
+      prev.map((t) => (t.id === toolId ? { ...t, status: "Rejected" as const } : t))
+    );
+  } catch (e) {
+    console.error("Failed to reject tool:", e);
+    throw e;
+  }
+}
+
+async function loadSelfModel() {
+  try {
+    const snapshot = await invoke<SelfModelSnapshot>("get_self_model_snapshot");
+    setSelfModelSnapshot(snapshot);
+    setIntelligenceState((prev) => ({
+      ...prev,
+      self_model_tool_count: snapshot.tools.length,
+    }));
+  } catch (e) {
+    console.warn("Failed to load self model:", e);
+  }
+}
+
+async function loadPolicyGateLog() {
+  try {
+    const log = await invoke<PolicyGateEvaluation[]>("get_policy_gate_log");
+    setPolicyGateLog(log.slice(0, 500));
+  } catch (e) {
+    console.warn("Failed to load policy gate log:", e);
+  }
+}
+
 const currentSession = createMemo<string | null>(() =>
   currentEnvironment() === "prompt_lab" ? promptLabCurrentSession() : assistantCurrentSession()
 );
@@ -2107,6 +2453,63 @@ function initListeners() {
       };
     });
   });
+
+  // ─── Intelligence Enhancement Listeners (Throttled) ───────────────────────
+  // These events fire at high frequency from the backend. We enqueue them
+  // into a batch queue and flush via requestAnimationFrame (or 50ms fallback)
+  // to avoid freezing the SolidJS reactive graph.
+
+  listen<ExecutiveTaskStarted>("executive:task_started", (event) => {
+    enqueueEvent({ kind: "executive:task_started", payload: event.payload });
+  });
+
+  listen<ExecutiveTaskCompleted>("executive:task_completed", (event) => {
+    enqueueEvent({ kind: "executive:task_completed", payload: event.payload });
+  });
+
+  listen<ExecutivePreemption>("executive:preemption", (event) => {
+    enqueueEvent({ kind: "executive:preemption", payload: event.payload });
+  });
+
+  listen<GpuLeaseEvent>("executive:gpu_lease", (event) => {
+    enqueueEvent({ kind: "executive:gpu_lease", payload: event.payload });
+  });
+
+  listen<PolicyGateEvaluation>("policy_gate:evaluation", (event) => {
+    enqueueEvent({ kind: "policy_gate:evaluation", payload: event.payload });
+  });
+
+  listen<QuarantineApprovalRequest>("quarantine:pending_approval", (event) => {
+    enqueueEvent({ kind: "quarantine:pending_approval", payload: event.payload });
+  });
+
+  listen<QuarantinePromotionEvent>("quarantine:promoted", (event) => {
+    enqueueEvent({ kind: "quarantine:promoted", payload: event.payload });
+  });
+
+  listen<QuarantineDisabledEvent>("quarantine:disabled", (event) => {
+    enqueueEvent({ kind: "quarantine:disabled", payload: event.payload });
+  });
+
+  listen<PlanGenerated>("intelligence:plan", (event) => {
+    enqueueEvent({ kind: "intelligence:plan", payload: event.payload });
+  });
+
+  listen<PlanStepResult>("intelligence:step_result", (event) => {
+    enqueueEvent({ kind: "intelligence:step_result", payload: event.payload });
+  });
+
+  listen<GoalVerification>("intelligence:goal_verification", (event) => {
+    enqueueEvent({ kind: "intelligence:goal_verification", payload: event.payload });
+  });
+
+  listen<UncertaintyEvaluation>("intelligence:uncertainty", (event) => {
+    enqueueEvent({ kind: "intelligence:uncertainty", payload: event.payload });
+  });
+
+  listen<SelfModelSnapshot>("intelligence:self_model", (event) => {
+    enqueueEvent({ kind: "intelligence:self_model", payload: event.payload });
+  });
 }
 
 async function initializeSessionPersistence() {
@@ -2180,6 +2583,16 @@ setInterval(() => {
 setInterval(() => {
   void loadIroncladStatus();
 }, 10000);
+
+// Load intelligence data on startup
+void loadExecutiveSnapshot();
+void loadQuarantinedTools();
+void loadSelfModel();
+void loadPolicyGateLog();
+// Refresh executive snapshot periodically
+setInterval(() => {
+  void loadExecutiveSnapshot();
+}, 5000);
 
 // --- Export store ---
 export const appStore = {
@@ -2288,4 +2701,24 @@ export const appStore = {
   imageGenStage,
   vramBlackoutInfo,
   imageSessionDegraded,
+
+  // Intelligence Enhancement (Phase A-F)
+  executiveSnapshot,
+  executiveRecentEvents,
+  policyGateLog,
+  quarantinedTools,
+  quarantinePendingApproval,
+  latestPlan,
+  planStepResults,
+  latestGoalVerification,
+  selfModelSnapshot,
+  intelligenceState,
+  latestUncertainty,
+  loadExecutiveSnapshot,
+  cancelExecutiveTask,
+  loadQuarantinedTools,
+  approveQuarantinedTool,
+  rejectQuarantinedTool,
+  loadSelfModel,
+  loadPolicyGateLog,
 };

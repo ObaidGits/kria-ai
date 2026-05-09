@@ -7,7 +7,7 @@ use crate::platform::intent::scheme::{classify_url, SchemeError};
 use crate::safety::blacklist::BlacklistChecker;
 
 /// Risk classification tier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub enum RiskLevel {
     Green,
     Yellow,

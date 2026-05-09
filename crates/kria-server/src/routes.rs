@@ -53,7 +53,7 @@ struct ChatRequest {
 }
 
 async fn chat(
-    State(_state): State<Arc<ServerState>>,
+    State(state): State<Arc<ServerState>>,
     Json(req): Json<ChatRequest>,
 ) -> Json<serde_json::Value> {
     let session_id = req
@@ -73,8 +73,45 @@ async fn chat(
         })),
     );
 
-    // TODO: In production, this routes to the AgentLoop and returns the response.
-    // For now, return a structured response that the Telegram MCP server can parse.
+    // ─── Feature-flag cutover ────────────────────────────────────────
+    // If executive.enabled = true, route through the ExecutiveController.
+    // Otherwise, fall through to the legacy stub.
+    if let Some(ref executive) = state.executive_sender {
+        use kria_core::agent::executive::types::*;
+
+        let task = TaskRequest::new(
+            TaskPriority::Interactive,
+            TaskSource::TextChat,
+            true, // may require GPU for planner
+            TaskPayload::UserTurn {
+                text: req.message.clone(),
+                is_voice: false,
+                session_id: session_id.clone(),
+            },
+        );
+
+        match executive.submit(task) {
+            Ok(()) => {
+                tracing::info!(session_id = %session_id, "Task submitted to ExecutiveController");
+                return Json(serde_json::json!({
+                    "status": "submitted",
+                    "session_id": session_id,
+                    "source": req.source.unwrap_or_else(|| "api".to_string()),
+                    "message": "Task queued for processing by ExecutiveController",
+                }));
+            }
+            Err(_) => {
+                tracing::error!("ExecutiveController channel closed");
+                return Json(serde_json::json!({
+                    "status": "error",
+                    "session_id": session_id,
+                    "message": "ExecutiveController unavailable — falling back to legacy",
+                }));
+            }
+        }
+    }
+
+    // ─── Legacy path (executive.enabled = false) ─────────────────────
     let message = req.message.clone();
     let response = serde_json::json!({
         "status": "received",

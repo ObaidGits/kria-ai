@@ -7,11 +7,13 @@ use crate::infra::environment::{
 };
 
 pub mod app_lifecycle;
+pub mod browser_agent;
 pub mod communication;
 pub mod desktop;
 pub mod developer;
 pub mod disk;
 pub mod documents;
+pub mod dynamic_gen;
 pub mod exec;
 pub mod file_ops;
 pub mod google_workspace;
@@ -28,9 +30,11 @@ pub mod power;
 pub mod precognitive;
 pub mod proactive;
 pub mod process;
+pub mod quarantine;
 pub mod rag;
 pub mod registry;
 pub mod scheduler;
+pub mod subprocess_executor;
 pub mod shell;
 pub mod system_config;
 pub mod system_info;
