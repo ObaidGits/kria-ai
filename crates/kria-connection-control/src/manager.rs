@@ -259,6 +259,9 @@ pub enum ControlPlaneEvent {
     ClockDrift {
         alert: ClockDriftAlert,
     },
+    TargetRemoved {
+        target_id: Uuid,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -490,6 +493,11 @@ pub struct ConnectionManagerHandle {
 impl ConnectionManagerHandle {
     pub fn subscribe_events(&self) -> broadcast::Receiver<ControlPlaneEvent> {
         self.event_tx.subscribe()
+    }
+
+    /// Broadcast a TargetRemoved event so SSE subscribers remove the target from their view.
+    pub fn emit_target_removed(&self, target_id: Uuid) {
+        let _ = self.event_tx.send(ControlPlaneEvent::TargetRemoved { target_id });
     }
 
     pub async fn acquire_lease(&self, ttl: Duration, grace: Duration) -> Result<LeaseGrant> {

@@ -5,28 +5,60 @@ use super::*;
 pub(super) fn migrate_legacy_colab_server_command(
     server: &mut kria_core::config::McpServerConfig,
 ) -> bool {
-    if server.command != COLAB_LEGACY_NPX_COMMAND {
-        return false;
+    if server.command == COLAB_LEGACY_NPX_COMMAND {
+        if !server
+            .args
+            .iter()
+            .any(|arg| arg == COLAB_LEGACY_NPX_PACKAGE)
+        {
+            return false;
+        }
+
+        server.command = COLAB_OFFICIAL_COMMAND.to_string();
+        server.args = vec![
+            "--from".to_string(),
+            COLAB_OFFICIAL_SOURCE.to_string(),
+            COLAB_OFFICIAL_ENTRYPOINT.to_string(),
+        ];
+        return true;
     }
 
-    if !server
+    if server.command == COLAB_OFFICIAL_COMMAND
+        && server.args.len() == 1
+        && server.args[0] == COLAB_OFFICIAL_SOURCE
+    {
+        server.args = vec![
+            "--from".to_string(),
+            COLAB_OFFICIAL_SOURCE.to_string(),
+            COLAB_OFFICIAL_ENTRYPOINT.to_string(),
+        ];
+        return true;
+    }
+
+    if server.command == COLAB_OFFICIAL_COMMAND
+        && server.args.len() >= 3
+        && server.args[0] == "--from"
+        && server.args[1] == COLAB_OFFICIAL_SOURCE
+        && server
         .args
         .iter()
-        .any(|arg| arg == COLAB_LEGACY_NPX_PACKAGE)
+        .any(|arg| arg == COLAB_OFFICIAL_ENTRYPOINT)
     {
         return false;
     }
 
-    server.command = COLAB_OFFICIAL_COMMAND.to_string();
-    server.args = vec![COLAB_OFFICIAL_SOURCE.to_string()];
-    true
+    false
 }
 
 fn default_colab_server_config() -> kria_core::config::McpServerConfig {
     kria_core::config::McpServerConfig {
         name: COLAB_DEFAULT_SERVER_NAME.to_string(),
         command: COLAB_OFFICIAL_COMMAND.to_string(),
-        args: vec![COLAB_OFFICIAL_SOURCE.to_string()],
+        args: vec![
+            "--from".to_string(),
+            COLAB_OFFICIAL_SOURCE.to_string(),
+            COLAB_OFFICIAL_ENTRYPOINT.to_string(),
+        ],
         env: std::collections::HashMap::new(),
         enabled: true,
         trust_level: "YELLOW".into(),
@@ -261,20 +293,42 @@ pub(super) async fn collect_colab_tier_status(state: &AppState) -> serde_json::V
 
     let statuses = {
         let mut manager = state.mcp_manager.lock().await;
+        let mut statuses = manager.status().await;
+
         if colab_config.enabled {
-            if let Err(err) = manager
-                .refresh_server_tools(&colab_server_name, &state.tool_registry)
-                .await
-            {
-                tracing::warn!(
-                    server = %colab_server_name,
-                    error = %err,
-                    "colab MCP tool refresh failed"
-                );
-                transient_warnings.push(format!("Colab MCP tool refresh failed: {err}"));
+            match statuses.iter().find(|s| s.name == colab_server_name) {
+                Some(status) if status.state == McpServerState::Running => {
+                    if let Err(err) = manager
+                        .refresh_server_tools(&colab_server_name, &state.tool_registry)
+                        .await
+                    {
+                        tracing::warn!(
+                            server = %colab_server_name,
+                            error = %err,
+                            "colab MCP tool refresh failed"
+                        );
+                        transient_warnings.push(format!(
+                            "Colab MCP tool refresh failed: {err}"
+                        ));
+                    }
+                    statuses = manager.status().await;
+                }
+                Some(status) => {
+                    transient_warnings.push(format!(
+                        "Colab MCP runtime is not running (state={})",
+                        mcp_state_name(status.state)
+                    ));
+                }
+                None => {
+                    transient_warnings.push(format!(
+                        "Colab MCP runtime '{}' not found",
+                        colab_server_name
+                    ));
+                }
             }
         }
-        manager.status().await
+
+        statuses
     };
 
     sync_colab_runtime_snapshot(state, &statuses).await;

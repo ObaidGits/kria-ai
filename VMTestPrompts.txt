@@ -13,6 +13,10 @@ KEY FOR EXPECTED OUTCOMES
   [WARN]      Advisory warning (for example sudo non-interactive hint)
   [BLOCK]     Should be blocked by safety policy
   [FAILFAST]  Clear error with reason; no fake success
+  [INTEL]     Intelligence engine routing (ExecutiveController / Planner / SelfModel)
+  [AUTO]      Autonomous investigation triggered (CuriosityLoop gathering VM evidence)
+  [PREEMPT]   Voice preemption: VM task paused for higher-priority local command
+  [PLAN]      StructuredBranchingPlanner evaluating multiple diagnostic paths
 
 REMOTE ROUTING BEST PRACTICES
   1. For guaranteed remote routing, include one of these markers:
@@ -225,6 +229,146 @@ TOOL PATH: execute_fleet_command (auto-routed from remote-context prompt)
 
 [TROUBLE-06] Prompt : "Please run on my VM via SSH: ssh obaid@192.168.122.240 \"echo KRIA_REMOTE_OK\""
              EXPECTED: [OK] Simple health probe for remote execution path.
+
+================================================================================
+SECTION 9A - INTELLIGENCE-AWARE REMOTE DIAGNOSTICS
+================================================================================
+TOOL PATH: execute_fleet_command via ExecutiveController (when executive.enabled=true)
+
+  These prompts test how the intelligence engine handles remote VM operations:
+  priority scheduling, multi-path planning, autonomous investigation of VM issues,
+  and uncertainty-based clarification for ambiguous remote requests.
+
+────────────────────────────────────────────────────────────────────────────────
+  9A.1 — REMOTE TASK PRIORITY & PREEMPTION
+────────────────────────────────────────────────────────────────────────────────
+
+[INTEL-VM-01] Prompt : "Install htop on my VM"
+               (while a local background task is running)
+              EXPECTED: [INTEL] [OK] Remote install routed as TaskPriority::Interactive (P1).
+                        Local background task (P3) yields if needed.
+                        Install executes on remote target; result streamed back.
+              Notes  : Without ExecutiveController, remote and local tasks compete
+                        for the same execution slot. With Executive, priorities are strict.
+
+[INTEL-VM-02] Prompt : "Hey Ria, stop that VM task and check my local CPU now."
+               (while a remote package install is running)
+              EXPECTED: [PREEMPT] Voice (P0) preempts remote task (P1:Interactive).
+                        Remote install paused → local CPU check runs immediately.
+                        Response: 🗣️ "CPU at 32%, VM package install paused. Resume?"
+
+────────────────────────────────────────────────────────────────────────────────
+  9A.2 — MULTI-PATH PLANNING FOR REMOTE DIAGNOSTICS
+────────────────────────────────────────────────────────────────────────────────
+
+[INTEL-VM-03] Prompt : "My VM is running slow. Figure out what's wrong."
+              EXPECTED: [PLAN] StructuredBranchingPlanner generates 3 diagnostic paths:
+                        Path A (DiagnoseFirst): ssh → top → free → df → iostat → analyze
+                        Path B (MinimalRisk): ssh → uptime → free (read-only, minimal)
+                        Path C (Aggressive): ssh → systemctl restart docker (assumes docker)
+                        SelfModel scores each path. Winner: Path A (highest geomean).
+                        Evidence gathered → FailureAnalyzer categorizes:
+                          "OOM killer active — container using 3.8 GB / 4 GB limit."
+              Notes  : WorkingSet summarizes all remote command outputs into LLM context.
+                        SelfModel tracks per-tool success rates across sessions.
+
+[INTEL-VM-04] Prompt : "My VM seems broken. Fix it."
+              EXPECTED: [INTEL] UncertaintyRouter classifies as LOW confidence.
+                        Ambiguous: "broken" could mean network, disk, services, etc.
+                        Route: Ask for clarification first.
+                        "What specifically isn't working? Network, services, disk space,
+                        or something else?"
+              Notes  : Without UncertaintyRouter, system would guess or try everything.
+                        Thresholds: plan≥0.7, gather≥0.4, ask≥0.3.
+
+────────────────────────────────────────────────────────────────────────────────
+  9A.3 — AUTONOMOUS VM INVESTIGATION (CURIOSITY LOOP)
+────────────────────────────────────────────────────────────────────────────────
+
+[INTEL-VM-05] Prompt : (No explicit prompt — autonomous investigation)
+              Trigger: fleet event reports VM health degraded
+              EXPECTED: [AUTO] CuriosityLoop detects health event via PerceptionBus.
+                        NoveltyDetector classifies as interesting (health degradation).
+                        EvidenceGatherer spawns read-only remote diagnostics:
+                          ssh obaid@192.168.122.240 "free -h"
+                          ssh obaid@192.168.122.240 "df -h"
+                          ssh obaid@192.168.122.240 "top -bn1 | head -20"
+                        BudgetGuard: 5s CPU cap, yields on voice interrupt.
+                        Proactive nudge: "VM health degraded — memory at 94%."
+                                    "Swap usage 2.1 GB. Want me to investigate further?"
+              Notes  : All remote commands verified as RiskLevel::Green by PolicyGate.
+                        Read-only diagnostics only. No destructive actions autonomously.
+
+[INTEL-VM-06] Prompt : (No explicit prompt — autonomous investigation)
+              Trigger: fleet event reports VM disk usage > 90%
+              EXPECTED: [AUTO] PerceptionEvent aggregated (2s debounce window).
+                        EvidenceGatherer runs: ssh → du -sh /home/* → df -h
+                        Proactive nudge: "VM disk at 92%."
+                                    "Largest directories: /home/obaid (45 GB),"
+                                    "/var/log (8.2 GB). Clean old logs?"
+              Notes  : CuriosityLoop yields immediately if user speaks.
+                        max_cpu_percent=10 from config prevents starving local foreground.
+
+────────────────────────────────────────────────────────────────────────────────
+  9A.4 — SKILL COMPILATION FROM REPEATED REMOTE PATTERNS
+────────────────────────────────────────────────────────────────────────────────
+
+[INTEL-VM-07] Prompt : "Check disk space on my VM"
+               (asked 3 times with different approaches across sessions)
+              EXPECTED: [INTEL] SkillCompiler recognizes repeated pattern after 3 successes:
+                        ssh {host} df -h
+                        CompiledSkill with typed variable: host: VariableType::IpAddress
+                        QuarantineRegistry holds for HITL approval.
+                        "I've compiled a shortcut skill 'check_vm_disk'."
+                        "It's in quarantine. Approve to use for faster future checks."
+              Notes  : N=3 gating requires 3 successes with varied variable values.
+                        VariableSafety validates against shell injection.
+
+[INTEL-VM-08] Prompt : "Check if docker is running on all my VMs"
+              EXPECTED: [PLAN] Planner creates multi-target plan:
+                        For each enrolled VM target:
+                          ssh {host} "systemctl is-active docker"
+                        Results aggregated. SelfModel tracks success per target.
+                        If a target consistently fails, SelfModel lowers its path score.
+                        Response: "Docker is active on 2/3 VMs."
+                                  "192.168.122.240: active"
+                                  "192.168.122.241: inactive (last check failed too)"
+                                  "192.168.122.242: active"
+
+────────────────────────────────────────────────────────────────────────────────
+  9A.5 — WORLD MODEL & FAILURE HISTORY FOR REMOTE TARGETS
+────────────────────────────────────────────────────────────────────────────────
+
+[INTEL-VM-09] Prompt : "Why did the VM install fail last time?"
+              EXPECTED: [INTEL] WorldModel stores remote command outcomes.
+                        FailureAnalyzer matches stderr to known patterns:
+                          - "Unable to locate package" → package name typo or missing repo
+                          - "Could not get lock" → another apt process running
+                          - "Permission denied" → sudo not configured
+                        Response grounded in actual historical failure:
+                          "Last install failed: 'Could not get lock /var/lib/dpkg/lock-frontend'."
+                          "Another package manager was running. Try again?"
+              Notes  : WorldModel persists across sessions (SQLite).
+                        Failure patterns: OOM, permission, config, dependency,
+                        network timeout, port conflict, resource exhaustion.
+
+────────────────────────────────────────────────────────────────────────────────
+  9A.6 — INTELLIGENCE API TESTS FOR REMOTE OPERATIONS
+────────────────────────────────────────────────────────────────────────────────
+
+[INTEL-VM-API-01] Command:
+  curl -sS -X POST http://127.0.0.1:3001/api/chat \
+    -H "Content-Type: application/json" \
+    --data '{"message":"Install htop on my VM","source":"api"}'
+  EXPECTED (executive.enabled=true):
+    {"status":"submitted", "session_id":"...", "message":"Task queued for processing by ExecutiveController"}
+  EXPECTED (executive.enabled=false):
+    Remote install executes via legacy path.
+
+[INTEL-VM-API-02] Command:
+  curl -sS http://127.0.0.1:3001/api/intelligence/status
+  EXPECTED: {"executive":{"enabled":true}, "planner":{"enabled":true}, ...}
+  Notes  : Confirms intelligence engine is active for remote operations.
 
 ================================================================================
 SECTION 9 - DESTRUCTIVE / SENSITIVE ACTION TESTS

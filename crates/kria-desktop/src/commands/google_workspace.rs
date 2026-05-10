@@ -12,17 +12,136 @@ pub(super) struct GoogleWorkspaceRuntimeSnapshot {
     pub(super) gw_client_wired: bool,
 }
 
+#[derive(Debug, Clone)]
+pub(super) struct GoogleAccountRegistryState {
+    pub(super) account_registered: bool,
+    pub(super) token_path: PathBuf,
+    pub(super) token_present: bool,
+}
+
+impl GoogleAccountRegistryState {
+    pub(super) fn requires_reauth(&self) -> bool {
+        self.account_registered && !self.token_present
+    }
+}
+
+fn google_accounts_registry_path(config_dir: &Path) -> PathBuf {
+    config_dir.join("accounts.json")
+}
+
+pub(super) fn inspect_google_account_registry(
+    config_dir: &Path,
+    account: &str,
+) -> GoogleAccountRegistryState {
+    let default_token_path = config_dir.join("tokens").join(format!("{}.json", account));
+    let mut state = GoogleAccountRegistryState {
+        account_registered: false,
+        token_path: default_token_path.clone(),
+        token_present: default_token_path.exists(),
+    };
+
+    let registry_path = google_accounts_registry_path(config_dir);
+    let Ok(raw) = std::fs::read_to_string(&registry_path) else {
+        return state;
+    };
+
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return state;
+    };
+
+    let entry = json
+        .get("accounts")
+        .and_then(|v| v.get(account))
+        .cloned();
+    let Some(entry) = entry else {
+        return state;
+    };
+
+    state.account_registered = true;
+    if let Some(token_path) = entry
+        .get("tokenPath")
+        .and_then(|v| v.as_str())
+        .filter(|v| !v.trim().is_empty())
+    {
+        state.token_path = PathBuf::from(token_path);
+        state.token_present = state.token_path.exists();
+    }
+
+    state
+}
+
+pub(super) fn remove_google_account_registry_entry(
+    config_dir: &Path,
+    account: &str,
+) -> anyhow::Result<bool> {
+    let registry_path = google_accounts_registry_path(config_dir);
+    let raw = match std::fs::read_to_string(&registry_path) {
+        Ok(raw) => raw,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(err) => return Err(err.into()),
+    };
+
+    let mut json: serde_json::Value = serde_json::from_str(&raw)?;
+    let Some(accounts) = json
+        .get_mut("accounts")
+        .and_then(|v| v.as_object_mut())
+    else {
+        return Ok(false);
+    };
+
+    let removed = accounts.remove(account).is_some();
+    if removed {
+        let serialized = serde_json::to_string_pretty(&json)?;
+        std::fs::write(&registry_path, serialized)?;
+    }
+
+    Ok(removed)
+}
+
+fn oauth_output_text(output: &std::process::Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if stderr.is_empty() {
+        stdout
+    } else if stdout.is_empty() {
+        stderr
+    } else {
+        format!("{}\n{}", stderr, stdout)
+    }
+}
+
+fn oauth_output_detail(output: &std::process::Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if !stderr.is_empty() {
+        format!("; stderr: {}", stderr.chars().take(600).collect::<String>())
+    } else if !stdout.is_empty() {
+        format!("; output: {}", stdout.chars().take(600).collect::<String>())
+    } else {
+        String::new()
+    }
+}
+
+fn should_retry_account_exists(output: &std::process::Output) -> bool {
+    let text = oauth_output_text(output).to_ascii_lowercase();
+    text.contains("already exists") || text.contains("remove first")
+        || text.contains("could not load token")
+}
+
 pub(super) fn build_google_workspace_status_payload(
     account: &str,
     config_dir: &Path,
     credentials_configured: bool,
     token_present: bool,
+    account_registered: bool,
+    token_path: &Path,
     runtime: GoogleWorkspaceRuntimeSnapshot,
 ) -> serde_json::Value {
     let auth_ready = token_present && credentials_configured;
     let runtime_ready = runtime.mcp_running && runtime.gw_client_wired;
     let connected = auth_ready && runtime_ready;
     let credentials_display_path = config_dir.join("credentials.json");
+    let requires_reauth = account_registered && !token_present;
 
     let mut warnings: Vec<String> = Vec::new();
     if !credentials_configured {
@@ -32,7 +151,14 @@ pub(super) fn build_google_workspace_status_payload(
         ));
     }
     if !token_present {
-        warnings.push(format!("OAuth token missing for account '{account}'"));
+        warnings.push(format!(
+            "OAuth token missing for account '{}' (expected at {})",
+            account,
+            token_path.display()
+        ));
+    }
+    if requires_reauth {
+        warnings.push("Account registry exists without a token; re-auth required".into());
     }
     if !runtime.configured_enabled {
         warnings.push("gworkspace MCP server is disabled in config".into());
@@ -52,6 +178,9 @@ pub(super) fn build_google_workspace_status_payload(
         "account": account,
         "credentials_configured": credentials_configured,
         "token_present": token_present,
+        "account_registered": account_registered,
+        "token_path": token_path.to_string_lossy(),
+        "requires_reauth": requires_reauth,
         "auth_ready": auth_ready,
         "runtime_ready": runtime_ready,
         "gw_client_wired": runtime.gw_client_wired,
@@ -95,10 +224,10 @@ pub async fn get_google_workspace_status(
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| google_account_from_config(&config_guard));
     let config_dir = google_mcp_config_dir_from_config(&config_guard);
-    let token_path = config_dir.join("tokens").join(format!("{}.json", account));
     let credentials_path = config_dir.join("credentials.json");
 
-    let token_present = token_path.exists();
+    let account_state = inspect_google_account_registry(&config_dir, &account);
+    let token_present = account_state.token_present;
     let credentials_configured = credentials_path.exists();
 
     let gworkspace_runtime = {
@@ -133,6 +262,8 @@ pub async fn get_google_workspace_status(
         &config_dir,
         credentials_configured,
         token_present,
+        account_state.account_registered,
+        &account_state.token_path,
         GoogleWorkspaceRuntimeSnapshot {
             configured_enabled,
             mcp_state: mcp_state.clone(),
@@ -224,6 +355,7 @@ pub async fn connect_google_workspace(
         (resolved_account, resolved_dir)
     };
     let config_dir_display = config_dir.to_string_lossy().to_string();
+    let account_state = inspect_google_account_registry(&config_dir, &account);
 
     // Fail fast if credentials.json is missing
     let creds_path = config_dir.join("credentials.json");
@@ -236,6 +368,31 @@ pub async fn connect_google_workspace(
         );
     }
 
+    let mut preflight_notice: Option<String> = None;
+    if account_state.requires_reauth() {
+        match remove_google_account_registry_entry(&config_dir, &account) {
+            Ok(true) => {
+                preflight_notice = Some(format!(
+                    "Detected stale Google account '{}' without a token. Cleared registry entry before OAuth.",
+                    account
+                ));
+            }
+            Ok(false) => {
+                preflight_notice = Some(format!(
+                    "Detected stale Google account '{}' without a token. OAuth may need a manual cleanup.",
+                    account
+                ));
+            }
+            Err(err) => {
+                preflight_notice = Some(format!(
+                    "Detected stale Google account '{}' but failed to clean registry: {}",
+                    account,
+                    err
+                ));
+            }
+        }
+    }
+
     let account_clone = account.clone();
     let config_dir_clone = config_dir_display.clone();
     let mcp_manager = state.mcp_manager.clone();
@@ -244,21 +401,39 @@ pub async fn connect_google_workspace(
     let config_arc = state.config.clone();
     tokio::spawn(async move {
         tracing::info!("[GW] Starting OAuth flow for account '{}'", account_clone);
-        let result = tokio::process::Command::new("npx")
-            .args([
-                "-y",
-                "google-workspace-mcp",
-                "accounts",
-                "add",
-                &account_clone,
-            ])
-            .env(GOOGLE_MCP_CONFIG_DIR_ENV, &config_dir_clone)
-            // inherit stdio so the process can open the browser
-            .status()
-            .await;
+        let run_oauth = |account: String, config_dir: String| async move {
+            tokio::process::Command::new("npx")
+                .args([
+                    "-y",
+                    "google-workspace-mcp",
+                    "accounts",
+                    "add",
+                    account.as_str(),
+                ])
+                .env(GOOGLE_MCP_CONFIG_DIR_ENV, config_dir)
+                .output()
+                .await
+        };
+
+        let mut result = run_oauth(account_clone.clone(), config_dir_clone.clone()).await;
+        if let Ok(output) = result.as_ref() {
+            if !output.status.success() && should_retry_account_exists(output) {
+                let config_dir = PathBuf::from(&config_dir_clone);
+                if let Ok(true) = remove_google_account_registry_entry(&config_dir, &account_clone)
+                {
+                    let _ = app_handle.emit(
+                        "gw:notice",
+                        serde_json::json!({
+                            "message": "Stale Google account entry removed. Retrying OAuth...",
+                        }),
+                    );
+                    result = run_oauth(account_clone.clone(), config_dir_clone.clone()).await;
+                }
+            }
+        }
 
         match result {
-            Ok(status) if status.success() => {
+            Ok(output) if output.status.success() => {
                 let runtime_refresh_result = async {
                     let desired = { config_arc.read().await.mcp.servers.clone() };
                     let mut manager = mcp_manager.lock().await;
@@ -289,8 +464,9 @@ pub async fn connect_google_workspace(
                     let _ = app_handle.emit("gw:error", serde_json::json!({ "message": msg }));
                 }
             }
-            Ok(status) => {
-                let msg = format!("OAuth process exited with: {status}");
+            Ok(output) => {
+                let detail = oauth_output_detail(&output);
+                let msg = format!("OAuth process exited with: {}{}", output.status, detail);
                 tracing::warn!("[GW] {}", msg);
                 let _ = app_handle.emit("gw:error", serde_json::json!({ "message": msg }));
             }
@@ -306,7 +482,10 @@ pub async fn connect_google_workspace(
         "status": "pending",
         "account": account,
         "config_dir": config_dir_display,
-        "message": "Browser opened for Google sign-in. Complete authorization and return here.",
+        "message": preflight_notice
+            .map(|notice| format!("{} Browser opened for Google sign-in. Complete authorization and return here.", notice))
+            .unwrap_or_else(|| "Browser opened for Google sign-in. Complete authorization and return here.".into()),
+        "cleanup_attempted": account_state.requires_reauth(),
     }))
 }
 
@@ -339,11 +518,18 @@ pub async fn disconnect_google_workspace(
         )
     };
 
-    let token_path = config_dir.join("tokens").join(format!("{}.json", account));
+    let account_state = inspect_google_account_registry(&config_dir, &account);
+    let token_path = account_state.token_path.clone();
 
     if token_path.exists() {
         std::fs::remove_file(&token_path).map_err(|e| format!("Failed to remove token: {e}"))?;
         tracing::info!("[GW] Disconnected Google account '{}'", account);
+    }
+
+    if account_state.account_registered {
+        if let Err(err) = remove_google_account_registry_entry(&config_dir, &account) {
+            tracing::warn!("[GW] Failed to remove account registry entry: {}", err);
+        }
     }
 
     let mut manager = state.mcp_manager.lock().await;

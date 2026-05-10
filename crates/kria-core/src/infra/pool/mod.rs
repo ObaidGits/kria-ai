@@ -151,6 +151,10 @@ impl InventoryRegistry {
         self.states.insert(target_id, InventoryState::Ready);
     }
 
+    fn remove(&mut self, target_id: &TargetId) {
+        self.states.remove(target_id);
+    }
+
     fn state(&self, target_id: &TargetId) -> Option<InventoryState> {
         self.states.get(target_id).cloned()
     }
@@ -576,6 +580,19 @@ impl TargetPool {
 
         self.inventory.write().await.insert_ready(target_id);
         self.emit_packet("target_added").await;
+    }
+
+    /// Remove a target from the pool. Evicts from both the target map and inventory.
+    /// Use when a user unenrolls/deletes a VM.
+    pub fn remove_target(&self, target_id: Uuid) {
+        let id = TargetId(target_id);
+        // Use try_write to avoid blocking — best-effort removal
+        if let Ok(mut targets) = self.targets.try_write() {
+            targets.remove(&id);
+        }
+        if let Ok(mut inventory) = self.inventory.try_write() {
+            inventory.remove(&id);
+        }
     }
 
     pub async fn inventory_state(&self, target_id: &TargetId) -> Option<InventoryState> {

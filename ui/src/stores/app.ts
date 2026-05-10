@@ -399,7 +399,14 @@ async function cancelExecutiveTask(taskId: string) {
   try {
     await invoke("cancel_executive_task", { taskId });
   } catch (e) {
-    console.error("Failed to cancel task:", e);
+    // Fallback: try the HTTP cancel endpoint (for web / non-Tauri mode)
+    try {
+      await fetch(`/api/executive/tasks/${encodeURIComponent(taskId)}/cancel`, {
+        method: "POST",
+      });
+    } catch (httpErr) {
+      console.error("Failed to cancel task via HTTP fallback:", httpErr);
+    }
   }
 }
 
@@ -618,9 +625,20 @@ export interface McpServer {
   args: string[];
   enabled: boolean;
   trust_level: string;
+  tags?: string[];
   runtime_state?: string;
   runtime_tool_count?: number;
   runtime_error?: string | null;
+  failure_history?: McpFailureRecord[];
+  last_failure?: McpFailureRecord | null;
+  health?: string;
+  remediation?: string | null;
+}
+
+export interface McpFailureRecord {
+  timestamp_unix_ms: number;
+  state: string;
+  reason: string;
 }
 
 export interface ScheduledTask {
@@ -791,6 +809,28 @@ async function cancelScopedTurnIfActive(scope: StreamScope): Promise<void> {
     await invoke("cancel_turn", { sessionId });
   } catch (e) {
     console.warn("Failed to cancel active turn before session change:", e);
+  }
+}
+
+/** Public API: cancel the active turn for the given scope (assistant or prompt_lab). */
+async function cancelTurn(scope: StreamScope = "assistant"): Promise<void> {
+  const sessionId = getScopedCurrentSession(scope);
+  if (!sessionId || !isScopedThinking(scope)) return;
+  try {
+    await invoke("cancel_turn", { sessionId });
+    setScopedThinking(scope, false);
+  } catch (e) {
+    // Fallback: try the HTTP cancel endpoint (for web / non-Tauri mode)
+    try {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/cancel`, {
+        method: "POST",
+      });
+      if (res.ok) {
+        setScopedThinking(scope, false);
+      }
+    } catch (httpErr) {
+      console.warn("Failed to cancel active turn via HTTP fallback:", httpErr);
+    }
   }
 }
 
@@ -1279,6 +1319,9 @@ export interface GoogleWorkspaceStatus {
   account: string;
   credentials_configured: boolean;
   token_present: boolean;
+  account_registered: boolean;
+  token_path?: string;
+  requires_reauth?: boolean;
   auth_ready: boolean;
   runtime_ready: boolean;
   gw_client_wired: boolean;
@@ -1302,6 +1345,9 @@ export interface ColabDiscoveredTool {
   operation: string;
   description: string;
   parameter_count: number;
+  last_failure?: McpFailureRecord | null;
+  health?: string;
+  remediation?: string | null;
 }
 
 export interface ColabCapabilities {
@@ -1626,6 +1672,25 @@ async function registerNewTarget(
   const response = await invoke<RegisterNewTargetResponse>("register_new_target", { request });
   void loadIroncladStatus();
   return response;
+}
+
+async function deleteTarget(targetId: string): Promise<void> {
+  await invoke("delete_target", { targetId });
+  void loadIroncladStatus();
+}
+
+interface UpdateTargetRequest {
+  targetId: string;
+  displayName?: string;
+  host?: string;
+  port?: number;
+  username?: string;
+  sshPrivateKeyPath?: string;
+}
+
+async function updateTarget(request: UpdateTargetRequest): Promise<void> {
+  await invoke("update_target", { request });
+  void loadIroncladStatus();
 }
 
 function submitToolChoice(candidateName: string) {
@@ -2624,6 +2689,7 @@ export const appStore = {
   sendMessage,
   sendLabMessage,
   sendImageMessage,
+  cancelTurn,
   approveAction,
   denyAction,
   toggleVoice,
@@ -2691,6 +2757,8 @@ export const appStore = {
   getIroncladConfig,
   updateIroncladConfig,
   registerNewTarget,
+  deleteTarget,
+  updateTarget,
   reconcileMcpRuntime,
   restartMcpServerRuntime,
   submitToolChoice,

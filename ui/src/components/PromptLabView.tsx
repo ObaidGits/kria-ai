@@ -69,6 +69,7 @@ const PromptLabView: Component = () => {
     inputText,
     setInputText,
     sendLabMessage,
+    cancelTurn,
     colabStatus,
     loadColabStatus,
   } = appStore;
@@ -206,9 +207,24 @@ const PromptLabView: Component = () => {
           onInput={(e) => setInputText(e.currentTarget.value)}
           rows={1}
         />
-        <button type="submit" class="send-btn" disabled={!inputText().trim()}>
-          Run
-        </button>
+        <Show when={isThinking()}>
+          <button
+            type="button"
+            class="stop-btn"
+            onClick={() => cancelTurn("prompt_lab")}
+            title="Stop generating"
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" style="vertical-align: middle; margin-right: 4px;">
+              <rect x="1" y="1" width="12" height="12" rx="2" />
+            </svg>
+            Stop
+          </button>
+        </Show>
+        <Show when={!isThinking()}>
+          <button type="submit" class="send-btn" disabled={!inputText().trim()}>
+            Run
+          </button>
+        </Show>
       </form>
     </div>
   );

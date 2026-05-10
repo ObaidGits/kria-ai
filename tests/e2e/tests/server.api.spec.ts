@@ -30,13 +30,18 @@ test.describe("GET /api/health", () => {
 // ── Chat ──────────────────────────────────────────────────────────
 
 test.describe("POST /api/chat", () => {
-  test("happy path — accepts valid message", async () => {
+  test("happy path — returns grounded response payload", async () => {
     const res = await api.sendChat("Hello KRIA");
     expect(res.ok()).toBeTruthy();
 
     const body = await res.json();
-    expect(body.status).toBe("received");
-    expect(body.message).toBe("Hello KRIA");
+    expect(body.session_id).toBeTruthy();
+    const responseText =
+      body.response ?? body.message ?? body.content ?? body.text ?? "";
+    expect(String(responseText).trim().length).toBeGreaterThan(0);
+    if (body.tool_calls !== undefined) {
+      expect(Array.isArray(body.tool_calls)).toBeTruthy();
+    }
     expect(body.session_id).toBeTruthy();
   });
 

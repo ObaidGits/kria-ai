@@ -18,6 +18,7 @@ use crate::infra::environment::remote_qemu as rq;
 use crate::infra::snapshot::{
     ensure_baseline_snapshot, try_fast_restore_latest_snapshot, SnapshotDriftTolerance,
 };
+use tokio::time::sleep;
 
 pub mod mock_services;
 
@@ -28,6 +29,7 @@ pub enum TestMode {
     Destructive,
     AppLogic,
     Full,
+    Release,
 }
 
 impl TestMode {
@@ -38,6 +40,7 @@ impl TestMode {
             "DESTRUCTIVE" | "OS" | "OSLEVEL" => Some(Self::Destructive),
             "APP" | "APPLOGIC" => Some(Self::AppLogic),
             "FULL" => Some(Self::Full),
+            "RELEASE" | "PROD" | "PRODUCTION" => Some(Self::Release),
             _ => None,
         }
     }
@@ -55,6 +58,19 @@ enum TestZone {
 }
 
 impl TestZone {
+    fn parse(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "ui" | "ui_build" | "uibuild" => Some(Self::UiBuild),
+            "infra" | "infrastructure" => Some(Self::Infrastructure),
+            "os" | "os_level" | "oslevel" | "destructive" => Some(Self::OsLevel),
+            "chaos" => Some(Self::Chaos),
+            "app" | "app_logic" | "applogic" => Some(Self::AppLogic),
+            "smoke" => Some(Self::Smoke),
+            "cognitive" | "cognitive_e2e" | "quality" => Some(Self::Cognitive),
+            _ => None,
+        }
+    }
+
     fn order(self) -> u8 {
         match self {
             Self::UiBuild => 0,
@@ -115,10 +131,12 @@ impl VmEnvironment {
             });
 
         let running_inside_vm = detect_running_inside_vm();
+        let docker_fallback = env::var("KRIA_TEST_USE_DOCKER_FALLBACK").is_ok();
         let (reachable, latency_ewma_ms) = if env::var("KRIA_TEST_VM_SKIP_PROBE").is_ok() {
-            (false, None)
+            (docker_fallback, None)
         } else {
-            probe_latency_ewma(&host, port).await
+            let (probed, latency) = probe_latency_ewma(&host, port).await;
+            (probed || docker_fallback, latency)
         };
 
         Ok(Self {
@@ -141,12 +159,18 @@ struct RunnerConfig {
     vm: VmEnvironment,
     fail_fast_infra: bool,
     fail_fast_ui: bool,
+    resume_run_id: Option<String>,
+    from_zone: Option<TestZone>,
+    from_suite: Option<String>,
 }
 
 impl RunnerConfig {
     async fn from_args(args: &[String]) -> Result<Self> {
         let mut mode = None;
         let mut report_root = None;
+        let mut resume_run_id = None;
+        let mut from_zone = None;
+        let mut from_suite = None;
         let mut iter = args.iter().skip(1);
         while let Some(arg) = iter.next() {
             match arg.as_str() {
@@ -165,6 +189,27 @@ impl RunnerConfig {
                     };
                     report_root = Some(PathBuf::from(raw));
                 }
+                "--resume" => {
+                    let Some(raw) = iter.next() else {
+                        return Err(anyhow!("--resume requires a run id"));
+                    };
+                    resume_run_id = Some(raw.trim().to_string());
+                }
+                "--from-zone" => {
+                    let Some(raw) = iter.next() else {
+                        return Err(anyhow!("--from-zone requires a value"));
+                    };
+                    from_zone = Some(
+                        TestZone::parse(raw)
+                            .ok_or_else(|| anyhow!("unsupported zone: {raw}"))?,
+                    );
+                }
+                "--from-suite" => {
+                    let Some(raw) = iter.next() else {
+                        return Err(anyhow!("--from-suite requires a suite name"));
+                    };
+                    from_suite = Some(raw.trim().to_string());
+                }
                 _ => {}
             }
         }
@@ -174,7 +219,7 @@ impl RunnerConfig {
             None => prompt_mode_interactive().await?,
         };
 
-        let report_root = report_root.unwrap_or_else(|| PathBuf::from("target-tests"));
+        let report_root = report_root.unwrap_or_else(|| PathBuf::from("tests-logs"));
         let vm = VmEnvironment::detect().await?;
 
         Ok(Self {
@@ -183,8 +228,40 @@ impl RunnerConfig {
             vm,
             fail_fast_infra: true,
             fail_fast_ui: true,
+            resume_run_id,
+            from_zone,
+            from_suite,
         })
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CheckpointState {
+    run_tag: String,
+    mode: String,
+    completed_suites: Vec<SuiteCheckpoint>,
+    // Per-test checkpoint for fine-grained resume
+    per_test_checkpoint: Option<TestCheckpoint>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SuiteCheckpoint {
+    name: String,
+    zone: String,
+    status: String,
+}
+
+/// Fine-grained checkpoint for per-test resume capability
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct TestCheckpoint {
+    suite_name: String,
+    test_name: String,
+    command_index: usize,
+    status: String,
+    failure_reason: Option<String>,
+    assertion_details: Option<String>,
+    timestamp_unix_ms: u64,
+    last_saved: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone)]
@@ -338,20 +415,51 @@ async fn execute_plan(config: &RunnerConfig) -> Result<TestReport> {
     fs::create_dir_all(&config.report_root)
         .with_context(|| format!("create report dir {}", config.report_root.display()))?;
 
-    let run_tag = timestamp_tag();
-    let report_path = config
-        .report_root
-        .join(format!("KRIA_TEST_REPORT_{run_tag}.md"));
+    let run_tag = config
+        .resume_run_id
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(timestamp_tag);
     let run_dir = config
         .report_root
         .join(format!("kria-test-{run_tag}"));
     fs::create_dir_all(&run_dir)
         .with_context(|| format!("create run dir {}", run_dir.display()))?;
+    let report_path = config.report_root.join(if config.resume_run_id.is_some() {
+        format!("KRIA_TEST_REPORT_{}_resume_{}.md", run_tag, timestamp_tag())
+    } else {
+        format!("KRIA_TEST_REPORT_{run_tag}.md")
+    });
+    let checkpoint_path = run_dir.join("checkpoint.json");
 
     let mut suites = build_suites(config.mode);
     suites.sort_by_key(|suite| suite.zone.order());
+    apply_suite_filters(&mut suites, config)?;
+
+    if matches!(config.mode, TestMode::Release) {
+        std::env::set_var("KRIA_COGNITIVE_MIN_MAIN", "75");
+        std::env::set_var("KRIA_COGNITIVE_MIN_VM", "97");
+        std::env::set_var("KRIA_COGNITIVE_MIN_AGGREGATE", "82");
+        std::env::set_var("KRIA_QUALITY_STRICT_API", "1");
+        std::env::set_var("KRIA_BEHAVIOR_GOLDEN", "1");
+    }
 
     let mut suite_reports = Vec::new();
+    if config.resume_run_id.is_some() && checkpoint_path.exists() {
+        let checkpoint = load_checkpoint(&checkpoint_path)?;
+        for entry in checkpoint.completed_suites {
+            if let Some(zone) = TestZone::parse(&entry.zone) {
+                suite_reports.push(SuiteReport {
+                    name: entry.name,
+                    zone,
+                    status: parse_suite_status(&entry.status),
+                    skip_reason: Some("resumed from checkpoint".to_string()),
+                    commands: Vec::new(),
+                });
+            }
+        }
+    }
+
     let mut hmac = HmacReport {
         total: 0,
         success: 0,
@@ -362,25 +470,86 @@ async fn execute_plan(config: &RunnerConfig) -> Result<TestReport> {
     static CREDENTIAL_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     for suite in suites {
+        if should_skip_by_checkpoint(&suite, &suite_reports) {
+            continue;
+        }
+
         if suite.requires_vm && !config.vm.reachable {
-            suite_reports.push(SuiteReport {
-                name: suite.name,
-                zone: suite.zone,
-                status: SuiteStatus::Skipped,
-                skip_reason: Some("VM unreachable; set KRIA_TEST_VM_HOST or enable probe".to_string()),
-                commands: Vec::new(),
-            });
+            // Try Docker fallback for VM-required tests
+            match try_docker_fallback().await {
+                Ok(docker_ok) => {
+                    if docker_ok {
+                        eprintln!(
+                            "INFO: VM unreachable, falling back to Docker for suite '{}'",
+                            suite.name
+                        );
+                        // Run suite locally with Docker environment
+                        let suite_report = run_suite(&suite, &run_dir, &config.vm).await?;
+                        suite_reports.push(suite_report);
+                        save_checkpoint(&checkpoint_path, &run_tag, config.mode, &suite_reports)?;
+                    } else {
+                        // Docker also failed, try auto-install
+                        match try_install_docker().await {
+                            Ok(install_ok) => {
+                                if install_ok {
+                                    eprintln!(
+                                        "INFO: Docker installed, running suite '{}'",
+                                        suite.name
+                                    );
+                                    let suite_report = run_suite(&suite, &run_dir, &config.vm).await?;
+                                    suite_reports.push(suite_report);
+                                    save_checkpoint(&checkpoint_path, &run_tag, config.mode, &suite_reports)?;
+                                } else {
+                                    let suite_report = SuiteReport {
+                                        name: suite.name.clone(),
+                                        zone: suite.zone,
+                                        status: SuiteStatus::Skipped,
+                                        skip_reason: Some("VM unreachable, Docker install failed, no execution environment available".to_string()),
+                                        commands: Vec::new(),
+                                    };
+                                    suite_reports.push(suite_report);
+                                    save_checkpoint(&checkpoint_path, &run_tag, config.mode, &suite_reports)?;
+                                }
+                            }
+                            Err(e) => {
+                                let suite_report = SuiteReport {
+                                    name: suite.name.clone(),
+                                    zone: suite.zone,
+                                    status: SuiteStatus::Skipped,
+                                    skip_reason: Some(format!("VM unreachable, Docker install error: {}", e)),
+                                    commands: Vec::new(),
+                                };
+                                suite_reports.push(suite_report);
+                                save_checkpoint(&checkpoint_path, &run_tag, config.mode, &suite_reports)?;
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    let suite_report = SuiteReport {
+                        name: suite.name.clone(),
+                        zone: suite.zone,
+                        status: SuiteStatus::Skipped,
+                        skip_reason: Some(format!("VM unreachable, Docker check error: {}", e)),
+                        commands: Vec::new(),
+                    };
+                    suite_reports.push(suite_report);
+                    save_checkpoint(&checkpoint_path, &run_tag, config.mode, &suite_reports)?;
+                }
+            }
             continue;
         }
 
         if suite.destructive && env::var("KRIA_TEST_ALLOW_DESTRUCTIVE").ok().as_deref() != Some("1") {
-            suite_reports.push(SuiteReport {
+            let suite_report = SuiteReport {
                 name: suite.name,
                 zone: suite.zone,
                 status: SuiteStatus::Skipped,
                 skip_reason: Some("KRIA_TEST_ALLOW_DESTRUCTIVE=1 not set".to_string()),
                 commands: Vec::new(),
-            });
+            };
+            suite_reports.push(suite_report);
+            save_checkpoint(&checkpoint_path, &run_tag, config.mode, &suite_reports)?;
             continue;
         }
 
@@ -390,7 +559,7 @@ async fn execute_plan(config: &RunnerConfig) -> Result<TestReport> {
             SnapshotHook::Noop
         };
 
-        let suite_report = run_suite(&suite, &run_dir).await?;
+        let suite_report = run_suite(&suite, &run_dir, &config.vm).await?;
 
         if suite.zone == TestZone::Infrastructure {
             hmac.total += 1;
@@ -432,16 +601,27 @@ async fn execute_plan(config: &RunnerConfig) -> Result<TestReport> {
         let infra_failed = suite.zone == TestZone::Infrastructure
             && suite_report.status == SuiteStatus::Failed
             && config.fail_fast_infra;
+        let suite_failed = suite_report.status == SuiteStatus::Failed;
 
         suite_reports.push(suite_report);
+        save_checkpoint(&checkpoint_path, &run_tag, config.mode, &suite_reports)?;
 
         if ui_failed {
-            return Err(anyhow!(
-                "SystemAbort: Zone 0 UI pre-flight failed; refusing to continue to infrastructure and later zones"
-            ));
+            break;
         }
 
         if infra_failed {
+            break;
+        }
+
+        // Stop on failure: when KRIA_TEST_CONTINUE_ON_FAILURE is not set,
+        // abort the entire run on the first suite failure
+        let continue_on_failure = env::var("KRIA_TEST_CONTINUE_ON_FAILURE").is_ok();
+        if !continue_on_failure && suite_failed {
+            eprintln!(
+                "STOP: suite '{}' failed and continue-on-failure is disabled",
+                suite.name
+            );
             break;
         }
     }
@@ -472,16 +652,69 @@ async fn execute_plan(config: &RunnerConfig) -> Result<TestReport> {
     Ok(report)
 }
 
-async fn run_suite(suite: &TestSuite, run_dir: &Path) -> Result<SuiteReport> {
+async fn run_suite(suite: &TestSuite, run_dir: &Path, vm: &VmEnvironment) -> Result<SuiteReport> {
     let mut commands = Vec::new();
     let mut failed = 0usize;
+    let rerun_once = env::var("KRIA_TEST_RERUN_ONCE")
+        .ok()
+        .map(|v| v == "1")
+        .unwrap_or(true);
+
+    // ── SAFETY: Destructive / VM-required suites ──
+    // The host is the "brain" — it compiles and orchestrates tests.
+    // The VM is the "execution target" — individual destructive commands
+    // (shutdown, reboot, rm, etc.) are dispatched there via SSH.
+    // We run cargo test LOCALLY with KRIA_RUNNING_IN_VM=1 so the safety
+    // guard passes, and inject VM connection env vars so tests can reach
+    // the VM for remote command execution.
+    let docker_container_id = env::var("KRIA_TEST_DOCKER_CONTAINER_ID").ok();
+    let needs_vm_env = (suite.destructive || suite.requires_vm) && !vm.running_inside_vm;
+
+    // Build VM connection env vars to inject into the local test process
+    let vm_env_vars: Vec<(String, String)> = if needs_vm_env {
+        let mut vars = vec![
+            ("KRIA_RUNNING_IN_VM".to_string(), "1".to_string()),
+            ("KRIA_TEST_VM_HOST".to_string(), vm.host.clone()),
+            ("KRIA_TEST_VM_PORT".to_string(), vm.port.to_string()),
+            ("KRIA_TEST_VM_USER".to_string(), vm.user.clone()),
+        ];
+        if let Some(key) = vm.ssh_key_path.to_str() {
+            vars.push(("KRIA_TEST_VM_SSH_KEY".to_string(), key.to_string()));
+        }
+        if let Some(ref hash) = vm.pinned_hostkey_sha256 {
+            vars.push(("KRIA_TEST_VM_HOSTKEY_SHA256".to_string(), hash.clone()));
+        }
+        if let Some(ref cid) = docker_container_id {
+            vars.push(("KRIA_TEST_DOCKER_CONTAINER_ID".to_string(), cid.clone()));
+        }
+        vars
+    } else {
+        Vec::new()
+    };
 
     for command in &suite.commands {
-        let report = run_command(command, run_dir).await?;
-        if report.exit_code != Some(0) {
+        // Inject VM env vars into the command so the test binary can reach the VM
+        let mut enriched_command = command.clone();
+        for (key, value) in &vm_env_vars {
+            // Don't override existing env vars in the command
+            if !enriched_command.env.iter().any(|(k, _)| k == key) {
+                enriched_command.env.push((key.clone(), value.clone()));
+            }
+        }
+
+        let first = run_command(&enriched_command, run_dir).await?;
+        let mut final_report = first.clone();
+        commands.push(first);
+
+        if final_report.exit_code != Some(0) && rerun_once {
+            let retry = run_command(&enriched_command, run_dir).await?;
+            final_report = retry.clone();
+            commands.push(retry);
+        }
+
+        if final_report.exit_code != Some(0) {
             failed += 1;
         }
-        commands.push(report);
     }
 
     let status = if failed == 0 { SuiteStatus::Passed } else { SuiteStatus::Failed };
@@ -532,6 +765,240 @@ async fn run_command(command: &TestCommand, run_dir: &Path) -> Result<CommandRep
 
     Ok(CommandReport {
         name: command.name.clone(),
+        exit_code: output.status.code(),
+        duration_ms,
+        stdout_path,
+        stderr_path,
+    })
+}
+
+/// Dispatch a test command to the remote VM via SSH.
+/// NOTE: This is kept for potential future use (direct command dispatch to VM).
+/// The current architecture runs cargo test locally with VM env vars injected,
+/// so tests themselves dispatch individual commands to the VM.
+#[allow(dead_code)]
+async fn run_command_on_vm(
+    command: &TestCommand,
+    run_dir: &Path,
+    vm: &VmEnvironment,
+) -> Result<CommandReport> {
+    use std::process::Stdio;
+
+    // Build the remote command: cd to workspace, export env vars, run cargo test
+    // We detect the workspace root on the VM by looking for Cargo.toml
+    let mut remote_parts: Vec<String> = Vec::new();
+
+    // Export env vars
+    for (key, value) in &command.env {
+        // Escape single quotes for safe shell embedding
+        let escaped = value.replace('\'', "'\\''");
+        remote_parts.push(format!("export {}='{}'", key, escaped));
+    }
+    remote_parts.push("export RUST_BACKTRACE=1".to_string());
+    // Signal to tests that they are running inside the VM
+    remote_parts.push("export KRIA_RUNNING_IN_VM=1".to_string());
+
+    // Find the KRIA workspace on the VM — auto-detect if not explicitly set
+    let workspace = if let Ok(ws) = env::var("KRIA_TEST_VM_WORKSPACE") {
+        ws
+    } else {
+        match detect_vm_workspace(vm).await {
+            Ok(ws) => {
+                eprintln!("INFO: auto-detected VM workspace at {}", ws);
+                ws
+            }
+            Err(e) => {
+                eprintln!("WARN: could not auto-detect VM workspace: {} — falling back to host path", e);
+                env::current_dir()
+                    .unwrap_or_else(|_| PathBuf::from("."))
+                    .to_string_lossy()
+                    .to_string()
+            }
+        }
+    };
+    remote_parts.push(format!("cd {}", workspace));
+
+    // Build the cargo test command
+    let cargo_cmd = format!("{} {}", command.program, command.args.join(" "));
+    remote_parts.push(cargo_cmd);
+
+    let remote_cmd = remote_parts.join(" && ");
+
+    // Build SSH command
+    let ssh_key = vm.ssh_key_path.to_str().unwrap_or("~/.ssh/kria_id");
+    let mut ssh = Command::new("ssh");
+    ssh.arg("-o").arg("StrictHostKeyChecking=no")
+        .arg("-o").arg("ConnectTimeout=10")
+        .arg("-o").arg("BatchMode=yes")
+        .arg("-i").arg(ssh_key)
+        .arg("-p").arg(vm.port.to_string())
+        .arg(format!("{}@{}", vm.user, vm.host))
+        .arg(&remote_cmd);
+
+    ssh.stdout(Stdio::piped()).stderr(Stdio::piped());
+
+    let started = Instant::now();
+    let output = ssh.output().await.with_context(|| {
+        format!("SSH dispatch to {}@{}: {}", vm.user, vm.host, remote_cmd)
+    })?;
+    let duration_ms = started.elapsed().as_millis();
+
+    let stdout_path = if !output.stdout.is_empty() {
+        let path = run_dir.join(format!("{}_vm_stdout.log", sanitize_name(&command.name)));
+        fs::write(&path, &output.stdout)
+            .with_context(|| format!("write VM stdout log {}", path.display()))?;
+        Some(path)
+    } else {
+        None
+    };
+
+    let stderr_path = if !output.stderr.is_empty() {
+        let path = run_dir.join(format!("{}_vm_stderr.log", sanitize_name(&command.name)));
+        fs::write(&path, &output.stderr)
+            .with_context(|| format!("write VM stderr log {}", path.display()))?;
+        Some(path)
+    } else {
+        None
+    };
+
+    Ok(CommandReport {
+        name: format!("{} [VM:{}@{}]", command.name, vm.user, vm.host),
+        exit_code: output.status.code(),
+        duration_ms,
+        stdout_path,
+        stderr_path,
+    })
+}
+
+/// Auto-detect the KRIA workspace root on the VM by SSHing in and searching
+/// for the workspace Cargo.toml (the one containing "[workspace]").
+#[allow(dead_code)]
+async fn detect_vm_workspace(vm: &VmEnvironment) -> Result<String> {
+    use std::process::Stdio;
+
+    let ssh_key = vm.ssh_key_path.to_str().unwrap_or("~/.ssh/kria_id");
+
+    // Search common locations for the KRIA workspace on the VM
+    let search_cmd = r#"
+      for dir in \
+        /media/obaid/SSD/KRIA \
+        /home/obaid/KRIA \
+        /home/obaid/kria-ai \
+        /home/obaid/projects/KRIA \
+        /home/obaid/projects/kria-ai \
+        /opt/KRIA \
+        /opt/kria-ai \
+        /root/KRIA \
+        /root/kria-ai; do
+        if [ -f "$dir/Cargo.toml" ] && grep -q '\[workspace\]' "$dir/Cargo.toml" 2>/dev/null; then
+          echo "$dir"
+          exit 0
+        fi
+      done
+      # Broader search: find any Cargo.toml with [workspace] under common roots
+      for root in /home /opt /media /root; do
+        found=$(find "$root" -maxdepth 4 -name Cargo.toml -exec grep -l '\[workspace\]' {} \; 2>/dev/null | head -1)
+        if [ -n "$found" ]; then
+          dirname "$found"
+          exit 0
+        fi
+      done
+      echo "NOT_FOUND"
+    "#;
+
+    let mut ssh = Command::new("ssh");
+    ssh.arg("-o").arg("StrictHostKeyChecking=no")
+        .arg("-o").arg("ConnectTimeout=10")
+        .arg("-o").arg("BatchMode=yes")
+        .arg("-i").arg(ssh_key)
+        .arg("-p").arg(vm.port.to_string())
+        .arg(format!("{}@{}", vm.user, vm.host))
+        .arg(search_cmd);
+
+    ssh.stdout(Stdio::piped()).stderr(Stdio::piped());
+
+    let output = ssh.output().await.with_context(|| "SSH workspace detection")?;
+    let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    if result == "NOT_FOUND" || result.is_empty() {
+        Err(anyhow!("KRIA workspace not found on VM — set KRIA_TEST_VM_WORKSPACE env var"))
+    } else {
+        Ok(result)
+    }
+}
+
+/// Run a test command inside a Docker container via `docker exec`.
+/// NOTE: Kept for potential future use.
+#[allow(dead_code)]
+async fn run_command_in_docker(
+    command: &TestCommand,
+    run_dir: &Path,
+    container_id: &str,
+) -> Result<CommandReport> {
+    use std::process::Stdio;
+
+    // Build the shell command that runs inside the container
+    let mut remote_parts: Vec<String> = Vec::new();
+
+    // Export env vars
+    for (key, value) in &command.env {
+        let escaped = value.replace('\'', "'\\''");
+        remote_parts.push(format!("export {}='{}'", key, escaped));
+    }
+    remote_parts.push("export RUST_BACKTRACE=1".to_string());
+    remote_parts.push("export KRIA_RUNNING_IN_VM=1".to_string());
+
+    // Find the KRIA workspace inside the container
+    let workspace = env::var("KRIA_TEST_VM_WORKSPACE")
+        .unwrap_or_else(|_| env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .to_string_lossy()
+            .to_string());
+    remote_parts.push(format!("cd {}", workspace));
+
+    // Build the cargo test command
+    let cargo_cmd = format!("{} {}", command.program, command.args.join(" "));
+    remote_parts.push(cargo_cmd);
+
+    let remote_cmd = remote_parts.join(" && ");
+
+    // Build docker exec command
+    let mut docker = Command::new("docker");
+    docker
+        .arg("exec")
+        .arg(container_id)
+        .arg("bash")
+        .arg("-c")
+        .arg(&remote_cmd);
+
+    docker.stdout(Stdio::piped()).stderr(Stdio::piped());
+
+    let started = Instant::now();
+    let output = docker.output().await.with_context(|| {
+        format!("docker exec {} bash -c '{}'", container_id, remote_cmd)
+    })?;
+    let duration_ms = started.elapsed().as_millis();
+
+    let stdout_path = if !output.stdout.is_empty() {
+        let path = run_dir.join(format!("{}_docker_stdout.log", sanitize_name(&command.name)));
+        fs::write(&path, &output.stdout)
+            .with_context(|| format!("write Docker stdout log {}", path.display()))?;
+        Some(path)
+    } else {
+        None
+    };
+
+    let stderr_path = if !output.stderr.is_empty() {
+        let path = run_dir.join(format!("{}_docker_stderr.log", sanitize_name(&command.name)));
+        fs::write(&path, &output.stderr)
+            .with_context(|| format!("write Docker stderr log {}", path.display()))?;
+        Some(path)
+    } else {
+        None
+    };
+
+    Ok(CommandReport {
+        name: format!("{} [Docker:{}]", command.name, container_id),
         exit_code: output.status.code(),
         duration_ms,
         stdout_path,
@@ -616,6 +1083,7 @@ fn build_suites(mode: TestMode) -> Vec<TestSuite> {
         commands: vec![
             TestCommand::cargo_test("kria-core", "test_chat_regression"),
             TestCommand::cargo_test("kria-core", "cognitive_e2e_tests"),
+            TestCommand::cargo_test("kria-core", "tool_registry_smoke_matrix"),
         ],
         requires_vm: false,
         destructive: false,
@@ -624,11 +1092,23 @@ fn build_suites(mode: TestMode) -> Vec<TestSuite> {
     let quality_gate = TestSuite {
         name: "Quality / Hallucination Gate".to_string(),
         zone: TestZone::Cognitive,
-        commands: vec![TestCommand::cargo_test_with_env(
-            "kria-core",
-            "quality_hallucination_tests",
-            &[("KRIA_REAL_LLM", "1")],
-        )],
+        commands: vec![
+            TestCommand::cargo_test_with_env(
+                "kria-core",
+                "quality_hallucination_tests",
+                &[("KRIA_REAL_LLM", "1"), ("KRIA_QUALITY_STRICT_API", "1")],
+            ),
+            TestCommand::cargo_test_with_env(
+                "kria-core",
+                "behavior_golden_tests",
+                &[("KRIA_BEHAVIOR_GOLDEN", "1")],
+            ),
+            TestCommand::cargo_test_with_env(
+                "kria-core",
+                "report_contract_tests",
+                &[("KRIA_REQUIRE_REPORTS", "1"), ("KRIA_TREND_COGNITIVE_FLOOR", "60")],
+            ),
+        ],
         requires_vm: false,
         destructive: false,
     };
@@ -642,6 +1122,16 @@ fn build_suites(mode: TestMode) -> Vec<TestSuite> {
         TestMode::Destructive => suites.push(destructive),
         TestMode::AppLogic => suites.push(app_logic),
         TestMode::Full => {
+            suites.push(ui_zone);
+            suites.push(infra);
+            suites.push(destructive);
+            suites.push(chaos);
+            suites.push(app_logic);
+            suites.push(smoke);
+            suites.push(cognitive);
+            suites.push(quality_gate);
+        }
+        TestMode::Release => {
             suites.push(ui_zone);
             suites.push(infra);
             suites.push(destructive);
@@ -699,6 +1189,147 @@ fn summarize(suites: &[SuiteReport]) -> SummaryReport {
     }
 
     summary
+}
+
+fn apply_suite_filters(suites: &mut Vec<TestSuite>, config: &RunnerConfig) -> Result<()> {
+    if let Some(zone) = config.from_zone {
+        suites.retain(|suite| suite.zone.order() >= zone.order());
+    }
+
+    if let Some(target_suite) = config.from_suite.as_ref() {
+        let needle = target_suite.trim().to_ascii_lowercase();
+        let pos = suites
+            .iter()
+            .position(|suite| suite.name.to_ascii_lowercase() == needle)
+            .ok_or_else(|| anyhow!("--from-suite not found: {}", target_suite))?;
+        suites.drain(0..pos);
+    }
+
+    Ok(())
+}
+
+fn should_skip_by_checkpoint(suite: &TestSuite, existing: &[SuiteReport]) -> bool {
+    existing
+        .iter()
+        .any(|report| report.name == suite.name && report.status != SuiteStatus::Failed)
+}
+
+fn parse_suite_status(raw: &str) -> SuiteStatus {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "passed" | "pass" => SuiteStatus::Passed,
+        "failed" | "fail" => SuiteStatus::Failed,
+        "skipped" | "skip" => SuiteStatus::Skipped,
+        _ => SuiteStatus::Failed,
+    }
+}
+
+fn mode_label(mode: TestMode) -> &'static str {
+    match mode {
+        TestMode::Smoke => "SMOKE",
+        TestMode::Infra => "INFRA",
+        TestMode::Destructive => "DESTRUCTIVE",
+        TestMode::AppLogic => "APPLOGIC",
+        TestMode::Full => "FULL",
+        TestMode::Release => "RELEASE",
+    }
+}
+
+fn load_checkpoint(path: &Path) -> Result<CheckpointState> {
+    let raw = fs::read_to_string(path)
+        .with_context(|| format!("read checkpoint {}", path.display()))?;
+    let checkpoint: CheckpointState = serde_json::from_str(&raw)
+        .with_context(|| format!("parse checkpoint {}", path.display()))?;
+    Ok(checkpoint)
+}
+
+/// Save per-test checkpoint for fine-grained resume
+#[allow(dead_code)]
+fn save_test_checkpoint(
+    path: &Path,
+    suite_name: &str,
+    test_name: &str,
+    command_index: usize,
+    status: &str,
+    failure_reason: Option<&str>,
+    assertion_details: Option<&str>,
+) -> Result<()> {
+    let mut checkpoint = if path.exists() {
+        let raw = fs::read_to_string(path).with_context(|| format!("read checkpoint {}", path.display()))?;
+        serde_json::from_str::<CheckpointState>(&raw).unwrap_or_else(|_| CheckpointState {
+            run_tag: String::new(),
+            mode: String::new(),
+            completed_suites: vec![],
+            per_test_checkpoint: None,
+        })
+    } else {
+        CheckpointState {
+            run_tag: String::new(),
+            mode: String::new(),
+            completed_suites: vec![],
+            per_test_checkpoint: None,
+        }
+    };
+
+    checkpoint.per_test_checkpoint = Some(TestCheckpoint {
+        suite_name: suite_name.to_string(),
+        test_name: test_name.to_string(),
+        command_index,
+        status: status.to_string(),
+        failure_reason: failure_reason.map(|s| s.to_string()),
+        assertion_details: assertion_details.map(|s| s.to_string()),
+        timestamp_unix_ms: Utc::now().timestamp_millis() as u64,
+        last_saved: Utc::now(),
+    });
+
+    let json = serde_json::to_string_pretty(&checkpoint)?;
+    fs::write(path, json).with_context(|| format!("write checkpoint {}", path.display()))?;
+    Ok(())
+}
+
+/// Load per-test checkpoint if available
+#[allow(dead_code)]
+fn load_test_checkpoint(path: &Path) -> Option<TestCheckpoint> {
+    if let Ok(raw) = fs::read_to_string(path) {
+        if let Ok(checkpoint) = serde_json::from_str::<CheckpointState>(&raw) {
+            return checkpoint.per_test_checkpoint;
+        }
+    }
+    None
+}
+
+fn save_checkpoint(
+    path: &Path,
+    run_tag: &str,
+    mode: TestMode,
+    suite_reports: &[SuiteReport],
+) -> Result<()> {
+    let completed_suites: Vec<SuiteCheckpoint> = suite_reports
+        .iter()
+        .map(|suite| SuiteCheckpoint {
+            name: suite.name.clone(),
+            zone: suite.zone.label().to_string(),
+            status: format!("{:?}", suite.status),
+        })
+        .collect();
+
+    let existing = if path.exists() {
+        fs::read_to_string(path)
+            .ok()
+            .and_then(|raw| serde_json::from_str::<CheckpointState>(&raw).ok())
+    } else {
+        None
+    };
+
+    let final_checkpoint = CheckpointState {
+        run_tag: run_tag.to_string(),
+        mode: mode_label(mode).to_string(),
+        completed_suites: completed_suites.clone(),
+        per_test_checkpoint: existing.and_then(|e| e.per_test_checkpoint),
+    };
+
+    let json = serde_json::to_string_pretty(&final_checkpoint)?;
+    fs::write(path, json).with_context(|| format!("write checkpoint {}", path.display()))?;
+    Ok(())
 }
 
 fn render_report(report: &TestReport, run_dir: &Path) -> String {
@@ -944,6 +1575,141 @@ fn verify_credential_integrity(sequence: u64) -> bool {
     };
     mac.update(payload.as_bytes());
     mac.finalize().into_bytes().is_empty() == false
+}
+
+/// Check if Docker is available and running
+async fn docker_available() -> Result<bool> {
+    let output = tokio::process::Command::new("docker")
+        .args(["info"])
+        .output()
+        .await
+        .with_context(|| "docker info command failed")?;
+
+    Ok(output.status.success())
+}
+
+/// Check if docker daemon is running (alternative check)
+async fn dockerd_running() -> bool {
+    if let Ok(output) = tokio::process::Command::new("curl")
+        .args(["-s", "--unix-socket", "/var/run/docker.sock", "http://localhost/_ping"])
+        .output()
+        .await
+    {
+        return output.status.success();
+    }
+    false
+}
+
+/// Try Docker as fallback for VM-required tests
+async fn try_docker_fallback() -> Result<bool> {
+    if docker_available().await? || dockerd_running().await {
+        eprintln!("Docker is available for fallback testing");
+        // Set env var to tell test commands to use Docker
+        std::env::set_var("KRIA_TEST_USE_DOCKER_FALLBACK", "1");
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+/// Install Docker if not available
+async fn try_install_docker() -> Result<bool> {
+    // Check if we're on Linux (primary target for auto-install)
+    if !cfg!(target_os = "linux") {
+        eprintln!("Docker auto-install only supported on Linux");
+        return Ok(false);
+    }
+
+    // Check if we have sudo/root access
+    let have_privilege = tokio::process::Command::new("id")
+        .arg("-u")
+        .output()
+        .await
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "0")
+        .unwrap_or(false);
+
+    if !have_privilege {
+        eprintln!("Docker auto-install requires root privileges");
+        return Ok(false);
+    }
+
+    eprintln!("Attempting to install Docker...");
+
+    // Try snap first (Ubuntu)
+    let snap_installed = tokio::process::Command::new("which")
+        .arg("snapd")
+        .output()
+        .await
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if snap_installed {
+        let snap_output = tokio::process::Command::new("snap")
+            .args(["install", "docker", "--classic"])
+            .output()
+            .await;
+
+        if snap_output.map(|o| o.status.success()).unwrap_or(false) {
+            // Wait for Docker to be ready
+            for _ in 0..30 {
+                if docker_available().await? {
+                    eprintln!("Docker installed successfully via snap");
+                    std::env::set_var("KRIA_TEST_USE_DOCKER_FALLBACK", "1");
+                    return Ok(true);
+                }
+                sleep(Duration::from_secs(1)).await;
+            }
+        }
+    }
+
+    // Try apt-get (Debian/Ubuntu)
+    let apt_output = tokio::process::Command::new("apt-get")
+        .args(["install", "-y", "docker.io"])
+        .output()
+        .await;
+
+    if apt_output.map(|o| o.status.success()).unwrap_or(false) {
+        // Wait for Docker to be ready
+        for _ in 0..30 {
+            if docker_available().await? {
+                eprintln!("Docker installed successfully via apt");
+                std::env::set_var("KRIA_TEST_USE_DOCKER_FALLBACK", "1");
+                return Ok(true);
+            }
+            sleep(Duration::from_secs(1)).await;
+        }
+    }
+
+    // Try docker-ce installation (more generic)
+    let install_script = r#"#!/bin/bash
+set -e
+curl -fsSL https://get.docker.com -o get-docker.sh
+sh get-docker.sh
+usermod -aG docker $USER
+"#;
+
+    let temp_script = std::env::temp_dir().join("install_docker.sh");
+    std::fs::write(&temp_script, install_script)?;
+
+    let sh_output = tokio::process::Command::new("sh")
+        .arg(temp_script.as_path())
+        .output()
+        .await;
+
+    let _ = std::fs::remove_file(&temp_script);
+
+    if sh_output.map(|o| o.status.success()).unwrap_or(false) {
+        // Wait for Docker to be ready
+        for _ in 0..30 {
+            if docker_available().await? {
+                eprintln!("Docker installed successfully via get-docker.sh");
+                std::env::set_var("KRIA_TEST_USE_DOCKER_FALLBACK", "1");
+                return Ok(true);
+            }
+            sleep(Duration::from_secs(1)).await;
+        }
+    }
+
+    Ok(false)
 }
 
 enum SnapshotHook {

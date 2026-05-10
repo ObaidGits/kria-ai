@@ -22,6 +22,7 @@ async fn spawn_ws_server() -> String {
         config,
         fleet,
         executive_sender: None,
+        turn_admission: std::sync::Arc::new(kria_core::agent::TurnAdmission::new()),
     });
     let app = kria_server::build_router(state);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

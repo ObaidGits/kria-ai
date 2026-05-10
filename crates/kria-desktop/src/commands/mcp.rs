@@ -1,6 +1,7 @@
 use super::*;
 
 // ── MCP Runtime Helpers ──────────────────────────────────────────────
+const MCP_FAILURE_HISTORY_LIMIT: usize = 20;
 
 pub(super) fn mcp_state_name(state: McpServerState) -> &'static str {
     match state {
@@ -20,6 +21,168 @@ pub(super) fn mcp_status_to_json(status: &McpServerStatus) -> serde_json::Value 
         "tool_count": status.tool_count,
         "error": status.error.clone(),
     })
+}
+
+fn derive_mcp_health(enabled: bool, runtime: Option<&McpServerStatus>) -> &'static str {
+    if !enabled {
+        return "disabled";
+    }
+
+    let Some(runtime) = runtime else {
+        return "stopped";
+    };
+
+    match runtime.state {
+        McpServerState::Running if runtime.tool_count > 0 => "healthy",
+        McpServerState::Running => "degraded",
+        McpServerState::Starting => "starting",
+        McpServerState::Error => "error",
+        McpServerState::Stopped => "stopped",
+    }
+}
+
+fn derive_mcp_remediation(
+    config: &kria_core::config::McpServerConfig,
+    runtime: Option<&McpServerStatus>,
+    last_failure: Option<&McpFailureRecord>,
+) -> Option<String> {
+    let error = runtime
+        .and_then(|r| r.error.as_ref())
+        .cloned()
+        .or_else(|| last_failure.map(|f| f.reason.clone()));
+
+    let Some(error) = error else {
+        if let Some(runtime) = runtime {
+            if runtime.state == McpServerState::Running && runtime.tool_count == 0 {
+                return Some(
+                    "Server is running but no tools were discovered. Restart the server or check its logs."
+                        .into(),
+                );
+            }
+        }
+        return None;
+    };
+
+    let lower = error.to_ascii_lowercase();
+
+    if lower.contains("credentials.json") {
+        return Some(
+            "OAuth credentials missing. Add credentials.json and reconnect via the Google tab."
+                .into(),
+        );
+    }
+
+    if lower.contains("already exists") || lower.contains("remove first") {
+        return Some(
+            "Account already exists without a valid token. Reconnect to re-auth (KRIA will auto-clean stale entries)."
+                .into(),
+        );
+    }
+
+    if lower.contains("could not load token") || lower.contains("token missing") {
+        return Some(
+            "OAuth token missing or invalid. Reconnect to re-auth and restore the token."
+                .into(),
+        );
+    }
+
+    if lower.contains("insufficient") || lower.contains("permission") || lower.contains("scope") {
+        return Some(
+            "OAuth scopes insufficient. Re-auth and grant all required Google permissions."
+                .into(),
+        );
+    }
+
+    if lower.contains("failed to spawn")
+        || lower.contains("no such file")
+        || lower.contains("not found")
+    {
+        return Some(format!(
+            "Command '{}' not found. Install the MCP server or update its command path.",
+            config.command
+        ));
+    }
+
+    if lower.contains("exited before replying")
+        || lower.contains("stdout eof")
+        || lower.contains("server exited")
+    {
+        return Some("Server exited unexpectedly. Restart it and review logs.".into());
+    }
+
+    if lower.contains("not running") || lower.contains("stopped") {
+        return Some("Server is not running. Enable and restart it from the MCP Services tab."
+            .into());
+    }
+
+    None
+}
+
+fn infer_mcp_tags(name: &str, command: &str, args: &[String]) -> Vec<String> {
+    let mut tags: Vec<String> = Vec::new();
+    let haystack = format!("{} {} {}", name, command, args.join(" ")).to_lowercase();
+
+    if haystack.contains("google") || haystack.contains("gworkspace") || haystack.contains("gmail")
+    {
+        tags.push("google".into());
+    }
+    if haystack.contains("telegram") {
+        tags.push("telegram".into());
+    }
+    if haystack.contains("colab") {
+        tags.push("colab".into());
+    }
+    if haystack.contains("filesystem") || name.eq_ignore_ascii_case("fs") {
+        tags.push("filesystem".into());
+    }
+    if haystack.contains("npx") {
+        tags.push("node".into());
+    }
+    if haystack.contains("uvx") || haystack.contains("python") {
+        tags.push("python".into());
+    }
+    if tags.is_empty() {
+        tags.push("custom".into());
+    }
+    tags.sort();
+    tags.dedup();
+    tags
+}
+
+pub(super) async fn record_mcp_failures(state: &AppState, statuses: &[McpServerStatus]) {
+    let mut history = state.mcp_failure_history.write().await;
+    let now = unix_now_ms();
+
+    for status in statuses {
+        if !status.enabled || status.state == McpServerState::Running {
+            continue;
+        }
+
+        let state_name = mcp_state_name(status.state).to_string();
+        let reason = status
+            .error
+            .clone()
+            .unwrap_or_else(|| format!("runtime state={}", state_name));
+
+        let entries = history.entry(status.name.clone()).or_default();
+        let duplicate = entries
+            .last()
+            .map(|last| last.state == state_name && last.reason == reason)
+            .unwrap_or(false);
+        if duplicate {
+            continue;
+        }
+
+        entries.push(McpFailureRecord {
+            timestamp_unix_ms: now,
+            state: state_name,
+            reason,
+        });
+        if entries.len() > MCP_FAILURE_HISTORY_LIMIT {
+            let overflow = entries.len() - MCP_FAILURE_HISTORY_LIMIT;
+            entries.drain(0..overflow);
+        }
+    }
 }
 
 pub(super) async fn sync_google_workspace_client_ref(
@@ -153,6 +316,7 @@ pub(super) async fn apply_mcp_runtime_from_config(state: &AppState) -> serde_jso
     sync_google_workspace_client_ref(state, gw_client).await;
     sync_colab_runtime_snapshot(state, &statuses).await;
     update_mcp_health_status(state, &statuses).await;
+    record_mcp_failures(state, &statuses).await;
 
     let status_json: Vec<serde_json::Value> = statuses.iter().map(mcp_status_to_json).collect();
     serde_json::json!({
@@ -173,6 +337,8 @@ pub async fn list_mcp_servers(state: State<'_, AppStateCell>) -> Result<serde_js
         let manager = state.mcp_manager.lock().await;
         manager.status().await
     };
+    record_mcp_failures(state, &runtime_statuses).await;
+    let failure_history = { state.mcp_failure_history.read().await.clone() };
 
     let runtime_by_name: std::collections::HashMap<String, McpServerStatus> = runtime_statuses
         .into_iter()
@@ -183,15 +349,22 @@ pub async fn list_mcp_servers(state: State<'_, AppStateCell>) -> Result<serde_js
         .iter()
         .map(|s| {
             let runtime = runtime_by_name.get(&s.name);
+            let history = failure_history.get(&s.name).cloned().unwrap_or_default();
+            let last_failure = history.last().cloned();
             serde_json::json!({
                 "name": s.name.clone(),
                 "command": s.command.clone(),
                 "args": s.args.clone(),
                 "enabled": s.enabled,
                 "trust_level": s.trust_level.clone(),
+                "tags": infer_mcp_tags(&s.name, &s.command, &s.args),
                 "runtime_state": runtime.map(|r| mcp_state_name(r.state)).unwrap_or("stopped"),
                 "runtime_tool_count": runtime.map(|r| r.tool_count).unwrap_or(0),
                 "runtime_error": runtime.and_then(|r| r.error.clone()),
+                "failure_history": history,
+                "last_failure": last_failure,
+                "health": derive_mcp_health(s.enabled, runtime),
+                "remediation": derive_mcp_remediation(s, runtime, last_failure.as_ref()),
             })
         })
         .collect();
@@ -233,6 +406,7 @@ pub async fn restart_mcp_server_runtime(
     sync_google_workspace_client_ref(state, gw_client).await;
     sync_colab_runtime_snapshot(state, &statuses).await;
     update_mcp_health_status(state, &statuses).await;
+    record_mcp_failures(state, &statuses).await;
     emit_colab_status_event(&app, state).await;
 
     let servers: Vec<serde_json::Value> = statuses.iter().map(mcp_status_to_json).collect();

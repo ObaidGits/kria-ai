@@ -24,6 +24,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+fn env_threshold(key: &str, default: f64) -> f64 {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .unwrap_or(default)
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  Cognitive Score Tracking
 // ═══════════════════════════════════════════════════════════════════════════
@@ -46,11 +53,11 @@ fn record_cognitive(result: CognitiveResult) {
 
 fn write_cognitive_score(report: &serde_json::Value) {
     let root = find_workspace_root();
-    let target_dir = root.join("target");
-    if std::fs::create_dir_all(&target_dir).is_err() {
+    let logs_dir = root.join("tests-logs");
+    if std::fs::create_dir_all(&logs_dir).is_err() {
         return;
     }
-    let path = target_dir.join("cognitive-score.json");
+    let path = logs_dir.join("cognitive-score.json");
     if let Ok(json) = serde_json::to_string_pretty(report) {
         let _ = std::fs::write(path, json);
     }
@@ -398,16 +405,19 @@ fn run_prompt_matrix(filename: &str, source: &str) {
         });
     }
 
-    // Soft assertion: only fail if <25% pass (i.e., >75% wrong).
-    // Many failures are expected for unimplemented tools (snippets, knowledge, etc.)
+    // Production gate with configurable thresholds.
     let total = cases.len();
     let passed = total - failure_count;
     let score = if total > 0 { (passed as f64 / total as f64) * 100.0 } else { 0.0 };
     eprintln!("  {source} score: {score:.1}% ({passed}/{total})");
 
-    if passed < total / 4 {
+    let threshold = match source {
+        "VMTestPrompts" => env_threshold("KRIA_COGNITIVE_MIN_VM", 95.0),
+        _ => env_threshold("KRIA_COGNITIVE_MIN_MAIN", 70.0),
+    };
+    if score < threshold {
         panic!(
-            "COGNITIVE {source}: critical failure ({passed}/{total}). Score: {score:.1}%"
+            "COGNITIVE {source}: below threshold ({score:.1}% < {threshold:.1}%) ({passed}/{total})"
         );
     }
 }
@@ -490,6 +500,11 @@ fn cognitive_aggregate_score_report() {
     eprintln!("  COGNITIVE E2E AGGREGATE SCORE: {score:.1}%  ({passed}/{total})");
     eprintln!("═══════════════════════════════════════════════════\n");
 
-    // This test is informational — it always passes.
-    // The per-prompt assertions are in the matrix tests above.
+    let aggregate_threshold = env_threshold("KRIA_COGNITIVE_MIN_AGGREGATE", 78.0);
+    assert!(
+        score >= aggregate_threshold,
+        "COGNITIVE aggregate below threshold: {:.1}% < {:.1}%",
+        score,
+        aggregate_threshold
+    );
 }

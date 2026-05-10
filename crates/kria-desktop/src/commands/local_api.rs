@@ -416,7 +416,8 @@ fn local_api_event_matches_lease(event: &ControlPlaneEvent, lease_id: Uuid) -> b
         | ControlPlaneEvent::TerminalGap { .. }
         | ControlPlaneEvent::ClockDrift { .. }
         | ControlPlaneEvent::FleetAlert { lease_id: None, .. }
-        | ControlPlaneEvent::TerminalLine { lease_id: None, .. } => true,
+        | ControlPlaneEvent::TerminalLine { lease_id: None, .. }
+        | ControlPlaneEvent::TargetRemoved { .. } => true,
     }
 }
 
@@ -434,6 +435,7 @@ fn local_api_event_matches_target(event: &ControlPlaneEvent, target_id: Uuid) ->
         ControlPlaneEvent::FleetAlert {
             target_id: None, ..
         } => false,
+        ControlPlaneEvent::TargetRemoved { target_id: id } => *id == target_id,
     }
 }
 
@@ -533,6 +535,10 @@ fn local_api_control_plane_event_json(event: &ControlPlaneEvent) -> serde_json::
                 "rejection_count": alert.rejection_count,
                 "created_at_unix_ms": alert.created_at_unix_ms,
             }
+        }),
+        ControlPlaneEvent::TargetRemoved { target_id } => serde_json::json!({
+            "type": "target_removed",
+            "target_id": target_id,
         }),
     }
 }

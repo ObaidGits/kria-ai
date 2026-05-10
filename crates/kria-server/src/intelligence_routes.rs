@@ -109,9 +109,27 @@ async fn cancel_task(
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
 
-    // In production, this would look up the task's CancellationToken
-    // and trigger cancellation via the ExecutiveController.
-    tracing::info!(task_id = %task_id, "Task cancellation requested");
+    // Try the ExecutiveSender if the task_id is a valid UUID
+    if let Ok(parsed_id) = uuid::Uuid::parse_str(&task_id) {
+        if let Some(ref sender) = state.executive_sender {
+            match sender.cancel_task(parsed_id) {
+                Ok(()) => {
+                    tracing::info!(task_id = %task_id, "Task cancellation requested via ExecutiveController");
+                    return Ok(Json(serde_json::json!({
+                        "status": "cancelled",
+                        "task_id": task_id,
+                    })));
+                }
+                Err(e) => {
+                    tracing::warn!(task_id = %task_id, error = %e, "ExecutiveController cancel failed");
+                }
+            }
+        }
+    }
+
+    // Fallback: cancel via turn admission (also handles non-UUID task IDs)
+    let cancelled = state.turn_admission.cancel_session(&task_id);
+    tracing::info!(task_id = %task_id, cancelled, "Task cancellation via turn admission");
     Ok(Json(serde_json::json!({
         "status": "cancelled",
         "task_id": task_id,

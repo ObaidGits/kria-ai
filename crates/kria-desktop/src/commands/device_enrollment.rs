@@ -680,7 +680,7 @@ fn target_registry_path_from_data_dir(data_dir: &Path) -> PathBuf {
         .join(TARGET_ENROLLMENT_REGISTRY_FILE)
 }
 
-fn default_target_registry_path() -> PathBuf {
+pub(crate) fn default_target_registry_path() -> PathBuf {
     let paths = kria_core::platform::paths::KriaPaths::resolve();
     target_registry_path_from_data_dir(paths.data_dir.as_path())
 }

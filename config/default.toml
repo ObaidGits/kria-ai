@@ -201,7 +201,7 @@ mmproj_vram_mb = 1300                        # mmproj-F16.gguf ~1291 MiB
 # ── Colab Cloud Tier ────────────────────────────────────────────────
 [colab]
 enabled = false
-mcp_server_name = "colab-mcp"               # Official Colab MCP server name (uvx git+https://github.com/googlecolab/colab-mcp)
+mcp_server_name = "colab-mcp"               # Official Colab MCP server name (uvx --from git+https://github.com/googlecolab/colab-mcp colab-mcp)
 connect_timeout_secs = 60
 keepalive_interval_secs = 120
 checkpoint_interval_secs = 300

@@ -190,6 +190,31 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\bremote\s+command\s*:\s*.+",
             "execute_fleet_command",
         ),
+        // Extended VM patterns — catch general VM-related queries
+        (
+            r"(?i)\bmy\s+(vm|virtual\s+machine|server)\s+(is|seems|looks|running|has|was|did)\b",
+            "execute_fleet_command",
+        ),
+        (
+            r"(?i)\b(vm|virtual\s+machine)\s+(task|install|update|upgrade|running|slow|broken|fix|fail|error|problem)\b",
+            "execute_fleet_command",
+        ),
+        (
+            r"(?i)\b(stop|check|restart|fix|diagnose)\b.{0,40}\b(vm|virtual\s+machine)\s+(task|process|job)\b",
+            "execute_fleet_command",
+        ),
+        (
+            r"(?i)\b(check|verify)\b.{0,30}\b(docker|service|process|disk|cpu|memory|ram)\b.{0,30}\b(on|in)\s+(all\s+)?my\s+(vm|vms|servers?|machines?)\b",
+            "execute_fleet_command",
+        ),
+        (
+            r"(?i)\b(why|what|how)\s+(did|does|is|was)\b.{0,40}\b(vm|virtual\s+machine)\b",
+            "execute_fleet_command",
+        ),
+        (
+            r"(?i)\b(vm|virtual\s+machine)\b.{0,20}\b(fail|error|crash|broken|slow|issue|problem)\b",
+            "execute_fleet_command",
+        ),
         (
             r"(?i)\b(?:is\s+it\s+(?:active|up)|check\s+status|status\s+check|is\s+(?:my\s+)?(?:vm|server|vm\d+)\s+up)\b",
             "check_device_health",
@@ -202,6 +227,25 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\bvia\s+ssh\b|\bssh\s+[a-z0-9_.-]+@[a-z0-9_.:-]+\b",
             "execute_fleet_command",
         ),
+        // Shell execution — MUST come before open_application so "Run bash:" is not misclassified
+        (
+            r"(?i)^run\s*:\s*\S+",
+            "execute_bash",
+        ),
+        (
+            r"(?i)\brun\s+(bash|shell|command)\s*:\s*.+",
+            "execute_bash",
+        ),
+        (
+            r"(?i)\brun\s+python\s*:\s*.+",
+            "execute_python",
+        ),
+        (
+            r"(?i)\brun\s+powershell\s*(command)?\s*:\s*.+",
+            "execute_powershell",
+        ),
+        // Speed test — MUST come before open_application so "Run a speed test" is not misclassified
+        (r"(?i)\bspeed\s*test\b", "speed_test"),
         // open_application: generic — last resort for "open/launch/start <app>"
         (
             r"(?i)\b(open|launch|start|run)\s+(\w+)\b",
@@ -246,10 +290,44 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\b(latest|recent|current|updates?)\b.*\b(google\s+calendar|calendar|schedule|events?)\b",
             "gw_calendar_search",
         ),
+        // MCP filesystem server — explicit "via MCP" / "using the filesystem MCP" routing.
+        // These MUST come before generic file ops so MCP-prefixed tools are preferred.
+        (
+            r"(?i)\b(list|ls|dir)\b.*\b(files?|directory|folder)\b.*\b(mcp|filesystem\s+mcp)\b",
+            "mcp_fs_list_directory",
+        ),
+        (
+            r"(?i)\b(mcp|filesystem\s+mcp)\b.*\b(list|ls|dir)\b.*\b(files?|directory|folder)\b",
+            "mcp_fs_list_directory",
+        ),
+        (
+            r"(?i)\b(read|show|cat|display|open)\b.*\b(mcp|filesystem\s+mcp)\b",
+            "mcp_fs_read_file",
+        ),
+        (
+            r"(?i)\b(mcp|filesystem\s+mcp)\b.*\b(read|show|cat|display|open)\b",
+            "mcp_fs_read_file",
+        ),
+        (
+            r"(?i)\b(search|find|grep)\b.*\b(files?|directory|folder)\b.*\b(mcp|filesystem\s+mcp)\b",
+            "mcp_fs_search_files",
+        ),
+        (
+            r"(?i)\b(mcp|filesystem\s+mcp)\b.*\b(search|find|grep)\b.*\b(files?|directory|folder)\b",
+            "mcp_fs_search_files",
+        ),
         // File ops
         (
             r"(?i)\b(read|show|cat|display)\s+(the\s+)?file\b",
             "read_file",
+        ),
+        (
+            r"(?i)\b(read|show|cat|display|open)\s+(/|~/)\S+",
+            "read_file",
+        ),
+        (
+            r"(?i)\b(list|ls|dir)\s+(the\s+)?(directories|folders|files)\b",
+            "list_directory",
         ),
         (
             r"(?i)\b(list|ls|dir)\s+(the\s+)?(directory|folder|files)\b",
@@ -257,11 +335,11 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
         ),
         (r"(?i)\b(search|find)\s+(for\s+)?files?\b", "search_files"),
         (
-            r"(?i)\b(search|find|locate|look\s*for)\b.*\b(file|folder|directory)\b",
+            r"(?i)\b(search|find|locate|look\s*for)\b.*\b(files?|folder|directory|directories|folders)\b",
             "search_files",
         ),
         (
-            r"(?i)\b(file|folder|directory)\b.*\b(named|called|name)\b",
+            r"(?i)\b(files?|folder|directory)\b.*\b(named|called|name)\b",
             "search_files",
         ),
         // "search for foo.txt" / "find bar.pdf" — filename with extension implies file search
@@ -447,7 +525,6 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
         ),
         (r"(?i)\b(ping)\s+\w+", "ping_host"),
         (r"(?i)\b(download)\s+", "download_file"),
-        (r"(?i)\bspeed\s*test\b", "speed_test"),
         (r"(?i)\b(my|public)\s*ip\b", "get_public_ip"),
         (r"(?i)\bdns\s+(lookup|resolve|query)\b", "dns_lookup"),
         (
@@ -607,6 +684,423 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\b(get|load|scrape|read)\s+the\s+(content|page|text|html)\b",
             "fetch_webpage",
         ),
+        // ── Weather / Time / Currency / Calculator ──
+        (
+            r"(?i)\b(what('?s|\s+is)\s+the\s+)?weather\b",
+            "get_weather",
+        ),
+        (
+            r"(?i)\b(weather|mausam)\s+(today|tomorrow|now|forecast|kaisa|kya)\b",
+            "get_weather",
+        ),
+        (
+            r"(?i)\b(current|local)\s+time\b|\bwhat\s+time\s+is\s+it\b|\btime\s+(now|kya)\b",
+            "get_current_time",
+        ),
+        (
+            r"(?i)\btime\s+in\s+\w+\b",
+            "get_current_time",
+        ),
+        (
+            r"(?i)\b(convert|exchange)\s+\d+.*\b(to|into)\b.*\b(usd|eur|inr|gbp|jpy|currency)\b",
+            "get_exchange_rate",
+        ),
+        (
+            r"(?i)\bexchange\s+rate\b|\bcurrency\s+convert\b",
+            "get_exchange_rate",
+        ),
+        (
+            r"(?i)\b(calculate|compute|math|solve)\b.*[\d+\-*/^()]+",
+            "calculate",
+        ),
+        (
+            r"(?i)\b\d+\s*[\+\-\*/\^]\s*\d+",
+            "calculate",
+        ),
+        // ── Power — extended patterns ──
+        (
+            r"(?i)\block\s+(my\s+)?(screen|computer|pc|laptop)\b",
+            "lock_screen",
+        ),
+        (
+            r"(?i)\bscreen\s+lock\s+(karo|karo|kar|lagao)\b",
+            "lock_screen",
+        ),
+        (
+            r"(?i)\b(hibernate|suspend\s+to\s+disk)\b",
+            "hibernate",
+        ),
+        (
+            r"(?i)\b(cancel|abort|stop)\s+(the\s+)?(shutdown|reboot|restart)\b",
+            "execute_bash",
+        ),
+        // ── WiFi / Config — extended ──
+        (
+            r"(?i)\b(turn|switch)\s+(on|off|enable|disable)\s+(the\s+)?wifi\b",
+            "toggle_wifi",
+        ),
+        (
+            r"(?i)\bwifi\s+(on|off|enable|disable|toggle)\b",
+            "toggle_wifi",
+        ),
+        (
+            r"(?i)\bconnect\s+(to|with)\s+(the\s+)?(wifi|wi-fi|wireless|network)\b",
+            "connect_wifi",
+        ),
+        (
+            r#"(?i)\bconnect\s+(to|with)\s+['"]?\w+['"]?\s+(wifi|network|password)\b"#,
+            "connect_wifi",
+        ),
+        // ── Environment variables ──
+        (
+            r"(?i)\bwhat\s+(is|are)\s+(the\s+)?(value\s+of\s+)?(the\s+)?\w*\s*(environment|env)\s*(var|variable)",
+            "get_environment_variable",
+        ),
+        (
+            r"(?i)\b(get|show|print|echo)\s+(the\s+)?(environment|env)\s*(var|variable)",
+            "get_environment_variable",
+        ),
+        (
+            r"(?i)\b(list|show)\s+(all\s+)?(environment|env)\s*(vars|variables)\b",
+            "list_environment_variables",
+        ),
+        (
+            r"(?i)\b(set|create|add|define)\s+(an?\s+)?(environment|env)\s*(var|variable)\b",
+            "set_environment_variable",
+        ),
+        // ── File operations — extended ──
+        (
+            r"(?i)\b(create|make|mkdir)\s+(a\s+)?(folder|directory)\s+(at|in|on)\s+\S+",
+            "create_directory",
+        ),
+        (
+            r"(?i)\b(create|make|mkdir)\s+(a\s+)?(folder|directory)\b",
+            "create_directory",
+        ),
+        (
+            r#"(?i)\b(write|save|put)\s+['"].*['"]?\s+(to|in|into|at)\s+(/|~/)\S+"#,
+            "write_file",
+        ),
+        (
+            r"(?i)\b(write|save)\s+\S+\s+(to|into)\s+(the\s+)?(file|path)\b",
+            "write_file",
+        ),
+        (
+            r"(?i)\b(copy|cp)\s+(/|~/)\S+\s+(to|into)\s+(/|~/)\S+",
+            "copy_file",
+        ),
+        (
+            r"(?i)\bcopy\s+(the\s+)?(file|folder|directory)\b",
+            "copy_file",
+        ),
+        (
+            r"(?i)\b(rename|mv)\s+(/|~/)\S+\s+(to|as)\s+\S+",
+            "rename_file",
+        ),
+        (
+            r"(?i)\brename\s+(the\s+)?(file|folder|directory)\b",
+            "rename_file",
+        ),
+        (
+            r"(?i)\bmove\s+(/|~/)\S+\s+(to|into)\s+(/|~/)\S+",
+            "move_file",
+        ),
+        (
+            r"(?i)\bmove\s+(the\s+)?(file|folder|directory)\b",
+            "move_file",
+        ),
+        (
+            r"(?i)\b(get|show)\s+(info|information|details|metadata)\s+(about|for|of)\s+(/|~/)\S+",
+            "get_file_info",
+        ),
+        (
+            r"(?i)\b(info|details|metadata)\s+(about|for|of)\s+(/|~/)\S+",
+            "get_file_info",
+        ),
+        (
+            r"(?i)\b(delete|remove|rm)\s+(/|~/)\S+",
+            "delete_file",
+        ),
+        (
+            r"(?i)\b(delete|remove)\s+(the\s+)?(folder|directory)\s+(at|in)\s+\S+",
+            "delete_directory",
+        ),
+        (
+            r"(?i)\b(delete|remove)\s+(the\s+)?(folder|directory)\b",
+            "delete_directory",
+        ),
+        (
+            r"(?i)\bdiff\s+(/|~/)\S+\s+(and|with|vs)\s+(/|~/)\S+",
+            "diff_files",
+        ),
+        (
+            r"(?i)\b(show\s+)?(unified\s+)?diff\s+(between|of)\s+(/|~/)\S+",
+            "diff_files_unified",
+        ),
+        (
+            r"(?i)\bclean\s+(the\s+)?(temp|temporary|tmp)\s+files\b",
+            "clean_temp_files",
+        ),
+        (
+            r"(?i)\b(analy[sz]e|inspect|review)\s+(the\s+)?(code|source)\s+(in|at|of)\s+\S+",
+            "analyze_code",
+        ),
+        (
+            r"(?i)\b(find|search)\s+(all\s+)?\w+\s+files\s+(under|in|at)\s+\S+",
+            "find_files_by_pattern",
+        ),
+        (
+            r#"(?i)\b(search|grep|find)\s+(for\s+)?['"]?\w+['"]?\s+(in|across|through)\s+(all\s+)?(.+\s+)?files\b"#,
+            "search_file_contents",
+        ),
+        // ── Process / Desktop — extended ──
+        (
+            r"(?i)\b(what|which)\s+(apps?|applications?|programs?|processes?)\s+(are\s+)?(running|active|open)\b",
+            "list_running_apps",
+        ),
+        (
+            r"(?i)\brunning\s+(apps?|applications?|processes?|programs?)\b",
+            "list_running_apps",
+        ),
+        (
+            r"(?i)\b(bring|focus|switch\s+to)\s+.{0,30}\b(to\s+front|forward|focus)\b",
+            "focus_window",
+        ),
+        (
+            r"(?i)\b(bring|focus)\s+\w+\s+(to\s+(the\s+)?front)\b",
+            "focus_window",
+        ),
+        (
+            r"(?i)\bset\s+(the\s+)?process\s+priority\b",
+            "set_process_priority",
+        ),
+        (
+            r"(?i)\bmaximize\s+\w+\b",
+            "maximize_window",
+        ),
+        (
+            r"(?i)\bminimize\s+\w+\b",
+            "minimize_window",
+        ),
+        (
+            r"(?i)\btile\s+.{1,40}\s+(and|with)\s+.{1,30}\b(side\s+by\s+side|together|split)\b",
+            "tile_windows",
+        ),
+        (
+            r"(?i)\btile\s+.{1,40}\s+(and|with)\s+\w+",
+            "tile_windows",
+        ),
+        (
+            r"(?i)\btile\s+(the\s+)?(windows?|apps?)\b",
+            "tile_windows",
+        ),
+        (
+            r"(?i)\bmove\s+.{1,40}\s+(window\s+)?(to\s+)?(x\s*=|position|coordinates?)\b",
+            "move_window",
+        ),
+        (
+            r"(?i)\bresize\s+.{1,40}\s+(window\s+)?(to\s+)?\d+\s*x\s*\d+",
+            "resize_window",
+        ),
+        // ── Package management — extended ──
+        (
+            r"(?i)\b(is|check\s+if)\s+\w+\s+(installed|available)\b",
+            "check_package_installed",
+        ),
+        (
+            r"(?i)\b(check|verify)\s+if\s+(the\s+)?(package\s+)?\w+\s+is\s+installed\b",
+            "check_package_installed",
+        ),
+        (
+            r"(?i)\bsearch\s+(for\s+)?(the\s+)?package\s+\w+",
+            "search_package",
+        ),
+        (
+            r"(?i)\b(info|information|details)\s+(about|for)\s+(the\s+)?package\s+\w+",
+            "get_package_info",
+        ),
+        (
+            r"(?i)\b(check|are\s+there)\s+(any\s+)?updates?\s+(for|available\s+for)\s+\w+",
+            "check_package_updates",
+        ),
+        (
+            r"(?i)\bupdates?\s+(for|available\s+for)\s+\w+",
+            "check_package_updates",
+        ),
+        // ── Scheduling ──
+        (
+            r"(?i)\b(create|add|set\s+up)\s+(a\s+)?(cron\s+job|scheduled\s+task|timer)\b",
+            "create_scheduled_task",
+        ),
+        (
+            r"(?i)\b(delete|remove|cancel)\s+(the\s+)?(cron\s+job|scheduled\s+task)\b",
+            "delete_scheduled_task",
+        ),
+        // ── Knowledge / Memory — extended ──
+        (
+            r"(?i)\b(what\s+is|what('?s|\s+was)|tell\s+me)\s+my\s+\w+\b",
+            "recall_fact",
+        ),
+        (
+            r#"(?i)\b(get|show|retrieve)\s+(the\s+)?(snippet|code\s+snippet)\s+['"]?\w+"#,
+            "get_snippet",
+        ),
+        (
+            r"(?i)\b(ingest|import|load|index)\s+(the\s+)?(document|doc|pdf|file)\s+\S+\s+(into\s+)?(memory|knowledge|rag)\b",
+            "ingest_document_rag",
+        ),
+        (
+            r"(?i)\b(ingest|import|load|index)\s+\S+\s+(into\s+)?(knowledge\s+index|memory)\b",
+            "ingest_document",
+        ),
+        (
+            r"(?i)\b(ask|query|search)\s+(my\s+)?(knowledge\s+base|memory)\b",
+            "rag_query",
+        ),
+        (
+            r"(?i)\b(list|show)\s+(all\s+)?(documents?|items?)\s+(in\s+)?(my\s+)?(knowledge\s+base|memory)\b",
+            "list_knowledge_base",
+        ),
+        (
+            r"(?i)\b(delete|remove)\s+(knowledge|memory)\s+(item|entry|document)\b",
+            "delete_knowledge_item",
+        ),
+        // ── Git — extended ──
+        (
+            r"(?i)\b(show|get|list)\s+(me\s+)?(the\s+)?(last|recent|latest)\s+\d+\s+(git\s+)?commits?\b",
+            "git_log",
+        ),
+        (
+            r"(?i)\bgit\s+log\b|\bcommit\s+history\b",
+            "git_log",
+        ),
+        (
+            r"(?i)\b(commit|save)\s+(all\s+)?(my\s+)?changes\b",
+            "git_commit",
+        ),
+        (
+            r"(?i)\b(create|make)\s+(and\s+)?(checkout|switch\s+to)\s+(a\s+)?(new\s+)?branch\b",
+            "git_checkout",
+        ),
+        (
+            r"(?i)\b(checkout|switch\s+to)\s+(the\s+)?branch\b",
+            "git_checkout",
+        ),
+        (
+            r"(?i)\b(stash|save)\s+(my\s+)?(the\s+)?changes\b",
+            "git_stash",
+        ),
+        (
+            r"(?i)\bpush\s+(to\s+)?(main|master|origin)\b",
+            "execute_bash",
+        ),
+        // ── Automation ──
+        (
+            r"(?i)\b(watch|monitor)\s+(the\s+)?(directory|folder|dir)\s+\S+\s+(for\s+)?(changes?|modifications?)\b",
+            "watch_directory",
+        ),
+        (
+            r"(?i)\b(list|show)\s+(watched|monitored)\s+(directories|folders|dirs)\b",
+            "list_watched_dirs",
+        ),
+        (
+            r"(?i)\b(give\s+me\s+)?(a\s+)?smart\s+(suggestion|recommendation)\b",
+            "smart_suggest",
+        ),
+        // ── i18n ──
+        (
+            r"(?i)\b(detect|identify|determine)\s+(the\s+)?language\s+(of|in)\b",
+            "detect_language",
+        ),
+        // ── Hinglish calendar / schedule ──
+        (
+            r"(?i)\b(kal|aaj|aajka|aaj\s+ka)\s+(ka\s+)?(schedule|calendar|events?|meetings?)\b",
+            "gw_calendar_search",
+        ),
+        (
+            r"(?i)\b(schedule|calendar|events?|meetings?)\b.*\b(kal|aaj|aajka)\b",
+            "gw_calendar_search",
+        ),
+        (
+            r"(?i)\bmujhe\s+(kal|aaj)\s+ka\s+schedule\b",
+            "gw_calendar_search",
+        ),
+        // ── Network — extended ──
+        (
+            r"(?i)\b(check|test)\s+if\s+\S+\s+(is\s+)?(reachable|accessible|up|alive)\b",
+            "check_url_status",
+        ),
+        (
+            r"(?i)\b(check|test)\s+url\s+(status|reachability)\b",
+            "check_url_status",
+        ),
+        (
+            r"(?i)\b(search|query)\s+(using|via|with)\s+searxng\b",
+            "searxng_search",
+        ),
+        // ── News sources ──
+        (
+            r"(?i)\b(list|show)\s+(the\s+)?(news\s+)?(sources?|feeds?|monitors?)\b",
+            "list_news_sources",
+        ),
+        (
+            r"(?i)\bnews\s+(system\s+)?(status|health|state)\b",
+            "news_status",
+        ),
+        // ── Document parsing ──
+        (
+            r"(?i)\b(parse|read|extract|process)\s+(the\s+)?(document|doc|pdf)\s+(at|in|from)\s+\S+",
+            "parse_document",
+        ),
+        (
+            r"(?i)\b(parse|read|process)\s+(the\s+)?(csv|spreadsheet)\s+(at|in|from)\s+\S+",
+            "parse_csv",
+        ),
+        (
+            r"(?i)\b(summarize|summarise)\s+(the\s+)?(document|doc|pdf)\s+(at|in|from)\s+\S+",
+            "summarize_document",
+        ),
+        // ── Colab / Google Workspace — extended ──
+        (
+            r"(?i)\b(create|make|new)\s+(a\s+)?(google\s+)?colab\s+notebook\b",
+            "gw_drive_create",
+        ),
+        (
+            r"(?i)\b(open|start|connect)\s+(the\s+)?(colab\s+)?(browser\s+)?(connection|session)\b",
+            "mcp_colab-mcp_open_colab_browser_connection",
+        ),
+        (
+            r"(?i)\b(execute|run)\s+(this\s+)?(code|python|cell)\s+(in|on|at)\s+colab\b",
+            "open_colab_browser_connection",
+        ),
+        (
+            r"(?i)\bcolab\s+(chalao|start|open|run|execute)\b",
+            "mcp_colab-mcp_open_colab_browser_connection",
+        ),
+        (
+            r"(?i)\bcolab\s+mein\s+(notebook|code)\b",
+            "gw_drive_create",
+        ),
+        // ── Direct tool invocation syntax ──
+        (
+            r"(?i)^!!tool:(\w+)",
+            "DIRECT_TOOL_OVERRIDE",
+        ),
+        // ── Database ──
+        (
+            r"(?i)\b(describe|show|list)\s+(the\s+)?(database|db)\s+schema\b",
+            "describe_database",
+        ),
+        // ── Screenshot + analyze ──
+        (
+            r"(?i)\b(take|capture)\s+(a\s+)?screenshot\s+(and|then)\s+(analyze|analyse|describe|ocr)\b",
+            "screenshot_analyze",
+        ),
+        // ── Image on clipboard ──
+        (
+            r"(?i)\b(read|extract|get)\s+(the\s+)?text\s+(from|on)\s+(the\s+)?(image\s+on\s+)?clipboard\b",
+            "get_clipboard",
+        ),
         // Hinglish patterns
         (
             r"(?i)\bvolume\s+(band|zero|mute|off)\s+karo\b|\bband\s+karo\b.{0,15}volume",
@@ -678,6 +1172,27 @@ impl IntentRouter {
     /// Classify user input text.
     pub fn classify(text: &str) -> IntentResult {
         let trimmed = text.trim();
+
+        // 0. Check for direct tool invocation syntax: !!tool:tool_name query=...
+        if trimmed.starts_with("!!tool:") {
+            let after_prefix = &trimmed[7..];
+            let tool_name = after_prefix
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .split('=')
+                .next()
+                .unwrap_or("")
+                .trim();
+            if !tool_name.is_empty() {
+                return IntentResult {
+                    intent: Intent::DirectTool(tool_name.to_string()),
+                    tool_hint: Some(tool_name.to_string()),
+                    category: None,
+                    confidence: 1.0,
+                };
+            }
+        }
 
         // 1. Check direct tool patterns first (highest confidence)
         for (re, tool) in DIRECT_TOOL_RE.iter() {

@@ -2,10 +2,12 @@ use super::{
     build_colab_tier_status_payload, build_google_workspace_status_payload,
     build_image_llm_user_content, build_tool_result_event_payload,
     extract_image_preanalysis_summary, extract_preprocessed_image_attachments,
-    infer_image_intent_from_text, local_api_chat, migrate_legacy_colab_server_command,
+    infer_image_intent_from_text, inspect_google_account_registry, local_api_chat,
+    migrate_legacy_colab_server_command, remove_google_account_registry_entry,
     summarize_tool_turn_for_history, sync_telegram_mcp_server_config, ColabRuntimeSnapshot,
     ColabRuntimeState, GoogleWorkspaceRuntimeSnapshot, LocalApiBridgeState, LocalApiChatRequest,
-    LocalApiResponder, COLAB_OFFICIAL_COMMAND, COLAB_OFFICIAL_SOURCE, OCR_HEALTH_PROBE_IMAGE_BYTES,
+    LocalApiResponder, COLAB_OFFICIAL_COMMAND, COLAB_OFFICIAL_ENTRYPOINT, COLAB_OFFICIAL_SOURCE,
+    OCR_HEALTH_PROBE_IMAGE_BYTES,
 };
 use async_trait::async_trait;
 use kria_core::config::ColabConfig;
@@ -50,11 +52,18 @@ fn migrate_legacy_colab_server_command_rewrites_npx_entry() {
 
     assert!(changed);
     assert_eq!(server.command, COLAB_OFFICIAL_COMMAND);
-    assert_eq!(server.args, vec![COLAB_OFFICIAL_SOURCE.to_string()]);
+    assert_eq!(
+        server.args,
+        vec![
+            "--from".to_string(),
+            COLAB_OFFICIAL_SOURCE.to_string(),
+            COLAB_OFFICIAL_ENTRYPOINT.to_string(),
+        ]
+    );
 }
 
 #[test]
-fn migrate_legacy_colab_server_command_keeps_official_entry() {
+fn migrate_legacy_colab_server_command_upgrades_old_uvx_format() {
     let mut server = kria_core::config::McpServerConfig {
         name: "colab-mcp".into(),
         command: COLAB_OFFICIAL_COMMAND.into(),
@@ -67,9 +76,46 @@ fn migrate_legacy_colab_server_command_keeps_official_entry() {
 
     let changed = migrate_legacy_colab_server_command(&mut server);
 
+    assert!(changed, "old uvx <source> format should be migrated to uvx --from <source> <entrypoint>");
+    assert_eq!(server.command, COLAB_OFFICIAL_COMMAND);
+    assert_eq!(
+        server.args,
+        vec![
+            "--from".to_string(),
+            COLAB_OFFICIAL_SOURCE.to_string(),
+            COLAB_OFFICIAL_ENTRYPOINT.to_string(),
+        ]
+    );
+}
+
+#[test]
+fn migrate_legacy_colab_server_command_keeps_official_entrypoint() {
+    let mut server = kria_core::config::McpServerConfig {
+        name: "colab-mcp".into(),
+        command: COLAB_OFFICIAL_COMMAND.into(),
+        args: vec![
+            "--from".into(),
+            COLAB_OFFICIAL_SOURCE.into(),
+            COLAB_OFFICIAL_ENTRYPOINT.into(),
+        ],
+        env: std::collections::HashMap::new(),
+        enabled: true,
+        trust_level: "YELLOW".into(),
+        tool_overrides: std::collections::HashMap::new(),
+    };
+
+    let changed = migrate_legacy_colab_server_command(&mut server);
+
     assert!(!changed);
     assert_eq!(server.command, COLAB_OFFICIAL_COMMAND);
-    assert_eq!(server.args, vec![COLAB_OFFICIAL_SOURCE.to_string()]);
+    assert_eq!(
+        server.args,
+        vec![
+            "--from".to_string(),
+            COLAB_OFFICIAL_SOURCE.to_string(),
+            COLAB_OFFICIAL_ENTRYPOINT.to_string(),
+        ]
+    );
 }
 
 #[test]
@@ -190,6 +236,8 @@ fn google_status_requires_auth_and_runtime_readiness() {
         Path::new("/tmp/google-mcp"),
         true,
         true,
+        true,
+        Path::new("/tmp/google-mcp/tokens/personal.json"),
         GoogleWorkspaceRuntimeSnapshot {
             configured_enabled: true,
             mcp_state: "running".into(),
@@ -214,6 +262,8 @@ fn google_status_includes_meet_fallback_capabilities_and_runtime_warnings() {
         Path::new("/tmp/google-mcp"),
         true,
         false,
+        true,
+        Path::new("/tmp/google-mcp/tokens/work.json"),
         GoogleWorkspaceRuntimeSnapshot {
             configured_enabled: false,
             mcp_state: "stopped".into(),
@@ -237,6 +287,77 @@ fn google_status_includes_meet_fallback_capabilities_and_runtime_warnings() {
     assert!(has_warning(&payload, "OAuth token missing"));
     assert!(has_warning(&payload, "disabled in config"));
     assert!(has_warning(&payload, "runtime is not running"));
+}
+
+#[test]
+fn google_account_registry_detects_missing_token() {
+    let temp_root = std::env::temp_dir();
+    let config_dir = temp_root.join(format!("kria-gw-test-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&config_dir).expect("create temp dir");
+    let token_path = config_dir.join("tokens").join("personal.json");
+    std::fs::create_dir_all(token_path.parent().unwrap()).expect("create tokens dir");
+
+    let accounts = serde_json::json!({
+        "accounts": {
+            "personal": {
+                "name": "personal",
+                "tokenPath": token_path.to_string_lossy(),
+                "addedAt": "2026-05-01T00:00:00Z"
+            }
+        },
+        "credentialsPath": config_dir.join("credentials.json").to_string_lossy()
+    });
+    std::fs::write(
+        config_dir.join("accounts.json"),
+        serde_json::to_string_pretty(&accounts).unwrap(),
+    )
+    .expect("write accounts.json");
+
+    let state = inspect_google_account_registry(&config_dir, "personal");
+    assert!(state.account_registered);
+    assert!(!state.token_present);
+    assert!(state.requires_reauth());
+
+    std::fs::write(&token_path, "{}".as_bytes()).expect("write token file");
+    let state = inspect_google_account_registry(&config_dir, "personal");
+    assert!(state.token_present);
+    assert!(!state.requires_reauth());
+
+    let _ = std::fs::remove_dir_all(&config_dir);
+}
+
+#[test]
+fn google_account_registry_removal_clears_entry() {
+    let temp_root = std::env::temp_dir();
+    let config_dir = temp_root.join(format!("kria-gw-test-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&config_dir).expect("create temp dir");
+    let accounts = serde_json::json!({
+        "accounts": {
+            "personal": {
+                "name": "personal",
+                "tokenPath": config_dir
+                    .join("tokens")
+                    .join("personal.json")
+                    .to_string_lossy(),
+                "addedAt": "2026-05-01T00:00:00Z"
+            }
+        },
+        "credentialsPath": config_dir.join("credentials.json").to_string_lossy()
+    });
+    std::fs::write(
+        config_dir.join("accounts.json"),
+        serde_json::to_string_pretty(&accounts).unwrap(),
+    )
+    .expect("write accounts.json");
+
+    let removed = remove_google_account_registry_entry(&config_dir, "personal")
+        .expect("remove account entry");
+    assert!(removed);
+
+    let state = inspect_google_account_registry(&config_dir, "personal");
+    assert!(!state.account_registered);
+
+    let _ = std::fs::remove_dir_all(&config_dir);
 }
 
 #[test]

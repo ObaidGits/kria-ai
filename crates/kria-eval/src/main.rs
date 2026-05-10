@@ -1,8 +1,8 @@
-use kria_eval::report::EvalRunReport;
+use kria_eval::report::{EvalCaseResult, EvalRunReport};
 use kria_eval::runner::run_eval_case;
 use kria_eval::suite::load_suite;
 
-const PROMPT_FILE: &str = "TestPrompts.txt";
+const PROMPT_FILES: [&str; 2] = ["TestPrompts.txt", "VMTestPrompts.txt"];
 
 #[tokio::main]
 async fn main() {
@@ -20,15 +20,18 @@ async fn main() {
         }
     };
 
-    let cases = match load_suite(PROMPT_FILE) {
-        Ok(cases) => cases,
-        Err(error) => {
-            eprintln!("Failed to load suite: {}", error);
-            std::process::exit(1);
-        }
-    };
-
-    println!("Loaded {} evaluation cases from {}", cases.len(), PROMPT_FILE);
+    let mut cases = Vec::new();
+    for prompt_file in PROMPT_FILES {
+        let mut loaded = match load_suite(prompt_file) {
+            Ok(cases) => cases,
+            Err(error) => {
+                eprintln!("Failed to load suite '{}': {}", prompt_file, error);
+                std::process::exit(1);
+            }
+        };
+        println!("Loaded {} evaluation cases from {}", loaded.len(), prompt_file);
+        cases.append(&mut loaded);
+    }
 
     let run_id = format!(
         "run-{}",
@@ -43,7 +46,7 @@ async fn main() {
         summary: serde_json::json!({}),
         case_results: Vec::new(),
         environment: serde_json::json!({
-            "prompt_file": PROMPT_FILE,
+            "prompt_files": PROMPT_FILES,
         }),
     };
 
@@ -53,13 +56,16 @@ async fn main() {
         println!("  -> Raw Events: {:?}", obs.events);
         println!("  Grade: {}", verdict.judge_grade);
         println!("  Reasons: {}", verdict.reasons.join(" | "));
-        report.case_results.push(verdict);
+        report.case_results.push(EvalCaseResult {
+            observation: obs,
+            verdict,
+        });
     }
 
     let pass_count = report
         .case_results
         .iter()
-        .filter(|verdict| verdict.judge_grade.eq_ignore_ascii_case("PASS"))
+        .filter(|result| result.verdict.judge_grade.eq_ignore_ascii_case("PASS"))
         .count();
     let fail_count = report.case_results.len().saturating_sub(pass_count);
 
@@ -76,10 +82,10 @@ async fn main() {
         fail_count
     );
 
-    std::fs::create_dir_all("eval_reports").expect("Failed to create report directory");
+    std::fs::create_dir_all("tests-logs/eval_reports").expect("Failed to create report directory");
     let json =
         serde_json::to_string_pretty(&report).expect("Failed to serialize report");
-    std::fs::write("eval_reports/latest_run.json", json)
+    std::fs::write("tests-logs/eval_reports/latest_run.json", json)
         .expect("Failed to write report file");
-    println!("\n📝 Full evaluation report saved to: eval_reports/latest_run.json");
+    println!("\n📝 Full evaluation report saved to: tests-logs/eval_reports/latest_run.json");
 }

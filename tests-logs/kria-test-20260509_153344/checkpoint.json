@@ -1,0 +1,12 @@
+{
+  "run_tag": "20260509_153344",
+  "mode": "DESTRUCTIVE",
+  "completed_suites": [
+    {
+      "name": "Destructive OS (VM)",
+      "zone": "os_level",
+      "status": "Skipped"
+    }
+  ],
+  "per_test_checkpoint": null
+}

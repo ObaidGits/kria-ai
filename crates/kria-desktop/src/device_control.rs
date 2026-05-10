@@ -47,7 +47,7 @@ struct EnrolledTargetRecord {
 }
 
 #[derive(Debug, Clone)]
-struct SshTargetProfile {
+pub(crate) struct SshTargetProfile {
     host: String,
     port: u16,
     username: String,
@@ -179,6 +179,69 @@ impl DesktopFleetControlRuntime {
         Ok(Self::spawn(initial_targets, profiles))
     }
 
+    /// Spawn a background probe that verifies SSH connectivity for all
+    /// enrolled targets within the first few seconds of app startup.
+    /// This ensures the UI gets real health/state data immediately instead
+    /// of showing hardcoded "unknown" / 0% until the first command dispatch.
+    pub fn spawn_startup_probe(&self, profiles: &HashMap<Uuid, SshTargetProfile>) {
+        let projections = self.projections.clone();
+        let profiles = profiles.clone();
+        tokio::spawn(async move {
+            // Small delay to let the app fully initialize
+            tokio::time::sleep(Duration::from_millis(500)).await;
+
+            for (target_id, profile) in &profiles {
+                let probe_start = Instant::now();
+                let probe_result = tokio::process::Command::new("ssh")
+                    .arg("-o").arg("StrictHostKeyChecking=no")
+                    .arg("-o").arg("ConnectTimeout=5")
+                    .arg("-o").arg("BatchMode=yes")
+                    .arg("-o").arg("IdentitiesOnly=yes")
+                    .arg("-i").arg(&profile.ssh_private_key_path)
+                    .arg("-p").arg(profile.port.to_string())
+                    .arg(format!("{}@{}", profile.username, profile.host))
+                    .arg("true")
+                    .output()
+                    .await;
+
+                let latency_ms = probe_start.elapsed().as_secs_f64() * 1000.0;
+                let (health, state) = match &probe_result {
+                    Ok(output) if output.status.success() => (1.0, TargetState::Ready),
+                    Ok(_) => (0.3, TargetState::Tainted),
+                    Err(_) => (0.0, TargetState::Quarantine),
+                };
+
+                let mut guard = projections.write().await;
+                if let Some(row) = guard.get_mut(target_id) {
+                    row.health_score = health;
+                    row.state = target_state_label(state).to_string();
+                    row.latency_ewma_ms = latency_ms;
+                    row.updated_at_unix_ms = now_unix_ms();
+                    if health < 1.0 {
+                        row.tainted = true;
+                        row.reason = Some(format!(
+                            "SSH probe failed: {}",
+                            match &probe_result {
+                                Ok(output) => String::from_utf8_lossy(&output.stderr).trim().to_string(),
+                                Err(e) => e.to_string(),
+                            }
+                        ));
+                    } else {
+                        row.tainted = false;
+                        row.reason = None;
+                    }
+                }
+                tracing::info!(
+                    target_id = %target_id,
+                    host = %profile.host,
+                    health = health,
+                    latency_ms = latency_ms,
+                    "startup SSH probe completed"
+                );
+            }
+        });
+    }
+
     pub fn empty() -> Self {
         Self::spawn(Vec::new(), HashMap::new())
     }
@@ -205,7 +268,7 @@ impl DesktopFleetControlRuntime {
 
         let signer = Arc::new(build_signer());
         let store = Arc::new(InMemoryFleetStore::new(&initial_targets));
-        let connector = Arc::new(SshConnector::new(profiles));
+        let connector = Arc::new(SshConnector::new(profiles.clone()));
         let connectors = ConnectorRegistry {
             ssh: connector.clone(),
             reverse_ws: connector.clone(),
@@ -246,6 +309,9 @@ impl DesktopFleetControlRuntime {
             target_connection_meta,
         };
         runtime.spawn_projection_loop();
+        // Immediately probe SSH connectivity for all targets so the UI
+        // gets real health/state data within seconds of app startup.
+        runtime.spawn_startup_probe(&profiles);
         runtime
     }
 
@@ -274,6 +340,24 @@ impl DesktopFleetControlRuntime {
         let mut rows = guard.values().cloned().collect::<Vec<_>>();
         rows.sort_by(|a, b| a.display_name.cmp(&b.display_name));
         rows
+    }
+
+    /// Remove a target from the runtime projections and connection metadata.
+    /// Called when a user deletes an enrolled target.
+    pub async fn remove_target_projection(&self, target_id: &Uuid) {
+        let mut guard = self.projections.write().await;
+        guard.remove(target_id);
+        drop(guard);
+        let mut meta = self.target_connection_meta.write().await;
+        meta.remove(target_id);
+    }
+
+    /// Update the display name of a target in the runtime projections.
+    pub async fn update_target_projection_display_name(&self, target_id: &Uuid, display_name: &str) {
+        let mut guard = self.projections.write().await;
+        if let Some(row) = guard.get_mut(target_id) {
+            row.display_name = display_name.to_string();
+        }
     }
 
     async fn resolve_target_id_from_hint(&self, target_hint: Option<&str>) -> Result<Option<Uuid>> {

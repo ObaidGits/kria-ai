@@ -64,6 +64,10 @@ const SettingsModal: Component = () => {
   const [newServerCommand, setNewServerCommand] = createSignal("");
   const [newServerArgs, setNewServerArgs] = createSignal("");
   const [newServerTrust, setNewServerTrust] = createSignal("YELLOW");
+  const [mcpFilter, setMcpFilter] = createSignal("");
+  const [mcpGroupBy, setMcpGroupBy] = createSignal<"state" | "trust" | "tag">("state");
+  const [mcpPage, setMcpPage] = createSignal(1);
+  const MCP_PAGE_SIZE = 12;
 
   // Automation form state
   const [newTaskName, setNewTaskName] = createSignal("");
@@ -152,6 +156,7 @@ const SettingsModal: Component = () => {
     let disposed = false;
     let unlistenConnected: (() => void) | null = null;
     let unlistenError: (() => void) | null = null;
+    let unlistenNotice: (() => void) | null = null;
 
     const initialize = async () => {
       await loadSettings();
@@ -239,6 +244,18 @@ const SettingsModal: Component = () => {
 
       if (disposed) {
         unlistenError?.();
+        return;
+      }
+
+      unlistenNotice = await listen("gw:notice", (event: any) => {
+        const message = event.payload?.message ?? "";
+        if (message) {
+          setGwMessage(message);
+        }
+      });
+
+      if (disposed) {
+        unlistenNotice?.();
       }
     };
 
@@ -248,6 +265,7 @@ const SettingsModal: Component = () => {
       disposed = true;
       unlistenConnected?.();
       unlistenError?.();
+      unlistenNotice?.();
       const pol = gwPollTimer();
       if (pol) clearInterval(pol);
     });
@@ -340,6 +358,10 @@ const SettingsModal: Component = () => {
     if (secs >= 60) return `${Math.round(secs / 60)}m`;
     return `${secs}s`;
   };
+  const formatUnixMs = (value?: number | null): string => {
+    if (!value || Number.isNaN(value)) return "-";
+    return new Date(value).toLocaleString();
+  };
 
   const runtimeDotClass = (state?: string): "running" | "stopped" | "" => {
     const normalized = String(state ?? "").toLowerCase();
@@ -379,6 +401,9 @@ const SettingsModal: Component = () => {
     }
     if (!status.credentials_configured) {
       return "OAuth credentials are missing.";
+    }
+    if (status.requires_reauth) {
+      return "Account registry exists without a token. Reconnect to re-auth.";
     }
     if (!status.token_present) {
       return `OAuth token is missing for account '${status.account}'.`;
@@ -438,6 +463,82 @@ const SettingsModal: Component = () => {
 
   const colabDiscoveredTools = () => colabStatus()?.capabilities?.discovered_tools ?? [];
   const selectedFontScale = () => normalizeFontScaleValue(draft()?.ui?.font_scale);
+  const filteredMcpServers = createMemo(() => {
+    const query = mcpFilter().trim().toLowerCase();
+    const servers = [...mcpServers()].sort((a, b) => a.name.localeCompare(b.name));
+    if (!query) return servers;
+    return servers.filter((server) => {
+      const haystack = [
+        server.name,
+        server.command,
+        server.args.join(" "),
+        server.runtime_state ?? "",
+        server.runtime_error ?? "",
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(query);
+    });
+  });
+  const groupedMcpServers = createMemo(() => {
+    const groups = new Map<string, typeof filteredMcpServers extends () => infer T ? T : never>();
+    for (const server of filteredMcpServers()) {
+      const groupBy = mcpGroupBy();
+      const keys =
+        groupBy === "state"
+          ? [runtimeStateLabel(server.runtime_state)]
+          : groupBy === "trust"
+          ? [String(server.trust_level || "UNKNOWN").toUpperCase()]
+          : (server.tags?.length ? server.tags : ["untagged"]);
+      for (const key of keys) {
+        const bucket = groups.get(key) ?? [];
+        bucket.push(server);
+        groups.set(key, bucket);
+      }
+    }
+    return Array.from(groups.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([name, servers]) => ({ name, servers }));
+  });
+  const mcpTotalPages = createMemo(() => {
+    const maxGroupSize = groupedMcpServers().reduce((acc, group) => Math.max(acc, group.servers.length), 0);
+    return Math.max(1, Math.ceil(maxGroupSize / MCP_PAGE_SIZE));
+  });
+  const pagedGroupedMcpServers = createMemo(() => {
+    const page = mcpPage();
+    const start = (page - 1) * MCP_PAGE_SIZE;
+    const end = start + MCP_PAGE_SIZE;
+    return groupedMcpServers().map((group) => ({
+      name: group.name,
+      total: group.servers.length,
+      servers: group.servers.slice(start, end),
+    }));
+  });
+  const mcpSummary = createMemo(() => {
+    const servers = mcpServers();
+    const total = servers.length;
+    const running = servers.filter((s) => String(s.runtime_state).toLowerCase() === "running").length;
+    const errored = servers.filter((s) => String(s.runtime_state).toLowerCase() === "error").length;
+    return { total, running, errored };
+  });
+
+  createEffect(() => {
+    if (activeTab() !== "services") return;
+    let cancelled = false;
+    const timer = setInterval(() => {
+      if (cancelled) return;
+      void loadMcpServers();
+    }, 4000);
+    onCleanup(() => {
+      cancelled = true;
+      clearInterval(timer);
+    });
+  });
+  createEffect(() => {
+    mcpFilter();
+    mcpGroupBy();
+    setMcpPage(1);
+  });
 
   const hydrateIroncladConfig = async () => {
     try {
@@ -1308,57 +1409,160 @@ const SettingsModal: Component = () => {
               <p class="field-hint">
                 Model Context Protocol servers provide external tools to the AI agent.
               </p>
+              <div class="field-hint">
+                {mcpSummary().running}/{mcpSummary().total} running
+                {mcpSummary().errored > 0 ? ` • ${mcpSummary().errored} in error` : ""}
+              </div>
+              <div class="mcp-server-actions" style="margin-top:0.6rem">
+                <button
+                  class="btn-small"
+                  onClick={async () => {
+                    try {
+                      await reconcileMcpRuntime();
+                      await loadMcpServers();
+                      setSuccess("MCP runtime reconciled");
+                      setTimeout(() => setSuccess(""), 2000);
+                    } catch (e) {
+                      setError(`Failed to reconcile runtime: ${e}`);
+                    }
+                  }}
+                >
+                  Reconcile runtime
+                </button>
+              </div>
+              <div class="settings-field">
+                <label>Search MCP Servers</label>
+                <input
+                  type="text"
+                  value={mcpFilter()}
+                  onInput={(e) => setMcpFilter(e.currentTarget.value)}
+                  placeholder="Filter by name, command, state, or error..."
+                />
+              </div>
+              <div class="settings-field">
+                <label>Group By</label>
+                <select
+                  value={mcpGroupBy()}
+                  onChange={(e) => setMcpGroupBy(e.currentTarget.value as "state" | "trust" | "tag")}
+                >
+                  <option value="state">Runtime State</option>
+                  <option value="trust">Trust Level</option>
+                  <option value="tag">Tag</option>
+                </select>
+              </div>
 
               <div class="mcp-server-list">
-                <For each={mcpServers()} fallback={
+                <For each={pagedGroupedMcpServers()} fallback={
                   <div class="mcp-empty">No MCP servers configured.</div>
                 }>
-                  {(server) => (
-                    <div class="mcp-server-card">
-                      <div class="mcp-server-info">
-                        <div class="mcp-server-name">
-                          <span class={`mcp-status-dot ${runtimeDotClass(server.runtime_state)}`}></span>
-                          {server.name}
-                        </div>
-                        <div class="mcp-server-cmd">{server.command} {server.args.join(" ")}</div>
-                        <div class="mcp-server-trust">Trust: {server.trust_level}</div>
-                        <div class="mcp-server-trust">
-                          Runtime: {runtimeStateLabel(server.runtime_state)}
-                          {typeof server.runtime_tool_count === "number" ? ` (${server.runtime_tool_count} tools)` : ""}
-                        </div>
-                        <Show when={server.runtime_error}>
-                          <div class="mcp-server-trust" style="color:#ef4444">Error: {server.runtime_error}</div>
-                        </Show>
+                  {(group) => (
+                    <>
+                      <div class="mcp-server-trust" style="margin-top:8px">
+                        Group: {group.name} ({group.total})
                       </div>
-                      <div class="mcp-server-actions">
-                        <button
-                          class={`btn-small ${server.enabled ? "btn-warning" : "btn-success"}`}
-                          onClick={async () => {
-                            try {
-                              await toggleMcpServer(server.name, !server.enabled);
-                            } catch (e) {
-                              setError(`${e}`);
-                            }
-                          }}
-                        >
-                          {server.enabled ? "Disable" : "Enable"}
-                        </button>
-                        <button
-                          class="btn-small btn-danger"
-                          onClick={async () => {
-                            try {
-                              await removeMcpServer(server.name);
-                            } catch (e) {
-                              setError(`${e}`);
-                            }
-                          }}
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    </div>
+                      <For each={group.servers}>
+                        {(server) => (
+                          <div class="mcp-server-card">
+                            <div class="mcp-server-info">
+                              <div class="mcp-server-name">
+                                <span class={`mcp-status-dot ${runtimeDotClass(server.runtime_state)}`}></span>
+                                {server.name}
+                              </div>
+                              <div class="mcp-server-cmd">{server.command} {server.args.join(" ")}</div>
+                              <div class="mcp-server-trust">Trust: {server.trust_level}</div>
+                              <div class="mcp-server-trust">
+                                Runtime: {runtimeStateLabel(server.runtime_state)}
+                                {typeof server.runtime_tool_count === "number" ? ` (${server.runtime_tool_count} tools)` : ""}
+                              </div>
+                              <Show when={server.health}>
+                                <div class="mcp-server-trust">Health: {server.health}</div>
+                              </Show>
+                              <Show when={server.tags && server.tags.length > 0}>
+                                <div class="mcp-server-trust">Tags: {(server.tags ?? []).join(", ")}</div>
+                              </Show>
+                              <Show when={server.runtime_error}>
+                                <div class="mcp-server-trust" style="color:#ef4444">Error: {server.runtime_error}</div>
+                              </Show>
+                              <Show when={server.remediation}>
+                                <div class="mcp-server-trust" style="color:#f59e0b">Remediation: {server.remediation}</div>
+                              </Show>
+                              <Show when={server.last_failure}>
+                                <div class="mcp-server-trust">
+                                  Last failure: {formatUnixMs(server.last_failure?.timestamp_unix_ms)} • {server.last_failure?.state} • {server.last_failure?.reason}
+                                </div>
+                              </Show>
+                              <Show when={(server.failure_history ?? []).length > 0}>
+                                <div class="mcp-server-trust">
+                                  Last failures: {(server.failure_history ?? [])
+                                    .slice(-3)
+                                    .reverse()
+                                    .map((entry) => `${formatUnixMs(entry.timestamp_unix_ms)} • ${entry.state} • ${entry.reason}`)
+                                    .join(" | ")}
+                                </div>
+                              </Show>
+                            </div>
+                            <div class="mcp-server-actions">
+                              <button
+                                class={`btn-small ${server.enabled ? "btn-warning" : "btn-success"}`}
+                                onClick={async () => {
+                                  try {
+                                    await toggleMcpServer(server.name, !server.enabled);
+                                  } catch (e) {
+                                    setError(`${e}`);
+                                  }
+                                }}
+                              >
+                                {server.enabled ? "Disable" : "Enable"}
+                              </button>
+                              <button
+                                class="btn-small"
+                                onClick={async () => {
+                                  try {
+                                    await restartMcpServerRuntime(server.name);
+                                    await loadMcpServers();
+                                  } catch (e) {
+                                    setError(`${e}`);
+                                  }
+                                }}
+                              >
+                                Restart
+                              </button>
+                              <button
+                                class="btn-small btn-danger"
+                                onClick={async () => {
+                                  try {
+                                    await removeMcpServer(server.name);
+                                  } catch (e) {
+                                    setError(`${e}`);
+                                  }
+                                }}
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </For>
+                    </>
                   )}
                 </For>
+              </div>
+              <div class="mcp-server-actions" style="margin-top:10px">
+                <button
+                  class="btn-small"
+                  disabled={mcpPage() <= 1}
+                  onClick={() => setMcpPage((p) => Math.max(1, p - 1))}
+                >
+                  Prev
+                </button>
+                <div class="field-hint">Page {mcpPage()} / {mcpTotalPages()}</div>
+                <button
+                  class="btn-small"
+                  disabled={mcpPage() >= mcpTotalPages()}
+                  onClick={() => setMcpPage((p) => Math.min(mcpTotalPages(), p + 1))}
+                >
+                  Next
+                </button>
               </div>
 
               <h3>Add Server</h3>
@@ -1953,7 +2157,10 @@ const SettingsModal: Component = () => {
                       setGwMessage("");
                       try {
                         await setGoogleAccount(normalized);
-                        await connectGoogle(normalized);
+                        const result = await connectGoogle(normalized);
+                        if (result?.message) {
+                          setGwMessage(result.message);
+                        }
                         let attempts = 0;
                         const maxAttempts = 20;
 

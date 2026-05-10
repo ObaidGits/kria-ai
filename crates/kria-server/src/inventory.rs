@@ -305,6 +305,10 @@ pub fn control_plane_event_json(event: &ControlPlaneEvent) -> serde_json::Value 
                 "created_at_unix_ms": alert.created_at_unix_ms,
             }
         }),
+        ControlPlaneEvent::TargetRemoved { target_id } => serde_json::json!({
+            "type": "target_removed",
+            "target_id": target_id,
+        }),
     }
 }
 
@@ -365,6 +369,10 @@ async fn apply_event_to_projection(
                 row.docker_last_run_at_unix_ms = Some(*updated_at_unix_ms);
                 row.updated_at_unix_ms = *updated_at_unix_ms;
             }
+        }
+        ControlPlaneEvent::TargetRemoved { target_id } => {
+            let mut guard = projections.write().await;
+            guard.remove(target_id);
         }
         _ => {}
     }

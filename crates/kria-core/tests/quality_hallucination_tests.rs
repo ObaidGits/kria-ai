@@ -2,15 +2,17 @@
 //  quality_hallucination_tests.rs
 //
 //  Real-LLM quality / hallucination gate.
-//  Requires KRIA_REAL_LLM=1 AND the kria-server running at localhost:8088
-//  (or KRIA_BASE_URL env override) with Phi-4-mini loaded.
+//  Requires KRIA_REAL_LLM=1 and a running LLM backend at localhost:8080.
+//
+//  The test harness automatically spawns a kria-server instance on port 8088
+//  if one is not already running, and tears it down after all tests complete.
 //
 //  Each test POSTs to the /api/chat endpoint and inspects:
 //    1. The correct tool was called (no raw-bash fallback).
 //    2. No raw shell snippets in the response text.
 //    3. Response in Hinglish-friendly tone.
 //
-//  Writes a structured JSON quality report to target/quality-report.json.
+//  Writes a structured JSON quality report to tests-logs/quality-report.json.
 //
 //  Run with:
 //    KRIA_REAL_LLM=1 cargo test -p kria-core --test quality_hallucination_tests
@@ -23,6 +25,118 @@ use common::{
 };
 use serde_json::Value;
 use std::sync::Mutex;
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Server Auto-Spawn — starts kria-server on port 8088 if not already running
+// ═══════════════════════════════════════════════════════════════════════════
+
+static SERVER_GUARD: std::sync::Mutex<Option<std::process::Child>> = std::sync::Mutex::new(None);
+
+fn ensure_server_running() {
+    // Check if already initialized
+    {
+        let guard = SERVER_GUARD.lock().unwrap();
+        if guard.is_some() {
+            return;
+        }
+    }
+
+    let base_url =
+        std::env::var("KRIA_BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:8088".to_string());
+
+    if is_server_up(&base_url) {
+        eprintln!("kria-server already running at {base_url}");
+        return;
+    }
+
+    let server_bin = find_server_binary();
+    let server_bin = match server_bin {
+        Some(p) => p,
+        None => {
+            eprintln!("WARN: kria-server binary not found; quality tests will skip");
+            return;
+        }
+    };
+
+    eprintln!("Starting kria-server from {server_bin}...");
+
+    let mut child = std::process::Command::new(&server_bin)
+        .env("KRIA_LOG_LEVEL", "warn")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("Failed to spawn kria-server");
+
+    // Wait for server to become ready (up to 30 seconds)
+    let start = std::time::Instant::now();
+    let timeout = std::time::Duration::from_secs(30);
+    while start.elapsed() < timeout {
+        if is_server_up(&base_url) {
+            eprintln!("kria-server ready in {:.1}s", start.elapsed().as_secs_f64());
+            let mut guard = SERVER_GUARD.lock().unwrap();
+            *guard = Some(child);
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+
+    eprintln!("WARN: kria-server did not become ready within 30s");
+    let _ = child.kill();
+}
+
+fn is_server_up(base_url: &str) -> bool {
+    std::process::Command::new("curl")
+        .args(["-s", "--max-time", "2", &format!("{base_url}/health")])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+fn find_server_binary() -> Option<String> {
+    // Check common locations
+    let candidates = [
+        "target/debug/kria-server",
+        "target/release/kria-server",
+        "../target/debug/kria-server",
+        "../target/release/kria-server",
+    ];
+    for c in &candidates {
+        if std::path::Path::new(c).exists() {
+            return Some(c.to_string());
+        }
+    }
+    // Try cargo metadata
+    if let Ok(output) = std::process::Command::new("cargo")
+        .args(["build", "-p", "kria-server", "--message-format=json"])
+        .output()
+    {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
+            if let Ok(v) = serde_json::from_str::<Value>(line) {
+                if let Some(exe) = v["executable"].as_str() {
+                    if !exe.is_empty() {
+                        return Some(exe.to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+// Drop guard to kill the server when tests complete
+struct ServerGuard;
+impl Drop for ServerGuard {
+    fn drop(&mut self) {
+        if let Some(mut child) = SERVER_GUARD.lock().unwrap().take() {
+            eprintln!("Shutting down test kria-server (pid {})", child.id());
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
 
 static QUALITY_RESULTS: Mutex<Vec<Value>> = Mutex::new(Vec::new());
 
@@ -41,9 +155,11 @@ fn record_result(
         "response_length": response.len(),
         "pass": pass
     }));
-    let path = std::path::Path::new("target/quality-report.json");
+    let logs_dir = std::path::Path::new("tests-logs");
+    let _ = std::fs::create_dir_all(logs_dir);
+    let path = logs_dir.join("quality-report.json");
     if let Ok(json) = serde_json::to_string_pretty(&*results) {
-        let _ = std::fs::write(path, json);
+        let _ = std::fs::write(&path, json);
     }
 }
 
@@ -53,6 +169,7 @@ macro_rules! real_llm_guard {
             eprintln!("SKIP: KRIA_REAL_LLM not set or LLM server not reachable at localhost:8080");
             return;
         }
+        ensure_server_running();
     };
 }
 
@@ -62,7 +179,6 @@ macro_rules! real_llm_guard {
 
 /// Send a chat prompt to the kria-server REST API and return
 /// (first_tool_called, response_text).
-/// Falls back to the tool-registry router when the server is not up.
 async fn run_prompt_real(prompt: &str) -> (Option<String>, String) {
     let base_url =
         std::env::var("KRIA_BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:8088".to_string());
@@ -99,21 +215,8 @@ async fn run_prompt_real(prompt: &str) -> (Option<String>, String) {
                 .to_string();
             (tool, text)
         }
-        Ok(r) => {
-            eprintln!("WARN: /api/chat returned {}", r.status());
-            (None, String::new())
-        }
-        Err(e) => {
-            eprintln!("WARN: /api/chat request failed: {e}. Falling back to router only.");
-            // Fallback: use IntentRouter to at least get a tool name
-            let r = kria_core::agent::router::IntentRouter::classify(prompt);
-            let tool = if let kria_core::agent::router::Intent::DirectTool(t) = r.intent {
-                Some(t)
-            } else {
-                None
-            };
-            (tool, String::new())
-        }
+        Ok(r) => panic!("/api/chat returned non-success status: {}", r.status()),
+        Err(e) => panic!("/api/chat request failed (strict mode): {e}"),
     }
 }
 

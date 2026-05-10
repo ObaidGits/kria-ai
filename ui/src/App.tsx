@@ -1,9 +1,10 @@
-import { Component, Show, For, createSignal, createMemo, createEffect, onMount, onCleanup } from "solid-js";
+import { Component, Show, For, createSignal, createMemo, createEffect, onMount, onCleanup, lazy, Suspense } from "solid-js";
+import { listen } from "@tauri-apps/api/event";
 import { appStore } from "./stores/app";
 import { provisioningStore } from "./stores/provisioning";
 import ChatView from "./components/ChatView";
-import DeviceMatrix from "./components/DeviceMatrix";
 import AddTargetModal from "./components/AddTargetModal";
+import EditTargetModal from "./components/EditTargetModal";
 import PromptLabView from "./components/PromptLabView";
 import SessionSidebar from "./components/SessionSidebar";
 import SettingsModal from "./components/SettingsModal";
@@ -11,6 +12,9 @@ import HitlModal from "./components/HitlModal";
 import VoiceOverlay from "./components/VoiceOverlay";
 import SetupWizard from "./components/SetupWizard";
 import { DeviceTargetView, useDeviceStatus } from "./hooks/useDeviceStatus";
+const DeviceMatrix = lazy(() => import("./components/DeviceMatrix"));
+const TestRunnerDashboard = lazy(() => import("./components/TestRunnerDashboard"));
+const AnalyticsDashboard = lazy(() => import("./components/AnalyticsDashboard"));
 
 interface Toast {
   id: number;
@@ -31,6 +35,22 @@ export function addToast(message: string, type: Toast["type"] = "info") {
 const [toasts, setToasts] = createSignal<Toast[]>([]);
 const CONTROL_PANEL_EXPANDED_STORAGE_KEY = "kria_control_panel_expanded";
 const FLEET_MATRIX_VISIBLE_STORAGE_KEY = "kria_fleet_matrix_visible";
+type AppRoute = "home" | "dashboard" | "vm-management" | "settings";
+
+function routeFromHash(hash: string): AppRoute {
+  const clean = hash.replace(/^#/, "").trim();
+  if (clean === "/dashboard") return "dashboard";
+  if (clean === "/vm-management") return "vm-management";
+  if (clean === "/settings") return "settings";
+  return "home";
+}
+
+function hashForRoute(route: AppRoute): string {
+  if (route === "dashboard") return "#/dashboard";
+  if (route === "vm-management") return "#/vm-management";
+  if (route === "settings") return "#/settings";
+  return "#/";
+}
 
 const App: Component = () => {
   const {
@@ -44,7 +64,8 @@ const App: Component = () => {
   const [showShortcuts, setShowShortcuts] = createSignal(false);
   const [showWizard, setShowWizard] = createSignal(false);
   const [wizardLoading, setWizardLoading] = createSignal(true);
-  const [showForensics, setShowForensics] = createSignal(false);
+  const [dashboardView, setDashboardView] = createSignal<"overview" | "operations" | "forensics">("overview");
+  const [route, setRoute] = createSignal<AppRoute>(routeFromHash(typeof window !== "undefined" ? window.location.hash : "#/"));
   const initialControlPanelExpanded =
     typeof window === "undefined"
       ? false
@@ -56,6 +77,11 @@ const App: Component = () => {
   const [controlPanelExpanded, setControlPanelExpanded] = createSignal<boolean>(initialControlPanelExpanded);
   const [showDeviceMatrix, setShowDeviceMatrix] = createSignal<boolean>(initialDeviceMatrixVisible);
   const [showAddTargetModal, setShowAddTargetModal] = createSignal(false);
+  const [showEditTargetModal, setShowEditTargetModal] = createSignal(false);
+  const [editingTarget, setEditingTarget] = createSignal<any>(null);
+  const [deletingTargetIds, setDeletingTargetIds] = createSignal<Set<string>>(new Set());
+  const [showTestDashboard, setShowTestDashboard] = createSignal(false);
+  const [showAnalytics, setShowAnalytics] = createSignal(true);
   const [resetReason, setResetReason] = createSignal("");
   const [hardResetConfirmation, setHardResetConfirmation] = createSignal("");
   const [lastResetToastEventId, setLastResetToastEventId] = createSignal<string | null>(null);
@@ -224,23 +250,32 @@ const App: Component = () => {
 
       const displayNameRaw = row.display_name ?? row.displayName;
       const modeRaw = row.mode;
+      // Use live backend data from connection_control_targets when available,
+      // fall back to sensible defaults only for plain enrolled_targets.
+      const isLiveData = typeof row.state === "string" && row.state !== "unknown";
+      const validStates = ["ready", "leased", "quarantine", "tainted", "disabled", "degraded", "unreachable", "unknown"] as const;
+      const validDockerHealth = ["unknown", "running", "pass", "fail"] as const;
+      const rawState = isLiveData ? String(row.state) : "unknown";
+      const state = validStates.includes(rawState as any) ? rawState as DeviceTargetView["state"] : "unknown";
+      const rawDocker = typeof row.docker_health === "string" ? row.docker_health : "unknown";
+      const dockerHealth = validDockerHealth.includes(rawDocker as any) ? rawDocker as DeviceTargetView["dockerHealth"] : "unknown";
       map.set(targetId, {
         targetId,
         displayName: typeof displayNameRaw === "string" && displayNameRaw.trim().length > 0
           ? displayNameRaw.trim()
           : targetId,
         mode: typeof modeRaw === "string" && modeRaw.trim().length > 0 ? modeRaw.trim() : "ssh_bootstrap",
-        state: "unknown",
-        tainted: false,
-        taintReason: null,
-        healthScore: 0,
-        latencyEwmaMs: 0,
-        recentFailureRate: 0,
-        dockerHealth: "unknown",
-        dockerPassCount: 0,
-        dockerFailCount: 0,
-        dockerLastRunAtUnixMs: null,
-        updatedAtUnixMs: Date.now(),
+        state,
+        tainted: Boolean(row.tainted ?? row.taint_reason),
+        taintReason: typeof row.taint_reason === "string" ? row.taint_reason : (typeof row.reason === "string" ? row.reason : null),
+        healthScore: typeof row.health_score === "number" && row.health_score > 0 ? row.health_score : (typeof row.healthScore === "number" && row.healthScore > 0 ? row.healthScore : 1),
+        latencyEwmaMs: typeof row.latency_ewma_ms === "number" && row.latency_ewma_ms > 0 ? row.latency_ewma_ms : (typeof row.latencyEwmaMs === "number" && row.latencyEwmaMs > 0 ? row.latencyEwmaMs : 50),
+        recentFailureRate: typeof row.recent_failure_rate === "number" ? row.recent_failure_rate : (typeof row.recentFailureRate === "number" ? row.recentFailureRate : 0),
+        dockerHealth,
+        dockerPassCount: typeof row.docker_pass_count === "number" ? row.docker_pass_count : 0,
+        dockerFailCount: typeof row.docker_fail_count === "number" ? row.docker_fail_count : 0,
+        dockerLastRunAtUnixMs: typeof row.docker_last_run_at_unix_ms === "number" ? row.docker_last_run_at_unix_ms : null,
+        updatedAtUnixMs: typeof row.updated_at_unix_ms === "number" ? row.updated_at_unix_ms : Date.now(),
       });
     }
 
@@ -256,6 +291,20 @@ const App: Component = () => {
   });
 
   const fleetTargets = createMemo<DeviceTargetView[]>(() => fleetHeartbeat.targets());
+
+  // Remove target from live fleet view when backend confirms deletion
+  onMount(() => {
+    const unlistenDeleted = listen<{ target_id: string }>("fleet:target_deleted", (event) => {
+      fleetHeartbeat.removeTarget(event.payload.target_id);
+    });
+    const unlistenUpdated = listen<{ target_id: string }>("fleet:target_updated", () => {
+      void appStore.loadIroncladStatus();
+    });
+    onCleanup(() => {
+      void unlistenDeleted.then((fn) => fn());
+      void unlistenUpdated.then((fn) => fn());
+    });
+  });
 
   const ocrStartupWarning = createMemo(() => {
     const info = appStore.healthInfo();
@@ -351,6 +400,16 @@ const App: Component = () => {
     fleetHeartbeat.reconnectNow();
   };
 
+  const navigate = (next: AppRoute) => {
+    setRoute(next);
+    if (typeof window !== "undefined") {
+      const targetHash = hashForRoute(next);
+      if (window.location.hash !== targetHash) {
+        window.location.hash = targetHash;
+      }
+    }
+  };
+
   const triggerSoftReset = async () => {
     try {
       await appStore.requestIroncladSoftReset(resetReason().trim() || undefined);
@@ -402,7 +461,13 @@ const App: Component = () => {
     }
   };
 
+  const handleHashRouteChange = () => {
+    if (typeof window === "undefined") return;
+    setRoute(routeFromHash(window.location.hash));
+  };
+
   onMount(() => {
+    window.addEventListener("hashchange", handleHashRouteChange);
     document.addEventListener("keydown", handleGlobalKeydown);
 
     // Retry session hydration once the app is mounted and Tauri runtime is ready.
@@ -460,17 +525,23 @@ const App: Component = () => {
     }
   });
 
+  // Start fleet heartbeat as soon as a commander URL is available,
+  // not just when the device matrix is visible.  This ensures targets
+  // get live state (health, latency, docker) immediately on app load
+  // instead of showing hardcoded "unknown" / 0% until the user navigates.
   createEffect(() => {
-    const shouldStreamFleet = controlPanelExpanded() && showDeviceMatrix();
-    if (shouldStreamFleet) {
+    if (controllerBaseUrl()) {
       fleetHeartbeat.start();
-      return;
+    } else {
+      fleetHeartbeat.stop();
     }
-    fleetHeartbeat.stop();
   });
 
   onCleanup(() => {
     document.removeEventListener("keydown", handleGlobalKeydown);
+    if (typeof window !== "undefined") {
+      window.removeEventListener("hashchange", handleHashRouteChange);
+    }
   });
 
   return (
@@ -493,23 +564,28 @@ const App: Component = () => {
       <Show when={!wizardLoading() && !showWizard()}>
       <div class="app-layout">
         <SessionSidebar />
-        <main class="main-content">
-          <div class="assistant-header">
-            <div>
-              <div class="assistant-header-kicker">Adaptive Workspace Assistant</div>
-              <h1>KRIA Control Center</h1>
-              <p>{assistantStatus().detail}</p>
+        <main class="main-content modern-main-shell">
+          <div class="modern-topbar">
+            <div class="modern-topbar-left">
+              <div class="modern-title">KRIA</div>
+              <div class="modern-subtitle">{assistantStatus().detail}</div>
             </div>
-            <div class="assistant-header-chips">
-              <div class="status-pill">
-                <span class={statusDotClass()} />
-                <span>{assistantStatus().label}</span>
-              </div>
-              <div class="status-pill subtle">Routing {routingSummary()}</div>
-              <div class="status-pill subtle">{connectedMcpServers()} MCP online</div>
-              <div class="status-pill subtle">{appStore.alerts().length} active alerts</div>
+            <div class="modern-topbar-right">
+              <span class={statusDotClass()} />
+              <span class="modern-chip">{assistantStatus().label}</span>
+              <span class="modern-chip">Routing {routingSummary()}</span>
+              <span class="modern-chip">{connectedMcpServers()} MCP online</span>
+              <span class="modern-chip">{appStore.alerts().length} alerts</span>
             </div>
           </div>
+
+          <div class="modern-nav">
+            <button class={`modern-nav-btn ${route() === "home" ? "active" : ""}`} onClick={() => navigate("home")}>Home</button>
+            <button class={`modern-nav-btn ${route() === "dashboard" ? "active" : ""}`} onClick={() => navigate("dashboard")}>Dashboard</button>
+            <button class={`modern-nav-btn ${route() === "vm-management" ? "active" : ""}`} onClick={() => navigate("vm-management")}>VM Management</button>
+            <button class={`modern-nav-btn ${route() === "settings" ? "active" : ""}`} onClick={() => { navigate("settings"); setShowSettings(true); }}>Settings</button>
+          </div>
+
           <Show when={colabDispatchWarning()}>
             <div class="startup-warning-banner">
               <strong>Colab Routing:</strong> {colabDispatchWarning()}
@@ -521,7 +597,8 @@ const App: Component = () => {
             </div>
           </Show>
 
-          <section class={`ironclad-strip ${controlPanelExpanded() ? "" : "collapsed"}`}>
+          <Show when={route() === "dashboard"}>
+          <section class={`ironclad-strip modern-dashboard ${controlPanelExpanded() ? "" : "collapsed"}`}>
             <div class="ironclad-strip-top">
               <div class="ironclad-strip-title">
                 <span>Runtime Status</span>
@@ -534,18 +611,27 @@ const App: Component = () => {
                 <button class="btn-secondary" onClick={toggleControlPanelExpanded}>
                   {controlPanelExpanded() ? "Collapse" : "Expand"}
                 </button>
+                <button class="btn-secondary" onClick={() => setShowTestDashboard((v) => !v)}>
+                  {showTestDashboard() ? "Hide Tests" : "Tests"}
+                </button>
+                <button class="btn-secondary" onClick={() => setShowAnalytics((v) => !v)}>
+                  Analytics {showAnalytics() ? "▾" : "▸"}
+                </button>
                 <Show when={controlPanelExpanded()}>
-                  <button class="btn-secondary" onClick={toggleDeviceMatrix}>
-                    {showDeviceMatrix() ? "Hide Devices" : "Show Devices"}
-                  </button>
-                  <button class="btn-secondary" onClick={() => setShowForensics((v) => !v)}>
-                    {showForensics() ? "Hide Forensics" : "View Forensics"}
+                  <button class="btn-secondary" onClick={() => setDashboardView("forensics")}>
+                    Forensics
                   </button>
                 </Show>
               </div>
             </div>
 
-            <Show when={!controlPanelExpanded()}>
+            <div class="modern-dashboard-tabs">
+              <button class={`modern-nav-btn ${dashboardView() === "overview" ? "active" : ""}`} onClick={() => setDashboardView("overview")}>Overview</button>
+              <button class={`modern-nav-btn ${dashboardView() === "operations" ? "active" : ""}`} onClick={() => setDashboardView("operations")}>Operations</button>
+              <button class={`modern-nav-btn ${dashboardView() === "forensics" ? "active" : ""}`} onClick={() => setDashboardView("forensics")}>Forensics</button>
+            </div>
+
+            <Show when={!controlPanelExpanded() && dashboardView() === "overview"}>
               <div class="ironclad-collapsed-row">
                 <span class={qosTrafficLightClass()} />
                 <span>Ready {ironcladStatus()?.fleet?.ready_targets ?? 0}</span>
@@ -554,7 +640,7 @@ const App: Component = () => {
               </div>
             </Show>
 
-            <Show when={controlPanelExpanded()}>
+            <Show when={controlPanelExpanded() && dashboardView() === "overview"}>
               <div class="ironclad-metric-row">
                 <div class="ironclad-card">
                   <div class="ironclad-card-label">Fleet Health</div>
@@ -586,7 +672,9 @@ const App: Component = () => {
                   <div class="ironclad-muted">{resetSnapshot()?.detail || "No recent reset events"}</div>
                 </div>
               </div>
+            </Show>
 
+            <Show when={controlPanelExpanded() && dashboardView() === "operations"}>
               <div class="ironclad-reset-controls">
                 <div class="ironclad-control-group">
                   <label>Reset reason</label>
@@ -615,8 +703,9 @@ const App: Component = () => {
                   Hard Reset
                 </button>
               </div>
+            </Show>
 
-              <Show when={showForensics()}>
+            <Show when={dashboardView() === "forensics" && controlPanelExpanded()}>
                 <div class="ironclad-forensics-panel">
                   <div class="ironclad-forensics-head">
                     <strong>Forensic Audit</strong>
@@ -652,37 +741,104 @@ const App: Component = () => {
                     Last reset start: {formatUnixMs(resetSnapshot()?.started_unix_ms)} | Last completion: {formatUnixMs(resetSnapshot()?.completed_unix_ms)}
                   </div>
                 </div>
-              </Show>
             </Show>
           </section>
-
-          <Show when={controlPanelExpanded() && showDeviceMatrix()}>
-            <DeviceMatrix
-              title="Live Orchestration Matrix"
-              fleet={fleetTargets()}
-              focusedTerminalTargetId={fleetHeartbeat.focusedTargetId()}
-              terminalLines={fleetHeartbeat.focusedTerminalLines()}
-              alerts={fleetHeartbeat.alerts()}
-              streamState={fleetHeartbeat.streamState()}
-              lastHeartbeatAtUnixMs={fleetHeartbeat.lastHeartbeatAtUnixMs()}
-              leaseHealthy={fleetHeartbeat.leaseHealthy()}
-              lastError={fleetHeartbeat.lastError()}
-              onAddTarget={() => setShowAddTargetModal(true)}
-              onReconnectStreams={fleetHeartbeat.reconnectNow}
-              onFocusTerminal={fleetHeartbeat.focusTarget}
-              onRunDockerEvals={runFleetDockerEvals}
-              dockerActionDisabled={!fleetLeaseId()}
-              lastTestResultByTarget={fleetHeartbeat.lastTestResultByTarget}
-            />
           </Show>
 
-          <Show when={currentEnvironment() === "assistant"}>
+          <Show when={route() === "vm-management"}>
+            <section class="ironclad-strip">
+              <div class="ironclad-strip-top">
+                <div class="ironclad-strip-title">
+                  <span>VM Management</span>
+                  <span class="ironclad-strip-subtitle">Device orchestration and operations</span>
+                </div>
+                <div class="ironclad-strip-actions">
+                  <button class="btn-secondary" onClick={() => setShowAddTargetModal(true)}>Add Target</button>
+                  <button class="btn-secondary" onClick={fleetHeartbeat.reconnectNow}>Reconnect</button>
+                  <button class="btn-secondary" onClick={toggleDeviceMatrix}>
+                    {showDeviceMatrix() ? "Hide Matrix" : "Show Matrix"}
+                  </button>
+                </div>
+              </div>
+            </section>
+            <Show when={showDeviceMatrix()}>
+              <Suspense fallback={<div class="status-pill subtle">Loading VM matrix…</div>}>
+                <DeviceMatrix
+                  title="Live Orchestration Matrix"
+                  fleet={fleetTargets()}
+                  focusedTerminalTargetId={fleetHeartbeat.focusedTargetId()}
+                  terminalLines={fleetHeartbeat.focusedTerminalLines()}
+                  alerts={fleetHeartbeat.alerts()}
+                  streamState={fleetHeartbeat.streamState()}
+                  lastHeartbeatAtUnixMs={fleetHeartbeat.lastHeartbeatAtUnixMs()}
+                  leaseHealthy={fleetHeartbeat.leaseHealthy()}
+                  lastError={fleetHeartbeat.lastError()}
+                  onAddTarget={() => setShowAddTargetModal(true)}
+                  onReconnectStreams={fleetHeartbeat.reconnectNow}
+                  onFocusTerminal={fleetHeartbeat.focusTarget}
+                  onRunDockerEvals={runFleetDockerEvals}
+                  dockerActionDisabled={!fleetLeaseId()}
+                  lastTestResultByTarget={fleetHeartbeat.lastTestResultByTarget}
+                  deletingTargetIds={deletingTargetIds()}
+                  onDeleteTarget={async (targetId) => {
+                    if (deletingTargetIds().has(targetId)) return;
+                    setDeletingTargetIds((prev) => new Set(prev).add(targetId));
+                    try {
+                      await appStore.deleteTarget(targetId);
+                      fleetHeartbeat.removeTarget(targetId);
+                      addToast("Target deleted successfully", "success");
+                    } catch (e: any) {
+                      addToast(`Failed to delete target: ${e?.message ?? e}`, "error");
+                    } finally {
+                      setDeletingTargetIds((prev) => {
+                        const next = new Set(prev);
+                        next.delete(targetId);
+                        return next;
+                      });
+                    }
+                  }}
+                  onEditTarget={(target) => {
+                    setEditingTarget(target);
+                    setShowEditTargetModal(true);
+                  }}
+                />
+              </Suspense>
+            </Show>
+          </Show>
+
+          <Show when={route() === "dashboard" && controlPanelExpanded() && showTestDashboard()}>
+            <Suspense fallback={<div class="status-pill subtle">Loading tests…</div>}>
+              <TestRunnerDashboard />
+            </Suspense>
+          </Show>
+
+          <Show when={route() === "dashboard" && showAnalytics()}>
+            <Suspense fallback={<div class="status-pill subtle">Loading analytics…</div>}>
+              <AnalyticsDashboard />
+            </Suspense>
+          </Show>
+
+          <Show when={route() === "home" && currentEnvironment() === "assistant"}>
             <ChatView />
           </Show>
-          <Show when={currentEnvironment() === "prompt_lab"}>
+          <Show when={route() === "home" && currentEnvironment() === "prompt_lab"}>
             <PromptLabView />
           </Show>
-          <div class="status-bar">
+          <Show when={route() === "settings"}>
+            <section class="ironclad-strip">
+              <div class="ironclad-strip-top">
+                <div class="ironclad-strip-title">
+                  <span>Settings</span>
+                  <span class="ironclad-strip-subtitle">Use the settings panel for full configuration</span>
+                </div>
+                <div class="ironclad-strip-actions">
+                  <button class="btn-secondary" onClick={() => setShowSettings(true)}>Open Settings Panel</button>
+                  <button class="btn-secondary" onClick={() => navigate("home")}>Back to Home</button>
+                </div>
+              </div>
+            </section>
+          </Show>
+          <div class="status-bar modern-statusbar">
             <div class="status-item">
               <span class={statusDotClass()} />
               <span>{assistantStatus().label}</span>
@@ -697,7 +853,7 @@ const App: Component = () => {
               <span>Routing: {routingSummary()}</span>
             </div>
             <div class="status-item">
-              <span>{appStore.theme() === "dark" ? "🌙" : "☀️"}</span>
+              <span>Theme: {appStore.theme()}</span>
             </div>
           </div>
         </main>
@@ -713,6 +869,29 @@ const App: Component = () => {
           onRegistered={() => {
             setShowAddTargetModal(false);
             handleTargetRegistered();
+          }}
+        />
+      </Show>
+
+      <Show when={showEditTargetModal() && editingTarget()}>
+        <EditTargetModal
+          target={editingTarget()!}
+          enrolledTarget={(ironcladStatus() as any)?.fleet?.enrolled_targets?.find(
+            (t: any) => t.target_id === editingTarget()?.targetId
+          )}
+          onClose={() => {
+            setShowEditTargetModal(false);
+            setEditingTarget(null);
+          }}
+          onUpdated={async (request) => {
+            try {
+              await appStore.updateTarget(request);
+              addToast("Target updated successfully", "success");
+              setShowEditTargetModal(false);
+              setEditingTarget(null);
+            } catch (e: any) {
+              addToast(`Failed to update target: ${e?.message ?? e}`, "error");
+            }
           }}
         />
       </Show>

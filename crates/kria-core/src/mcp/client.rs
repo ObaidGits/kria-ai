@@ -7,7 +7,8 @@
 //! - Graceful shutdown
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -41,8 +42,10 @@ pub struct McpClient {
     tools: Arc<Mutex<Vec<McpToolDef>>>,
     server_info: Arc<Mutex<Option<ServerInfo>>>,
     error_msg: Arc<Mutex<Option<String>>>,
+    stderr_tail: Arc<Mutex<VecDeque<String>>>,
     /// Consecutive restart count for exponential backoff (1s → 2s → 4s → … max 30s).
     restart_count: AtomicU64,
+    stopping: Arc<AtomicBool>,
 }
 
 impl McpClient {
@@ -58,7 +61,9 @@ impl McpClient {
             tools: Arc::new(Mutex::new(Vec::new())),
             server_info: Arc::new(Mutex::new(None)),
             error_msg: Arc::new(Mutex::new(None)),
+            stderr_tail: Arc::new(Mutex::new(VecDeque::with_capacity(10))),
             restart_count: AtomicU64::new(0),
+            stopping: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -84,8 +89,10 @@ impl McpClient {
         args: &[String],
         env: &HashMap<String, String>,
     ) -> anyhow::Result<()> {
+        self.stopping.store(false, Ordering::Relaxed);
         *self.state.lock().await = McpServerState::Starting;
         *self.error_msg.lock().await = None;
+        self.stderr_tail.lock().await.clear();
 
         let result = self.do_start(command, args, env).await;
         if let Err(ref e) = result {
@@ -152,6 +159,7 @@ impl McpClient {
 
         // Spawn stderr logger
         let server_name = self.name.clone();
+        let stderr_tail = self.stderr_tail.clone();
         tokio::spawn(async move {
             let mut reader = BufReader::new(stderr);
             let mut line = String::new();
@@ -162,6 +170,13 @@ impl McpClient {
                     Ok(_) => {
                         let trimmed = line.trim();
                         if !trimmed.is_empty() {
+                            {
+                                let mut tail = stderr_tail.lock().await;
+                                if tail.len() >= 10 {
+                                    tail.pop_front();
+                                }
+                                tail.push_back(trimmed.to_string());
+                            }
                             tracing::debug!(target: "mcp_stderr", server = %server_name, "{}", trimmed);
                         }
                     }
@@ -173,6 +188,11 @@ impl McpClient {
         // Spawn stdout response reader
         let pending = self.pending.clone();
         let reader_name = self.name.clone();
+        let state = self.state.clone();
+        let error_msg = self.error_msg.clone();
+        let tools_ref = self.tools.clone();
+        let stopping = self.stopping.clone();
+        let stderr_tail_for_exit = self.stderr_tail.clone();
         let reader_handle = tokio::spawn(async move {
             let mut reader = BufReader::new(stdout);
             let mut line = String::new();
@@ -183,6 +203,22 @@ impl McpClient {
                         tracing::info!("[MCP:{}] stdout EOF — server process exited", reader_name);
                         // Drop all outstanding response senders so in-flight requests fail fast.
                         pending.lock().await.clear();
+                        if !stopping.load(Ordering::Relaxed) {
+                            let msg = {
+                                let tail = stderr_tail_for_exit.lock().await;
+                                if tail.is_empty() {
+                                    "MCP server exited".to_string()
+                                } else {
+                                    format!(
+                                        "MCP server exited; stderr: {}",
+                                        tail.iter().cloned().collect::<Vec<_>>().join(" | ")
+                                    )
+                                }
+                            };
+                            *state.lock().await = McpServerState::Error;
+                            *error_msg.lock().await = Some(msg);
+                            *tools_ref.lock().await = Vec::new();
+                        }
                         break;
                     }
                     Ok(_) => {
@@ -213,6 +249,22 @@ impl McpClient {
                         tracing::error!("[MCP:{}] stdout read error: {}", reader_name, e);
                         // Ensure pending callers do not wait for the full timeout window.
                         pending.lock().await.clear();
+                        if !stopping.load(Ordering::Relaxed) {
+                            let msg = {
+                                let tail = stderr_tail_for_exit.lock().await;
+                                if tail.is_empty() {
+                                    format!("MCP server stdout read error: {e}")
+                                } else {
+                                    format!(
+                                        "MCP server stdout read error: {e}; stderr: {}",
+                                        tail.iter().cloned().collect::<Vec<_>>().join(" | ")
+                                    )
+                                }
+                            };
+                            *state.lock().await = McpServerState::Error;
+                            *error_msg.lock().await = Some(msg);
+                            *tools_ref.lock().await = Vec::new();
+                        }
                         break;
                     }
                 }
@@ -462,9 +514,11 @@ impl McpClient {
             Ok(resp) => resp,
             Err(_) => {
                 self.pending.lock().await.remove(&id);
+                let context = self.format_exit_context().await;
                 anyhow::bail!(
-                    "MCP request '{}' failed because the server exited before replying",
-                    method
+                    "MCP request '{}' failed because the server exited before replying{}",
+                    method,
+                    context
                 );
             }
         };
@@ -502,6 +556,7 @@ impl McpClient {
     /// Gracefully shut down the MCP server.
     pub async fn stop(&self) -> anyhow::Result<()> {
         tracing::info!(server = %self.name, "stopping MCP server");
+        self.stopping.store(true, Ordering::Relaxed);
 
         // Close stdin to signal EOF
         *self.stdin.lock().await = None;
@@ -517,8 +572,45 @@ impl McpClient {
         }
 
         *self.tools.lock().await = Vec::new();
+        self.stderr_tail.lock().await.clear();
+        *self.error_msg.lock().await = None;
         *self.state.lock().await = McpServerState::Stopped;
         Ok(())
+    }
+
+    pub(crate) async fn mark_error(&self, message: impl Into<String>) {
+        *self.state.lock().await = McpServerState::Error;
+        *self.error_msg.lock().await = Some(message.into());
+        *self.tools.lock().await = Vec::new();
+    }
+
+    pub(crate) async fn clear_error(&self) {
+        *self.error_msg.lock().await = None;
+        if *self.state.lock().await == McpServerState::Error {
+            *self.state.lock().await = McpServerState::Running;
+        }
+    }
+
+    async fn format_exit_context(&self) -> String {
+        let exit_note = {
+            let mut guard = self.child.lock().await;
+            if let Some(child) = guard.as_mut() {
+                match child.try_wait() {
+                    Ok(Some(status)) => format!(" (exit status: {status})"),
+                    Ok(None) => String::new(),
+                    Err(_) => String::new(),
+                }
+            } else {
+                String::new()
+            }
+        };
+
+        let stderr_tail = self.stderr_tail.lock().await;
+        if stderr_tail.is_empty() {
+            return exit_note;
+        }
+        let joined = stderr_tail.iter().cloned().collect::<Vec<_>>().join(" | ");
+        format!("{exit_note}; stderr: {joined}")
     }
 
     /// Lightweight health ping — sends a `ping` request and expects `pong`.

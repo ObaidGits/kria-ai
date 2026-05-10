@@ -12,6 +12,7 @@ pub(super) const COLAB_LEGACY_NPX_COMMAND: &str = "npx";
 pub(super) const COLAB_LEGACY_NPX_PACKAGE: &str = "@googlecolab/colab-mcp";
 pub(super) const COLAB_OFFICIAL_COMMAND: &str = "uvx";
 pub(super) const COLAB_OFFICIAL_SOURCE: &str = "git+https://github.com/googlecolab/colab-mcp";
+pub(super) const COLAB_OFFICIAL_ENTRYPOINT: &str = "colab-mcp";
 pub(super) const COLAB_BROWSER_BOOTSTRAP_TOOL: &str = "open_colab_browser_connection";
 pub(super) const HISTORY_ITEM_CHAR_CAP: usize = 900;
 pub(super) const HISTORY_TOTAL_CHAR_BUDGET: usize = 3_200;

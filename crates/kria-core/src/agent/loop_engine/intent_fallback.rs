@@ -1249,7 +1249,10 @@ pub(super) fn build_fallback_call_for_hint(
             })
         }
         // ── File operations ───────────────────────────────────────────────────
-        "read_file" if allowed_tool_names.contains("read_file") => {
+        "read_file" | "mcp_fs_read_file"
+            if allowed_tool_names.contains("mcp_fs_read_file")
+                || allowed_tool_names.contains("read_file") =>
+        {
             let path = user_query
                 .split_whitespace()
                 .find(|w| w.starts_with('/') || w.starts_with("~/"))
@@ -1258,19 +1261,32 @@ pub(super) fn build_fallback_call_for_hint(
             if path.is_empty() {
                 return None;
             }
+            let tool_name = if allowed_tool_names.contains("mcp_fs_read_file") {
+                "mcp_fs_read_file"
+            } else {
+                "read_file"
+            };
             Some(ParsedToolCall {
-                name: "read_file".into(),
+                name: tool_name.into(),
                 arguments: serde_json::json!({ "path": path }),
             })
         }
-        "list_directory" if allowed_tool_names.contains("list_directory") => {
+        "list_directory" | "mcp_fs_list_directory"
+            if allowed_tool_names.contains("mcp_fs_list_directory")
+                || allowed_tool_names.contains("list_directory") =>
+        {
             let path = user_query
                 .split_whitespace()
                 .find(|w| w.starts_with('/') || w.starts_with("~/"))
                 .unwrap_or("/home/obaid")
                 .to_string();
+            let tool_name = if allowed_tool_names.contains("mcp_fs_list_directory") {
+                "mcp_fs_list_directory"
+            } else {
+                "list_directory"
+            };
             Some(ParsedToolCall {
-                name: "list_directory".into(),
+                name: tool_name.into(),
                 arguments: serde_json::json!({ "path": path }),
             })
         }

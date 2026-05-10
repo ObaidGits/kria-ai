@@ -20,7 +20,9 @@ pub(crate) mod provisioning;
 pub(crate) mod runtime;
 pub(crate) mod sessions;
 pub(crate) mod telegram;
+pub(crate) mod test_runner;
 pub(crate) mod tool_result_helpers;
+pub(crate) mod analytics;
 pub(crate) mod voice;
 pub(crate) mod voice_diagnostics;
 pub(crate) mod voice_runtime_helpers;
@@ -34,7 +36,10 @@ use constants::*;
 use device_enrollment::*;
 use device_tools::*;
 #[cfg(test)]
-use google_workspace::{build_google_workspace_status_payload, GoogleWorkspaceRuntimeSnapshot};
+use google_workspace::{
+    build_google_workspace_status_payload, inspect_google_account_registry,
+    remove_google_account_registry_entry, GoogleWorkspaceRuntimeSnapshot,
+};
 use history_helpers::*;
 use runtime_status::collect_ironclad_status_from_parts;
 #[cfg(test)]
@@ -50,13 +55,14 @@ use voice_runtime_helpers::*;
 
 #[allow(unused_imports)]
 pub use app_commands::{
-    approve_action, cancel_request, cancel_turn, deny_action, get_alerts, get_hardware_info,
-    get_health, get_settings, list_audio_devices, list_knowledge_base, list_models,
-    update_settings,
+    approve_action, cancel_executive_task, cancel_request, cancel_turn, deny_action, get_alerts,
+    get_hardware_info, get_health, get_settings, list_audio_devices, list_knowledge_base,
+    list_models, update_settings,
 };
 #[allow(unused_imports)]
 pub use app_state::{
     AppState, AppStateCell, ColabRuntimeSnapshot, ColabRuntimeState, FleetRuntimeState,
+    McpFailureRecord,
 };
 #[allow(unused_imports)]
 pub use automation::{
@@ -78,9 +84,9 @@ pub use google_workspace::{
 pub use image_chat::send_image_message;
 #[allow(unused_imports)]
 pub use runtime_status::{
-    get_ironclad_config, get_ironclad_forensics, get_ironclad_status, get_orchestrator_status,
-    register_new_target, request_ironclad_hard_reset, request_ironclad_soft_reset,
-    update_ironclad_config,
+    delete_target, get_ironclad_config, get_ironclad_forensics, get_ironclad_status,
+    get_orchestrator_status, register_new_target, request_ironclad_hard_reset,
+    request_ironclad_soft_reset, update_ironclad_config, update_target,
 };
 #[allow(unused_imports)]
 pub use mcp::{
@@ -107,6 +113,13 @@ pub use sessions::{
 pub use telegram::{
     get_telegram_config, start_telegram_mcp, stop_telegram_mcp, test_telegram_connection,
     update_telegram_config,
+};
+#[allow(unused_imports)]
+pub use analytics::get_analytics_dashboard;
+#[allow(unused_imports)]
+pub use test_runner::{
+    delete_all_test_logs, delete_test_report, get_test_run_state, list_docker_containers,
+    list_test_history, list_test_targets, read_test_report, start_test_run, stop_test_run,
 };
 #[allow(unused_imports)]
 pub use voice::{get_voice_status, start_voice, stop_voice, voice_v2_abort, voice_v2_speak};

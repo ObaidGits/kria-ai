@@ -39,6 +39,6 @@ pub struct EvalCaseResult {
 pub struct EvalRunReport {
     pub run_id: String,
     pub summary: serde_json::Value,
-    pub case_results: Vec<EvalVerdict>,
+    pub case_results: Vec<EvalCaseResult>,
     pub environment: serde_json::Value,
 }

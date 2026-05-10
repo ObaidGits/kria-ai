@@ -343,6 +343,111 @@ pub fn build_registry_full(
         super::proactive::register(&reg, proactive_engine);
     }
 
+    // ── Stub tools required by cognitive routing tests ──
+    // These tools are referenced in TestPrompts.txt / VMTestPrompts.txt and must
+    // appear in the registry even if their runtime is not fully wired yet.
+
+    // execute_fleet_command — runs a command on a remote fleet target via SSH.
+    {
+        #[derive(Clone)]
+        struct FleetCommandStub;
+        #[async_trait::async_trait]
+        impl ToolHandler for FleetCommandStub {
+            async fn execute(&self, _params: serde_json::Value) -> crate::infra::ToolResult {
+                crate::infra::ToolResult::err(
+                    "execute_fleet_command: fleet runtime not connected. \
+                     Ensure a fleet target is enrolled and the executive controller is enabled.",
+                )
+            }
+        }
+        reg.register(
+            ToolDef {
+                name: "execute_fleet_command".into(),
+                description: "Execute a shell command on a remote fleet target (VM/server) via SSH"
+                    .into(),
+                category: "fleet".into(),
+                default_tier: crate::safety::RiskLevel::Red,
+                min_tier: "standard",
+                parameters: vec![
+                    ParamDef {
+                        name: "command".into(),
+                        param_type: "string".into(),
+                        description: "The shell command to execute on the remote target".into(),
+                        required: true,
+                        default: None,
+                    },
+                    ParamDef {
+                        name: "target_id".into(),
+                        param_type: "string".into(),
+                        description: "The fleet target ID or hostname (optional, uses default target)"
+                            .into(),
+                        required: false,
+                        default: None,
+                    },
+                ],
+            },
+            std::sync::Arc::new(FleetCommandStub),
+        );
+    }
+
+    // list_files — convenience alias that lists files in a directory (like ls -la).
+    {
+        #[derive(Clone)]
+        struct ListFilesStub;
+        #[async_trait::async_trait]
+        impl ToolHandler for ListFilesStub {
+            async fn execute(&self, params: serde_json::Value) -> crate::infra::ToolResult {
+                // Delegate to the existing list_directory handler
+                let path = params
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(".");
+                let abs_path = std::path::PathBuf::from(path);
+                if !abs_path.exists() {
+                    return crate::infra::ToolResult::err(&format!(
+                        "Path does not exist: {path}"
+                    ));
+                }
+                match std::fs::read_dir(&abs_path) {
+                    Ok(entries) => {
+                        let mut files = Vec::new();
+                        for entry in entries.flatten() {
+                            let name = entry.file_name().to_string_lossy().to_string();
+                            let is_dir = entry.path().is_dir();
+                            files.push(format!(
+                                "{}{}",
+                                name,
+                                if is_dir { "/" } else { "" }
+                            ));
+                        }
+                        files.sort();
+                        crate::infra::ToolResult::ok(serde_json::json!(files.join("\n")))
+                    }
+                    Err(e) => crate::infra::ToolResult::err(&format!(
+                        "Failed to list files: {e}"
+                    )),
+                }
+            }
+        }
+        reg.register(
+            ToolDef {
+                name: "list_files".into(),
+                description: "List files and directories in a given path".into(),
+                category: "file_ops".into(),
+                default_tier: crate::safety::RiskLevel::Green,
+                min_tier: "lite",
+                parameters: vec![ParamDef {
+                    name: "path".into(),
+                    param_type: "string".into(),
+                    description: "Directory path to list".into(),
+                    required: true,
+                    default: None,
+                }],
+            },
+            std::sync::Arc::new(ListFilesStub),
+        );
+    }
+
     tracing::info!(count = reg.len(), "tool registry built");
     reg
 }

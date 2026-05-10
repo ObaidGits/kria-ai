@@ -641,6 +641,14 @@ body {
   background: linear-gradient(135deg, var(--accent-hover), var(--primary-alt-hover));
 }
 
+.stop-btn {
+  border-radius: 10px;
+}
+
+.stop-btn:hover {
+  background: var(--danger, #e74c3c);
+}
+
 .status-bar {
   background: var(--statusbar-bg);
   border-top: 1px solid var(--border);

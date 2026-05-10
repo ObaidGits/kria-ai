@@ -7,11 +7,461 @@ use kria_core::llm::{ChatMessage, ModelRouter};
 use kria_core::safety::{AuditLogger, HitlGateway, PolicyEngine, RollbackManager};
 use kria_core::tools::registry::build_default_registry;
 use kria_core::tools::ToolMountManager;
+use serde_json::Value;
+use std::path::PathBuf;
 use std::sync::{Arc, LazyLock};
 use std::time::Instant;
+use tokio::process::Child;
 use tokio::sync::{mpsc, Mutex, RwLock};
+use tokio::time::{sleep, Duration};
 
 static EVAL_ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+/// Server lifecycle management for eval - ensures kria-server is running
+/// before executing prompts, just like real usage would do.
+static SERVER_GUARD: LazyLock<Mutex<Option<ServerHandle>>> =
+    LazyLock::new(|| Mutex::new(None));
+
+pub struct ServerHandle {
+    pub port: u16,
+    pub base_url: String,
+    child: Option<Child>,
+    we_spawned: bool,
+}
+
+impl ServerHandle {
+    /// Check if server is healthy by hitting the /health endpoint
+    async fn check_health(&self) -> bool {
+        let url = format!("{}/health", self.base_url);
+        if let Ok(output) = tokio::process::Command::new("curl")
+            .args(["-s", "--max-time", "2", &url])
+            .output()
+            .await
+        {
+            output.status.success()
+        } else {
+            false
+        }
+    }
+}
+
+impl Drop for ServerHandle {
+    fn drop(&mut self) {
+        if self.we_spawned {
+            if let Some(mut child) = self.child.take() {
+                eprintln!("Shutting down eval kria-server (pid {:?})", child.id());
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+    }
+}
+
+/// Find the kria-server binary in common locations or build it
+fn find_server_binary() -> Option<PathBuf> {
+    let candidates = [
+        "target/debug/kria-server",
+        "target/release/kria-server",
+        "../target/debug/kria-server",
+        "../target/release/kria-server",
+        "/media/obaid/SSD/KRIA/target/debug/kria-server",
+        "/media/obaid/SSD/KRIA/target/release/kria-server",
+    ];
+
+    for path in &candidates {
+        if std::path::Path::new(path).exists() {
+            return Some(PathBuf::from(path));
+        }
+    }
+
+    None
+}
+
+/// Start kria-server on the configured port and wait for it to be healthy
+async fn start_server(port: u16) -> Result<ServerHandle, String> {
+    let server_bin = find_server_binary()
+        .ok_or_else(|| "kria-server binary not found".to_string())?;
+
+    eprintln!("Starting kria-server on port {port}...");
+
+    let mut child = tokio::process::Command::new(&server_bin)
+        .env("KRIA_LOG_LEVEL", "warn")
+        .env("RUST_BACKTRACE", "1")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to spawn kria-server: {e}"))?;
+
+    let base_url = format!("http://127.0.0.1:{port}");
+    let mut handle = ServerHandle {
+        port,
+        base_url: base_url.clone(),
+        child: Some(child),
+        we_spawned: true,
+    };
+
+    // Wait for server to become healthy (up to 60 seconds)
+    let start = Instant::now();
+    let timeout = Duration::from_secs(60);
+
+    while start.elapsed() < timeout {
+        if handle.check_health().await {
+            eprintln!("kria-server ready at {base_url} in {:.1}s", start.elapsed().as_secs_f64());
+            return Ok(handle);
+        }
+        sleep(Duration::from_millis(500)).await;
+    }
+
+    // Kill the failed spawn
+    if let Some(mut child) = handle.child.take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    Err("kria-server did not become healthy within 60s".to_string())
+}
+
+/// Ensure a kria-server is running - either use existing or spawn new
+pub async fn ensure_server_running() -> Result<ServerHandle, String> {
+    let mut guard = SERVER_GUARD.lock().await;
+
+    if let Some(ref handle) = *guard {
+        if handle.check_health().await {
+            eprintln!("Using existing kria-server at {}", handle.base_url);
+            return Ok(handle.clone());
+        }
+    }
+
+    // Parse port from env or default
+    let port = std::env::var("KRIA_EVAL_SERVER_PORT")
+        .ok()
+        .and_then(|p| p.parse::<u16>().ok())
+        .unwrap_or(8088);
+
+    let base_url = format!("http://127.0.0.1:{port}");
+
+    // Check if something is already running on this port
+    if let Ok(output) = tokio::process::Command::new("curl")
+        .args(["-s", "--max-time", "2", &format!("{}/health", base_url)])
+        .output()
+        .await
+    {
+        if output.status.success() {
+            eprintln!("kria-server already running at {base_url}");
+            let handle = ServerHandle {
+                port,
+                base_url,
+                child: None,
+                we_spawned: false,
+            };
+            *guard = Some(handle.clone());
+            return Ok(handle);
+        }
+    }
+
+    // Spawn new server
+    let handle = start_server(port).await?;
+    *guard = Some(handle.clone());
+    Ok(handle)
+}
+
+/// Send a prompt to the running kria-server via HTTP and return the response
+pub async fn send_prompt_via_http(prompt: &str, session_id: &str) -> Result<String, String> {
+    let handle = ensure_server_running().await?;
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(120))
+        .build()
+        .map_err(|e| format!("HTTP client build failed: {e}"))?;
+
+    let body = serde_json::json!({
+        "session_id": session_id,
+        "message": prompt
+    });
+
+    let resp = client
+        .post(format!("{}/api/chat", handle.base_url))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("HTTP request failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("Server returned error: {}", resp.status()));
+    }
+
+    let json: Value = resp.json().await
+        .map_err(|e| format!("Failed to parse JSON response: {e}"))?;
+
+    // Extract response text from various possible JSON shapes
+    let response_text = json["response"]
+        .as_str()
+        .or_else(|| json["message"].as_str())
+        .or_else(|| json["content"].as_str())
+        .unwrap_or("")
+        .to_string();
+
+    Ok(response_text)
+}
+
+/// Stop the managed kria-server if we spawned it
+pub async fn shutdown_server() {
+    let mut guard = SERVER_GUARD.lock().await;
+    *guard = None;
+    eprintln!("Eval server guard released");
+}
+
+impl Clone for ServerHandle {
+    fn clone(&self) -> Self {
+        Self {
+            port: self.port,
+            base_url: self.base_url.clone(),
+            child: None,
+            we_spawned: false,
+        }
+    }
+}
+
+/// Run an eval case via HTTP API - mimics real usage by calling running kria-server
+pub async fn run_eval_case_via_api(case: EvalCase) -> (EvalObservation, EvalVerdict) {
+    let _ = dotenvy::dotenv();
+    let started_at = Instant::now();
+
+    // Step 1: Ensure server is running
+    let server_handle = match ensure_server_running().await {
+        Ok(handle) => handle,
+        Err(error) => {
+            let obs = EvalObservation {
+                case_id: case.id.clone(),
+                events: vec![],
+                tool_calls: vec![],
+                policy_trace: vec![],
+                final_response: format!("Failed to start kria-server: {}", error),
+                timings: serde_json::json!({
+                    "duration_ms": started_at.elapsed().as_millis(),
+                    "execution_provider": "http_api",
+                    "server_error": error,
+                }),
+            };
+            let verdict = evaluate_case(&case, &obs).await;
+            return (obs, verdict);
+        }
+    };
+
+    // Step 2: Send prompt via HTTP
+    let session_id = format!("eval-api-{}", case.id);
+    let response_text = match send_prompt_via_http(&case.prompt, &session_id).await {
+        Ok(text) => text,
+        Err(error) => {
+            let obs = EvalObservation {
+                case_id: case.id.clone(),
+                events: vec![],
+                tool_calls: vec![],
+                policy_trace: vec![],
+                final_response: format!("HTTP API call failed: {}", error),
+                timings: serde_json::json!({
+                    "duration_ms": started_at.elapsed().as_millis(),
+                    "execution_provider": "http_api",
+                    "api_error": error,
+                    "server_url": server_handle.base_url,
+                }),
+            };
+            let verdict = evaluate_case(&case, &obs).await;
+            return (obs, verdict);
+        }
+    };
+
+    // Step 3: Detect response issues (hallucination, unavailable, wrong data)
+    let issues = detect_response_issues(&response_text, &case.prompt);
+    let has_critical_issue = !issues.is_empty();
+
+    let observation = EvalObservation {
+        case_id: case.id.clone(),
+        events: vec![serde_json::json!({
+            "type": "api_response_received",
+            "server_url": server_handle.base_url,
+            "response_length": response_text.len(),
+            "issues_detected": issues,
+        })],
+        tool_calls: vec![],
+        policy_trace: vec![],
+        final_response: response_text.clone(),
+        timings: serde_json::json!({
+            "duration_ms": started_at.elapsed().as_millis(),
+            "execution_provider": "http_api",
+            "server_url": server_handle.base_url,
+        }),
+    };
+
+    // Step 4: If critical issues detected, fail fast
+    if has_critical_issue {
+        let issue_reasons: Vec<String> = issues.iter().map(|i| i.description.clone()).collect();
+        let verdict = EvalVerdict {
+            case_id: case.id.clone(),
+            stage_a_pass: false,
+            judge_grade: "FAIL".to_string(),
+            confidence: 1.0,
+            reasons: issue_reasons,
+            artifacts: serde_json::json!({
+                "stage": "A",
+                "failure_kind": "response_issue_detected",
+                "issues": issues,
+            }),
+        };
+        return (observation, verdict);
+    }
+
+    let verdict = evaluate_case(&case, &observation).await;
+    (observation, verdict)
+}
+
+/// Response issue types for detection
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ResponseIssue {
+    pub kind: ResponseIssueKind,
+    pub description: String,
+    pub matched_pattern: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub enum ResponseIssueKind {
+    /// KRIA said it cannot do something or doesn't have access
+    Unavailable,
+    /// KRIA hallucinated or made up information
+    Hallucination,
+    /// KRIA returned wrong or fabricated data
+    WrongData,
+    /// KRIA returned a bash/terminal command instead of using tools
+    BashFallback,
+}
+
+/// Detect issues in KRIA's response: unavailable claims, hallucination, wrong data
+pub fn detect_response_issues(response: &str, prompt: &str) -> Vec<ResponseIssue> {
+    let mut issues = Vec::new();
+    let response_lower = response.to_lowercase();
+    let prompt_lower = prompt.to_lowercase();
+
+    // ─── Unavailable / Cannot Do patterns ───
+    let unavailable_patterns = [
+        ("i cannot access real-time", "Real-time data access claimed unavailable"),
+        ("i can't access real-time", "Real-time data access claimed unavailable"),
+        ("i do not have access to", "Tool access claimed unavailable"),
+        ("i don't have access to", "Tool access claimed unavailable"),
+        ("i cannot check", "Action claimed unavailable"),
+        ("i can't check", "Action claimed unavailable"),
+        ("i cannot access", "Access claimed unavailable"),
+        ("i can't access", "Access claimed unavailable"),
+        ("i am not able to access", "Access claimed unavailable"),
+        ("unable to access real-time", "Real-time data access claimed unavailable"),
+        ("do not have permission", "Permission claimed denied"),
+        ("don't have the ability", "Capability claimed missing"),
+        ("don't have the capability", "Capability claimed missing"),
+        ("i cannot help with that", "Request claimed unsupported"),
+        ("i'm sorry, but i cannot", "Request claimed unsupported"),
+        ("as an ai", "Disclaiming knowledge/capability"),
+        ("please provide your", "Requesting user to do KRIA's job"),
+        ("you can install", "Redirecting to manual steps"),
+        ("to install", "Redirecting to manual steps"),
+        ("follow these steps", "Redirecting to manual steps"),
+        ("open terminal", "Redirecting to manual terminal use"),
+    ];
+
+    for (pattern, description) in &unavailable_patterns {
+        if response_lower.contains(pattern) {
+            // Only flag if the prompt is asking for something KRIA should be able to do
+            let should_be_able = prompt_lower.contains("weather")
+                || prompt_lower.contains("news")
+                || prompt_lower.contains("install")
+                || prompt_lower.contains("check")
+                || prompt_lower.contains("search")
+                || prompt_lower.contains("file")
+                || prompt_lower.contains("memory")
+                || prompt_lower.contains("remember");
+            if should_be_able {
+                issues.push(ResponseIssue {
+                    kind: ResponseIssueKind::Unavailable,
+                    description: description.to_string(),
+                    matched_pattern: pattern.to_string(),
+                });
+            }
+        }
+    }
+
+    // ─── Bash/Terminal fallback patterns ───
+    let bash_patterns = [
+        ("```bash", "Bash code block in response"),
+        ("```sh", "Shell code block in response"),
+        ("run: `", "Inline bash command"),
+        ("command: `", "Inline bash command"),
+        ("sudo apt", "Apt command in text"),
+        ("pip install", "Pip install in text"),
+        ("brew install", "Brew install in text"),
+        ("npx ", "NPX command in text"),
+    ];
+
+    for (pattern, description) in &bash_patterns {
+        if response.contains(pattern) {
+            issues.push(ResponseIssue {
+                kind: ResponseIssueKind::BashFallback,
+                description: description.to_string(),
+                matched_pattern: pattern.to_string(),
+            });
+        }
+    }
+
+    // ─── Hallucination markers ───
+    let hallucination_patterns = [
+        ("here are the steps to check", "Instructions instead of actual data"),
+        ("based on my training", "Dated knowledge disclaimer"),
+        ("as of my last training", "Training data date claim"),
+        ("according to my knowledge", "Knowledge disclaimer"),
+        ("i don't have real-time", "Real-time data hallucination disclaimer"),
+        ("i may not have the most", "Data freshness disclaimer"),
+    ];
+
+    for (pattern, description) in &hallucination_patterns {
+        if response_lower.contains(pattern) {
+            issues.push(ResponseIssue {
+                kind: ResponseIssueKind::Hallucination,
+                description: description.to_string(),
+                matched_pattern: pattern.to_string(),
+            });
+        }
+    }
+
+    // ─── Check for empty or too-short responses ───
+    if response.trim().len() < 5 {
+        issues.push(ResponseIssue {
+            kind: ResponseIssueKind::Hallucination,
+            description: "Response too short or empty".to_string(),
+            matched_pattern: "(empty)".to_string(),
+        });
+    }
+
+    // ─── Weather-specific hallucination check ───
+    if prompt_lower.contains("weather") && response_lower.contains("here are") {
+        issues.push(ResponseIssue {
+            kind: ResponseIssueKind::Hallucination,
+            description: "Weather response with instructions instead of actual data".to_string(),
+            matched_pattern: "here are".to_string(),
+        });
+    }
+
+    // ─── News-specific hallucination check ───
+    if (prompt_lower.contains("news") || prompt_lower.contains("headline"))
+        && response_lower.contains("here are")
+        && !response_lower.contains("breaking:")
+        && !response_lower.contains("reported:")
+    {
+        issues.push(ResponseIssue {
+            kind: ResponseIssueKind::Hallucination,
+            description: "News response with instructions instead of actual news".to_string(),
+            matched_pattern: "here are".to_string(),
+        });
+    }
+
+    issues
+}
 
 struct EnvVarGuard {
     key: &'static str,

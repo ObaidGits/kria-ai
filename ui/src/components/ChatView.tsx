@@ -21,6 +21,7 @@ const ChatView: Component = () => {
     setInputText,
     sendMessage,
     sendImageMessage,
+    cancelTurn,
     toggleVoice,
     voiceActive,
     voiceState,
@@ -327,9 +328,24 @@ const ChatView: Component = () => {
           rows={1}
           disabled={isSwapping()}
         />
-        <button type="submit" class="send-btn" disabled={isSwapping() || (!inputText().trim() && !pendingImage())}>
-          Send
-        </button>
+        <Show when={isThinking()}>
+          <button
+            type="button"
+            class="stop-btn"
+            onClick={() => cancelTurn("assistant")}
+            title="Stop generating"
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" style="vertical-align: middle; margin-right: 4px;">
+              <rect x="1" y="1" width="12" height="12" rx="2" />
+            </svg>
+            Stop
+          </button>
+        </Show>
+        <Show when={!isThinking()}>
+          <button type="submit" class="send-btn" disabled={isSwapping() || (!inputText().trim() && !pendingImage())}>
+            Send
+          </button>
+        </Show>
       </form>
 
       <Show when={toolChoiceRequest()}>

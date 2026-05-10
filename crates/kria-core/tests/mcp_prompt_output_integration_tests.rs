@@ -381,7 +381,7 @@ async fn mcp_prompt_output_discovers_tools_and_invokes_from_prompt() {
         "expected terminal Done or Error event"
     );
 
-    manager.stop_all().await;
+    manager.stop_all(&registry).await;
 }
 
 #[tokio::test]
@@ -428,7 +428,77 @@ async fn mcp_prompt_output_retries_without_injected_account() {
         "retry result did not surface expected payload: {payload}"
     );
 
-    manager.stop_all().await;
+    manager.stop_all(&registry).await;
+}
+
+#[tokio::test]
+async fn mcp_registry_unregisters_on_stop_and_reconcile_restart() {
+    let Some(fake_mcp) = FakeMcpHarness::new() else {
+        eprintln!("SKIP: python runtime not available for fake MCP server");
+        return;
+    };
+
+    let registry = Arc::new(ToolRegistry::new());
+    let config = fake_mcp.server_config("gworkspace", HashMap::new());
+    let mut manager = McpServerManager::new(vec![config.clone()]);
+    manager.start_all(&registry).await;
+
+    assert!(
+        registry.get_def("mcp_gworkspace_echo_tool").is_some(),
+        "expected MCP tool to be registered"
+    );
+
+    manager
+        .stop_server("gworkspace", &registry)
+        .await
+        .expect("stop_server should succeed");
+
+    assert!(
+        registry.get_def("mcp_gworkspace_echo_tool").is_none(),
+        "expected MCP tools to be unregistered after stop"
+    );
+
+    let report = manager.reconcile(vec![config.clone()], &registry).await;
+    assert!(
+        report.started.contains(&"gworkspace".to_string())
+            || report.restarted.contains(&"gworkspace".to_string()),
+        "expected reconcile to start or restart gworkspace"
+    );
+    assert!(
+        registry.get_def("mcp_gworkspace_echo_tool").is_some(),
+        "expected MCP tools to be registered after reconcile restart"
+    );
+
+    manager.stop_all(&registry).await;
+}
+
+#[tokio::test]
+async fn mcp_reconcile_restarts_on_config_change() {
+    let Some(fake_mcp) = FakeMcpHarness::new() else {
+        eprintln!("SKIP: python runtime not available for fake MCP server");
+        return;
+    };
+
+    let registry = Arc::new(ToolRegistry::new());
+    let config = fake_mcp.server_config("gworkspace", HashMap::new());
+    let mut manager = McpServerManager::new(vec![config.clone()]);
+    manager.start_all(&registry).await;
+
+    let mut updated_env = HashMap::new();
+    updated_env.insert("KRIA_FAKE_MCP_PING_MODE".to_string(), "ok".to_string());
+    let updated_config = fake_mcp.server_config("gworkspace", updated_env);
+    let report = manager.reconcile(vec![updated_config], &registry).await;
+
+    assert!(
+        report.restarted.contains(&"gworkspace".to_string()),
+        "expected reconcile to restart on config change"
+    );
+    assert!(
+        registry.get_def("mcp_gworkspace_echo_tool").is_some(),
+        "expected MCP tools to remain registered after restart"
+    );
+
+    manager.stop_all(&registry).await;
 }
 
 #[tokio::test]
@@ -517,5 +587,5 @@ async fn mcp_prompt_output_surfaces_tool_errors_cleanly() {
         "expected terminal Done or Error event after error surface"
     );
 
-    manager.stop_all().await;
+    manager.stop_all(&registry).await;
 }

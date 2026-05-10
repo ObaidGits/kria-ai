@@ -36,7 +36,7 @@
       "name": "colab-mcp",
       "transport": "stdio",
       "command": "uvx",
-      "args": ["git+https://github.com/googlecolab/colab-mcp"],
+      "args": ["--python", "/home/obaid/anaconda3/bin/python3.13", "--from", "git+https://github.com/googlecolab/colab-mcp", "colab-mcp"],
       "enabled": true,
       "trust_level": "YELLOW",
       "tool_overrides": {}

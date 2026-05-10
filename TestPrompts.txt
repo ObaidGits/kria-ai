@@ -14,6 +14,12 @@ KEY FOR EXPECTED OUTCOMES
   🗣️ VOICE  — Ria should read result aloud + short on-screen text
   ⚠️ WARN   — Warning shown; user choice needed
   📋 PLAN   — StreamEvent::Plan emitted (visible in UI)
+  🧠 INTEL  — Intelligence engine active (planner, SelfModel, uncertainty)
+  🔍 AUTO   — Autonomous investigation triggered (CuriosityLoop/Perception)
+  🧩 SKILL  — Skill compiled from repeated pattern (requires approval)
+  🛡️ QUAR   — Dynamic tool quarantined (awaiting HITL approval)
+  🌐 BROWSER — Docker-isolated browser task (BrowserAgent)
+  🔄 PREEMPT — Voice preemption: active task paused for higher-priority input
 
 ────────────────────────────────────────────────────────────────────────────────
 SECTION 1 — SYSTEM INFORMATION & HEALTH
@@ -24,6 +30,9 @@ SECTION 1 — SYSTEM INFORMATION & HEALTH
           EXPECTED: 🗣️ Short voice summary: "CPU at X%, RAM Y GB free, Disk Z% used."
                     On-screen: detailed card with all three metrics.
           Notes  : Must-work critical task per preferences.
+          INTEL  : Routed as TaskPriority::Interactive (P1) via ExecutiveController.
+                   SelfModel scores path through geomean of tool success rates.
+                   If any tool historically fails, Planner picks alternate path.
 
 [SYS-02]  Prompt : "Mera CPU kitna use ho raha hai?"  (Hinglish)
           Tool   : get_cpu_usage
@@ -40,6 +49,9 @@ SECTION 1 — SYSTEM INFORMATION & HEALTH
 [SYS-05]  Prompt : "Check system health."
           Tool   : check_system_health
           EXPECTED: ✅ GREEN — Alerts summary (thermal, disk, memory warnings if any).
+          INTEL  : CuriosityLoop may have already gathered evidence proactively.
+                   If PerceptionBus detected anomalies (disk I/O spike, thermal event),
+                   the response includes pre-gathered diagnostic context.
 
 [SYS-06]  Prompt : "Show me current alerts."
           Tool   : get_alerts (include_dismissed: false)
@@ -958,6 +970,11 @@ SECTION 21 — MULTI-STEP / CHAINED WORKFLOW TESTS
            Tools  : get_cpu_usage → send_notification (conditional)
            EXPECTED: ✅➡️ CPU checked; if > 80%: notification sent.
                      If ≤ 80%: "CPU is fine at X%, no notification needed."
+           INTEL  : StructuredBranchingPlanner evaluates 3 paths:
+                     Path A (DiagnoseFirst): check_cpu → evaluate → notify
+                     Path B (MinimalRisk): check_cpu only, no notification
+                     Path C (Aggressive): check all system metrics, notify on any anomaly
+                     SelfModel selects Path A (highest geomean score).
 
 [CHAIN-04] Prompt : "List my Google Drive files and open the most recent one."
            Tools  : gw_drive_list → gw_drive_read (chained on most recent file)
@@ -1115,6 +1132,276 @@ SECTION 25 — SIDECAR / PRE-COGNITIVE TOOLS
           EXPECTED: ✅ GREEN — Preprocessed audio info (duration, format, RMS level).
 
 ================================================================================
+SECTION 26 — INTELLIGENCE ENGINE TESTS
+================================================================================
+
+  These prompts validate the Phase A–F intelligence subsystems:
+  ExecutiveController, StructuredBranchingPlanner, SelfModel,
+  UncertaintyRouter, CuriosityLoop, SkillCompiler, DynamicToolGenerator,
+  BrowserAgent, PromptOptimizer, WorkingSet, FailureAnalyzer, WorldModel.
+
+  All intelligence features require the corresponding feature flags in
+  kria_config.toml to be enabled:
+    [executive] enabled = true
+    [planner]   enabled = true
+    [uncertainty] enabled = true
+    [skill_compiler] enabled = true
+    [curiosity] enabled = true
+    [browser_agent] enabled = true
+
+────────────────────────────────────────────────────────────────────────────────
+  26A — EXECUTIVE CONTROLLER & PRIORITY SCHEDULING
+────────────────────────────────────────────────────────────────────────────────
+
+[INTEL-01] Prompt : "Hey Ria, stop that and check my CPU now."
+            (while a long download or background task is running)
+           EXPECTED: 🔄 PREEMPT — Voice command (P0:Voice) preempts background task.
+                     PreemptionManager sends cancellation with 500ms grace.
+                     Background task pauses → CPU check runs immediately (<2s).
+                     Response: 🗣️ "CPU usage is 45%, download paused."
+           Notes  : Without Executive, voice queues behind background. 10+ second delay.
+
+[INTEL-02] Prompt : "KRIA stop now."  (Emergency stop)
+           EXPECTED: 🔄 PREEMPT — ALL tasks cancelled immediately.
+                     Foreground, background, CuriosityLoop, SkillCompiler — everything.
+                     Voice: "Stopping. All operations cancelled."
+           Notes  : Cancellation propagates through entire task tree via CancellationToken.
+                     CuriosityLoop yields instantly (no grace period).
+
+[INTEL-03] Prompt : "Start monitoring disk space in the background."
+             then immediately: "What's the weather today?"
+           EXPECTED: 🔄 PREEMPT — Background monitoring (P3) runs in JoinSet.
+                     Weather query (P1:Interactive) runs in foreground slot instantly.
+                     No blocking. Background monitoring continues silently.
+           Notes  : max_background_tasks=2 from config. Background never blocks foreground.
+
+[INTEL-04] Prompt : "Are there any ongoing operations?"
+           EXPECTED: 🧠 INTEL — Reports active foreground, queued tasks,
+                     background count, GPU lease holder, and approval queue.
+                     Response includes progress percentages per active task.
+
+────────────────────────────────────────────────────────────────────────────────
+  26B — STRUCTURED BRANCHING PLANNER & SELF-MODEL
+────────────────────────────────────────────────────────────────────────────────
+
+[INTEL-05] Prompt : "My Docker containers are unreachable. Figure out what's wrong and fix it."
+           EXPECTED: 📋 PLAN — Planner generates 3 candidate paths:
+                     Path A: DiagnoseFirst (check daemon → network → DNS)
+                     Path B: MinimalRisk (read-only probes only)
+                     Path C: Aggressive (restart daemon immediately)
+                     SelfModel scores each via geometric mean of tool success rates.
+                     Winner shown in PlanVisualization UI panel.
+                     Response: "Docker daemon is active but containers are unhealthy."
+                               "Restarting nginx-proxy… Done. All 3 containers reachable."
+           Notes  : Geometric mean ensures if ANY tool has low success, entire path score drops.
+                     SelfModel persists per-tool Beta(α,β) posteriors across sessions.
+
+[INTEL-06] Prompt : "Set up a reverse proxy for my local dev server."
+           EXPECTED: 🧠 INTEL — UncertaintyRouter classifies confidence as LOW.
+                     Ambiguous: which port? which domain? SSL?
+                     Routes to Action::Ask before executing.
+                     "Which port is your dev server on? And do you want SSL?"
+           Notes  : Without UncertaintyRouter, system would guess (likely wrong config).
+                     Thresholds: plan≥0.7, gather≥0.4, ask≥0.3.
+
+[INTEL-07] Prompt : "Run diagnostics on all my services."
+           EXPECTED: 📋 PLAN + 🧠 INTEL — Planner creates multi-step plan:
+                     Step 1: systemctl list-units --type=service --state=failed
+                     Step 2: For each failed service, gather journal logs
+                     Step 3: FailureAnalyzer categorizes errors (OOM, config, dependency)
+                     Step 4: Suggest recovery actions
+                     WorkingSet summarizes evidence into LLM prompt context.
+
+────────────────────────────────────────────────────────────────────────────────
+  26C — CURIOSITY LOOP & AUTONOMOUS INVESTIGATION
+────────────────────────────────────────────────────────────────────────────────
+
+[INTEL-08] Prompt : (No explicit prompt — autonomous system event)
+             Trigger: unusual disk I/O spike detected by PerceptionBus
+           EXPECTED: 🔍 AUTO — Event-driven pipeline fires:
+                     PerceptionEvent (debounced, 2s window) → NoveltyDetector
+                     classifies as interesting → EvidenceGatherer spawns read-only
+                     diagnostics (iostat, df, du) → results surfaced proactively.
+                     🗣️ Nudge: "Disk I/O spike detected on /media/obaid/SSD."
+                               "KRIA target directory is 78% full. Want me to show the largest files?"
+           Notes  : CuriosityLoop runs at P3:Background with BudgetGuard (5s CPU cap).
+                     Yields instantly if you speak (CancellationToken checked at every step).
+                     All commands verified as RiskLevel::Green (read-only) by PolicyGate.
+                     max_cpu_percent=10 from config prevents starving foreground.
+
+[INTEL-09] Prompt : (No explicit prompt — autonomous filesystem event)
+             Trigger: new large file appears in /home/obaid/Downloads
+           EXPECTED: 🔍 AUTO — PerceptionBus detects file creation event.
+                     NoveltyDetector classifies: new file in watched directory.
+                     If watch_directory was set, proactive nudge fires:
+                     "New file detected in Downloads: report_2026.pdf (45 MB)"
+
+[INTEL-10] Prompt : "What interesting things have you noticed about my system lately?"
+           EXPECTED: 🔍 AUTO — CuriosityLoop reports recent investigation findings:
+                     - High-CPU processes detected at 3 PM
+                     - Disk usage trend approaching 90%
+                     - Docker image update available
+                     Each finding includes evidence gathered and confidence level.
+
+────────────────────────────────────────────────────────────────────────────────
+  26D — SKILL COMPILATION & QUARANTINE
+────────────────────────────────────────────────────────────────────────────────
+
+[INTEL-11] Prompt : "Check disk space on server 192.168.1.10"
+             (asked 3 times with different servers across sessions)
+           EXPECTED: 🧩 SKILL — After 3 successful varied executions:
+                     SkillCompiler recognizes pattern: ssh {host} df -h
+                     Compiles into CompiledSkill with typed variable:
+                       host: VariableType::IpAddress (validated format)
+                     QuarantineRegistry holds for HITL approval.
+                     "I've compiled a shortcut skill 'check_remote_disk'."
+                     "It's in quarantine for your approval."
+           Notes  : N=3 gating requires 3 successes with different variable values.
+                     VariableSafety validates against shell metacharacters (injection prevention).
+                     CompiledSkill confidence decays over time without use (auto-archive <0.3).
+
+[INTEL-12] Prompt : "I just installed rclone. Can you use it to list my Google Drive files?"
+           EXPECTED: 🛡️ QUAR — DynamicToolGenerator reads rclone --help output.
+                     LLM generates GeneratedToolDef from CLI docs.
+                     SchemaValidator dry-runs rclone ls --help (idempotent: safe).
+                     Tool quarantined with RiskLevel::Yellow.
+                     "Tool 'rclone_list_files' generated and in quarantine."
+                     "Approve in the QuarantineQueue panel to use."
+           Notes  : Mutative operations (rclone copy, delete) go straight to quarantine
+                     WITHOUT dry-run — HITL approval required.
+                     SchemaValidator safe patterns: --help, --version, --dry-run,
+                     list, status, show, get, describe, info commands.
+
+[INTEL-13] Prompt : Approve a quarantined tool in the UI.
+           EXPECTED: 🛡️ QUAR — QuarantineQueue shows:
+                     Tool name, description, risk level, success rate bar.
+                     Approve button → tool promoted to active ToolRegistry.
+                     Reject button → tool removed from quarantine.
+           Notes  : RiskLevel::Red tools require PIN for approval.
+                     RiskLevel::Yellow tools require explicit yes/no.
+
+────────────────────────────────────────────────────────────────────────────────
+  26E — BROWSER AGENT (DOCKER-ISOLATED)
+────────────────────────────────────────────────────────────────────────────────
+
+[INTEL-14] Prompt : "Go to the GitHub Actions page for my KRIA repo and tell me if the last build passed."
+           EXPECTED: 🌐 BROWSER — BrowserAgent spins up Docker container:
+                     - Ephemeral Chromium inside container
+                     - Hardened: --read-only, --cap-drop ALL, memory-limited
+                     - Navigates to GitHub → scrapes build status → returns result
+                     - Container killed on Drop (no zombie processes)
+                     Response: "Last build on main: passed ✅ (2m 34s, commit a1b2c3d)."
+           Notes  : Cancellation token checked at every step.
+                     'KRIA stop now' kills container instantly.
+                     Hard timeout per task — container killed if sidecar unresponsive.
+
+[INTEL-15] Prompt : "Search for latest Rust async runtime benchmarks on the web."
+           EXPECTED: 🌐 BROWSER — BrowserAgent performs web search:
+                     Container starts → navigates → scrapes results → returns summary.
+                     Alternative: web_search tool if browser not needed.
+                     Planner selects cheapest reliable path.
+
+────────────────────────────────────────────────────────────────────────────────
+  26F — PROMPT OPTIMIZER & ADAPTIVE ROUTING
+────────────────────────────────────────────────────────────────────────────────
+
+[INTEL-16] Prompt : (Across many sessions, user asks various system admin questions)
+           EXPECTED: 🧠 INTEL — PromptOptimizer tracks success rates per TaskDomain.
+                     After ~20 sessions:
+                       Domain: SystemAdmin → Variant B (concise, tool-focused): 94% success
+                       Domain: FileOps → Variant A (detailed, step-by-step): 89% success
+                     System auto-selects highest-scoring variant (90% exploitation).
+                     10% exploration tests new/under-tested variants (UCB1 scoring).
+           Notes  : Stats persist in SQLite across restarts.
+                     Domains: SystemAdmin, FileOps, Communication, WebSearch,
+                     CodeGeneration, Planning, Diagnosis, General.
+
+────────────────────────────────────────────────────────────────────────────────
+  26G — UNCERTAINTY ENGINE & EVIDENCE GATHERING
+────────────────────────────────────────────────────────────────────────────────
+
+[INTEL-17] Prompt : "Why is my system slow?"
+           EXPECTED: 🧠 INTEL — UncertaintyRouter classifies as LOW confidence.
+                     Ambiguous: could be CPU, RAM, disk, network, or thermal.
+                     Route: GatherEvidence → run diagnostic commands:
+                       top -bn1, free -h, df -h, iostat, sensors
+                     WorkingSet summarizes evidence.
+                     Response: "CPU is at 95% — kria-server process using 4.2 GB RAM."
+                               "Likely cause: memory pressure causing swap thrashing."
+           Notes  : EvidenceGatherer generates read-only StructuredCommands.
+                     WorkingSet fits evidence into token budget for LLM context.
+                     FailureAnalyzer maps stderr patterns to recovery suggestions.
+
+[INTEL-18] Prompt : "What is the capital of France?"  (high-confidence general knowledge)
+           EXPECTED: ✅ GREEN — UncertaintyRouter classifies as HIGH confidence.
+                     No tools needed. LLM answers directly: "Paris."
+                     No planning overhead. Fast path.
+           Notes  : Confidence threshold determines whether to plan at all.
+                     High confidence (>0.7) → direct execution, no multi-path planning.
+
+────────────────────────────────────────────────────────────────────────────────
+  26H — WORLD MODEL & FAILURE ANALYZER
+────────────────────────────────────────────────────────────────────────────────
+
+[INTEL-19] Prompt : "Why did the Docker restart fail last time?"
+           EXPECTED: 🧠 INTEL — WorldModel stores command outcomes and system facts.
+                     FailureAnalyzer matches stderr output to known error patterns:
+                       - OOM killer → "Container hit memory limit."
+                       - Port conflict → "Port 8080 already in use."
+                       - Config error → "Invalid YAML in docker-compose.yml."
+                     Response grounded in actual historical failure data.
+           Notes  : WorldModel persists across sessions in SQLite.
+                     Pattern categories: OOM, permission denied, config, dependency,
+                     network timeout, port conflict, resource exhaustion.
+
+[INTEL-20] Prompt : "Install nginx on my system."
+           Expected flow with intelligence:
+           EXPECTED: 🧠 INTEL + 🔒 PIN — Multi-step:
+                     1. UncertaintyRouter: confidence OK (clear intent).
+                     2. Planner: single-path (straightforward install).
+                     3. PolicyGate: RiskLevel::Red (package install) → PIN required.
+                     4. SubprocessExecutor runs apt install.
+                     5. FailureAnalyzer watches stderr for errors.
+                     6. SelfModel records outcome (success/failure) for nginx tool.
+                     7. WorldModel stores: "nginx installed, version X.Y.Z".
+                     8. PromptOptimizer records: SystemAdmin variant succeeded.
+
+────────────────────────────────────────────────────────────────────────────────
+  26I — INTELLIGENCE API ENDPOINTS
+────────────────────────────────────────────────────────────────────────────────
+
+[INTEL-API-01] Command:
+  curl -sS http://127.0.0.1:3001/api/intelligence/status
+  EXPECTED: {
+    "executive": {"enabled": true, ...},
+    "planner": {"enabled": true, ...},
+    "uncertainty": {"enabled": true, ...},
+    "skill_compiler": {"enabled": true, ...},
+    "curiosity": {"enabled": true, ...},
+    "browser_agent": {"enabled": true, ...}
+  }
+  Notes  : Always returns 200 (no feature gate — frontend needs this for discovery).
+
+[INTEL-API-02] Command:
+  curl -sS http://127.0.0.1:3001/api/executive/snapshot
+  EXPECTED: {"config":{...}, "active_foreground":null, "queued":[], ...}
+  Notes  : Returns 503 if executive.enabled = false.
+
+[INTEL-API-03] Command:
+  curl -sS http://127.0.0.1:3001/api/quarantine/tools
+  EXPECTED: {"tools":[], "total":0, "pending_approval":0}
+  Notes  : Returns 503 if skill_compiler.enabled = false.
+
+[INTEL-API-04] Command:
+  curl -sS -X POST http://127.0.0.1:3001/api/chat \
+    -H "Content-Type: application/json" \
+    --data '{"message":"Check my CPU","source":"api"}'
+  EXPECTED (executive.enabled=true):
+    {"status":"submitted", "session_id":"...", "message":"Task queued for processing by ExecutiveController"}
+  EXPECTED (executive.enabled=false):
+    {"status":"received", "message":"Check my CPU", ...}  (legacy path)
+
+================================================================================
 EDGE CASE SUMMARY
 ================================================================================
 
@@ -1133,8 +1420,18 @@ Blocked path accessed                  Immediate block; no partial execution.
 Multi-command utterance                Ask before each sub-command per preferences.
 Concurrency: heavy task cap reached    Ask which running task to replace.
 Low battery detected                   Warn + reduce background heavy tasks.
+Voice preemption fails                 Grace period expires → force-kill background task.
+Planner generates no valid paths       Fall back to legacy single-path execution.
+SelfModel has no history for tool      Use Beta(1,1) prior = 0.5 (neutral confidence).
+CuriosityLoop BudgetGuard exhausted   Pause investigation; resume next tick.
+SkillCompiler N=3 not yet reached     Pattern tracked but not compiled; continue counting.
+Quarantine tool approval timeout      Tool stays in quarantine; no auto-promote.
+BrowserAgent container crash          Drop impl kills container; user notified.
+PromptOptimizer no variant for domain Explore: create new variant with default template.
+Uncertainty confidence below ask_threshold  Ask user for clarification before acting.
+WorldModel schema mismatch            Log warning; ignore stale entry; continue.
 
 ================================================================================
 END OF TEST PROMPTS FILE
-Total prompts: updated for current built-in registry + conditional MCP tools
+Total prompts: 26 sections — includes Intelligence Engine (Section 26)
 ================================================================================

@@ -360,12 +360,27 @@ async fn send_message_with_profile(
 
             if let Some(turn_id) = active_turn_id.as_deref() {
                 if !stale_guard_agent.is_turn_active(&session_id_clone, turn_id) {
-                    tracing::debug!(
-                        session_id = %session_id_clone,
-                        turn_id = %turn_id,
-                        "Dropping stale stream event in send_message consumer"
-                    );
-                    continue;
+                    // Always forward Done/Error events even for stale turns so the
+                    // frontend receives the `agent:done` signal and clears isThinking.
+                    // Other events (Token, ToolStart, etc.) are safe to drop.
+                    match &event {
+                        StreamEvent::Done(_) | StreamEvent::Error(_) => {
+                            tracing::debug!(
+                                session_id = %session_id_clone,
+                                turn_id = %turn_id,
+                                "Forwarding terminal stream event for stale turn"
+                            );
+                            // fall through to the match below
+                        }
+                        _ => {
+                            tracing::debug!(
+                                session_id = %session_id_clone,
+                                turn_id = %turn_id,
+                                "Dropping stale stream event in send_message consumer"
+                            );
+                            continue;
+                        }
+                    }
                 }
             }
 

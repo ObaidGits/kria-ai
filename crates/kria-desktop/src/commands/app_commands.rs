@@ -19,6 +19,32 @@ pub async fn cancel_turn(session_id: String, state: State<'_, AppStateCell>) -> 
 }
 
 #[tauri::command]
+pub async fn cancel_executive_task(
+    task_id: String,
+    state: State<'_, AppStateCell>,
+) -> Result<(), String> {
+    let state = state
+        .get()
+        .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
+    let parsed_id = uuid::Uuid::parse_str(&task_id)
+        .map_err(|e| format!("Invalid task ID: {e}"))?;
+
+    // Try the executive sender first (when executive.enabled = true)
+    {
+        let config = state.config.read().await;
+        if config.executive.enabled {
+            drop(config);
+            // The executive sender is stored in the runtime init, not AppState.
+            // Fall through to agent_loop cancel as a reliable fallback.
+        }
+    }
+
+    // Fallback: cancel via the agent loop's turn admission (works for all modes)
+    state.agent_loop.cancel_session(&parsed_id.to_string());
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn approve_action(
     request_id: String,
     state: State<'_, AppStateCell>,

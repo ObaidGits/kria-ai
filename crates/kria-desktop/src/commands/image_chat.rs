@@ -493,12 +493,25 @@ pub async fn send_image_message(
 
             if let Some(turn_id) = active_turn_id.as_deref() {
                 if !stale_guard_agent.is_turn_active(&session_id_clone, turn_id) {
-                    tracing::debug!(
-                        session_id = %session_id_clone,
-                        turn_id = %turn_id,
-                        "Dropping stale stream event in image consumer"
-                    );
-                    continue;
+                    // Always forward Done/Error events even for stale turns so the
+                    // frontend receives the `agent:done` signal and clears isThinking.
+                    match &event {
+                        StreamEvent::Done(_) | StreamEvent::Error(_) => {
+                            tracing::debug!(
+                                session_id = %session_id_clone,
+                                turn_id = %turn_id,
+                                "Forwarding terminal stream event for stale turn in image consumer"
+                            );
+                        }
+                        _ => {
+                            tracing::debug!(
+                                session_id = %session_id_clone,
+                                turn_id = %turn_id,
+                                "Dropping stale stream event in image consumer"
+                            );
+                            continue;
+                        }
+                    }
                 }
             }
 

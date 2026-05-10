@@ -546,6 +546,219 @@ pub async fn register_new_target(
     Ok(response)
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  DELETE TARGET
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DeleteTargetResponse {
+    pub target_id: String,
+    pub display_name: String,
+    pub removed: bool,
+}
+
+#[tauri::command]
+pub async fn delete_target(
+    target_id: String,
+    state: State<'_, AppStateCell>,
+    app_handle: AppHandle,
+) -> Result<DeleteTargetResponse, String> {
+    let state = state
+        .get()
+        .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
+
+    let registry_path = resolve_target_registry_path(state)
+        .await
+        .map_err(|e| e.message)?;
+    let mut registry = load_fleet_enrollment_registry(registry_path.as_path())
+        .map_err(|e| e.message)?;
+
+    let idx = registry
+        .targets
+        .iter()
+        .position(|t| t.target_id == target_id)
+        .ok_or_else(|| format!("Target {target_id} not found in registry"))?;
+
+    let removed_record = registry.targets.remove(idx);
+    save_fleet_enrollment_registry(registry_path.as_path(), &registry)
+        .map_err(|e| e.message)?;
+
+    // Remove from runtime projections and broadcast removal via SSE
+    if let Ok(uuid) = uuid::Uuid::parse_str(&target_id) {
+        state
+            .fleet_control_runtime
+            .remove_target_projection(&uuid)
+            .await;
+        state
+            .fleet_control_runtime
+            .manager
+            .emit_target_removed(uuid);
+    }
+
+    append_ironclad_forensic_record(
+        &state.ironclad_forensic_log,
+        &app_handle,
+        "fleet_enrollment",
+        "info",
+        format!(
+            "Fleet target removed: {} ({}@{}:{})",
+            removed_record.display_name,
+            removed_record.username,
+            removed_record.host,
+            removed_record.port
+        ),
+        format!("target_id={target_id}"),
+        "desktop.fleet",
+    )
+    .await;
+
+    let _ = app_handle.emit(
+        "fleet:target_deleted",
+        serde_json::json!({ "target_id": target_id }),
+    );
+    let _ = app_handle.emit(
+        "ironclad:status",
+        collect_ironclad_status_from_parts(
+            &state.orchestrator,
+            &state.ironclad_reset,
+            &state.ironclad_forensic_log,
+        )
+        .await,
+    );
+
+    Ok(DeleteTargetResponse {
+        target_id,
+        display_name: removed_record.display_name,
+        removed: true,
+    })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  UPDATE TARGET
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateTargetRequest {
+    pub target_id: String,
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub host: Option<String>,
+    #[serde(default)]
+    pub port: Option<u16>,
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub ssh_private_key_path: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct UpdateTargetResponse {
+    pub target_id: String,
+    pub display_name: String,
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub updated: bool,
+}
+
+#[tauri::command]
+pub async fn update_target(
+    request: UpdateTargetRequest,
+    state: State<'_, AppStateCell>,
+    app_handle: AppHandle,
+) -> Result<UpdateTargetResponse, String> {
+    let state = state
+        .get()
+        .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
+
+    let registry_path = resolve_target_registry_path(state)
+        .await
+        .map_err(|e| e.message)?;
+    let mut registry = load_fleet_enrollment_registry(registry_path.as_path())
+        .map_err(|e| e.message)?;
+
+    let idx = registry
+        .targets
+        .iter()
+        .position(|t| t.target_id == request.target_id)
+        .ok_or_else(|| format!("Target {} not found in registry", request.target_id))?;
+
+    let record = &mut registry.targets[idx];
+    if let Some(name) = &request.display_name {
+        if !name.trim().is_empty() {
+            record.display_name = name.trim().to_string();
+        }
+    }
+    if let Some(host) = &request.host {
+        if !host.trim().is_empty() {
+            record.host = host.trim().to_string();
+        }
+    }
+    if let Some(port) = request.port {
+        if port > 0 {
+            record.port = port;
+        }
+    }
+    if let Some(username) = &request.username {
+        if !username.trim().is_empty() {
+            record.username = username.trim().to_string();
+        }
+    }
+    if let Some(key_path) = &request.ssh_private_key_path {
+        if !key_path.trim().is_empty() {
+            record.ssh_private_key_path = key_path.trim().to_string();
+        }
+    }
+
+    let updated_record = record.clone();
+    save_fleet_enrollment_registry(registry_path.as_path(), &registry)
+        .map_err(|e| e.message)?;
+
+    // Update runtime projection display name
+    if let Ok(uuid) = uuid::Uuid::parse_str(&request.target_id) {
+        state
+            .fleet_control_runtime
+            .update_target_projection_display_name(&uuid, &updated_record.display_name)
+            .await;
+    }
+
+    append_ironclad_forensic_record(
+        &state.ironclad_forensic_log,
+        &app_handle,
+        "fleet_enrollment",
+        "info",
+        format!("Fleet target updated: {}", updated_record.display_name),
+        format!("target_id={}", request.target_id),
+        "desktop.fleet",
+    )
+    .await;
+
+    let _ = app_handle.emit(
+        "fleet:target_updated",
+        serde_json::json!({ "target_id": request.target_id }),
+    );
+    let _ = app_handle.emit(
+        "ironclad:status",
+        collect_ironclad_status_from_parts(
+            &state.orchestrator,
+            &state.ironclad_reset,
+            &state.ironclad_forensic_log,
+        )
+        .await,
+    );
+
+    Ok(UpdateTargetResponse {
+        target_id: updated_record.target_id,
+        display_name: updated_record.display_name,
+        host: updated_record.host,
+        port: updated_record.port,
+        username: updated_record.username,
+        updated: true,
+    })
+}
+
 #[tauri::command]
 pub async fn get_ironclad_status(
     state: State<'_, AppStateCell>,

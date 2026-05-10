@@ -66,15 +66,11 @@ impl ToolHandler for ShutdownSystem {
         } else {
             format!("shutdown /s /t {}", delay_minutes * 60)
         };
-        match tokio::process::Command::new("sh")
-            .args(["-c", &cmd])
-            .status()
-            .await
-        {
-            Ok(s) if s.success() => ToolResult::ok(serde_json::json!({
+        match crate::tools::vm_dispatch_command_with_sudo(&cmd, true).await {
+            Ok(()) => ToolResult::ok(serde_json::json!({
                 "action": "shutdown", "delay_minutes": delay_minutes,
             })),
-            _ => ToolResult::err("failed to initiate shutdown"),
+            Err(e) => ToolResult::err(&format!("failed to initiate shutdown: {}", e)),
         }
     }
 }
@@ -88,13 +84,9 @@ impl ToolHandler for RebootSystem {
         } else {
             "shutdown /r /t 0"
         };
-        match tokio::process::Command::new("sh")
-            .args(["-c", cmd])
-            .status()
-            .await
-        {
-            Ok(s) if s.success() => ToolResult::ok(serde_json::json!({ "action": "reboot" })),
-            _ => ToolResult::err("failed to reboot"),
+        match crate::tools::vm_dispatch_command_with_sudo(cmd, true).await {
+            Ok(()) => ToolResult::ok(serde_json::json!({ "action": "reboot" })),
+            Err(e) => ToolResult::err(&format!("failed to reboot: {}", e)),
         }
     }
 }

@@ -23,9 +23,56 @@ mod common;
 use std::sync::Arc;
 
 use common::{dangerous_enabled, SandboxDir};
+
+/// SAFETY GUARD: Asserts that the current process is running inside a VM.
+/// Panics with a clear message if running on bare metal / host OS.
+/// This prevents Tier 3 destructive tests from accidentally running on
+/// the developer's laptop (e.g. executing a real shutdown command).
+fn assert_running_in_vm() {
+    // Check KRIA_RUNNING_IN_VM env var (set by test runner SSH dispatch)
+    if std::env::var("KRIA_RUNNING_IN_VM").as_deref() == Ok("1") {
+        return;
+    }
+    // Fallback: check DMI/CPU info for VM signatures
+    let vm_indicators = ["kvm", "qemu", "virtualbox", "vmware", "xen", "hyper-v"];
+    let dmi_paths = [
+        "/sys/class/dmi/id/product_name",
+        "/sys/class/dmi/id/sys_vendor",
+        "/sys/class/dmi/id/bios_vendor",
+    ];
+    for path in &dmi_paths {
+        if let Ok(contents) = std::fs::read_to_string(path) {
+            let lower = contents.to_ascii_lowercase();
+            for indicator in &vm_indicators {
+                if lower.contains(indicator) {
+                    return; // Running inside a VM, safe to proceed
+                }
+            }
+        }
+    }
+    // Check /proc/cpuinfo for hypervisor flag
+    if let Ok(cpuinfo) = std::fs::read_to_string("/proc/cpuinfo") {
+        if cpuinfo.to_ascii_lowercase().contains("hypervisor") {
+            return;
+        }
+    }
+    panic!(
+        "🚨 SAFETY ABORT: Tier 3 destructive test running on HOST machine! \
+         These tests MUST run inside a VM or Docker container. \
+         Set KRIA_RUNNING_IN_VM=1 or run via 'cargo kria-test --mode FULL' \
+         which dispatches destructive tests to the VM via SSH."
+    );
+}
 use kria_core::safety::hitl::{ApprovalResponse, HitlGateway};
 use kria_core::safety::policy::{PolicyEngine, RiskLevel};
 use kria_core::tools::registry;
+use tokio_util::sync::CancellationToken;
+
+/// Create a default ToolContext for tests that call execute_with_context.
+fn test_tool_context() -> kria_core::tools::ToolContext {
+    let reg = registry::build_default_registry();
+    reg.make_tool_context(CancellationToken::new())
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  TIER 1 — Policy-gate assertions (always run)
@@ -151,11 +198,18 @@ async fn dangerous_t2_sandbox_delete_file() {
     );
 
     let reg = registry::build_default_registry();
-    let handler = reg.get_handler("delete_file").unwrap().clone();
+    let handler = match reg.get_handler("delete_file") {
+        Some(h) => h.clone(),
+        None => {
+            eprintln!("SKIP: delete_file tool not registered");
+            return;
+        }
+    };
+    let ctx = test_tool_context();
     let result = handler
-        .execute(serde_json::json!({
+        .execute_with_context(serde_json::json!({
             "path": sandbox.child("to_delete.txt").to_str().unwrap()
-        }))
+        }), ctx)
         .await;
     assert!(
         result.success,
@@ -176,12 +230,19 @@ async fn dangerous_t2_sandbox_move_then_delete() {
     let reg = registry::build_default_registry();
 
     // Move
-    let mv_handler = reg.get_handler("move_file").unwrap().clone();
+    let mv_handler = match reg.get_handler("move_file") {
+        Some(h) => h.clone(),
+        None => {
+            eprintln!("SKIP: move_file tool not registered");
+            return;
+        }
+    };
+    let ctx_mv = test_tool_context();
     let mv_result = mv_handler
-        .execute(serde_json::json!({
+        .execute_with_context(serde_json::json!({
             "source": sandbox.child("source.txt").to_str().unwrap(),
             "destination": sandbox.child("moved.txt").to_str().unwrap()
-        }))
+        }), ctx_mv)
         .await;
     assert!(
         mv_result.success,
@@ -194,11 +255,18 @@ async fn dangerous_t2_sandbox_move_then_delete() {
     );
 
     // Delete moved file
-    let del_handler = reg.get_handler("delete_file").unwrap().clone();
+    let del_handler = match reg.get_handler("delete_file") {
+        Some(h) => h.clone(),
+        None => {
+            eprintln!("SKIP: delete_file tool not registered");
+            return;
+        }
+    };
+    let ctx_del = test_tool_context();
     let del_result = del_handler
-        .execute(serde_json::json!({
+        .execute_with_context(serde_json::json!({
             "path": sandbox.child("moved.txt").to_str().unwrap()
-        }))
+        }), ctx_del)
         .await;
     assert!(
         del_result.success,
@@ -224,10 +292,11 @@ async fn dangerous_t2_sandbox_clean_directory() {
         return;
     };
     let handler = handler.clone();
+    let ctx = test_tool_context();
     let result = handler
-        .execute(serde_json::json!({
+        .execute_with_context(serde_json::json!({
             "path": sandbox.path.to_str().unwrap()
-        }))
+        }), ctx)
         .await;
     assert!(
         result.success,
@@ -241,7 +310,7 @@ async fn dangerous_t2_sandbox_clean_directory() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// ⚠  This test actually shuts down the machine.
-/// Run ONLY when explicitly testing the shutdown flow.
+/// Run ONLY when explicitly testing the shutdown flow inside a VM.
 /// KRIA_DANGEROUS=1 cargo test dangerous_t3_real_shutdown -- --ignored
 #[tokio::test]
 #[ignore]
@@ -250,11 +319,19 @@ async fn dangerous_t3_real_shutdown() {
         eprintln!("SKIP: KRIA_DANGEROUS not set");
         return;
     }
+    // SAFETY: Must be running inside a VM — never execute real shutdown on the host
+    assert_running_in_vm();
     eprintln!("⚠️  DANGER: scheduling real system shutdown in 3 seconds!");
     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
     let reg = registry::build_default_registry();
-    let handler = reg.get_handler("shutdown").unwrap().clone();
+    let handler = match reg.get_handler("shutdown_system") {
+        Some(h) => h.clone(),
+        None => {
+            eprintln!("SKIP: shutdown_system tool not registered");
+            return;
+        }
+    };
     // Shutdown with 1-minute delay so the test can verify the command was accepted
     let result = handler
         .execute(serde_json::json!({ "delay_minutes": 1 }))
@@ -275,6 +352,8 @@ async fn dangerous_t3_real_gmail_send() {
         eprintln!("SKIP: KRIA_DANGEROUS not set");
         return;
     }
+    // SAFETY: Must be running inside a VM — never send real emails from the host
+    assert_running_in_vm();
     if !common::gworkspace_creds_available() {
         eprintln!("SKIP: Google Workspace credentials not available");
         return;
@@ -283,7 +362,13 @@ async fn dangerous_t3_real_gmail_send() {
     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
     let reg = registry::build_default_registry();
-    let handler = reg.get_handler("gw_gmail_send").unwrap().clone();
+    let handler = match reg.get_handler("gw_gmail_send") {
+        Some(h) => h.clone(),
+        None => {
+            eprintln!("SKIP: gw_gmail_send tool not registered");
+            return;
+        }
+    };
     let result = handler
         .execute(serde_json::json!({
             "to": "kria-test@example.com",

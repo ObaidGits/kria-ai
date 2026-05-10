@@ -1,4 +1,5 @@
 use super::*;
+use crate::commands::colab::migrate_legacy_colab_server_command;
 
 pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     // Initialize logging first so startup diagnostics are filterable.
@@ -386,9 +387,23 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         kria_core::config::load_mcp_servers(&mut cfg);
         config = cfg;
     }
+    let mut config_dirty = false;
+    for server in config.mcp.servers.iter_mut() {
+        if server.name == COLAB_DEFAULT_SERVER_NAME && migrate_legacy_colab_server_command(server) {
+            tracing::info!(
+                "[MCP] migrated legacy Colab MCP launch config to current uvx --from entrypoint format"
+            );
+            config_dirty = true;
+        }
+    }
     sync_telegram_mcp_server_config(&mut config);
     sync_google_workspace_server_config(&mut config, None);
     apply_google_runtime_env_from_config(&config);
+    if config_dirty {
+        if let Err(error) = config.save() {
+            tracing::warn!(error = %error, "failed to persist migrated MCP config");
+        }
+    }
     let total_servers = config.mcp.servers.len();
     let enabled_servers = config.mcp.servers.iter().filter(|s| s.enabled).count();
     tracing::info!(
@@ -715,6 +730,9 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         },
         colab_server_name.clone(),
     )));
+    let mcp_failure_history = Arc::new(RwLock::new(
+        std::collections::HashMap::<String, Vec<McpFailureRecord>>::new(),
+    ));
     let ironclad_reset = Arc::new(RwLock::new(IroncladResetSnapshot::default()));
     let ironclad_forensic_log = Arc::new(RwLock::new(Vec::<IroncladForensicRecord>::new()));
     let (_, ironclad_system_config) = load_ironclad_system_config_with_path();
@@ -781,6 +799,7 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         mcp_manager: mcp_manager.clone(),
         gw_client_ref: gw_client_ref.clone(),
         colab_runtime: colab_runtime.clone(),
+        mcp_failure_history: mcp_failure_history.clone(),
         ironclad_reset: ironclad_reset.clone(),
         ironclad_forensic_log: ironclad_forensic_log.clone(),
         fleet_runtime: fleet_runtime.clone(),
@@ -1286,7 +1305,7 @@ pub async fn shutdown_runtime(handle: &AppHandle) {
 
     {
         let mut manager = state.mcp_manager.lock().await;
-        manager.stop_all().await;
+        manager.stop_all(&state.tool_registry).await;
     }
 
     if let Err(e) = state.sidecar.shutdown().await {

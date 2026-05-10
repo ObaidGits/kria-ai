@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::HashMap;
 
 /// OnceCell populated by init_runtime() once the full runtime is ready.
 /// Managing this (not AppState) in Tauri allows commands to be registered
@@ -74,6 +75,8 @@ pub struct AppState {
     pub gw_client_ref: gw::GwClientRef,
     /// Colab cloud-tier runtime status surface.
     pub colab_runtime: Arc<RwLock<ColabRuntimeSnapshot>>,
+    /// Rolling MCP runtime failures per connector for operator diagnostics.
+    pub mcp_failure_history: Arc<RwLock<HashMap<String, Vec<McpFailureRecord>>>>,
     /// Latest reset lifecycle snapshot for operator visibility.
     pub ironclad_reset: Arc<RwLock<IroncladResetSnapshot>>,
     /// In-memory rolling forensic audit feed for trust-first diagnostics.
@@ -94,6 +97,13 @@ pub struct AppState {
     /// Image generation orchestrator — ComfyUI sidecar + cloud fallback.
     #[allow(dead_code)]
     pub image_orchestrator: Arc<ImageOrchestrator>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct McpFailureRecord {
+    pub timestamp_unix_ms: u64,
+    pub state: String,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -238,19 +238,33 @@ impl McpServerManager {
         Ok(())
     }
 
-    /// Stop a specific MCP server.
-    pub async fn stop_server(&mut self, name: &str) -> anyhow::Result<()> {
+    fn unregister_server_tools(registry: &ToolRegistry, name: &str) {
+        let category = format!("mcp_{}", name);
+        let removed = registry.unregister_category(&category);
+        if removed > 0 {
+            tracing::info!(
+                server = %name,
+                removed,
+                "unregistered MCP tools for server"
+            );
+        }
+    }
+
+    /// Stop a specific MCP server and remove its registered tools.
+    pub async fn stop_server(&mut self, name: &str, registry: &ToolRegistry) -> anyhow::Result<()> {
         if let Some(client) = self.clients.remove(name) {
             client.stop().await?;
         }
+        Self::unregister_server_tools(registry, name);
+        self.notify_tools_changed();
         Ok(())
     }
 
-    /// Stop all MCP servers.
-    pub async fn stop_all(&mut self) {
+    /// Stop all MCP servers and unregister their tools.
+    pub async fn stop_all(&mut self, registry: &ToolRegistry) {
         let names: Vec<String> = self.clients.keys().cloned().collect();
         for name in names {
-            if let Err(e) = self.stop_server(&name).await {
+            if let Err(e) = self.stop_server(&name, registry).await {
                 tracing::warn!(server = %name, error = %e, "error stopping MCP server");
             }
         }
@@ -341,7 +355,7 @@ impl McpServerManager {
         name: &str,
         registry: &ToolRegistry,
     ) -> anyhow::Result<()> {
-        self.stop_server(name).await?;
+        self.stop_server(name, registry).await?;
         let config = self
             .configs
             .iter()
@@ -394,7 +408,7 @@ impl McpServerManager {
                 .unwrap_or(false);
 
             if !should_run {
-                match self.stop_server(&name).await {
+                match self.stop_server(&name, registry).await {
                     Ok(()) => {
                         self.ping_failures.remove(&name);
                         report.stopped.push(name);
@@ -424,7 +438,7 @@ impl McpServerManager {
                 .unwrap_or(true);
 
             if restart_required {
-                if let Err(e) = self.stop_server(&cfg.name).await {
+                if let Err(e) = self.stop_server(&cfg.name, registry).await {
                     report
                         .errors
                         .push(format!("failed to restart '{}': stop error: {e}", cfg.name));
@@ -451,19 +465,38 @@ impl McpServerManager {
     pub async fn health_check_cycle(&mut self, registry: &ToolRegistry) {
         let names: Vec<String> = self.clients.keys().cloned().collect();
         for name in names {
-            let alive = if let Some(client) = self.clients.get(&name) {
-                if client.state().await == McpServerState::Running {
-                    client.ping().await
-                } else {
-                    false
-                }
-            } else {
+            let Some(client) = self.clients.get(&name) else {
                 continue;
             };
 
+            let state = client.state().await;
+            let alive = if state == McpServerState::Running {
+                client.ping().await
+            } else {
+                false
+            };
+
             if alive {
+                client.clear_error().await;
                 self.ping_failures.remove(&name);
             } else {
+                Self::unregister_server_tools(registry, &name);
+
+                if client.error().await.is_none() {
+                    let state_label = match state {
+                        McpServerState::Running => "running",
+                        McpServerState::Starting => "starting",
+                        McpServerState::Stopped => "stopped",
+                        McpServerState::Error => "error",
+                    };
+                    let msg = if state == McpServerState::Running {
+                        "MCP server ping failed".to_string()
+                    } else {
+                        format!("MCP server is {}", state_label)
+                    };
+                    client.mark_error(msg).await;
+                }
+
                 let count = self.ping_failures.entry(name.clone()).or_insert(0);
                 *count += 1;
                 tracing::warn!(server = %name, failures = *count, "MCP server ping failed");
@@ -622,6 +655,13 @@ impl std::fmt::Debug for McpServerManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tools::registry::ParamDef;
+    use crate::tools::ToolHandler;
+    use async_trait::async_trait;
+
+    struct NoopHandler;
+    #[async_trait]
+    impl ToolHandler for NoopHandler {}
 
     fn cfg(name: &str, enabled: bool, command: &str) -> McpServerConfig {
         McpServerConfig {
@@ -715,5 +755,45 @@ mod tests {
         assert_eq!(report.unchanged, vec!["alpha".to_string()]);
         assert!(report.errors.is_empty());
         assert!(manager.clients.contains_key("alpha"));
+    }
+
+    #[tokio::test]
+    async fn tools_are_unregistered_immediately_when_server_is_disabled_or_stopped() {
+        let baseline = cfg("alpha", true, "same");
+        let mut manager = McpServerManager::new(vec![baseline.clone()]);
+        manager
+            .clients
+            .insert("alpha".into(), Arc::new(McpClient::new("alpha")));
+
+        let registry = ToolRegistry::new();
+        registry.register(
+            ToolDef {
+                name: "mcp_alpha_demo_tool".into(),
+                description: "demo".into(),
+                category: "mcp_alpha".into(),
+                parameters: vec![ParamDef {
+                    name: "arg".into(),
+                    param_type: "string".into(),
+                    description: "arg".into(),
+                    required: false,
+                    default: None,
+                }],
+                default_tier: RiskLevel::Yellow,
+                min_tier: "standard",
+            },
+            Arc::new(NoopHandler),
+        );
+        assert!(registry.get_def("mcp_alpha_demo_tool").is_some());
+
+        let report = manager
+            .reconcile(vec![cfg("alpha", false, "same")], &registry)
+            .await;
+
+        assert!(report.errors.is_empty());
+        assert!(!manager.clients.contains_key("alpha"));
+        assert!(
+            registry.get_def("mcp_alpha_demo_tool").is_none(),
+            "tool should be removed as soon as server is disabled/stopped"
+        );
     }
 }

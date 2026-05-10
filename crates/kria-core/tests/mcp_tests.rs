@@ -6,6 +6,7 @@
 
 use kria_core::config::*;
 use kria_core::mcp::*;
+use kria_core::tools::registry::ToolRegistry;
 use serde_json::json;
 use std::io::Write;
 use tempfile::NamedTempFile;
@@ -375,14 +376,16 @@ mod server_manager {
     #[tokio::test]
     async fn stop_nonexistent_server_succeeds() {
         let mut mgr = McpServerManager::new(vec![]);
+        let registry = ToolRegistry::new();
         // Should not error
-        mgr.stop_server("nonexistent").await.unwrap();
+        mgr.stop_server("nonexistent", &registry).await.unwrap();
     }
 
     #[tokio::test]
     async fn stop_all_on_empty_succeeds() {
         let mut mgr = McpServerManager::new(vec![]);
-        mgr.stop_all().await;
+        let registry = ToolRegistry::new();
+        mgr.stop_all(&registry).await;
     }
 }
 

@@ -77,7 +77,8 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
-    let state = Arc::new(ServerState { config, fleet, executive_sender });
+    let turn_admission = Arc::new(kria_core::agent::TurnAdmission::new());
+    let state = Arc::new(ServerState { config, fleet, executive_sender, turn_admission });
     let app = build_router(state);
 
     tracing::info!("KRIA server listening on {bind_addr}");

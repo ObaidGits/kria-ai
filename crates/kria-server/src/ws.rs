@@ -95,6 +95,19 @@ async fn handle_socket(socket: WebSocket, _state: Arc<ServerState>) {
                                     })),
                                 );
                             }
+                            "cancel" => {
+                                let session_id = val
+                                    .get("session_id")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("ws");
+                                let cancelled = _state.turn_admission.cancel_session(session_id);
+                                let resp = serde_json::json!({
+                                    "type": "cancel_ack",
+                                    "session_id": session_id,
+                                    "cancelled": cancelled,
+                                });
+                                let _ = sender.send(Message::Text(resp.to_string().into())).await;
+                            }
                             "approve" | "deny" => {
                                 // HITL approval/denial
                                 let resp = serde_json::json!({

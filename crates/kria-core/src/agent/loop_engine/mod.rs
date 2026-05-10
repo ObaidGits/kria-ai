@@ -2085,6 +2085,7 @@ impl AgentLoop {
                         "turn_id": turn_id_for_checks,
                     })),
                 );
+                let _ = event_tx.send(StreamEvent::Done("Turn cancelled.".into()));
                 true
             }
         };

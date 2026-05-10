@@ -64,11 +64,19 @@ impl Default for ExecutiveConfig {
 /// Owns the main dispatch loop. Receives `TaskRequest`s via MPSC,
 /// makes scheduling decisions, and dispatches to worker pools.
 /// All I/O happens in spawned workers, never in the dispatch loop.
+/// Internal command sent to the controller's dispatch loop.
+enum ControllerCommand {
+    /// Cancel a task by ID (foreground, background, or queued).
+    CancelTask { task_id: uuid::Uuid },
+}
+
 pub struct ExecutiveController {
     /// Configuration.
     config: ExecutiveConfig,
     /// Ingress channel: receives tasks from all subsystems.
     rx: mpsc::UnboundedReceiver<TaskRequest>,
+    /// Command channel: receives control commands (cancel, etc.).
+    cmd_rx: mpsc::UnboundedReceiver<ControllerCommand>,
     /// Public sender for submitting tasks.
     #[allow(dead_code)]
     tx: mpsc::UnboundedSender<TaskRequest>,
@@ -134,11 +142,13 @@ impl ExecutiveController {
         policy_gate: Arc<dyn PolicyGate>,
     ) -> (Self, ExecutiveSender) {
         let (tx, rx) = mpsc::unbounded_channel();
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let (event_tx, _event_rx) = watch::channel(None);
         let shutdown = CancellationToken::new();
 
         let sender = ExecutiveSender {
             tx: tx.clone(),
+            cmd_tx,
             cancel: shutdown.clone(),
         };
 
@@ -149,6 +159,7 @@ impl ExecutiveController {
         let controller = Self {
             config,
             rx,
+            cmd_rx,
             tx,
             queue: BinaryHeap::new(),
             foreground: None,
@@ -181,6 +192,7 @@ impl ExecutiveController {
             let Self {
                 config: _,
                 rx,
+                cmd_rx,
                 tx: _,
                 queue: _,
                 foreground,
@@ -215,7 +227,12 @@ impl ExecutiveController {
                     self.dispatch(task).await;
                 }
 
-                // 4. Shutdown signal
+                // 4. Receive control commands (cancel, etc.)
+                Some(cmd) = cmd_rx.recv() => {
+                    self.handle_command(cmd);
+                }
+
+                // 5. Shutdown signal
                 _ = shutdown.cancelled() => {
                     tracing::info!("ExecutiveController shutting down");
                     self.graceful_shutdown().await;
@@ -629,6 +646,42 @@ impl ExecutiveController {
         let _ = self.event_tx.send(Some(event));
     }
 
+    /// Handle an internal command (cancel, etc.).
+    fn handle_command(&mut self, cmd: ControllerCommand) {
+        match cmd {
+            ControllerCommand::CancelTask { task_id } => {
+                // Check foreground first
+                if let Some(ref fg) = self.foreground {
+                    if fg.id == task_id {
+                        tracing::info!(task_id = %task_id, "Cancelling foreground task via command");
+                        fg.cancel.cancel();
+                        return;
+                    }
+                }
+
+                // Check queued tasks — remove and cancel matching entry
+                let mut remaining = BinaryHeap::new();
+                while let Some(Reverse(queued)) = self.queue.pop() {
+                    if queued.request.id == task_id {
+                        tracing::info!(task_id = %task_id, "Cancelling queued task via command");
+                        queued.request.cancel.cancel();
+                        // Don't re-insert; task is cancelled
+                    } else {
+                        remaining.push(Reverse(queued));
+                    }
+                }
+                self.queue = remaining;
+
+                // Background tasks are in a JoinSet — we can't cancel by ID
+                // directly, but the task's own CancellationToken was already
+                // cloned into the spawned future. If the caller has access to
+                // the TaskRequest they can cancel via that token; otherwise the
+                // task will complete normally.
+                tracing::debug!(task_id = %task_id, "Cancel command processed (background tasks cancel via their own token)");
+            }
+        }
+    }
+
     /// Graceful shutdown: cancel all tasks, wait briefly, then exit.
     async fn graceful_shutdown(&mut self) {
         // Cancel all background tasks
@@ -654,6 +707,7 @@ impl ExecutiveController {
 #[derive(Clone)]
 pub struct ExecutiveSender {
     tx: mpsc::UnboundedSender<TaskRequest>,
+    cmd_tx: mpsc::UnboundedSender<ControllerCommand>,
     cancel: CancellationToken,
 }
 
@@ -662,6 +716,14 @@ impl ExecutiveSender {
     /// Returns `Err` if the controller has shut down.
     pub fn submit(&self, task: TaskRequest) -> Result<(), TaskRequest> {
         self.tx.send(task).map_err(|e| e.0)
+    }
+
+    /// Request cancellation of a task by ID.
+    /// Returns `Ok(())` even if the task ID is not found (idempotent).
+    pub fn cancel_task(&self, task_id: uuid::Uuid) -> Result<(), String> {
+        self.cmd_tx
+            .send(ControllerCommand::CancelTask { task_id })
+            .map_err(|_| "ExecutiveController has shut down".to_string())
     }
 
     /// Check if the controller is still running.

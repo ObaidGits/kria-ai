@@ -1,0 +1,8 @@
+{
+  "snapshot_id": "b2fcea39-e6eb-4ed1-b15b-4eb7669a1969",
+  "target_instance_id": "kria-test-20260509_153822",
+  "created_unix_ms": 1778341102980,
+  "toolchain_fingerprint": "kria-test",
+  "digest_sha256": "a7660201677a66d5853a1cf6b1bceda0015212c132e9327e18588f4a8b7d9fd9",
+  "baseline_fingerprint": "b83e2176cd434c5e2331e4c73f71a511745401bced94521712ca09368b39efe3"
+}

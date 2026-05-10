@@ -26,14 +26,17 @@ test.describe("Chat Journey", () => {
   });
 
   test("user can send a message and see it appear", async () => {
+    const before = await chatPage.messageCount();
     await chatPage.sendMessage("Hello KRIA!");
+    await chatPage.waitForResponse(15_000);
 
-    // User message should appear in the chat
+    // User + assistant messages should appear in the chat
     const count = await chatPage.messageCount();
-    expect(count).toBeGreaterThanOrEqual(1);
+    expect(count).toBeGreaterThanOrEqual(before + 2);
 
     const lastMsg = await chatPage.getLastMessage();
-    expect(lastMsg).toContain("Hello KRIA!");
+    expect(lastMsg.trim().length).toBeGreaterThan(0);
+    expect(lastMsg).not.toEqual("Hello KRIA!");
   });
 
   test("send button is disabled when input is empty", async () => {

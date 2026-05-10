@@ -28,6 +28,7 @@ async fn build_app_default() -> Router {
         config,
         fleet,
         executive_sender: None,
+        turn_admission: Arc::new(kria_core::agent::TurnAdmission::new()),
     });
     kria_server::build_router(state)
 }
@@ -72,6 +73,7 @@ async fn build_app_executive() -> Router {
         config,
         fleet,
         executive_sender: Some(sender),
+        turn_admission: Arc::new(kria_core::agent::TurnAdmission::new()),
     });
     kria_server::build_router(state)
 }

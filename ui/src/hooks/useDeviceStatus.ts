@@ -106,6 +106,7 @@ export interface DeviceStatusController {
   reconnectNow: () => void;
   start: () => void;
   stop: () => void;
+  removeTarget: (targetId: string) => void;
 }
 
 type DeviceConnectionIssueSource = "sse" | "terminal_ws" | "heartbeat";
@@ -400,6 +401,21 @@ export function useDeviceStatus(options: UseDeviceStatusOptions): DeviceStatusCo
     return now - lastBeat <= healthyWindowMs;
   });
 
+  const removeTarget = (targetId: string) => {
+    setTargetsMap((current) => {
+      if (!current.has(targetId)) {
+        return current;
+      }
+      const next = new Map(current);
+      next.delete(targetId);
+      ringBuffers.delete(targetId);
+      if (focusedTargetId() === targetId) {
+        setFocusedTargetId(null);
+      }
+      return next;
+    });
+  };
+
   const upsertTarget = (targetPatch: Partial<DeviceTargetView> & { targetId: string }) => {
     setTargetsMap((current) => {
       const next = new Map(current);
@@ -411,8 +427,8 @@ export function useDeviceStatus(options: UseDeviceStatusOptions): DeviceStatusCo
         state: normalizeTargetState(targetPatch.state ?? existing?.state ?? "unknown", targetPatch.taintReason ?? existing?.taintReason),
         tainted: targetPatch.tainted ?? existing?.tainted ?? false,
         taintReason: targetPatch.taintReason ?? existing?.taintReason ?? null,
-        healthScore: targetPatch.healthScore ?? existing?.healthScore ?? 0,
-        latencyEwmaMs: targetPatch.latencyEwmaMs ?? existing?.latencyEwmaMs ?? 0,
+        healthScore: targetPatch.healthScore ?? existing?.healthScore ?? 1,
+        latencyEwmaMs: targetPatch.latencyEwmaMs ?? existing?.latencyEwmaMs ?? 50,
         recentFailureRate: targetPatch.recentFailureRate ?? existing?.recentFailureRate ?? 0,
         dockerHealth: targetPatch.dockerHealth ?? existing?.dockerHealth ?? "unknown",
         dockerPassCount: targetPatch.dockerPassCount ?? existing?.dockerPassCount ?? 0,
@@ -616,6 +632,14 @@ export function useDeviceStatus(options: UseDeviceStatusOptions): DeviceStatusCo
         if (started) {
           connectFocusedTerminalWs();
         }
+      }
+      return;
+    }
+
+    if (eventType === "targetremoved" || eventType === "target_removed") {
+      const targetId = asString(payload.target_id) ?? asString(payload.targetId);
+      if (targetId) {
+        removeTarget(targetId);
       }
       return;
     }
@@ -1133,5 +1157,6 @@ export function useDeviceStatus(options: UseDeviceStatusOptions): DeviceStatusCo
     reconnectNow,
     start,
     stop,
+    removeTarget,
   };
 }

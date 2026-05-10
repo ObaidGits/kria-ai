@@ -28,6 +28,7 @@ pub fn api_routes() -> Router<Arc<ServerState>> {
         .route("/api/fleet/terminal", get(fleet_terminal_ws))
         .route("/api/fleet/leases/{lease_id}/heartbeat", post(fleet_lease_heartbeat))
         .route("/api/fleet/docker-evals", post(fleet_docker_evals))
+        .route("/api/sessions/{session_id}/cancel", post(cancel_session))
 }
 
 async fn health() -> Json<serde_json::Value> {
@@ -165,6 +166,32 @@ async fn update_settings(
 ) -> Json<serde_json::Value> {
     // In production: validate and persist to config file
     Json(serde_json::json!({ "status": "updated" }))
+}
+
+/// POST /api/sessions/{session_id}/cancel
+///
+/// Cancel the active turn for a session. Safe to call even when no turn is
+/// active (returns 200 with `"cancelled": false`).
+async fn cancel_session(
+    State(state): State<Arc<ServerState>>,
+    Path(session_id): Path<String>,
+) -> Json<serde_json::Value> {
+    let cancelled = state.turn_admission.cancel_session(&session_id);
+
+    if cancelled {
+        log_pipeline_step(
+            &session_id,
+            "server_session_cancelled",
+            "Session cancelled via HTTP endpoint",
+            None,
+        );
+    }
+
+    Json(serde_json::json!({
+        "status": "ok",
+        "session_id": session_id,
+        "cancelled": cancelled,
+    }))
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -467,7 +494,8 @@ fn event_matches_lease(event: &ControlPlaneEvent, lease_id: Uuid) -> bool {
         | ControlPlaneEvent::TerminalGap { .. }
         | ControlPlaneEvent::ClockDrift { .. }
         | ControlPlaneEvent::FleetAlert { lease_id: None, .. }
-        | ControlPlaneEvent::TerminalLine { lease_id: None, .. } => true,
+        | ControlPlaneEvent::TerminalLine { lease_id: None, .. }
+        | ControlPlaneEvent::TargetRemoved { .. } => true,
     }
 }
 
@@ -484,6 +512,7 @@ fn event_matches_target(event: &ControlPlaneEvent, target_id: Uuid) -> bool {
         ControlPlaneEvent::FleetAlert {
             target_id: None, ..
         } => false,
+        ControlPlaneEvent::TargetRemoved { target_id: id } => *id == target_id,
     }
 }
 

@@ -92,7 +92,7 @@ cargo test -p kria-server --test integration_ws
 
 ```bash
 KRIA_REAL_LLM=1 cargo test -p kria-core --test quality_hallucination_tests
-# Quality report is written to: target/quality-report.json
+# Quality report is written to: tests-logs/quality-report.json
 ```
 
 ### Run live voice tests
@@ -146,6 +146,8 @@ npx playwright show-report
 | **Real LLM** | `KRIA_REAL_LLM=1 cargo test --test quality_hallucination_tests` | Quality/hallucination golden set via local Phi-4-mini |
 | **Live Voice** | `KRIA_VOICE_LIVE=1 cargo test --test voice_live_tests -- --test-threads=1` | Wake-word, barge-in, VAD, PTT, emergency stop |
 | **Dangerous** | `KRIA_DANGEROUS=1 cargo test --test dangerous_live_tests -- --ignored` | Real shutdown / Gmail send / git push to main |
+| **Runner Full** | `cargo kria-test --mode FULL` | UI preflight + infra + app + smoke + cognitive + quality |
+| **Runner Release** | `scripts/run_release_test_gate.sh` | Production gate profile with strict thresholds + behavior goldens |
 
 ---
 
@@ -181,6 +183,13 @@ All tests are fully idempotent:
 | `KRIA_WS_URL` | `ws://127.0.0.1:8088/ws` | WebSocket URL for WS tests |
 | `KRIA_UI_URL` | `http://localhost:5173` | Frontend URL for browser E2E tests |
 | `KRIA_REAL_LLM` | unset | Set to `1` to enable quality/hallucination tests |
+| `KRIA_QUALITY_STRICT_API` | `1` (runner quality gate) | Fail quality tests if `/api/chat` is unavailable |
+| `KRIA_BEHAVIOR_GOLDEN` | unset | Set to `1` to enable behavior golden tests against live API |
+| `KRIA_COGNITIVE_MIN_MAIN` | `70` | Min score (%) for `TestPrompts.txt` cognitive matrix |
+| `KRIA_COGNITIVE_MIN_VM` | `95` | Min score (%) for `VMTestPrompts.txt` cognitive matrix |
+| `KRIA_COGNITIVE_MIN_AGGREGATE` | `78` | Min aggregate cognitive score (%) |
+| `KRIA_REQUIRE_REPORTS` | unset | Set to `1` to require report contract tests to find artifacts |
+| `KRIA_TREND_COGNITIVE_FLOOR` | `60` | Min cognitive trend floor (%) in report contract tests |
 | `KRIA_VOICE_LIVE` | unset | Set to `1` to enable live voice tests |
 | `KRIA_DANGEROUS` | unset | Set to `1` to enable Tier-3 destructive tests (use `--ignored`) |
 

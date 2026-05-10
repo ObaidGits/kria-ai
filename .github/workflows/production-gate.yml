@@ -1,0 +1,54 @@
+name: Production Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      destructive:
+        description: "Enable destructive VM tests"
+        required: true
+        default: "true"
+      snapshot:
+        description: "Enable snapshot hooks"
+        required: true
+        default: "true"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release-gate:
+    name: "Release Gate (RELEASE mode)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+            libssl-dev libasound2-dev pkg-config
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run release gate script
+        env:
+          KRIA_TEST_ALLOW_DESTRUCTIVE: ${{ github.event.inputs.destructive == 'true' && '1' || '0' }}
+          KRIA_TEST_SNAPSHOT: ${{ github.event.inputs.snapshot == 'true' && '1' || '0' }}
+          KRIA_REAL_LLM: "1"
+          KRIA_QUALITY_STRICT_API: "1"
+          KRIA_BEHAVIOR_GOLDEN: "1"
+        run: |
+          bash scripts/run_release_test_gate.sh
+
+      - name: Upload tests-logs artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tests-logs
+          path: tests-logs/
+

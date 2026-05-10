@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
 
-use super::client::McpClient;
+use super::client::{McpClient, McpServerState};
 use super::protocol::ToolCallResult;
 use crate::infra::ToolResult;
 use crate::tools::ToolHandler;
@@ -98,6 +98,17 @@ impl McpToolHandler {
 #[async_trait]
 impl ToolHandler for McpToolHandler {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let state = self.client.state().await;
+        if state != McpServerState::Running {
+            let fallback = format!("MCP server '{}' is not running", self.server_name);
+            let msg = self.client.error().await.unwrap_or(fallback);
+            return ToolResult {
+                success: false,
+                data: serde_json::Value::Null,
+                error: Some(msg),
+            };
+        }
+
         let original_arguments = normalize_arguments(params);
         let (arguments, injected_account) = inject_gworkspace_account(
             &self.server_name,

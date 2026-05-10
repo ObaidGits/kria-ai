@@ -21,6 +21,9 @@ export interface DeviceMatrixProps {
   onReconnectStreams: () => void;
   onFocusTerminal: (targetId: string | null) => void;
   onRunDockerEvals: (targetId: string) => Promise<void> | void;
+  onDeleteTarget: (targetId: string) => void;
+  onEditTarget: (target: DeviceTargetView) => void;
+  deletingTargetIds?: Set<string>;
   dockerActionDisabled?: boolean;
   title?: string;
   class?: string;
@@ -44,8 +47,10 @@ function formatAgo(unixMs: number | null): string {
 }
 
 function healthPct(target: DeviceTargetView): number {
-  const score = Math.max(0, Math.min(1, target.healthScore));
-  const penalty = Math.max(0, Math.min(1, target.recentFailureRate));
+  const rawScore = target?.healthScore;
+  const score = Math.max(0, Math.min(1, typeof rawScore === 'number' && !isNaN(rawScore) && rawScore > 0 ? rawScore : 1));
+  const failureRate = target?.recentFailureRate ?? 0;
+  const penalty = Math.max(0, Math.min(1, failureRate));
   const adjusted = Math.max(0, score * (1 - penalty * 0.5));
   return Math.round(adjusted * 100);
 }
@@ -236,6 +241,30 @@ const DeviceMatrix: Component<DeviceMatrixProps> = (props) => {
                             }}
                           >
                             {props.focusedTerminalTargetId === target.targetId ? "Hide Terminal" : "Open Terminal"}
+                          </button>
+                          <button
+                            class="btn-secondary fleet-action-btn fleet-action-edit"
+                            title="Edit target settings"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              props.onEditTarget(target);
+                            }}
+                          >
+                            ✏️
+                          </button>
+                          <button
+                            class="btn-secondary fleet-action-btn fleet-action-delete"
+                            title="Delete this target"
+                            disabled={props.deletingTargetIds?.has(target.targetId)}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              if (props.deletingTargetIds?.has(target.targetId)) return;
+                              if (confirm(`Delete "${target.displayName}"? This will remove it from your fleet.`)) {
+                                props.onDeleteTarget(target.targetId);
+                              }
+                            }}
+                          >
+                            {props.deletingTargetIds?.has(target.targetId) ? "⏳" : "🗑️"}
                           </button>
                         </td>
                       </tr>
