@@ -72,21 +72,11 @@
 
 ## Structure Change Watch
 <!-- AI-CONTEXT:START generated-change-watch -->
-- Last checked: 2026-05-11 13:47 UTC
-- Commit: `55bb04a50c32`
+- Last checked: 2026-05-11 14:21 UTC
+- Commit: `cff202237482`
 - Reason: structural changes.
-- `Cargo.toml` changed; review stable summary only if its public role changed.
-- `crates/kria-core/src/agent/ml_orchestrator/async_wrapper.rs` added; include only if it becomes an important navigation point.
-- `crates/kria-core/src/agent/ml_orchestrator/code_gate.rs` added; include only if it becomes an important navigation point.
-- `crates/kria-core/src/agent/ml_orchestrator/helpers_template.rs` added; include only if it becomes an important navigation point.
-- `crates/kria-core/src/agent/ml_orchestrator/integrity.rs` added; include only if it becomes an important navigation point.
-- `crates/kria-core/src/agent/ml_orchestrator/ledger.rs` added; include only if it becomes an important navigation point.
-- `crates/kria-core/src/agent/ml_orchestrator/mod.rs` added; include only if it becomes an important navigation point.
-- `crates/kria-core/src/agent/ml_orchestrator/plan_parser.rs` added; include only if it becomes an important navigation point.
-- `crates/kria-core/src/agent/ml_orchestrator/poller.rs` added; include only if it becomes an important navigation point.
-- `crates/kria-core/src/agent/ml_orchestrator/sync_cell.rs` added; include only if it becomes an important navigation point.
-- `crates/kria-core/src/agent/ml_orchestrator/types.rs` added; include only if it becomes an important navigation point.
 - `crates/kria-core/src/config.rs` changed; review stable summary only if its public role changed.
-- 28 more relevant files omitted for brevity.
+- `crates/kria-core/src/lib.rs` changed; review stable summary only if its public role changed.
+- `crates/kria-server/src/main.rs` changed; review stable summary only if its public role changed.
 - Next action: Use `ai-context/prompts/update_map.txt` only if stable structure changed.
 <!-- AI-CONTEXT:END generated-change-watch -->

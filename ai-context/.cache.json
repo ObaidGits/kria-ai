@@ -1,4 +1,8 @@
 {
-  "last_checked_utc": "2026-05-11T14:03:33.964548+00:00",
-  "last_processed_commit": "f730e25877d0f47f974dcae410d272ce852f4921"
+  "last_checked_utc": "2026-05-11T14:21:02.382571+00:00",
+  "last_processed_commit": "cff202237482ecf025990fac70b82f05bfb16179",
+  "updated_docs": [
+    "CODEBASE_MAP.md",
+    "COMMON_FLOWS.md"
+  ]
 }
