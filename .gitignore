@@ -85,12 +85,7 @@ data/logs/
 test.png
 *.snap.new
 
-# ── AI Context (generated) ───────────────────────────────────────
-/ai-context/
-
 # ── Graphify artifacts (generated) ───────────────────────────────
-/graphify-out/
-/.graphify/
 /.graphify-cache/
 /.graphify-tmp/
 

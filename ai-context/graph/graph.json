@@ -1,0 +1,565 @@
+{
+  "nodes": [
+    {
+      "id": "system.kria",
+      "type": "system",
+      "description": "Local-first desktop AI assistant with chat, voice, tools, memory, and OS integrations.",
+      "importance": "high"
+    },
+    {
+      "id": "module.desktop_runtime",
+      "type": "module",
+      "description": "Primary Tauri runtime host that wires core services and UI events.",
+      "importance": "high"
+    },
+    {
+      "id": "module.kria_core",
+      "type": "module",
+      "description": "Main Rust library containing agent, tools, safety, LLM, memory, routing, sidecar, MCP, image, and voice logic.",
+      "importance": "high"
+    },
+    {
+      "id": "module.ui",
+      "type": "module",
+      "description": "SolidJS frontend using Tauri invokes and event listeners.",
+      "importance": "high"
+    },
+    {
+      "id": "module.server",
+      "type": "module",
+      "description": "Secondary Axum API/WebSocket surface; chat route is currently a stub.",
+      "importance": "medium"
+    },
+    {
+      "id": "module.python_sidecar",
+      "type": "module",
+      "description": "Python JSON-RPC processor process for image, document, code, web, audio, embeddings, news, and Google helpers.",
+      "importance": "high"
+    },
+    {
+      "id": "module.agent",
+      "type": "module",
+      "description": "User-turn orchestration, routing, streaming, parsing, tool execution, and cancellation.",
+      "importance": "high"
+    },
+    {
+      "id": "module.routing",
+      "type": "module",
+      "description": "Semantic and lexical router that narrows domains and tool schemas per turn.",
+      "importance": "high"
+    },
+    {
+      "id": "module.tools",
+      "type": "module",
+      "description": "Tool definitions, handlers, registry, sidecar tools, image tools, Google Workspace tools, and MCP-backed tools.",
+      "importance": "high"
+    },
+    {
+      "id": "module.safety",
+      "type": "module",
+      "description": "Risk policy, HITL approval, audit logging, rollback snapshots, blacklist, and PIN guard.",
+      "importance": "high"
+    },
+    {
+      "id": "module.llm",
+      "type": "module",
+      "description": "Model router, local/cloud backend abstraction, token/context helpers, and local orchestration.",
+      "importance": "high"
+    },
+    {
+      "id": "module.llm_orchestrator",
+      "type": "module",
+      "description": "Hardware-aware llama-server lifecycle, telemetry, watchdog, thresholds, vision strategy, and VRAM budgeting.",
+      "importance": "high"
+    },
+    {
+      "id": "module.memory",
+      "type": "module",
+      "description": "SQLite conversations, preferences, media, facts, documents, RAG, embeddings, and vector index.",
+      "importance": "high"
+    },
+    {
+      "id": "module.voice",
+      "type": "module",
+      "description": "Legacy voice pipeline plus v2 streaming voice architecture.",
+      "importance": "medium"
+    },
+    {
+      "id": "module.image",
+      "type": "module",
+      "description": "Image message handling, vision paths, and image generation orchestration.",
+      "importance": "medium"
+    },
+    {
+      "id": "module.mcp",
+      "type": "module",
+      "description": "External MCP server lifecycle and tool bridge into KRIA tools.",
+      "importance": "medium"
+    },
+    {
+      "id": "module.platform",
+      "type": "module",
+      "description": "OS detection, paths, intents, sandboxing, inbox, Telegram bridge, and platform utilities.",
+      "importance": "medium"
+    },
+    {
+      "id": "module.config",
+      "type": "module",
+      "description": "Config schema, loading, saving, path resolution, hardware/model/orchestrator settings.",
+      "importance": "high"
+    },
+    {
+      "id": "module.infra",
+      "type": "module",
+      "description": "Health registry, logging, event bus, hardware profiling, supervisor, and pipeline tracing.",
+      "importance": "medium"
+    },
+    {
+      "id": "file.desktop_commands",
+      "type": "file",
+      "description": "Tauri command/runtime integration layer and AppState composition.",
+      "importance": "high"
+    },
+    {
+      "id": "file.ui_store",
+      "type": "file",
+      "description": "Central UI state, Tauri invokes, and backend event listeners.",
+      "importance": "high"
+    },
+    {
+      "id": "file.agent_loop",
+      "type": "file",
+      "description": "Main agent turn loop and stream event producer.",
+      "importance": "high"
+    },
+    {
+      "id": "file.tool_registry",
+      "type": "file",
+      "description": "Central registry for tool schemas and handlers.",
+      "importance": "high"
+    },
+    {
+      "id": "file.safety_policy",
+      "type": "file",
+      "description": "Risk tiers and approval/blocking decisions for tool actions.",
+      "importance": "high"
+    },
+    {
+      "id": "file.sidecar_bridge_rs",
+      "type": "file",
+      "description": "Rust-side process manager and JSON-RPC client for Python sidecar.",
+      "importance": "high"
+    },
+    {
+      "id": "file.sidecar_bridge_py",
+      "type": "file",
+      "description": "Python JSON-RPC stdio dispatcher and processor registry.",
+      "importance": "high"
+    },
+    {
+      "id": "file.model_router",
+      "type": "file",
+      "description": "Dispatches LLM requests across local/cloud/external backends.",
+      "importance": "high"
+    },
+    {
+      "id": "file.orchestrator_mod",
+      "type": "file",
+      "description": "Top-level local llama-server orchestrator wiring telemetry, watchdog, and server manager.",
+      "importance": "high"
+    },
+    {
+      "id": "flow.desktop_startup",
+      "type": "flow",
+      "description": "Tauri startup initializes runtime state, services, tools, sidecar, voice, MCP, and orchestrator.",
+      "importance": "high"
+    },
+    {
+      "id": "flow.ui_chat",
+      "type": "flow",
+      "description": "UI message invoke enters desktop command layer, runs AgentLoop, and streams events back.",
+      "importance": "high"
+    },
+    {
+      "id": "flow.routing_context",
+      "type": "flow",
+      "description": "Agent narrows route/tool schema context and trims/shapes messages for token budgets.",
+      "importance": "high"
+    },
+    {
+      "id": "flow.tool_execution",
+      "type": "flow",
+      "description": "Agent parses tool calls, applies policy/HITL, executes handlers, audits, and returns shaped results.",
+      "importance": "high"
+    },
+    {
+      "id": "flow.model_orchestration",
+      "type": "flow",
+      "description": "Desktop config/hardware selection starts and monitors local llama-server.",
+      "importance": "high"
+    },
+    {
+      "id": "flow.sidecar_processing",
+      "type": "flow",
+      "description": "Rust sidecar bridge spawns Python dispatcher and calls processor methods via JSON-RPC.",
+      "importance": "medium"
+    },
+    {
+      "id": "flow.voice_to_chat",
+      "type": "flow",
+      "description": "Voice pipeline emits transcript state and can feed recognized text into agent chat.",
+      "importance": "medium"
+    },
+    {
+      "id": "flow.image_generation",
+      "type": "flow",
+      "description": "Image upload/generation stores media, invokes model/tool paths, and emits image progress events.",
+      "importance": "medium"
+    },
+    {
+      "id": "flow.mcp_tool",
+      "type": "flow",
+      "description": "Configured MCP servers expose capabilities that are bridged into ToolRegistry.",
+      "importance": "medium"
+    },
+    {
+      "id": "flow.server_api",
+      "type": "flow",
+      "description": "Axum server exposes basic API/WebSocket routes; chat is not full AgentLoop runtime.",
+      "importance": "low"
+    }
+  ],
+  "edges": [
+    {
+      "from": "system.kria",
+      "to": "module.desktop_runtime",
+      "type": "depends_on",
+      "confidence": "high"
+    },
+    {
+      "from": "system.kria",
+      "to": "module.kria_core",
+      "type": "depends_on",
+      "confidence": "high"
+    },
+    {
+      "from": "module.desktop_runtime",
+      "to": "module.kria_core",
+      "type": "depends_on",
+      "confidence": "high"
+    },
+    {
+      "from": "module.desktop_runtime",
+      "to": "module.ui",
+      "type": "communicates_with",
+      "confidence": "high"
+    },
+    {
+      "from": "module.ui",
+      "to": "file.ui_store",
+      "type": "depends_on",
+      "confidence": "high"
+    },
+    {
+      "from": "module.desktop_runtime",
+      "to": "file.desktop_commands",
+      "type": "depends_on",
+      "confidence": "high"
+    },
+    {
+      "from": "file.desktop_commands",
+      "to": "module.config",
+      "type": "uses",
+      "confidence": "high"
+    },
+    {
+      "from": "file.desktop_commands",
+      "to": "module.memory",
+      "type": "uses",
+      "confidence": "high"
+    },
+    {
+      "from": "file.desktop_commands",
+      "to": "module.tools",
+      "type": "uses",
+      "confidence": "high"
+    },
+    {
+      "from": "file.desktop_commands",
+      "to": "module.safety",
+      "type": "uses",
+      "confidence": "high"
+    },
+    {
+      "from": "file.desktop_commands",
+      "to": "module.llm_orchestrator",
+      "type": "uses",
+      "confidence": "high"
+    },
+    {
+      "from": "file.desktop_commands",
+      "to": "module.voice",
+      "type": "uses",
+      "confidence": "high"
+    },
+    {
+      "from": "file.desktop_commands",
+      "to": "module.mcp",
+      "type": "uses",
+      "confidence": "high"
+    },
+    {
+      "from": "file.desktop_commands",
+      "to": "module.infra",
+      "type": "uses",
+      "confidence": "high"
+    },
+    {
+      "from": "module.agent",
+      "to": "file.agent_loop",
+      "type": "depends_on",
+      "confidence": "high"
+    },
+    {
+      "from": "file.agent_loop",
+      "to": "module.routing",
+      "type": "uses",
+      "confidence": "high"
+    },
+    {
+      "from": "file.agent_loop",
+      "to": "module.llm",
+      "type": "uses",
+      "confidence": "high"
+    },
+    {
+      "from": "file.agent_loop",
+      "to": "module.tools",
+      "type": "uses",
+      "confidence": "high"
+    },
+    {
+      "from": "file.agent_loop",
+      "to": "module.safety",
+      "type": "uses",
+      "confidence": "high"
+    },
+    {
+      "from": "file.agent_loop",
+      "to": "module.memory",
+      "type": "uses",
+      "confidence": "medium"
+    },
+    {
+      "from": "module.tools",
+      "to": "file.tool_registry",
+      "type": "depends_on",
+      "confidence": "high"
+    },
+    {
+      "from": "module.safety",
+      "to": "file.safety_policy",
+      "type": "depends_on",
+      "confidence": "high"
+    },
+    {
+      "from": "module.llm",
+      "to": "file.model_router",
+      "type": "depends_on",
+      "confidence": "high"
+    },
+    {
+      "from": "module.llm",
+      "to": "module.llm_orchestrator",
+      "type": "uses",
+      "confidence": "medium"
+    },
+    {
+      "from": "module.llm_orchestrator",
+      "to": "file.orchestrator_mod",
+      "type": "depends_on",
+      "confidence": "high"
+    },
+    {
+      "from": "module.llm_orchestrator",
+      "to": "file.model_router",
+      "type": "communicates_with",
+      "confidence": "medium"
+    },
+    {
+      "from": "module.tools",
+      "to": "module.python_sidecar",
+      "type": "uses",
+      "confidence": "high"
+    },
+    {
+      "from": "module.tools",
+      "to": "module.image",
+      "type": "uses",
+      "confidence": "high"
+    },
+    {
+      "from": "module.tools",
+      "to": "module.mcp",
+      "type": "uses",
+      "confidence": "high"
+    },
+    {
+      "from": "module.tools",
+      "to": "module.platform",
+      "type": "uses",
+      "confidence": "medium"
+    },
+    {
+      "from": "module.python_sidecar",
+      "to": "file.sidecar_bridge_rs",
+      "type": "communicates_with",
+      "confidence": "high"
+    },
+    {
+      "from": "file.sidecar_bridge_rs",
+      "to": "file.sidecar_bridge_py",
+      "type": "communicates_with",
+      "confidence": "high"
+    },
+    {
+      "from": "module.server",
+      "to": "module.kria_core",
+      "type": "depends_on",
+      "confidence": "high"
+    },
+    {
+      "from": "module.server",
+      "to": "module.agent",
+      "type": "depends_on",
+      "confidence": "low"
+    },
+    {
+      "from": "flow.desktop_startup",
+      "to": "module.desktop_runtime",
+      "type": "flows_to",
+      "confidence": "high"
+    },
+    {
+      "from": "flow.desktop_startup",
+      "to": "file.desktop_commands",
+      "type": "flows_to",
+      "confidence": "high"
+    },
+    {
+      "from": "flow.ui_chat",
+      "to": "module.ui",
+      "type": "flows_to",
+      "confidence": "high"
+    },
+    {
+      "from": "flow.ui_chat",
+      "to": "file.desktop_commands",
+      "type": "flows_to",
+      "confidence": "high"
+    },
+    {
+      "from": "flow.ui_chat",
+      "to": "file.agent_loop",
+      "type": "flows_to",
+      "confidence": "high"
+    },
+    {
+      "from": "flow.routing_context",
+      "to": "module.routing",
+      "type": "flows_to",
+      "confidence": "high"
+    },
+    {
+      "from": "flow.routing_context",
+      "to": "file.agent_loop",
+      "type": "flows_to",
+      "confidence": "high"
+    },
+    {
+      "from": "flow.tool_execution",
+      "to": "file.agent_loop",
+      "type": "flows_to",
+      "confidence": "high"
+    },
+    {
+      "from": "flow.tool_execution",
+      "to": "file.tool_registry",
+      "type": "flows_to",
+      "confidence": "high"
+    },
+    {
+      "from": "flow.tool_execution",
+      "to": "file.safety_policy",
+      "type": "flows_to",
+      "confidence": "high"
+    },
+    {
+      "from": "flow.model_orchestration",
+      "to": "module.llm_orchestrator",
+      "type": "flows_to",
+      "confidence": "high"
+    },
+    {
+      "from": "flow.model_orchestration",
+      "to": "file.orchestrator_mod",
+      "type": "flows_to",
+      "confidence": "high"
+    },
+    {
+      "from": "flow.sidecar_processing",
+      "to": "file.sidecar_bridge_rs",
+      "type": "flows_to",
+      "confidence": "high"
+    },
+    {
+      "from": "flow.sidecar_processing",
+      "to": "file.sidecar_bridge_py",
+      "type": "flows_to",
+      "confidence": "high"
+    },
+    {
+      "from": "flow.voice_to_chat",
+      "to": "module.voice",
+      "type": "flows_to",
+      "confidence": "high"
+    },
+    {
+      "from": "flow.voice_to_chat",
+      "to": "module.agent",
+      "type": "flows_to",
+      "confidence": "medium"
+    },
+    {
+      "from": "flow.image_generation",
+      "to": "module.image",
+      "type": "flows_to",
+      "confidence": "high"
+    },
+    {
+      "from": "flow.image_generation",
+      "to": "module.tools",
+      "type": "flows_to",
+      "confidence": "high"
+    },
+    {
+      "from": "flow.mcp_tool",
+      "to": "module.mcp",
+      "type": "flows_to",
+      "confidence": "high"
+    },
+    {
+      "from": "flow.mcp_tool",
+      "to": "file.tool_registry",
+      "type": "flows_to",
+      "confidence": "high"
+    },
+    {
+      "from": "flow.server_api",
+      "to": "module.server",
+      "type": "flows_to",
+      "confidence": "high"
+    }
+  ]
+}
+

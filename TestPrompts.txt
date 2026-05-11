@@ -1807,7 +1807,222 @@ PromptOptimizer no variant for domain Explore: create new variant with default t
 Uncertainty confidence below ask_threshold  Ask user for clarification before acting.
 WorldModel schema mismatch            Log warning; ignore stale entry; continue.
 
+────────────────────────────────────────────────────────────────────────────────
+  SECTION 27 — OPENCLAW SKILL SUBSTRATE
+────────────────────────────────────────────────────────────────────────────────
+TOOL PATH: invoke_skill, clawhub_fetch_remote_skills, clawhub_install_skill
+
+  🔧 SKILL   — OpenClaw skill executed in sandboxed Docker container
+  📦 POOL    — Container pool state change (acquire/release/warm)
+  🛡️ TRUST   — Trust tier check (Community/Verified/Partner/Internal)
+  📋 AUDIT   — Audit ledger entry recorded with HMAC signature
+
+[OPENCLAW-01] Prompt : "Browse available skills on ClawHub"
+              Tool   : clawhub_fetch_remote_skills
+              EXPECTED: ✅ GREEN — List of skills from ClawHub registry.
+                        Each skill shows: name, description, trust_tier, capabilities.
+                        UI: SkillMarketplace component renders skill cards.
+              Notes  : Fetches from GitHub registry URL configured in openclaw.clawhub_url.
+
+[OPENCLAW-02] Prompt : "Install the PDF analyzer skill"
+              Tool   : clawhub_install_skill
+              EXPECTED: 📦 POOL + 🛡️ TRUST —
+                        1. Download skill manifest from ClawHub.
+                        2. Validate capabilities against approved_capabilities config.
+                        3. Check trust tier (Community → requires HITL if strict mode).
+                        4. Install to local skill registry (SQLite).
+                        5. Emit SkillInstalled event to UI.
+              Notes  : If skill requests unapproved capabilities, install is blocked.
+
+[OPENCLAW-03] Prompt : "Use PDF analyzer to summarize this document"
+              Tool   : invoke_skill (skill_id: "pdf-analyzer")
+              EXPECTED: 🔧 SKILL + 📦 POOL + 📋 AUDIT —
+                        1. CapabilityResolver matches request to skill.
+                        2. ContainerPool.acquire() gets warm container.
+                        3. Skill executed in isolated Docker container.
+                        4. AuditLedger records invocation with HMAC.
+                        5. Container returned to pool (not killed).
+                        Response: "PDF summary: [summary text]"
+              Notes  : Container pool maintains warm containers for <100ms latency.
+
+[OPENCLAW-04] Prompt : "What skills do I have installed?"
+              Tool   : list_installed_skills
+              EXPECTED: ✅ GREEN — List of installed skills with:
+                        - name, version, trust_tier, capabilities, installed_at
+              Notes  : Reads from openclaw.db SQLite.
+
+[OPENCLAW-05] Prompt : "Uninstall the PDF analyzer skill"
+              Tool   : uninstall_skill
+              EXPECTED: ✅ GREEN — Skill removed from registry.
+                        No active containers using this skill are affected.
+                        Future invocations fail with "Skill not found."
+
+[OPENCLAW-06] Prompt : "Check container pool status"
+              Tool   : get_substrate_status
+              EXPECTED: ✅ GREEN — Pool status:
+                        - warm_containers: N
+                        - max_containers: M
+                        - state: Running/Idle/Stopped
+              Notes  : UI: SubstrateStatus component shows pool health.
+
+[OPENCLAW-07] Prompt : "Run a skill that accesses the network"
+              Tool   : invoke_skill (skill with network capability)
+              EXPECTED: 🛡️ TRUST —
+                        If skill trust_tier == Community:
+                          - HITL approval required for network access.
+                        If skill trust_tier == Verified/Partner:
+                          - Auto-approved if network in approved_capabilities.
+              Notes  : Capability isolation enforced by Docker network policy.
+
+[OPENCLAW-08] Prompt : "Run a skill that writes to filesystem"
+              Tool   : invoke_skill (skill with filesystem_write capability)
+              EXPECTED: 🛡️ TRUST + 🔒 PIN —
+                        Filesystem write is high-risk.
+                        Even Verified skills require PIN for destructive writes.
+                        Container filesystem is isolated; host access requires mount.
+
+[OPENCLAW-09] Prompt : "Show skill invocation audit log"
+              Tool   : get_skill_audit_log
+              EXPECTED: ✅ GREEN — Audit entries with:
+                        - timestamp, skill_name, action, params_hash
+                        - result_hash, hmac_signature
+              Notes  : HMAC signature ensures tamper-proof audit trail.
+
+[OPENCLAW-10] Prompt : "Emergency stop all skill containers"
+              Tool   : shutdown_substrate
+              EXPECTED: 📦 POOL — All containers killed immediately.
+                        Pool state: Stopped.
+                        Audit: EmergencyShutdown event logged.
+              Notes  : Called automatically on app shutdown via shutdown_runtime.
+
+────────────────────────────────────────────────────────────────────────────────
+  27A — OPENCLAW TRUST TIER TESTS
+────────────────────────────────────────────────────────────────────────────────
+
+[TRUST-01] Prompt : Install Community-tier skill with subprocess capability
+            EXPECTED: 🛡️ TRUST — HITL approval required.
+                      "This skill can run subprocesses. Approve?"
+            Notes  : Community tier = unverified, requires explicit approval.
+
+[TRUST-02] Prompt : Install Verified-tier skill with network capability
+            EXPECTED: ✅ GREEN — Auto-approved if network in approved_capabilities.
+                      No HITL required for Verified tier.
+            Notes  : Verified tier = reviewed by KRIA team.
+
+[TRUST-03] Prompt : Install Partner-tier skill with filesystem_write
+            EXPECTED: ✅ GREEN — Auto-approved for Partner tier.
+                      Trust tier overrides capability risk for trusted partners.
+            Notes  : Partner tier = official integration partner.
+
+[TRUST-04] Prompt : Install skill requesting unapproved capability (any tier)
+            EXPECTED: ❌ BLOCK — "Skill requests 'browser' capability."
+                      "Browser is not in your approved capabilities list."
+                      "Add to approved_capabilities in config to allow."
+            Notes  : Hard block regardless of trust tier.
+
+────────────────────────────────────────────────────────────────────────────────
+  27B — OPENCLAW CONTAINER POOL TESTS
+────────────────────────────────────────────────────────────────────────────────
+
+[POOL-01] Test : Container pool warming on startup
+            EXPECTED: 📦 POOL — On app start:
+                      - Pool initializes with min_warm_containers (default: 2).
+                      - Containers run openclaw-substrate Docker image.
+                      - Health check confirms containers are ready.
+            Notes  : Warm containers enable <100ms skill invocation latency.
+
+[POOL-02] Test : Container acquisition and release
+            EXPECTED: 📦 POOL —
+                      1. invoke_skill → ContainerPool.acquire()
+                      2. Container marked as InUse
+                      3. Skill execution
+                      4. ContainerPool.release() → container back to warm state
+            Notes  : Containers are reused, not killed after each invocation.
+
+[POOL-03] Test : Pool exhaustion handling
+            EXPECTED: 📦 POOL — When all containers in use:
+                      - Wait for available container (timeout: 5s)
+                      - If timeout: spawn new container (up to max_containers)
+                      - If max reached: queue request or fail gracefully
+            Notes  : max_containers default is 10.
+
+[POOL-04] Test : Container health monitoring
+            EXPECTED: 📦 POOL — Periodic health check:
+                      - Docker exec health probe
+                      - Unhealthy container → killed and replaced
+                      - Audit: ContainerReplaced event
+            Notes  : Health check interval: 30s.
+
+────────────────────────────────────────────────────────────────────────────────
+  27C — OPENCLAW API ENDPOINTS
+────────────────────────────────────────────────────────────────────────────────
+
+[OPENCLAW-API-01] Command:
+  curl -sS http://127.0.0.1:3001/api/openclaw/skills
+  EXPECTED: {"skills":[{"id":"pdf-analyzer","name":"PDF Analyzer",...}], "total":N}
+
+[OPENCLAW-API-02] Command:
+  curl -sS http://127.0.0.1:3001/api/openclaw/substrate/status
+  EXPECTED: {"warm_containers":2, "max_containers":10, "state":"Running"}
+
+[OPENCLAW-API-03] Command:
+  curl -sS -X POST http://127.0.0.1:3001/api/openclaw/skills/install \
+    -H "Content-Type: application/json" \
+    --data '{"skill_id":"pdf-analyzer"}'
+  EXPECTED: {"status":"installed", "skill":{...}}
+
+[OPENCLAW-API-04] Command:
+  curl -sS -X POST http://127.0.0.1:3001/api/openclaw/skills/invoke \
+    -H "Content-Type: application/json" \
+    --data '{"skill_id":"pdf-analyzer","params":{"file":"test.pdf"}}'
+  EXPECTED: {"status":"success", "result":"...", "duration_ms":150}
+
+────────────────────────────────────────────────────────────────────────────────
+  27D — OPENCLAW CAPABILITY RESOLVER TESTS
+────────────────────────────────────────────────────────────────────────────────
+
+[RESOLVER-01] Test : Skill matching by capability
+              Prompt : "I need to analyze an image"
+              EXPECTED: 🔧 SKILL — CapabilityResolver finds skills with:
+                        - image_generation OR media OR vision capabilities
+                        Returns ranked list by BM25 + dense similarity.
+              Notes  : Hybrid retrieval: BM25 for keywords + embeddings for semantics.
+
+[RESOLVER-02] Test : Skill matching by description
+              Prompt : "Summarize this PDF document"
+              EXPECTED: 🔧 SKILL — Resolver matches "summarize" + "PDF" to:
+                        - pdf-analyzer skill
+                        - document-processor skill
+                        Ranks by combined score.
+              Notes  : Embedding similarity threshold: 0.35 minimum.
+
+[RESOLVER-03] Test : No matching skill found
+              Prompt : "Translate this document to Klingon"
+              EXPECTED: ✅ GREEN — "No skill found for this task."
+                        "Would you like to search ClawHub for translation skills?"
+              Notes  : Falls back to offering ClawHub search.
+
+================================================================================
+EDGE CASE SUMMARY (Updated with OpenClaw)
+================================================================================
+
+SCENARIO                              EXPECTED BEHAVIOR
+-----------------------------------------------------------------
+OpenClaw substrate not running        "Skill substrate is not available. Start Docker?"
+Skill not found in registry           "Skill X is not installed. Install from ClawHub?"
+Container pool exhausted              Wait for container → spawn new → queue → fail gracefully
+Skill execution timeout (30s)         Container killed; error returned; audit logged
+Skill requests unapproved capability  ❌ BLOCK — hard block regardless of trust tier
+Community skill with subprocess       🛡️ TRUST — HITL approval required
+Verified skill with network           ✅ GREEN — auto-approved if in approved_capabilities
+Docker not installed                  "OpenClaw requires Docker. Install Docker first."
+Container health check fails          Container killed and replaced; audit logged
+HMAC signature verification fails     Audit entry flagged as tampered; alert raised
+Skill crashes during execution        Container killed; error returned; container replaced
+Pool shutdown during invocation       Invocation fails; "Substrate shutting down" error
+-----------------------------------------------------------------
+
 ================================================================================
 END OF TEST PROMPTS FILE
-Total prompts: 26 sections — includes Intelligence Engine (Section 26)
+Total prompts: 27 sections — includes Intelligence Engine (Section 26) + OpenClaw (Section 27)
 ================================================================================

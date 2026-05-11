@@ -1,0 +1,21 @@
+You are updating KRIA's COMMON_FLOWS.md after a code change.
+
+Input:
+- Changed files:
+  {{changed_files}}
+- Flow section to update:
+  {{current_section}}
+- Relevant code evidence:
+  {{evidence}}
+
+Task:
+- Update only the affected flow steps.
+- Keep the numbered flow short and action-oriented.
+- Do not rewrite unrelated flows.
+- Do not invent behavior from filenames alone.
+- If the flow impact is unclear, add `(needs verification)` to the specific step.
+- Prefer existing event/command names exactly as used in code.
+
+Output:
+- Return only the revised flow section.
+

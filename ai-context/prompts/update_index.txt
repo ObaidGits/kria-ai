@@ -1,0 +1,21 @@
+You are updating KRIA's FILE_INDEX.md after files were added, removed, renamed, or became important.
+
+Input:
+- Changed files:
+  {{changed_files}}
+- Current FILE_INDEX section:
+  {{current_section}}
+- Evidence from file headers, exports, or nearby module declarations:
+  {{evidence}}
+
+Task:
+- Add only important files future agents should navigate to directly.
+- Remove entries for deleted or renamed files.
+- Keep one-line purpose descriptions.
+- Avoid listing generated files, tests unless they define important contracts, caches, models, build outputs, or minor leaf files.
+- Preserve manual edits and ordering style.
+- If purpose is not clear from evidence, mark `(needs verification)`.
+
+Output:
+- Return only the revised section.
+

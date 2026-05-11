@@ -1,0 +1,21 @@
+You are updating KRIA's AI context docs after a code change.
+
+Input:
+- Changed files:
+  {{changed_files}}
+- Current doc section:
+  {{current_section}}
+- Relevant code snippets or directory listing:
+  {{evidence}}
+
+Task:
+- Update only the affected bullets in PROJECT_CONTEXT.md or CODEBASE_MAP.md.
+- Preserve all unrelated wording and manual edits.
+- Add new modules/folders only if they are stable source structure.
+- Remove stale paths only when deletion/rename is clear.
+- If behavior or ownership is uncertain, write `(needs verification)`.
+- Keep each bullet to 1-2 lines.
+
+Output:
+- Return only the revised section, not the whole file.
+

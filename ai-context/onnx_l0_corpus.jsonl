@@ -1,0 +1,18 @@
+{"text":"generate image of a cyberpunk city at night","operation":"generate_image"}
+{"text":"create a logo image for my startup","operation":"generate_image"}
+{"text":"draw a watercolor portrait from this prompt","operation":"generate_image"}
+{"text":"make an illustration of a mountain village","operation":"generate_image"}
+{"text":"render a product photo style hero shot","operation":"generate_image"}
+{"text":"generate a wallpaper image in neon style","operation":"generate_image"}
+{"text":"what do you remember about my schedule","operation":"retrieve_memory"}
+{"text":"recall notes about my gym routine","operation":"retrieve_memory"}
+{"text":"memory notes about meeting preferences","operation":"retrieve_memory"}
+{"text":"have i told you my food allergies","operation":"retrieve_memory"}
+{"text":"from memory tell me my wifi setup","operation":"retrieve_memory"}
+{"text":"remembered details about my doctor appointment","operation":"retrieve_memory"}
+{"text":"search the web for rust async patterns","operation":"search"}
+{"text":"find online latest headlines about ai","operation":"search"}
+{"text":"look up internet speed troubleshooting guide","operation":"search"}
+{"text":"search news about nvidia drivers","operation":"search"}
+{"text":"browse online docs for tokio channels","operation":"search"}
+{"text":"check the internet for weather update","operation":"search"}
