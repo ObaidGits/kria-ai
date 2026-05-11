@@ -1,0 +1,73 @@
+# Build outputs
+target/
+dist/
+build/
+out/
+
+# Node.js
+node_modules/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Large binary files
+*.gguf
+*.bin
+*.safetensors
+*.onnx
+*.pt
+*.pth
+
+# Media
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.mp4
+*.mp3
+*.wav
+
+# Archives
+*.zip
+*.tar.gz
+
+# Lock files
+package-lock.json
+yarn.lock
+Cargo.lock
+
+# Test fixtures
+tests/e2e/fixtures/
+tests/e2e/screenshots/
+__snapshots__/
+
+# Data
+data/
+models/
+*.db
+*.sqlite
+
+# AI context - only ignore generated/cache files (keep .md files for AI context)
+ai-context/.cache.json
+ai-context/onnx_l0_corpus.jsonl
+ai-context/__pycache__/
+ai-context/update.log
+
+# UI build
+ui/dist/
+ui/.vite/
+
+# Downloaded models
+models/

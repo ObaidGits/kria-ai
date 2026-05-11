@@ -33,31 +33,6 @@ impl ToolHandler for SetProcessPriority {
     }
 }
 
-struct ManageService;
-#[async_trait]
-impl ToolHandler for ManageService {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let name = params["name"].as_str().unwrap_or("");
-        let action = params["action"].as_str().unwrap_or("status");
-        let output = tokio::process::Command::new("systemctl")
-            .args([action, name])
-            .output()
-            .await;
-        match output {
-            Ok(o) => {
-                let stdout = String::from_utf8_lossy(&o.stdout).to_string();
-                let stderr = String::from_utf8_lossy(&o.stderr).to_string();
-                ToolResult::ok(serde_json::json!({
-                    "service": name, "action": action,
-                    "success": o.status.success(),
-                    "output": stdout, "error": stderr,
-                }))
-            }
-            Err(e) => ToolResult::err(format!("manage_service failed: {e}")),
-        }
-    }
-}
-
 struct GetActiveConnections;
 #[async_trait]
 impl ToolHandler for GetActiveConnections {
@@ -104,20 +79,6 @@ pub fn register(reg: &ToolRegistry) {
                 ],
             },
             Arc::new(SetProcessPriority),
-        ),
-        (
-            ToolDef {
-                name: "manage_service".into(),
-                description: "Start, stop, or restart a systemd service".into(),
-                category: "process".into(),
-                default_tier: RiskLevel::Red,
-                min_tier: "standard",
-                parameters: vec![
-                    param("name", "string", "Service name", true),
-                    param("action", "string", "start|stop|restart|status", true),
-                ],
-            },
-            Arc::new(ManageService),
         ),
     ];
     for (def, handler) in tools {

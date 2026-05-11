@@ -718,7 +718,9 @@ pub(super) fn build_fallback_call_for_hint(
                 arguments: serde_json::json!({ "pid": pid }),
             })
         }
-        "manage_service" if allowed_tool_names.contains("manage_service") => {
+        "manage_service" | "execute_bash"
+            if allowed_tool_names.contains("execute_bash") =>
+        {
             let action = if lower.contains("start") {
                 "start"
             } else if lower.contains("stop") {
@@ -738,8 +740,10 @@ pub(super) fn build_fallback_call_for_hint(
                 .unwrap_or("docker")
                 .to_string();
             Some(ParsedToolCall {
-                name: "manage_service".into(),
-                arguments: serde_json::json!({ "name": service, "action": action }),
+                name: "execute_bash".into(),
+                arguments: serde_json::json!({
+                    "command": format!("systemctl {} {}", action, service)
+                }),
             })
         }
         "get_active_connections" if allowed_tool_names.contains("get_active_connections") => {

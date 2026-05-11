@@ -452,17 +452,6 @@ impl TurnGate {
             );
         }
 
-        if looks_like_web_search_request(&lower) {
-            return IntentEnvelope::new(
-                modality,
-                Operation::Search,
-                HazardHint::Green,
-                ComputeClass::ToolOnly,
-                0.76,
-                IntentSource::FastEmbedSemanticRouter,
-            );
-        }
-
         if looks_like_file_search_request(&lower) {
             return IntentEnvelope::new(
                 modality,
@@ -623,7 +612,44 @@ impl TurnGate {
                 if lower.contains("git") { fallback_hints.push("git_status".into()); }
                 if lower.contains("run") || lower.contains("shell") { fallback_hints.push("execute_command".into()); }
             }
+            crate::routing::domain::Domain::Packages => {
+                if lower.contains("list")
+                    || lower.contains("installed")
+                    || lower.contains("apps")
+                    || lower.contains("applications")
+                    || lower.contains("packages")
+                    || lower.contains("programs")
+                {
+                    push_hint_unique(&mut fallback_hints, "list_installed_packages");
+                }
+                if lower.contains("install") || lower.contains("uninstall") || lower.contains("package") {
+                    push_hint_unique(&mut fallback_hints, "search_package");
+                    push_hint_unique(&mut fallback_hints, "check_package_installed");
+                    push_hint_unique(&mut fallback_hints, "install_package");
+                    push_hint_unique(&mut fallback_hints, "uninstall_package");
+                }
+                if fallback_hints.is_empty() {
+                    push_hint_unique(&mut fallback_hints, "list_installed_packages");
+                }
+            }
             _ => {}
+        }
+
+        let wants_installed_list = lower.contains("installed app")
+            || lower.contains("installed apps")
+            || lower.contains("installed application")
+            || lower.contains("installed applications")
+            || lower.contains("installed package")
+            || lower.contains("installed packages")
+            || lower.contains("installed programs")
+            || (lower.contains("list")
+                && (lower.contains("apps")
+                    || lower.contains("applications")
+                    || lower.contains("packages")
+                    || lower.contains("programs"))
+                && lower.contains("installed"));
+        if wants_installed_list {
+            push_hint_unique(&mut fallback_hints, "list_installed_packages");
         }
 
         // Direct tool hint: if exactly one fallback, use it as direct
@@ -678,12 +704,11 @@ impl TurnGate {
                 }
             }
             Operation::Search => {
-                let ordered_hints: [&str; 3] = if looks_like_news_search_request(&lower) {
-                    ["search_news", "web_search", "searxng_search"]
-                } else {
-                    ["web_search", "searxng_search", "search_news"]
-                };
-                for hint in ordered_hints {
+                // Present all three search tools to the LLM and let it pick
+                // based on the tool descriptions (true agentic routing).
+                // Order: searxng first (primary real-time), then search_news
+                // (RSS+GDELT), then web_search (DDG fallback).
+                for hint in ["searxng_search", "search_news", "web_search"] {
                     push_hint_unique(&mut fallback_hints, hint);
                 }
             }
@@ -740,23 +765,6 @@ impl TurnGate {
             ComputeClass::RefuseOnly => ResourcePlan::Refuse,
         }
     }
-}
-
-fn looks_like_web_search_request(text_lower: &str) -> bool {
-    text_lower.contains("search the web")
-        || text_lower.contains("search web")
-        || text_lower.contains("look up")
-        || text_lower.contains("find online")
-        || text_lower.contains("find on the internet")
-        || text_lower.contains("web search")
-        || looks_like_news_search_request(text_lower)
-}
-
-fn looks_like_news_search_request(text_lower: &str) -> bool {
-    text_lower.contains("latest news")
-        || text_lower.contains("news about")
-        || text_lower.contains("headlines")
-        || (text_lower.contains("news") && text_lower.contains("search"))
 }
 
 fn looks_like_memory_recall_request(text_lower: &str) -> bool {

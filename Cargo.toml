@@ -119,8 +119,18 @@ tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
 blake3 = "1"
 hex = "0.4"
 
+# AST parsing (Python code gate for ML orchestrator)
+tree-sitter = "0.22"
+tree-sitter-python = "0.21"
+
+# Fast hashing (dataset integrity)
+xxhash-rust = { version = "0.8", features = ["xxh64"] }
+
 # Memory-mapped files
 memmap2 = "0.9"
+
+# ZIP archive reading (DOCX/XLSX/PPTX extraction)
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 # Semantic embeddings (ONNX-based, no Python)
 fastembed = "5"

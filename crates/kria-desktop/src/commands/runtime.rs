@@ -64,6 +64,54 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     let memory_store_backend = Arc::new(MemoryStore::open(&paths.db_path)?);
     let memory_store: Arc<dyn MemoryRuntime> = memory_store_backend.clone();
 
+    // Initialize OpenClaw subsystem (synchronous — creates skills.db with both
+    // `installed_skills` and `audit_log` tables immediately on boot).
+    let openclaw_subsystem = match kria_core::openclaw::OpenClawSubsystem::boot(&paths.data_dir) {
+        Ok(s) => {
+            tracing::info!("[OpenClaw] subsystem ready");
+            Some(s)
+        }
+        Err(e) => {
+            tracing::warn!("[OpenClaw] subsystem boot failed (non-fatal): {e}");
+            None
+        }
+    };
+
+    let openclaw_registry: Arc<kria_core::openclaw::registry::SkillRegistry> =
+        if let Some(ref s) = openclaw_subsystem {
+            s.registry.clone()
+        } else {
+            let fallback = paths.data_dir.join("skills.db");
+            let _ = std::fs::create_dir_all(&paths.data_dir);
+            Arc::new(
+                kria_core::openclaw::registry::SkillRegistry::open(&fallback)
+                    .expect("fallback registry must open"),
+            )
+        };
+
+    // Boot the ContainerPool asynchronously — Docker may not be available.
+    // If unavailable, OpenClaw tools are registered but return a clear error
+    // on invocation rather than crashing the app.
+    let openclaw_config = kria_core::openclaw::OpenClawConfig::default();
+    let openclaw_pool: Option<Arc<kria_core::openclaw::ContainerPool>> =
+        match kria_core::openclaw::ContainerPool::new(openclaw_config).await {
+            Ok(pool) => {
+                let pool = Arc::new(pool);
+                // Pre-warm initial containers (non-fatal if it fails).
+                if let Err(e) = pool.initialize().await {
+                    tracing::warn!("[OpenClaw] pool pre-warm failed: {e}");
+                }
+                // Spawn background loop that maintains warm Light containers.
+                kria_core::openclaw::ContainerPool::spawn_prewarm_loop(pool.clone());
+                tracing::info!("[OpenClaw] container pool ready");
+                Some(pool)
+            }
+            Err(e) => {
+                tracing::info!("[OpenClaw] container pool unavailable (Docker not running?): {e}");
+                None
+            }
+        };
+
     // Initialize model router from config
     let model_router = Arc::new(ModelRouter::from_config(&config));
 
@@ -443,6 +491,12 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
 
     // Wrap registry in Arc immediately — thread-safe for background MCP registration
     let tool_registry = Arc::new(tool_registry_inner);
+
+    // Register active OpenClaw skills as oc_* tools (requires pool to be ready).
+    if let (Some(ref subsystem), Some(ref pool)) = (&openclaw_subsystem, &openclaw_pool) {
+        subsystem.register_into_tool_registry(&tool_registry, pool.clone());
+    }
+
     tracing::info!(
         tools = tool_registry.len(),
         "[INIT] base tool registry ready ({} tools, MCP tools will be added in background)",
@@ -517,6 +571,11 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     let max_tool_rounds = config.agent.max_tool_rounds.max(1);
     let min_confidence_to_act = config.agent.min_confidence_to_act;
     let clarify_threshold = config.agent.clarify_threshold;
+    let doc_store = Arc::new(kria_core::preprocessing::SessionVectorStore::new(
+        paths.data_dir.join("uploads"),
+        5,
+    ));
+
     let agent_loop = Arc::new(
         AgentLoop::new(
             model_router.clone(),
@@ -530,6 +589,7 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         .with_semantic_router(semantic_router)
         .with_tool_index(tool_index)
         .with_feedback_collector(feedback_collector)
+        .with_doc_store(doc_store)
         .with_max_tool_rounds(max_tool_rounds)
         .with_confidence_thresholds(min_confidence_to_act, clarify_threshold)
         .with_hardware_tier(hardware_info.tier.as_str()),
@@ -808,6 +868,8 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         orchestrator_active_turns: orchestrator_active_turns.clone(),
         orchestrator_last_activity_at: orchestrator_last_activity_at.clone(),
         image_orchestrator,
+        skill_registry: openclaw_registry,
+        container_pool: openclaw_pool,
     };
 
     if handle.state::<AppStateCell>().set(state).is_err() {
@@ -1314,6 +1376,14 @@ pub async fn shutdown_runtime(handle: &AppHandle) {
 
     if let Some(orchestrator) = state.orchestrator.read().await.as_ref().cloned() {
         orchestrator.shutdown().await;
+    }
+
+    if let Some(pool) = state.container_pool.as_ref() {
+        if let Err(e) = pool.shutdown().await {
+            tracing::warn!("shutdown: container pool cleanup failed: {e}");
+        } else {
+            tracing::info!("shutdown: OpenClaw container pool destroyed");
+        }
     }
 
     tracing::info!("runtime shutdown completed");

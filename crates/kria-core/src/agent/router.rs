@@ -51,6 +51,19 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\b(system\s+health|health\s+check)\b",
             "check_system_health",
         ),
+        // Installed apps/packages — MUST come before generic search/news patterns
+        (
+            r"(?i)\b(list|show|get|what|display|view)\b.{0,30}\b(installed)\b.{0,20}\b(apps?|applications?|packages?|programs?|software)\b",
+            "list_installed_packages",
+        ),
+        (
+            r"(?i)\b(installed)\b.{0,20}\b(apps?|applications?|packages?|programs?|software)\b",
+            "list_installed_packages",
+        ),
+        (
+            r"(?i)\b(apps?|applications?|packages?|programs?|software)\b.{0,20}\b(installed)\b",
+            "list_installed_packages",
+        ),
         // Alerts
         (
             r"(?i)\b(show|list|get|check|current|active)\b.{0,30}\balerts?\b",
@@ -91,10 +104,10 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\b(active|open|current)\b.{0,20}\b(network\s+connections?|connections?|sockets?)\b",
             "get_active_connections",
         ),
-        // Service management
+        // Service management — routed to execute_bash for command-level granularity
         (
             r"(?i)\b(start|stop|restart|status|check)\b.{0,20}\b(service|daemon|systemd)\b",
-            "manage_service",
+            "execute_bash",
         ),
         // Scheduled tasks
         (
@@ -1195,13 +1208,20 @@ impl IntentRouter {
         }
 
         // 1. Check direct tool patterns first (highest confidence)
+        //    Confidence is computed from match quality: how many query tokens
+        //    the regex actually consumed (avoiding blanket 0.85 for partial matches).
         for (re, tool) in DIRECT_TOOL_RE.iter() {
-            if re.is_match(trimmed) {
+            if let Some(mat) = re.find(trimmed) {
+                let match_len = mat.len() as f32;
+                let query_len = trimmed.len() as f32;
+                let coverage = if query_len > 0.0 { match_len / query_len } else { 0.0 };
+                // Scale: full coverage → 0.95, half → 0.70, minimal → 0.55
+                let dynamic_confidence = (0.55 + coverage * 0.40).min(0.95);
                 return IntentResult {
                     intent: Intent::DirectTool(tool.to_string()),
                     tool_hint: Some(tool.to_string()),
                     category: None,
-                    confidence: 0.85,
+                    confidence: dynamic_confidence,
                 };
             }
         }
@@ -1427,5 +1447,35 @@ mod tests {
         let result = IntentRouter::classify("check status of the server");
         assert!(matches!(result.intent, Intent::DirectTool(_)));
         assert_eq!(result.tool_hint.as_deref(), Some("check_device_health"));
+    }
+
+    #[test]
+    fn routes_list_installed_apps_to_list_installed_packages() {
+        let result = IntentRouter::classify("List the Apps installed in my System");
+        assert!(matches!(result.intent, Intent::DirectTool(_)));
+        assert_eq!(
+            result.tool_hint.as_deref(),
+            Some("list_installed_packages")
+        );
+    }
+
+    #[test]
+    fn routes_show_installed_packages_to_list_installed_packages() {
+        let result = IntentRouter::classify("show me all installed packages");
+        assert!(matches!(result.intent, Intent::DirectTool(_)));
+        assert_eq!(
+            result.tool_hint.as_deref(),
+            Some("list_installed_packages")
+        );
+    }
+
+    #[test]
+    fn routes_what_programs_are_installed_to_list_installed_packages() {
+        let result = IntentRouter::classify("what programs are installed on my system");
+        assert!(matches!(result.intent, Intent::DirectTool(_)));
+        assert_eq!(
+            result.tool_hint.as_deref(),
+            Some("list_installed_packages")
+        );
     }
 }

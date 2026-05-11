@@ -165,6 +165,24 @@ SOURCES: list[dict] = [
         "language": "en",
         "authenticity": "established",
     },
+    {
+        "name": "The New Indian Express",
+        "tier": 2,
+        "rss": "https://www.newindianexpress.com/rss/frontpage.xml",
+        "country": "IN",
+        "region": "south-asia",
+        "language": "en",
+        "authenticity": "established",
+    },
+    {
+        "name": "India Today",
+        "tier": 2,
+        "rss": "https://www.indiatoday.in/rss/home",
+        "country": "IN",
+        "region": "south-asia",
+        "language": "en",
+        "authenticity": "established",
+    },
 
     # Science/Tech — tier 2
     {
@@ -726,11 +744,21 @@ def search(params: dict) -> dict:
     if hours_raw is None or str(hours_raw).strip() == "":
         hours = _FRESHNESS_DEFAULT_HOURS[freshness_mode]
     else:
-        hours = int(hours_raw)
+        try:
+            hours = int(hours_raw)
+        except (ValueError, TypeError):
+            logger.warning("[search] invalid 'hours' value %r — using freshness_mode default", hours_raw)
+            hours = _FRESHNESS_DEFAULT_HOURS[freshness_mode]
     hours = max(1, min(hours, 336))
 
-    min_trust = int(params.get("min_trust", 3))  # default 3 = include all tiers incl. GDELT
-    limit = max(1, min(int(params.get("limit", 10)), 30))
+    try:
+        min_trust = int(params.get("min_trust", 3))
+    except (ValueError, TypeError):
+        min_trust = 3
+    try:
+        limit = max(1, min(int(params.get("limit", 10)), 30))
+    except (ValueError, TypeError):
+        limit = 10
     use_gdelt = _as_bool(params.get("use_gdelt", True), True)
 
     country = str(params.get("country", "")).strip().upper()
@@ -763,7 +791,7 @@ def search(params: dict) -> dict:
     # Optionally fetch live from GDELT and ingest
     if use_gdelt:
         logger.info("[search] step 1/4 — GDELT live fetch")
-        gdelt_articles = _fetch_gdelt(query, timespan=f"{hours}h" if hours <= 24 else "1d")
+        gdelt_articles = _fetch_gdelt(query, timespan=f"{min(hours, 168)}h")
         gdelt_new = 0
         with _db_lock:
             for art in gdelt_articles:

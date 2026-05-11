@@ -4,6 +4,32 @@ import hljs from "highlight.js";
 import DOMPurify from "dompurify";
 import { invoke } from "@tauri-apps/api/core";
 import { appStore, type Message, type ToolCall } from "../stores/app";
+import ToolCallBadge from "./ToolCallBadge";
+
+function inferExecutionSource(toolName: string): "native" | "mcp" | "openclaw" | "cloud" {
+  if (toolName.startsWith("oc_")) return "openclaw";
+  if (toolName.startsWith("gw_")) return "cloud";
+  if (toolName.startsWith("mcp_") || toolName.includes("_mcp")) return "mcp";
+  return "native";
+}
+
+function msgFileIcon(mime: string, name: string): string {
+  if (mime === "application/pdf" || name.endsWith(".pdf")) return "📄";
+  if (mime.includes("spreadsheet") || name.match(/\.(xlsx|xls|csv)$/i)) return "📊";
+  if (mime.includes("presentation") || name.match(/\.(pptx|ppt)$/i)) return "📑";
+  if (mime.includes("wordprocessing") || name.match(/\.(docx|doc)$/i)) return "📝";
+  if (name.match(/\.(py|rs|ts|js|go|java|c|cpp|h|rb|php|kt|swift|lua|sh|sql|r)$/i)) return "💻";
+  if (name.endsWith(".ipynb")) return "📓";
+  if (name.match(/\.(json|yaml|yml|toml|xml)$/i)) return "⚙️";
+  if (name.match(/\.(md|markdown|txt|log)$/i)) return "📃";
+  return "📎";
+}
+
+function msgFormatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 // Configure marked with highlight.js
 marked.setOptions({
@@ -42,6 +68,9 @@ function renderMarkdown(content: string): string {
 
 interface Props {
   message: Message;
+  sessionId?: string;
+  /** Last user message text that triggered this assistant reply (for feedback embedding). */
+  userText?: string;
 }
 
 function parseResultObject(result: unknown): Record<string, any> | null {
@@ -742,6 +771,24 @@ const MessageBubble: Component<Props> = (props) => {
   const isUser = () => props.message.role === "user";
   const isAssistant = () => props.message.role === "assistant";
 
+  // Feedback state
+  const [feedbackSent, setFeedbackSent] = createSignal<string | null>(null);
+
+  const handleFeedback = async (outcomeType: string) => {
+    if (feedbackSent()) return;
+    const toolName = props.message.toolCalls?.[0]?.name ?? null;
+    const nudged = await appStore.submitTurnFeedback(
+      props.sessionId ?? "",
+      props.userText ?? props.message.content,
+      toolName,
+      outcomeType,
+    );
+    setFeedbackSent(outcomeType);
+    if (nudged) {
+      console.info("[Feedback] Router centroid nudged for:", outcomeType);
+    }
+  };
+
   const [inlineImageDataUrls, setInlineImageDataUrls] = createSignal<Record<string, string>>({});
   const [inlineImageLoadAttempts, setInlineImageLoadAttempts] = createSignal<Record<string, number>>({});
   const inlineInFlightImageLoads = new Set<string>();
@@ -894,6 +941,24 @@ const MessageBubble: Component<Props> = (props) => {
           </div>
         </Show>
 
+        {/* Attached document file cards */}
+        <Show when={props.message.attachedFiles && props.message.attachedFiles!.length > 0}>
+          <div class="msg-file-cards">
+            <For each={props.message.attachedFiles}>
+              {(f) => (
+                <div class="msg-file-card">
+                  <span class="msg-file-card-icon">{msgFileIcon(f.mime, f.name)}</span>
+                  <div class="msg-file-card-info">
+                    <span class="msg-file-card-name" title={f.name}>{f.name}</span>
+                    <span class="msg-file-card-size">{msgFormatSize(f.size)}</span>
+                  </div>
+                  <span class="msg-file-card-badge">Indexed</span>
+                </div>
+              )}
+            </For>
+          </div>
+        </Show>
+
         <Show when={inlineGeneratedImagePaths().length > 0}>
           <div class="msg-inline-generated-images">
             <For each={inlineGeneratedImagePaths()}>
@@ -956,11 +1021,57 @@ const MessageBubble: Component<Props> = (props) => {
 
         {/* Message text */}
         <Show when={props.message.content}>
+          <Show when={(props.message.toolCalls?.length ?? 0) > 0}>
+            <ToolCallBadge
+              source={inferExecutionSource(props.message.toolCalls![0].name)}
+              toolName={props.message.toolCalls![0].name}
+            />
+          </Show>
           <div class="msg-text">
             {isAssistant()
               ? <div innerHTML={htmlContent()} />
               : <span>{props.message.content}</span>
             }
+          </div>
+        </Show>
+
+        {/* Feedback row — only on assistant messages */}
+        <Show when={isAssistant() && props.message.content}>
+          <div class="msg-feedback-row">
+            <Show
+              when={feedbackSent()}
+              fallback={
+                <>
+                  <button
+                    type="button"
+                    class="msg-feedback-btn"
+                    onClick={() => handleFeedback("wrong_tool")}
+                    title="Wrong tool was used — help KRIA learn"
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+                    </svg>
+                    Wrong tool
+                  </button>
+                  <button
+                    type="button"
+                    class="msg-feedback-btn"
+                    onClick={() => handleFeedback("try_differently")}
+                    title="Try a different approach"
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <polyline points="1 4 1 10 7 10"/>
+                      <path d="M3.51 15a9 9 0 1 0 .49-3.5"/>
+                    </svg>
+                    Try differently
+                  </button>
+                </>
+              }
+            >
+              <span class="msg-feedback-sent">
+                ✓ Feedback sent{feedbackSent() === "wrong_tool" ? " — routing improved" : " — noted"}
+              </span>
+            </Show>
           </div>
         </Show>
       </div>

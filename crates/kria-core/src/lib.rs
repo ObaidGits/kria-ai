@@ -6,6 +6,7 @@ pub mod infra;
 pub mod llm;
 pub mod mcp;
 pub mod memory;
+pub mod openclaw;
 pub mod platform;
 pub mod plugin;
 pub mod preprocessing;

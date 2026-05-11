@@ -669,6 +669,19 @@ impl CapabilityPolicyGate {
     }
 }
 
+/// Extract the inner command string from shell interpreter args like `["-c", "systemctl status nginx"]`.
+/// Returns `None` if the args don't contain a `-c` flag with a subsequent argument.
+fn extract_shell_c_command(args: &[String]) -> Option<String> {
+    for (i, arg) in args.iter().enumerate() {
+        if arg == "-c" {
+            // The next argument is the command string
+            return args.get(i + 1).cloned();
+        }
+        // Handle combined form like `-ceval` — not standard, skip
+    }
+    None
+}
+
 impl PolicyGate for CapabilityPolicyGate {
     fn evaluate(&self, binary: &str, args: &[String]) -> PolicyDecision {
         // 1. Check custom rules first (highest priority)
@@ -693,14 +706,44 @@ impl PolicyGate for CapabilityPolicyGate {
             }
         }
 
-        // 2. Check blocked binaries
+        // 2. Command-level granularity for shell interpreters.
+        //    When the binary is bash/sh/zsh with `-c <command>`, extract the
+        //    inner command string and classify it via command_classifier.
+        //    This ensures the SubprocessExecutor path agrees with PolicyEngine
+        //    on tiering for the same command string (defense-in-depth).
+        if matches!(binary, "bash" | "sh" | "zsh" | "fish" | "csh" | "tcsh") {
+            if let Some(inner_cmd) = extract_shell_c_command(args) {
+                let classification =
+                    crate::safety::command_classifier::classify(&inner_cmd);
+                return match classification.tier {
+                    RiskLevel::Green => PolicyDecision::AutoApproved {
+                        risk_level: RiskLevel::Green,
+                        capabilities: [CommandCapability::ProcessInspect].into_iter().collect(),
+                    },
+                    RiskLevel::Yellow => PolicyDecision::AutoApproved {
+                        risk_level: RiskLevel::Yellow,
+                        capabilities: [CommandCapability::ProcessControl].into_iter().collect(),
+                    },
+                    RiskLevel::Red => PolicyDecision::RequiresApproval {
+                        risk_level: RiskLevel::Red,
+                        capabilities: [CommandCapability::CodeExecution].into_iter().collect(),
+                        reason: classification.reason,
+                    },
+                    RiskLevel::Black => PolicyDecision::Blocked {
+                        reason: classification.reason,
+                    },
+                };
+            }
+        }
+
+        // 3. Check blocked binaries
         if self.blocked_binaries.contains(binary) {
             return PolicyDecision::Blocked {
                 reason: format!("Binary '{}' is permanently blocked", binary),
             };
         }
 
-        // 3. Check blocked argument patterns
+        // 4. Check blocked argument patterns
         for (blocked_binary, blocked_args) in &self.blocked_arg_patterns {
             if binary == blocked_binary && args.starts_with(blocked_args) {
                 return PolicyDecision::Blocked {
@@ -713,17 +756,17 @@ impl PolicyGate for CapabilityPolicyGate {
             }
         }
 
-        // 4. Resolve capabilities
+        // 5. Resolve capabilities
         let caps = self.resolve_capabilities(binary, args);
 
-        // 5. Determine risk level from capabilities
+        // 6. Determine risk level from capabilities
         let max_risk = caps
             .iter()
             .map(|c| c.risk_level())
             .max()
             .unwrap_or(RiskLevel::Yellow);
 
-        // 6. Decision based on risk level
+        // 7. Decision based on risk level
         match max_risk {
             RiskLevel::Green => PolicyDecision::AutoApproved {
                 risk_level: max_risk,

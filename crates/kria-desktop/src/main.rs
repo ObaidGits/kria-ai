@@ -64,6 +64,7 @@ fn main() {
             commands::app_commands::cancel_request,
             commands::app_commands::cancel_turn,
             commands::app_commands::cancel_executive_task,
+            commands::app_commands::submit_turn_feedback,
             commands::app_commands::approve_action,
             commands::app_commands::deny_action,
             commands::app_commands::get_health,
@@ -77,6 +78,7 @@ fn main() {
             commands::voice::voice_v2_speak,
             commands::voice::voice_v2_abort,
             commands::image_chat::send_image_message,
+            commands::document_chat::send_document_message,
             commands::mcp::list_mcp_servers,
             commands::mcp::reconcile_mcp_runtime,
             commands::mcp::add_mcp_server,
@@ -142,6 +144,14 @@ fn main() {
             commands::provisioning::get_provisioning_diagnostics,
             commands::provisioning::get_hardware_profile,
             commands::voice_diagnostics::voice_v2_status,
+            commands::openclaw::clawhub_list_skills,
+            commands::openclaw::clawhub_search_skills,
+            commands::openclaw::clawhub_fetch_remote_skills,
+            commands::openclaw::clawhub_install_skill,
+            commands::openclaw::clawhub_uninstall_skill,
+            commands::openclaw::clawhub_toggle_skill,
+            commands::openclaw::openclaw_substrate_status,
+            commands::openclaw::openclaw_substrate_restart,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

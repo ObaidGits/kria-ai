@@ -555,8 +555,8 @@ impl IntentRuntime {
         let labels = IntentLabel::all();
         let label = labels.get(best_idx)?;
 
-        // Apply temperature-scaled softmax for confidence
-        let scaled_confidence = (confidence * SOFTMAX_TEMPERATURE / SOFTMAX_TEMPERATURE).min(0.99);
+        // Use raw softmax probability — no dummy scaling.
+        let scaled_confidence = confidence.min(0.99);
 
         Some(IntentClassification {
             operation: label.to_operation(),

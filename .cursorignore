@@ -1,0 +1,155 @@
+# Build outputs
+target/
+dist/
+build/
+out/
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+*.egg
+.pytest_cache/
+.mypy_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+*.bak
+*.tmp
+
+# Logs
+logs/
+*.log
+
+# Cache
+.cache/
+.parcel-cache/
+.turbo/
+.nx/
+
+# Generated files
+*.generated.*
+*.min.js
+*.min.css
+
+# Large binary files (models, weights)
+*.gguf
+*.bin
+*.safetensors
+*.onnx
+*.pt
+*.pth
+*.h5
+*.pkl
+*.pickle
+
+# Media files
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.mp4
+*.mp3
+*.wav
+*.ogg
+*.webm
+*.webp
+*.ico
+*.svg
+
+# Archives
+*.zip
+*.tar.gz
+*.rar
+*.7z
+*.deb
+*.rpm
+*.AppImage
+*.dmg
+*.msi
+
+# Lock files
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+Cargo.lock
+
+# Test fixtures and snapshots
+tests/e2e/fixtures/
+tests/e2e/screenshots/
+tests/e2e/videos/
+tests/e2e/traces/
+__snapshots__/
+
+# Documentation (keep only essential for coding)
+docs-old/
+
+# Data directories
+data/
+models/llm/
+models/voice/
+models/vision/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Config with secrets
+.env
+.env.*
+*.pem
+*.key
+*.crt
+
+# Temporary files
+tmp/
+temp/
+*.temp
+
+# Coverage
+coverage/
+.nyc_output/
+
+# Build artifacts
+*.wasm
+*.o
+*.obj
+*.exe
+*.dll
+*.dylib
+*.so
+
+# AI context - only ignore generated/cache files (keep .md files for AI context)
+ai-context/.cache.json
+ai-context/onnx_l0_corpus.jsonl
+ai-context/__pycache__/
+ai-context/update.log
+
+# UI build output
+ui/dist/
+ui/.vite/
+ui/node_modules/
+
+# Downloaded/generated content
+downloads/
+*.download

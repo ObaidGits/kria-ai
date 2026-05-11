@@ -310,7 +310,7 @@ impl SpeculativeRouter {
             (Domain::Knowledge, "search web find information news weather"),
             (Domain::Power, "shutdown reboot volume brightness mute"),
             (Domain::Vision, "screenshot image analysis describe screen"),
-            (Domain::Packages, "install uninstall update software package"),
+            (Domain::Packages, "install uninstall update software package list installed apps"),
             (Domain::Developer, "run shell command git build lint"),
             (Domain::Workspace, "google docs drive sheets presentation"),
         ];

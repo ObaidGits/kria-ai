@@ -620,17 +620,31 @@ impl GpuWatchdog {
         let api_err = api_swap_result
             .err()
             .unwrap_or_else(|| "unknown API swap error".to_string());
-        tracing::warn!(
-            error = %api_err,
-            old_ngl,
-            old_ctx,
-            new_ngl = target.ngl,
-            new_ctx = target.context,
-            emergency,
-            "watchdog: API swap path failed; falling back to legacy process restart"
-        );
 
         let router_unsupported = api_err.contains("HTTP 501") || api_err.contains("HTTP 404");
+
+        if router_unsupported {
+            // Router Mode simply not available on this llama-server build — expected,
+            // not an error. Log at debug so startup is noise-free.
+            tracing::debug!(
+                error = %api_err,
+                old_ngl,
+                old_ctx,
+                new_ngl = target.ngl,
+                new_ctx = target.context,
+                "watchdog: Router Mode unavailable; using legacy process restart (upgrade to b5291+ for zero-downtime swaps)"
+            );
+        } else {
+            tracing::warn!(
+                error = %api_err,
+                old_ngl,
+                old_ctx,
+                new_ngl = target.ngl,
+                new_ctx = target.context,
+                emergency,
+                "watchdog: API swap path failed; falling back to legacy process restart"
+            );
+        }
 
         // 3. Legacy fallback: prefer graceful ladder when Router Mode is absent.
         if router_unsupported {

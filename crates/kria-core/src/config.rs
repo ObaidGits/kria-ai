@@ -29,6 +29,8 @@ pub struct KriaConfig {
     pub skill_compiler: SkillCompilerConfig,
     pub curiosity: CuriosityLoopConfig,
     pub browser_agent: BrowserAgentConfig,
+    // ─── OpenClaw Skill Substrate ───
+    pub openclaw: crate::openclaw::OpenClawConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1226,6 +1228,20 @@ fn merge_config(base: &mut KriaConfig, user: &KriaConfig) {
     }
     if user.colab != ColabConfig::default() {
         base.colab = user.colab.clone();
+    }
+    // Merge openclaw registry config — allows ~/.kria/config.toml to override
+    // the default registry index_url and allowed_hosts.
+    {
+        let default_url = crate::openclaw::clawhub::DEFAULT_REGISTRY_URL;
+        if user.openclaw.registry.index_url != default_url {
+            base.openclaw.registry.index_url = user.openclaw.registry.index_url.clone();
+        }
+        if !user.openclaw.registry.allowed_hosts.is_empty() {
+            base.openclaw.registry.allowed_hosts = user.openclaw.registry.allowed_hosts.clone();
+        }
+        if user.openclaw.enabled {
+            base.openclaw.enabled = true;
+        }
     }
 }
 

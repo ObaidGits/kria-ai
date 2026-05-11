@@ -2,8 +2,10 @@ import { Component, Show, For, createSignal, createEffect, createMemo, onMount, 
 import { listen } from "@tauri-apps/api/event";
 import { appStore } from "../stores/app";
 import { SUPPORTED_LANGUAGES, setLocale } from "../stores/i18n";
+import SkillMarketplace from "./SkillMarketplace";
+import SubstrateStatus from "./SubstrateStatus";
 
-type Tab = "llm" | "voice" | "safety" | "ui" | "assistant" | "labs" | "search" | "services" | "telegram" | "automation" | "hardware" | "knowledge" | "google" | "colab" | "ironclad";
+type Tab = "llm" | "voice" | "safety" | "ui" | "assistant" | "labs" | "search" | "services" | "telegram" | "automation" | "hardware" | "knowledge" | "google" | "colab" | "ironclad" | "marketplace";
 
 interface AssistantFrontendPrefs {
   persona: "operator" | "coach" | "researcher" | "chief_of_staff";
@@ -749,6 +751,17 @@ const SettingsModal: Component = () => {
           label: "Knowledge",
           icon: "K",
           description: "Review indexed documents and retrieval corpus status for knowledge grounding.",
+        },
+      ],
+    },
+    {
+      title: "Marketplace",
+      tabs: [
+        {
+          id: "marketplace",
+          label: "Skill Marketplace",
+          icon: "M",
+          description: "Browse and manage skills.",
         },
       ],
     },
@@ -2569,8 +2582,15 @@ const SettingsModal: Component = () => {
               <Show when={ironcladStatus()}>
                 {(status) => (
                   <>
-                    <div class={`tg-status-banner ${status().fleet?.health_degraded ? "" : "tg-connected"}`}>
-                      <span class={`mcp-status-dot ${status().fleet?.health_degraded ? "degraded" : "running"}`}></span>
+                    <div
+                      class={`tg-status-banner ${status().fleet?.health_degraded ? "" : "tg-connected"}`}
+                      style={status().fleet?.health_degraded
+                        ? ""
+                        : "background:var(--surface-2,#2a2a2a);border-left:3px solid var(--text-muted,#888)"}
+                    >
+                      <span
+                        class={`mcp-status-dot ${status().fleet?.health_degraded ? "degraded" : "running"}`}
+                      ></span>
                       <span>
                         Fleet ready {status().fleet?.ready_targets ?? 0}/{status().fleet?.total_targets ?? 0} •
                         QoS {status().qos?.traffic_light ?? "gray"} •
@@ -2705,6 +2725,16 @@ const SettingsModal: Component = () => {
                 </table>
               </Show>
               <p class="settings-hint">{knowledgeBase().length} document(s) in knowledge base</p>
+            </section>
+          </Show>
+
+          {/* Marketplace Tab */}
+          <Show when={activeTab() === "marketplace"}>
+            <section>
+              <h3>Marketplace</h3>
+              <p class="settings-hint">Browse and manage skills.</p>
+              <SkillMarketplace />
+              <SubstrateStatus />
             </section>
           </Show>
 

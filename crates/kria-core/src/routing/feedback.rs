@@ -131,11 +131,13 @@ pub struct FeedbackCollector {
     max_buffer: usize,
     /// Path to feedback directory.
     feedback_dir: PathBuf,
+    /// Learning rate for centroid nudging.
+    learning_rate: f32,
 }
 
 impl FeedbackCollector {
     /// Create a new feedback collector.
-    pub fn new(feedback_dir: &str, max_buffer: usize, _learning_rate: f32) -> Self {
+    pub fn new(feedback_dir: &str, max_buffer: usize, learning_rate: f32) -> Self {
         let dir = if feedback_dir.starts_with('~') {
             if let Some(home) = std::env::var_os("HOME") {
                 PathBuf::from(home).join(&feedback_dir[1..])
@@ -150,6 +152,7 @@ impl FeedbackCollector {
             buffer: Vec::new(),
             max_buffer,
             feedback_dir: dir,
+            learning_rate,
         }
     }
 
@@ -165,6 +168,55 @@ impl FeedbackCollector {
         if self.buffer.len() >= self.max_buffer {
             self.flush_to_disk();
         }
+    }
+
+    /// Submit an explicit user feedback signal (e.g. from UI buttons).
+    ///
+    /// Records the entry and immediately nudges the in-memory centroids
+    /// via the provided mutable map, then returns a report.
+    /// Callers should persist centroids themselves after this call.
+    pub fn submit_explicit(
+        &mut self,
+        feedback: RoutingFeedback,
+        centroids: &mut HashMap<Domain, Vec<f32>>,
+    ) -> CentroidAdjustmentReport {
+        // Flush before, so adjust_centroids sees only this explicit signal
+        self.flush_to_disk();
+        let report = adjust_centroids(&[feedback.clone()], centroids, self.learning_rate);
+        // Also persist this entry on its own
+        self.buffer.push(feedback);
+        self.flush_to_disk();
+        report
+    }
+
+    /// Flush all buffered feedback, run centroid adjustment, and return the report.
+    ///
+    /// Callers must supply the current centroid map; it will be modified in-place.
+    /// After this call, save the centroids to disk (e.g. via `RouterCache::apply_nudged_centroids`).
+    pub fn flush_and_adjust(
+        &mut self,
+        centroids: &mut HashMap<Domain, Vec<f32>>,
+    ) -> CentroidAdjustmentReport {
+        let entries = std::mem::take(&mut self.buffer);
+        if entries.is_empty() {
+            return CentroidAdjustmentReport::default();
+        }
+        // Persist to disk first (for audit trail)
+        let path = self.feedback_dir.join(FEEDBACK_FILENAME);
+        if let Ok(()) = std::fs::create_dir_all(&self.feedback_dir) {
+            if let Ok(mut file) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+            {
+                for entry in &entries {
+                    if let Ok(json) = serde_json::to_string(entry) {
+                        let _ = writeln!(file, "{}", json);
+                    }
+                }
+            }
+        }
+        adjust_centroids(&entries, centroids, self.learning_rate)
     }
 
     /// Flush buffer to persistent storage.

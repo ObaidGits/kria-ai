@@ -310,7 +310,7 @@ fn normalize_tool_name(raw: &str) -> Vec<String> {
         ("set_environment_variable", &["set_env", "export_env"]),
         ("get_environment_variable", &["get_env", "echo_env"]),
         ("list_environment_variables", &["env_vars", "printenv"]),
-        ("manage_service_status", &["service_status", "systemctl"]),
+        ("execute_bash", &["service_status", "systemctl"]),
         ("get_power_plan", &["power_plan"]),
         ("set_power_plan", &["change_power_plan"]),
         ("shutdown_system", &["shutdown", "power_off"]),

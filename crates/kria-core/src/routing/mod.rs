@@ -25,6 +25,7 @@ pub mod domain;
 pub mod embed;
 pub mod feedback;
 pub mod intent_classifier;
+pub mod live_fact;
 pub mod ood;
 pub mod segment;
 pub mod speculative;
@@ -227,6 +228,32 @@ impl Router {
         (decision, modality, trace)
     }
 
+    /// Return a reference to the underlying RouterCache (for feedback nudging).
+    pub fn cache(&self) -> &Arc<RouterCache> {
+        &self.cache
+    }
+
+    /// Apply explicit feedback: nudge centroids and immediately reload into the live router.
+    ///
+    /// This is the entry point for UI-triggered feedback ("Wrong tool", "Try differently").
+    /// `feedback` must carry a non-empty `embedding` for the nudge to have effect.
+    pub async fn apply_feedback(
+        &self,
+        feedback: &feedback::RoutingFeedback,
+        learning_rate: f32,
+    ) -> feedback::CentroidAdjustmentReport {
+        let mut centroids = self.cache.centroids().await;
+        let report = feedback::adjust_centroids(
+            std::slice::from_ref(feedback),
+            &mut centroids,
+            learning_rate,
+        );
+        if report.total_adjusted > 0 {
+            self.cache.apply_nudged_centroids(&centroids).await;
+        }
+        report
+    }
+
     /// Legacy regex-based fallback (uses existing IntentRouter).
     fn regex_fallback(&self, text: &str) -> RouteDecision {
         use crate::agent::router::Intent;
@@ -319,6 +346,11 @@ fn tool_name_to_category(tool_name: &str) -> String {
     } else if lc.starts_with("install_")
         || lc.starts_with("uninstall_")
         || lc.starts_with("update_")
+        || lc == "list_installed_packages"
+        || lc == "search_package"
+        || lc == "check_package_installed"
+        || lc == "check_package_updates"
+        || lc == "get_package_info"
     {
         "packages".into()
     } else if lc.starts_with("run_")

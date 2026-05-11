@@ -92,6 +92,11 @@ impl Domain {
                 "parse a PDF spreadsheet or Word document",
                 "create or modify a file on disk",
                 "file dhundo ya padhao",
+                "analyze this file and tell me what it contains",
+                "what does this document say or contain",
+                "summarize or extract information from a file",
+                "open and read a file path given in the message",
+                "is mein kya likha hai yeh file padhao",
             ],
             Self::AppLifecycle => &[
                 "open launch start or close an application",
@@ -134,6 +139,8 @@ impl Domain {
             Self::Packages => &[
                 "install uninstall or update a software package",
                 "manage apt pip cargo npm packages",
+                "list installed apps or packages on my system",
+                "show installed applications and programs",
                 "software install karo ya hatao",
             ],
             Self::Developer => &[

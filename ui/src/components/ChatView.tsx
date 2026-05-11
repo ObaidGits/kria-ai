@@ -21,6 +21,11 @@ const ChatView: Component = () => {
     setInputText,
     sendMessage,
     sendImageMessage,
+    sendDocumentMessage,
+    pendingFiles,
+    addPendingFile,
+    removePendingFile,
+    clearPendingFiles,
     cancelTurn,
     toggleVoice,
     voiceActive,
@@ -48,13 +53,36 @@ const ChatView: Component = () => {
 
   const clearPendingImage = () => {
     const img = pendingImage();
-    if (img) {
-      URL.revokeObjectURL(img.preview);
-    }
+    if (img) URL.revokeObjectURL(img.preview);
     setPendingImage(null);
-    if (fileInput) {
-      fileInput.value = "";
+    if (fileInput) fileInput.value = "";
+  };
+
+  const isDocumentFile = (file: File): boolean => {
+    if (file.type.startsWith("image/")) {
+      // True images stay in the image pipeline UNLESS the extension says otherwise
+      return !!file.name.match(/\.(pdf|docx|xlsx|pptx|txt|md|csv|json|yaml|yml|toml|py|rs|ts|js|ipynb|log|html|xml)$/i);
     }
+    // Everything that isn't image/* goes to the document pipeline
+    return true;
+  };
+
+  const fileTypeIcon = (mime: string, name: string): string => {
+    if (mime === "application/pdf" || name.endsWith(".pdf")) return "📄";
+    if (mime.includes("spreadsheet") || name.match(/\.(xlsx|xls|csv)$/i)) return "📊";
+    if (mime.includes("presentation") || name.match(/\.(pptx|ppt)$/i)) return "📑";
+    if (mime.includes("wordprocessing") || name.match(/\.(docx|doc)$/i)) return "📝";
+    if (name.match(/\.(py|rs|ts|js|go|java|c|cpp|h|rb|php|kt|swift|lua|sh|sql|r)$/i)) return "💻";
+    if (name.endsWith(".ipynb")) return "📓";
+    if (name.match(/\.(json|yaml|yml|toml|xml)$/i)) return "⚙️";
+    if (name.match(/\.(md|markdown|txt|log)$/i)) return "📃";
+    return "📎";
+  };
+
+  const formatFileSize = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
   const slashCommands: SlashCmd[] = [
@@ -120,8 +148,12 @@ const ChatView: Component = () => {
       executeSlash(filteredSlash()[slashIndex()]);
       return;
     }
+    const files = pendingFiles();
     const img = pendingImage();
-    if (img) {
+    if (files.length > 0) {
+      const snapshot = [...files];
+      sendDocumentMessage(snapshot, inputText() || undefined);
+    } else if (img) {
       const data = img.data;
       const mime = img.mime;
       clearPendingImage();
@@ -156,8 +188,12 @@ const ChatView: Component = () => {
     }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
+      const files = pendingFiles();
       const img = pendingImage();
-      if (img) {
+      if (files.length > 0) {
+        const snapshot = [...files];
+        sendDocumentMessage(snapshot, inputText() || undefined);
+      } else if (img) {
         const data = img.data;
         const mime = img.mime;
         clearPendingImage();
@@ -170,18 +206,19 @@ const ChatView: Component = () => {
   };
 
   const processFile = async (file: File) => {
-    if (!file.type.startsWith("image/")) return;
-    const previous = pendingImage();
-    if (previous) {
-      URL.revokeObjectURL(previous.preview);
+    // Route to document pipeline for non-image or explicit doc extensions
+    if (isDocumentFile(file)) {
+      addPendingFile(file);
+      return;
     }
+    // Image path — existing flow
+    const previous = pendingImage();
+    if (previous) URL.revokeObjectURL(previous.preview);
     const buffer = await file.arrayBuffer();
     const data = new Uint8Array(buffer);
     const preview = URL.createObjectURL(file);
     setPendingImage({ data, mime: file.type, preview });
-    if (fileInput) {
-      fileInput.value = "";
-    }
+    if (fileInput) fileInput.value = "";
   };
 
   const handlePaste = async (e: ClipboardEvent) => {
@@ -202,7 +239,7 @@ const ChatView: Component = () => {
     setIsDragOver(false);
     const files = e.dataTransfer?.files;
     if (files && files.length > 0) {
-      await processFile(files[0]);
+      await Promise.all(Array.from(files).map(processFile));
     }
   };
 
@@ -232,12 +269,27 @@ const ChatView: Component = () => {
           <div class="assistant-welcome-card">
             <div class="assistant-welcome-eyebrow">Personal Mission Control</div>
             <h2>How can I help you today?</h2>
-            <p>Type a message, attach an image, or use the 🎤 button to speak.</p>
+            <p>Type a message, attach a file, or use the 🎤 button to speak.</p>
           </div>
         </Show>
 
         <For each={messages()}>
-          {(msg) => <MessageBubble message={msg} />}
+          {(msg, i) => {
+            const prevUserText = () => {
+              const list = messages();
+              for (let j = i() - 1; j >= 0; j--) {
+                if (list[j].role === "user") return list[j].content;
+              }
+              return "";
+            };
+            return (
+              <MessageBubble
+                message={msg}
+                sessionId={currentSession() ?? ""}
+                userText={prevUserText()}
+              />
+            );
+          }}
         </For>
 
         {isThinking() && (
@@ -254,28 +306,52 @@ const ChatView: Component = () => {
         <div ref={messagesEnd} />
       </div>
 
-      <Show when={degradationLevel() && degradationLevel() !== "Full"}>
-        <div class="degradation-pill">{degradationLevel()}</div>
-      </Show>
+      <form class="chat-input-form" onSubmit={handleSubmit}>
+        <Show when={degradationLevel && degradationLevel() === "critical"}>
+          <div class="degradation-banner">⚠️ Operating in reduced capacity mode.</div>
+        </Show>
 
-      <Show when={pendingImage()}>
-        <div class="image-preview-bar">
-          <img
-            src={pendingImage()!.preview}
-            alt="Pending upload"
-            class="image-preview-thumb"
-          />
-          <span class="image-preview-label">Image attached</span>
-          <button
-            class="image-preview-remove"
-            onClick={clearPendingImage}
-          >✕</button>
-        </div>
-      </Show>
+        {/* File chips (pending document attachments) */}
+        <Show when={pendingFiles().length > 0}>
+          <div class="file-chips-bar">
+            <For each={pendingFiles()}>
+              {(pf, i) => (
+                <div class="file-chip">
+                  <span class="file-chip-icon">{fileTypeIcon(pf.mime, pf.name)}</span>
+                  <span class="file-chip-name" title={pf.name}>{pf.name}</span>
+                  <span class="file-chip-size">{formatFileSize(pf.size)}</span>
+                  <button
+                    type="button"
+                    class="file-chip-remove"
+                    onClick={() => removePendingFile(i())}
+                    title={`Remove ${pf.name}`}
+                  >✕</button>
+                </div>
+              )}
+            </For>
+          </div>
+        </Show>
 
-      <form class="chat-input-bar" onSubmit={handleSubmit} style={{ position: "relative" }}>
-        <Show when={showSlash()}>
-          <div class="slash-commands">
+        {/* Image preview (pending image attachment) */}
+        <Show when={pendingImage()}>
+          <div class="image-preview-bar">
+            <img
+              src={pendingImage()!.preview}
+              alt="Pending upload"
+              class="image-preview-thumb"
+            />
+            <span class="image-preview-label">Image attached</span>
+            <button
+              type="button"
+              class="image-preview-remove"
+              onClick={clearPendingImage}
+            >✕</button>
+          </div>
+        </Show>
+
+        {/* Slash command menu */}
+        <Show when={showSlash() && filteredSlash().length > 0}>
+          <div class="slash-menu">
             {filteredSlash().map((cmd, i) => (
               <div
                 class={`slash-command-item ${i === slashIndex() ? "selected" : ""}`}
@@ -287,65 +363,80 @@ const ChatView: Component = () => {
             ))}
           </div>
         </Show>
-        <button
-          type="button"
-          class={`voice-btn ${voiceActive() ? "active" : ""} ${voiceActive() ? `voice-state-${voiceState()}` : ""}`}
-          onClick={() => toggleVoice()}
-          title={voiceActive() ? `Voice: ${voiceState()}` : "Toggle voice input"}
-        >
-          {voiceState() === "speaking" ? "🔊" : "🎤"}
-        </button>
-        <button
-          type="button"
-          class="attach-btn"
-          onClick={() => fileInput?.click()}
-          title="Attach image"
-        >
-          📎
-        </button>
-        <input
-          ref={fileInput}
-          type="file"
-          accept="image/*"
-          style={{ display: "none" }}
-          onChange={async (e) => {
-            const file = e.currentTarget.files?.[0];
-            if (file) await processFile(file);
-            e.currentTarget.value = "";
-          }}
-        />
-        <textarea
-          ref={textareaRef}
-          class="chat-input"
-          placeholder={isSwapping() ? "Model is swapping GPU layers…" : pendingImage() ? "Describe what you want to know about this image..." : "Ask KRIA anything… (type / for commands)"}
-          value={inputText()}
-          onInput={(e) => {
-            setInputText(e.currentTarget.value);
-            autoGrow();
-          }}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          rows={1}
-          disabled={isSwapping()}
-        />
-        <Show when={isThinking()}>
+
+        <div class="input-row">
           <button
             type="button"
-            class="stop-btn"
-            onClick={() => cancelTurn("assistant")}
-            title="Stop generating"
+            class={`voice-btn ${voiceActive() ? "active" : ""} ${voiceActive() ? `voice-state-${voiceState()}` : ""}`}
+            onClick={() => toggleVoice()}
+            title={voiceActive() ? `Voice: ${voiceState()}` : "Toggle voice input"}
           >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" style="vertical-align: middle; margin-right: 4px;">
-              <rect x="1" y="1" width="12" height="12" rx="2" />
-            </svg>
-            Stop
+            {voiceState() === "speaking" ? "🔊" : "🎤"}
           </button>
-        </Show>
-        <Show when={!isThinking()}>
-          <button type="submit" class="send-btn" disabled={isSwapping() || (!inputText().trim() && !pendingImage())}>
-            Send
-          </button>
-        </Show>
+
+          <label class="attach-btn" title="Attach file or image" role="button" tabIndex={0}>
+            📎
+            <input
+              ref={fileInput}
+              type="file"
+              accept=".jpg,.jpeg,.png,.gif,.webp,.bmp,.svg,.pdf,.docx,.doc,.xlsx,.xls,.pptx,.ppt,.txt,.md,.csv,.json,.yaml,.yml,.toml,.py,.rs,.ts,.js,.go,.java,.c,.cpp,.h,.rb,.php,.kt,.swift,.sh,.sql,.lua,.r,.ipynb,.log,.html,.xml"
+              multiple
+              style={{ display: "none" }}
+              onChange={async (e) => {
+                const files = e.currentTarget.files;
+                if (files) await Promise.all(Array.from(files).map(processFile));
+                e.currentTarget.value = "";
+              }}
+            />
+          </label>
+
+          <textarea
+            ref={textareaRef}
+            class="chat-input"
+            placeholder={
+              isSwapping()
+                ? "Model is swapping GPU layers…"
+                : pendingFiles().length > 0
+                ? "Add a message about your files, or press Send…"
+                : pendingImage()
+                ? "Describe what you want to know about this image…"
+                : "Ask KRIA anything… (type / for commands)"
+            }
+            value={inputText()}
+            onInput={(e) => {
+              setInputText(e.currentTarget.value);
+              autoGrow();
+            }}
+            onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            rows={1}
+            disabled={isSwapping()}
+          />
+
+          <Show when={isThinking()}>
+            <button
+              type="button"
+              class="stop-btn"
+              onClick={() => cancelTurn("assistant")}
+              title="Stop generating"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" style="vertical-align: middle; margin-right: 4px;">
+                <rect x="1" y="1" width="12" height="12" rx="2" />
+              </svg>
+              Stop
+            </button>
+          </Show>
+
+          <Show when={!isThinking()}>
+            <button
+              type="submit"
+              class="send-btn"
+              disabled={isSwapping() || (!inputText().trim() && !pendingImage() && pendingFiles().length === 0)}
+            >
+              Send
+            </button>
+          </Show>
+        </div>
       </form>
 
       <Show when={toolChoiceRequest()}>

@@ -10,6 +10,7 @@ pub(crate) mod device_enrollment;
 pub(crate) mod device_tools;
 pub(crate) mod google_workspace;
 pub(crate) mod history_helpers;
+pub(crate) mod document_chat;
 pub(crate) mod image_chat;
 pub(crate) mod runtime_status;
 pub(crate) mod local_api;
@@ -24,6 +25,7 @@ pub(crate) mod test_runner;
 pub(crate) mod tool_result_helpers;
 pub(crate) mod analytics;
 pub(crate) mod voice;
+pub(crate) mod openclaw;
 pub(crate) mod voice_diagnostics;
 pub(crate) mod voice_runtime_helpers;
 
@@ -57,7 +59,7 @@ use voice_runtime_helpers::*;
 pub use app_commands::{
     approve_action, cancel_executive_task, cancel_request, cancel_turn, deny_action, get_alerts,
     get_hardware_info, get_health, get_settings, list_audio_devices, list_knowledge_base,
-    list_models, update_settings,
+    list_models, submit_turn_feedback, update_settings,
 };
 #[allow(unused_imports)]
 pub use app_state::{
@@ -71,6 +73,8 @@ pub use automation::{
 };
 #[allow(unused_imports)]
 pub use chat::{send_lab_message, send_message};
+#[allow(unused_imports)]
+pub use document_chat::send_document_message;
 #[allow(unused_imports)]
 pub use colab::{
     connect_colab_tier, disconnect_colab_tier, get_colab_tier_status, set_colab_selected_notebook,
@@ -125,6 +129,12 @@ pub use test_runner::{
 pub use voice::{get_voice_status, start_voice, stop_voice, voice_v2_abort, voice_v2_speak};
 #[allow(unused_imports)]
 pub use voice_diagnostics::voice_v2_status;
+#[allow(unused_imports)]
+pub use openclaw::{
+    clawhub_fetch_remote_skills, clawhub_install_skill, clawhub_list_skills,
+    clawhub_search_skills, clawhub_toggle_skill, clawhub_uninstall_skill,
+    openclaw_substrate_restart, openclaw_substrate_status,
+};
 
 use async_stream::stream;
 use async_trait::async_trait;

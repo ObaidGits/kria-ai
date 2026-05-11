@@ -1,151 +1,117 @@
-# K.R.I.A. — Kernel-Responsive Intelligent Agent
+# K.R.I.A. — Kernel Responsive Intelligent Agent
 
-> A locally-hosted, voice-controlled, complete AI Assistant with root-level OS control, internet connectivity, document intelligence, and workflow automation.
-
-**Developer:** Obaidullah Zeeshan — BTech CS Final Year Project
+> An AI-driven desktop productivity agent built to automate workflows through contextual reasoning, natural interaction, and adaptive decision-making.
 
 ---
 
-## What is K.R.I.A.?
+## Overview
 
-K.R.I.A. is a **complete AI Assistant** that runs entirely on your laptop. It goes far beyond a simple chatbot — it listens for voice commands, reasons about complex tasks using a local LLM, browses the internet for real-time information, reads and analyzes documents, manages your applications, automates repetitive workflows, and executes actions on your operating system.
+K.R.I.A. (Kernel Responsive Intelligent Agent) is an intelligent desktop assistant designed to transform how users interact with their systems by combining conversational AI, workflow automation, and context-aware execution into a single unified platform. It is built to reduce repetitive manual tasks, improve productivity, and create a more intuitive computing experience through autonomous assistance.
 
-**No cloud. No subscriptions. No data leaves your machine (unless you ask it to search the web).**
+K.R.I.A. processes both voice and text commands, interprets user intent, and intelligently coordinates multi-step operations such as file management, application control, smart scheduling, knowledge retrieval, and task automation. Rather than responding only to direct commands, it can reason about objectives, determine the best execution path, and dynamically orchestrate tools and actions based on real-time context.
 
-## Key Features
+At its core, K.R.I.A. acts as a **smart desktop command center**—bridging human interaction and system-level automation through an adaptive, scalable, and modular AI architecture.
 
-### 🧠 Intelligent Agent
-- **Dual-Model Architecture** — Phi-4-mini-instruct (3.8B, primary) + Qwen2.5-VL-7B-Instruct (7B, secondary with vision) via llama.cpp with ReAct planning for multi-step tasks
-- **Voice-First Interaction** — Custom wake word ("Hey KRIA"), sub-500ms response for simple commands
-- **65+ Built-in Tools** — Organized across 12 capability domains
-- **Four-Tier Safety System** — GREEN/YELLOW/RED/BLACK risk classification with human-in-the-loop approval
+---
 
-### 🌐 Internet Connectivity
-- **Web Search** — DuckDuckGo-powered search with result extraction (no API key required)
-- **Content Extraction** — Fetch and extract text from any web page via trafilatura
-- **Real-Time Data** — Weather, news headlines, stock prices, IP info — all from free APIs
-- **Download Manager** — Download files with progress tracking and size limits
-- **RSS Feeds** — Read and aggregate RSS/Atom feeds
+## Core Capabilities
 
-### 📄 Document Intelligence
-- **Document Parsing** — Read PDF, DOCX, XLSX, CSV, images (OCR), Markdown, HTML
-- **Document Summarization** — LLM-powered summarization of any document
-- **Format Conversion** — Convert between formats (MD→PDF, DOCX→PDF, XLSX→CSV, etc.)
-- **Document RAG** — Ingest documents into a local knowledge base for Q&A
-- **Smart File Organization** — Rule-based automatic file sorting
+### 🧠 Agentic Reasoning & Decision Engine
+K.R.I.A. is powered by an agentic reasoning pipeline designed for autonomous decision-making.
 
-### 💻 OS-Level Control
-- **Service Management** — List, start, stop, restart system services (systemctl / sc.exe)
-- **Scheduled Tasks** — Create, list, and manage cron jobs / Windows Task Scheduler entries
-- **Environment Management** — Read/set environment variables, edit shell profiles
-- **Disk Management** — Find large files, detect duplicates, calculate directory sizes
-- **Network Diagnostics** — Ping, DNS lookup, traceroute, speed test, WiFi management
-- **Power Control** — Shutdown, reboot, sleep, hibernate, lock screen
+- **Context-aware intent understanding** to interpret commands beyond simple keyword matching  
+- **Multi-step task decomposition** for handling complex workflows intelligently  
+- **Dynamic tool selection** based on task requirements and system context  
+- **Adaptive execution flow** that adjusts decisions in real time  
+- **Autonomous planning** for chained actions and workflow coordination  
+- **Intelligent fallback strategies** when tasks require clarification or alternate execution paths  
 
-### 📦 Application Management
-- **Cross-Platform Package Manager** — Unified interface across apt, dnf, winget, brew
-- **Install/Uninstall/Update** — Install apps with a single voice command
-- **Package Search** — Search repositories for available packages
+---
 
-### ⚙️ Automation Engine
-- **YAML Workflows** — Define multi-step automation routines with variables and conditions
-- **Event Triggers** — React to file changes, app launches, WiFi connections, battery level
-- **Scheduled Tasks** — Cron-like scheduling with APScheduler
-- **Macro Recorder** — Record and replay sequences of tool calls
+### 🎙️ Natural Interaction Layer
+Built to feel intuitive and conversational.
 
-### 🔔 Communication Hub
-- **Desktop Notifications** — Native notifications on Linux (notify-send) and Windows (toast)
-- **Email Composer** — Draft emails and open in your default email client
-- **Clipboard Intelligence** — Read, write, history, and transform clipboard content
-- **Timed Reminders** — Set reminders that trigger as desktop notifications
+- **Voice and text command support** for flexible interaction  
+- **Conversational interface** with contextual follow-up understanding  
+- **Natural language command interpretation** instead of rigid syntax  
+- **Interactive assistance** for guided task execution  
+- **Context retention** across conversations for smoother interactions  
+- **Personalized responses** based on user preferences and historical usage  
 
-### 📚 Knowledge Base
-- **Persistent Facts** — "Remember that my project deadline is April 30"
-- **Document Q&A** — Ask questions about ingested documents via RAG
-- **Code Snippets** — Save and retrieve code/text snippets
-- **User Preference Learning** — Learns your patterns for proactive suggestions
+---
 
-### 🔌 Plugin Architecture
-- **Extensible** — Community-contributed plugins for new capabilities
-- **Sandboxed** — Plugins cannot bypass safety system
-- **Simple API** — `plugin.yml` manifest + Python entry point
+### ⚙️ Workflow Automation & System Coordination
+Designed to automate repetitive and multi-step productivity tasks.
 
-### 🛡️ Safety & Privacy
-- **Fully Local** — All models run on-device (16GB RAM + NVIDIA RTX GPU)
-- **Four-Tier Safety** — Dangerous actions blocked until human approval
-- **Rollback System** — Automatic backups before destructive operations
-- **Audit Logging** — Every action logged to tamper-proof database
-- **Internet Transparency** — Every outgoing request logged and auditable
-- **Docker-Portable** — One-command deployment with GPU passthrough
+- **Intelligent file organization, search, and retrieval**  
+- **Application launching, switching, and coordinated task execution**  
+- **Smart reminders, scheduling, and timed workflow triggers**  
+- **Cross-application task orchestration** across desktop tools and services  
+- **Automated workflow pipelines** for repeated routines  
+- **Background task coordination** for improved productivity with minimal interruption  
 
-## Quick Start
+---
 
-```bash
-# Clone
-git clone https://github.com/obaidullah-zeeshan/kria.git
-cd kria
+### 📚 Personalization & Knowledge Intelligence
+K.R.I.A. continuously improves through context and memory.
 
-# Setup (creates virtualenv, installs deps, generates .env)
-bash scripts/setup.sh        # Linux
-# .\scripts\setup.ps1        # Windows PowerShell
+- **Memory-driven personalization** based on recurring user patterns  
+- **Knowledge retrieval** from saved notes, documents, and contextual history  
+- **Proactive recommendations** based on behavior and task flow  
+- **Preference learning** to personalize workflows over time  
+- **Task continuity** that remembers progress and context between interactions  
+- **Intelligent summarization** of information, documents, and updates  
 
-# Download models (first time only, ~7 GB, ~10 minutes)
-python3 scripts/download_models.py
+---
 
-# Launch
-bash scripts/app-start.sh
+### 🔔 Productivity & Smart Assistance
+Focused on reducing friction in daily work.
 
-# Optional: start secondary model (Qwen2.5-VL-7B vision)
-docker compose --profile secondary -f docker/docker-compose.yml up -d kria-brain-secondary
+- **Intelligent notification prioritization and summarization**  
+- **Activity insights and productivity suggestions**  
+- **Cross-task awareness** to reduce workflow fragmentation  
+- **Quick contextual assistance** for system and task-related queries  
+- **Automated status updates** for ongoing workflows  
+- **Smart suggestions for next actions** based on current activity patterns  
 
-# Dashboard
-open http://localhost:3000
-```
+---
 
-See [HOW_TO_RUN.md](docs/HOW_TO_RUN.md) for detailed instructions (Docker and non-Docker methods).
+## Architecture Highlights
 
-## Hardware Requirements
+K.R.I.A. is designed around a modular and extensible architecture:
 
-| Component | Minimum | Recommended |
-|---|---|---|
-| RAM | 16 GB | 32 GB |
-| GPU | NVIDIA RTX with 6 GB VRAM | 8+ GB VRAM |
-| Storage | 20 GB free | NVMe SSD |
-| OS | Windows 11 / Ubuntu 22.04+ | WSL2 or native Linux |
-| Internet | Optional (for web features) | Broadband for real-time data |
+- **Agentic decision engine** for intelligent planning and execution  
+- **Context-aware execution pipeline** for adaptive task handling  
+- **Modular tool orchestration framework** for scalable capability expansion  
+- **Memory-driven personalization layer** for adaptive experiences  
+- **Event-driven workflow automation** for proactive assistance  
+- **Extensible plugin architecture** for future integrations and ecosystem growth  
+- **Scalable system design** capable of supporting richer multimodal capabilities over time  
 
-## Architecture
+---
 
-See the [System Design Document](docs/SYSTEM_DESIGN_DOCUMENT.md) for the full technical specification.
+## Development
 
-## Documentation
+K.R.I.A. was designed with a strong focus on **modularity, intelligent automation, and scalable desktop AI architecture**. The system emphasizes clean component boundaries, extensible tooling, and adaptive execution pipelines that support future expansion into richer autonomous capabilities.
 
-| Document | Description |
-|---|---|
-| [System Design Document](docs/SYSTEM_DESIGN_DOCUMENT.md) | Complete system architecture — 14 modules, technology choices, and rationale |
-| [Implementation Guide](docs/IMPLEMENTATION_GUIDE.md) | 18-phase implementation plan with code examples for all 65+ tools |
-| [Safety Specification](docs/SAFETY_SPECIFICATION.md) | Guardrail system, risk classification, HITL protocol, internet safety |
-| [Project Structure](docs/PROJECT_STRUCTURE.md) | Directory layout and module responsibilities |
-| [How to Run](docs/HOW_TO_RUN.md) | Setup and running instructions (Docker & manual) |
-| [Speech Recognition](docs/SPEECH_RECOGNITION.md) | Speech pipeline deep-dive |
-| [Queries & Decisions](docs/QUERIES.md) | Design queries, FAQ, and decision log |
+Development was accelerated using :contentReference[oaicite:0]{index=0} to improve implementation speed, enhance code quality, and streamline engineering productivity throughout the development lifecycle.
 
-## Tool Catalog (65+ Tools)
+---
 
-| Category | Count | Examples |
-|---|---|---|
-| App Control | 6 | open/close/list apps, focus window |
-| File Operations | 10 | read/write/search/move/copy/delete files |
-| Document Intelligence | 6 | parse PDF/DOCX/XLSX/CSV, summarize, convert |
-| System Info | 7 | CPU, RAM, disk, network, battery, GPU, uptime |
-| System Config | 8 | volume, brightness, WiFi, services, firewall |
-| Process Management | 5 | kill, priority, process details |
-| Network Management | 5 | ping, DNS, traceroute, public IP, speed test |
-| Code Execution | 3 | Python, Bash, PowerShell (sandboxed) |
-| Web & Internet | 8 | search, fetch, download, weather, news, RSS |
-| Communication | 4 | notifications, email draft, clipboard, reminders |
-| Knowledge & Memory | 5 | remember/recall facts, document RAG, snippets |
-| Automation | 4 | scheduled tasks, workflows, macros |
+## Future Scope
+
+Planned capabilities include:
+
+- Predictive workflow automation  
+- Deeper operating system integration  
+- Plugin ecosystem for third-party extensions  
+- Multimodal interaction (vision + voice)  
+- Adaptive task learning and optimization  
+- Smarter proactive recommendations  
+- Personalized desktop analytics dashboard  
+- Cross-device synchronization and orchestration  
+
+---
 
 ## License
 

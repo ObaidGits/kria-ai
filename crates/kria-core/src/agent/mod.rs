@@ -3,6 +3,7 @@ pub mod executive;
 pub mod failure_analyzer;
 pub mod interaction;
 pub mod loop_engine;
+pub mod ml_orchestrator;
 pub mod onnx_classifier;
 pub mod perception;
 pub mod planner;

@@ -1,0 +1,34 @@
+# Dockerfile.openclaw-substrate (v3 — air-gapped)
+# Builds the OpenClaw skill execution sandbox image.
+# No network access at runtime. NPM is removed from the final image.
+
+FROM node:24-slim AS builder
+
+WORKDIR /app
+
+# Copy lockfile FIRST (for Docker layer caching)
+COPY openclaw-substrate/package.json openclaw-substrate/package-lock.json* ./
+
+# Install with --ignore-scripts to prevent postinstall attacks
+RUN npm ci --production --ignore-scripts 2>/dev/null || npm install --production --ignore-scripts
+
+# Copy source
+COPY openclaw-substrate/src ./src
+COPY openclaw-substrate/skills ./skills
+
+# Remove npm itself from the builder stage
+RUN rm -rf /usr/local/bin/npm /usr/local/lib/node_modules/npm
+
+# Final stage — minimal
+FROM node:24-slim
+
+WORKDIR /app
+COPY --from=builder /app /app
+
+# Remove package managers from final image to prevent supply chain attacks
+RUN rm -rf /usr/local/bin/npm /usr/local/bin/npx /usr/local/lib/node_modules/npm \
+    && rm -rf /usr/bin/apt* /usr/bin/dpkg* /usr/bin/yum* \
+    && rm -rf /var/lib/apt /var/cache/apt
+
+USER node
+CMD ["node", "--max-old-space-size=256", "src/mcp-bridge.js"]

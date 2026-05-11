@@ -110,7 +110,7 @@ fn build_filtered_tool_schema_catalog(tool_schemas: &[ToolSchema]) -> String {
     lines.join("\n")
 }
 
-fn rewrite_system_prompt_tools_block(system_prompt: &str, tool_schemas: &[ToolSchema]) -> String {
+fn rewrite_system_prompt_tools_block(system_prompt: &str, tool_schemas: &[ToolSchema], is_live_fact: bool) -> String {
     let user_context = extract_user_context_block(system_prompt);
     let mut rebuilt = String::with_capacity(2800);
     rebuilt.push_str(
@@ -125,6 +125,25 @@ fn rewrite_system_prompt_tools_block(system_prompt: &str, tool_schemas: &[ToolSc
 ## Enabled Tools\n",
     );
     rebuilt.push_str(&build_filtered_tool_schema_catalog(tool_schemas));
+
+    // Layer 3: Neutral date injection - operational, no epistemic handicapping
+    rebuilt.push_str(&format!(
+        "\n\n## System State\nCurrent date: {}. \
+        Verify time-sensitive facts (political offices, prices, scores, recent events) \
+        using the enabled search tools before synthesizing an answer.\n",
+        chrono::Local::now().format("%A, %B %d, %Y")
+    ));
+
+    // CRITICAL instruction for live-fact queries: trust search results over training data
+    if is_live_fact {
+        rebuilt.push_str(
+            "\n**CRITICAL - LIVE FACT MODE ACTIVE**: \
+            When search results are shown above, you MUST base your answer SOLELY on those results. \
+            If search results contradict your training data, TRUST THE SEARCH RESULTS. \
+            Sources marked with [WARNING: SOURCE DATE UNKNOWN] should be treated as uncertain. \
+            Do not blend training data with search results. Answer strictly from the provided search evidence.\n"
+        );
+    }
 
     if let Some(context) = user_context {
         rebuilt.push_str("\n\n## User Context\n");
@@ -250,12 +269,27 @@ fn fallback_routed_tool_candidates(
         add_tool_if_available(allowed_tool_names, &mut selected, hint);
     }
 
+    let wants_installed_list = lower.contains("installed app")
+        || lower.contains("installed apps")
+        || lower.contains("installed application")
+        || lower.contains("installed applications")
+        || lower.contains("installed package")
+        || lower.contains("installed packages")
+        || lower.contains("installed programs")
+        || (lower.contains("list")
+            && (lower.contains("apps")
+                || lower.contains("applications")
+                || lower.contains("packages")
+                || lower.contains("programs"))
+            && lower.contains("installed"));
+
     if lower.contains("install")
         || lower.contains("uninstall")
         || lower.contains("package")
-        || lower.contains("installed app")
+        || wants_installed_list
     {
         for tool in [
+            "list_installed_packages",
             "search_package",
             "check_package_installed",
             "install_package",
@@ -354,6 +388,16 @@ fn score_tool_relevance(query_text: &str, schema: &ToolSchema) -> i32 {
     score
 }
 
+/// A semantic injection candidate from the tool embedding index.
+#[derive(Debug, Clone)]
+pub struct SemanticInjection {
+    pub name: String,
+    pub cosine_similarity: f32,
+}
+
+/// Prepend marker for tools injected via cross-domain semantic search.
+const SEMANTIC_OVERRIDE_PREFIX: &str = "[HIGH RELEVANCE OVERRIDE] - ";
+
 #[allow(clippy::too_many_arguments)]
 fn select_routed_tool_schemas(
     all_tool_schemas: &[ToolSchema],
@@ -364,7 +408,9 @@ fn select_routed_tool_schemas(
     forced_tool_name: Option<&str>,
     tool_lock_name: Option<&str>,
     _conversation_only: bool,
+    semantic_injections: &[SemanticInjection],
 ) -> Vec<ToolSchema> {
+    // ── Phase A: Build the ONNX-domain include set ──────────────────────
     let mut include_names: HashSet<String> = if direct_tool_hint.is_some() {
         HashSet::new()
     } else {
@@ -388,16 +434,50 @@ fn select_routed_tool_schemas(
         pinned_names.extend(fallback_tool_names.iter().cloned());
     }
 
+    // ── Phase B: Inject semantic Top-K + fallback candidates ────────────
+    // These cross domain boundaries — the whole point of hybrid assembly.
+    let domain_tool_names: HashSet<String> = include_names.clone();
+
+    for inj in semantic_injections {
+        include_names.insert(inj.name.clone());
+    }
+    for name in fallback_tool_names {
+        include_names.insert(name.clone());
+    }
+
+    // ── Phase C: Build filtered list with attention hack ────────────────
     let filtered: Vec<ToolSchema> = if include_names.is_empty() {
         Vec::new()
     } else {
         all_tool_schemas
             .iter()
             .filter(|schema| include_names.contains(&schema.name))
-            .cloned()
+            .map(|schema| {
+                // Attention hack: if this tool was NOT in the original ONNX
+                // domain set, prepend the override marker so the LLM's
+                // attention mechanism prioritises it over domain-default tools.
+                let was_domain = domain_tool_names.contains(&schema.name);
+                let was_semantic = semantic_injections.iter().any(|i| i.name == schema.name);
+                let was_fallback = fallback_tool_names.contains(&schema.name);
+                let is_injected = !was_domain && (was_semantic || was_fallback);
+
+                if is_injected {
+                    let mut boosted = schema.clone();
+                    if !boosted.description.starts_with(SEMANTIC_OVERRIDE_PREFIX) {
+                        boosted.description = format!(
+                            "{}{}",
+                            SEMANTIC_OVERRIDE_PREFIX, boosted.description
+                        );
+                    }
+                    boosted
+                } else {
+                    schema.clone()
+                }
+            })
             .collect()
     };
 
+    // ── Phase D: Rank by relevance score ────────────────────────────────
     let mut ranked: Vec<(bool, i32, ToolSchema)> = filtered
         .into_iter()
         .map(|schema| {
@@ -869,6 +949,102 @@ fn compact_tool_result_for_llm(
     }
 
     compact_gmail_payload_for_llm(tool_result)
+}
+
+/// Strict mode freshness pruning for search results.
+/// Drops any result entry where the date field is older than max_age_days.
+/// Handles both SearxNG format (`published_date`) and search_news format (`published`).
+/// For live-fact queries, undated snippets are marked with a warning (not dropped)
+/// to prevent context loss while still signaling uncertainty to the LLM.
+fn prune_stale_search_results(mut val: serde_json::Value, max_age_days: i64) -> serde_json::Value {
+    let cutoff = chrono::Utc::now() - chrono::Duration::days(max_age_days);
+
+    // Handle both SearxNG format (results array) and search_news format
+    let results_path = if val.get("results").is_some() {
+        "results"
+    } else if val.get("articles").is_some() {
+        "articles"
+    } else {
+        return val; // No recognized results array, return as-is
+    };
+
+    /// Extract the date from a result entry, checking both `published_date` (SearxNG)
+    /// and `published` (search_news) field names.
+    fn extract_date(r: &serde_json::Value) -> Option<chrono::DateTime<chrono::Utc>> {
+        r.get("published_date")
+            .or_else(|| r.get("published")) // search_news uses "published"
+            .and_then(|v| v.as_str())
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&chrono::Utc))
+    }
+
+    /// Check if a result entry has any date field at all.
+    fn has_date_field(r: &serde_json::Value) -> bool {
+        let pd = r.get("published_date").and_then(|v| v.as_str());
+        let p = r.get("published").and_then(|v| v.as_str());
+        pd.is_some() || p.is_some()
+    }
+
+    let (pruned_count, warned_count) = if let Some(results) = val[results_path].as_array_mut() {
+        let _original_count = results.len();
+        let mut pruned = 0;
+        let mut warned = 0;
+
+        for r in results.iter_mut() {
+            let is_undated = !has_date_field(r);
+            let is_stale = extract_date(r)
+                .map(|dt| dt < cutoff)
+                .unwrap_or(false);
+
+            if is_stale {
+                // Drop stale dated results
+                pruned += 1;
+            } else if is_undated {
+                // Mark undated results with warning instead of dropping
+                // This prevents context loss when SearxNG doesn't populate publishedDate
+                if let Some(snippet) = r.get_mut("snippet") {
+                    if let Some(snippet_str) = snippet.as_str() {
+                        *snippet = serde_json::Value::String(format!(
+                            "[WARNING: SOURCE DATE UNKNOWN - VERIFY FRESHNESS] {}",
+                            snippet_str
+                        ));
+                        warned += 1;
+                    }
+                }
+            }
+        }
+
+        // Actually remove stale results
+        results.retain(|r| {
+            extract_date(r)
+                .map(|dt| dt >= cutoff)
+                .unwrap_or(true) // Keep undated (they're now warned)
+        });
+
+        (pruned, warned)
+    } else {
+        (0, 0)
+    };
+
+    if pruned_count > 0 || warned_count > 0 {
+        tracing::info!(
+            pruned = pruned_count,
+            warned = warned_count,
+            max_age_days = max_age_days,
+            "Layer 4 freshness pruning: dropped stale results, warned undated results"
+        );
+    }
+
+    // Update count field if present (after mutable borrow is released)
+    // Store the results length before borrowing val again
+    let new_count = val[results_path].as_array().map(|arr| arr.len());
+    if let Some(count) = val.get_mut("count") {
+        if let Some(len) = new_count {
+            *count = serde_json::Value::Number(serde_json::Number::from(len));
+        }
+    }
+
+    val
 }
 
 fn extract_preprocessed_image_attachments(
@@ -1758,6 +1934,8 @@ pub struct AgentLoop {
     tool_index: Option<Arc<crate::routing::tool_index::SharedToolIndex>>,
     /// Feedback collector for online learning.
     feedback_collector: Option<Arc<tokio::sync::Mutex<crate::routing::feedback::FeedbackCollector>>>,
+    /// Session vector store for document RAG context injection.
+    pub doc_store: Option<Arc<crate::preprocessing::SessionVectorStore>>,
     max_tool_rounds: usize,
     hardware_tier: String,
     min_confidence_to_act: f32,
@@ -1789,6 +1967,7 @@ impl AgentLoop {
             semantic_router: None,
             tool_index: None,
             feedback_collector: None,
+            doc_store: None,
             max_tool_rounds: 10,
             hardware_tier: "standard".into(),
             min_confidence_to_act: 0.55,
@@ -1807,6 +1986,12 @@ impl AgentLoop {
     /// Attach a tool-level semantic index for direct execution.
     pub fn with_tool_index(mut self, index: Arc<crate::routing::tool_index::SharedToolIndex>) -> Self {
         self.tool_index = Some(index);
+        self
+    }
+
+    /// Attach a session vector store for document RAG retrieval.
+    pub fn with_doc_store(mut self, store: Arc<crate::preprocessing::SessionVectorStore>) -> Self {
+        self.doc_store = Some(store);
         self
     }
 
@@ -1882,6 +2067,69 @@ impl AgentLoop {
     /// this is a no-op.
     pub fn cancel_session(&self, session_id: &str) {
         self.turn_admission.cancel_session(session_id);
+    }
+
+    /// Submit explicit user feedback for a routing decision.
+    ///
+    /// Embeds `user_text`, builds a `RoutingFeedback` record with the given outcome,
+    /// immediately nudges the live domain centroids, and persists the update to disk.
+    /// This is the entry point for the "Wrong tool" / "Try differently" UI buttons.
+    ///
+    /// Returns `true` if the centroid was actually nudged (embedding available + router ready).
+    pub async fn submit_routing_feedback(
+        &self,
+        user_text: &str,
+        domain: crate::routing::domain::Domain,
+        outcome: crate::routing::feedback::RoutingOutcome,
+        tool_selected: Option<String>,
+        session_id: &str,
+        learning_rate: f32,
+    ) -> bool {
+        use std::hash::{Hash, Hasher};
+
+        // Embed the user text to get the query vector
+        let embedding = crate::routing::embed::embed_batch(&[user_text])
+            .ok()
+            .and_then(|mut v| v.pop())
+            .unwrap_or_default();
+
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        user_text.hash(&mut hasher);
+
+        let feedback = crate::routing::feedback::RoutingFeedback {
+            input_text_hash: hasher.finish(),
+            domain_selected: domain,
+            tool_selected,
+            intent_source: "explicit_user_feedback".into(),
+            confidence: 1.0, // explicit feedback is maximum confidence signal
+            outcome,
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            session_id: session_id.to_string(),
+            embedding: embedding.clone(),
+        };
+
+        // Persist to the feedback collector buffer
+        if let Some(ref collector) = self.feedback_collector {
+            let mut c = collector.lock().await;
+            c.record(feedback.clone());
+        }
+
+        // Apply immediately to the live router (Gaps 2 + 3 closed)
+        if let Some(ref router) = self.semantic_router {
+            let report = router.apply_feedback(&feedback, learning_rate).await;
+            tracing::info!(
+                domain = ?domain,
+                outcome = ?feedback.outcome,
+                total_adjusted = report.total_adjusted,
+                "[AgentLoop] explicit feedback applied to router"
+            );
+            return report.total_adjusted > 0;
+        }
+
+        false
     }
 
     /// Return the local LLM backend used for semantic memory parsing.
@@ -2109,6 +2357,22 @@ impl AgentLoop {
         // Check if the user message contains images and route accordingly
         let has_images = messages.last().is_some_and(|m| m.has_images());
         let mut routing_focus_text = routing_focus_text_from_user_content(&last_user_text);
+
+        // Layer 2: Deterministic Tool Forcing for live-fact queries
+        // MUST run BEFORE tool_lock prefix injection so the classifier sees clean user text
+        let is_live_fact = crate::routing::live_fact::is_live_fact_query(&routing_focus_text);
+        if is_live_fact && extract_forced_tool_directive(&routing_focus_text).is_none() {
+            // Force searxng_search as the primary tool for live-fact queries
+            // search_news is also made available via the pinned tool list
+            routing_focus_text = format!("#tool:searxng_search {}", routing_focus_text);
+            tracing::info!(
+                original_query = %routing_focus_text_from_user_content(&last_user_text),
+                forced_query = %routing_focus_text,
+                "LiveFactClassifier: forced searxng_search via #tool: directive"
+            );
+        }
+
+        // Now apply tool_lock prefix (after live-fact check)
         if execution_profile.uses_direct_strategy() {
             if let Some(tool_lock) = execution_profile.tool_lock.as_deref() {
                 if extract_forced_tool_directive(&routing_focus_text).is_none() {
@@ -2116,6 +2380,7 @@ impl AgentLoop {
                 }
             }
         }
+
         let routing_focus_lower = routing_focus_text.to_lowercase();
         let mut turn_gate_plan = self.turn_gate.plan_turn(&last_user_text, has_images);
         let pure_image_analysis_turn =
@@ -2404,6 +2669,16 @@ impl AgentLoop {
         let initial_turn_gate_tool_hint = self
             .turn_gate
             .direct_tool_hint(&turn_gate_plan, &allowed_tool_names);
+        // Capture turn-level routing embedding for feedback (Gap 1 fix).
+        // Embed once here and reuse for all tool calls in this turn.
+        let turn_query_embedding: Vec<f32> = if self.semantic_router.is_some() {
+            crate::routing::embed::embed_batch(&[routing_focus_text.as_str()])
+                .ok()
+                .and_then(|mut v| v.pop())
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         let mut turn_modality = if let Some(router) = &self.semantic_router {
             let ctx = self.turn_gate.context();
             let (_, modality, _) = router.route_with_context(&routing_focus_text, ctx).await;
@@ -2436,13 +2711,13 @@ impl AgentLoop {
                 return;
             }
 
-            let round_user_text = messages
+            let round_user_text: String = messages
                 .iter()
                 .rev()
                 .find(|m| m.role == "user")
-                .map(|m| m.content.as_str())
-                .unwrap_or(routing_focus_text.as_str());
-            let round_focus_text = routing_focus_text_from_user_content(round_user_text);
+                .map(|m| m.content.clone())
+                .unwrap_or_else(|| routing_focus_text_from_user_content(&last_user_text));
+            let round_focus_text = routing_focus_text_from_user_content(&round_user_text);
             let mut routed_tool_names: HashSet<String> = HashSet::new();
             let mut conversation_only_route = false;
 
@@ -2462,6 +2737,39 @@ impl AgentLoop {
                 round_direct_tool_hint.as_deref(),
                 &allowed_tool_names,
             );
+
+            // ── Cross-domain semantic tool injection (Hybrid Assembly) ──
+            // Query the FastEmbed index for the Top-3 most semantically
+            // relevant tools **regardless of ONNX domain boundaries**.
+            // This runs unconditionally so the results are available for
+            // the override instruction below.
+            let semantic_injections: Vec<SemanticInjection> =
+                if self.tool_index.is_some() && !pure_image_analysis_turn {
+                    if let Some(ref tool_index) = self.tool_index {
+                        let matches = tool_index
+                            .top_k_by_text(&round_focus_text, 3, &self.hardware_tier)
+                            .await;
+                        matches
+                            .into_iter()
+                            .filter(|m| m.confidence >= 0.35)
+                            .map(|m| SemanticInjection {
+                                name: m.name,
+                                cosine_similarity: m.confidence,
+                            })
+                            .collect()
+                    } else {
+                        Vec::new()
+                    }
+                } else {
+                    Vec::new()
+                };
+
+            if !semantic_injections.is_empty() {
+                tracing::debug!(
+                    tools = ?semantic_injections.iter().map(|i| format!("{} ({:.2})", i.name, i.cosine_similarity)).collect::<Vec<_>>(),
+                    "Semantic tool injection candidates"
+                );
+            }
 
             let round_tool_schemas = if pure_image_analysis_turn {
                 Vec::new()
@@ -2483,9 +2791,42 @@ impl AgentLoop {
                         forced_tool_name.as_deref(),
                         execution_profile.tool_lock.as_deref(),
                         conversation_only_route,
+                        &semantic_injections,
                     )
                 }
             };
+
+            // ── Cross-domain override instruction ──────────────────────────────
+            // When semantic injection brings in tools that the ONNX domain
+            // didn't select, inject an explicit system instruction so the LLM
+            // prioritises them over the domain-default tools.
+            {
+                let domain_names = &routed_tool_names;
+                let injected_names: Vec<&str> = round_tool_schemas
+                    .iter()
+                    .filter(|s| {
+                        !domain_names.contains(&s.name)
+                            && (semantic_injections.iter().any(|i| i.name == s.name)
+                                || fallback_tool_names.contains(&s.name))
+                    })
+                    .map(|s| s.name.as_str())
+                    .collect();
+                if !injected_names.is_empty() {
+                    let override_msg = format!(
+                        "CRITICAL TOOL OVERRIDE: The following tool(s) are semantically \
+                         matched to the user's request and MUST be preferred over any \
+                         web/news/search tools: {}. \
+                         Use them first. Only fall back to web search if these tools fail.",
+                        injected_names.join(", ")
+                    );
+                    messages.push(ChatMessage {
+                        role: "system".into(),
+                        content: override_msg,
+                        name: None,
+                        images: None,
+                    });
+                }
+            }
 
             if let Some(template) = base_system_prompt_template.as_ref() {
                 if let Some(system_msg) = messages
@@ -2493,7 +2834,7 @@ impl AgentLoop {
                     .filter(|m| m.role.eq_ignore_ascii_case("system"))
                 {
                     system_msg.content =
-                        rewrite_system_prompt_tools_block(template, &round_tool_schemas);
+                        rewrite_system_prompt_tools_block(template, &round_tool_schemas, is_live_fact);
                 } else {
                     messages.insert(
                         0,
@@ -2502,6 +2843,7 @@ impl AgentLoop {
                             content: rewrite_system_prompt_tools_block(
                                 template,
                                 &round_tool_schemas,
+                                is_live_fact,
                             ),
                             name: None,
                             images: None,
@@ -2534,6 +2876,43 @@ impl AgentLoop {
             } else {
                 Some(round_tool_schemas.as_slice())
             };
+
+            // ── Document RAG context injection ─────────────────────────────────
+            // If the session has uploaded documents, retrieve the most relevant
+            // chunks and inject them as a system message before the LLM call.
+            if let Some(ref doc_store) = self.doc_store {
+                if doc_store.has_documents(session_id).await {
+                    let chunks = doc_store.query(session_id, &round_user_text).await;
+                    if !chunks.is_empty() {
+                        let context_text =
+                            crate::preprocessing::RetrievedChunk::format_context(&chunks);
+                        // Determine insert position before any mutable borrow of messages
+                        let has_system = messages
+                            .first()
+                            .map(|m| m.role.eq_ignore_ascii_case("system"))
+                            .unwrap_or(false);
+                        let inject_pos = if has_system { 1 } else { 0 };
+                        messages.insert(
+                            inject_pos,
+                            ChatMessage {
+                                role: "system".into(),
+                                content: context_text,
+                                name: None,
+                                images: None,
+                            },
+                        );
+                        log_pipeline_step(
+                            session_id,
+                            "doc_rag_injected",
+                            "Document RAG context injected",
+                            Some(serde_json::json!({
+                                "chunks": chunks.len(),
+                                "round": round,
+                            })),
+                        );
+                    }
+                }
+            }
 
             let mut llm_messages = messages.clone();
             let should_strip_images_for_round = has_images && !inline_images_allowed_for_turn;
@@ -3526,8 +3905,16 @@ impl AgentLoop {
 
                 // Phase 5: Record routing feedback for online learning
                 if let Some(ref feedback_collector) = self.feedback_collector {
+                    // Resolve the actual domain from the turn-gate plan
+                    let domain_for_feedback = crate::routing::domain::category_to_domain(
+                        &call.name
+                            .split('_')
+                            .next()
+                            .unwrap_or("conversation")
+                            .to_lowercase(),
+                    );
                     let outcome = crate::routing::feedback::detect_outcome(
-                        crate::routing::domain::Domain::Conversation, // Will be resolved by context
+                        domain_for_feedback,
                         Some(&call.name),
                         None, // next_text unknown at this point
                         tool_result.success,
@@ -3541,7 +3928,7 @@ impl AgentLoop {
                             routing_focus_text.hash(&mut hasher);
                             hasher.finish()
                         },
-                        domain_selected: crate::routing::domain::Domain::Conversation,
+                        domain_selected: domain_for_feedback,
                         tool_selected: Some(call.name.clone()),
                         intent_source: format!("{:?}", turn_gate_plan.intent.source),
                         confidence: turn_gate_plan.intent.confidence,
@@ -3551,7 +3938,7 @@ impl AgentLoop {
                             .unwrap_or_default()
                             .as_secs(),
                         session_id: session_id.to_string(),
-                        embedding: Vec::new(),
+                        embedding: turn_query_embedding.clone(), // Gap 1 fixed
                     });
                 }
 
@@ -3706,6 +4093,19 @@ impl AgentLoop {
                 }
 
                 let llm_tool_result = compact_tool_result_for_llm(&call.name, &tool_result.data);
+
+                // Layer 4: Freshness pruning for live-fact queries
+                // Uses 30-day window for stable facts (political offices, etc.) — 7-day was
+                // too aggressive and dropped Wikipedia/encyclopedic sources that are highly
+                // relevant even if older. Also matches web_search tool (not just searxng_search).
+                let llm_tool_result = if is_live_fact
+                    && matches!(call.name.as_str(), "searxng_search" | "web_search" | "search_news")
+                {
+                    prune_stale_search_results(llm_tool_result, 30)
+                } else {
+                    llm_tool_result
+                };
+
                 let result_str = if !tool_result.success {
                     let err_msg = tool_result
                         .error
@@ -3798,6 +4198,24 @@ impl AgentLoop {
                     )
                 } else {
                     result_str
+                };
+
+                // Issue 6 fix: For live-fact queries, inject a CRITICAL instruction
+                // directly into the tool result message for search tools. This places
+                // the instruction RIGHT NEXT to the search results where the LLM can
+                // see it, rather than only in the system prompt which may be far away.
+                let tool_msg = if is_live_fact
+                    && matches!(call.name.as_str(), "searxng_search" | "web_search" | "search_news")
+                    && tool_result.success
+                {
+                    format!(
+                        "[SYSTEM: LIVE FACT MODE — You MUST answer from these search results ONLY. \
+                        Do NOT use training data that contradicts these results. \
+                        Trust the search evidence above all else.]\n{}",
+                        tool_msg
+                    )
+                } else {
+                    tool_msg
                 };
 
                 let tool_msg =

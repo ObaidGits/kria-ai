@@ -1,0 +1,15 @@
+{
+  "name": "openclaw-substrate",
+  "version": "1.0.0",
+  "description": "Air-gapped MCP bridge for OpenClaw skill execution within KRIA containers",
+  "main": "src/mcp-bridge.js",
+  "scripts": {
+    "start": "node --max-old-space-size=256 src/mcp-bridge.js"
+  },
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {}
+}

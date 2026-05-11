@@ -491,6 +491,25 @@ impl RouterCache {
         let _ = self.save_centroids(&centroids);
     }
 
+    /// Apply nudged centroids from the feedback loop into the live router.
+    ///
+    /// Writes `nudged` into the in-memory centroid map and persists to disk so
+    /// the updated centroids survive restarts. Does NOT re-embed all tools —
+    /// only the feedback-adjusted values are applied on top of the current map.
+    pub async fn apply_nudged_centroids(&self, nudged: &HashMap<Domain, Vec<f32>>) {
+        if nudged.is_empty() {
+            return;
+        }
+        let mut centroids = self.centroids.write().await;
+        for (domain, vec) in nudged {
+            centroids.insert(*domain, vec.clone());
+        }
+        let snapshot = centroids.clone();
+        drop(centroids);
+        let _ = self.save_centroids(&snapshot);
+        tracing::debug!(domains = nudged.len(), "[RouterCache] nudged centroids applied and persisted");
+    }
+
     fn save_centroids(&self, centroids: &HashMap<Domain, Vec<f32>>) -> Result<()> {
         std::fs::create_dir_all(&self.cache_dir)?;
         let path = self.cache_dir.join("domain_centroids.v1.bin");

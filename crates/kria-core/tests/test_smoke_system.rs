@@ -539,7 +539,6 @@ fn smoke_process_tools_registered() {
         "close_application",
         "kill_process",
         "focus_window",
-        "manage_service",
         "get_active_connections",
     ];
     for name in &required {
@@ -623,13 +622,13 @@ fn routing_proc01_list_apps_routes_correctly() {
 }
 
 #[test]
-fn routing_proc06_manage_service_status_routes_correctly() {
+fn routing_proc06_service_status_routes_correctly() {
     // PROMPT-ID: PROC-06
     let r = IntentRouter::classify("Check status of docker service.");
     assert!(
-        matches!(&r.intent, Intent::DirectTool(t) if t == "manage_service")
+        matches!(&r.intent, Intent::DirectTool(t) if t == "execute_bash")
             || matches!(r.intent, Intent::Conversation | Intent::ComplexTask),
-        "Docker service status should route to manage_service, got: {:?}",
+        "Docker service status should route to execute_bash, got: {:?}",
         r.intent
     );
 }

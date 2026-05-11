@@ -269,7 +269,16 @@ fn default_download_max_size_mb() -> u64 {
 }
 
 fn default_searxng_instance_url() -> String {
-    "http://localhost:8888".to_string()
+    std::env::var("KRIA_SEARXNG_URL")
+        .unwrap_or_else(|_| "http://localhost:8888".to_string())
+}
+
+fn default_searxng_language() -> String {
+    "en".to_string()
+}
+
+fn default_searxng_category() -> String {
+    "general".to_string()
 }
 
 fn default_timezone() -> String {
@@ -359,6 +368,15 @@ struct SearxngSearchInput {
     max_results: usize,
     #[serde(default = "default_searxng_instance_url")]
     instance_url: String,
+    /// Language code, e.g. "en", "hi", "de" (default: "en")
+    #[serde(default = "default_searxng_language")]
+    language: String,
+    /// Recency filter: "day", "week", "month", "year" (omit for all-time)
+    #[serde(default)]
+    time_range: Option<String>,
+    /// Search category: "general", "news", "science", "it" (default: "general")
+    #[serde(default = "default_searxng_category")]
+    category: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -1094,18 +1112,36 @@ impl ToolHandler for SearxngSearch {
             return error;
         }
 
-        let max_results = input.max_results.clamp(1, 50);
+        let max_results = input.max_results.clamp(1, 10);
         let search_url = format!("{}/search", input.instance_url.trim_end_matches('/'));
 
-        let client = match build_http_client("searxng_search", 10, true) {
+        // Validate time_range
+        let time_range = input.time_range.as_deref().and_then(|t| {
+            match t.to_lowercase().as_str() {
+                "day" | "week" | "month" | "year" => Some(t),
+                _ => None,
+            }
+        });
+
+        let client = match build_http_client("searxng_search", 15, true) {
             Ok(client) => client,
             Err(error) => return error,
         };
 
+        let mut query_params: Vec<(&str, &str)> = vec![
+            ("q", query.as_str()),
+            ("format", "json"),
+            ("language", input.language.as_str()),
+            ("categories", input.category.as_str()),
+        ];
+        if let Some(tr) = time_range {
+            query_params.push(("time_range", tr));
+        }
+
         let response = client
             .get(&search_url)
-            .query(&[("q", query.as_str()), ("format", "json"), ("language", "en")])
-            .header("User-Agent", "KRIA/0.1")
+            .query(&query_params)
+            .header("User-Agent", "Mozilla/5.0 (compatible; KRIA/1.0)")
             .send()
             .await;
 
@@ -1162,19 +1198,42 @@ impl ToolHandler for SearxngSearch {
                         .iter()
                         .take(max_results)
                         .map(|row| {
+                            let snippet = row["content"]
+                                .as_str()
+                                .unwrap_or("")
+                                .chars()
+                                .take(400)
+                                .collect::<String>();
+                            let title = row["title"]
+                                .as_str()
+                                .unwrap_or("")
+                                .chars()
+                                .take(120)
+                                .collect::<String>();
                             serde_json::json!({
-                                "title": row["title"],
+                                "title": title,
                                 "url": row["url"],
-                                "snippet": row["content"],
+                                "snippet": snippet,
                                 "engine": row["engine"],
+                                "published_date": row.get("publishedDate"),
                             })
                         })
                         .collect();
+
+                    let engines_used: Vec<&str> = body["answers"]
+                        .as_array()
+                        .map(|_| vec![])
+                        .unwrap_or_default();
+                    let _ = engines_used; // reserved for future use
 
                     ToolResult::ok(serde_json::json!({
                         "query": query,
                         "results": results,
                         "count": results.len(),
+                        "backend": "searxng",
+                        "instance": input.instance_url,
+                        "language": input.language,
+                        "category": input.category,
                     }))
                 }
             }
@@ -1849,10 +1908,16 @@ fn skip_spaces(chars: &mut std::iter::Peekable<std::str::Chars>) {
 pub fn register(reg: &ToolRegistry) {
     let tools: Vec<(ToolDef, Arc<dyn ToolHandler>)> = vec![
         (ToolDef {
-            name: "web_search".into(), description: "Search the web using DuckDuckGo".into(),
+            name: "web_search".into(),
+            description: "Search the web using DuckDuckGo (fallback search — use searxng_search \
+                first for real-time or current-events queries). Use web_search when searxng_search \
+                is unavailable or when a broad fallback search is needed. \
+                Include geographic context in the query (e.g. 'Chief Minister West Bengal' \
+                not just 'CM'). Always synthesize a natural answer from results — \
+                do NOT dump the raw list.".into(),
             category: "internet".into(), default_tier: RiskLevel::Green, min_tier: "lite",
             parameters: vec![
-                param("query", "string", "Search query", true),
+                param("query", "string", "Search query — include location or time context when relevant", true),
                 param("max_results", "integer", "Max results (default 5)", false),
             ],
         }, Arc::new(WebSearch)),
@@ -1904,12 +1969,26 @@ pub fn register(reg: &ToolRegistry) {
         }, Arc::new(DownloadFile)),
         (ToolDef {
             name: "searxng_search".into(),
-            description: "Search the web via a SearXNG instance (structured results)".into(),
+            description: "Real-time multi-engine web search (Google + Bing + Brave aggregated via \
+                local SearxNG). Use this for: (1) current facts that change over time — 'who is \
+                the Chief Minister of X', 'current price of Y', 'latest score', 'PM of Z right now'; \
+                (2) any query where the answer may have changed in the past year; \
+                (3) when search_news returns 0 results. \
+                ALWAYS append geographic context to the query string itself \
+                (e.g. 'Chief Minister West Bengal 2025' not just 'CM'). \
+                Set category='news' for news queries, 'general' for facts. \
+                Set time_range='day' or 'week' for 'right now / today / latest' queries. \
+                Set language to match the geographic region (e.g. 'hi' for Hindi content, \
+                'en' for English). After results are returned, synthesize a clear answer — \
+                do NOT dump the raw list.".into(),
             category: "internet".into(), default_tier: RiskLevel::Green, min_tier: "lite",
             parameters: vec![
-                param("query", "string", "Search query", true),
-                param("max_results", "integer", "Max results (default 5)", false),
-                param("instance_url", "string", "SearXNG URL (default http://localhost:8888)", false),
+                param("query", "string", "Search query — include geographic context in the query string itself (e.g. 'Chief Minister West Bengal 2025')", true),
+                param("max_results", "integer", "Max results (default 5, max 20)", false),
+                param("language", "string", "Language code: 'en' (default), 'hi', 'de', 'fr', 'ja', etc.", false),
+                param("time_range", "string", "Recency filter: 'day' (last 24h), 'week', 'month', 'year'. Omit for all-time.", false),
+                param("category", "string", "Search category: 'general' (default), 'news', 'science', 'it'", false),
+                param("instance_url", "string", "SearxNG instance URL (default: http://localhost:8888)", false),
             ],
         }, Arc::new(SearxngSearch)),
         (ToolDef {

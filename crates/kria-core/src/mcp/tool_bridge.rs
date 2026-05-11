@@ -3,10 +3,13 @@
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
+use std::time::Instant;
 
 use super::client::{McpClient, McpServerState};
 use super::protocol::ToolCallResult;
 use crate::infra::ToolResult;
+use crate::openclaw::sanitizer::EvidenceWrapper;
+use crate::openclaw::types::ExecutionSource;
 use crate::tools::ToolHandler;
 
 fn normalize_arguments(params: Value) -> Option<Value> {
@@ -98,6 +101,7 @@ impl McpToolHandler {
 #[async_trait]
 impl ToolHandler for McpToolHandler {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let start = Instant::now();
         let state = self.client.state().await;
         if state != McpServerState::Running {
             let fallback = format!("MCP server '{}' is not running", self.server_name);
@@ -145,12 +149,12 @@ impl ToolHandler for McpToolHandler {
             }
         }
 
+        let duration_ms = start.elapsed().as_millis() as u64;
+
         match call_result {
             Ok(result) => {
-                // Combine all text content into a single string.
                 let text = tool_result_text(&result);
-
-                if result.is_error {
+                let raw = if result.is_error {
                     ToolResult {
                         success: false,
                         data: serde_json::json!(text),
@@ -162,6 +166,20 @@ impl ToolHandler for McpToolHandler {
                         data: serde_json::json!(text),
                         error: None,
                     }
+                };
+
+                // Wrap in structured evidence block for safe LLM consumption
+                let wrapped = EvidenceWrapper::wrap(
+                    &self.mcp_tool_name,
+                    ExecutionSource::Mcp,
+                    &raw,
+                    duration_ms,
+                );
+
+                ToolResult {
+                    success: raw.success,
+                    data: serde_json::json!(wrapped),
+                    error: raw.error,
                 }
             }
             Err(e) => ToolResult {

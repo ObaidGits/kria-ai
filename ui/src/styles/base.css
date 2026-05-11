@@ -543,17 +543,151 @@ body {
   color: var(--danger);
 }
 
+/* ============================================
+   File Chips (input bar — composing state)
+   ============================================ */
+
+.file-chips-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 16px 4px;
+  background: var(--bg-tertiary);
+  border-top: 1px solid var(--border);
+}
+
+.file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12px;
+  max-width: 220px;
+  color: var(--text-primary);
+}
+
+.file-chip-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.file-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 120px;
+}
+
+.file-chip-size {
+  color: var(--text-muted);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.file-chip-remove {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 2px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.file-chip-remove:hover {
+  color: var(--danger);
+}
+
+/* ============================================
+   File Cards (message bubble — history)
+   ============================================ */
+
+.msg-file-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.msg-file-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-width: 180px;
+  max-width: 280px;
+}
+
+.msg-file-card-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.msg-file-card-info {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex: 1;
+}
+
+.msg-file-card-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.msg-file-card-size {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.msg-file-card-badge {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  background: rgba(88, 166, 255, 0.12);
+  border: 1px solid rgba(88, 166, 255, 0.25);
+  border-radius: 4px;
+  padding: 2px 5px;
+  flex-shrink: 0;
+}
+
 .attach-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 10px;
   border-radius: var(--radius);
   border: 1px solid var(--border);
   background: transparent;
   cursor: pointer;
   font-size: 18px;
+  align-self: flex-end;
+  flex-shrink: 0;
+  user-select: none;
+  line-height: 1;
+  transition: background 0.15s ease;
 }
 
 .attach-btn:hover {
   background: var(--bg-hover);
+}
+
+.attach-btn:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .message-image {
@@ -932,6 +1066,23 @@ body {
   background: var(--bg-secondary);
 }
 
+/* Form container — wraps chips, image preview, slash menu, and the input row */
+.chat-input-form {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+  background: var(--bg-secondary);
+  flex-shrink: 0;
+}
+
+/* The actual bottom row: icons + textarea + send */
+.input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 10px 14px 12px;
+}
+
 .chat-input {
   flex: 1;
   resize: none;
@@ -945,11 +1096,13 @@ body {
   line-height: 1.5;
   max-height: 150px;
   overflow-y: auto;
+  transition: border-color 0.15s ease;
 }
 
 .chat-input:focus {
   outline: none;
   border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.15);
 }
 
 .send-btn {
@@ -961,6 +1114,9 @@ body {
   font-weight: 600;
   cursor: pointer;
   font-size: 14px;
+  flex-shrink: 0;
+  transition: background 0.15s ease, opacity 0.15s ease;
+  align-self: flex-end;
 }
 
 .send-btn:disabled {
@@ -981,6 +1137,8 @@ body {
   font-weight: 600;
   cursor: pointer;
   font-size: 14px;
+  flex-shrink: 0;
+  align-self: flex-end;
   transition: all 0.15s ease;
   animation: stop-btn-pulse 2s ease-in-out infinite;
 }
@@ -1000,10 +1158,53 @@ body {
   transform: scale(0.97);
 }
 
+/* ─── Message Feedback Row ────────────────────────────────────────────────── */
+.msg-feedback-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.msg-bubble:hover .msg-feedback-row {
+  opacity: 1;
+}
+
+.msg-feedback-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted, #888);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  white-space: nowrap;
+}
+
+.msg-feedback-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.msg-feedback-sent {
+  font-size: 11px;
+  color: var(--success, #2ecc71);
+  opacity: 0.85;
+}
+
 .voice-btn {
   padding: 10px;
   border-radius: var(--radius);
   border: 1px solid var(--border);
+  align-self: flex-end;
+  flex-shrink: 0;
   background: transparent;
   cursor: pointer;
   font-size: 18px;
@@ -1761,8 +1962,10 @@ body {
 
 .message-content code {
   background: var(--bg-tertiary);
+  color: var(--text-primary);
   padding: 2px 6px;
   border-radius: 3px;
+  border: 1px solid var(--border);
   font-family: var(--font-mono);
   font-size: 0.9em;
 }
@@ -1779,6 +1982,8 @@ body {
 
 .message-content pre code {
   background: none;
+  color: inherit;
+  border: none;
   padding: 0;
   font-size: 13px;
   line-height: 1.5;

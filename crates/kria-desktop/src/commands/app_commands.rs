@@ -44,6 +44,91 @@ pub async fn cancel_executive_task(
     Ok(())
 }
 
+/// Submit explicit routing feedback from the UI ("Wrong tool" / "Try differently").
+///
+/// `outcome_type` must be one of:
+/// - `"wrong_tool"` — maps to `RoutingOutcome::Corrected`
+/// - `"try_differently"` — maps to `RoutingOutcome::Rephrased`
+/// - `"wrong_domain:<DomainName>"` — maps to `RoutingOutcome::Corrected` with a named domain
+#[tauri::command]
+pub async fn submit_turn_feedback(
+    session_id: String,
+    user_text: String,
+    tool_selected: Option<String>,
+    outcome_type: String,
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    use kria_core::routing::domain::Domain;
+    use kria_core::routing::feedback::RoutingOutcome;
+
+    let state = state
+        .get()
+        .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
+
+    let config = state.config.read().await;
+    let learning_rate = config.routing.feedback_learning_rate;
+    drop(config);
+
+    // Map outcome_type string to RoutingOutcome
+    let outcome = if outcome_type == "wrong_tool" || outcome_type.starts_with("wrong_domain:") {
+        let correct_domain = if let Some(d) = outcome_type.strip_prefix("wrong_domain:") {
+            match d.to_lowercase().as_str() {
+                "systeminfo" | "system" => Domain::SystemInfo,
+                "knowledge" => Domain::Knowledge,
+                "fileops" | "file" => Domain::FileOps,
+                "applifecycle" | "app" => Domain::AppLifecycle,
+                "comms" | "communication" => Domain::Comms,
+                "workspace" => Domain::Workspace,
+                "power" => Domain::Power,
+                "vision" => Domain::Vision,
+                "packages" => Domain::Packages,
+                "developer" | "dev" => Domain::Developer,
+                "planner" => Domain::Planner,
+                _ => Domain::Conversation,
+            }
+        } else {
+            Domain::Conversation
+        };
+        RoutingOutcome::Corrected {
+            correct_domain,
+            correct_tool: None,
+        }
+    } else {
+        // "try_differently" → Rephrased (weak negative signal)
+        RoutingOutcome::Rephrased
+    };
+
+    // Use the tool name to hint the domain that was originally selected
+    let domain = tool_selected
+        .as_deref()
+        .and_then(|t| {
+            let cat = t.split('_').next().unwrap_or("conversation").to_lowercase();
+            Some(kria_core::routing::domain::category_to_domain(&cat))
+        })
+        .unwrap_or(Domain::Conversation);
+
+    let nudged = state.agent_loop.submit_routing_feedback(
+        &user_text,
+        domain,
+        outcome,
+        tool_selected,
+        &session_id,
+        learning_rate,
+    ).await;
+
+    tracing::info!(
+        session_id = %session_id,
+        outcome_type = %outcome_type,
+        nudged,
+        "User submitted routing feedback"
+    );
+
+    Ok(serde_json::json!({
+        "status": "ok",
+        "nudged": nudged,
+    }))
+}
+
 #[tauri::command]
 pub async fn approve_action(
     request_id: String,

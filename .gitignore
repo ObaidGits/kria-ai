@@ -68,8 +68,13 @@ lerna-debug.log*
 
 # ── Logs ──────────────────────────────────────────────────────────
 *.log
+*.log.*
 logs/
+tests-logs/
+crates/*/tests-logs/
 **/update.log
+data/logs/
+.kria/logs/
 
 # ── Temp & generated files ───────────────────────────────────────
 *.tmp

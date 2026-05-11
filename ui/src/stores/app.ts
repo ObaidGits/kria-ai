@@ -410,6 +410,40 @@ async function cancelExecutiveTask(taskId: string) {
   }
 }
 
+/** Submit explicit routing feedback from UI buttons ("Wrong tool" / "Try differently").
+ *  outcomeType: "wrong_tool" | "try_differently" | "wrong_domain:<DomainName>"
+ */
+async function submitTurnFeedback(
+  sessionId: string,
+  userText: string,
+  toolSelected: string | null,
+  outcomeType: string,
+): Promise<boolean> {
+  try {
+    const result = await invoke<{ status: string; nudged: boolean }>("submit_turn_feedback", {
+      sessionId,
+      userText,
+      toolSelected: toolSelected ?? null,
+      outcomeType,
+    });
+    return result?.nudged ?? false;
+  } catch (e) {
+    // HTTP fallback for web mode
+    try {
+      const res = await fetch("/api/feedback/routing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId, userText, toolSelected, outcomeType }),
+      });
+      const data = await res.json();
+      return data?.nudged ?? false;
+    } catch (httpErr) {
+      console.warn("Failed to submit routing feedback:", httpErr);
+      return false;
+    }
+  }
+}
+
 async function loadQuarantinedTools() {
   try {
     const tools = await invoke<QuarantinedTool[]>("list_quarantined_tools");
@@ -567,6 +601,22 @@ export interface Message {
   toolCalls?: ToolCall[];
   /** Base64 data URL for image messages */
   imageUrl?: string;
+  /** Attached document files (for document chat messages) */
+  attachedFiles?: AttachedFileInfo[];
+}
+
+export interface AttachedFileInfo {
+  name: string;
+  size: number;
+  mime: string;
+}
+
+export interface PendingFile {
+  file: File;
+  name: string;
+  size: number;
+  mime: string;
+  preview?: string; // object URL for images
 }
 
 export interface ToolCall {
@@ -949,6 +999,96 @@ function uint8ToBase64(bytes: Uint8Array): string {
     binary += String.fromCharCode(...chunk);
   }
   return btoa(binary);
+}
+
+// ── Pending documents state ───────────────────────────────────────────────
+const [pendingFiles, setPendingFiles] = createSignal<PendingFile[]>([]);
+
+function addPendingFile(file: File) {
+  const pf: PendingFile = {
+    file,
+    name: file.name,
+    size: file.size,
+    mime: file.type || "application/octet-stream",
+    preview: file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined,
+  };
+  setPendingFiles((prev) => [...prev, pf].slice(0, 10)); // cap at 10
+}
+
+function removePendingFile(index: number) {
+  setPendingFiles((prev) => {
+    const next = [...prev];
+    const removed = next.splice(index, 1)[0];
+    if (removed?.preview) URL.revokeObjectURL(removed.preview);
+    return next;
+  });
+}
+
+function clearPendingFiles() {
+  setPendingFiles((prev) => {
+    prev.forEach((f) => { if (f.preview) URL.revokeObjectURL(f.preview); });
+    return [];
+  });
+}
+
+async function sendDocumentMessage(files: PendingFile[], text?: string) {
+  if (files.length === 0) return;
+
+  // Build display info for the message bubble
+  const fileInfos: AttachedFileInfo[] = files.map((f) => ({
+    name: f.name,
+    size: f.size,
+    mime: f.mime,
+  }));
+
+  const userMsg: Message = {
+    id: crypto.randomUUID(),
+    role: "user",
+    content: text?.trim() || `Analyze these files: ${files.map((f) => f.name).join(", ")}`,
+    timestamp: Date.now(),
+    attachedFiles: fileInfos,
+  };
+  appendScopedMessage("assistant", userMsg);
+  setInputText("");
+  clearPendingFiles();
+  setScopedThinking("assistant", true);
+
+  try {
+    const sessionId = await ensureScopedSessionActive("assistant");
+
+    // Read file bytes
+    const uploadedFiles = await Promise.all(
+      files.map(async (pf) => {
+        const buf = await pf.file.arrayBuffer();
+        return {
+          name: pf.name,
+          bytes: Array.from(new Uint8Array(buf)),
+          mime: pf.mime,
+        };
+      })
+    );
+
+    const result = await invoke<{ status: string; prompt: string }>("send_document_message", {
+      sessionId,
+      files: uploadedFiles,
+      text: text?.trim() || null,
+    });
+
+    // The backend indexed the docs and returned the prompt to send;
+    // now fire the normal agent turn with that prompt.
+    if (result.status === "indexed" && result.prompt) {
+      await sendMessage(result.prompt);
+    }
+  } catch (e) {
+    const errMsg: Message = {
+      id: crypto.randomUUID(),
+      role: "system",
+      content: `Document upload error: ${e}`,
+      timestamp: Date.now(),
+    };
+    appendScopedMessage("assistant", errMsg);
+    setScopedThinking("assistant", false);
+  }
 }
 
 async function sendImageMessage(imageData: Uint8Array, mimeType: string, text?: string) {
@@ -2689,6 +2829,11 @@ export const appStore = {
   sendMessage,
   sendLabMessage,
   sendImageMessage,
+  sendDocumentMessage,
+  pendingFiles,
+  addPendingFile,
+  removePendingFile,
+  clearPendingFiles,
   cancelTurn,
   approveAction,
   denyAction,
@@ -2784,6 +2929,7 @@ export const appStore = {
   latestUncertainty,
   loadExecutiveSnapshot,
   cancelExecutiveTask,
+  submitTurnFeedback,
   loadQuarantinedTools,
   approveQuarantinedTool,
   rejectQuarantinedTool,

@@ -97,6 +97,10 @@ pub struct AppState {
     /// Image generation orchestrator — ComfyUI sidecar + cloud fallback.
     #[allow(dead_code)]
     pub image_orchestrator: Arc<ImageOrchestrator>,
+    /// OpenClaw skill registry — SQLite-backed, populated at boot.
+    pub skill_registry: Arc<kria_core::openclaw::registry::SkillRegistry>,
+    /// OpenClaw container pool — None if Docker is unavailable (graceful degradation).
+    pub container_pool: Option<Arc<kria_core::openclaw::ContainerPool>>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

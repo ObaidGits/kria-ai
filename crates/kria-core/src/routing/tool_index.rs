@@ -291,6 +291,50 @@ impl ToolEmbeddingIndex {
         self.entries.iter().map(|e| e.name.as_str()).collect()
     }
 
+    /// Return the top-K tools by cosine similarity, **ignoring thresholds**.
+    ///
+    /// Unlike `match_tool()` which only returns tools above the per-tool
+    /// threshold, this returns the K most semantically relevant tools
+    /// regardless of confidence.  Used for cross-domain tool injection
+    /// so the LLM always sees the right tools even when the domain
+    /// classifier is wrong.
+    pub fn top_k_unfiltered(&self, query_embedding: &[f32], k: usize, current_tier: &str) -> Vec<ToolMatch> {
+        if self.entries.is_empty() {
+            return Vec::new();
+        }
+
+        let tier_idx = TIER_ORDER
+            .iter()
+            .position(|&t| t == current_tier)
+            .unwrap_or(0);
+
+        let mut scored: Vec<ToolMatch> = self
+            .entries
+            .iter()
+            .filter(|entry| {
+                let entry_tier_idx = TIER_ORDER
+                    .iter()
+                    .position(|&t| t == entry.min_tier.as_str())
+                    .unwrap_or(0);
+                tier_idx >= entry_tier_idx
+            })
+            .map(|entry| {
+                let sim = embed::cosine_sim(query_embedding, &entry.embedding);
+                ToolMatch {
+                    name: entry.name.clone(),
+                    description: entry.description.clone(),
+                    category: entry.category.clone(),
+                    confidence: sim,
+                    direct_execution: sim >= self.global_threshold,
+                }
+            })
+            .collect();
+
+        scored.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap());
+        scored.truncate(k);
+        scored
+    }
+
     /// Get top-N matches (for debugging/analysis).
     pub fn top_matches(&self, query_embedding: &[f32], n: usize) -> Vec<ToolMatch> {
         let mut matches: Vec<ToolMatch> = self
@@ -376,6 +420,20 @@ impl SharedToolIndex {
     pub async fn len(&self) -> usize {
         let index = self.index.read().await;
         index.len()
+    }
+
+    /// Return the top-K most semantically relevant tools, **ignoring thresholds**.
+    ///
+    /// This is the cross-domain injection entry point: the caller passes
+    /// the user's raw query text and gets back the K tools whose embeddings
+    /// are closest, regardless of the ONNX domain selection.
+    pub async fn top_k_by_text(&self, text: &str, k: usize, current_tier: &str) -> Vec<ToolMatch> {
+        let query_emb = match embed::embed_one(text) {
+            Ok(e) => e,
+            Err(_) => return Vec::new(),
+        };
+        let index = self.index.read().await;
+        index.top_k_unfiltered(&query_emb, k, current_tier)
     }
 }
 

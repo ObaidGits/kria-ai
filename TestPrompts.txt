@@ -890,47 +890,423 @@ SECTION 18 — GOOGLE WORKSPACE TOOLS
 SECTION 19 — GOOGLE COLAB (MCP)
 ────────────────────────────────────────────────────────────────────────────────
 
-Note: MCP tool names in this section are dynamic and only available when the
-  corresponding MCP server is mounted and healthy.
+Prerequisites:
+  - [colab] enabled = true in kria_config.toml
+  - colab-mcp MCP server running (uvx from git+https://github.com/googlecolab/colab-mcp)
+  - Google account authenticated (OAuth token valid)
+  - A Colab notebook open in Chrome (or created via Drive API)
+
+MCP Server: colab-mcp (stdio transport, YELLOW trust level)
+Runtime States: Disconnected → SidecarStarting → AwaitingBrowserConnection
+                → NotebookSelectionRequired → Ready / Degraded
+
+Tool Naming Convention:
+  All Colab MCP tools are prefixed with `mcp_colab-mcp_` in KRIA's registry.
+  Dynamic tools are discovered at runtime from the MCP server.
+  The tools below reflect the known set; additional tools may appear
+  depending on the colab-mcp version.
+
+────────────────────────────────────────────────────────────────────────────────
+  19A — NOTEBOOK LIFECYCLE (Create / Open / Select)
+────────────────────────────────────────────────────────────────────────────────
 
 [COLAB-01] Prompt : "Create a Google Colab notebook named mcp_test.ipynb"
            Tools  : gw_drive_create → mcp_colab-mcp_open_colab_browser_connection
-           EXPECTED: ✅➡️ MULTI-STEP FLOW (ColabFlowState):
-                     📋 Plan event: "Creating notebook mcp_test.ipynb on Drive..."
-                     Step 1: If gw_drive_create is mounted, use it with
-                             title="mcp_test.ipynb", mime_type="application/vnd.google.colab"
-                             to create file on Drive.
-                     📋 Plan event: "Opening Colab notebook in browser..."
-                     Step 2: open_colab_browser_connection → browser opens notebook
+           EXPECTED: ✅➡️ MULTI-STEP FLOW (ColabFlowState: CreateNotebook):
+                     📋 Plan: "Creating notebook mcp_test.ipynb on Drive..."
+                     Step 1: gw_drive_create(title="mcp_test.ipynb",
+                             mime_type="application/vnd.google.colab")
+                             → returns Drive file ID
+                     📋 Plan: "Opening Colab notebook in browser..."
+                     Step 2: mcp_colab-mcp_open_colab_browser_connection({})
+                             → browser opens the notebook, WebSocket established
                      Voice: "Notebook mcp_test.ipynb created and opened in browser."
-           Notes  : gw_drive_create may be dynamic/conditional depending on mounted tool set.
+           Notes  : ColabFlowState tracks drive_file_id from Step 1 result.
+                    If gw_drive_create is not mounted, falls back to
+                    open_colab_browser_connection only (opens blank notebook).
            ❌ WRONG: Plain text "Tool call: colab create mcp_test.ipynb" (hallucination)
 
 [COLAB-02] Prompt : "Open the Colab browser connection."
-           Tool   : mcp_colab-mcp_open_colab_browser_connection
+           Tool   : mcp_colab-mcp_open_colab_browser_connection({})
            EXPECTED: ✅ GREEN — Browser WebSocket session established.
+                     ColabRuntimeState: AwaitingBrowserConnection → Ready
                      Voice: "Colab browser session is now connected."
+           Notes  : This is the bootstrap tool. Must be called before any
+                    cell execution. KRIA auto-injects this as a gate when
+                    execute_cell is called without an active connection.
 
-[COLAB-03] Prompt : "Execute this code in Colab: print('Hello from KRIA')"
-           Tools  : open_colab_browser_connection (gate) → mcp_colab-mcp_execute_cell
+[COLAB-03] Prompt : "Open my existing Colab notebook at
+                     https://colab.research.google.com/drive/1abc123xyz"
+           Tool   : mcp_colab-mcp_open_colab_browser_connection({})
+           EXPECTED: ✅ GREEN — Browser navigates to the specified notebook URL.
+                     NotebookSelectionRequired → Ready (notebook selected).
+                     Voice: "Notebook opened in browser."
+           Notes  : The URL is passed as context; the MCP server navigates
+                    Chrome to the notebook tab. If the notebook is not
+                    accessible (permissions), returns clear error.
+
+[COLAB-04] Prompt : "Colab mein ek notebook banao 'data_analysis.ipynb' naam se."
+           Tools  : gw_drive_create → open_colab_browser_connection
+           EXPECTED: ✅➡️ Same multi-step flow as COLAB-01.
+                    Hinglish "banao" triggers CreateNotebook intent
+                    via detect_colab_intent() keyword matching.
+                    Voice: "Notebook data_analysis.ipynb ban gaya aur browser mein khul gaya."
+
+[COLAB-05] Prompt : "Colab chalao."  (Generic Hinglish — "run/start Colab")
+           Tool   : mcp_colab-mcp_open_colab_browser_connection({})
+           EXPECTED: ✅ GREEN — Browser connection opened.
+                     Voice: "Colab chalu ho gaya."
+
+[COLAB-06] Prompt : "Switch to my other Colab notebook titled 'training_model.ipynb'"
+           Tool   : mcp_colab-mcp_open_colab_browser_connection({})
+           EXPECTED: ✅ GREEN — If multiple notebooks are open in Chrome,
+                     the MCP server switches to the named notebook tab.
+                     Voice: "Switched to training_model.ipynb."
+
+────────────────────────────────────────────────────────────────────────────────
+  19B — CELL EXECUTION (Run Python Code)
+────────────────────────────────────────────────────────────────────────────────
+
+[COLAB-10] Prompt : "Execute this code in Colab: print('Hello from KRIA')"
+           Tools  : open_colab_browser_connection (auto-gate) → mcp_colab-mcp_execute_cell
            EXPECTED: ✅➡️ Browser-connection gate fires if not connected:
                      📋 Plan: "Establishing Colab browser connection first..."
-                     Step 1: open_colab_browser_connection
-                     Step 2: mcp_colab-mcp_execute_cell(code: "print('Hello from KRIA')")
+                     Step 1: mcp_colab-mcp_open_colab_browser_connection({})
+                     Step 2: mcp_colab-mcp_execute_cell({ "code": "print('Hello from KRIA')" })
                      Output: "Hello from KRIA" returned from Colab kernel.
+           Notes  : The loop engine auto-injects the browser gate when
+                    execute_cell is called without an active connection.
+                    ColabFlowState: browser_connected=false → triggers gate.
 
-[COLAB-04] Prompt : "Colab mein ek notebook banao 'data_analysis.ipynb' naam se."  (Hinglish)
-           Tools  : gw_drive_create → open_colab_browser_connection
-           EXPECTED: ✅➡️ Same multi-step flow as COLAB-01; Hinglish "banao" triggers
-                     CreateNotebook intent via detect_colab_intent().
-
-[COLAB-05] Prompt : "Run Python in Colab: import pandas as pd; print(pd.__version__)"
-           Tools  : open_colab_browser_connection (gate if needed) → execute_cell
+[COLAB-11] Prompt : "Run Python in Colab: import pandas as pd; print(pd.__version__)"
+           Tools  : execute_cell (gate if needed)
            EXPECTED: ✅➡️ pandas version printed from Colab runtime.
+                     Output: "2.2.2" (or whatever version is installed).
+           Notes  : Colab runtimes have pre-installed packages (pandas, numpy,
+                    matplotlib, etc.). No pip install needed for common libs.
 
-[COLAB-06] Prompt : "Colab chalao."  (Generic Hinglish — "run/start Colab")
-           Tool   : mcp_colab-mcp_open_colab_browser_connection
-           EXPECTED: ✅ GREEN — Browser connection opened. Voice: "Colab chalu ho gaya."
+[COLAB-12] Prompt : "In Colab, calculate the first 10 Fibonacci numbers."
+           Tool   : mcp_colab-mcp_execute_cell({ "code": "..." })
+           EXPECTED: ✅ GREEN — Code executed, output returned:
+                     "0, 1, 1, 2, 3, 5, 8, 13, 21, 34"
+           Notes  : KRIA generates the Python code from the natural language
+                    request and passes it to execute_cell.
+
+[COLAB-13] Prompt : "Run this in Colab:
+                     import torch
+                     print(torch.__version__)
+                     print(torch.cuda.is_available())"
+           Tool   : mcp_colab-mcp_execute_cell({ "code": "..." })
+           EXPECTED: ✅ GREEN — PyTorch version + CUDA availability.
+                     Colab GPUs return True; CPU runtimes return False.
+                     Output: "2.3.0\nTrue" (on GPU runtime)
+
+[COLAB-14] Prompt : "In Colab, create a plot of sin(x) from 0 to 2*pi."
+           Tool   : mcp_colab-mcp_execute_cell({ "code": "..." })
+           EXPECTED: ✅ GREEN — Code runs matplotlib, generates plot.
+                     Output: plot displayed inline in Colab notebook.
+                     KRIA may also return a text summary: "Plot generated."
+
+[COLAB-15] Prompt : "Colab mein code chalaao: print(2**10)"  (Hinglish)
+           Tool   : mcp_colab-mcp_execute_cell({ "code": "print(2**10)" })
+           EXPECTED: ✅ GREEN — Output: "1024"
+                     Hinglish "chalaao" triggers ExecuteCode intent.
+
+[COLAB-16] Prompt : "In Colab, train a simple linear regression on the iris dataset."
+           Tool   : mcp_colab-mcp_execute_cell({ "code": "..." })
+           EXPECTED: ✅➡️ Multi-cell flow:
+                     Cell 1: import sklearn, load iris dataset
+                     Cell 2: train_test_split, fit model, print accuracy
+                     Output: "Accuracy: 0.97" (or similar)
+           Notes  : For complex tasks, KRIA may split into multiple
+                    execute_cell calls (one per logical cell).
+
+[COLAB-17] Prompt : "Run a cell in Colab that installs the 'transformers' library."
+           Tool   : mcp_colab-mcp_execute_cell({ "code": "!pip install transformers" })
+           EXPECTED: ✅ GREEN — pip install runs in Colab runtime.
+                     Output: "Successfully installed transformers-..."
+           Notes  : Use `!pip install` inside execute_cell for Colab packages.
+                    Colab runtimes persist installed packages until runtime restart.
+
+[COLAB-18] Prompt : "Execute this Colab cell: %%bash\napt-get update && apt-get install -y ffmpeg"
+           Tool   : mcp_colab-mcp_execute_cell({ "code": "%%bash\napt-get update && apt-get install -y ffmpeg" })
+           EXPECTED: ✅ GREEN — System package installed in Colab VM.
+                     Output: apt-get progress and "Setting up ffmpeg ..."
+
+────────────────────────────────────────────────────────────────────────────────
+  19C — FILE I/O (Upload / Download / Mount Drive)
+────────────────────────────────────────────────────────────────────────────────
+
+[COLAB-20] Prompt : "In Colab, mount my Google Drive."
+           Tool   : mcp_colab-mcp_execute_cell({ "code": "from google.colab import drive\ndrive.mount('/content/drive')" })
+           EXPECTED: ✅ GREEN — Drive mounted at /content/drive.
+                     Output: "Mounted at /content/drive"
+           Notes  : This triggers a Google auth popup in the browser.
+                    User must click "Authorize" in the browser tab.
+                    After mount, files at /content/drive/MyDrive/ are accessible.
+
+[COLAB-21] Prompt : "In Colab, list files in /content/drive/MyDrive/"
+           Tool   : mcp_colab-mcp_execute_cell({ "code": "import os\nfor f in os.listdir('/content/drive/MyDrive/'):\n    print(f)" })
+           EXPECTED: ✅ GREEN — List of files in Drive root.
+
+[COLAB-22] Prompt : "In Colab, read the CSV file from Drive and show first 5 rows."
+           Tool   : mcp_colab-mcp_execute_cell({ "code": "import pandas as pd\ndf = pd.read_csv('/content/drive/MyDrive/data.csv')\ndf.head()" })
+           EXPECTED: ✅ GREEN — DataFrame head displayed.
+
+[COLAB-23] Prompt : "In Colab, save the trained model to Drive."
+           Tool   : mcp_colab-mcp_execute_cell({ "code": "import torch\ntorch.save(model.state_dict(), '/content/drive/MyDrive/model.pth')" })
+           EXPECTED: ✅ GREEN — Model saved to Drive.
+
+[COLAB-24] Prompt : "In Colab, upload a file from my local machine."
+           Tool   : mcp_colab-mcp_execute_cell({ "code": "from google.colab import files\nuploaded = files.upload()" })
+           EXPECTED: ✅ GREEN — File upload dialog appears in browser.
+                     User selects file → uploaded to /content/ in Colab VM.
+
+[COLAB-25] Prompt : "In Colab, download the output file to my local machine."
+           Tool   : mcp_colab-mcp_execute_cell({ "code": "from google.colab import files\nfiles.download('/content/output.csv')" })
+           EXPECTED: ✅ GREEN — Browser download dialog triggers.
+                     File downloads to user's local Downloads folder.
+
+────────────────────────────────────────────────────────────────────────────────
+  19D — RUNTIME MANAGEMENT (GPU / RAM / Restart)
+────────────────────────────────────────────────────────────────────────────────
+
+[COLAB-30] Prompt : "In Colab, check if GPU is available."
+           Tool   : mcp_colab-mcp_execute_cell({ "code": "!nvidia-smi" })
+           EXPECTED: ✅ GREEN — GPU info: name, memory, utilization.
+                     If no GPU: "NVIDIA-SMI has failed because it couldn't
+                     communicate with the NVIDIA driver."
+
+[COLAB-31] Prompt : "In Colab, check available RAM and disk."
+           Tool   : mcp_colab-mcp_execute_cell({ "code": "!free -h && df -h /" })
+           EXPECTED: ✅ GREEN — RAM total/used/free + disk usage.
+
+[COLAB-32] Prompt : "In Colab, check which Python version is running."
+           Tool   : mcp_colab-mcp_execute_cell({ "code": "!python --version" })
+           EXPECTED: ✅ GREEN — "Python 3.10.x" (or Colab's current version).
+
+[COLAB-33] Prompt : "In Colab, list all installed pip packages."
+           Tool   : mcp_colab-mcp_execute_cell({ "code": "!pip list" })
+           EXPECTED: ✅ GREEN — Full pip package list with versions.
+
+[COLAB-34] Prompt : "In Colab, restart the runtime."
+           Tool   : mcp_colab-mcp_execute_cell({ "code": "import os\nos._exit(0)" })
+           EXPECTED: ⚠️ WARN — "This will restart the Colab runtime. All variables
+                     will be lost. Confirm?"
+                     After yes: runtime restarts. Installed packages persist
+                     (Colab feature), but variables are cleared.
+           Notes  : After restart, the browser connection may need re-establishing.
+                    KRIA should auto-detect and re-inject the browser gate.
+
+────────────────────────────────────────────────────────────────────────────────
+  19E — MULTI-CELL WORKFLOWS (Chained Execution)
+────────────────────────────────────────────────────────────────────────────────
+
+[COLAB-40] Prompt : "In Colab, load the iris dataset, train a random forest,
+                     and print the classification report."
+           Tools  : execute_cell (×3, chained)
+           EXPECTED: ✅➡️ Three sequential cell executions:
+                     Cell 1: "from sklearn.datasets import load_iris\n..."
+                     Cell 2: "from sklearn.ensemble import RandomForestClassifier\n..."
+                     Cell 3: "from sklearn.metrics import classification_report\n..."
+                     Output: precision, recall, f1-score table.
+           Notes  : KRIA splits complex requests into logical cells.
+                    Each cell is a separate execute_cell call.
+                    Results from previous cells are available in next cells
+                    (Colab kernel persists state between cells).
+
+[COLAB-41] Prompt : "In Colab, download a dataset from Kaggle, clean it,
+                     and save the cleaned version to Drive."
+           Tools  : execute_cell (×4, chained)
+           EXPECTED: ✅➡️ Four cells:
+                     Cell 1: pip install kaggle, configure API key
+                     Cell 2: kaggle datasets download, unzip
+                     Cell 3: pandas cleaning (drop NaN, fix types, etc.)
+                     Cell 4: save to /content/drive/MyDrive/cleaned_data.csv
+                     Voice: "Dataset cleaned and saved to Drive."
+
+[COLAB-42] Prompt : "In Colab, create a Streamlit app that shows a bar chart
+                     and deploy it with localtunnel."
+           Tools  : execute_cell (×3, chained)
+           EXPECTED: ✅➡️ Three cells:
+                     Cell 1: pip install streamlit
+                     Cell 2: Write app.py with st.bar_chart code
+                     Cell 3: !streamlit run app.py & npx localtunnel --port 8501
+                     Output: public URL for the Streamlit app.
+
+────────────────────────────────────────────────────────────────────────────────
+  19F — ERROR HANDLING & EDGE CASES
+────────────────────────────────────────────────────────────────────────────────
+
+[COLAB-50] Prompt : "Execute this in Colab: print(1/0)"
+           Tool   : mcp_colab-mcp_execute_cell({ "code": "print(1/0)" })
+           EXPECTED: ✅ GREEN (error is Colab-side, not KRIA-side)
+                     Output: "ZeroDivisionError: division by zero"
+                     KRIA reports: "Code raised a ZeroDivisionError."
+           Notes  : Python errors in Colab cells are returned as output.
+                    KRIA should display the traceback and offer to fix the code.
+
+[COLAB-51] Prompt : "Execute this in Colab: import nonexistent_module_xyz"
+           Tool   : mcp_colab-mcp_execute_cell({ "code": "import nonexistent_module_xyz" })
+           EXPECTED: ✅ GREEN (error returned from Colab)
+                     Output: "ModuleNotFoundError: No module named 'nonexistent_module_xyz'"
+                     KRIA: "Module not found. Want me to install it with pip?"
+
+[COLAB-52] Prompt : "Execute code in Colab" (no code provided)
+           EXPECTED: ⚠️ WARN — "What code would you like me to run in Colab?"
+                     KRIA asks for the code snippet before calling execute_cell.
+
+[COLAB-53] Prompt : "Run Colab cell" (when Colab MCP server is offline)
+           EXPECTED: ❌ BLOCK — "Colab MCP server is not running."
+                     "Start it with: uvx --from git+https://github.com/googlecolab/colab-mcp colab-mcp"
+                     Or: "Want me to start it for you?"
+
+[COLAB-54] Prompt : "Execute code in Colab" (when browser connection dropped)
+           EXPECTED: ✅➡️ Auto-recovery:
+                     KRIA detects browser_connected=false
+                     → auto-injects open_colab_browser_connection gate
+                     → retries execute_cell after reconnection
+                     Voice: "Reconnected to Colab. Running your code."
+
+[COLAB-55] Prompt : "Run this in Colab" (when Google auth expired)
+           EXPECTED: ❌ BLOCK — "Google authentication has expired."
+                     "Please re-authorize in the browser tab that will open."
+                     KRIA may trigger re-auth flow via the MCP server.
+
+────────────────────────────────────────────────────────────────────────────────
+  19G — ADVANCED COLAB PATTERNS
+────────────────────────────────────────────────────────────────────────────────
+
+[COLAB-60] Prompt : "In Colab, connect to a T4 GPU runtime."
+           Tool   : mcp_colab-mcp_execute_cell({ "code": "import torch\ndevice = torch.device('cuda' if torch.cuda.is_available() else 'cpu')\nprint(f'Using: {device}')" })
+           EXPECTED: ✅ GREEN — "Using: cuda" (if GPU runtime selected in Colab).
+           Notes  : GPU runtime selection is done in Colab UI (Runtime → Change runtime type).
+                    KRIA cannot change the runtime type programmatically.
+                    If CPU runtime: "Using: cpu" — KRIA should suggest switching.
+
+[COLAB-61] Prompt : "In Colab, fine-tune a small language model on a sample dataset."
+           Tools  : execute_cell (×5, chained — long-running)
+           EXPECTED: ✅➡️ Five cells:
+                     Cell 1: pip install transformers datasets
+                     Cell 2: Load dataset and tokenizer
+                     Cell 3: Define training arguments
+                     Cell 4: Train model (may take minutes)
+                     Cell 5: Save and evaluate
+                     Progress: KRIA streams training logs to UI.
+           Notes  : Long-running cells may hit Colab's idle timeout (~90 min).
+                    Checkpoint_interval_secs (300s) triggers periodic state saves.
+
+[COLAB-62] Prompt : "In Colab, scrape data from a website and save it as JSON."
+           Tool   : mcp_colab-mcp_execute_cell({ "code": "..." })
+           EXPECTED: ✅ GREEN — requests/BeautifulSoup scrapes page,
+                     saves to /content/scraped_data.json.
+
+[COLAB-63] Prompt : "In Colab, create a REST API with FastAPI and expose it."
+           Tools  : execute_cell (×3, chained)
+           EXPECTED: ✅➡️ Three cells:
+                     Cell 1: pip install fastapi uvicorn
+                     Cell 2: Write FastAPI app code
+                     Cell 3: !uvicorn main:app --host 0.0.0.0 --port 8000 &
+                             + localtunnel for public URL
+                     Output: Public URL for the API.
+
+[COLAB-64] Prompt : "In Colab, process a large CSV file that's too big for my laptop."
+           Tools  : execute_cell (×3, chained)
+           EXPECTED: ✅➡️ Leverages Colab's 12-13 GB RAM:
+                     Cell 1: Upload file or mount Drive
+                     Cell 2: pandas read_csv with chunking
+                     Cell 3: Process and save results
+           Notes  : Colab has more RAM than typical laptops. Good for
+                    large dataset processing that would OOM locally.
+
+[COLAB-65] Prompt : "In Colab, run a Jupyter magic command: %%timeit range(1000)"
+           Tool   : mcp_colab-mcp_execute_cell({ "code": "%%timeit range(1000)" })
+           EXPECTED: ✅ GREEN — Timing output: "125 ns ± 2.3 ns per loop"
+
+[COLAB-66] Prompt : "In Colab, display an interactive widget."
+           Tool   : mcp_colab-mcp_execute_cell({ "code": "import ipywidgets as widgets\nslider = widgets.IntSlider(value=5, min=0, max=10, description='Value:')\ndisplay(slider)" })
+           EXPECTED: ✅ GREEN — Interactive slider widget displayed in notebook.
+
+────────────────────────────────────────────────────────────────────────────────
+  19H — COLAB STATUS & DIAGNOSTICS
+────────────────────────────────────────────────────────────────────────────────
+
+[COLAB-70] Prompt : "What is the Colab connection status?"
+           Tool   : get_colab_tier_status (Tauri command)
+           EXPECTED: ✅ GREEN — JSON with:
+                     - runtime_state: "Ready" / "Disconnected" / etc.
+                     - connected: true/false
+                     - mcp_server_name: "colab-mcp"
+                     - tool_count: N (number of discovered MCP tools)
+                     - capabilities: { cell_execution, notebook_discovery, ... }
+                     - warnings: [] (or list of issues)
+           Notes  : Always returns 200 even if Colab is disabled.
+
+[COLAB-71] Prompt : "Is Colab ready to run code?"
+           Tool   : get_colab_tier_status
+           EXPECTED: ✅ GREEN — "Yes, Colab is connected and ready."
+                     OR "No, Colab is not connected. Browser connection needed."
+
+[COLAB-72] Prompt : "What Colab tools are available?"
+           Tool   : get_colab_tier_status → capabilities.discovered_tools
+           EXPECTED: ✅ GREEN — List of dynamically discovered MCP tools:
+                     - open_colab_browser_connection (notebook_selection)
+                     - execute_cell (cell_execution)
+                     - (+ any additional tools from colab-mcp version)
+
+────────────────────────────────────────────────────────────────────────────────
+  19I — COLAB + KRIA INTEGRATION WORKFLOWS
+────────────────────────────────────────────────────────────────────────────────
+
+[COLAB-80] Prompt : "Download this dataset from Kaggle in Colab, analyze it,
+                     and email me the summary."
+           Tools  : execute_cell (×3) → gw_gmail_send
+           EXPECTED: ✅➡️ Multi-step Colab + Google Workspace:
+                     Cells 1-3: Download, clean, analyze in Colab
+                     Step 4: gw_gmail_send(summary) — requires PIN per policy.
+
+[COLAB-81] Prompt : "Train a model in Colab and save it to my Google Drive."
+           Tools  : execute_cell (×4) → drive mount → save
+           EXPECTED: ✅➡️ Four cells:
+                     Cell 1: Mount Drive
+                     Cell 2: Load data from Drive
+                     Cell 3: Train model
+                     Cell 4: Save model to /content/drive/MyDrive/model.pth
+
+[COLAB-82] Prompt : "In Colab, run the notebook I have open and tell me the results."
+           Tools  : open_colab_browser_connection → execute_cell (run all)
+           EXPECTED: ✅➡️ KRIA connects to the currently open notebook
+                     and executes all cells sequentially.
+                     Results summarized in voice + on-screen.
+
+[COLAB-83] Prompt : "Take a screenshot of the Colab output and analyze it."
+           Tools  : screenshot → screenshot_analyze
+           EXPECTED: ✅➡️ Screenshot captures Colab browser tab output.
+                     Vision model analyzes the screenshot and describes results.
+
+────────────────────────────────────────────────────────────────────────────────
+  19J — COLAB DISPATCH & FALLBACK
+────────────────────────────────────────────────────────────────────────────────
+
+[COLAB-90] Prompt : "Run this computationally heavy task." (Colab enabled, ready)
+           EXPECTED: 🧠 INTEL — ExecutiveController detects heavy task.
+                     ColabDispatch checks: colab_enabled=true, ready_for_cloud_task=true
+                     → routes to Colab tier (GPU-accelerated execution).
+                     Voice: "Running on Colab for faster processing."
+
+[COLAB-91] Prompt : "Run this computationally heavy task." (Colab enabled, NOT ready)
+           EXPECTED: 🧠 INTEL — ColabDispatch detects not ready.
+                     fallback_to_local=true → routes to local execution.
+                     Voice: "Colab not available, running locally instead."
+                     UI shows colabDispatchWarning with fallback reason.
+
+[COLAB-92] Prompt : "Run this computationally heavy task." (Colab disabled)
+           EXPECTED: ✅ GREEN — Normal local execution.
+                     No Colab routing attempted. All execution is local.
+
+────────────────────────────────────────────────────────────────────────────────
+  END OF SECTION 19 — GOOGLE COLAB (MCP)
+────────────────────────────────────────────────────────────────────────────────
 
 ────────────────────────────────────────────────────────────────────────────────
 SECTION 20 — MCP FILESYSTEM SERVER TOOLS

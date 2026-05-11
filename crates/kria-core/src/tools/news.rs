@@ -235,11 +235,16 @@ pub fn register(reg: &ToolRegistry, bridge: Arc<SidecarBridge>) {
             ToolDef {
                 name: "search_news".into(),
                 description: "Search recent news articles for any topic. Returns deduplicated, \
-                    trust-scored results from curated RSS sources plus optional GDELT coverage. \
-                    Supports freshness-aware ranking and regional source preference (for example \
-                    India-focused authentic coverage). Results are clustered by story so you see \
-                    one entry per event with a cross-reference count. Always use this before \
-                    summarising news.".into(),
+                    trust-scored results from curated RSS sources (BBC, CNN, The Hindu, Al Jazeera, \
+                    etc.) plus live GDELT coverage. Use for news, current events, and real-time facts. \
+                    CRITICAL — Geographic extraction: ALWAYS extract country and region from the user \
+                    query and pass them explicitly. Examples: 'CM of West Bengal' → country='IN', \
+                    region='south-asia'; 'Tokyo governor' → country='JP', region='east-asia'; \
+                    'UK Prime Minister' → country='GB', region='europe'. \
+                    For 'right now / current / today' queries set freshness_mode='live'. \
+                    For India-specific trustworthy coverage set source_profile='india_authentic'. \
+                    After getting results, synthesize a concise answer citing source names and dates — \
+                    do NOT dump the raw JSON.".into(),
                 category: "news".into(),
                 default_tier: RiskLevel::Green,
                 min_tier: "lite",
