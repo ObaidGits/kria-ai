@@ -12,14 +12,9 @@
 
 name: KRIA Test Suite
 
-# Temporarily disabled - uncomment to enable
-# on:
-#   push:
-#     branches: [main, develop]
-#   pull_request:
-#     branches: [main, develop]
-
-on: {}
+# Temporarily disabled - only manual trigger allowed
+on:
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -31,6 +26,13 @@ jobs:
   # TEMPORARILY DISABLED FOR FASTER CI ITERATION
   # Uncomment all jobs below when ready for full test suite
   # ─────────────────────────────────────────────────────────────────
+
+  # Placeholder job - remove when re-enabling tests
+  placeholder:
+    name: "Disabled — Tests temporarily skipped"
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Test suite temporarily disabled for faster CI iteration"
 
   # # ── Smoke Test (Zone 1 + Zone 4) ────────────────────────────────
   # smoke-test:
