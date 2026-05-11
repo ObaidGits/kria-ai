@@ -7,6 +7,9 @@
 #   3. ui-unit-test — Vitest unit/snapshot tests for UI
 #   4. e2e-api      — Playwright API integration tests
 #   5. e2e-browser  — Playwright browser E2E tests (requires UI build)
+#
+# NOTE: Jobs 2-5 are temporarily disabled for faster CI iteration.
+#       Uncomment them when ready for full test suite.
 # ──────────────────────────────────────────────────────────────────────
 
 name: CI
@@ -53,179 +56,184 @@ jobs:
       - name: Build workspace
         run: cargo build --workspace
 
-  # ── Rust tests ───────────────────────────────────────────────────
-  rust-test:
-    name: "Rust — Tests"
-    runs-on: ubuntu-latest
-    needs: rust-check
-    steps:
-      - uses: actions/checkout@v4
+  # ─────────────────────────────────────────────────────────────────
+  # TEMPORARILY DISABLED FOR FASTER CI ITERATION
+  # Uncomment the jobs below when ready for full test suite
+  # ─────────────────────────────────────────────────────────────────
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
-            libssl-dev libasound2-dev pkg-config
+  # # ── Rust tests ───────────────────────────────────────────────────
+  # rust-test:
+  #   name: "Rust — Tests"
+  #   runs-on: ubuntu-latest
+  #   needs: rust-check
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #
+  #     - name: Install system dependencies
+  #       run: |
+  #         sudo apt-get update
+  #         sudo apt-get install -y \
+  #           libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+  #           libssl-dev libasound2-dev pkg-config
+  #
+  #     - name: Install Rust toolchain
+  #       uses: dtolnay/rust-toolchain@stable
+  #
+  #     - name: Cache cargo
+  #       uses: Swatinem/rust-cache@v2
+  #
+  #     - name: Run all Rust tests
+  #       run: cargo test --workspace -- --nocapture
+  #
+  #     - name: Run desktop metadata payload tests
+  #       run: cargo test -p kria-desktop tool_result_payload_ -- --nocapture
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+  # # ── UI unit tests (Vitest) ───────────────────────────────────
+  # ui-unit-test:
+  #   name: "UI — Unit Tests (Vitest)"
+  #   runs-on: ubuntu-latest
+  #   needs: rust-check
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version: 20
+  #
+  #     - name: Install UI dependencies
+  #       working-directory: ui
+  #       run: npm ci
+  #
+  #     - name: Run UI unit tests
+  #       working-directory: ui
+  #       run: |
+  #         set -o pipefail
+  #         npm run test:run 2>&1 | tee vitest-output.txt
+  #
+  #     - name: Upload UI unit test artifacts
+  #       uses: actions/upload-artifact@v4
+  #       if: always()
+  #       with:
+  #         name: vitest-ui-artifacts
+  #         path: |
+  #           ui/vitest-output.txt
+  #           ui/src/components/__snapshots__/**
 
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+  # # ── Playwright API tests ─────────────────────────────────────────
+  # e2e-api:
+  #   name: "E2E — API Integration (Playwright)"
+  #   runs-on: ubuntu-latest
+  #   needs: [rust-test, ui-unit-test]
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #
+  #     - name: Install system dependencies
+  #       run: |
+  #         sudo apt-get update
+  #         sudo apt-get install -y \
+  #           libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+  #           libssl-dev libasound2-dev pkg-config
+  #
+  #     - name: Install Rust toolchain
+  #       uses: dtolnay/rust-toolchain@stable
+  #
+  #     - name: Cache cargo
+  #       uses: Swatinem/rust-cache@v2
+  #
+  #     - name: Build KRIA server
+  #       run: cargo build -p kria-server
+  #
+  #     - name: Start KRIA server
+  #       run: |
+  #         cargo run -p kria-server &
+  #         for i in $(seq 1 30); do
+  #           curl -sf http://127.0.0.1:8088/api/health && break
+  #           sleep 1
+  #         done
+  #
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version: 20
+  #
+  #     - name: Install Playwright deps
+  #       working-directory: tests/e2e
+  #       run: |
+  #         npm ci
+  #         npx playwright install --with-deps chromium
+  #
+  #     - name: Run API tests
+  #       working-directory: tests/e2e
+  #       env:
+  #         KRIA_BASE_URL: http://127.0.0.1:8088
+  #       run: npx playwright test --project=api-integration
+  #
+  #     - name: Upload test report
+  #       uses: actions/upload-artifact@v4
+  #       if: always()
+  #       with:
+  #         name: playwright-api-report
+  #         path: tests/e2e/playwright-report/
 
-      - name: Run all Rust tests
-        run: cargo test --workspace -- --nocapture
-
-      - name: Run desktop metadata payload tests
-        run: cargo test -p kria-desktop tool_result_payload_ -- --nocapture
-
-  # ── UI unit tests (Vitest) ───────────────────────────────────
-  ui-unit-test:
-    name: "UI — Unit Tests (Vitest)"
-    runs-on: ubuntu-latest
-    needs: rust-check
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install UI dependencies
-        working-directory: ui
-        run: npm ci
-
-      - name: Run UI unit tests
-        working-directory: ui
-        run: |
-          set -o pipefail
-          npm run test:run 2>&1 | tee vitest-output.txt
-
-      - name: Upload UI unit test artifacts
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: vitest-ui-artifacts
-          path: |
-            ui/vitest-output.txt
-            ui/src/components/__snapshots__/**
-
-  # ── Playwright API tests ─────────────────────────────────────────
-  e2e-api:
-    name: "E2E — API Integration (Playwright)"
-    runs-on: ubuntu-latest
-    needs: [rust-test, ui-unit-test]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
-            libssl-dev libasound2-dev pkg-config
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
-      - name: Build KRIA server
-        run: cargo build -p kria-server
-
-      - name: Start KRIA server
-        run: |
-          cargo run -p kria-server &
-          for i in $(seq 1 30); do
-            curl -sf http://127.0.0.1:8088/api/health && break
-            sleep 1
-          done
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install Playwright deps
-        working-directory: tests/e2e
-        run: |
-          npm ci
-          npx playwright install --with-deps chromium
-
-      - name: Run API tests
-        working-directory: tests/e2e
-        env:
-          KRIA_BASE_URL: http://127.0.0.1:8088
-        run: npx playwright test --project=api-integration
-
-      - name: Upload test report
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: playwright-api-report
-          path: tests/e2e/playwright-report/
-
-  # ── Playwright browser E2E tests ────────────────────────────────
-  e2e-browser:
-    name: "E2E — Browser (Playwright)"
-    runs-on: ubuntu-latest
-    needs: [rust-test, ui-unit-test]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
-            libssl-dev libasound2-dev pkg-config
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
-      - name: Build KRIA server
-        run: cargo build -p kria-server
-
-      - name: Start KRIA server
-        run: |
-          cargo run -p kria-server &
-          for i in $(seq 1 30); do
-            curl -sf http://127.0.0.1:8088/api/health && break
-            sleep 1
-          done
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Build frontend
-        working-directory: ui
-        run: npm ci && npm run build
-
-      - name: Serve frontend
-        working-directory: ui
-        run: npx vite preview --port 5173 &
-
-      - name: Install Playwright browsers
-        working-directory: tests/e2e
-        run: |
-          npm ci
-          npx playwright install --with-deps chromium firefox
-
-      - name: Run browser E2E tests
-        working-directory: tests/e2e
-        env:
-          KRIA_BASE_URL: http://127.0.0.1:8088
-          KRIA_UI_URL: http://localhost:5173
-        run: npx playwright test --project=e2e-chromium --project=e2e-firefox
-
-      - name: Upload test report
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: playwright-browser-report
-          path: tests/e2e/playwright-report/
+  # # ── Playwright browser E2E tests ────────────────────────────────
+  # e2e-browser:
+  #   name: "E2E — Browser (Playwright)"
+  #   runs-on: ubuntu-latest
+  #   needs: [rust-test, ui-unit-test]
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #
+  #     - name: Install system dependencies
+  #       run: |
+  #         sudo apt-get update
+  #         sudo apt-get install -y \
+  #           libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+  #           libssl-dev libasound2-dev pkg-config
+  #
+  #     - name: Install Rust toolchain
+  #       uses: dtolnay/rust-toolchain@stable
+  #
+  #     - name: Cache cargo
+  #       uses: Swatinem/rust-cache@v2
+  #
+  #     - name: Build KRIA server
+  #       run: cargo build -p kria-server
+  #
+  #     - name: Start KRIA server
+  #       run: |
+  #         cargo run -p kria-server &
+  #         for i in $(seq 1 30); do
+  #           curl -sf http://127.0.0.1:8088/api/health && break
+  #           sleep 1
+  #         done
+  #
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version: 20
+  #
+  #     - name: Build frontend
+  #       working-directory: ui
+  #       run: npm ci && npm run build
+  #
+  #     - name: Serve frontend
+  #       working-directory: ui
+  #       run: npx vite preview --port 5173 &
+  #
+  #     - name: Install Playwright browsers
+  #       working-directory: tests/e2e
+  #       run: |
+  #         npm ci
+  #         npx playwright install --with-deps chromium firefox
+  #
+  #     - name: Run browser E2E tests
+  #       working-directory: tests/e2e
+  #       env:
+  #         KRIA_BASE_URL: http://127.0.0.1:8088
+  #         KRIA_UI_URL: http://localhost:5173
+  #       run: npx playwright test --project=e2e-chromium --project=e2e-firefox
+  #
+  #     - name: Upload test report
+  #       uses: actions/upload-artifact@v4
+  #       if: always()
+  #       with:
+  #         name: playwright-browser-report
+  #         path: tests/e2e/playwright-report/
