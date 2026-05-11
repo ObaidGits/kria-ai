@@ -179,6 +179,6 @@ mod tests {
     fn abort_signal_is_subscribable() {
         let s = PlaybackSink::new(22_050);
         let mut rx = s.abort_signal();
-        assert_eq!(*rx.borrow_and_update(), false);
+        assert!(!(*rx.borrow_and_update()));
     }
 }

@@ -507,7 +507,10 @@ impl RouterCache {
         let snapshot = centroids.clone();
         drop(centroids);
         let _ = self.save_centroids(&snapshot);
-        tracing::debug!(domains = nudged.len(), "[RouterCache] nudged centroids applied and persisted");
+        tracing::debug!(
+            domains = nudged.len(),
+            "[RouterCache] nudged centroids applied and persisted"
+        );
     }
 
     fn save_centroids(&self, centroids: &HashMap<Domain, Vec<f32>>) -> Result<()> {

@@ -83,7 +83,12 @@ impl WorkingSetBuilder {
     }
 
     /// Add a constraint.
-    pub fn add_constraint(mut self, description: impl Into<String>, source: impl Into<String>, hard: bool) -> Self {
+    pub fn add_constraint(
+        mut self,
+        description: impl Into<String>,
+        source: impl Into<String>,
+        hard: bool,
+    ) -> Self {
         self.constraints.push(Constraint {
             description: description.into(),
             source: source.into(),
@@ -186,7 +191,10 @@ impl WorkingSet {
             out.push_str("\n## CONSTRAINTS\n");
             for c in &self.constraints {
                 let hard = if c.hard { "HARD" } else { "soft" };
-                out.push_str(&format!("- [{}] {} (from: {})\n", hard, c.description, c.source));
+                out.push_str(&format!(
+                    "- [{}] {} (from: {})\n",
+                    hard, c.description, c.source
+                ));
             }
         }
 
@@ -194,12 +202,16 @@ impl WorkingSet {
         if !self.evidence.is_empty() {
             out.push_str("\n## EVIDENCE\n");
             for ev in &self.evidence {
-                out.push_str(&format!("# [{}] exit:{} target:{}\n",
+                out.push_str(&format!(
+                    "# [{}] exit:{} target:{}\n",
                     ev.command, ev.exit_code, ev.target
                 ));
 
                 // Error codes (exact)
-                let all_errors: Vec<String> = ev.stdout_fields.error_codes.iter()
+                let all_errors: Vec<String> = ev
+                    .stdout_fields
+                    .error_codes
+                    .iter()
                     .chain(ev.stderr_fields.error_codes.iter())
                     .cloned()
                     .collect();
@@ -208,7 +220,10 @@ impl WorkingSet {
                 }
 
                 // Exit codes (exact)
-                let all_exits: Vec<String> = ev.stdout_fields.exit_codes.iter()
+                let all_exits: Vec<String> = ev
+                    .stdout_fields
+                    .exit_codes
+                    .iter()
                     .chain(ev.stderr_fields.exit_codes.iter())
                     .cloned()
                     .collect();
@@ -217,7 +232,10 @@ impl WorkingSet {
                 }
 
                 // IPs (exact)
-                let all_ips: Vec<String> = ev.stdout_fields.ipv4_addresses.iter()
+                let all_ips: Vec<String> = ev
+                    .stdout_fields
+                    .ipv4_addresses
+                    .iter()
                     .chain(ev.stderr_fields.ipv4_addresses.iter())
                     .cloned()
                     .collect();
@@ -226,7 +244,10 @@ impl WorkingSet {
                 }
 
                 // File paths (exact)
-                let all_paths: Vec<String> = ev.stdout_fields.file_paths.iter()
+                let all_paths: Vec<String> = ev
+                    .stdout_fields
+                    .file_paths
+                    .iter()
                     .chain(ev.stderr_fields.file_paths.iter())
                     .cloned()
                     .collect();
@@ -235,7 +256,10 @@ impl WorkingSet {
                 }
 
                 // Numeric values (exact)
-                let all_nums: Vec<String> = ev.stdout_fields.numeric_values.iter()
+                let all_nums: Vec<String> = ev
+                    .stdout_fields
+                    .numeric_values
+                    .iter()
                     .chain(ev.stderr_fields.numeric_values.iter())
                     .map(|(k, v, u)| format!("{}={}{})", k, v, u))
                     .collect();
@@ -244,7 +268,10 @@ impl WorkingSet {
                 }
 
                 // KV pairs
-                let all_kvs: Vec<String> = ev.stdout_fields.kv_pairs.iter()
+                let all_kvs: Vec<String> = ev
+                    .stdout_fields
+                    .kv_pairs
+                    .iter()
                     .chain(ev.stderr_fields.kv_pairs.iter())
                     .map(|(k, v)| format!("{}={}", k, v))
                     .collect();
@@ -254,7 +281,10 @@ impl WorkingSet {
 
                 // Raw snippet (if still present)
                 if !ev.stdout_fields.raw_snippet.is_empty() {
-                    out.push_str(&format!("  stdout_snippet: {}\n", ev.stdout_fields.raw_snippet));
+                    out.push_str(&format!(
+                        "  stdout_snippet: {}\n",
+                        ev.stdout_fields.raw_snippet
+                    ));
                 }
             }
         }
@@ -299,7 +329,11 @@ mod tests {
     fn working_set_builder_basic() {
         let ws = WorkingSet::builder("Fix nginx")
             .add_constraint("Don't restart during business hours", "user", true)
-            .add_evidence(make_evidence("systemctl status nginx", "Active: active (running)", 0))
+            .add_evidence(make_evidence(
+                "systemctl status nginx",
+                "Active: active (running)",
+                0,
+            ))
             .build();
 
         assert_eq!(ws.goal, "Fix nginx");
@@ -310,9 +344,12 @@ mod tests {
     #[test]
     fn working_set_fits_to_budget() {
         // Create a WorkingSet with a very small budget
-        let big_output = (0..1000).map(|i| format!("Line {}: some data here {}", i, i)).collect::<Vec<_>>().join("\n");
+        let big_output = (0..1000)
+            .map(|i| format!("Line {}: some data here {}", i, i))
+            .collect::<Vec<_>>()
+            .join("\n");
         let ws = WorkingSet::builder("Test goal")
-            .with_max_tokens(100)  // Very small budget
+            .with_max_tokens(100) // Very small budget
             .add_evidence(make_evidence("cat /var/log/syslog", &big_output, 0))
             .build();
 
@@ -354,7 +391,10 @@ mod tests {
             .build();
 
         let prompt = ws.to_prompt();
-        assert!(prompt.contains("ECONNREFUSED"), "Error code must be preserved in prompt");
+        assert!(
+            prompt.contains("ECONNREFUSED"),
+            "Error code must be preserved in prompt"
+        );
     }
 
     #[test]
@@ -368,7 +408,10 @@ mod tests {
             .build();
 
         let prompt = ws.to_prompt();
-        assert!(prompt.contains("192.168.1.100"), "IP address must be preserved in prompt");
+        assert!(
+            prompt.contains("192.168.1.100"),
+            "IP address must be preserved in prompt"
+        );
     }
 
     #[test]
@@ -383,8 +426,10 @@ mod tests {
 
         let prompt = ws.to_prompt();
         // Should contain some numeric values
-        assert!(prompt.contains("15921") || prompt.contains("2345") || prompt.contains("8765"),
-            "Numeric values must be preserved");
+        assert!(
+            prompt.contains("15921") || prompt.contains("2345") || prompt.contains("8765"),
+            "Numeric values must be preserved"
+        );
     }
 
     #[test]

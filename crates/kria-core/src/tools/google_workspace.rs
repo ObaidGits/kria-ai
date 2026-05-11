@@ -89,11 +89,10 @@ enum ToolExecutionError {
     McpTimeout { tool: String, timeout_secs: u64 },
     #[error("google_workspace mcp request failed for tool '{tool}': {reason}")]
     McpRequest { tool: String, reason: String },
-    #[error("google_workspace sidecar request timed out for method '{method}' after {timeout_secs}s")]
-    SidecarTimeout {
-        method: String,
-        timeout_secs: u64,
-    },
+    #[error(
+        "google_workspace sidecar request timed out for method '{method}' after {timeout_secs}s"
+    )]
+    SidecarTimeout { method: String, timeout_secs: u64 },
     #[error("google_workspace sidecar request failed for method '{method}': {reason}")]
     SidecarRequest { method: String, reason: String },
 }
@@ -651,7 +650,10 @@ fn build_google_resource_url(resource_kind: &str, resource_id: &str) -> Option<S
     }
 }
 
-fn calendar_create_args(input: &CreateCalendarEventInput, alternate_shape: bool) -> serde_json::Value {
+fn calendar_create_args(
+    input: &CreateCalendarEventInput,
+    alternate_shape: bool,
+) -> serde_json::Value {
     let summary = input.summary.clone();
     let start = input.start.clone();
     let end = input.end.clone();
@@ -1558,7 +1560,10 @@ impl ToolHandler for GwDocsCreate {
         // TODO (ADR Pillar 4): Implement pre-flight idempotency check when Sidecar API supports read-before-write
         let create_result = self
             .0
-            .mcp_call_raw("createDocument", serde_json::json!({ "title": title.clone() }))
+            .mcp_call_raw(
+                "createDocument",
+                serde_json::json!({ "title": title.clone() }),
+            )
             .await;
         if !create_result.success {
             return create_result;
@@ -1680,7 +1685,10 @@ impl ToolHandler for GwSheetsCreate {
         // TODO (ADR Pillar 4): Implement pre-flight idempotency check when Sidecar API supports read-before-write
         let create_result = self
             .0
-            .mcp_call_raw("createSpreadsheet", serde_json::json!({ "title": title.clone() }))
+            .mcp_call_raw(
+                "createSpreadsheet",
+                serde_json::json!({ "title": title.clone() }),
+            )
             .await;
         if !create_result.success {
             return create_result;
@@ -1813,7 +1821,10 @@ impl ToolHandler for GwSlidesCreate {
         // TODO (ADR Pillar 4): Implement pre-flight idempotency check when Sidecar API supports read-before-write
         let create_result = self
             .0
-            .mcp_call_raw("createPresentation", serde_json::json!({ "title": title.clone() }))
+            .mcp_call_raw(
+                "createPresentation",
+                serde_json::json!({ "title": title.clone() }),
+            )
             .await;
         if !create_result.success {
             return create_result;

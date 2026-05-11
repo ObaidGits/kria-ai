@@ -338,7 +338,11 @@ impl Default for ConnectionManagerConfig {
 pub trait Connector: Send + Sync {
     async fn connect(&self, target: &TargetIdentity) -> Result<()>;
     async fn authenticate(&self, target: &TargetIdentity) -> Result<()>;
-    async fn probe_identity(&self, target: &TargetIdentity, endpoint: IpAddr) -> Result<IdentityProof>;
+    async fn probe_identity(
+        &self,
+        target: &TargetIdentity,
+        endpoint: IpAddr,
+    ) -> Result<IdentityProof>;
     async fn dispatch(
         &self,
         target: &TargetIdentity,
@@ -409,7 +413,10 @@ pub trait FleetStore: Send + Sync {
         run_id: Uuid,
     ) -> Result<()>;
     async fn save_docker_eval_summary(&self, summary: &DockerEvalSummary) -> Result<()>;
-    async fn load_target_attestation_material(&self, target_id: Uuid) -> Result<KeyAttestationMaterial>;
+    async fn load_target_attestation_material(
+        &self,
+        target_id: Uuid,
+    ) -> Result<KeyAttestationMaterial>;
     async fn commit_attested_rotation(
         &self,
         target_id: Uuid,
@@ -497,7 +504,9 @@ impl ConnectionManagerHandle {
 
     /// Broadcast a TargetRemoved event so SSE subscribers remove the target from their view.
     pub fn emit_target_removed(&self, target_id: Uuid) {
-        let _ = self.event_tx.send(ControlPlaneEvent::TargetRemoved { target_id });
+        let _ = self
+            .event_tx
+            .send(ControlPlaneEvent::TargetRemoved { target_id });
     }
 
     pub async fn acquire_lease(&self, ttl: Duration, grace: Duration) -> Result<LeaseGrant> {
@@ -563,7 +572,10 @@ impl ConnectionManagerHandle {
     pub async fn send_command(&self, cmd: CommandInput) -> Result<DispatchResult> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.tx
-            .send(ManagerCommand::SendCommand { cmd, reply: reply_tx })
+            .send(ManagerCommand::SendCommand {
+                cmd,
+                reply: reply_tx,
+            })
             .await
             .context("manager loop unavailable")?;
         reply_rx.await.context("send command channel closed")?
@@ -572,7 +584,10 @@ impl ConnectionManagerHandle {
     pub async fn run_docker_eval(&self, req: DockerEvalRequest) -> Result<DockerEvalSummary> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.tx
-            .send(ManagerCommand::RunDockerEval { req, reply: reply_tx })
+            .send(ManagerCommand::RunDockerEval {
+                req,
+                reply: reply_tx,
+            })
             .await
             .context("manager loop unavailable")?;
         reply_rx.await.context("docker eval channel closed")?
@@ -684,7 +699,11 @@ pub fn spawn_reverse_tunnel_keepalive_loop(
         loop {
             let wait_ms = jitter_ms(base_interval.as_millis() as u64, 0.20);
             sleep(Duration::from_millis(wait_ms)).await;
-            if manager.reverse_tunnel_keepalive_tick(target_id).await.is_err() {
+            if manager
+                .reverse_tunnel_keepalive_tick(target_id)
+                .await
+                .is_err()
+            {
                 break;
             }
         }
@@ -743,6 +762,7 @@ pub struct ConnectionManager {
 }
 
 impl ConnectionManager {
+    #[allow(clippy::too_many_arguments)]
     pub fn spawn(
         initial_targets: Vec<TargetIdentity>,
         connectors: ConnectorRegistry,
@@ -799,7 +819,9 @@ impl ConnectionManager {
             loop {
                 ticker.tick().await;
                 if tx_reaper
-                    .send(ManagerCommand::ReapExpired { now: Instant::now() })
+                    .send(ManagerCommand::ReapExpired {
+                        now: Instant::now(),
+                    })
                     .await
                     .is_err()
                 {
@@ -836,10 +858,14 @@ impl ConnectionManager {
                         grace,
                         reply,
                     } => {
-                        let _ =
-                            reply.send(manager.handle_acquire_lease_for_target(target_id, ttl, grace));
+                        let _ = reply
+                            .send(manager.handle_acquire_lease_for_target(target_id, ttl, grace));
                     }
-                    ManagerCommand::Heartbeat { lease_id, now, reply } => {
+                    ManagerCommand::Heartbeat {
+                        lease_id,
+                        now,
+                        reply,
+                    } => {
                         let _ = reply.send(manager.handle_heartbeat(lease_id, now).await);
                     }
                     ManagerCommand::ReleaseLease {
@@ -860,7 +886,8 @@ impl ConnectionManager {
                         target_id,
                         reply,
                     } => {
-                        let _ = reply.send(manager.handle_rotate_trust_pins(lease_id, target_id).await);
+                        let _ =
+                            reply.send(manager.handle_rotate_trust_pins(lease_id, target_id).await);
                     }
                     ManagerCommand::VerifyInboundEnvelope { envelope, reply } => {
                         let _ = reply.send(manager.handle_verify_inbound_envelope(&envelope).await);
@@ -870,7 +897,11 @@ impl ConnectionManager {
                         session_id,
                         since_offset,
                     } => {
-                        manager.handle_register_terminal_session(target_id, session_id, since_offset);
+                        manager.handle_register_terminal_session(
+                            target_id,
+                            session_id,
+                            since_offset,
+                        );
                     }
                     ManagerCommand::TerminalWsFailed {
                         target_id,
@@ -893,7 +924,10 @@ impl ConnectionManager {
                         let _ = reply.send(manager.handle_promote_standby().await);
                     }
                     ManagerCommand::ReverseTunnelKeepaliveTick { target_id } => {
-                        if let Err(err) = manager.handle_reverse_tunnel_keepalive_tick(target_id).await {
+                        if let Err(err) = manager
+                            .handle_reverse_tunnel_keepalive_tick(target_id)
+                            .await
+                        {
                             warn!(target_id = %target_id, error = %err, "reverse tunnel keepalive tick failed");
                         }
                     }
@@ -942,7 +976,11 @@ impl ConnectionManager {
             .targets
             .values()
             .filter(|target| target.state == TargetState::Ready)
-            .max_by(|a, b| Self::score(a).partial_cmp(&Self::score(b)).unwrap_or(std::cmp::Ordering::Equal))
+            .max_by(|a, b| {
+                Self::score(a)
+                    .partial_cmp(&Self::score(b))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .map(|target| target.target_id)
             .ok_or_else(|| anyhow!("no ready target available"))?;
 
@@ -1063,12 +1101,11 @@ impl ConnectionManager {
                 .get(&lease_id)
                 .map(|lease| lease.state == LeaseState::Released)
                 .unwrap_or(false)
+                && target.state == TargetState::Leased
             {
-                if target.state == TargetState::Leased {
-                    target.state = TargetState::Ready;
-                    target.taint_reason = Some(reason);
-                    should_emit = true;
-                }
+                target.state = TargetState::Ready;
+                target.taint_reason = Some(reason);
+                should_emit = true;
             }
 
             if should_emit {
@@ -1109,7 +1146,8 @@ impl ConnectionManager {
             cmd.lease_id,
             cmd.operation,
             cmd.payload,
-            cmd.max_attempts.unwrap_or(self.config.max_dispatch_attempts),
+            cmd.max_attempts
+                .unwrap_or(self.config.max_dispatch_attempts),
         )
         .await
     }
@@ -1147,7 +1185,11 @@ impl ConnectionManager {
             }
 
             lease.sequence_high_watermark += 1;
-            (lease.target_id, lease.heartbeat_ttl, lease.sequence_high_watermark)
+            (
+                lease.target_id,
+                lease.heartbeat_ttl,
+                lease.sequence_high_watermark,
+            )
         };
 
         let target = self
@@ -1156,7 +1198,9 @@ impl ConnectionManager {
             .cloned()
             .ok_or_else(|| anyhow!("target missing for active lease"))?;
 
-        if target.mode == TargetMode::ReverseWs && self.reverse_tunnel_dead.contains(&target.target_id) {
+        if target.mode == TargetMode::ReverseWs
+            && self.reverse_tunnel_dead.contains(&target.target_id)
+        {
             return Err(anyhow!(
                 "reverse tunnel marked dead; command dispatch halted until reconnect"
             ));
@@ -1220,9 +1264,7 @@ impl ConnectionManager {
                             }),
                         )
                         .await;
-                        return Err(anyhow!(
-                            "dispatch failed after identity resolution retries"
-                        ));
+                        return Err(anyhow!("dispatch failed after identity resolution retries"));
                     }
 
                     self.sleep_with_backoff(&mut backoff_ms).await;
@@ -1389,7 +1431,12 @@ impl ConnectionManager {
                     443
                 };
 
-                let mut resolved = match timeout(Duration::from_secs(2), lookup_host((dns_name.as_str(), port))).await {
+                let mut resolved = match timeout(
+                    Duration::from_secs(2),
+                    lookup_host((dns_name.as_str(), port)),
+                )
+                .await
+                {
                     Ok(Ok(addrs)) => addrs,
                     Ok(Err(err)) => {
                         return Err(StageFailure::new(
@@ -1416,7 +1463,12 @@ impl ConnectionManager {
                 };
 
                 let connector = self.connectors.for_mode(target.mode);
-                let proof = match timeout(Duration::from_secs(4), connector.probe_identity(target, endpoint)).await {
+                let proof = match timeout(
+                    Duration::from_secs(4),
+                    connector.probe_identity(target, endpoint),
+                )
+                .await
+                {
                     Ok(Ok(proof)) => proof,
                     Ok(Err(err)) => {
                         return Err(StageFailure::new(
@@ -1572,7 +1624,10 @@ impl ConnectionManager {
         }
     }
 
-    async fn handle_run_docker_eval(&mut self, req: DockerEvalRequest) -> Result<DockerEvalSummary> {
+    async fn handle_run_docker_eval(
+        &mut self,
+        req: DockerEvalRequest,
+    ) -> Result<DockerEvalSummary> {
         let lease = self
             .leases
             .get(&req.lease_id)
@@ -1584,7 +1639,9 @@ impl ConnectionManager {
         }
 
         if lease.target_id != req.target_id {
-            return Err(anyhow!("docker eval target does not match active lease owner"));
+            return Err(anyhow!(
+                "docker eval target does not match active lease owner"
+            ));
         }
 
         let run_id = Uuid::new_v4();
@@ -1774,14 +1831,16 @@ impl ConnectionManager {
     ) -> Result<VerificationMetadata> {
         match self.signer.verify(envelope).await {
             Ok(metadata) => {
-                self.maybe_revert_clock_drift_override(envelope.target_id).await;
+                self.maybe_revert_clock_drift_override(envelope.target_id)
+                    .await;
                 Ok(metadata)
             }
             Err(SignerError::IssuedInFutureWindow) | Err(SignerError::EnvelopeExpired) => {
                 self.handle_clock_drift_rejection(envelope.target_id).await;
                 Err(anyhow!("clock drift verification rejection"))
             }
-            Err(SignerError::ReplayNonceDetected) | Err(SignerError::NonMonotonicSequence { .. }) => {
+            Err(SignerError::ReplayNonceDetected)
+            | Err(SignerError::NonMonotonicSequence { .. }) => {
                 self.quarantine_and_taint(
                     envelope.target_id,
                     envelope.lease_id,
@@ -1837,10 +1896,7 @@ impl ConnectionManager {
     }
 
     async fn maybe_revert_clock_drift_override(&mut self, target_id: Uuid) {
-        let Some(stabilize_until) = self
-            .drift_stabilize_until_mono_ms
-            .get(&target_id)
-            .copied()
+        let Some(stabilize_until) = self.drift_stabilize_until_mono_ms.get(&target_id).copied()
         else {
             return;
         };
@@ -2153,7 +2209,12 @@ impl ConnectionManager {
             }
         };
 
-        match timeout(Duration::from_secs(6), transport.reconnect(&target, endpoint)).await {
+        match timeout(
+            Duration::from_secs(6),
+            transport.reconnect(&target, endpoint),
+        )
+        .await
+        {
             Ok(Ok(())) => {
                 self.reverse_tunnel_dead.remove(&target_id);
                 self.reverse_tunnel_misses.insert(target_id, 0);
@@ -2315,7 +2376,9 @@ fn verify_rotation_attestation(
     }
 
     if proof.candidate_ssh_fingerprint.is_none() && proof.candidate_mtls_fingerprint.is_none() {
-        return Err(anyhow!("candidate key material missing in attestation payload"));
+        return Err(anyhow!(
+            "candidate key material missing in attestation payload"
+        ));
     }
 
     if mat.next_ssh_fingerprint.is_some()

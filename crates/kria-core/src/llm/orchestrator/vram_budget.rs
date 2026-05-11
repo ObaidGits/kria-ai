@@ -207,7 +207,7 @@ mod tests {
 
         // 133MB * 1024 / 100 = 1361.92 tokens.
         assert!(
-            cap_512 >= 1361 && cap_512 <= 1362,
+            (1361..=1362).contains(&cap_512),
             "Math failed: expected ~1361 tokens, got {}",
             cap_512
         );
@@ -219,7 +219,7 @@ mod tests {
 
         // 35MB * 1024 / 100 = 358.4 tokens.
         assert!(
-            cap_256 >= 358 && cap_256 <= 359,
+            (358..=359).contains(&cap_256),
             "Math failed: expected ~358 tokens, got {}",
             cap_256
         );

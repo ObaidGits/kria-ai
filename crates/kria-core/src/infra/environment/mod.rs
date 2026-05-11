@@ -8,10 +8,12 @@ pub use docker::{
     EnvironmentResetKind,
 };
 pub use local::LocalEnvironment;
-pub use remote_qemu::{GuardrailSnapshot, QemuSshEnvironment, RemoteConfig, RemoteConfigValidationError};
+pub use remote_qemu::{
+    GuardrailSnapshot, QemuSshEnvironment, RemoteConfig, RemoteConfigValidationError,
+};
 
 pub use traits::{
     CommandExecutor, CommandRequest, CommandResult, EnvironmentError, EnvironmentLifecycle,
     EnvironmentProvider, FileSystemOps, ListDirRequest, ListDirResult, ReadFileRequest,
-    ReadFileResult, ResetReason, ShellState, SharedShellState, WriteFileRequest, WriteFileResult,
+    ReadFileResult, ResetReason, SharedShellState, ShellState, WriteFileRequest, WriteFileResult,
 };

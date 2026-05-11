@@ -12,8 +12,8 @@ const ALLOWED_MIMES: &[&str] = &[
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // .docx
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",       // .xlsx
     "application/vnd.openxmlformats-officedocument.presentationml.presentation", // .pptx
-    "application/msword",     // .doc legacy
-    "application/vnd.ms-excel", // .xls legacy
+    "application/msword",                                                      // .doc legacy
+    "application/vnd.ms-excel",                                                // .xls legacy
     // Text / markup
     "text/plain",
     "text/markdown",
@@ -42,12 +42,9 @@ const ALLOWED_MIMES: &[&str] = &[
 
 /// Allowed file extensions (additional guard — MIME can be spoofed).
 const ALLOWED_EXTENSIONS: &[&str] = &[
-    "pdf", "docx", "xlsx", "pptx", "doc", "xls",
-    "txt", "md", "markdown", "csv", "html", "htm", "xml", "json", "yaml", "yml", "toml",
-    "py", "rs", "ts", "js", "go", "java", "c", "cpp", "h", "rb", "php", "swift", "kt", "r",
-    "sql", "lua", "sh", "bash",
-    "ipynb",
-    "log",
+    "pdf", "docx", "xlsx", "pptx", "doc", "xls", "txt", "md", "markdown", "csv", "html", "htm",
+    "xml", "json", "yaml", "yml", "toml", "py", "rs", "ts", "js", "go", "java", "c", "cpp", "h",
+    "rb", "php", "swift", "kt", "r", "sql", "lua", "sh", "bash", "ipynb", "log",
 ];
 
 /// Magic bytes that indicate dangerous executable formats.
@@ -57,7 +54,10 @@ const DANGEROUS_MAGIC: &[(&[u8], &str)] = &[
     (b"\xca\xfe\xba\xbe", "Mach-O binary"),
     (b"\x23\x21/bin/sh", "Shell script (blocked for security)"),
     (b"#!/bin/bash", "Bash script (blocked for security)"),
-    (b"#!/usr/bin/env python", "Python script via shebang (use .py upload instead)"),
+    (
+        b"#!/usr/bin/env python",
+        "Python script via shebang (use .py upload instead)",
+    ),
 ];
 
 // ─── Input Type ───────────────────────────────────────────────────────────────
@@ -119,10 +119,7 @@ pub async fn send_document_message(
         Some(store) => store.clone(),
         None => {
             // Fallback: create a temporary in-process store
-            Arc::new(SessionVectorStore::new(
-                paths.data_dir.join("uploads"),
-                5,
-            ))
+            Arc::new(SessionVectorStore::new(paths.data_dir.join("uploads"), 5))
         }
     };
 
@@ -152,10 +149,7 @@ pub async fn send_document_message(
             .map_err(|e| format!("Failed to save '{}': {e}", file.name))?;
 
         // Record the absolute path for this file so the prompt can reference it
-        saved_paths.push((
-            file.name.clone(),
-            dest.to_string_lossy().to_string(),
-        ));
+        saved_paths.push((file.name.clone(), dest.to_string_lossy().to_string()));
 
         tracing::info!(
             file = %safe_name,
@@ -181,9 +175,12 @@ pub async fn send_document_message(
 
         // ── Step 3: Sanitize ──────────────────────────────────────────────
         let sanitized = sanitize(&raw_text, &file.name);
-        all_warnings.extend(sanitized.warnings.iter().map(|w| {
-            format!("[{}] {}", file.name, w)
-        }));
+        all_warnings.extend(
+            sanitized
+                .warnings
+                .iter()
+                .map(|w| format!("[{}] {}", file.name, w)),
+        );
 
         emit_agent_stage(
             &app,
@@ -223,7 +220,9 @@ pub async fn send_document_message(
             let text_for_inline = if sanitized.text.len() > 12_000 {
                 // Walk back to a UTF-8 char boundary
                 let mut cut = 12_000;
-                while !sanitized.text.is_char_boundary(cut) { cut -= 1; }
+                while !sanitized.text.is_char_boundary(cut) {
+                    cut -= 1;
+                }
                 format!(
                     "{}\n\n[... document truncated to first ~12 000 chars ...]",
                     &sanitized.text[..cut]
@@ -310,10 +309,7 @@ fn validate_file(file: &UploadedFile) -> Result<(), String> {
     // Magic byte check for dangerous executables
     for (magic, desc) in DANGEROUS_MAGIC {
         if file.bytes.starts_with(magic) {
-            return Err(format!(
-                "'{}' rejected: detected as {}",
-                file.name, desc
-            ));
+            return Err(format!("'{}' rejected: detected as {}", file.name, desc));
         }
     }
 
@@ -370,7 +366,13 @@ fn sanitize_filename(name: &str) -> String {
         .and_then(|n| n.to_str())
         .unwrap_or("upload");
     base.chars()
-        .map(|c| if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .take(128)
         .collect()
 }
@@ -393,7 +395,5 @@ fn build_document_prompt_with_paths(
         .filter(|t| !t.is_empty())
         .unwrap_or("Please analyze the uploaded file(s) and summarize their key contents.");
 
-    format!(
-        "{question}\n\n[Uploaded file paths:\n{path_block}\n]"
-    )
+    format!("{question}\n\n[Uploaded file paths:\n{path_block}\n]")
 }

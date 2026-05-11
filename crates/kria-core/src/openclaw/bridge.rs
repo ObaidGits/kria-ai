@@ -82,12 +82,14 @@ pub struct McpBridge {
 impl McpBridge {
     /// Create a new MCP bridge from a container's child process.
     pub fn new(child: &mut Child) -> Result<Self, BridgeError> {
-        let stdin = child.stdin.take().ok_or_else(|| {
-            BridgeError::Protocol("child process has no stdin".into())
-        })?;
-        let stdout = child.stdout.take().ok_or_else(|| {
-            BridgeError::Protocol("child process has no stdout".into())
-        })?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| BridgeError::Protocol("child process has no stdin".into()))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| BridgeError::Protocol("child process has no stdout".into()))?;
 
         Ok(Self {
             stdin,
@@ -113,7 +115,8 @@ impl McpBridge {
         self.initialized = true;
 
         // Send initialized notification
-        self.send_notification("notifications/initialized", None).await?;
+        self.send_notification("notifications/initialized", None)
+            .await?;
 
         Ok(response)
     }
@@ -147,12 +150,9 @@ impl McpBridge {
             "arguments": arguments,
         });
 
-        let response = tokio::time::timeout(
-            timeout,
-            self.send_request("tools/call", Some(params)),
-        )
-        .await
-        .map_err(|_| BridgeError::Timeout(timeout.as_millis() as u64))??;
+        let response = tokio::time::timeout(timeout, self.send_request("tools/call", Some(params)))
+            .await
+            .map_err(|_| BridgeError::Timeout(timeout.as_millis() as u64))??;
 
         // Check for error
         if let Some(error) = response.get("error") {
@@ -274,9 +274,8 @@ impl McpBridge {
             }
         }
 
-        let length = content_length.ok_or_else(|| {
-            BridgeError::Protocol("missing Content-Length header".into())
-        })?;
+        let length = content_length
+            .ok_or_else(|| BridgeError::Protocol("missing Content-Length header".into()))?;
 
         // Read exactly `length` bytes
         let mut body = vec![0u8; length];

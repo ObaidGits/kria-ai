@@ -7,8 +7,8 @@ pub mod ml_orchestrator;
 pub mod onnx_classifier;
 pub mod perception;
 pub mod planner;
-pub mod prompt_optimizer;
 pub mod planner_v2;
+pub mod prompt_optimizer;
 pub mod prompts;
 pub mod response_parser;
 pub mod router;
@@ -31,7 +31,9 @@ pub use turn_gate::{IntentEnvelope, ResourcePlan, TurnGate, TurnGatePlan};
 
 // Phase E: Perception + Curiosity
 pub use curiosity::{CuriosityConfig, CuriosityLoop};
-pub use perception::{EventDebouncer, PerceptionBus, PerceptionConfig, PerceptionEvent, PerceptionLoop};
+pub use perception::{
+    EventDebouncer, PerceptionBus, PerceptionConfig, PerceptionEvent, PerceptionLoop,
+};
 
 // Phase F: Prompt Optimizer
 pub use prompt_optimizer::{PromptOptimizer, PromptOptimizerConfig, TaskDomain, TaskOutcome};

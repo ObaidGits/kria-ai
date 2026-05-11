@@ -233,7 +233,11 @@ impl BrowserAgent {
 
         self.set_state(ContainerState::Running).await;
 
-        let container_id = self.container_id.lock().await.clone()
+        let container_id = self
+            .container_id
+            .lock()
+            .await
+            .clone()
             .ok_or(BrowserError::NoContainer)?;
 
         let start = Instant::now();
@@ -303,14 +307,21 @@ impl BrowserAgent {
             .args([
                 "create",
                 "--rm",
-                "--network", &self.config.network_mode,
-                "--memory", &self.config.memory_limit,
-                "--pids-limit", &self.config.pids_limit.to_string(),
+                "--network",
+                &self.config.network_mode,
+                "--memory",
+                &self.config.memory_limit,
+                "--pids-limit",
+                &self.config.pids_limit.to_string(),
                 "--read-only",
-                "--tmpfs", "/tmp:size=64m",
-                "--security-opt", "no-new-privileges",
-                "--cap-drop", "ALL",
-                "-p", &format!("127.0.0.1::{}", self.config.sidecar_port),
+                "--tmpfs",
+                "/tmp:size=64m",
+                "--security-opt",
+                "no-new-privileges",
+                "--cap-drop",
+                "ALL",
+                "-p",
+                &format!("127.0.0.1::{}", self.config.sidecar_port),
                 &self.config.image,
             ])
             .output()
@@ -399,7 +410,7 @@ impl BrowserAgent {
         let port = port_str
             .trim()
             .split(':')
-            .last()
+            .next_back()
             .ok_or_else(|| BrowserError::Docker(format!("Invalid port format: {}", port_str)))?
             .parse::<u16>()
             .map_err(|_| BrowserError::Docker(format!("Invalid port number: {}", port_str)))?;
@@ -498,7 +509,10 @@ impl Drop for BrowserAgent {
         let already_stopped = stopped.try_lock().ok().map(|g| *g).unwrap_or(false);
 
         if let (Some(id), false) = (id, already_stopped) {
-            tracing::warn!("BrowserAgent dropped without explicit stop — killing container {}", id);
+            tracing::warn!(
+                "BrowserAgent dropped without explicit stop — killing container {}",
+                id
+            );
 
             // Spawn a blocking task to kill the container.
             // This is fire-and-forget — we can't await in Drop.

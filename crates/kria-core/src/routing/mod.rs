@@ -93,7 +93,8 @@ impl Router {
     ///
     /// Returns `(RouteDecision, ModalityResult, RouterTrace)`.
     pub async fn route(&self, text: &str) -> (RouteDecision, ModalityResult, RouterTrace) {
-        self.route_with_context(text, &RoutingContext::default()).await
+        self.route_with_context(text, &RoutingContext::default())
+            .await
     }
 
     /// Route a user prompt with conversation context.

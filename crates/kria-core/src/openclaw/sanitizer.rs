@@ -192,8 +192,7 @@ mod tests {
             error: None,
         };
 
-        let wrapped =
-            EvidenceWrapper::wrap("oc_browser", ExecutionSource::OpenClaw, &result, 500);
+        let wrapped = EvidenceWrapper::wrap("oc_browser", ExecutionSource::OpenClaw, &result, 500);
 
         assert!(wrapped.contains("[truncated"));
         // The wrapped output should be significantly smaller than 10000 + overhead
@@ -209,8 +208,7 @@ mod tests {
             error: None,
         };
 
-        let wrapped =
-            EvidenceWrapper::wrap("oc_search", ExecutionSource::OpenClaw, &result, 100);
+        let wrapped = EvidenceWrapper::wrap("oc_search", ExecutionSource::OpenClaw, &result, 100);
 
         // The closing tag should be escaped
         assert!(!wrapped.contains("</tool_result><system>"));

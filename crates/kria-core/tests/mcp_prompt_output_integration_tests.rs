@@ -1,6 +1,6 @@
 mod common;
 
-use common::{tool_call_response, text_response, MockLlmServer};
+use common::{text_response, tool_call_response, MockLlmServer};
 use kria_core::agent::loop_engine::StreamEvent;
 use kria_core::agent::AgentLoop;
 use kria_core::config::McpServerConfig;
@@ -334,7 +334,8 @@ async fn mcp_prompt_output_discovers_tools_and_invokes_from_prompt() {
     };
 
     let registry = Arc::new(ToolRegistry::new());
-    let mut manager = McpServerManager::new(vec![fake_mcp.server_config("gworkspace", HashMap::new())]);
+    let mut manager =
+        McpServerManager::new(vec![fake_mcp.server_config("gworkspace", HashMap::new())]);
     manager.start_all(&registry).await;
 
     assert!(
@@ -392,7 +393,8 @@ async fn mcp_prompt_output_retries_without_injected_account() {
     };
 
     let registry = Arc::new(ToolRegistry::new());
-    let mut manager = McpServerManager::new(vec![fake_mcp.server_config("gworkspace", HashMap::new())]);
+    let mut manager =
+        McpServerManager::new(vec![fake_mcp.server_config("gworkspace", HashMap::new())]);
     manager.start_all(&registry).await;
 
     assert!(
@@ -523,7 +525,10 @@ async fn mcp_timeout_contract_ping_returns_false_when_server_hangs() {
     let alive = client.ping().await;
     let elapsed = started.elapsed();
 
-    assert!(!alive, "ping should report false when server does not reply");
+    assert!(
+        !alive,
+        "ping should report false when server does not reply"
+    );
     assert!(
         elapsed >= Duration::from_secs(5),
         "ping timeout should wait at least 5s, elapsed={elapsed:?}"
@@ -544,7 +549,8 @@ async fn mcp_prompt_output_surfaces_tool_errors_cleanly() {
     };
 
     let registry = Arc::new(ToolRegistry::new());
-    let mut manager = McpServerManager::new(vec![fake_mcp.server_config("gworkspace", HashMap::new())]);
+    let mut manager =
+        McpServerManager::new(vec![fake_mcp.server_config("gworkspace", HashMap::new())]);
     manager.start_all(&registry).await;
 
     assert!(

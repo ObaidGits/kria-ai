@@ -83,8 +83,9 @@ pub fn spawn_ws_listener(
                 return;
             }
             if tokio::time::Instant::now() >= deadline {
-                let message = last_connect_error
-                    .unwrap_or_else(|| "timed out before websocket connection was established".to_string());
+                let message = last_connect_error.unwrap_or_else(|| {
+                    "timed out before websocket connection was established".to_string()
+                });
                 let _ = completion_tx.send(Err(WsBridgeError::Connect(message)));
                 return;
             }
@@ -103,8 +104,7 @@ pub fn spawn_ws_listener(
         // Heartbeat task sends ping every 2 s.
         let cancel2 = cancel.clone();
         let ping_task = tokio::spawn(async move {
-            let mut interval =
-                tokio::time::interval(Duration::from_secs(WS_PING_INTERVAL_SECS));
+            let mut interval = tokio::time::interval(Duration::from_secs(WS_PING_INTERVAL_SECS));
             loop {
                 tokio::select! {
                     _ = cancel2.cancelled() => break,
@@ -173,9 +173,8 @@ pub fn spawn_ws_listener(
                             if cancel.is_cancelled() {
                                 ping_task.abort();
                                 if let Some(message) = terminal_error.take() {
-                                    let _ = completion_tx.send(Err(WsBridgeError::ComfyError {
-                                        message,
-                                    }));
+                                    let _ = completion_tx
+                                        .send(Err(WsBridgeError::ComfyError { message }));
                                 } else if outputs.is_empty() {
                                     let _ = completion_tx.send(Err(WsBridgeError::ComfyError {
                                         message: "job cancelled or error".into(),
@@ -325,10 +324,7 @@ async fn handle_frame(
                 .as_str()
                 .unwrap_or("unknown ComfyUI error")
                 .to_string();
-            let data = val
-                .get("data")
-                .cloned()
-                .unwrap_or(serde_json::Value::Null);
+            let data = val.get("data").cloned().unwrap_or(serde_json::Value::Null);
             let detailed = format!("{message}; frame_data={data}");
             warn!(message = %detailed, "ComfyUI WS error frame");
             *terminal_error = Some(detailed);
@@ -392,7 +388,9 @@ fn classify_history_state(history: &serde_json::Value, prompt_id: &str) -> Histo
         return HistoryRecoveryState::Outputs(outputs);
     }
 
-    let completed = prompt_entry["status"]["completed"].as_bool().unwrap_or(false);
+    let completed = prompt_entry["status"]["completed"]
+        .as_bool()
+        .unwrap_or(false);
     let status = prompt_entry["status"]["status_str"]
         .as_str()
         .unwrap_or("unknown");
@@ -499,7 +497,8 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
-    async fn spawn_fake_comfy_interrupt_server() -> (u16, Arc<AtomicUsize>, tokio::task::JoinHandle<()>) {
+    async fn spawn_fake_comfy_interrupt_server(
+    ) -> (u16, Arc<AtomicUsize>, tokio::task::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let interrupts = Arc::new(AtomicUsize::new(0));

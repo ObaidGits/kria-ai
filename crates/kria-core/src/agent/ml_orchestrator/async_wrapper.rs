@@ -3,8 +3,8 @@
 // Orchestrator-owned async wrapper. The Cloud LLM NEVER writes subprocess
 // boilerplate — it writes only the inner ML logic. This module wraps it.
 
-use super::types::ParsedCell;
 use super::helpers_template::render_helpers;
+use super::types::ParsedCell;
 
 /// Generate the complete async cell code by wrapping the LLM's inner code
 /// in an orchestrator-owned subprocess shell.
@@ -107,15 +107,21 @@ except Exception as e:
 fn indent_code(code: &str, spaces: usize) -> String {
     let indent = " ".repeat(spaces);
     code.lines()
-        .map(|line| if line.trim().is_empty() { String::new() } else { format!("{}{}", indent, line) })
+        .map(|line| {
+            if line.trim().is_empty() {
+                String::new()
+            } else {
+                format!("{}{}", indent, line)
+            }
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::types::Phase;
+    use super::*;
 
     fn test_cell(is_async: bool) -> ParsedCell {
         ParsedCell {
@@ -134,7 +140,14 @@ mod tests {
     #[test]
     fn sync_cell_has_helpers() {
         let cell = test_cell(false);
-        let code = wrap_sync_cell(&cell, "j1", "/hot", "/cold", "/data.csv", "/hot/status.json");
+        let code = wrap_sync_cell(
+            &cell,
+            "j1",
+            "/hot",
+            "/cold",
+            "/data.csv",
+            "/hot/status.json",
+        );
         assert!(code.contains("KRIA HELPERS"));
         assert!(code.contains("JobPaths"));
         assert!(code.contains("JobProgress"));
@@ -146,7 +159,14 @@ mod tests {
     #[test]
     fn async_cell_has_subprocess() {
         let cell = test_cell(true);
-        let code = wrap_async_cell(&cell, "j1", "/hot", "/cold", "/data.csv", "/hot/status.json");
+        let code = wrap_async_cell(
+            &cell,
+            "j1",
+            "/hot",
+            "/cold",
+            "/data.csv",
+            "/hot/status.json",
+        );
         assert!(code.contains("subprocess.Popen"));
         assert!(code.contains("KRIA_PID"));
         assert!(code.contains("KRIA_ASYNC"));
@@ -158,7 +178,14 @@ mod tests {
     #[test]
     fn async_cell_wraps_in_try_except() {
         let cell = test_cell(true);
-        let code = wrap_async_cell(&cell, "j1", "/hot", "/cold", "/data.csv", "/hot/status.json");
+        let code = wrap_async_cell(
+            &cell,
+            "j1",
+            "/hot",
+            "/cold",
+            "/data.csv",
+            "/hot/status.json",
+        );
         // The worker script (inside the raw string) should have try/except
         assert!(code.contains("try:"));
         assert!(code.contains("except Exception as e:"));

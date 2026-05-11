@@ -14,15 +14,12 @@ impl DocumentProcessor {
 
         match ext.as_str() {
             // Plain text / markup / data formats — direct UTF-8 read
-            "txt" | "md" | "markdown" | "log" | "csv" | "json" | "toml"
-            | "yaml" | "yml" | "xml" | "html" | "htm" => {
-                Ok(tokio::fs::read_to_string(path).await?)
-            }
+            "txt" | "md" | "markdown" | "log" | "csv" | "json" | "toml" | "yaml" | "yml"
+            | "xml" | "html" | "htm" => Ok(tokio::fs::read_to_string(path).await?),
 
             // Code files — all plain text
-            "py" | "rs" | "ts" | "js" | "jsx" | "tsx" | "go" | "java"
-            | "c" | "cpp" | "h" | "hpp" | "rb" | "php" | "kt" | "swift"
-            | "lua" | "r" | "sh" | "bash" | "sql" => {
+            "py" | "rs" | "ts" | "js" | "jsx" | "tsx" | "go" | "java" | "c" | "cpp" | "h"
+            | "hpp" | "rb" | "php" | "kt" | "swift" | "lua" | "r" | "sh" | "bash" | "sql" => {
                 Ok(tokio::fs::read_to_string(path).await?)
             }
 
@@ -59,10 +56,13 @@ impl DocumentProcessor {
         }
         // Fallback: try pdf-extract via Python if available
         if let Ok(output) = tokio::process::Command::new("python3")
-            .args(["-c", &format!(
+            .args([
+                "-c",
+                &format!(
                 "import pdfminer.high_level, sys; print(pdfminer.high_level.extract_text('{}'))",
                 p.to_string_lossy()
-            )])
+            ),
+            ])
             .output()
             .await
         {

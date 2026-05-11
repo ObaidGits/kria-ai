@@ -99,9 +99,7 @@ pub struct RemoteInstallRequest {
 
 /// List all installed skills from the live SQLite registry.
 #[command]
-pub fn clawhub_list_skills(
-    state: State<'_, AppStateCell>,
-) -> Result<Vec<SkillCard>, String> {
+pub fn clawhub_list_skills(state: State<'_, AppStateCell>) -> Result<Vec<SkillCard>, String> {
     let app = state.get().ok_or("runtime not ready")?;
     let skills = app
         .skill_registry
@@ -151,10 +149,7 @@ pub async fn clawhub_fetch_remote_skills(
 ) -> Result<Vec<RemoteSkillCard>, String> {
     let app = state.get().ok_or("runtime not ready")?;
     let cfg = app.config.read().await.openclaw.clone();
-    let client = ClawHubClient::new(
-        &cfg.registry.index_url,
-        cfg.registry.allowed_hosts.clone(),
-    );
+    let client = ClawHubClient::new(&cfg.registry.index_url, cfg.registry.allowed_hosts.clone());
 
     let entries = client
         .search_remote(&query, category.as_deref())
@@ -208,10 +203,7 @@ pub async fn clawhub_install_skill(
         .map_err(|e| format!("URL rejected: {e}"))?;
 
     // 2. Download manifest.
-    let client = ClawHubClient::new(
-        &cfg.registry.index_url,
-        cfg.registry.allowed_hosts.clone(),
-    );
+    let client = ClawHubClient::new(&cfg.registry.index_url, cfg.registry.allowed_hosts.clone());
     let raw_manifest = client
         .download_skill_manifest(&request.manifest_url)
         .await
@@ -332,9 +324,7 @@ pub async fn openclaw_substrate_status(
 
 /// Drain and re-warm the container pool.
 #[command]
-pub async fn openclaw_substrate_restart(
-    state: State<'_, AppStateCell>,
-) -> Result<(), String> {
+pub async fn openclaw_substrate_restart(state: State<'_, AppStateCell>) -> Result<(), String> {
     let app = state.get().ok_or("runtime not ready")?;
     if let Some(pool) = &app.container_pool {
         pool.shutdown().await.map_err(|e| e.to_string())?;

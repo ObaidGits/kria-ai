@@ -482,10 +482,7 @@ pub async fn get_analytics_dashboard(
             }
 
             payload.cognitive_score = Some(CognitiveScoreView {
-                zone: json["zone"]
-                    .as_str()
-                    .unwrap_or("cognitive_e2e")
-                    .to_string(),
+                zone: json["zone"].as_str().unwrap_or("cognitive_e2e").to_string(),
                 total_prompts: total,
                 passed,
                 failed,
@@ -562,7 +559,7 @@ fn find_workspace_root() -> PathBuf {
 fn extract_report_count(content: &str, label: &str) -> u64 {
     for line in content.lines() {
         if line.contains(label) && line.contains(':') {
-            if let Some(val) = line.split(':').last() {
+            if let Some(val) = line.split(':').next_back() {
                 return val.trim().parse::<u64>().unwrap_or(0);
             }
         }

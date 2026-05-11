@@ -173,11 +173,7 @@ fn normalize_mode(raw: Option<String>) -> String {
 
 fn build_command_args(request: &TestRunProfileRequest) -> (String, Vec<String>) {
     let mode = normalize_mode(request.mode.clone());
-    let mut args = vec![
-        "kria-test".to_string(),
-        "--mode".to_string(),
-        mode.clone(),
-    ];
+    let mut args = vec!["kria-test".to_string(), "--mode".to_string(), mode.clone()];
 
     if let Some(resume) = request.resume.as_ref().filter(|v| !v.trim().is_empty()) {
         args.push("--resume".to_string());
@@ -248,10 +244,7 @@ pub async fn start_test_run(
     command.stderr(Stdio::piped());
 
     let mode_normalized = normalize_mode(request.mode.clone());
-    let destructive_mode = matches!(
-        mode_normalized.as_str(),
-        "DESTRUCTIVE" | "FULL" | "RELEASE"
-    );
+    let destructive_mode = matches!(mode_normalized.as_str(), "DESTRUCTIVE" | "FULL" | "RELEASE");
     if request.allow_destructive.unwrap_or(false) || destructive_mode {
         command.env("KRIA_TEST_ALLOW_DESTRUCTIVE", "1");
         command.env("KRIA_DANGEROUS", "1");
@@ -271,7 +264,11 @@ pub async fn start_test_run(
     if let Some(vm_ssh_key) = request.vm_ssh_key.as_ref().filter(|v| !v.trim().is_empty()) {
         command.env("KRIA_TEST_VM_SSH_KEY", vm_ssh_key.trim());
     }
-    if let Some(vm_hostkey) = request.vm_hostkey_sha256.as_ref().filter(|v| !v.trim().is_empty()) {
+    if let Some(vm_hostkey) = request
+        .vm_hostkey_sha256
+        .as_ref()
+        .filter(|v| !v.trim().is_empty())
+    {
         command.env("KRIA_TEST_VM_HOSTKEY_SHA256", vm_hostkey.trim());
     }
     if request.docker_fallback.unwrap_or(false) {
@@ -280,7 +277,11 @@ pub async fn start_test_run(
     if let Some(target_id) = request.target_id.as_ref().filter(|v| !v.trim().is_empty()) {
         command.env("KRIA_TEST_TARGET_ID", target_id.trim());
     }
-    if let Some(container_id) = request.docker_container_id.as_ref().filter(|v| !v.trim().is_empty()) {
+    if let Some(container_id) = request
+        .docker_container_id
+        .as_ref()
+        .filter(|v| !v.trim().is_empty())
+    {
         command.env("KRIA_TEST_DOCKER_CONTAINER_ID", container_id.trim());
         command.env("KRIA_TEST_USE_DOCKER_FALLBACK", "1");
     }
@@ -290,7 +291,9 @@ pub async fn start_test_run(
 
     let run_label = format!("run-{}", now_unix_ms());
     let command_preview = format!("cargo {}", args.join(" "));
-    let mut child = command.spawn().map_err(|e| format!("Failed to start test run: {e}"))?;
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("Failed to start test run: {e}"))?;
     let pid = child.id();
 
     let stdout = child.stdout.take();
@@ -353,7 +356,8 @@ pub async fn start_test_run(
             };
 
             if let Some((run_label, mode, exit_code)) = maybe_finished {
-                let report = latest_report_path(&target_tests_dir()).map(|p| p.display().to_string());
+                let report =
+                    latest_report_path(&target_tests_dir()).map(|p| p.display().to_string());
                 let _ = app.emit(
                     "kria://tests/run_finished",
                     serde_json::json!({
@@ -430,8 +434,12 @@ pub async fn list_test_history(limit: Option<usize>) -> Result<Vec<TestHistoryIt
     let max_items = limit.unwrap_or(50).clamp(1, 500);
     let mut items = Vec::new();
     let dir = target_tests_dir();
-    let entries = std::fs::read_dir(&dir)
-        .map_err(|e| format!("Failed to read test history directory '{}': {e}", dir.display()))?;
+    let entries = std::fs::read_dir(&dir).map_err(|e| {
+        format!(
+            "Failed to read test history directory '{}': {e}",
+            dir.display()
+        )
+    })?;
     for entry in entries.flatten() {
         let path = entry.path();
         let name = match path.file_name().map(|n| n.to_string_lossy().to_string()) {
@@ -533,18 +541,31 @@ pub async fn get_test_checkpoint() -> Result<Option<TestCheckpointInfo>, String>
         per_test_checkpoint: Option<serde_json::Value>,
     }
 
-    let checkpoint: CheckpointState = serde_json::from_str(&raw)
-        .map_err(|e| format!("Failed to parse checkpoint: {e}"))?;
+    let checkpoint: CheckpointState =
+        serde_json::from_str(&raw).map_err(|e| format!("Failed to parse checkpoint: {e}"))?;
 
     let info = if let Some(ptc) = checkpoint.per_test_checkpoint {
         TestCheckpointInfo {
             run_tag: checkpoint.run_tag,
-            suite_name: ptc.get("suite_name").and_then(|v| v.as_str()).map(String::from),
-            test_name: ptc.get("test_name").and_then(|v| v.as_str()).map(String::from),
+            suite_name: ptc
+                .get("suite_name")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            test_name: ptc
+                .get("test_name")
+                .and_then(|v| v.as_str())
+                .map(String::from),
             status: ptc.get("status").and_then(|v| v.as_str()).map(String::from),
-            failure_reason: ptc.get("failure_reason").and_then(|v| v.as_str()).map(String::from),
-            assertion_details: ptc.get("assertion_details").and_then(|v| v.as_str()).map(String::from),
-            timestamp_unix_ms: ptc.get("timestamp_unix_ms")
+            failure_reason: ptc
+                .get("failure_reason")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            assertion_details: ptc
+                .get("assertion_details")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            timestamp_unix_ms: ptc
+                .get("timestamp_unix_ms")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0),
         }
@@ -582,7 +603,9 @@ fn find_latest_run_tag(dir: &Path) -> Result<String, String> {
             }
         }
     }
-    latest.map(|(_, tag)| tag).ok_or_else(|| "No test runs found".to_string())
+    latest
+        .map(|(_, tag)| tag)
+        .ok_or_else(|| "No test runs found".to_string())
 }
 
 #[allow(dead_code)]
@@ -596,7 +619,10 @@ pub async fn get_failure_categories() -> Result<Vec<TestFailureCategory>, String
         let entry = entry.map_err(|e| e.to_string())?;
         let path = entry.path();
         if path.extension().map(|e| e == "md").unwrap_or(false)
-            && path.file_name().map(|n| n.to_string_lossy().contains("REPORT")).unwrap_or(false)
+            && path
+                .file_name()
+                .map(|n| n.to_string_lossy().contains("REPORT"))
+                .unwrap_or(false)
         {
             if let Ok(content) = std::fs::read_to_string(&path) {
                 parse_failure_categories(&content, &mut categories);
@@ -683,7 +709,11 @@ fn categorize_failure(reason: &str) -> String {
 #[tauri::command]
 pub async fn list_docker_containers() -> Result<Vec<DockerContainerItem>, String> {
     let output = Command::new("docker")
-        .args(["ps", "--format", "{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}"])
+        .args([
+            "ps",
+            "--format",
+            "{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}",
+        ])
         .output()
         .await
         .map_err(|e| format!("Docker not available: {e}"))?;
@@ -725,7 +755,10 @@ pub async fn list_test_targets() -> Result<Vec<TestTargetItem>, String> {
             .iter()
             .map(|t| TestTargetItem {
                 id: format!("vm:{}", t.target_id),
-                label: format!("🖥️ {} ({}@{}:{})", t.display_name, t.username, t.host, t.port),
+                label: format!(
+                    "🖥️ {} ({}@{}:{})",
+                    t.display_name, t.username, t.host, t.port
+                ),
                 target_type: "vm".to_string(),
                 host: Some(t.host.clone()),
                 port: Some(t.port),

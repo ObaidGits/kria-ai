@@ -184,33 +184,14 @@ impl AuditLedger {
             .map_err(AuditError::Db)?;
 
         for row in rows {
-            let (
-                id,
-                ts,
-                et,
-                sid,
-                iid,
-                sess,
-                tid,
-                tn,
-                rl,
-                ih,
-                oh,
-                dm,
-                suc,
-                es,
-                rc,
-                ci,
-                sig,
-            ) = row.map_err(AuditError::Db)?;
+            let (id, ts, et, sid, iid, sess, tid, tn, rl, ih, oh, dm, suc, es, rc, ci, sig) =
+                row.map_err(AuditError::Db)?;
 
             let entry = AuditEntry {
                 timestamp: chrono::DateTime::parse_from_rfc3339(&ts)
                     .map_err(|_| AuditError::VerificationFailed(id))?
                     .with_timezone(&chrono::Utc),
-                event_type: et
-                    .parse()
-                    .map_err(|_| AuditError::VerificationFailed(id))?,
+                event_type: et.parse().map_err(|_| AuditError::VerificationFailed(id))?,
                 skill_id: sid,
                 invocation_id: iid,
                 session_id: sess,

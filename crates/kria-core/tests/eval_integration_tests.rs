@@ -32,8 +32,8 @@ fn ensure_server_running() {
         }
     }
 
-    let base_url =
-        std::env::var("KRIA_EVAL_SERVER_URL").unwrap_or_else(|_| "http://127.0.0.1:8088".to_string());
+    let base_url = std::env::var("KRIA_EVAL_SERVER_URL")
+        .unwrap_or_else(|_| "http://127.0.0.1:8088".to_string());
 
     if is_server_up(&base_url) {
         eprintln!("kria-server already running at {base_url}");
@@ -103,7 +103,10 @@ struct ServerGuard;
 impl Drop for ServerGuard {
     fn drop(&mut self) {
         if let Some(mut child) = SERVER_GUARD.lock().unwrap().take() {
-            eprintln!("Shutting down eval integration test kria-server (pid {})", child.id());
+            eprintln!(
+                "Shutting down eval integration test kria-server (pid {})",
+                child.id()
+            );
             let _ = child.kill();
             let _ = child.wait();
         }
@@ -197,8 +200,8 @@ fn detect_response_issues(response: &str, prompt: &str) -> Vec<ResponseIssue> {
 // ═══════════════════════════════════════════════════════════════════════════
 
 async fn send_prompt_via_api(prompt: &str) -> Result<Value, String> {
-    let base_url =
-        std::env::var("KRIA_EVAL_SERVER_URL").unwrap_or_else(|_| "http://127.0.0.1:8088".to_string());
+    let base_url = std::env::var("KRIA_EVAL_SERVER_URL")
+        .unwrap_or_else(|_| "http://127.0.0.1:8088".to_string());
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(120))
@@ -221,7 +224,9 @@ async fn send_prompt_via_api(prompt: &str) -> Result<Value, String> {
         return Err(format!("Server returned error: {}", resp.status()));
     }
 
-    resp.json().await.map_err(|e| format!("Failed to parse response: {e}"))
+    resp.json()
+        .await
+        .map_err(|e| format!("Failed to parse response: {e}"))
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -235,7 +240,6 @@ fn eval_integration_enabled() -> bool {
 fn require_enabled() {
     if !eval_integration_enabled() {
         eprintln!("SKIP: set KRIA_EVAL_INTEGRATION=1 to run eval integration tests");
-        return;
     }
 }
 
@@ -254,7 +258,8 @@ async fn eval_weather_must_use_tool() {
     eval_integration_guard!();
     let _guard = ServerGuard;
 
-    let json = send_prompt_via_api("What is the weather in Mumbai?").await
+    let json = send_prompt_via_api("What is the weather in Mumbai?")
+        .await
         .expect("eval integration: failed to get response from API");
 
     let tool = json["tool_calls"]
@@ -289,7 +294,8 @@ async fn eval_news_must_use_tool() {
     eval_integration_guard!();
     let _guard = ServerGuard;
 
-    let json = send_prompt_via_api("Give me latest AI news").await
+    let json = send_prompt_via_api("Give me latest AI news")
+        .await
         .expect("eval integration: failed to get response from API");
 
     let tool = json["tool_calls"]
@@ -318,7 +324,8 @@ async fn eval_install_must_execute() {
     eval_integration_guard!();
     let _guard = ServerGuard;
 
-    let json = send_prompt_via_api("Install neofetch on my system").await
+    let json = send_prompt_via_api("Install neofetch on my system")
+        .await
         .expect("eval integration: failed to get response from API");
 
     let tool = json["tool_calls"]
@@ -351,7 +358,8 @@ async fn eval_file_ops_must_use_tool() {
     eval_integration_guard!();
     let _guard = ServerGuard;
 
-    let json = send_prompt_via_api("List files in /tmp").await
+    let json = send_prompt_via_api("List files in /tmp")
+        .await
         .expect("eval integration: failed to get response from API");
 
     let tool = json["tool_calls"]
@@ -372,7 +380,8 @@ async fn eval_no_hallucination_on_system_stats() {
     eval_integration_guard!();
     let _guard = ServerGuard;
 
-    let json = send_prompt_via_api("What are my system stats?").await
+    let json = send_prompt_via_api("What are my system stats?")
+        .await
         .expect("eval integration: failed to get response from API");
 
     let response = json["response"]
@@ -400,7 +409,8 @@ async fn eval_internet_check_uses_tool() {
     eval_integration_guard!();
     let _guard = ServerGuard;
 
-    let json = send_prompt_via_api("Are you connected to the internet?").await
+    let json = send_prompt_via_api("Are you connected to the internet?")
+        .await
         .expect("eval integration: failed to get response from API");
 
     let tool = json["tool_calls"]

@@ -2,8 +2,8 @@
 //
 // TOML-only parser for Cloud LLM responses. Zero regex. Zero string slicing.
 
-use std::collections::HashSet;
 use serde::Deserialize;
+use std::collections::HashSet;
 
 use super::types::{CellPlan, ParsedCell, Phase};
 
@@ -25,7 +25,9 @@ struct PlanMeta {
     estimated_duration_minutes: u32,
 }
 
-fn default_duration() -> u32 { 15 }
+fn default_duration() -> u32 {
+    15
+}
 
 /// A single cell definition — code is a TOML multiline literal string.
 #[derive(Debug, Deserialize)]
@@ -46,32 +48,38 @@ struct RawCellDef {
     code: String,
 }
 
-fn default_timeout() -> u64 { 60 }
+fn default_timeout() -> u64 {
+    60
+}
 
 /// Parse the LLM's TOML response into a CellPlan.
 /// This is the ONLY parsing function. No regex. No string slicing.
 pub fn parse_cell_plan(raw: &str, job_id: &str) -> Result<CellPlan, PlanParseError> {
-    let payload: LlmPayload = toml::from_str(raw)
-        .map_err(|e| PlanParseError::TomlParse(e.to_string()))?;
+    let payload: LlmPayload =
+        toml::from_str(raw).map_err(|e| PlanParseError::TomlParse(e.to_string()))?;
 
     if payload.cells.is_empty() {
         return Err(PlanParseError::NoCells);
     }
 
-    let cells: Vec<ParsedCell> = payload.cells.into_iter().map(|c| {
-        let code = c.code.replace("{job_id}", job_id);
-        Ok(ParsedCell {
-            cell_id: c.id,
-            phase: parse_phase(&c.phase)?,
-            description: c.description,
-            code,
-            timeout_secs: c.timeout,
-            retry_on_failure: c.retry,
-            is_async: c.async_cell,
-            inputs: c.inputs,
-            outputs: c.outputs,
+    let cells: Vec<ParsedCell> = payload
+        .cells
+        .into_iter()
+        .map(|c| {
+            let code = c.code.replace("{job_id}", job_id);
+            Ok(ParsedCell {
+                cell_id: c.id,
+                phase: parse_phase(&c.phase)?,
+                description: c.description,
+                code,
+                timeout_secs: c.timeout,
+                retry_on_failure: c.retry,
+                is_async: c.async_cell,
+                inputs: c.inputs,
+                outputs: c.outputs,
+            })
         })
-    }).collect::<Result<Vec<_>, PlanParseError>>()?;
+        .collect::<Result<Vec<_>, PlanParseError>>()?;
 
     validate_dag(&cells)?;
 
@@ -200,7 +208,9 @@ job_progress.complete()
     #[test]
     fn job_id_placeholder_replaced() {
         let plan = parse_cell_plan(VALID_TOML, "job_abc").unwrap();
-        assert!(plan.cells[1].code.contains("job_abc") || plan.cells[1].code.contains("job_progress"));
+        assert!(
+            plan.cells[1].code.contains("job_abc") || plan.cells[1].code.contains("job_progress")
+        );
     }
 
     #[test]
@@ -210,7 +220,10 @@ job_progress.complete()
 name = "empty"
 task = "test"
 "#;
-        assert!(matches!(parse_cell_plan(toml, "x"), Err(PlanParseError::NoCells)));
+        assert!(matches!(
+            parse_cell_plan(toml, "x"),
+            Err(PlanParseError::NoCells)
+        ));
     }
 
     #[test]
@@ -226,7 +239,10 @@ phase = "bogus"
 description = "test"
 code = "pass"
 "#;
-        assert!(matches!(parse_cell_plan(toml, "x"), Err(PlanParseError::UnknownPhase(_))));
+        assert!(matches!(
+            parse_cell_plan(toml, "x"),
+            Err(PlanParseError::UnknownPhase(_))
+        ));
     }
 
     #[test]
@@ -248,7 +264,10 @@ phase = "training"
 description = "second"
 code = "pass"
 "#;
-        assert!(matches!(parse_cell_plan(toml, "x"), Err(PlanParseError::DuplicateCellId(_))));
+        assert!(matches!(
+            parse_cell_plan(toml, "x"),
+            Err(PlanParseError::DuplicateCellId(_))
+        ));
     }
 
     #[test]
@@ -266,7 +285,10 @@ inputs = ["01_setup/missing.json"]
 outputs = ["model.pth"]
 code = "pass"
 "#;
-        assert!(matches!(parse_cell_plan(toml, "x"), Err(PlanParseError::MissingInput { .. })));
+        assert!(matches!(
+            parse_cell_plan(toml, "x"),
+            Err(PlanParseError::MissingInput { .. })
+        ));
     }
 
     #[test]

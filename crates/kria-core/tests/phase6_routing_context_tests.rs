@@ -7,14 +7,13 @@
 
 use std::time::{Duration, Instant};
 
+use kria_core::config::RoutingConfig;
 use kria_core::routing::context::{
-    detect_correction, enrich_with_context, CorrectionSignal, EnrichedInput, EnrichmentReason,
-    RoutingContext,
+    detect_correction, enrich_with_context, EnrichmentReason, RoutingContext,
 };
 use kria_core::routing::decide::{self, DecideInput, RouteDecision};
 use kria_core::routing::domain::Domain;
 use kria_core::routing::verbs::{IntentModality, ModalityResult};
-use kria_core::config::RoutingConfig;
 
 // ─── Helper Functions ───────────────────────────────────────────────────────
 
@@ -67,7 +66,12 @@ fn ctx02_correction_detection() {
 #[test]
 fn ctx03_stale_context_not_used() {
     let mut ctx = RoutingContext::default();
-    ctx.record_turn(Domain::SystemInfo, None, IntentModality::Read, vec![0.1; 384]);
+    ctx.record_turn(
+        Domain::SystemInfo,
+        None,
+        IntentModality::Read,
+        vec![0.1; 384],
+    );
     // Manually set last_turn_at to 120s ago to simulate stale context
     ctx.last_turn_at = Some(Instant::now() - Duration::from_secs(120));
 
@@ -78,7 +82,12 @@ fn ctx03_stale_context_not_used() {
 #[test]
 fn ctx04_long_input_not_enriched() {
     let mut ctx = RoutingContext::default();
-    ctx.record_turn(Domain::SystemInfo, None, IntentModality::Read, vec![0.1; 384]);
+    ctx.record_turn(
+        Domain::SystemInfo,
+        None,
+        IntentModality::Read,
+        vec![0.1; 384],
+    );
 
     let long_text = "a".repeat(100);
     let enriched = enrich_with_context(&long_text, &ctx);
@@ -88,7 +97,12 @@ fn ctx04_long_input_not_enriched() {
 #[test]
 fn ctx05_multi_turn_hinglish_continuation() {
     let mut ctx = RoutingContext::default();
-    ctx.record_turn(Domain::SystemInfo, None, IntentModality::Read, vec![0.1; 384]);
+    ctx.record_turn(
+        Domain::SystemInfo,
+        None,
+        IntentModality::Read,
+        vec![0.1; 384],
+    );
     ctx.turn_count_in_topic = 2;
 
     let enriched = enrich_with_context("uska status bhi dikhao", &ctx);
@@ -98,7 +112,12 @@ fn ctx05_multi_turn_hinglish_continuation() {
 #[test]
 fn ctx06_context_resets_on_topic_change() {
     let mut ctx = RoutingContext::default();
-    ctx.record_turn(Domain::SystemInfo, None, IntentModality::Read, vec![0.1; 384]);
+    ctx.record_turn(
+        Domain::SystemInfo,
+        None,
+        IntentModality::Read,
+        vec![0.1; 384],
+    );
     ctx.turn_count_in_topic = 3;
 
     // Simulate routing to different domain
@@ -214,10 +233,7 @@ fn ctx12_correction_without_prev_domain_no_boost() {
         ..Default::default()
     };
 
-    let domain_sims = vec![
-        (Domain::Knowledge, 0.6),
-        (Domain::SystemInfo, 0.4),
-    ];
+    let domain_sims = vec![(Domain::Knowledge, 0.6), (Domain::SystemInfo, 0.4)];
 
     let input = DecideInput {
         domain_sims: &domain_sims,
@@ -254,7 +270,12 @@ fn ctx13_context_enrichment_improves_embedding() {
 fn ctx14_context_records_embedding() {
     let mut ctx = RoutingContext::default();
     let embedding = vec![0.1, 0.2, 0.3, 0.4, 0.5];
-    ctx.record_turn(Domain::SystemInfo, None, IntentModality::Read, embedding.clone());
+    ctx.record_turn(
+        Domain::SystemInfo,
+        None,
+        IntentModality::Read,
+        embedding.clone(),
+    );
 
     assert_eq!(ctx.last_embedding, Some(embedding));
 }
@@ -262,11 +283,21 @@ fn ctx14_context_records_embedding() {
 #[test]
 fn ctx15_context_clears_correction_after_record() {
     let mut ctx = RoutingContext::default();
-    ctx.record_turn(Domain::SystemInfo, None, IntentModality::Read, vec![0.1; 10]);
+    ctx.record_turn(
+        Domain::SystemInfo,
+        None,
+        IntentModality::Read,
+        vec![0.1; 10],
+    );
     ctx.set_correction_pending();
     assert!(ctx.correction_pending);
 
     // Recording a turn clears the correction flag
-    ctx.record_turn(Domain::SystemInfo, None, IntentModality::Read, vec![0.1; 10]);
+    ctx.record_turn(
+        Domain::SystemInfo,
+        None,
+        IntentModality::Read,
+        vec![0.1; 10],
+    );
     assert!(!ctx.correction_pending);
 }

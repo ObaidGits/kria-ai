@@ -228,7 +228,7 @@ async fn run_prompt_real(prompt: &str) -> (Option<String>, String) {
 async fn quality_sys01_cpu_usage_uses_tool() {
     real_llm_guard!();
     let (tool, response) = run_prompt_real("What is the current CPU usage?").await;
-    let pass = tool.as_deref().map_or(false, |t| t.contains("cpu"));
+    let pass = tool.as_deref().is_some_and(|t| t.contains("cpu"));
     assert_no_bash_hallucination(&response);
     record_result(
         "SYS-01",
@@ -246,7 +246,7 @@ async fn quality_sys02_memory_usage_uses_tool() {
     let (tool, response) = run_prompt_real("Show me the memory usage.").await;
     let pass = tool
         .as_deref()
-        .map_or(false, |t| t.contains("memory") || t.contains("mem"));
+        .is_some_and(|t| t.contains("memory") || t.contains("mem"));
     assert_no_bash_hallucination(&response);
     record_result(
         "SYS-02",
@@ -264,7 +264,7 @@ async fn quality_net01_web_search_uses_tool() {
     let (tool, response) = run_prompt_real("Search the web for Rust 2024 edition.").await;
     let pass = tool
         .as_deref()
-        .map_or(false, |t| t.contains("web_search") || t.contains("search"));
+        .is_some_and(|t| t.contains("web_search") || t.contains("search"));
     assert_no_bash_hallucination(&response);
     record_result(
         "NET-01",
@@ -282,7 +282,7 @@ async fn quality_fs01_list_files_uses_tool() {
     let (tool, response) = run_prompt_real("List the files in /home/obaid.").await;
     let pass = tool
         .as_deref()
-        .map_or(false, |t| t.contains("list") || t.contains("files"));
+        .is_some_and(|t| t.contains("list") || t.contains("files"));
     assert_no_bash_hallucination(&response);
     record_result(
         "FS-01",
@@ -298,9 +298,9 @@ async fn quality_fs01_list_files_uses_tool() {
 async fn quality_critical_system_stats_uses_tool() {
     real_llm_guard!();
     let (tool, response) = run_prompt_real("What is the System Stats?").await;
-    let pass = tool.as_deref().map_or(false, |t| {
-        t.contains("stats") || t.contains("cpu") || t.contains("system")
-    });
+    let pass = tool
+        .as_deref()
+        .is_some_and(|t| t.contains("stats") || t.contains("cpu") || t.contains("system"));
     assert_no_bash_hallucination(&response);
     assert_response_length_sane(&response, 10, 1000);
     record_result(
@@ -320,9 +320,9 @@ async fn quality_critical_system_stats_uses_tool() {
 async fn quality_critical_internet_check_uses_tool() {
     real_llm_guard!();
     let (tool, response) = run_prompt_real("Are you connected to Internet?").await;
-    let pass = tool.as_deref().map_or(false, |t| {
-        t.contains("internet") || t.contains("ping") || t.contains("connect")
-    });
+    let pass = tool
+        .as_deref()
+        .is_some_and(|t| t.contains("internet") || t.contains("ping") || t.contains("connect"));
     assert_no_bash_hallucination(&response);
     record_result(
         "CRITICAL-2",
@@ -341,15 +341,16 @@ async fn quality_critical_internet_check_uses_tool() {
 async fn quality_critical_ongoing_ops_uses_tool() {
     real_llm_guard!();
     let (tool, response) = run_prompt_real("Is there any ongoing Operation you are doing?").await;
-    let pass = tool.as_deref().map_or(false, |t| {
-        t.contains("task") || t.contains("queue") || t.contains("running")
-    }) || matches!(
-        kria_core::agent::router::IntentRouter::classify(
-            "Is there any ongoing Operation you are doing?"
-        )
-        .intent,
-        kria_core::agent::router::Intent::Conversation
-    );
+    let pass = tool
+        .as_deref()
+        .is_some_and(|t| t.contains("task") || t.contains("queue") || t.contains("running"))
+        || matches!(
+            kria_core::agent::router::IntentRouter::classify(
+                "Is there any ongoing Operation you are doing?"
+            )
+            .intent,
+            kria_core::agent::router::Intent::Conversation
+        );
     assert_no_bash_hallucination(&response);
     record_result(
         "CRITICAL-3",
@@ -402,7 +403,7 @@ async fn quality_gw01_gmail_inbox_uses_tool() {
     let (tool, response) = run_prompt_real("Check my Gmail inbox.").await;
     let pass = tool
         .as_deref()
-        .map_or(false, |t| t.contains("gmail") || t.contains("gw_"));
+        .is_some_and(|t| t.contains("gmail") || t.contains("gw_"));
     assert_no_bash_hallucination(&response);
     record_result(
         "GW-01",

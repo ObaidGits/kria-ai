@@ -95,7 +95,9 @@ pub enum FilesystemOp {
 }
 
 /// Event severity for prioritization.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum EventSeverity {
     /// Informational, no action needed.
     Info,
@@ -304,7 +306,12 @@ impl FilesystemSource {
     /// This is a long-running task — call it via `tokio::spawn`.
     pub async fn run(
         self,
-        event_sink: tokio::sync::mpsc::UnboundedSender<(EventKind, Option<String>, String, EventSeverity)>,
+        event_sink: tokio::sync::mpsc::UnboundedSender<(
+            EventKind,
+            Option<String>,
+            String,
+            EventSeverity,
+        )>,
         cancel: tokio_util::sync::CancellationToken,
     ) {
         use notify::{Event, RecursiveMode, Watcher};
@@ -375,9 +382,7 @@ impl FilesystemSource {
 }
 
 /// Classify a `notify::Event` into our event kind.
-fn classify_fs_event(
-    event: notify::Event,
-) -> (EventKind, Option<String>, String) {
+fn classify_fs_event(event: notify::Event) -> (EventKind, Option<String>, String) {
     use notify::EventKind as NKind;
 
     let path = event.paths.first().map(|p| p.display().to_string());
@@ -428,7 +433,12 @@ impl DbusSource {
     /// Currently a stub — D-Bus monitoring requires `zbus` with the
     /// `dbus-perception` feature. When disabled, this returns immediately.
     pub async fn run(
-        event_sink: tokio::sync::mpsc::UnboundedSender<(EventKind, Option<String>, String, EventSeverity)>,
+        event_sink: tokio::sync::mpsc::UnboundedSender<(
+            EventKind,
+            Option<String>,
+            String,
+            EventSeverity,
+        )>,
         cancel: tokio_util::sync::CancellationToken,
     ) {
         #[cfg(feature = "dbus-perception")]
@@ -446,7 +456,12 @@ impl DbusSource {
 
     #[cfg(feature = "dbus-perception")]
     async fn run_zbus(
-        event_sink: tokio::sync::mpsc::UnboundedSender<(EventKind, Option<String>, String, EventSeverity)>,
+        event_sink: tokio::sync::mpsc::UnboundedSender<(
+            EventKind,
+            Option<String>,
+            String,
+            EventSeverity,
+        )>,
         cancel: tokio_util::sync::CancellationToken,
     ) {
         use futures::StreamExt;
@@ -659,10 +674,7 @@ mod tests {
         // Now we should receive 1 aggregated event with count=10.
         let event = rx.try_recv().expect("Expected one aggregated event");
         assert_eq!(event.count, 10);
-        assert_eq!(
-            event.kind,
-            EventKind::Filesystem(FilesystemOp::Modified)
-        );
+        assert_eq!(event.kind, EventKind::Filesystem(FilesystemOp::Modified));
         assert_eq!(event.primary_path, Some("/tmp/test.txt".to_string()));
     }
 
@@ -867,10 +879,8 @@ mod tests {
             &EventKind::Filesystem(FilesystemOp::Created),
             &Some("/tmp/a.txt".to_string()),
         );
-        let key4 = EventDebouncer::make_key(
-            &EventKind::HealthBreach("disk_low".to_string()),
-            &None,
-        );
+        let key4 =
+            EventDebouncer::make_key(&EventKind::HealthBreach("disk_low".to_string()), &None);
 
         // All keys should be unique.
         assert_ne!(key1, key2);

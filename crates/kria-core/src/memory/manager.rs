@@ -4,8 +4,8 @@ use chrono::{DateTime, Utc};
 
 use crate::memory::semantic_parser::MemoryExtraction;
 use crate::memory::store::{
-    ChatMediaRecord, ConversationTurn, DocumentChunk, MemoryFact, MemoryFetchRequest,
-    MemoryStore, PreferenceRecord,
+    ChatMediaRecord, ConversationTurn, DocumentChunk, MemoryFact, MemoryFetchRequest, MemoryStore,
+    PreferenceRecord,
 };
 
 /// Typed write request for persisting one complete conversational exchange and
@@ -52,8 +52,11 @@ pub trait MemoryManager: Send + Sync {
 /// rather than depending on concrete persistence internals.
 pub trait MemoryReader: Send + Sync {
     fn fetch_memories(&self, query: &MemoryFetchRequest) -> anyhow::Result<Vec<ConversationTurn>>;
-    fn get_recent_turns(&self, session_id: &str, limit: usize)
-    -> anyhow::Result<Vec<ConversationTurn>>;
+    fn get_recent_turns(
+        &self,
+        session_id: &str,
+        limit: usize,
+    ) -> anyhow::Result<Vec<ConversationTurn>>;
     fn search_conversations(
         &self,
         query: &str,

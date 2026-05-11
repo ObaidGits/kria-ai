@@ -139,10 +139,7 @@ fn validate_name(name: &str) -> Result<(), TranspileError> {
     if name.is_empty() || name.len() > 64 {
         return Err(TranspileError::InvalidName);
     }
-    if !name
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_')
-    {
+    if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
         return Err(TranspileError::InvalidName);
     }
     Ok(())
@@ -165,12 +162,42 @@ fn validate_description_safe(desc: &str) -> Result<(), TranspileError> {
 
     // Known safe starting verbs
     let safe_verbs = [
-        "Searches", "Fetches", "Generates", "Analyzes", "Creates", "Converts",
-        "Extracts", "Processes", "Downloads", "Uploads", "Monitors", "Sends",
-        "Receives", "Transforms", "Calculates", "Reads", "Writes", "Executes",
-        "Manages", "Controls", "Lists", "Gets", "Finds", "Checks", "Shows",
-        "Displays", "Returns", "Provides", "Runs", "Performs", "Scans",
-        "Detects", "Identifies", "Summarizes", "Parses", "Formats",
+        "Searches",
+        "Fetches",
+        "Generates",
+        "Analyzes",
+        "Creates",
+        "Converts",
+        "Extracts",
+        "Processes",
+        "Downloads",
+        "Uploads",
+        "Monitors",
+        "Sends",
+        "Receives",
+        "Transforms",
+        "Calculates",
+        "Reads",
+        "Writes",
+        "Executes",
+        "Manages",
+        "Controls",
+        "Lists",
+        "Gets",
+        "Finds",
+        "Checks",
+        "Shows",
+        "Displays",
+        "Returns",
+        "Provides",
+        "Runs",
+        "Performs",
+        "Scans",
+        "Detects",
+        "Identifies",
+        "Summarizes",
+        "Parses",
+        "Formats",
     ];
 
     if !safe_verbs
@@ -192,7 +219,13 @@ fn validate_description_safe(desc: &str) -> Result<(), TranspileError> {
 fn sanitize_name(name: &str) -> String {
     name.to_lowercase()
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect::<String>()
         .chars()
         .take(64)
@@ -289,10 +322,26 @@ pub async fn rewrite_description(
     // Must start with a verb
     let first_word = rewritten.split_whitespace().next().unwrap_or("");
     let safe_verbs = [
-        "Searches", "Fetches", "Generates", "Analyzes", "Creates", "Converts",
-        "Extracts", "Processes", "Downloads", "Uploads", "Monitors", "Sends",
-        "Receives", "Transforms", "Calculates", "Reads", "Writes", "Executes",
-        "Manages", "Controls",
+        "Searches",
+        "Fetches",
+        "Generates",
+        "Analyzes",
+        "Creates",
+        "Converts",
+        "Extracts",
+        "Processes",
+        "Downloads",
+        "Uploads",
+        "Monitors",
+        "Sends",
+        "Receives",
+        "Transforms",
+        "Calculates",
+        "Reads",
+        "Writes",
+        "Executes",
+        "Manages",
+        "Controls",
     ];
 
     if !safe_verbs

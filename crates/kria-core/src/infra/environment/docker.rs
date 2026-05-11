@@ -378,10 +378,7 @@ impl DockerEnvironment {
             if !script_path.exists() {
                 return Err(EnvironmentError::NetworkPolicyNotReady {
                     mode: self.config.network_policy_mode.as_str().to_string(),
-                    details: format!(
-                        "network policy script missing at {}",
-                        script_path.display()
-                    ),
+                    details: format!("network policy script missing at {}", script_path.display()),
                 });
             }
 
@@ -493,7 +490,11 @@ impl DockerEnvironment {
             env.push(format!("KRIA_HOST_UID_GID={user}"));
         }
 
-        let container_name = format!("{}-{}", self.config.container_name_prefix, Self::now_suffix());
+        let container_name = format!(
+            "{}-{}",
+            self.config.container_name_prefix,
+            Self::now_suffix()
+        );
         let create_options = CreateContainerOptions {
             name: container_name,
             platform: None,
@@ -630,7 +631,8 @@ impl DockerEnvironment {
             }
         }
 
-        self.recycle_container(None, "initial container create").await
+        self.recycle_container(None, "initial container create")
+            .await
     }
 
     async fn execute_in_container(
@@ -690,7 +692,8 @@ impl DockerEnvironment {
                     let mut observed_lines = 0usize;
 
                     while let Some(item) = output.next().await {
-                        let log = item.map_err(|error| self.map_docker_error("start_exec_stream", error))?;
+                        let log = item
+                            .map_err(|error| self.map_docker_error("start_exec_stream", error))?;
                         let (message, write_to_stderr) = match log {
                             LogOutput::StdOut { message } => (message, false),
                             LogOutput::StdErr { message } => (message, true),
@@ -702,7 +705,8 @@ impl DockerEnvironment {
                         observed_lines = observed_lines
                             .saturating_add(message.iter().filter(|&&byte| byte == b'\n').count());
 
-                        if observed_bytes > request.max_bytes || observed_lines > request.max_lines {
+                        if observed_bytes > request.max_bytes || observed_lines > request.max_lines
+                        {
                             return Err(EnvironmentError::OutputLimitExceeded {
                                 max_bytes: request.max_bytes,
                                 max_lines: request.max_lines,
@@ -773,7 +777,10 @@ impl DockerEnvironment {
                 });
             }
 
-            if stderr_text.to_ascii_lowercase().contains("no space left on device") {
+            if stderr_text
+                .to_ascii_lowercase()
+                .contains("no space left on device")
+            {
                 return Err(EnvironmentError::StorageLimitExceeded {
                     limit_bytes: (self.config.workspace_tmpfs_size_mb * 1024 * 1024) as u64,
                     observed_bytes: observed_bytes as u64,
@@ -844,12 +851,12 @@ impl DockerEnvironment {
 
     fn untar_single_file(archive_bytes: &[u8]) -> Result<Vec<u8>, EnvironmentError> {
         let mut archive = Archive::new(Cursor::new(archive_bytes));
-        let mut entries = archive.entries().map_err(|error| EnvironmentError::Io {
+        let entries = archive.entries().map_err(|error| EnvironmentError::Io {
             operation: "untar_entries".to_string(),
             details: error.to_string(),
         })?;
 
-        while let Some(entry_result) = entries.next() {
+        for entry_result in entries {
             let mut entry = entry_result.map_err(|error| EnvironmentError::Io {
                 operation: "untar_next_entry".to_string(),
                 details: error.to_string(),
@@ -860,10 +867,12 @@ impl DockerEnvironment {
             }
 
             let mut contents = Vec::new();
-            entry.read_to_end(&mut contents).map_err(|error| EnvironmentError::Io {
-                operation: "untar_read_entry".to_string(),
-                details: error.to_string(),
-            })?;
+            entry
+                .read_to_end(&mut contents)
+                .map_err(|error| EnvironmentError::Io {
+                    operation: "untar_read_entry".to_string(),
+                    details: error.to_string(),
+                })?;
             return Ok(contents);
         }
 
@@ -889,7 +898,10 @@ impl CommandExecutor for DockerEnvironment {
 
 #[async_trait]
 impl FileSystemOps for DockerEnvironment {
-    async fn read_file(&self, request: ReadFileRequest) -> Result<ReadFileResult, EnvironmentError> {
+    async fn read_file(
+        &self,
+        request: ReadFileRequest,
+    ) -> Result<ReadFileResult, EnvironmentError> {
         let container_id = self.ensure_container_id().await?;
         let path = self.normalize_workspace_path(&request.path)?;
 
@@ -902,7 +914,8 @@ impl FileSystemOps for DockerEnvironment {
 
         let mut archive_bytes = Vec::new();
         while let Some(chunk_result) = stream.next().await {
-            let chunk = chunk_result.map_err(|error| self.map_docker_error("download_from_container", error))?;
+            let chunk = chunk_result
+                .map_err(|error| self.map_docker_error("download_from_container", error))?;
             archive_bytes.extend_from_slice(&chunk);
         }
 
@@ -916,7 +929,9 @@ impl FileSystemOps for DockerEnvironment {
     ) -> Result<WriteFileResult, EnvironmentError> {
         let container_id = self.ensure_container_id().await?;
         let path = self.normalize_workspace_path(&request.path)?;
-        let parent = path.parent().unwrap_or_else(|| Path::new(CONTAINER_WORKSPACE_ROOT));
+        let parent = path
+            .parent()
+            .unwrap_or_else(|| Path::new(CONTAINER_WORKSPACE_ROOT));
         let file_name = path
             .file_name()
             .map(|name| name.to_string_lossy().to_string())
@@ -1022,7 +1037,7 @@ fn looks_like_pid_limit_error(details: &str) -> bool {
     let lower = details.to_ascii_lowercase();
     lower.contains("pids")
         || lower.contains("process limit")
-    || lower.contains("cannot fork")
+        || lower.contains("cannot fork")
         || lower.contains("resource temporarily unavailable")
 }
 

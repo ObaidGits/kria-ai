@@ -96,7 +96,10 @@ async fn create_directory_idempotency_reports_already_in_desired_state() {
         }))
         .await;
 
-    assert!(first.success, "initial create_directory should succeed: {first:?}");
+    assert!(
+        first.success,
+        "initial create_directory should succeed: {first:?}"
+    );
     assert_eq!(first.data["changed"].as_bool(), Some(true));
     assert_eq!(
         first.data["already_in_desired_state"].as_bool(),
@@ -141,10 +144,7 @@ async fn delete_file_idempotency_reports_already_in_desired_state_for_missing() 
         "delete_file should no-op for missing file: {first:?}"
     );
     assert_eq!(first.data["changed"].as_bool(), Some(false));
-    assert_eq!(
-        first.data["already_in_desired_state"].as_bool(),
-        Some(true)
-    );
+    assert_eq!(first.data["already_in_desired_state"].as_bool(), Some(true));
 
     std::fs::write(&target, "payload").expect("failed to create file for delete test");
 
@@ -154,7 +154,10 @@ async fn delete_file_idempotency_reports_already_in_desired_state_for_missing() 
         }))
         .await;
 
-    assert!(second.success, "delete_file should delete existing file: {second:?}");
+    assert!(
+        second.success,
+        "delete_file should delete existing file: {second:?}"
+    );
     assert_eq!(second.data["changed"].as_bool(), Some(true));
     assert_eq!(
         second.data["already_in_desired_state"].as_bool(),

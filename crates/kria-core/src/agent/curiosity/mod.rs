@@ -288,7 +288,10 @@ impl EvidenceGatherer {
 
     fn plan_dbus_signal(detail: &str) -> DiagnosticPlan {
         let commands = vec![
-            cmd("systemctl", &["list-units", "--type=service", "--state=running"]),
+            cmd(
+                "systemctl",
+                &["list-units", "--type=service", "--state=running"],
+            ),
             cmd("journalctl", &["--no-pager", "-n", "30"]),
         ];
 
@@ -300,10 +303,7 @@ impl EvidenceGatherer {
     }
 
     fn plan_filesystem_critical(event: &PerceptionEvent) -> DiagnosticPlan {
-        let path = event
-            .primary_path
-            .as_deref()
-            .unwrap_or("/");
+        let path = event.primary_path.as_deref().unwrap_or("/");
 
         let commands = vec![
             cmd("ls", &["-la", path]),
@@ -382,7 +382,9 @@ impl CommandValidator {
         }
 
         // Verify it's read-only.
-        let capabilities = self.policy_gate.resolve_capabilities(&command.binary, &command.args);
+        let capabilities = self
+            .policy_gate
+            .resolve_capabilities(&command.binary, &command.args);
         for cap in &capabilities {
             if !cap.is_read_only() {
                 return Err(format!(
@@ -759,19 +761,28 @@ mod tests {
 
     #[test]
     fn test_novelty_detector_critical_always_novel() {
-        let event = make_event(EventSeverity::Critical, EventKind::Filesystem(FilesystemOp::Deleted));
+        let event = make_event(
+            EventSeverity::Critical,
+            EventKind::Filesystem(FilesystemOp::Deleted),
+        );
         assert!(NoveltyDetector::is_novel(&event));
     }
 
     #[test]
     fn test_novelty_detector_warning_always_novel() {
-        let event = make_event(EventSeverity::Warning, EventKind::HealthBreach("disk_low".to_string()));
+        let event = make_event(
+            EventSeverity::Warning,
+            EventKind::HealthBreach("disk_low".to_string()),
+        );
         assert!(NoveltyDetector::is_novel(&event));
     }
 
     #[test]
     fn test_novelty_detector_info_never_novel() {
-        let event = make_event(EventSeverity::Info, EventKind::Filesystem(FilesystemOp::Modified));
+        let event = make_event(
+            EventSeverity::Info,
+            EventKind::Filesystem(FilesystemOp::Modified),
+        );
         assert!(!NoveltyDetector::is_novel(&event));
     }
 
@@ -904,11 +915,7 @@ mod tests {
         let cancel = tokio_util::sync::CancellationToken::new();
         let mut guard = BudgetGuard::new(Duration::from_secs(60), cancel.clone());
 
-        let commands = vec![
-            cmd("uptime", &[]),
-            cmd("free", &["-h"]),
-            cmd("df", &["-h"]),
-        ];
+        let commands = [cmd("uptime", &[]), cmd("free", &["-h"]), cmd("df", &["-h"])];
 
         let mut executed = 0;
         for (i, _cmd) in commands.iter().enumerate() {

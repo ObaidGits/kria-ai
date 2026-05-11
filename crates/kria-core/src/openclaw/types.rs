@@ -219,6 +219,7 @@ impl OpenClawNetworkPolicy {
 /// Declared in YAML frontmatter, validated against runtime behavior.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct SkillCapabilities {
     /// Needs filesystem read access.
     pub filesystem_read: bool,
@@ -236,21 +237,6 @@ pub struct SkillCapabilities {
     pub image_generation: bool,
     /// Needs audio/media processing.
     pub media: bool,
-}
-
-impl Default for SkillCapabilities {
-    fn default() -> Self {
-        Self {
-            filesystem_read: false,
-            filesystem_write: false,
-            subprocess: false,
-            browser: false,
-            network: false,
-            network_domains: Vec::new(),
-            image_generation: false,
-            media: false,
-        }
-    }
 }
 
 impl SkillCapabilities {

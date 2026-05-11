@@ -7,10 +7,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use kria_connection_control::manager::{
-    ClockDriftAlert, CommandInput, ControllerRole, ConnectionManager, ConnectionManagerConfig,
-    ConnectionManagerHandle, Connector, ConnectorRegistry, ControlPlaneEvent, DispatchResult,
-    DockerEvalSummary, DockerHealthStatus, FleetStore, HaControlState, IdentityProof,
-    KeyAttestationMaterial, SecurityAlert, TargetIdentity, TargetMode, TargetState,
+    ClockDriftAlert, CommandInput, ConnectionManager, ConnectionManagerConfig,
+    ConnectionManagerHandle, Connector, ConnectorRegistry, ControlPlaneEvent, ControllerRole,
+    DispatchResult, DockerEvalSummary, DockerHealthStatus, FleetStore, HaControlState,
+    IdentityProof, KeyAttestationMaterial, SecurityAlert, TargetIdentity, TargetMode, TargetState,
     TerminalGapMarker,
 };
 use kria_connection_control::signer::{DualKeyHmacEnvelopeSigner, KeyMaterial, SignedEnvelope};
@@ -193,12 +193,18 @@ impl DesktopFleetControlRuntime {
             for (target_id, profile) in &profiles {
                 let probe_start = Instant::now();
                 let probe_result = tokio::process::Command::new("ssh")
-                    .arg("-o").arg("StrictHostKeyChecking=no")
-                    .arg("-o").arg("ConnectTimeout=5")
-                    .arg("-o").arg("BatchMode=yes")
-                    .arg("-o").arg("IdentitiesOnly=yes")
-                    .arg("-i").arg(&profile.ssh_private_key_path)
-                    .arg("-p").arg(profile.port.to_string())
+                    .arg("-o")
+                    .arg("StrictHostKeyChecking=no")
+                    .arg("-o")
+                    .arg("ConnectTimeout=5")
+                    .arg("-o")
+                    .arg("BatchMode=yes")
+                    .arg("-o")
+                    .arg("IdentitiesOnly=yes")
+                    .arg("-i")
+                    .arg(&profile.ssh_private_key_path)
+                    .arg("-p")
+                    .arg(profile.port.to_string())
                     .arg(format!("{}@{}", profile.username, profile.host))
                     .arg("true")
                     .output()
@@ -222,7 +228,8 @@ impl DesktopFleetControlRuntime {
                         row.reason = Some(format!(
                             "SSH probe failed: {}",
                             match &probe_result {
-                                Ok(output) => String::from_utf8_lossy(&output.stderr).trim().to_string(),
+                                Ok(output) =>
+                                    String::from_utf8_lossy(&output.stderr).trim().to_string(),
                                 Err(e) => e.to_string(),
                             }
                         ));
@@ -353,7 +360,11 @@ impl DesktopFleetControlRuntime {
     }
 
     /// Update the display name of a target in the runtime projections.
-    pub async fn update_target_projection_display_name(&self, target_id: &Uuid, display_name: &str) {
+    pub async fn update_target_projection_display_name(
+        &self,
+        target_id: &Uuid,
+        display_name: &str,
+    ) {
         let mut guard = self.projections.write().await;
         if let Some(row) = guard.get_mut(target_id) {
             row.display_name = display_name.to_string();
@@ -365,7 +376,9 @@ impl DesktopFleetControlRuntime {
             let guard = self.projections.read().await;
             let mut rows = guard.values().collect::<Vec<_>>();
             rows.sort_by(|a, b| a.display_name.cmp(&b.display_name));
-            return Ok(rows.first().and_then(|row| Uuid::parse_str(&row.target_id).ok()));
+            return Ok(rows
+                .first()
+                .and_then(|row| Uuid::parse_str(&row.target_id).ok()));
         };
 
         let hint = raw_hint.trim();
@@ -412,10 +425,9 @@ impl DesktopFleetControlRuntime {
                 .filter_map(|(target_id, meta)| {
                     let host = meta.host.to_ascii_lowercase();
                     let user_host = format!("{}@{}", meta.username.to_ascii_lowercase(), host);
-                    if needles
-                        .iter()
-                        .any(|token| host == *token || host.contains(token) || user_host.contains(token))
-                    {
+                    if needles.iter().any(|token| {
+                        host == *token || host.contains(token) || user_host.contains(token)
+                    }) {
                         Some(*target_id)
                     } else {
                         None
@@ -832,7 +844,8 @@ impl SshConnector {
     async fn verify_connectivity(&self, profile: &SshTargetProfile) -> Result<()> {
         let output = self.run_ssh_shell(profile, "true").await?;
         if output.status_code != 0 {
-            let classified = classify_ssh_error(&output.stderr).unwrap_or("SSH connectivity failure");
+            let classified =
+                classify_ssh_error(&output.stderr).unwrap_or("SSH connectivity failure");
             return Err(anyhow!(
                 "{} for {}@{}:{} (exit={}): {}",
                 classified,

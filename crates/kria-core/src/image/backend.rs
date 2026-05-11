@@ -213,7 +213,8 @@ impl ImageBackendRegistry {
             .critical_free_vram_mb
             .read()
             .expect("image backend threshold lock poisoned");
-        let heavily_fragmented = telemetry.vram.free_mb <= critical_free_vram_mb && l1_not_evictable;
+        let heavily_fragmented =
+            telemetry.vram.free_mb <= critical_free_vram_mb && l1_not_evictable;
 
         let lease_ready = self.local_gpu_lease_available_for_comfy();
         let comfy_healthy = comfy

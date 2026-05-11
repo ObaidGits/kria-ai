@@ -130,7 +130,10 @@ async fn read_stream(
     }
 }
 
-async fn canonicalize_existing_path(path: &Path, operation: &str) -> Result<PathBuf, EnvironmentError> {
+async fn canonicalize_existing_path(
+    path: &Path,
+    operation: &str,
+) -> Result<PathBuf, EnvironmentError> {
     tokio::fs::canonicalize(path)
         .await
         .map_err(|error| io_err(operation, format!("{} ({})", error, path.display())))
@@ -159,7 +162,8 @@ async fn canonicalize_write_path(
             .map_err(|error| io_err("write_file::create_dir_all", error.to_string()))?;
     }
 
-    let canonical_parent = canonicalize_existing_path(parent, "write_file::canonicalize_parent").await?;
+    let canonical_parent =
+        canonicalize_existing_path(parent, "write_file::canonicalize_parent").await?;
     Ok(canonical_parent.join(file_name))
 }
 
@@ -240,9 +244,7 @@ impl CommandExecutor for LocalEnvironment {
                 let _ = finalize_reader(stdout_reader, "execute_command::stdout_reader").await;
                 let _ = finalize_reader(stderr_reader, "execute_command::stderr_reader").await;
 
-                let snapshot = capture
-                    .lock()
-                    .await;
+                let snapshot = capture.lock().await;
                 return Err(EnvironmentError::OutputLimitExceeded {
                     max_bytes: request.max_bytes,
                     max_lines: request.max_lines,
@@ -266,9 +268,7 @@ impl CommandExecutor for LocalEnvironment {
         finalize_reader(stderr_reader, "execute_command::stderr_reader").await?;
 
         if limit_reached.load(Ordering::Relaxed) {
-            let snapshot = capture
-                .lock()
-                .await;
+            let snapshot = capture.lock().await;
             return Err(EnvironmentError::OutputLimitExceeded {
                 max_bytes: request.max_bytes,
                 max_lines: request.max_lines,
@@ -277,9 +277,7 @@ impl CommandExecutor for LocalEnvironment {
             });
         }
 
-        let snapshot = capture
-            .lock()
-            .await;
+        let snapshot = capture.lock().await;
 
         let stdout_text = String::from_utf8_lossy(&snapshot.stdout).to_string();
         let stderr_text = String::from_utf8_lossy(&snapshot.stderr).to_string();
@@ -303,11 +301,18 @@ impl CommandExecutor for LocalEnvironment {
 #[async_trait]
 impl FileSystemOps for LocalEnvironment {
     /// RFC-001 FINAL (Section 3.3): Reads a file from the canonicalized local path.
-    async fn read_file(&self, request: ReadFileRequest) -> Result<ReadFileResult, EnvironmentError> {
-        let canonical = canonicalize_existing_path(&request.path, "read_file::canonicalize").await?;
-        let contents = tokio::fs::read(&canonical)
-            .await
-            .map_err(|error| io_err("read_file::read", format!("{} ({})", error, canonical.display())))?;
+    async fn read_file(
+        &self,
+        request: ReadFileRequest,
+    ) -> Result<ReadFileResult, EnvironmentError> {
+        let canonical =
+            canonicalize_existing_path(&request.path, "read_file::canonicalize").await?;
+        let contents = tokio::fs::read(&canonical).await.map_err(|error| {
+            io_err(
+                "read_file::read",
+                format!("{} ({})", error, canonical.display()),
+            )
+        })?;
 
         Ok(ReadFileResult { contents })
     }
@@ -321,7 +326,12 @@ impl FileSystemOps for LocalEnvironment {
 
         tokio::fs::write(&canonical, &request.contents)
             .await
-            .map_err(|error| io_err("write_file::write", format!("{} ({})", error, canonical.display())))?;
+            .map_err(|error| {
+                io_err(
+                    "write_file::write",
+                    format!("{} ({})", error, canonical.display()),
+                )
+            })?;
 
         Ok(WriteFileResult {
             bytes_written: request.contents.len(),
@@ -330,10 +340,14 @@ impl FileSystemOps for LocalEnvironment {
 
     /// RFC-001 FINAL (Section 3.3): Lists canonicalized entries under a canonicalized directory.
     async fn list_dir(&self, request: ListDirRequest) -> Result<ListDirResult, EnvironmentError> {
-        let canonical_dir = canonicalize_existing_path(&request.path, "list_dir::canonicalize_dir").await?;
-        let mut reader = tokio::fs::read_dir(&canonical_dir)
-            .await
-            .map_err(|error| io_err("list_dir::read_dir", format!("{} ({})", error, canonical_dir.display())))?;
+        let canonical_dir =
+            canonicalize_existing_path(&request.path, "list_dir::canonicalize_dir").await?;
+        let mut reader = tokio::fs::read_dir(&canonical_dir).await.map_err(|error| {
+            io_err(
+                "list_dir::read_dir",
+                format!("{} ({})", error, canonical_dir.display()),
+            )
+        })?;
 
         let mut entries = Vec::new();
         while let Some(entry) = reader
@@ -341,7 +355,8 @@ impl FileSystemOps for LocalEnvironment {
             .await
             .map_err(|error| io_err("list_dir::next_entry", error.to_string()))?
         {
-            let canonical = canonicalize_existing_path(&entry.path(), "list_dir::canonicalize_entry").await?;
+            let canonical =
+                canonicalize_existing_path(&entry.path(), "list_dir::canonicalize_entry").await?;
             entries.push(canonical);
         }
         entries.sort();

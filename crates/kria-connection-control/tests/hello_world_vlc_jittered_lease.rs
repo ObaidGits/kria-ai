@@ -5,14 +5,12 @@ use std::time::Duration;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use kria_connection_control::manager::{
-    spawn_jittered_heartbeat_loop, CommandInput, ControllerRole, ConnectionManager,
-    ConnectionManagerConfig, Connector, ConnectorRegistry, DispatchResult, DockerEvalSummary,
-    FleetStore, HaControlState, IdentityProof, KeyAttestationMaterial, SecurityAlert,
-    TargetIdentity, TargetMode, TargetState, TerminalGapMarker, ClockDriftAlert,
+    spawn_jittered_heartbeat_loop, ClockDriftAlert, CommandInput, ConnectionManager,
+    ConnectionManagerConfig, Connector, ConnectorRegistry, ControllerRole, DispatchResult,
+    DockerEvalSummary, FleetStore, HaControlState, IdentityProof, KeyAttestationMaterial,
+    SecurityAlert, TargetIdentity, TargetMode, TargetState, TerminalGapMarker,
 };
-use kria_connection_control::signer::{
-    DualKeyHmacEnvelopeSigner, KeyMaterial, SignedEnvelope,
-};
+use kria_connection_control::signer::{DualKeyHmacEnvelopeSigner, KeyMaterial, SignedEnvelope};
 use serde_json::json;
 use tokio::sync::Mutex;
 use tokio::time::sleep;
@@ -78,14 +76,21 @@ impl FleetStore for MockStore {
         Ok(())
     }
 
-    async fn load_target_attestation_material(&self, _target_id: Uuid) -> Result<KeyAttestationMaterial> {
+    async fn load_target_attestation_material(
+        &self,
+        _target_id: Uuid,
+    ) -> Result<KeyAttestationMaterial> {
         Ok(KeyAttestationMaterial {
             active_ssh_fingerprint: Some("ssh-active".to_string()),
             active_mtls_fingerprint: Some("mtls-active".to_string()),
             next_ssh_fingerprint: Some("ssh-next".to_string()),
             next_mtls_fingerprint: Some("mtls-next".to_string()),
-            active_attestation_pubkey_b64: Some("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string()),
-            next_attestation_pubkey_b64: Some("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB".to_string()),
+            active_attestation_pubkey_b64: Some(
+                "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+            ),
+            next_attestation_pubkey_b64: Some(
+                "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB".to_string(),
+            ),
         })
     }
 
@@ -144,7 +149,11 @@ impl Connector for MockConnector {
         Ok(())
     }
 
-    async fn probe_identity(&self, _target: &TargetIdentity, _endpoint: IpAddr) -> Result<IdentityProof> {
+    async fn probe_identity(
+        &self,
+        _target: &TargetIdentity,
+        _endpoint: IpAddr,
+    ) -> Result<IdentityProof> {
         Ok(IdentityProof {
             ssh_hostkey_sha256_b64: Some(self.expected_ssh_pin.clone()),
             mtls_cert_sha256_b64: None,
@@ -262,11 +271,8 @@ async fn hello_world_vlc_install_over_jittered_lease() {
         .await
         .expect("lease acquisition should succeed");
 
-    let heartbeat_task = spawn_jittered_heartbeat_loop(
-        manager.clone(),
-        grant.lease_id,
-        Duration::from_millis(60),
-    );
+    let heartbeat_task =
+        spawn_jittered_heartbeat_loop(manager.clone(), grant.lease_id, Duration::from_millis(60));
 
     // Wait longer than ttl + grace; jittered heartbeat renewals must keep the lease alive.
     sleep(Duration::from_millis(520)).await;

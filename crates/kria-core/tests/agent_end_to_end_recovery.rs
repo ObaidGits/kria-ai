@@ -1,6 +1,6 @@
 use std::collections::{HashSet, VecDeque};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -193,7 +193,8 @@ impl EnvironmentLifecycle for StressRecoveryEnvironment {
 
     async fn reset_environment(&self, _reason: ResetReason) -> Result<(), EnvironmentError> {
         self.reset_calls.fetch_add(1, Ordering::AcqRel);
-        self.snapshot_restore_attempts.fetch_add(1, Ordering::AcqRel);
+        self.snapshot_restore_attempts
+            .fetch_add(1, Ordering::AcqRel);
         self.tainted_targets.lock().await.clear();
         Ok(())
     }
@@ -263,7 +264,8 @@ impl EnvironmentLifecycle for MockRecoveryEnvironment {
 
     async fn reset_environment(&self, _reason: ResetReason) -> Result<(), EnvironmentError> {
         self.reset_calls.fetch_add(1, Ordering::AcqRel);
-        self.snapshot_restore_attempts.fetch_add(1, Ordering::AcqRel);
+        self.snapshot_restore_attempts
+            .fetch_add(1, Ordering::AcqRel);
         self.tainted.store(false, Ordering::Release);
         Ok(())
     }
@@ -357,14 +359,14 @@ async fn stress_parallel_recovery_handles_vm_saturation_without_hang_or_data_los
     let event_sink = Arc::clone(&lifecycle_events);
 
     let bridge = Arc::new(
-        RemoteEnvironmentToolBridge::new(Arc::clone(&env)).with_reset_lifecycle_callback(
-            Arc::new(move |stage, reason| {
+        RemoteEnvironmentToolBridge::new(Arc::clone(&env)).with_reset_lifecycle_callback(Arc::new(
+            move |stage, reason| {
                 event_sink
                     .lock()
                     .expect("event sink lock poisoned")
                     .push((stage, reason.to_string()));
-            }),
-        ),
+            },
+        )),
     );
 
     let mut join_set = JoinSet::new();
@@ -415,7 +417,8 @@ async fn stress_parallel_recovery_handles_vm_saturation_without_hang_or_data_los
     })
     .await;
 
-    let completed_task_ids = completion_result.expect("stress test timed out; potential hang detected");
+    let completed_task_ids =
+        completion_result.expect("stress test timed out; potential hang detected");
     assert_eq!(completed_task_ids.len(), TOTAL_TASKS);
 
     assert_eq!(env.completed_tasks_len().await, TOTAL_TASKS);

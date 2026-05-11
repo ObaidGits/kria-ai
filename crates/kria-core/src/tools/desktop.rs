@@ -25,7 +25,8 @@ fn param(name: &str, ty: &str, desc: &str, required: bool) -> ParamDef {
 }
 
 fn parse_input<T: DeserializeOwned>(params: serde_json::Value) -> Result<T, ToolResult> {
-    serde_json::from_value(params).map_err(|error| ToolResult::err(format!("invalid parameters: {error}")))
+    serde_json::from_value(params)
+        .map_err(|error| ToolResult::err(format!("invalid parameters: {error}")))
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -297,7 +298,12 @@ fn geometry_matches_size(entry: &WindowEntry, width: i64, height: i64) -> bool {
     entry.width == Some(width) && entry.height == Some(height)
 }
 
-fn side_by_side_already_tiled(entries: &[WindowEntry], windows: &[String], sw: i64, sh: i64) -> bool {
+fn side_by_side_already_tiled(
+    entries: &[WindowEntry],
+    windows: &[String],
+    sw: i64,
+    sh: i64,
+) -> bool {
     if windows.len() < 2 {
         return false;
     }
@@ -328,7 +334,12 @@ fn grid_already_tiled(entries: &[WindowEntry], windows: &[String], sw: i64, sh: 
 
     let half_width = sw / 2;
     let half_height = sh / 2;
-    let expected = [(0, 0), (half_width, 0), (0, half_height), (half_width, half_height)];
+    let expected = [
+        (0, 0),
+        (half_width, 0),
+        (0, half_height),
+        (half_width, half_height),
+    ];
 
     for (index, title) in windows.iter().enumerate().take(4) {
         let Some(window) = find_window_by_title(entries, title) else {
@@ -409,7 +420,12 @@ async fn apply_tile_side_by_side(windows: &[String], sw: i64, sh: i64) -> Result
 async fn apply_tile_grid(windows: &[String], sw: i64, sh: i64) -> Result<(), String> {
     let half_width = sw / 2;
     let half_height = sh / 2;
-    let positions = [(0, 0), (half_width, 0), (0, half_height), (half_width, half_height)];
+    let positions = [
+        (0, 0),
+        (half_width, 0),
+        (0, half_height),
+        (half_width, half_height),
+    ];
 
     for (index, title) in windows.iter().enumerate().take(4) {
         let (x, y) = positions[index];
@@ -697,7 +713,9 @@ impl ToolHandler for TileWindows {
 
         match query_window_geometries().await {
             Ok(entries) => {
-                if layout == "side-by-side" && side_by_side_already_tiled(&entries, &windows, sw, sh) {
+                if layout == "side-by-side"
+                    && side_by_side_already_tiled(&entries, &windows, sw, sh)
+                {
                     return ToolResult::ok(serde_json::json!({
                         "layout": "side-by-side",
                         "windows": windows,

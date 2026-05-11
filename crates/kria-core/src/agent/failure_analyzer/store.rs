@@ -308,7 +308,9 @@ mod tests {
             exit_code: 7,
             stderr: "ECONNREFUSED".into(),
             stdout: String::new(),
-            root_cause: RootCause::NetworkUnreachable { target: "localhost".into() },
+            root_cause: RootCause::NetworkUnreachable {
+                target: "localhost".into(),
+            },
             timestamp: Utc::now(),
         };
         store.record_failure(&ctx).unwrap();

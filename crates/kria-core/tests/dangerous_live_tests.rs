@@ -207,9 +207,12 @@ async fn dangerous_t2_sandbox_delete_file() {
     };
     let ctx = test_tool_context();
     let result = handler
-        .execute_with_context(serde_json::json!({
-            "path": sandbox.child("to_delete.txt").to_str().unwrap()
-        }), ctx)
+        .execute_with_context(
+            serde_json::json!({
+                "path": sandbox.child("to_delete.txt").to_str().unwrap()
+            }),
+            ctx,
+        )
         .await;
     assert!(
         result.success,
@@ -239,10 +242,13 @@ async fn dangerous_t2_sandbox_move_then_delete() {
     };
     let ctx_mv = test_tool_context();
     let mv_result = mv_handler
-        .execute_with_context(serde_json::json!({
-            "source": sandbox.child("source.txt").to_str().unwrap(),
-            "destination": sandbox.child("moved.txt").to_str().unwrap()
-        }), ctx_mv)
+        .execute_with_context(
+            serde_json::json!({
+                "source": sandbox.child("source.txt").to_str().unwrap(),
+                "destination": sandbox.child("moved.txt").to_str().unwrap()
+            }),
+            ctx_mv,
+        )
         .await;
     assert!(
         mv_result.success,
@@ -264,9 +270,12 @@ async fn dangerous_t2_sandbox_move_then_delete() {
     };
     let ctx_del = test_tool_context();
     let del_result = del_handler
-        .execute_with_context(serde_json::json!({
-            "path": sandbox.child("moved.txt").to_str().unwrap()
-        }), ctx_del)
+        .execute_with_context(
+            serde_json::json!({
+                "path": sandbox.child("moved.txt").to_str().unwrap()
+            }),
+            ctx_del,
+        )
         .await;
     assert!(
         del_result.success,
@@ -294,9 +303,12 @@ async fn dangerous_t2_sandbox_clean_directory() {
     let handler = handler.clone();
     let ctx = test_tool_context();
     let result = handler
-        .execute_with_context(serde_json::json!({
-            "path": sandbox.path.to_str().unwrap()
-        }), ctx)
+        .execute_with_context(
+            serde_json::json!({
+                "path": sandbox.path.to_str().unwrap()
+            }),
+            ctx,
+        )
         .await;
     assert!(
         result.success,

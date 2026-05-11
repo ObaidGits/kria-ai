@@ -25,7 +25,8 @@ fn param(name: &str, ty: &str, desc: &str, required: bool) -> ParamDef {
 }
 
 fn parse_input<T: DeserializeOwned>(params: serde_json::Value) -> Result<T, ToolResult> {
-    serde_json::from_value(params).map_err(|error| ToolResult::err(format!("invalid parameters: {error}")))
+    serde_json::from_value(params)
+        .map_err(|error| ToolResult::err(format!("invalid parameters: {error}")))
 }
 
 #[derive(Debug, Clone, Copy, JsonSchema)]
@@ -429,7 +430,10 @@ async fn query_current_brightness() -> Result<(u8, &'static str), String> {
             ));
         }
         (Err(current_error), _) => {
-            failures.push(("brightnessctl".into(), format!("get failed: {current_error}")));
+            failures.push((
+                "brightnessctl".into(),
+                format!("get failed: {current_error}"),
+            ));
         }
         (_, Err(max_error)) => {
             failures.push(("brightnessctl".into(), format!("max failed: {max_error}")));
@@ -521,7 +525,8 @@ async fn apply_brightness(level: u8) -> Result<&'static str, String> {
         Ok(output) => {
             if let Some(display) = first_connected_display(&output) {
                 let fraction = format!("{:.2}", level as f64 / 100.0);
-                match run_apply("xrandr", &["--output", &display, "--brightness", &fraction]).await {
+                match run_apply("xrandr", &["--output", &display, "--brightness", &fraction]).await
+                {
                     Ok(_) => return Ok("xrandr-gamma"),
                     Err(error) => failures.push(("xrandr".into(), error)),
                 }
@@ -544,7 +549,9 @@ async fn query_wifi_enabled() -> Result<bool, String> {
     } else if normalized.contains("disabled") || normalized == "off" {
         Ok(false)
     } else {
-        Err(format!("unable to parse wifi state from nmcli output: {output}"))
+        Err(format!(
+            "unable to parse wifi state from nmcli output: {output}"
+        ))
     }
 }
 
@@ -584,7 +591,12 @@ async fn query_active_wifi_ssid() -> Result<Option<String>, String> {
 }
 
 async fn apply_connect_wifi(ssid: &str, password: Option<&str>) -> Result<String, String> {
-    let mut args: Vec<String> = vec!["device".into(), "wifi".into(), "connect".into(), ssid.into()];
+    let mut args: Vec<String> = vec![
+        "device".into(),
+        "wifi".into(),
+        "connect".into(),
+        ssid.into(),
+    ];
     if let Some(password) = password {
         args.push("password".into());
         args.push(password.into());
@@ -752,7 +764,9 @@ impl ToolHandler for SetPowerPlan {
                 "changed": true,
                 "already_in_desired_state": false,
             })),
-            Err(error) => ToolResult::err(format!("failed to set power plan (powerprofilesctl): {error}")),
+            Err(error) => ToolResult::err(format!(
+                "failed to set power plan (powerprofilesctl): {error}"
+            )),
         }
     }
 }

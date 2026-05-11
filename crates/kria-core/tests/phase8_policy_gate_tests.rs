@@ -3,11 +3,9 @@
 //! Test IDs: PG01-PG20
 
 use kria_core::safety::policy_gate::{
-    ArgPattern, ArgCapabilityOverride, BinaryProfile, CapabilityPolicyGate,
-    CommandCapability, CustomRule, PolicyDecision, PolicyGate,
+    ArgPattern, CapabilityPolicyGate, CommandCapability, CustomRule, PolicyDecision, PolicyGate,
 };
 use kria_core::safety::RiskLevel;
-use std::collections::HashSet;
 
 fn gate() -> CapabilityPolicyGate {
     CapabilityPolicyGate::new()
@@ -217,7 +215,7 @@ fn pg22_shell_injection_impossible() {
     // they are passed as literal arguments, not interpreted.
     let decision = g.evaluate("ls", &args(&["; rm -rf /"]));
     assert!(decision.is_auto_approved()); // ls is auto-approved
-    // The "; rm -rf /" is just a filename argument to ls, not a shell command
+                                          // The "; rm -rf /" is just a filename argument to ls, not a shell command
 }
 
 #[test]
@@ -262,10 +260,16 @@ fn pg25_risk_level_classification() {
     assert_eq!(g.classify_risk("cp", &[]), RiskLevel::Yellow);
 
     // Process control = Yellow
-    assert_eq!(g.classify_risk("systemctl", &args(&["restart", "nginx"])), RiskLevel::Yellow);
+    assert_eq!(
+        g.classify_risk("systemctl", &args(&["restart", "nginx"])),
+        RiskLevel::Yellow
+    );
 
     // rm file = Yellow (WriteFilesystem, not SystemDestructive)
-    assert_eq!(g.classify_risk("rm", &args(&["file.txt"])), RiskLevel::Yellow);
+    assert_eq!(
+        g.classify_risk("rm", &args(&["file.txt"])),
+        RiskLevel::Yellow
+    );
 
     // Blocked = Black
     assert_eq!(g.classify_risk("dd", &[]), RiskLevel::Black);

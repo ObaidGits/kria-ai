@@ -15,23 +15,23 @@ pub mod tier_strategy;
 pub mod vision_strategy;
 pub mod vram_budget;
 
-pub use runtime::L1Runtime;
 pub use crate::resource::L1Residency;
+pub use runtime::L1Runtime;
 
 use crate::config::OrchestratorConfig;
-use crate::infra::event_bus::EventBus;
 use crate::infra::environment::remote_qemu::QemuSshEnvironment;
 use crate::infra::environment::{
     CommandExecutor, CommandRequest, CommandResult, EnvironmentError, EnvironmentLifecycle,
     FileSystemOps, ListDirRequest, ListDirResult, ReadFileRequest, ReadFileResult, ResetReason,
     ShellState, WriteFileRequest, WriteFileResult,
 };
+use crate::infra::event_bus::EventBus;
 use crate::infra::health::HealthRegistry;
 use crate::infra::pool::{LeaseHandle, PoolTelemetryPacket, TargetPool};
 use crate::infra::qos::{QosAdaptationDecision, QosAdaptationPacket};
 use crate::resource::{
-    GpuLeaseManager, GpuOwner, ImageRuntimeSnapshot, L1RuntimeSnapshot, LeaseToken,
-    RamSnapshot, RecoveryReason, ResourceSnapshot, VramSnapshot,
+    GpuLeaseManager, GpuOwner, ImageRuntimeSnapshot, L1RuntimeSnapshot, LeaseToken, RamSnapshot,
+    RecoveryReason, ResourceSnapshot, VramSnapshot,
 };
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
@@ -152,8 +152,7 @@ pub enum RemoteResetLifecycleStage {
     AgentResumed,
 }
 
-pub type RemoteResetLifecycleCallback =
-    Arc<dyn Fn(RemoteResetLifecycleStage, &str) + Send + Sync>;
+pub type RemoteResetLifecycleCallback = Arc<dyn Fn(RemoteResetLifecycleStage, &str) + Send + Sync>;
 
 pub type RemoteInfraObservabilityCallback =
     Arc<dyn Fn(RemoteInfraObservabilityEvent) + Send + Sync>;
@@ -176,7 +175,8 @@ impl RemoteInfraObservabilityState {
     fn apply_event(&mut self, event: &RemoteInfraObservabilityEvent) {
         match event {
             RemoteInfraObservabilityEvent::PoolTelemetry(packet) => {
-                self.target_health_degraded = packet.tainted_targets > 0 || packet.quarantined_targets > 0;
+                self.target_health_degraded =
+                    packet.tainted_targets > 0 || packet.quarantined_targets > 0;
                 self.latest_pool_packet = Some(packet.clone());
             }
             RemoteInfraObservabilityEvent::QosAdaptation(packet) => {
@@ -252,7 +252,10 @@ where
             .expect("remote bridge reset lifecycle lock poisoned") = callback;
     }
 
-    pub fn set_observability_callback(&mut self, callback: Option<RemoteInfraObservabilityCallback>) {
+    pub fn set_observability_callback(
+        &mut self,
+        callback: Option<RemoteInfraObservabilityCallback>,
+    ) {
         *self
             .on_observability
             .lock()
@@ -280,10 +283,13 @@ where
                 self.emit_reset_stage(RemoteResetLifecycleStage::ResetStarted, &reason);
 
                 let reset_reason = Self::classify_reset_reason(&reason);
-                self.handle_reset_recovery(reset_reason, &mut active_lease).await?;
+                self.handle_reset_recovery(reset_reason, &mut active_lease)
+                    .await?;
 
                 self.emit_reset_stage(RemoteResetLifecycleStage::ResetHealthy, &reason);
-                let retry = self.dispatch_once(retry_intent, active_lease.as_ref()).await;
+                let retry = self
+                    .dispatch_once(retry_intent, active_lease.as_ref())
+                    .await;
                 self.emit_reset_stage(RemoteResetLifecycleStage::AgentResumed, &reason);
                 retry
             }
@@ -376,11 +382,12 @@ where
         active_lease: &mut Option<LeaseHandle>,
     ) -> Result<(), EnvironmentError> {
         if let Some(pool) = &self.target_pool {
-            let lease = active_lease
-                .clone()
-                .ok_or_else(|| EnvironmentError::EnvironmentResetRequired {
-                    reason: "recovery requested without an active pool lease".to_string(),
-                })?;
+            let lease =
+                active_lease
+                    .clone()
+                    .ok_or_else(|| EnvironmentError::EnvironmentResetRequired {
+                        reason: "recovery requested without an active pool lease".to_string(),
+                    })?;
             let environment = pool.environment_for_lease(&lease).await?;
 
             Self::run_fail_closed_reset(environment.as_ref(), reset_reason).await?;
@@ -456,11 +463,7 @@ where
     }
 
     fn emit_observability_event(&self, event: RemoteInfraObservabilityEvent) {
-        Self::publish_observability_event(
-            &self.observability_state,
-            &self.on_observability,
-            event,
-        );
+        Self::publish_observability_event(&self.observability_state, &self.on_observability, event);
     }
 
     fn publish_observability_event(
@@ -732,7 +735,9 @@ impl Orchestrator {
             last_slot_save_ok: AtomicBool::new(false),
             last_slot_restore_ok: AtomicBool::new(false),
             remote_tool_bridge: StdMutex::new(None),
-            remote_infra_observability: Arc::new(StdMutex::new(RemoteInfraObservabilityState::default())),
+            remote_infra_observability: Arc::new(StdMutex::new(
+                RemoteInfraObservabilityState::default(),
+            )),
             _telemetry_actor: Some(telemetry_actor),
         });
 
@@ -824,7 +829,9 @@ impl Orchestrator {
         );
     }
 
-    fn format_remote_infra_observability_message(snapshot: &RemoteInfraObservabilityState) -> String {
+    fn format_remote_infra_observability_message(
+        snapshot: &RemoteInfraObservabilityState,
+    ) -> String {
         let pool = snapshot.latest_pool_packet.as_ref().map_or_else(
             || "pool=unavailable".to_string(),
             |packet| {
@@ -851,10 +858,7 @@ impl Orchestrator {
 
         format!(
             "{}; {}; target_health_degraded={}; qos_pressure_active={}",
-            pool,
-            qos,
-            snapshot.target_health_degraded,
-            snapshot.qos_pressure_active,
+            pool, qos, snapshot.target_health_degraded, snapshot.qos_pressure_active,
         )
     }
 
@@ -910,7 +914,10 @@ impl Orchestrator {
             .expect("l1 lease token lock poisoned");
 
         if let Some(token) = lock.as_ref() {
-            if self.gpu_lease.refresh(token, Some(Duration::from_secs(300))) {
+            if self
+                .gpu_lease
+                .refresh(token, Some(Duration::from_secs(300)))
+            {
                 return;
             }
         }
@@ -951,7 +958,9 @@ impl Orchestrator {
             vram: VramSnapshot {
                 free_mb: telemetry.free_vram_mb,
                 total_mb: telemetry.total_vram_mb,
-                used_mb: telemetry.total_vram_mb.saturating_sub(telemetry.free_vram_mb),
+                used_mb: telemetry
+                    .total_vram_mb
+                    .saturating_sub(telemetry.free_vram_mb),
             },
             ram: RamSnapshot {
                 total_mb: sys.total_memory() / (1024 * 1024),
@@ -1405,8 +1414,10 @@ impl Orchestrator {
 
         match self.server_manager.api_unload_model().await {
             Ok(()) => {
-                self.last_unload_latency_ms
-                    .store(unload_started.elapsed().as_millis() as u64, Ordering::Release);
+                self.last_unload_latency_ms.store(
+                    unload_started.elapsed().as_millis() as u64,
+                    Ordering::Release,
+                );
                 self.release_l1_lease(RecoveryReason::OwnerReleaseRequested);
                 self.reconcile_l1_lease(false).await;
                 tracing::debug!(
@@ -1572,8 +1583,10 @@ impl Orchestrator {
         let unload_started = Instant::now();
         match self.server_manager.api_unload_model().await {
             Ok(()) => {
-                self.last_unload_latency_ms
-                    .store(unload_started.elapsed().as_millis() as u64, Ordering::Release);
+                self.last_unload_latency_ms.store(
+                    unload_started.elapsed().as_millis() as u64,
+                    Ordering::Release,
+                );
                 self.release_l1_lease(RecoveryReason::OwnerReleaseRequested);
                 self.reconcile_l1_lease(false).await;
                 tracing::info!(
@@ -1665,7 +1678,10 @@ impl Orchestrator {
         self.record_slot_restore(slot_restore_ok);
         self.release_l1_lease(RecoveryReason::OwnerReleaseRequested);
         self.reconcile_l1_lease(false).await;
-        tracing::debug!(slot_restore_ok, "orchestrator: Tier B eviction restore status");
+        tracing::debug!(
+            slot_restore_ok,
+            "orchestrator: Tier B eviction restore status"
+        );
 
         self.health.update(
             "llama-server",
@@ -1961,7 +1977,9 @@ mod tests {
             last_slot_save_ok: AtomicBool::new(false),
             last_slot_restore_ok: AtomicBool::new(false),
             remote_tool_bridge: StdMutex::new(None),
-            remote_infra_observability: Arc::new(StdMutex::new(RemoteInfraObservabilityState::default())),
+            remote_infra_observability: Arc::new(StdMutex::new(
+                RemoteInfraObservabilityState::default(),
+            )),
             _telemetry_actor: None,
         }
     }
@@ -2040,7 +2058,10 @@ mod tests {
             })
         }
 
-        async fn list_dir(&self, _request: ListDirRequest) -> Result<ListDirResult, EnvironmentError> {
+        async fn list_dir(
+            &self,
+            _request: ListDirRequest,
+        ) -> Result<ListDirResult, EnvironmentError> {
             self.list_result.lock().await.take().unwrap_or_else(|| {
                 Err(EnvironmentError::ProviderUnavailable {
                     provider: "mock".to_string(),
@@ -2136,14 +2157,13 @@ mod tests {
 
         let lifecycle_events = Arc::new(StdMutex::new(Vec::new()));
         let event_sink = Arc::clone(&lifecycle_events);
-        let bridge = RemoteEnvironmentToolBridge::new(Arc::clone(&env)).with_reset_lifecycle_callback(
-            Arc::new(move |stage, reason| {
+        let bridge = RemoteEnvironmentToolBridge::new(Arc::clone(&env))
+            .with_reset_lifecycle_callback(Arc::new(move |stage, reason| {
                 event_sink
                     .lock()
                     .expect("event sink lock poisoned")
                     .push((stage, reason.to_string()));
-            }),
-        );
+            }));
 
         let outcome = bridge
             .dispatch_tool_call(RemoteToolCallIntent::ExecuteCommand {

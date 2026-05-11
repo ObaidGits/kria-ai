@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 
 // ── Telegram Mock ──────────────────────────────────────────────────
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct TelegramMockState {
     pub sent_messages: Vec<TelegramMockMessage>,
     pub should_fail: bool,
@@ -22,18 +22,15 @@ pub struct TelegramMockMessage {
     pub parse_mode: Option<String>,
 }
 
-impl Default for TelegramMockState {
-    fn default() -> Self {
-        Self {
-            sent_messages: Vec::new(),
-            should_fail: false,
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct TelegramMock {
     state: Arc<Mutex<TelegramMockState>>,
+}
+
+impl Default for TelegramMock {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TelegramMock {
@@ -91,7 +88,7 @@ impl TelegramMock {
 
 // ── Mail Mock ──────────────────────────────────────────────────────
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MailMockState {
     pub sent_emails: Vec<MailMockMessage>,
     pub should_fail: bool,
@@ -105,18 +102,15 @@ pub struct MailMockMessage {
     pub content_type: String,
 }
 
-impl Default for MailMockState {
-    fn default() -> Self {
-        Self {
-            sent_emails: Vec::new(),
-            should_fail: false,
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct MailMock {
     state: Arc<Mutex<MailMockState>>,
+}
+
+impl Default for MailMock {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MailMock {
@@ -206,6 +200,12 @@ pub struct McpMock {
     state: Arc<Mutex<McpMockState>>,
 }
 
+impl Default for McpMock {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl McpMock {
     pub fn new() -> Self {
         Self {
@@ -255,9 +255,7 @@ impl McpMock {
             return Ok(None);
         }
 
-        let result = format!(
-            "mock-result-for-{server_name}-{tool_name}"
-        );
+        let result = format!("mock-result-for-{server_name}-{tool_name}");
         state.tool_calls.push(McpMockCall {
             server_name: server_name.to_string(),
             tool_name: tool_name.to_string(),
@@ -344,17 +342,27 @@ pub async fn test_network_partition(bundle: &MockBundle) -> Result<(), String> {
     bundle.mcp.set_fail_closed(true).await;
 
     let tg_result = bundle.telegram.send_message("chat-1", "test", None).await;
-    let mail_result = bundle.mail.send_email("user@test.com", "test", "body", "text/plain").await;
+    let mail_result = bundle
+        .mail
+        .send_email("user@test.com", "test", "body", "text/plain")
+        .await;
     let mcp_result = bundle.mcp.call_tool("test-server", "test-tool", "{}").await;
 
     if tg_result.is_ok() {
-        return Err("network partition FAIL: telegram call succeeded during partition (fail-open)".to_string());
+        return Err(
+            "network partition FAIL: telegram call succeeded during partition (fail-open)"
+                .to_string(),
+        );
     }
     if mail_result.is_ok() {
-        return Err("network partition FAIL: mail call succeeded during partition (fail-open)".to_string());
+        return Err(
+            "network partition FAIL: mail call succeeded during partition (fail-open)".to_string(),
+        );
     }
     if mcp_result.is_ok() {
-        return Err("network partition FAIL: mcp call succeeded during partition (fail-open)".to_string());
+        return Err(
+            "network partition FAIL: mcp call succeeded during partition (fail-open)".to_string(),
+        );
     }
 
     let tg_count = bundle.telegram.sent_count().await;
@@ -387,7 +395,10 @@ pub async fn test_signature_corruption(bundle: &MockBundle) -> Result<(), String
     bundle.mcp.set_should_fail(true).await;
     bundle.mcp.set_fail_closed(false).await;
 
-    let mcp_result = bundle.mcp.call_tool("corrupt-server", "sign-tool", r#"{"sig":"tampered"}"#).await;
+    let mcp_result = bundle
+        .mcp
+        .call_tool("corrupt-server", "sign-tool", r#"{"sig":"tampered"}"#)
+        .await;
 
     match mcp_result {
         Ok(None) => {
@@ -397,13 +408,15 @@ pub async fn test_signature_corruption(bundle: &MockBundle) -> Result<(), String
         }
         Ok(Some(_)) => {
             return Err(
-                "signature corruption FAIL: mcp returned a result despite fail-open (unexpected)".to_string(),
+                "signature corruption FAIL: mcp returned a result despite fail-open (unexpected)"
+                    .to_string(),
             );
         }
         Err(_) => {
             // fail-closed path — not the corruption scenario we're testing
             return Err(
-                "signature corruption FAIL: mcp returned error instead of fail-open Ok(None)".to_string(),
+                "signature corruption FAIL: mcp returned error instead of fail-open Ok(None)"
+                    .to_string(),
             );
         }
     }
@@ -417,7 +430,8 @@ pub async fn test_signature_corruption(bundle: &MockBundle) -> Result<(), String
         Some(call) => {
             if call.result.is_some() {
                 return Err(
-                    "signature corruption FAIL: corrupt call recorded a result (should be None)".to_string(),
+                    "signature corruption FAIL: corrupt call recorded a result (should be None)"
+                        .to_string(),
                 );
             }
             // Call was recorded with result=None, indicating source_unwired detection
@@ -463,7 +477,9 @@ mod tests {
     #[tokio::test]
     async fn test_mock_mail_failure() {
         let mock = MailMock::new_failing();
-        let result = mock.send_email("user@test.com", "Sub", "Body", "text/plain").await;
+        let result = mock
+            .send_email("user@test.com", "Sub", "Body", "text/plain")
+            .await;
         assert!(result.is_err());
     }
 

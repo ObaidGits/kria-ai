@@ -213,7 +213,7 @@ fn score_keywords(lower: &str, keywords: &[&str]) -> u32 {
 #[serde(rename_all = "snake_case")]
 pub enum AspectRatio {
     #[default]
-    Square,    // 1:1  → 1024×1024
+    Square, // 1:1  → 1024×1024
     Landscape, // 16:9 → 1024×576
     Portrait,  // 9:16 → 576×1024
     Wide,      // 2.39:1 cinematic → 1024×428

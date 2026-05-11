@@ -78,59 +78,64 @@ impl ToolHandler for ParseDocument {
                 }
             }
             // Code and notebook files — treated as plain text
-            "py" | "rs" | "ts" | "js" | "go" | "java" | "c" | "cpp" | "h"
-            | "sh" | "rb" | "php" | "swift" | "kt" | "r" | "sql" | "lua" => {
-                match tokio::fs::read_to_string(path).await {
-                    Ok(content) => {
-                        let max = 50000;
-                        let truncated = content.len() > max;
-                        let text = if truncated { &content[..max] } else { &content };
-                        ToolResult::ok(serde_json::json!({
-                            "path": path, "format": ext, "content": text,
-                            "truncated": truncated, "total_chars": content.len(),
-                            "backend": "native",
-                        }))
-                    }
-                    Err(e) => ToolResult::err(format!("read failed: {e}")),
+            "py" | "rs" | "ts" | "js" | "go" | "java" | "c" | "cpp" | "h" | "sh" | "rb" | "php"
+            | "swift" | "kt" | "r" | "sql" | "lua" => match tokio::fs::read_to_string(path).await {
+                Ok(content) => {
+                    let max = 50000;
+                    let truncated = content.len() > max;
+                    let text = if truncated { &content[..max] } else { &content };
+                    ToolResult::ok(serde_json::json!({
+                        "path": path, "format": ext, "content": text,
+                        "truncated": truncated, "total_chars": content.len(),
+                        "backend": "native",
+                    }))
                 }
-            }
+                Err(e) => ToolResult::err(format!("read failed: {e}")),
+            },
             // Jupyter notebooks — extract only source cells, skip outputs
-            "ipynb" => {
-                match tokio::fs::read_to_string(path).await {
-                    Ok(raw) => {
-                        let nb: serde_json::Value = match serde_json::from_str(&raw) {
-                            Ok(v) => v,
-                            Err(e) => return ToolResult::err(format!("invalid notebook JSON: {e}")),
-                        };
-                        let cells = nb["cells"].as_array();
-                        let mut extracted = String::new();
-                        if let Some(cells) = cells {
-                            for (i, cell) in cells.iter().enumerate() {
-                                let cell_type = cell["cell_type"].as_str().unwrap_or("unknown");
-                                let source = cell["source"]
-                                    .as_array()
-                                    .map(|lines| lines.iter()
-                                        .filter_map(|l| l.as_str())
-                                        .collect::<String>())
-                                    .or_else(|| cell["source"].as_str().map(String::from))
-                                    .unwrap_or_default();
-                                if !source.trim().is_empty() {
-                                    extracted.push_str(&format!("# Cell {} [{}]\n{}\n\n", i + 1, cell_type, source));
-                                }
+            "ipynb" => match tokio::fs::read_to_string(path).await {
+                Ok(raw) => {
+                    let nb: serde_json::Value = match serde_json::from_str(&raw) {
+                        Ok(v) => v,
+                        Err(e) => return ToolResult::err(format!("invalid notebook JSON: {e}")),
+                    };
+                    let cells = nb["cells"].as_array();
+                    let mut extracted = String::new();
+                    if let Some(cells) = cells {
+                        for (i, cell) in cells.iter().enumerate() {
+                            let cell_type = cell["cell_type"].as_str().unwrap_or("unknown");
+                            let source = cell["source"]
+                                .as_array()
+                                .map(|lines| {
+                                    lines.iter().filter_map(|l| l.as_str()).collect::<String>()
+                                })
+                                .or_else(|| cell["source"].as_str().map(String::from))
+                                .unwrap_or_default();
+                            if !source.trim().is_empty() {
+                                extracted.push_str(&format!(
+                                    "# Cell {} [{}]\n{}\n\n",
+                                    i + 1,
+                                    cell_type,
+                                    source
+                                ));
                             }
                         }
-                        let max = 50000;
-                        let truncated = extracted.len() > max;
-                        let text = if truncated { &extracted[..max] } else { &extracted };
-                        ToolResult::ok(serde_json::json!({
-                            "path": path, "format": "ipynb",
-                            "content": text, "truncated": truncated,
-                            "total_chars": extracted.len(), "backend": "native",
-                        }))
                     }
-                    Err(e) => ToolResult::err(format!("read failed: {e}")),
+                    let max = 50000;
+                    let truncated = extracted.len() > max;
+                    let text = if truncated {
+                        &extracted[..max]
+                    } else {
+                        &extracted
+                    };
+                    ToolResult::ok(serde_json::json!({
+                        "path": path, "format": "ipynb",
+                        "content": text, "truncated": truncated,
+                        "total_chars": extracted.len(), "backend": "native",
+                    }))
                 }
-            }
+                Err(e) => ToolResult::err(format!("read failed: {e}")),
+            },
             "pdf" => {
                 // Fallback: poppler's pdftotext
                 let output = tokio::process::Command::new("pdftotext")

@@ -561,9 +561,16 @@ impl TurnGate {
             Modality::Image
         } else {
             let lower = user_text.to_ascii_lowercase();
-            if lower.starts_with("check") || lower.starts_with("get") || lower.starts_with("list") || lower.starts_with("show") {
+            if lower.starts_with("check")
+                || lower.starts_with("get")
+                || lower.starts_with("list")
+                || lower.starts_with("show")
+            {
                 Modality::Text
-            } else if lower.starts_with("set") || lower.starts_with("update") || lower.starts_with("create") {
+            } else if lower.starts_with("set")
+                || lower.starts_with("update")
+                || lower.starts_with("create")
+            {
                 Modality::Text
             } else {
                 Modality::Text
@@ -583,34 +590,74 @@ impl TurnGate {
         // Map domain to tool hints
         match classification.domain {
             crate::routing::domain::Domain::SystemInfo => {
-                if lower.contains("cpu") { fallback_hints.push("get_cpu_usage".into()); }
-                if lower.contains("memory") || lower.contains("ram") { fallback_hints.push("get_memory_info".into()); }
-                if lower.contains("disk") { fallback_hints.push("get_disk_space".into()); }
-                if lower.contains("battery") { fallback_hints.push("get_battery_status".into()); }
-                if lower.contains("network") { fallback_hints.push("get_network_status".into()); }
-                if lower.contains("uptime") || lower.contains("running") { fallback_hints.push("get_system_uptime".into()); }
-                if fallback_hints.is_empty() { fallback_hints.push("check_system_health".into()); }
+                if lower.contains("cpu") {
+                    fallback_hints.push("get_cpu_usage".into());
+                }
+                if lower.contains("memory") || lower.contains("ram") {
+                    fallback_hints.push("get_memory_info".into());
+                }
+                if lower.contains("disk") {
+                    fallback_hints.push("get_disk_space".into());
+                }
+                if lower.contains("battery") {
+                    fallback_hints.push("get_battery_status".into());
+                }
+                if lower.contains("network") {
+                    fallback_hints.push("get_network_status".into());
+                }
+                if lower.contains("uptime") || lower.contains("running") {
+                    fallback_hints.push("get_system_uptime".into());
+                }
+                if fallback_hints.is_empty() {
+                    fallback_hints.push("check_system_health".into());
+                }
             }
             crate::routing::domain::Domain::FileOps => {
-                if lower.contains("read") || lower.contains("open") { fallback_hints.push("read_file".into()); }
-                if lower.contains("write") || lower.contains("create") { fallback_hints.push("write_file".into()); }
-                if lower.contains("delete") { fallback_hints.push("delete_file".into()); }
-                if lower.contains("search") || lower.contains("find") { fallback_hints.push("search_files".into()); }
-                if lower.contains("list") { fallback_hints.push("list_directory".into()); }
+                if lower.contains("read") || lower.contains("open") {
+                    fallback_hints.push("read_file".into());
+                }
+                if lower.contains("write") || lower.contains("create") {
+                    fallback_hints.push("write_file".into());
+                }
+                if lower.contains("delete") {
+                    fallback_hints.push("delete_file".into());
+                }
+                if lower.contains("search") || lower.contains("find") {
+                    fallback_hints.push("search_files".into());
+                }
+                if lower.contains("list") {
+                    fallback_hints.push("list_directory".into());
+                }
             }
             crate::routing::domain::Domain::Power => {
-                if lower.contains("volume") { fallback_hints.push("set_volume".into()); }
-                if lower.contains("brightness") { fallback_hints.push("set_brightness".into()); }
-                if lower.contains("shutdown") || lower.contains("shut down") { fallback_hints.push("shutdown_system".into()); }
-                if lower.contains("reboot") { fallback_hints.push("reboot_system".into()); }
+                if lower.contains("volume") {
+                    fallback_hints.push("set_volume".into());
+                }
+                if lower.contains("brightness") {
+                    fallback_hints.push("set_brightness".into());
+                }
+                if lower.contains("shutdown") || lower.contains("shut down") {
+                    fallback_hints.push("shutdown_system".into());
+                }
+                if lower.contains("reboot") {
+                    fallback_hints.push("reboot_system".into());
+                }
             }
             crate::routing::domain::Domain::Comms => {
-                if lower.contains("email") || lower.contains("mail") { fallback_hints.push("gw_gmail_send".into()); }
-                if lower.contains("calendar") || lower.contains("schedule") { fallback_hints.push("gw_calendar_today".into()); }
+                if lower.contains("email") || lower.contains("mail") {
+                    fallback_hints.push("gw_gmail_send".into());
+                }
+                if lower.contains("calendar") || lower.contains("schedule") {
+                    fallback_hints.push("gw_calendar_today".into());
+                }
             }
             crate::routing::domain::Domain::Developer => {
-                if lower.contains("git") { fallback_hints.push("git_status".into()); }
-                if lower.contains("run") || lower.contains("shell") { fallback_hints.push("execute_command".into()); }
+                if lower.contains("git") {
+                    fallback_hints.push("git_status".into());
+                }
+                if lower.contains("run") || lower.contains("shell") {
+                    fallback_hints.push("execute_command".into());
+                }
             }
             crate::routing::domain::Domain::Packages => {
                 if lower.contains("list")
@@ -622,7 +669,10 @@ impl TurnGate {
                 {
                     push_hint_unique(&mut fallback_hints, "list_installed_packages");
                 }
-                if lower.contains("install") || lower.contains("uninstall") || lower.contains("package") {
+                if lower.contains("install")
+                    || lower.contains("uninstall")
+                    || lower.contains("package")
+                {
                     push_hint_unique(&mut fallback_hints, "search_package");
                     push_hint_unique(&mut fallback_hints, "check_package_installed");
                     push_hint_unique(&mut fallback_hints, "install_package");

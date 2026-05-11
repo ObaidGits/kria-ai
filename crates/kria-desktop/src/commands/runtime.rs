@@ -550,11 +550,8 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     .await;
 
     // Phase 3: Build tool-level semantic index
-    let tool_defs_for_index: Vec<kria_core::tools::registry::ToolDef> = tool_registry
-        .list_defs()
-        .iter()
-        .cloned()
-        .collect();
+    let tool_defs_for_index: Vec<kria_core::tools::registry::ToolDef> =
+        tool_registry.list_defs().to_vec();
     let tool_index = kria_core::routing::tool_index::SharedToolIndex::new(
         tool_defs_for_index,
         routing_config.clone(),
@@ -790,9 +787,10 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         },
         colab_server_name.clone(),
     )));
-    let mcp_failure_history = Arc::new(RwLock::new(
-        std::collections::HashMap::<String, Vec<McpFailureRecord>>::new(),
-    ));
+    let mcp_failure_history = Arc::new(RwLock::new(std::collections::HashMap::<
+        String,
+        Vec<McpFailureRecord>,
+    >::new()));
     let ironclad_reset = Arc::new(RwLock::new(IroncladResetSnapshot::default()));
     let ironclad_forensic_log = Arc::new(RwLock::new(Vec::<IroncladForensicRecord>::new()));
     let (_, ironclad_system_config) = load_ironclad_system_config_with_path();

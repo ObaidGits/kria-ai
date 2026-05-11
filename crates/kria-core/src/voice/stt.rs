@@ -1,6 +1,6 @@
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::resource::{
@@ -70,7 +70,8 @@ impl SpeechToText {
         let start = Instant::now();
         let lease_guard = self.acquire_speech_lease("speech_stt_transcribe")?;
 
-        let result: anyhow::Result<TranscriptionResult> = if let Some(ref binary) = self.binary_path {
+        let result: anyhow::Result<TranscriptionResult> = if let Some(ref binary) = self.binary_path
+        {
             // CLI mode: call whisper.cpp binary
             let whisper_threads = self.threads.unwrap_or_else(default_whisper_threads);
             let mut args = vec![
@@ -174,11 +175,7 @@ impl SpeechToText {
         };
 
         gpu_lease
-            .acquire_guard(
-                GpuOwner::Speech,
-                turn_label,
-                Some(Duration::from_secs(120)),
-            )
+            .acquire_guard(GpuOwner::Speech, turn_label, Some(Duration::from_secs(120)))
             .map(Some)
             .map_err(Self::map_gpu_lease_error)
     }

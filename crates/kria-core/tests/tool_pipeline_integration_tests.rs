@@ -5,7 +5,7 @@ use kria_core::agent::AgentLoop;
 use kria_core::infra::ToolResult;
 use kria_core::llm::{ChatMessage, ModelRouter};
 use kria_core::safety::hitl::HitlGateway;
-use kria_core::safety::{AuditLogger, PolicyEngine, RollbackManager, RiskLevel};
+use kria_core::safety::{AuditLogger, PolicyEngine, RiskLevel, RollbackManager};
 use kria_core::tools::mount_manager::ToolMountManager;
 use kria_core::tools::registry::{self, ToolDef, ToolRegistry};
 use std::collections::BTreeSet;
@@ -32,7 +32,8 @@ fn build_test_agent_loop(
     let hitl = Arc::new(HitlGateway::new(0));
     let audit_conn = rusqlite::Connection::open_in_memory().expect("open in-memory audit db");
     let audit_logger = Arc::new(AuditLogger::new(audit_conn));
-    let rollback_dir = std::env::temp_dir().join(format!("kria-test-rollback-{}", uuid::Uuid::new_v4()));
+    let rollback_dir =
+        std::env::temp_dir().join(format!("kria-test-rollback-{}", uuid::Uuid::new_v4()));
     let rollback_mgr = Arc::new(RollbackManager::new(rollback_dir, 1, 10));
 
     AgentLoop::new(
@@ -226,7 +227,11 @@ fn registry_every_tool_has_handler_and_valid_schema() {
     let reg = registry::build_default_registry();
     let defs = reg.list_defs();
 
-    assert!(defs.len() >= 50, "expected broad tool inventory, found {}", defs.len());
+    assert!(
+        defs.len() >= 50,
+        "expected broad tool inventory, found {}",
+        defs.len()
+    );
 
     let mut unique_names = BTreeSet::new();
 
@@ -388,7 +393,9 @@ async fn green_tools_with_required_params_return_structured_results_on_invalid_t
 
         match timeout(Duration::from_secs(6), task).await {
             Err(_) => failures.push(format!("{}: handler timed out", tool_name)),
-            Ok(Err(join_err)) => failures.push(format!("{}: handler panicked: {}", tool_name, join_err)),
+            Ok(Err(join_err)) => {
+                failures.push(format!("{}: handler panicked: {}", tool_name, join_err))
+            }
             Ok(Ok(result)) => {
                 if !is_structured_tool_result(&result) {
                     failures.push(format!(
@@ -420,6 +427,9 @@ fn is_structured_tool_result(result: &ToolResult) -> bool {
     if result.success {
         result.error.is_none()
     } else {
-        result.error.as_ref().is_some_and(|msg| !msg.trim().is_empty())
+        result
+            .error
+            .as_ref()
+            .is_some_and(|msg| !msg.trim().is_empty())
     }
 }

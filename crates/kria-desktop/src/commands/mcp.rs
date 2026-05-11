@@ -81,15 +81,13 @@ fn derive_mcp_remediation(
 
     if lower.contains("could not load token") || lower.contains("token missing") {
         return Some(
-            "OAuth token missing or invalid. Reconnect to re-auth and restore the token."
-                .into(),
+            "OAuth token missing or invalid. Reconnect to re-auth and restore the token.".into(),
         );
     }
 
     if lower.contains("insufficient") || lower.contains("permission") || lower.contains("scope") {
         return Some(
-            "OAuth scopes insufficient. Re-auth and grant all required Google permissions."
-                .into(),
+            "OAuth scopes insufficient. Re-auth and grant all required Google permissions.".into(),
         );
     }
 
@@ -111,8 +109,9 @@ fn derive_mcp_remediation(
     }
 
     if lower.contains("not running") || lower.contains("stopped") {
-        return Some("Server is not running. Enable and restart it from the MCP Services tab."
-            .into());
+        return Some(
+            "Server is not running. Enable and restart it from the MCP Services tab.".into(),
+        );
     }
 
     None

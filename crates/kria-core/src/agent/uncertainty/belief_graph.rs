@@ -137,7 +137,9 @@ impl BeliefGraph {
     /// Get overall confidence for a set of propositions (geometric mean).
     /// If any fact is uncertain, overall confidence is low.
     pub fn confidence_for(&self, propositions: &[&str]) -> f64 {
-        let relevant: Vec<f64> = self.facts.values()
+        let relevant: Vec<f64> = self
+            .facts
+            .values()
             .filter(|f| propositions.iter().any(|p| f.proposition.contains(p)))
             .map(|f| f.confidence)
             .collect();
@@ -183,7 +185,8 @@ impl BeliefGraph {
 
     /// Get facts with confidence below a threshold (stale/uncertain).
     pub fn uncertain_facts(&self, threshold: f64) -> Vec<&BeliefFact> {
-        self.facts.values()
+        self.facts
+            .values()
             .filter(|f| f.confidence < threshold)
             .collect()
     }
@@ -191,7 +194,8 @@ impl BeliefGraph {
     /// Get facts that haven't been verified recently.
     pub fn stale_facts(&self, max_age: Duration) -> Vec<&BeliefFact> {
         let max_age_secs = max_age.as_secs();
-        self.facts.values()
+        self.facts
+            .values()
             .filter(|f| f.age_secs() > max_age_secs)
             .collect()
     }
@@ -218,7 +222,12 @@ mod tests {
     #[test]
     fn stores_and_retrieves_facts() {
         let mut bg = BeliefGraph::new();
-        bg.update("Nginx is running", 0.95, "systemctl status: active", BeliefSource::Detected);
+        bg.update(
+            "Nginx is running",
+            0.95,
+            "systemctl status: active",
+            BeliefSource::Detected,
+        );
 
         let fact = bg.get("Nginx is running").unwrap();
         assert!((fact.confidence - 0.95).abs() < 0.001);
@@ -229,13 +238,26 @@ mod tests {
     #[test]
     fn bayesian_update_combines_confidence() {
         let mut bg = BeliefGraph::new();
-        bg.update("Nginx is running", 0.8, "systemctl status: active", BeliefSource::Detected);
-        bg.update("Nginx is running", 0.9, "curl localhost: OK", BeliefSource::Detected);
+        bg.update(
+            "Nginx is running",
+            0.8,
+            "systemctl status: active",
+            BeliefSource::Detected,
+        );
+        bg.update(
+            "Nginx is running",
+            0.9,
+            "curl localhost: OK",
+            BeliefSource::Detected,
+        );
 
         let fact = bg.get("Nginx is running").unwrap();
         // Bayesian: 1 - (1-0.8) * (1-0.9) = 1 - 0.02 = 0.98
-        assert!((fact.confidence - 0.98).abs() < 0.01,
-            "Bayesian update should give ~0.98, got {}", fact.confidence);
+        assert!(
+            (fact.confidence - 0.98).abs() < 0.01,
+            "Bayesian update should give ~0.98, got {}",
+            fact.confidence
+        );
         assert_eq!(fact.evidence.len(), 2);
     }
 
@@ -247,8 +269,11 @@ mod tests {
 
         let conf = bg.confidence_for(&["Nginx", "Disk"]);
         // Geometric mean of 0.9 and 0.8 = sqrt(0.72) ≈ 0.849
-        assert!((conf - 0.849).abs() < 0.01,
-            "Geometric mean should be ~0.849, got {}", conf);
+        assert!(
+            (conf - 0.849).abs() < 0.01,
+            "Geometric mean should be ~0.849, got {}",
+            conf
+        );
     }
 
     #[test]
@@ -270,10 +295,16 @@ mod tests {
         bg.decay();
         let fact = bg.get("Old fact").unwrap();
         // After 10 hours at 0.05/hour: 0.9 * exp(-0.05*10) = 0.9 * 0.607 ≈ 0.546
-        assert!(fact.confidence < 0.6,
-            "Confidence should decay to ~0.55, got {}", fact.confidence);
-        assert!(fact.confidence > 0.5,
-            "Confidence should not decay below 0.5, got {}", fact.confidence);
+        assert!(
+            fact.confidence < 0.6,
+            "Confidence should decay to ~0.55, got {}",
+            fact.confidence
+        );
+        assert!(
+            fact.confidence > 0.5,
+            "Confidence should not decay below 0.5, got {}",
+            fact.confidence
+        );
     }
 
     #[test]
@@ -288,7 +319,10 @@ mod tests {
 
         bg.decay();
         let fact = bg.get("Very old fact").unwrap();
-        assert!(fact.confidence >= 0.01, "Confidence should never go below 0.01");
+        assert!(
+            fact.confidence >= 0.01,
+            "Confidence should never go below 0.01"
+        );
     }
 
     #[test]

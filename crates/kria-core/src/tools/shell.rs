@@ -50,7 +50,8 @@ enum PersistedBuiltin {
 }
 
 fn parse_input<T: DeserializeOwned>(params: serde_json::Value) -> Result<T, ToolResult> {
-    serde_json::from_value(params).map_err(|error| ToolResult::err(format!("invalid parameters: {error}")))
+    serde_json::from_value(params)
+        .map_err(|error| ToolResult::err(format!("invalid parameters: {error}")))
 }
 
 fn resolve_timeout_ms(timeout_secs: u64) -> Result<u64, ToolResult> {
@@ -209,11 +210,21 @@ fn resolve_cd_target(raw_path: &str, snapshot: &ShellState) -> Result<PathBuf, T
         snapshot.cwd.join(requested)
     };
 
-    let canonical = std::fs::canonicalize(&candidate)
-        .map_err(|error| ToolResult::err(format!("cd failed for '{}': {}", candidate.display(), error)))?;
+    let canonical = std::fs::canonicalize(&candidate).map_err(|error| {
+        ToolResult::err(format!(
+            "cd failed for '{}': {}",
+            candidate.display(),
+            error
+        ))
+    })?;
 
-    let metadata = std::fs::metadata(&canonical)
-        .map_err(|error| ToolResult::err(format!("cd failed for '{}': {}", canonical.display(), error)))?;
+    let metadata = std::fs::metadata(&canonical).map_err(|error| {
+        ToolResult::err(format!(
+            "cd failed for '{}': {}",
+            canonical.display(),
+            error
+        ))
+    })?;
 
     if !metadata.is_dir() {
         return Err(ToolResult::err(format!(
@@ -308,7 +319,11 @@ fn param(name: &str, ty: &str, desc: &str, required: bool) -> ParamDef {
 struct ExecuteBash;
 #[async_trait]
 impl ToolHandler for ExecuteBash {
-    async fn execute_with_context(&self, params: serde_json::Value, ctx: ToolContext) -> ToolResult {
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
         let input: ExecuteBashInput = match parse_input(params) {
             Ok(input) => input,
             Err(error) => return error,
@@ -352,22 +367,15 @@ impl ToolHandler for ExecuteBash {
                 Err(EnvironmentError::Io { details, .. })
                     if details.contains("No such file") || details.contains("not found") =>
                 {
-                    let cmd_request = build_request(
-                        "cmd",
-                        vec!["/C".to_string(), input.command],
-                        timeout_ms,
-                    );
+                    let cmd_request =
+                        build_request("cmd", vec!["/C".to_string(), input.command], timeout_ms);
                     return execute_request(&ctx, cmd_request).await;
                 }
                 Err(error) => return env_error_to_tool_result(error),
             }
         }
 
-        let request = build_request(
-            "bash",
-            vec!["-c".to_string(), input.command],
-            timeout_ms,
-        );
+        let request = build_request("bash", vec!["-c".to_string(), input.command], timeout_ms);
         execute_request(&ctx, request).await
     }
 }
@@ -375,7 +383,11 @@ impl ToolHandler for ExecuteBash {
 struct ExecutePython;
 #[async_trait]
 impl ToolHandler for ExecutePython {
-    async fn execute_with_context(&self, params: serde_json::Value, ctx: ToolContext) -> ToolResult {
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
         let input: ExecutePythonInput = match parse_input(params) {
             Ok(input) => input,
             Err(error) => return error,
@@ -395,11 +407,7 @@ impl ToolHandler for ExecutePython {
         } else {
             "python3"
         };
-        let request = build_request(
-            python,
-            vec!["-c".to_string(), input.code],
-            timeout_ms,
-        );
+        let request = build_request(python, vec!["-c".to_string(), input.code], timeout_ms);
 
         execute_request(&ctx, request).await
     }
@@ -408,7 +416,11 @@ impl ToolHandler for ExecutePython {
 struct ExecutePowershell;
 #[async_trait]
 impl ToolHandler for ExecutePowershell {
-    async fn execute_with_context(&self, params: serde_json::Value, ctx: ToolContext) -> ToolResult {
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
         let input: ExecutePowershellInput = match parse_input(params) {
             Ok(input) => input,
             Err(error) => return error,
@@ -431,7 +443,11 @@ impl ToolHandler for ExecutePowershell {
 
         let request = build_request(
             ps,
-            vec!["-NoProfile".to_string(), "-Command".to_string(), input.command],
+            vec![
+                "-NoProfile".to_string(),
+                "-Command".to_string(),
+                input.command,
+            ],
             timeout_ms,
         );
 

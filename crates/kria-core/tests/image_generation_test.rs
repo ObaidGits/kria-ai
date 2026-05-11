@@ -6,7 +6,9 @@
 //! `KRIA_SKIP_NETWORK_TESTS=1` is set (CI environments without outbound HTTP).
 
 use kria_core::config::ImageGenerationConfig;
-use kria_core::image::{cloud::CloudError, ImageError, ImageOrchestrator, ImageRequest, ImageResult};
+use kria_core::image::{
+    cloud::CloudError, ImageError, ImageOrchestrator, ImageRequest, ImageResult,
+};
 use std::path::PathBuf;
 
 fn skip_if_no_network() -> bool {
@@ -34,9 +36,7 @@ fn unwrap_or_skip_transient(
     match result {
         Ok(value) => Some(value),
         Err(err) if is_transient_cloud_failure(&err) => {
-            println!(
-                "Skipping {test_name} due transient cloud provider error: {err:?}"
-            );
+            println!("Skipping {test_name} due transient cloud provider error: {err:?}");
             None
         }
         Err(err) => panic!("{test_name} failed: {err:?}"),

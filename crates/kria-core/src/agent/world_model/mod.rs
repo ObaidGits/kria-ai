@@ -26,8 +26,8 @@
 //! - `world_facts` — active facts
 //! - `world_facts_archive` — deprecated facts (for audit trail)
 
-mod types;
 mod store;
+mod types;
 
-pub use types::{WorldFact, FactSource, ConflictResolution, WorldModelStats};
 pub use store::WorldModelStore;
+pub use types::{ConflictResolution, FactSource, WorldFact, WorldModelStats};

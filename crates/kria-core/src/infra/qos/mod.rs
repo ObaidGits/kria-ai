@@ -36,9 +36,7 @@ impl AdaptiveQosConfig {
             retry_after_defer_ms: system_config.qos.retry_after_defer_ms,
             max_latency_samples: system_config.qos.max_latency_samples,
             max_medium_credits: system_config.qos.max_medium_credits,
-            medium_credit_per_high_completion: system_config
-                .qos
-                .medium_credit_per_high_completion,
+            medium_credit_per_high_completion: system_config.qos.medium_credit_per_high_completion,
             monitor_sample_interval_ms: system_config.qos.monitor_sample_interval_ms,
             max_adaptation_history: system_config.qos.max_adaptation_history,
         }
@@ -55,8 +53,13 @@ impl Default for AdaptiveQosConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QosAdmission {
     Accepted,
-    Deferred { retry_after: Duration, reason: String },
-    Rejected { reason: String },
+    Deferred {
+        retry_after: Duration,
+        reason: String,
+    },
+    Rejected {
+        reason: String,
+    },
 }
 
 #[derive(Debug, Clone, Default)]
@@ -208,7 +211,10 @@ impl QosState {
             high: QosClassCounters::default(),
             medium: QosClassCounters::default(),
             low: QosClassCounters::default(),
-            monitor: QosMonitor::new(config.monitor_sample_interval_ms, config.max_latency_samples),
+            monitor: QosMonitor::new(
+                config.monitor_sample_interval_ms,
+                config.max_latency_samples,
+            ),
             adaptation_history: VecDeque::new(),
         }
     }
@@ -260,11 +266,7 @@ impl QosState {
     }
 
     fn push_adaptation(&mut self, packet: QosAdaptationPacket, max_history: usize) {
-        push_bounded(
-            &mut self.adaptation_history,
-            packet,
-            max_history.max(1),
-        );
+        push_bounded(&mut self.adaptation_history, packet, max_history.max(1));
     }
 }
 
@@ -288,7 +290,9 @@ impl AdaptiveQosScheduler {
     }
 
     pub fn classify_operation(operation: &str) -> QosClass {
-        if operation == "reset_environment::medium_reconnect_slot" || operation.contains("reconnect") {
+        if operation == "reset_environment::medium_reconnect_slot"
+            || operation.contains("reconnect")
+        {
             return QosClass::MediumReconnect;
         }
 
@@ -316,7 +320,9 @@ impl AdaptiveQosScheduler {
 
             let mut adaptation_packets = Vec::new();
 
-            if let Some(packet) = Self::refresh_low_maintenance_mode(&mut state, &self.config, operation) {
+            if let Some(packet) =
+                Self::refresh_low_maintenance_mode(&mut state, &self.config, operation)
+            {
                 state.push_adaptation(packet.clone(), self.config.max_adaptation_history);
                 adaptation_packets.push(packet);
             }
@@ -362,7 +368,10 @@ impl AdaptiveQosScheduler {
                                 ),
                                 promoted_after,
                             );
-                            state.push_adaptation(packet.clone(), self.config.max_adaptation_history);
+                            state.push_adaptation(
+                                packet.clone(),
+                                self.config.max_adaptation_history,
+                            );
                             adaptation_packets.push(packet);
 
                             QosAdmission::Accepted
@@ -454,11 +463,13 @@ impl AdaptiveQosScheduler {
                     }
                 }
                 QosClass::MediumReconnect => {
-                    state.medium_reconnect_inflight = state.medium_reconnect_inflight.saturating_sub(1);
+                    state.medium_reconnect_inflight =
+                        state.medium_reconnect_inflight.saturating_sub(1);
                     state.medium.completed = state.medium.completed.saturating_add(1);
                 }
                 QosClass::LowMaintenance => {
-                    state.low_maintenance_inflight = state.low_maintenance_inflight.saturating_sub(1);
+                    state.low_maintenance_inflight =
+                        state.low_maintenance_inflight.saturating_sub(1);
                     state.low.completed = state.low.completed.saturating_add(1);
                 }
             }
@@ -466,9 +477,11 @@ impl AdaptiveQosScheduler {
             // Current runtime contracts only expose total latency; use it as wait/pressure proxy.
             state.push_wait_sample(class, total_latency_ms, self.config.max_latency_samples);
 
-            if let Some(packet) =
-                Self::refresh_low_maintenance_mode(&mut state, &self.config, CONTROLLER_TICK_OPERATION)
-            {
+            if let Some(packet) = Self::refresh_low_maintenance_mode(
+                &mut state,
+                &self.config,
+                CONTROLLER_TICK_OPERATION,
+            ) {
                 state.push_adaptation(packet.clone(), self.config.max_adaptation_history);
                 adaptation_packets.push(packet);
             }
@@ -666,14 +679,14 @@ fn now_unix_ms() -> u64 {
 }
 
 fn emit_telemetry(packet: QosTelemetryPacket) {
-    let payload = serde_json::to_string(&packet)
-        .unwrap_or_else(|error| format!("telemetry_error:{error}"));
+    let payload =
+        serde_json::to_string(&packet).unwrap_or_else(|error| format!("telemetry_error:{error}"));
     tracing::info!(target: "kria_qos", packet = %payload, "qos_telemetry");
 }
 
 fn emit_adaptation(packet: QosAdaptationPacket) {
-    let payload = serde_json::to_string(&packet)
-        .unwrap_or_else(|error| format!("telemetry_error:{error}"));
+    let payload =
+        serde_json::to_string(&packet).unwrap_or_else(|error| format!("telemetry_error:{error}"));
     tracing::info!(target: "kria_qos", packet = %payload, "qos_adaptation");
 }
 
@@ -718,12 +731,12 @@ mod tests {
         assert!(matches!(low, QosAdmission::Rejected { .. }));
 
         let adaptations = scheduler.adaptation_snapshot(16);
-        assert!(adaptations.iter().any(|packet| {
-            packet.decision == QosAdaptationDecision::ThrottleLowMaintenance
-        }));
-        assert!(adaptations.iter().any(|packet| {
-            packet.decision == QosAdaptationDecision::RejectLowMaintenance
-        }));
+        assert!(adaptations
+            .iter()
+            .any(|packet| { packet.decision == QosAdaptationDecision::ThrottleLowMaintenance }));
+        assert!(adaptations
+            .iter()
+            .any(|packet| { packet.decision == QosAdaptationDecision::RejectLowMaintenance }));
     }
 
     #[test]
@@ -741,7 +754,10 @@ mod tests {
         scheduler.finish_task(QosClass::HighRecovery, 10, true);
 
         assert_eq!(
-            scheduler.try_start_task(QosClass::MediumReconnect, "reset_environment::medium_reconnect_slot"),
+            scheduler.try_start_task(
+                QosClass::MediumReconnect,
+                "reset_environment::medium_reconnect_slot"
+            ),
             QosAdmission::Accepted
         );
     }
@@ -790,9 +806,9 @@ mod tests {
         scheduler.finish_task(QosClass::HighRecovery, 20, true);
 
         let adaptations = scheduler.adaptation_snapshot(16);
-        assert!(adaptations.iter().any(|packet| {
-            packet.decision == QosAdaptationDecision::PromoteMediumReconnect
-        }));
+        assert!(adaptations
+            .iter()
+            .any(|packet| { packet.decision == QosAdaptationDecision::PromoteMediumReconnect }));
     }
 
     #[test]
@@ -820,7 +836,7 @@ mod tests {
         scheduler.finish_task(QosClass::LowMaintenance, 10, true);
 
         let samples = scheduler.monitor_samples(0);
-        assert!(samples.len() >= first_len + 1);
+        assert!(samples.len() > first_len);
         assert!(scheduler.monitor_snapshot().is_some());
     }
 
@@ -873,7 +889,10 @@ mod tests {
 
         let telemetry = scheduler.telemetry_snapshot();
         assert!(high_requests > 0);
-        assert!(low_rejected > 0, "expected low lane rejections under high wait breach");
+        assert!(
+            low_rejected > 0,
+            "expected low lane rejections under high wait breach"
+        );
         assert!(
             telemetry.high_recovery_wait_p95_ms <= 80,
             "high lane p95 wait should recover/stay stable under burst, got {}ms",
@@ -881,11 +900,11 @@ mod tests {
         );
 
         let adaptations = scheduler.adaptation_snapshot(4096);
-        assert!(adaptations.iter().any(|packet| {
-            packet.decision == QosAdaptationDecision::ThrottleLowMaintenance
-        }));
-        assert!(adaptations.iter().any(|packet| {
-            packet.decision == QosAdaptationDecision::RejectLowMaintenance
-        }));
+        assert!(adaptations
+            .iter()
+            .any(|packet| { packet.decision == QosAdaptationDecision::ThrottleLowMaintenance }));
+        assert!(adaptations
+            .iter()
+            .any(|packet| { packet.decision == QosAdaptationDecision::RejectLowMaintenance }));
     }
 }

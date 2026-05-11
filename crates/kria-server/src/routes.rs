@@ -26,7 +26,10 @@ pub fn api_routes() -> Router<Arc<ServerState>> {
         .route("/api/settings", post(update_settings))
         .route("/api/fleet/events", get(fleet_events))
         .route("/api/fleet/terminal", get(fleet_terminal_ws))
-        .route("/api/fleet/leases/{lease_id}/heartbeat", post(fleet_lease_heartbeat))
+        .route(
+            "/api/fleet/leases/{lease_id}/heartbeat",
+            post(fleet_lease_heartbeat),
+        )
         .route("/api/fleet/docker-evals", post(fleet_docker_evals))
         .route("/api/sessions/{session_id}/cancel", post(cancel_session))
 }
@@ -487,8 +490,12 @@ async fn fleet_docker_evals(
 
 fn event_matches_lease(event: &ControlPlaneEvent, lease_id: Uuid) -> bool {
     match event {
-        ControlPlaneEvent::FleetAlert { lease_id: Some(id), .. } => *id == lease_id,
-        ControlPlaneEvent::TerminalLine { lease_id: Some(id), .. } => *id == lease_id,
+        ControlPlaneEvent::FleetAlert {
+            lease_id: Some(id), ..
+        } => *id == lease_id,
+        ControlPlaneEvent::TerminalLine {
+            lease_id: Some(id), ..
+        } => *id == lease_id,
         ControlPlaneEvent::TargetStatus { .. }
         | ControlPlaneEvent::DockerEvalUpdate { .. }
         | ControlPlaneEvent::TerminalGap { .. }
@@ -503,7 +510,8 @@ fn event_matches_target(event: &ControlPlaneEvent, target_id: Uuid) -> bool {
     match event {
         ControlPlaneEvent::TargetStatus { target_id: id, .. } => *id == target_id,
         ControlPlaneEvent::FleetAlert {
-            target_id: Some(id), ..
+            target_id: Some(id),
+            ..
         } => *id == target_id,
         ControlPlaneEvent::DockerEvalUpdate { target_id: id, .. } => *id == target_id,
         ControlPlaneEvent::TerminalGap { marker } => marker.target_id == target_id,

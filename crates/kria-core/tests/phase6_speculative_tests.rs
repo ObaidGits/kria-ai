@@ -192,7 +192,10 @@ fn sp15_same_partial_doesnt_re_speculate() {
 #[test]
 fn sp16_action_equality() {
     assert_eq!(SpeculativeAction::Wait, SpeculativeAction::Wait);
-    assert_eq!(SpeculativeAction::Speculating, SpeculativeAction::Speculating);
+    assert_eq!(
+        SpeculativeAction::Speculating,
+        SpeculativeAction::Speculating
+    );
     assert_ne!(SpeculativeAction::Wait, SpeculativeAction::Speculating);
 }
 

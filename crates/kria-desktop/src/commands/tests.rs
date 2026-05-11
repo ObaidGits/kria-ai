@@ -76,7 +76,10 @@ fn migrate_legacy_colab_server_command_upgrades_old_uvx_format() {
 
     let changed = migrate_legacy_colab_server_command(&mut server);
 
-    assert!(changed, "old uvx <source> format should be migrated to uvx --from <source> <entrypoint>");
+    assert!(
+        changed,
+        "old uvx <source> format should be migrated to uvx --from <source> <entrypoint>"
+    );
     assert_eq!(server.command, COLAB_OFFICIAL_COMMAND);
     assert_eq!(
         server.args,

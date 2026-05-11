@@ -150,7 +150,11 @@ fn fb06_normalization_preserved() {
     // Verify normalization is preserved
     let c = &centroids[&Domain::SystemInfo];
     let norm: f32 = c.iter().map(|x| x * x).sum::<f32>().sqrt();
-    assert!((norm - 1.0).abs() < 0.001, "Norm should be ~1.0, got {}", norm);
+    assert!(
+        (norm - 1.0).abs() < 0.001,
+        "Norm should be ~1.0, got {}",
+        norm
+    );
 }
 
 // ─── Outcome Detection Tests ────────────────────────────────────────────────
@@ -205,7 +209,7 @@ fn fb09_tool_error_detection() {
         Some("check_health"),
         None,
         false,
-        Some("permission denied".into()),
+        Some("permission denied"),
     );
     match r {
         RoutingOutcome::ToolError { error } => assert_eq!(error, "permission denied"),
@@ -358,7 +362,11 @@ fn fb17_submit_explicit_immediately_adjusts_centroids() {
 
     // Centroid must have moved (Gap 1 + 2 fixed: embedding stored, adjust called)
     assert_eq!(report.success_nudges, 1);
-    assert_ne!(centroids[&Domain::SystemInfo], original, "centroid should have moved");
+    assert_ne!(
+        centroids[&Domain::SystemInfo],
+        original,
+        "centroid should have moved"
+    );
 
     // Buffer should be empty after explicit submit (flushed to disk)
     assert_eq!(collector.buffer_len(), 0);
@@ -392,7 +400,11 @@ fn fb18_flush_and_adjust_drains_buffer_and_nudges() {
     // flush_and_adjust should drain buffer and apply all 5 nudges (Gap 2 fixed)
     let report = collector.flush_and_adjust(&mut centroids);
     assert_eq!(report.success_nudges, 5);
-    assert_eq!(collector.buffer_len(), 0, "buffer should be empty after flush_and_adjust");
+    assert_eq!(
+        collector.buffer_len(),
+        0,
+        "buffer should be empty after flush_and_adjust"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -410,12 +422,12 @@ fn fb19_correction_outcome_pulls_toward_correct_domain() {
 
     let feedback = RoutingFeedback {
         input_text_hash: 77,
-        domain_selected: Domain::Conversation,  // wrong — was routed here
+        domain_selected: Domain::Conversation, // wrong — was routed here
         tool_selected: None,
         intent_source: "explicit_user_feedback".into(),
         confidence: 1.0,
         outcome: RoutingOutcome::Corrected {
-            correct_domain: Domain::SystemInfo,  // should have gone here
+            correct_domain: Domain::SystemInfo, // should have gone here
             correct_tool: None,
         },
         timestamp: 1000,
@@ -425,8 +437,14 @@ fn fb19_correction_outcome_pulls_toward_correct_domain() {
 
     let report = collector.submit_explicit(feedback, &mut centroids);
 
-    assert_eq!(report.correction_pushes, 1, "wrong domain should be pushed away");
-    assert_eq!(report.correction_pulls, 1, "correct domain should be pulled toward");
+    assert_eq!(
+        report.correction_pushes, 1,
+        "wrong domain should be pushed away"
+    );
+    assert_eq!(
+        report.correction_pulls, 1,
+        "correct domain should be pulled toward"
+    );
     assert_ne!(centroids[&Domain::Conversation], conv_before);
     assert_ne!(centroids[&Domain::SystemInfo], sys_before);
 
@@ -436,7 +454,6 @@ fn fb19_correction_outcome_pulls_toward_correct_domain() {
 #[tokio::test]
 async fn fb20_apply_nudged_centroids_updates_live_router_cache() {
     use kria_core::routing::cache::RouterCache;
-    use std::path::PathBuf;
 
     let cache_dir = std::env::temp_dir().join("kria_fb20_cache");
     let (cache, _tx) = RouterCache::new(cache_dir.clone(), "test-model".into());
@@ -457,8 +474,16 @@ async fn fb20_apply_nudged_centroids_updates_live_router_cache() {
 
     let after = cache.centroids().await;
     let v = &after[&Domain::SystemInfo];
-    assert!((v[0] - 0.707).abs() < 0.001, "centroid x should be ~0.707, got {}", v[0]);
-    assert!((v[1] - 0.707).abs() < 0.001, "centroid y should be ~0.707, got {}", v[1]);
+    assert!(
+        (v[0] - 0.707).abs() < 0.001,
+        "centroid x should be ~0.707, got {}",
+        v[0]
+    );
+    assert!(
+        (v[1] - 0.707).abs() < 0.001,
+        "centroid y should be ~0.707, got {}",
+        v[1]
+    );
 
     let _ = std::fs::remove_dir_all(&cache_dir);
 }

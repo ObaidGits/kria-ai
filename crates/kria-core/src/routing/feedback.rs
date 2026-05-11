@@ -28,11 +28,11 @@
 //! | HitlDenied | Safety denied the action | No centroid change |
 //! | ToolError | Tool execution failed | No centroid change |
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
 use super::domain::Domain;
@@ -158,7 +158,11 @@ impl FeedbackCollector {
 
     /// Create with default settings.
     pub fn default_config() -> Self {
-        Self::new(DEFAULT_FEEDBACK_DIR, DEFAULT_MAX_BUFFER, DEFAULT_LEARNING_RATE)
+        Self::new(
+            DEFAULT_FEEDBACK_DIR,
+            DEFAULT_MAX_BUFFER,
+            DEFAULT_LEARNING_RATE,
+        )
     }
 
     /// Record a routing feedback entry.
@@ -232,11 +236,7 @@ impl FeedbackCollector {
         }
 
         let path = self.feedback_dir.join(FEEDBACK_FILENAME);
-        let mut file = match OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-        {
+        let mut file = match OpenOptions::new().create(true).append(true).open(&path) {
             Ok(f) => f,
             Err(e) => {
                 warn!("Failed to open feedback file: {}", e);
@@ -275,14 +275,12 @@ impl FeedbackCollector {
         let reader = BufReader::new(file);
         let mut entries = Vec::new();
 
-        for line in reader.lines() {
-            if let Ok(line) = line {
-                if line.trim().is_empty() {
-                    continue;
-                }
-                if let Ok(entry) = serde_json::from_str::<RoutingFeedback>(&line) {
-                    entries.push(entry);
-                }
+        for line in reader.lines().flatten() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            if let Ok(entry) = serde_json::from_str::<RoutingFeedback>(&line) {
+                entries.push(entry);
             }
         }
 
@@ -340,9 +338,7 @@ pub fn adjust_centroids(
                     report.total_adjusted += 1;
                 }
             }
-            RoutingOutcome::Corrected {
-                correct_domain, ..
-            } => {
+            RoutingOutcome::Corrected { correct_domain, .. } => {
                 // Strong signal: push away from wrong, pull toward correct
                 if let Some(centroid) = centroids.get_mut(&entry.domain_selected) {
                     nudge_centroid(centroid, &entry.embedding, -learning_rate * 2.0);
@@ -561,7 +557,7 @@ mod tests {
             Some("check_health"),
             None,
             false,
-            Some("permission denied".into()),
+            Some("permission denied"),
         );
         assert!(matches!(outcome, RoutingOutcome::ToolError { .. }));
     }
@@ -644,11 +640,7 @@ mod tests {
     #[test]
     fn flush_to_disk_creates_file() {
         let dir = std::env::temp_dir().join("kria_feedback_test");
-        let mut collector = FeedbackCollector::new(
-            dir.to_str().unwrap(),
-            2,
-            0.01,
-        );
+        let mut collector = FeedbackCollector::new(dir.to_str().unwrap(), 2, 0.01);
         let feedback = RoutingFeedback {
             input_text_hash: 1,
             domain_selected: Domain::SystemInfo,
@@ -674,11 +666,7 @@ mod tests {
     #[test]
     fn auto_flush_at_capacity() {
         let dir = std::env::temp_dir().join("kria_feedback_test_capacity");
-        let mut collector = FeedbackCollector::new(
-            dir.to_str().unwrap(),
-            3,
-            0.01,
-        );
+        let mut collector = FeedbackCollector::new(dir.to_str().unwrap(), 3, 0.01);
         for i in 0..5 {
             let feedback = RoutingFeedback {
                 input_text_hash: i,

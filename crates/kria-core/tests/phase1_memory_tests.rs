@@ -2,13 +2,13 @@ use chrono::Utc;
 use kria_core::memory::embeddings::EmbeddingModel;
 use kria_core::memory::facts::FactManager;
 use kria_core::memory::retrieval::ContextBuilder;
+use kria_core::memory::vectors::VectorIndex;
 /// Phase 1 — Persistent Memory & Chat History tests
 ///
 /// Validates: MemoryStore CRUD, session management, fact extraction,
 /// knowledge tool wiring, embeddings (fallback), vector index, and
 /// the ContextBuilder retrieval pipeline.
 use kria_core::memory::{ConversationTurn, MemoryFact, MemoryStore};
-use kria_core::memory::vectors::VectorIndex;
 use kria_core::tools::registry;
 use std::sync::Arc;
 

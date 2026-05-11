@@ -58,12 +58,11 @@ async fn main() -> anyhow::Result<()> {
             ..Default::default()
         };
 
-        let (mut controller, sender) =
-            kria_core::agent::executive::ExecutiveController::new(
-                executive_config,
-                gpu_lease,
-                policy_gate,
-            );
+        let (mut controller, sender) = kria_core::agent::executive::ExecutiveController::new(
+            executive_config,
+            gpu_lease,
+            policy_gate,
+        );
 
         // Spawn the controller's dispatch loop in the background.
         tokio::spawn(async move {
@@ -78,7 +77,12 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let turn_admission = Arc::new(kria_core::agent::TurnAdmission::new());
-    let state = Arc::new(ServerState { config, fleet, executive_sender, turn_admission });
+    let state = Arc::new(ServerState {
+        config,
+        fleet,
+        executive_sender,
+        turn_admission,
+    });
     let app = build_router(state);
 
     tracing::info!("KRIA server listening on {bind_addr}");

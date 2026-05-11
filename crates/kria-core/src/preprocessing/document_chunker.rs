@@ -95,7 +95,10 @@ fn split_into_chunks(text: &str) -> Vec<RawChunk> {
 /// Split on double-newline paragraph boundaries, then merge small paragraphs
 /// and split large ones to stay near `TARGET_CHUNK_CHARS`.
 fn split_by_paragraphs(text: &str) -> Vec<RawChunk> {
-    let paragraphs: Vec<&str> = text.split("\n\n").filter(|p| !p.trim().is_empty()).collect();
+    let paragraphs: Vec<&str> = text
+        .split("\n\n")
+        .filter(|p| !p.trim().is_empty())
+        .collect();
 
     let mut chunks: Vec<RawChunk> = Vec::new();
     let mut current = String::new();
@@ -253,7 +256,11 @@ mod tests {
         let para = "This is a paragraph with enough words to fill space. ".repeat(40);
         let text = format!("{}\n\n{}\n\n{}", para, para, para);
         let chunks = split_into_chunks(&text);
-        assert!(chunks.len() > 1, "expected multiple chunks, got {}", chunks.len());
+        assert!(
+            chunks.len() > 1,
+            "expected multiple chunks, got {}",
+            chunks.len()
+        );
     }
 
     #[test]

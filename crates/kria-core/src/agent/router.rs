@@ -199,10 +199,7 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\b(?:run|execute|install|uninstall|update|upgrade)\b.{0,80}\b(?:on|in)\s+(?:my\s+)?(?:vm|remote\s+(?:vm|host|machine|computer)|connected\s+(?:vm|computer|machine|host))\b",
             "execute_fleet_command",
         ),
-        (
-            r"(?i)\bremote\s+command\s*:\s*.+",
-            "execute_fleet_command",
-        ),
+        (r"(?i)\bremote\s+command\s*:\s*.+", "execute_fleet_command"),
         // Extended VM patterns — catch general VM-related queries
         (
             r"(?i)\bmy\s+(vm|virtual\s+machine|server)\s+(is|seems|looks|running|has|was|did)\b",
@@ -241,18 +238,9 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             "execute_fleet_command",
         ),
         // Shell execution — MUST come before open_application so "Run bash:" is not misclassified
-        (
-            r"(?i)^run\s*:\s*\S+",
-            "execute_bash",
-        ),
-        (
-            r"(?i)\brun\s+(bash|shell|command)\s*:\s*.+",
-            "execute_bash",
-        ),
-        (
-            r"(?i)\brun\s+python\s*:\s*.+",
-            "execute_python",
-        ),
+        (r"(?i)^run\s*:\s*\S+", "execute_bash"),
+        (r"(?i)\brun\s+(bash|shell|command)\s*:\s*.+", "execute_bash"),
+        (r"(?i)\brun\s+python\s*:\s*.+", "execute_python"),
         (
             r"(?i)\brun\s+powershell\s*(command)?\s*:\s*.+",
             "execute_powershell",
@@ -698,10 +686,7 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             "fetch_webpage",
         ),
         // ── Weather / Time / Currency / Calculator ──
-        (
-            r"(?i)\b(what('?s|\s+is)\s+the\s+)?weather\b",
-            "get_weather",
-        ),
+        (r"(?i)\b(what('?s|\s+is)\s+the\s+)?weather\b", "get_weather"),
         (
             r"(?i)\b(weather|mausam)\s+(today|tomorrow|now|forecast|kaisa|kya)\b",
             "get_weather",
@@ -710,10 +695,7 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\b(current|local)\s+time\b|\bwhat\s+time\s+is\s+it\b|\btime\s+(now|kya)\b",
             "get_current_time",
         ),
-        (
-            r"(?i)\btime\s+in\s+\w+\b",
-            "get_current_time",
-        ),
+        (r"(?i)\btime\s+in\s+\w+\b", "get_current_time"),
         (
             r"(?i)\b(convert|exchange)\s+\d+.*\b(to|into)\b.*\b(usd|eur|inr|gbp|jpy|currency)\b",
             "get_exchange_rate",
@@ -726,10 +708,7 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\b(calculate|compute|math|solve)\b.*[\d+\-*/^()]+",
             "calculate",
         ),
-        (
-            r"(?i)\b\d+\s*[\+\-\*/\^]\s*\d+",
-            "calculate",
-        ),
+        (r"(?i)\b\d+\s*[\+\-\*/\^]\s*\d+", "calculate"),
         // ── Power — extended patterns ──
         (
             r"(?i)\block\s+(my\s+)?(screen|computer|pc|laptop)\b",
@@ -739,10 +718,7 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\bscreen\s+lock\s+(karo|karo|kar|lagao)\b",
             "lock_screen",
         ),
-        (
-            r"(?i)\b(hibernate|suspend\s+to\s+disk)\b",
-            "hibernate",
-        ),
+        (r"(?i)\b(hibernate|suspend\s+to\s+disk)\b", "hibernate"),
         (
             r"(?i)\b(cancel|abort|stop)\s+(the\s+)?(shutdown|reboot|restart)\b",
             "execute_bash",
@@ -830,10 +806,7 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\b(info|details|metadata)\s+(about|for|of)\s+(/|~/)\S+",
             "get_file_info",
         ),
-        (
-            r"(?i)\b(delete|remove|rm)\s+(/|~/)\S+",
-            "delete_file",
-        ),
+        (r"(?i)\b(delete|remove|rm)\s+(/|~/)\S+", "delete_file"),
         (
             r"(?i)\b(delete|remove)\s+(the\s+)?(folder|directory)\s+(at|in)\s+\S+",
             "delete_directory",
@@ -887,26 +860,14 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\bset\s+(the\s+)?process\s+priority\b",
             "set_process_priority",
         ),
-        (
-            r"(?i)\bmaximize\s+\w+\b",
-            "maximize_window",
-        ),
-        (
-            r"(?i)\bminimize\s+\w+\b",
-            "minimize_window",
-        ),
+        (r"(?i)\bmaximize\s+\w+\b", "maximize_window"),
+        (r"(?i)\bminimize\s+\w+\b", "minimize_window"),
         (
             r"(?i)\btile\s+.{1,40}\s+(and|with)\s+.{1,30}\b(side\s+by\s+side|together|split)\b",
             "tile_windows",
         ),
-        (
-            r"(?i)\btile\s+.{1,40}\s+(and|with)\s+\w+",
-            "tile_windows",
-        ),
-        (
-            r"(?i)\btile\s+(the\s+)?(windows?|apps?)\b",
-            "tile_windows",
-        ),
+        (r"(?i)\btile\s+.{1,40}\s+(and|with)\s+\w+", "tile_windows"),
+        (r"(?i)\btile\s+(the\s+)?(windows?|apps?)\b", "tile_windows"),
         (
             r"(?i)\bmove\s+.{1,40}\s+(window\s+)?(to\s+)?(x\s*=|position|coordinates?)\b",
             "move_window",
@@ -983,10 +944,7 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\b(show|get|list)\s+(me\s+)?(the\s+)?(last|recent|latest)\s+\d+\s+(git\s+)?commits?\b",
             "git_log",
         ),
-        (
-            r"(?i)\bgit\s+log\b|\bcommit\s+history\b",
-            "git_log",
-        ),
+        (r"(?i)\bgit\s+log\b|\bcommit\s+history\b", "git_log"),
         (
             r"(?i)\b(commit|save)\s+(all\s+)?(my\s+)?changes\b",
             "git_commit",
@@ -1090,15 +1048,9 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\bcolab\s+(chalao|start|open|run|execute)\b",
             "mcp_colab-mcp_open_colab_browser_connection",
         ),
-        (
-            r"(?i)\bcolab\s+mein\s+(notebook|code)\b",
-            "gw_drive_create",
-        ),
+        (r"(?i)\bcolab\s+mein\s+(notebook|code)\b", "gw_drive_create"),
         // ── Direct tool invocation syntax ──
-        (
-            r"(?i)^!!tool:(\w+)",
-            "DIRECT_TOOL_OVERRIDE",
-        ),
+        (r"(?i)^!!tool:(\w+)", "DIRECT_TOOL_OVERRIDE"),
         // ── Database ──
         (
             r"(?i)\b(describe|show|list)\s+(the\s+)?(database|db)\s+schema\b",
@@ -1187,8 +1139,7 @@ impl IntentRouter {
         let trimmed = text.trim();
 
         // 0. Check for direct tool invocation syntax: !!tool:tool_name query=...
-        if trimmed.starts_with("!!tool:") {
-            let after_prefix = &trimmed[7..];
+        if let Some(after_prefix) = trimmed.strip_prefix("!!tool:") {
             let tool_name = after_prefix
                 .split_whitespace()
                 .next()
@@ -1214,7 +1165,11 @@ impl IntentRouter {
             if let Some(mat) = re.find(trimmed) {
                 let match_len = mat.len() as f32;
                 let query_len = trimmed.len() as f32;
-                let coverage = if query_len > 0.0 { match_len / query_len } else { 0.0 };
+                let coverage = if query_len > 0.0 {
+                    match_len / query_len
+                } else {
+                    0.0
+                };
                 // Scale: full coverage → 0.95, half → 0.70, minimal → 0.55
                 let dynamic_confidence = (0.55 + coverage * 0.40).min(0.95);
                 return IntentResult {
@@ -1453,29 +1408,20 @@ mod tests {
     fn routes_list_installed_apps_to_list_installed_packages() {
         let result = IntentRouter::classify("List the Apps installed in my System");
         assert!(matches!(result.intent, Intent::DirectTool(_)));
-        assert_eq!(
-            result.tool_hint.as_deref(),
-            Some("list_installed_packages")
-        );
+        assert_eq!(result.tool_hint.as_deref(), Some("list_installed_packages"));
     }
 
     #[test]
     fn routes_show_installed_packages_to_list_installed_packages() {
         let result = IntentRouter::classify("show me all installed packages");
         assert!(matches!(result.intent, Intent::DirectTool(_)));
-        assert_eq!(
-            result.tool_hint.as_deref(),
-            Some("list_installed_packages")
-        );
+        assert_eq!(result.tool_hint.as_deref(), Some("list_installed_packages"));
     }
 
     #[test]
     fn routes_what_programs_are_installed_to_list_installed_packages() {
         let result = IntentRouter::classify("what programs are installed on my system");
         assert!(matches!(result.intent, Intent::DirectTool(_)));
-        assert_eq!(
-            result.tool_hint.as_deref(),
-            Some("list_installed_packages")
-        );
+        assert_eq!(result.tool_hint.as_deref(), Some("list_installed_packages"));
     }
 }

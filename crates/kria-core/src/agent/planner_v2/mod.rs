@@ -99,7 +99,8 @@ pub struct PlannedPath {
 impl PlannedPath {
     /// Get tool names used in this path (for SelfModel scoring).
     pub fn tool_names(&self) -> Vec<&str> {
-        self.steps.iter()
+        self.steps
+            .iter()
             .map(|s| s.command.binary.as_str())
             .collect()
     }
@@ -152,12 +153,14 @@ impl BranchingPlanner {
         }
 
         // Find Path A (DiagnoseFirst) and Path B (MinimalRisk) scores
-        let path_a_score = paths.iter()
+        let path_a_score = paths
+            .iter()
             .find(|p| p.risk == PathRisk::DiagnoseFirst)
             .and_then(|p| p.score)
             .unwrap_or(0.5);
 
-        let path_b_score = paths.iter()
+        let path_b_score = paths
+            .iter()
             .find(|p| p.risk == PathRisk::MinimalRisk)
             .and_then(|p| p.score)
             .unwrap_or(0.5);
@@ -170,10 +173,14 @@ impl BranchingPlanner {
         }
 
         // Otherwise, pick highest score
-        paths.iter()
+        paths
+            .iter()
             .enumerate()
             .max_by(|(_, a), (_, b)| {
-                a.score.unwrap_or(0.5).partial_cmp(&b.score.unwrap_or(0.5)).unwrap()
+                a.score
+                    .unwrap_or(0.5)
+                    .partial_cmp(&b.score.unwrap_or(0.5))
+                    .unwrap()
             })
             .map(|(idx, _)| idx)
             .unwrap_or(0)
@@ -185,12 +192,13 @@ impl BranchingPlanner {
             r#"You are KRIA's planning engine. You MUST generate exactly 3 plans using these templates:
 
 SYSTEM STATE:
-"#
+"#,
         );
 
         prompt.push_str(&working_set.to_prompt());
 
-        prompt.push_str(r#"
+        prompt.push_str(
+            r#"
 
 Generate exactly 3 plans:
 
@@ -212,7 +220,7 @@ PATH C — AGGRESSIVE FIX (may be hard to reverse):
 SELECT: [A/B/C] because [reasoning based on risk and confidence]
 
 IMPORTANT: All commands MUST be structured JSON: {"binary": "...", "args": [...], "target": "..."}
-Do NOT use shell syntax. Each command is a separate binary invocation."#
+Do NOT use shell syntax. Each command is a separate binary invocation."#,
         );
 
         prompt
@@ -302,22 +310,20 @@ Do NOT use shell syntax. Each command is a separate binary invocation."#
             PlannedPath {
                 risk: PathRisk::MinimalRisk,
                 name: "Minimal-Risk Fix".into(),
-                steps: vec![
-                    PlannedStep {
-                        step_number: 1,
-                        description: "Restart common services".into(),
-                        command: StructuredCommand {
-                            binary: "systemctl".into(),
-                            args: vec!["restart".into(), "nginx".into()],
-                            target: "local".into(),
-                            timeout_secs: 30,
-                            working_dir: None,
-                            env_vars: None,
-                        },
-                        expected_outcome: "Service restarted".into(),
-                        on_failure: "abort".into(),
+                steps: vec![PlannedStep {
+                    step_number: 1,
+                    description: "Restart common services".into(),
+                    command: StructuredCommand {
+                        binary: "systemctl".into(),
+                        args: vec!["restart".into(), "nginx".into()],
+                        target: "local".into(),
+                        timeout_secs: 30,
+                        working_dir: None,
+                        env_vars: None,
                     },
-                ],
+                    expected_outcome: "Service restarted".into(),
+                    on_failure: "abort".into(),
+                }],
                 predicted_outcome: "Service running".into(),
                 score: None,
             }
@@ -378,66 +384,60 @@ mod tests {
             PlannedPath {
                 risk: PathRisk::DiagnoseFirst,
                 name: "Diagnose-First".into(),
-                steps: vec![
-                    PlannedStep {
-                        step_number: 1,
-                        description: "Check status".into(),
-                        command: StructuredCommand {
-                            binary: "systemctl".into(),
-                            args: vec!["status".into(), "nginx".into()],
-                            target: "local".into(),
-                            timeout_secs: 5,
-                            working_dir: None,
-                            env_vars: None,
-                        },
-                        expected_outcome: "Service status".into(),
-                        on_failure: "continue".into(),
+                steps: vec![PlannedStep {
+                    step_number: 1,
+                    description: "Check status".into(),
+                    command: StructuredCommand {
+                        binary: "systemctl".into(),
+                        args: vec!["status".into(), "nginx".into()],
+                        target: "local".into(),
+                        timeout_secs: 5,
+                        working_dir: None,
+                        env_vars: None,
                     },
-                ],
+                    expected_outcome: "Service status".into(),
+                    on_failure: "continue".into(),
+                }],
                 predicted_outcome: "Know what's wrong".into(),
                 score: None,
             },
             PlannedPath {
                 risk: PathRisk::MinimalRisk,
                 name: "Minimal-Risk Fix".into(),
-                steps: vec![
-                    PlannedStep {
-                        step_number: 1,
-                        description: "Restart service".into(),
-                        command: StructuredCommand {
-                            binary: "systemctl".into(),
-                            args: vec!["restart".into(), "nginx".into()],
-                            target: "local".into(),
-                            timeout_secs: 30,
-                            working_dir: None,
-                            env_vars: None,
-                        },
-                        expected_outcome: "Service restarted".into(),
-                        on_failure: "abort".into(),
+                steps: vec![PlannedStep {
+                    step_number: 1,
+                    description: "Restart service".into(),
+                    command: StructuredCommand {
+                        binary: "systemctl".into(),
+                        args: vec!["restart".into(), "nginx".into()],
+                        target: "local".into(),
+                        timeout_secs: 30,
+                        working_dir: None,
+                        env_vars: None,
                     },
-                ],
+                    expected_outcome: "Service restarted".into(),
+                    on_failure: "abort".into(),
+                }],
                 predicted_outcome: "Service running".into(),
                 score: None,
             },
             PlannedPath {
                 risk: PathRisk::Aggressive,
                 name: "Aggressive Fix".into(),
-                steps: vec![
-                    PlannedStep {
-                        step_number: 1,
-                        description: "Force kill".into(),
-                        command: StructuredCommand {
-                            binary: "systemctl".into(),
-                            args: vec!["kill".into(), "nginx".into()],
-                            target: "local".into(),
-                            timeout_secs: 10,
-                            working_dir: None,
-                            env_vars: None,
-                        },
-                        expected_outcome: "Service killed".into(),
-                        on_failure: "abort".into(),
+                steps: vec![PlannedStep {
+                    step_number: 1,
+                    description: "Force kill".into(),
+                    command: StructuredCommand {
+                        binary: "systemctl".into(),
+                        args: vec!["kill".into(), "nginx".into()],
+                        target: "local".into(),
+                        timeout_secs: 10,
+                        working_dir: None,
+                        env_vars: None,
                     },
-                ],
+                    expected_outcome: "Service killed".into(),
+                    on_failure: "abort".into(),
+                }],
                 predicted_outcome: "Clean restart".into(),
                 score: None,
             },
@@ -454,7 +454,10 @@ mod tests {
 
         // With equal scores (all unknown tools = 0.5), Path B should be preferred
         // because it's within 10% of Path A
-        assert_eq!(winner, 1, "Should prefer Path B (MinimalRisk) when scores are equal");
+        assert_eq!(
+            winner, 1,
+            "Should prefer Path B (MinimalRisk) when scores are equal"
+        );
     }
 
     #[tokio::test]
@@ -491,8 +494,13 @@ mod tests {
         let result = BranchingPlanner::heuristic_plan("nginx is down", &[]);
         let path_b = &result.paths[1];
         // Should include nginx config check
-        assert!(path_b.steps.iter().any(|s| s.command.args.contains(&"-t".to_string())),
-            "Path B should include nginx config check");
+        assert!(
+            path_b
+                .steps
+                .iter()
+                .any(|s| s.command.args.contains(&"-t".to_string())),
+            "Path B should include nginx config check"
+        );
     }
 
     #[test]

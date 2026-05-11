@@ -50,12 +50,12 @@ impl ConfidenceCalibrator {
     pub fn new() -> Self {
         Self {
             // Priors encode our initial beliefs about threshold quality
-            plan_alpha: 8.0,    // 8 successes at 0.8 threshold
-            plan_beta: 2.0,     // 2 failures at 0.8 threshold
-            gather_alpha: 6.0,  // 6 successes at 0.6 threshold
-            gather_beta: 4.0,   // 4 failures at 0.6 threshold
-            ask_alpha: 3.0,     // 3 successes at 0.3 threshold
-            ask_beta: 7.0,      // 7 failures at 0.3 threshold
+            plan_alpha: 8.0,   // 8 successes at 0.8 threshold
+            plan_beta: 2.0,    // 2 failures at 0.8 threshold
+            gather_alpha: 6.0, // 6 successes at 0.6 threshold
+            gather_beta: 4.0,  // 4 failures at 0.6 threshold
+            ask_alpha: 3.0,    // 3 successes at 0.3 threshold
+            ask_beta: 7.0,     // 7 failures at 0.3 threshold
             plan_threshold: 0.8,
             gather_threshold: 0.6,
             ask_threshold: 0.3,
@@ -82,11 +82,23 @@ impl ConfidenceCalibrator {
     pub fn record_outcome(&mut self, confidence: f64, success: bool) {
         // Update the appropriate Beta distribution
         if confidence >= self.plan_threshold {
-            if success { self.plan_alpha += 1.0; } else { self.plan_beta += 1.0; }
+            if success {
+                self.plan_alpha += 1.0;
+            } else {
+                self.plan_beta += 1.0;
+            }
         } else if confidence >= self.gather_threshold {
-            if success { self.gather_alpha += 1.0; } else { self.gather_beta += 1.0; }
+            if success {
+                self.gather_alpha += 1.0;
+            } else {
+                self.gather_beta += 1.0;
+            }
         } else if confidence >= self.ask_threshold {
-            if success { self.ask_alpha += 1.0; } else { self.ask_beta += 1.0; }
+            if success {
+                self.ask_alpha += 1.0;
+            } else {
+                self.ask_beta += 1.0;
+            }
         }
         // Below ask_threshold: no update (we refused, so no outcome)
 
@@ -107,7 +119,11 @@ impl ConfidenceCalibrator {
 
     /// Get the current thresholds.
     pub fn thresholds(&self) -> (f64, f64, f64) {
-        (self.plan_threshold, self.gather_threshold, self.ask_threshold)
+        (
+            self.plan_threshold,
+            self.gather_threshold,
+            self.ask_threshold,
+        )
     }
 }
 
@@ -160,7 +176,7 @@ mod tests {
     #[test]
     fn recording_success_adjusts_thresholds() {
         let mut cal = ConfidenceCalibrator::new();
-        let initial_plan = cal.plan_threshold;
+        let _initial_plan = cal.plan_threshold;
 
         // Record many successes at the plan threshold
         for _ in 0..10 {
@@ -184,8 +200,11 @@ mod tests {
 
         // Threshold should adjust (may go up or down depending on Beta update)
         // The important thing is it stays reasonable and doesn't panic
-        assert!(cal.plan_threshold >= 0.0 && cal.plan_threshold <= 1.0,
-            "Threshold should stay in [0,1], got {}", cal.plan_threshold);
+        assert!(
+            cal.plan_threshold >= 0.0 && cal.plan_threshold <= 1.0,
+            "Threshold should stay in [0,1], got {}",
+            cal.plan_threshold
+        );
     }
 
     #[test]
@@ -198,10 +217,18 @@ mod tests {
             cal.record_outcome(conf, i % 2 == 0);
         }
 
-        assert!(cal.plan_threshold > cal.gather_threshold,
-            "plan ({}) should be > gather ({})", cal.plan_threshold, cal.gather_threshold);
-        assert!(cal.gather_threshold > cal.ask_threshold,
-            "gather ({}) should be > ask ({})", cal.gather_threshold, cal.ask_threshold);
+        assert!(
+            cal.plan_threshold > cal.gather_threshold,
+            "plan ({}) should be > gather ({})",
+            cal.plan_threshold,
+            cal.gather_threshold
+        );
+        assert!(
+            cal.gather_threshold > cal.ask_threshold,
+            "gather ({}) should be > ask ({})",
+            cal.gather_threshold,
+            cal.ask_threshold
+        );
     }
 
     #[test]

@@ -3,43 +3,76 @@
 // Strict capability allowlist using tree-sitter AST parsing.
 // Bans dangerous modules at the import_statement level regardless of aliasing.
 
-use tree_sitter::{Parser, Node};
+use tree_sitter::{Node, Parser};
 
 /// Unconditionally banned modules — blocked at import_statement level.
 /// Banned regardless of aliasing (import X as Y).
 const BANNED_MODULES: &[&str] = &[
     // System interaction
-    "os", "subprocess", "shutil", "sys",
+    "os",
+    "subprocess",
+    "shutil",
+    "sys",
     // Code execution
-    "code", "codeop", "compile", "ast",
+    "code",
+    "codeop",
+    "compile",
+    "ast",
     // Deserialization attacks
-    "pickle", "joblib", "shelve", "marshal",
+    "pickle",
+    "joblib",
+    "shelve",
+    "marshal",
     // Network exfiltration
-    "socket", "http", "urllib", "requests", "http.client",
-    "ftplib", "smtplib", "paramiko", "telnetlib", "xmlrpc",
+    "socket",
+    "http",
+    "urllib",
+    "requests",
+    "http.client",
+    "ftplib",
+    "smtplib",
+    "paramiko",
+    "telnetlib",
+    "xmlrpc",
     // Native code
-    "ctypes", "cffi",
+    "ctypes",
+    "cffi",
     // Dynamic import
-    "importlib", "imp",
+    "importlib",
+    "imp",
     // Introspection (sandbox escape)
-    "__builtin__", "__builtins__", "builtins",
+    "__builtin__",
+    "__builtins__",
+    "builtins",
 ];
 
 /// Banned call targets — blocked at call AST node.
 const BANNED_CALLS: &[&str] = &[
-    "eval", "exec", "compile", "globals", "locals", "vars",
-    "getattr", "setattr", "delattr",
-    "__import__", "breakpoint", "exit", "quit",
+    "eval",
+    "exec",
+    "compile",
+    "globals",
+    "locals",
+    "vars",
+    "getattr",
+    "setattr",
+    "delattr",
+    "__import__",
+    "breakpoint",
+    "exit",
+    "quit",
 ];
 
 /// Check a code block against the capability allowlist.
 /// Returns Ok(()) if safe, Err with details if blocked.
 pub fn capability_check(code: &str) -> Result<(), CapabilityError> {
     let mut parser = Parser::new();
-    parser.set_language(&tree_sitter_python::language())
+    parser
+        .set_language(&tree_sitter_python::language())
         .expect("Failed to load Python grammar for tree-sitter");
 
-    let tree = parser.parse(code, None)
+    let tree = parser
+        .parse(code, None)
         .ok_or(CapabilityError::ParseError)?;
 
     walk_node(tree.root_node(), code, 0)

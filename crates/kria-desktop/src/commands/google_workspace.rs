@@ -49,10 +49,7 @@ pub(super) fn inspect_google_account_registry(
         return state;
     };
 
-    let entry = json
-        .get("accounts")
-        .and_then(|v| v.get(account))
-        .cloned();
+    let entry = json.get("accounts").and_then(|v| v.get(account)).cloned();
     let Some(entry) = entry else {
         return state;
     };
@@ -82,10 +79,7 @@ pub(super) fn remove_google_account_registry_entry(
     };
 
     let mut json: serde_json::Value = serde_json::from_str(&raw)?;
-    let Some(accounts) = json
-        .get_mut("accounts")
-        .and_then(|v| v.as_object_mut())
-    else {
+    let Some(accounts) = json.get_mut("accounts").and_then(|v| v.as_object_mut()) else {
         return Ok(false);
     };
 
@@ -124,7 +118,8 @@ fn oauth_output_detail(output: &std::process::Output) -> String {
 
 fn should_retry_account_exists(output: &std::process::Output) -> bool {
     let text = oauth_output_text(output).to_ascii_lowercase();
-    text.contains("already exists") || text.contains("remove first")
+    text.contains("already exists")
+        || text.contains("remove first")
         || text.contains("could not load token")
 }
 
@@ -386,8 +381,7 @@ pub async fn connect_google_workspace(
             Err(err) => {
                 preflight_notice = Some(format!(
                     "Detected stale Google account '{}' but failed to clean registry: {}",
-                    account,
-                    err
+                    account, err
                 ));
             }
         }

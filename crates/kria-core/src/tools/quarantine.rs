@@ -218,7 +218,12 @@ impl QuarantineRegistry {
             params![name, risk_level.as_str(), source.to_string(), now],
         )?;
 
-        log_action_inner(&conn, name, "quarantined", &format!("risk={:?}, source={}", risk_level, source))?;
+        log_action_inner(
+            &conn,
+            name,
+            "quarantined",
+            &format!("risk={:?}, source={}", risk_level, source),
+        )?;
 
         Ok(())
     }
@@ -261,7 +266,12 @@ impl QuarantineRegistry {
                         "UPDATE quarantine SET status = 'active' WHERE name = ?1",
                         params![name],
                     )?;
-                    log_action_inner(&conn, name, "auto_promoted", "green risk, auto-promoted after 3 successes")?;
+                    log_action_inner(
+                        &conn,
+                        name,
+                        "auto_promoted",
+                        "green risk, auto-promoted after 3 successes",
+                    )?;
                     return Ok(QuarantineStatus::Active);
                 }
                 RiskLevel::Yellow | RiskLevel::Red => {
@@ -270,7 +280,12 @@ impl QuarantineRegistry {
                         "UPDATE quarantine SET status = 'pending_approval' WHERE name = ?1",
                         params![name],
                     )?;
-                    log_action_inner(&conn, name, "pending_approval", &format!("{:?} risk, HITL required", risk_level))?;
+                    log_action_inner(
+                        &conn,
+                        name,
+                        "pending_approval",
+                        &format!("{:?} risk, HITL required", risk_level),
+                    )?;
                     return Ok(QuarantineStatus::PendingApproval);
                 }
                 RiskLevel::Black => {
@@ -315,7 +330,12 @@ impl QuarantineRegistry {
                 "UPDATE quarantine SET status = 'disabled' WHERE name = ?1",
                 params![name],
             )?;
-            log_action_inner(&conn, name, "disabled", &format!("circuit breaker: {} consecutive failures", failures))?;
+            log_action_inner(
+                &conn,
+                name,
+                "disabled",
+                &format!("circuit breaker: {} consecutive failures", failures),
+            )?;
             return Ok(QuarantineStatus::Disabled);
         }
 
@@ -375,8 +395,14 @@ impl QuarantineRegistry {
                         "BLACK" => RiskLevel::Black,
                         _ => RiskLevel::Yellow,
                     },
-                    status: row.get::<_, String>(3)?.parse().unwrap_or(QuarantineStatus::Testing),
-                    source: row.get::<_, String>(4)?.parse().unwrap_or(ToolSource::SkillCompiler),
+                    status: row
+                        .get::<_, String>(3)?
+                        .parse()
+                        .unwrap_or(QuarantineStatus::Testing),
+                    source: row
+                        .get::<_, String>(4)?
+                        .parse()
+                        .unwrap_or(ToolSource::SkillCompiler),
                     success_count: row.get(5)?,
                     consecutive_failures: row.get(6)?,
                     total_executions: row.get(7)?,
@@ -411,11 +437,13 @@ impl QuarantineRegistry {
     /// Check if a tool is active (promoted).
     pub fn is_active(&self, name: &str) -> anyhow::Result<bool> {
         let conn = self.conn.lock().unwrap();
-        let status: String = conn.query_row(
-            "SELECT status FROM quarantine WHERE name = ?1",
-            params![name],
-            |r| r.get(0),
-        ).unwrap_or_else(|_| "not_found".into());
+        let status: String = conn
+            .query_row(
+                "SELECT status FROM quarantine WHERE name = ?1",
+                params![name],
+                |r| r.get(0),
+            )
+            .unwrap_or_else(|_| "not_found".into());
         Ok(status == "active")
     }
 
@@ -425,23 +453,28 @@ impl QuarantineRegistry {
 
         let testing: i64 = conn.query_row(
             "SELECT COUNT(*) FROM quarantine WHERE status = 'testing'",
-            [], |r| r.get(0),
+            [],
+            |r| r.get(0),
         )?;
         let pending: i64 = conn.query_row(
             "SELECT COUNT(*) FROM quarantine WHERE status = 'pending_approval'",
-            [], |r| r.get(0),
+            [],
+            |r| r.get(0),
         )?;
         let active: i64 = conn.query_row(
             "SELECT COUNT(*) FROM quarantine WHERE status = 'active'",
-            [], |r| r.get(0),
+            [],
+            |r| r.get(0),
         )?;
         let disabled: i64 = conn.query_row(
             "SELECT COUNT(*) FROM quarantine WHERE status = 'disabled'",
-            [], |r| r.get(0),
+            [],
+            |r| r.get(0),
         )?;
         let rejected: i64 = conn.query_row(
             "SELECT COUNT(*) FROM quarantine WHERE status = 'rejected'",
-            [], |r| r.get(0),
+            [],
+            |r| r.get(0),
         )?;
 
         Ok(QuarantineStats {
@@ -464,7 +497,12 @@ impl QuarantineRegistry {
 
 /// Log an action to the quarantine audit trail. Takes an already-locked connection
 /// to avoid Mutex re-entrance deadlocks.
-fn log_action_inner(conn: &rusqlite::Connection, name: &str, action: &str, details: &str) -> anyhow::Result<()> {
+fn log_action_inner(
+    conn: &rusqlite::Connection,
+    name: &str,
+    action: &str,
+    details: &str,
+) -> anyhow::Result<()> {
     conn.execute(
         "INSERT INTO quarantine_log (tool_name, action, details) VALUES (?1, ?2, ?3)",
         params![name, action, details],
@@ -495,7 +533,8 @@ mod tests {
     #[test]
     fn quarantine_and_test() {
         let reg = test_registry();
-        reg.quarantine("test_tool", RiskLevel::Yellow, ToolSource::SkillCompiler).unwrap();
+        reg.quarantine("test_tool", RiskLevel::Yellow, ToolSource::SkillCompiler)
+            .unwrap();
 
         // Record 3 successes
         let status = reg.record_success("test_tool").unwrap();
@@ -511,7 +550,12 @@ mod tests {
     #[test]
     fn green_auto_promotes() {
         let reg = test_registry();
-        reg.quarantine("read_only_tool", RiskLevel::Green, ToolSource::SkillCompiler).unwrap();
+        reg.quarantine(
+            "read_only_tool",
+            RiskLevel::Green,
+            ToolSource::SkillCompiler,
+        )
+        .unwrap();
 
         reg.record_success("read_only_tool").unwrap();
         reg.record_success("read_only_tool").unwrap();
@@ -524,7 +568,8 @@ mod tests {
     #[test]
     fn circuit_breaker_disables() {
         let reg = test_registry();
-        reg.quarantine("failing_tool", RiskLevel::Yellow, ToolSource::SkillCompiler).unwrap();
+        reg.quarantine("failing_tool", RiskLevel::Yellow, ToolSource::SkillCompiler)
+            .unwrap();
 
         reg.record_failure("failing_tool").unwrap();
         reg.record_failure("failing_tool").unwrap();
@@ -536,7 +581,8 @@ mod tests {
     #[test]
     fn success_resets_failure_streak() {
         let reg = test_registry();
-        reg.quarantine("tool", RiskLevel::Yellow, ToolSource::SkillCompiler).unwrap();
+        reg.quarantine("tool", RiskLevel::Yellow, ToolSource::SkillCompiler)
+            .unwrap();
 
         reg.record_failure("tool").unwrap();
         reg.record_failure("tool").unwrap();
@@ -550,9 +596,12 @@ mod tests {
     #[test]
     fn hitl_approval_workflow() {
         let reg = test_registry();
-        reg.quarantine("tool", RiskLevel::Yellow, ToolSource::SkillCompiler).unwrap();
+        reg.quarantine("tool", RiskLevel::Yellow, ToolSource::SkillCompiler)
+            .unwrap();
 
-        for _ in 0..3 { reg.record_success("tool").unwrap(); }
+        for _ in 0..3 {
+            reg.record_success("tool").unwrap();
+        }
 
         let pending = reg.pending_approval().unwrap();
         assert_eq!(pending.len(), 1);
@@ -564,9 +613,12 @@ mod tests {
     #[test]
     fn hitl_rejection() {
         let reg = test_registry();
-        reg.quarantine("tool", RiskLevel::Red, ToolSource::SkillCompiler).unwrap();
+        reg.quarantine("tool", RiskLevel::Red, ToolSource::SkillCompiler)
+            .unwrap();
 
-        for _ in 0..3 { reg.record_success("tool").unwrap(); }
+        for _ in 0..3 {
+            reg.record_success("tool").unwrap();
+        }
         reg.reject("tool", Some("Too dangerous")).unwrap();
 
         let rejected = reg.get_by_status(QuarantineStatus::Rejected).unwrap();
@@ -576,9 +628,12 @@ mod tests {
     #[test]
     fn black_never_promotes() {
         let reg = test_registry();
-        reg.quarantine("dangerous", RiskLevel::Black, ToolSource::SkillCompiler).unwrap();
+        reg.quarantine("dangerous", RiskLevel::Black, ToolSource::SkillCompiler)
+            .unwrap();
 
-        for _ in 0..3 { reg.record_success("dangerous").unwrap(); }
+        for _ in 0..3 {
+            reg.record_success("dangerous").unwrap();
+        }
 
         let rejected = reg.get_by_status(QuarantineStatus::Rejected).unwrap();
         assert_eq!(rejected.len(), 1);
@@ -587,9 +642,12 @@ mod tests {
     #[test]
     fn reenable_after_circuit_breaker() {
         let reg = test_registry();
-        reg.quarantine("tool", RiskLevel::Yellow, ToolSource::SkillCompiler).unwrap();
+        reg.quarantine("tool", RiskLevel::Yellow, ToolSource::SkillCompiler)
+            .unwrap();
 
-        for _ in 0..3 { reg.record_failure("tool").unwrap(); }
+        for _ in 0..3 {
+            reg.record_failure("tool").unwrap();
+        }
         assert_eq!(reg.disabled_tools().unwrap().len(), 1);
 
         reg.reenable("tool").unwrap();
@@ -599,9 +657,13 @@ mod tests {
     #[test]
     fn stats_accurate() {
         let reg = test_registry();
-        reg.quarantine("t1", RiskLevel::Green, ToolSource::SkillCompiler).unwrap();
-        reg.quarantine("t2", RiskLevel::Yellow, ToolSource::DynamicDiscovery).unwrap();
-        for _ in 0..3 { reg.record_success("t1").unwrap(); }
+        reg.quarantine("t1", RiskLevel::Green, ToolSource::SkillCompiler)
+            .unwrap();
+        reg.quarantine("t2", RiskLevel::Yellow, ToolSource::DynamicDiscovery)
+            .unwrap();
+        for _ in 0..3 {
+            reg.record_success("t1").unwrap();
+        }
 
         let stats = reg.stats().unwrap();
         assert_eq!(stats.active, 1); // t1 auto-promoted
@@ -616,7 +678,8 @@ mod tests {
         // First session
         {
             let reg = QuarantineRegistry::open_path(&path).unwrap();
-            reg.quarantine("persist_test", RiskLevel::Yellow, ToolSource::SkillCompiler).unwrap();
+            reg.quarantine("persist_test", RiskLevel::Yellow, ToolSource::SkillCompiler)
+                .unwrap();
             reg.record_success("persist_test").unwrap();
             reg.record_success("persist_test").unwrap();
         }

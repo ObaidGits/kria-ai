@@ -14,7 +14,9 @@ struct MockColabExecutor {
 
 impl MockColabExecutor {
     fn new(responses: Vec<String>) -> Self {
-        Self { responses: std::sync::Mutex::new(responses) }
+        Self {
+            responses: std::sync::Mutex::new(responses),
+        }
     }
 }
 
@@ -220,7 +222,7 @@ fn e2e_parse_full_plan() {
     assert!(!plan.cells[0].is_async);
     assert!(!plan.cells[1].is_async);
     assert!(!plan.cells[2].is_async);
-    assert!(plan.cells[3].is_async);  // train cell
+    assert!(plan.cells[3].is_async); // train cell
     assert!(!plan.cells[4].is_async);
     assert!(!plan.cells[5].is_async);
 }
@@ -233,7 +235,12 @@ fn e2e_capability_gate_all_cells() {
     // Every cell must pass the capability gate
     for cell in &plan.cells {
         let result = orch.validate_cell(cell);
-        assert!(result.is_ok(), "Cell '{}' failed capability gate: {:?}", cell.cell_id, result.err());
+        assert!(
+            result.is_ok(),
+            "Cell '{}' failed capability gate: {:?}",
+            cell.cell_id,
+            result.err()
+        );
     }
 }
 
@@ -244,11 +251,33 @@ fn e2e_wrap_sync_cells_have_helpers() {
 
     // All sync cells should have orchestrator helpers
     for cell in plan.cells.iter().filter(|c| !c.is_async) {
-        let code = orch.prepare_cell(cell, "job_123", "/content/kria_jobs", "/content/drive/MyDrive/kria_jobs", "/data/reviews.csv");
-        assert!(code.contains("KRIA HELPERS"), "Cell '{}' missing helpers", cell.cell_id);
-        assert!(code.contains("JobPaths"), "Cell '{}' missing JobPaths", cell.cell_id);
-        assert!(code.contains("JobProgress"), "Cell '{}' missing JobProgress", cell.cell_id);
-        assert!(code.contains("try:"), "Cell '{}' missing try/except", cell.cell_id);
+        let code = orch.prepare_cell(
+            cell,
+            "job_123",
+            "/content/kria_jobs",
+            "/content/drive/MyDrive/kria_jobs",
+            "/data/reviews.csv",
+        );
+        assert!(
+            code.contains("KRIA HELPERS"),
+            "Cell '{}' missing helpers",
+            cell.cell_id
+        );
+        assert!(
+            code.contains("JobPaths"),
+            "Cell '{}' missing JobPaths",
+            cell.cell_id
+        );
+        assert!(
+            code.contains("JobProgress"),
+            "Cell '{}' missing JobProgress",
+            cell.cell_id
+        );
+        assert!(
+            code.contains("try:"),
+            "Cell '{}' missing try/except",
+            cell.cell_id
+        );
     }
 }
 
@@ -260,21 +289,48 @@ fn e2e_wrap_async_cell_has_subprocess() {
     let train_cell = &plan.cells[3]; // the async training cell
     assert!(train_cell.is_async);
 
-    let code = orch.prepare_cell(train_cell, "job_123", "/content/kria_jobs", "/content/drive/MyDrive/kria_jobs", "/data/reviews.csv");
+    let code = orch.prepare_cell(
+        train_cell,
+        "job_123",
+        "/content/kria_jobs",
+        "/content/drive/MyDrive/kria_jobs",
+        "/data/reviews.csv",
+    );
 
     // Must have subprocess (orchestrator-injected, not from LLM)
-    assert!(code.contains("subprocess.Popen"), "Async cell missing subprocess");
+    assert!(
+        code.contains("subprocess.Popen"),
+        "Async cell missing subprocess"
+    );
     assert!(code.contains("KRIA_PID"), "Async cell missing PID output");
-    assert!(code.contains("KRIA_ASYNC"), "Async cell missing ASYNC marker");
-    assert!(code.contains("start_new_session=True"), "Async cell missing session isolation");
+    assert!(
+        code.contains("KRIA_ASYNC"),
+        "Async cell missing ASYNC marker"
+    );
+    assert!(
+        code.contains("start_new_session=True"),
+        "Async cell missing session isolation"
+    );
 
     // The LLM's inner code should NOT contain subprocess
-    assert!(!train_cell.code.contains("subprocess"), "LLM code should not contain subprocess");
+    assert!(
+        !train_cell.code.contains("subprocess"),
+        "LLM code should not contain subprocess"
+    );
 
     // But the LLM code should use job_paths and job_progress
-    assert!(train_cell.code.contains("job_paths.safe_save_model"), "LLM code should use safe_save_model");
-    assert!(train_cell.code.contains("job_progress.report"), "LLM code should use job_progress.report");
-    assert!(train_cell.code.contains("job_progress.complete"), "LLM code should use job_progress.complete");
+    assert!(
+        train_cell.code.contains("job_paths.safe_save_model"),
+        "LLM code should use safe_save_model"
+    );
+    assert!(
+        train_cell.code.contains("job_progress.report"),
+        "LLM code should use job_progress.report"
+    );
+    assert!(
+        train_cell.code.contains("job_progress.complete"),
+        "LLM code should use job_progress.complete"
+    );
 }
 
 #[test]
@@ -292,7 +348,8 @@ fn e2e_dag_validation() {
             assert!(
                 produced.contains(input),
                 "Cell '{}' requires input '{}' not produced by prior cells",
-                cell.cell_id, input
+                cell.cell_id,
+                input
             );
         }
         for output in &cell.outputs {
@@ -306,7 +363,12 @@ fn e2e_sync_cell_generation() {
     let orch = MlOrchestrator::new(MlOrchestratorConfig::default());
     let plan = orch.parse_plan(FULL_ML_PLAN, "job_123").unwrap();
 
-    let sync = orch.generate_phase_sync("job_123", &plan.cells[3], "/content/kria_jobs", "/content/drive/MyDrive/kria_jobs");
+    let sync = orch.generate_phase_sync(
+        "job_123",
+        &plan.cells[3],
+        "/content/kria_jobs",
+        "/content/drive/MyDrive/kria_jobs",
+    );
 
     assert!(sync.contains("model.pth"));
     assert!(sync.contains("manifest.json"));
@@ -325,20 +387,35 @@ fn e2e_ledger_actor_lifecycle() {
         let ledger = LedgerActor::spawn(&db_path).unwrap();
 
         // Create job
-        ledger.create_job("job_123", "test_plan", "classification").await.unwrap();
+        ledger
+            .create_job("job_123", "test_plan", "classification")
+            .await
+            .unwrap();
 
         // Mark phases
-        ledger.mark_started("job_123", "setup", "setup", None).await.unwrap();
-        ledger.mark_completed("job_123", "setup", vec![]).await.unwrap();
+        ledger
+            .mark_started("job_123", "setup", "setup", None)
+            .await
+            .unwrap();
+        ledger
+            .mark_completed("job_123", "setup", vec![])
+            .await
+            .unwrap();
 
-        ledger.mark_started("job_123", "train", "training", Some(12345)).await.unwrap();
+        ledger
+            .mark_started("job_123", "train", "training", Some(12345))
+            .await
+            .unwrap();
 
         // Resume point should be "train" (only non-completed phase)
         let resume = ledger.get_resume_point("job_123").await.unwrap();
         assert_eq!(resume, Some("train".into()));
 
         // Mark train completed
-        ledger.mark_completed("job_123", "train", vec![]).await.unwrap();
+        ledger
+            .mark_completed("job_123", "train", vec![])
+            .await
+            .unwrap();
 
         // Resume point should be None (all completed)
         let resume = ledger.get_resume_point("job_123").await.unwrap();
@@ -364,7 +441,9 @@ fn e2e_ledger_actor_concurrent_writes() {
             let l = ledger.clone();
             handles.push(tokio::spawn(async move {
                 let cell_id = format!("cell_{}", i);
-                l.mark_started("j1", &cell_id, "setup", Some(i as u32)).await.unwrap();
+                l.mark_started("j1", &cell_id, "setup", Some(i as u32))
+                    .await
+                    .unwrap();
                 l.mark_completed("j1", &cell_id, vec![]).await.unwrap();
             }));
         }
@@ -399,17 +478,21 @@ fn e2e_adaptive_poller_completes() {
                 "metrics": {"loss": 0.3, "epoch": 1},
                 "pid": 12345, "heartbeat_ts": now,
                 "timestamp": now, "batch_latencies_p95": 1.5
-            }).to_string(),
+            })
+            .to_string(),
             // Second poll: completed
             serde_json::json!({
                 "state": "completed", "progress": 1.0,
                 "metrics": {"accuracy": 0.92},
                 "pid": 12345, "heartbeat_ts": now + 2.0,
                 "timestamp": now + 2.0, "batch_latencies_p95": 1.5
-            }).to_string(),
+            })
+            .to_string(),
         ]);
 
-        let exit = poller.run(&colab, "/tmp/status.json", "job_1", Some(12345), None).await;
+        let exit = poller
+            .run(&colab, "/tmp/status.json", "job_1", Some(12345), None)
+            .await;
         assert!(matches!(exit, MlPollerExit::Completed(_)));
     });
 }
@@ -432,7 +515,9 @@ fn e2e_adaptive_poller_detects_crash() {
             "DEAD".into(), // PID check
         ]);
 
-        let exit = poller.run(&colab, "/tmp/status.json", "job_1", Some(12345), None).await;
+        let exit = poller
+            .run(&colab, "/tmp/status.json", "job_1", Some(12345), None)
+            .await;
         assert!(matches!(exit, MlPollerExit::Failed(ref msg) if msg.contains("crashed")));
     });
 }
@@ -454,7 +539,9 @@ fn e2e_adaptive_poller_cancelled() {
         cancel.cancel();
 
         let colab = MockColabExecutor::new(vec![]);
-        let exit = poller.run(&colab, "/tmp/status.json", "job_1", Some(12345), None).await;
+        let exit = poller
+            .run(&colab, "/tmp/status.json", "job_1", Some(12345), None)
+            .await;
         assert!(matches!(exit, MlPollerExit::Cancelled));
     });
 }
@@ -490,14 +577,26 @@ fn e2e_integrity_roundtrip() {
 
 #[test]
 fn e2e_sync_cell_atomic_protocol() {
-    let code = generate_sync_cell("job_123", "04_train", "/content/kria_jobs", "/content/drive/MyDrive/kria_jobs", &["model.pth", "training_status.json"]);
+    let code = generate_sync_cell(
+        "job_123",
+        "04_train",
+        "/content/kria_jobs",
+        "/content/drive/MyDrive/kria_jobs",
+        &["model.pth", "training_status.json"],
+    );
 
     // Must contain all atomic protocol steps
     assert!(code.contains("shutil.copy2"), "Missing shutil.copy2");
-    assert!(code.contains("os.open(tmp, os.O_RDONLY)"), "Missing os.open for fsync");
+    assert!(
+        code.contains("os.open(tmp, os.O_RDONLY)"),
+        "Missing os.open for fsync"
+    );
     assert!(code.contains("os.fsync(fd)"), "Missing os.fsync");
     assert!(code.contains("os.close(fd)"), "Missing os.close");
-    assert!(code.contains("os.replace(tmp, dst)"), "Missing os.replace (atomic rename)");
+    assert!(
+        code.contains("os.replace(tmp, dst)"),
+        "Missing os.replace (atomic rename)"
+    );
     assert!(code.contains("manifest.json"), "Missing manifest");
     assert!(code.contains(".tmp"), "Missing .tmp prefix");
 }
@@ -506,7 +605,8 @@ fn e2e_sync_cell_atomic_protocol() {
 fn e2e_rejected_malicious_code() {
     let malicious_plans = vec![
         // os.system
-        (r#"
+        (
+            r#"
 [plan]
 name = "evil1"
 task = "test"
@@ -518,9 +618,12 @@ code = '''
 import os
 os.system("rm -rf /")
 '''
-"#, "os.system"),
+"#,
+            "os.system",
+        ),
         // subprocess
-        (r#"
+        (
+            r#"
 [plan]
 name = "evil2"
 task = "test"
@@ -532,9 +635,12 @@ code = '''
 import subprocess
 subprocess.Popen(["rm", "-rf", "/"])
 '''
-"#, "subprocess"),
+"#,
+            "subprocess",
+        ),
         // pickle
-        (r#"
+        (
+            r#"
 [plan]
 name = "evil3"
 task = "test"
@@ -546,9 +652,12 @@ code = '''
 import pickle
 pickle.loads(malicious_bytes)
 '''
-"#, "pickle"),
+"#,
+            "pickle",
+        ),
         // eval
-        (r#"
+        (
+            r#"
 [plan]
 name = "evil4"
 task = "test"
@@ -559,9 +668,12 @@ description = "evil"
 code = '''
 eval("__import__('os').system('rm -rf /')")
 '''
-"#, "eval"),
+"#,
+            "eval",
+        ),
         // getattr bypass
-        (r#"
+        (
+            r#"
 [plan]
 name = "evil5"
 task = "test"
@@ -572,7 +684,9 @@ description = "evil"
 code = '''
 getattr(__import__("os"), "system")("rm -rf /")
 '''
-"#, "getattr"),
+"#,
+            "getattr",
+        ),
     ];
 
     let orch = MlOrchestrator::new(MlOrchestratorConfig::default());
@@ -580,6 +694,10 @@ getattr(__import__("os"), "system")("rm -rf /")
     for (toml, desc) in malicious_plans {
         let plan = orch.parse_plan(toml, "j1").unwrap();
         let result = orch.validate_cell(&plan.cells[0]);
-        assert!(result.is_err(), "Malicious code ({}) should be rejected", desc);
+        assert!(
+            result.is_err(),
+            "Malicious code ({}) should be rejected",
+            desc
+        );
     }
 }

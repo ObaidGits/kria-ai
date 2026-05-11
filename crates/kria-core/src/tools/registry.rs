@@ -1,7 +1,7 @@
-use crate::infra::ToolResult;
 use crate::infra::environment::{
-    EnvironmentProvider, LocalEnvironment, ShellState, SharedShellState,
+    EnvironmentProvider, LocalEnvironment, SharedShellState, ShellState,
 };
+use crate::infra::ToolResult;
 use crate::safety::RiskLevel;
 use crate::tools::ToolContext;
 use async_trait::async_trait;
@@ -77,7 +77,11 @@ pub trait ToolHandler: Send + Sync {
         ToolResult::err("tool does not implement execute")
     }
 
-    async fn execute_with_context(&self, params: serde_json::Value, _ctx: ToolContext) -> ToolResult {
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        _ctx: ToolContext,
+    ) -> ToolResult {
         self.execute(params).await
     }
 }
@@ -398,15 +402,10 @@ pub fn build_registry_full(
         impl ToolHandler for ListFilesStub {
             async fn execute(&self, params: serde_json::Value) -> crate::infra::ToolResult {
                 // Delegate to the existing list_directory handler
-                let path = params
-                    .get("path")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or(".");
+                let path = params.get("path").and_then(|v| v.as_str()).unwrap_or(".");
                 let abs_path = std::path::PathBuf::from(path);
                 if !abs_path.exists() {
-                    return crate::infra::ToolResult::err(&format!(
-                        "Path does not exist: {path}"
-                    ));
+                    return crate::infra::ToolResult::err(format!("Path does not exist: {path}"));
                 }
                 match std::fs::read_dir(&abs_path) {
                     Ok(entries) => {
@@ -414,18 +413,12 @@ pub fn build_registry_full(
                         for entry in entries.flatten() {
                             let name = entry.file_name().to_string_lossy().to_string();
                             let is_dir = entry.path().is_dir();
-                            files.push(format!(
-                                "{}{}",
-                                name,
-                                if is_dir { "/" } else { "" }
-                            ));
+                            files.push(format!("{}{}", name, if is_dir { "/" } else { "" }));
                         }
                         files.sort();
                         crate::infra::ToolResult::ok(serde_json::json!(files.join("\n")))
                     }
-                    Err(e) => crate::infra::ToolResult::err(&format!(
-                        "Failed to list files: {e}"
-                    )),
+                    Err(e) => crate::infra::ToolResult::err(format!("Failed to list files: {e}")),
                 }
             }
         }

@@ -6,7 +6,6 @@
 
 use futures::{SinkExt, StreamExt};
 use kria_core::config::KriaConfig;
-use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 

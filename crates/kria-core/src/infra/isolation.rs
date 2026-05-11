@@ -123,12 +123,7 @@ mod tests {
 
         let result = run.await.expect("run_isolated task should complete");
         assert!(!result.success);
-        assert!(
-            result
-                .error
-                .unwrap_or_default()
-                .contains("cancelled")
-        );
+        assert!(result.error.unwrap_or_default().contains("cancelled"));
 
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert!(!completed.load(Ordering::SeqCst));

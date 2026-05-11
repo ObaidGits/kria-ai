@@ -4,9 +4,9 @@ use std::time::Duration;
 
 use bollard::Docker;
 use kria_core::infra::environment::{
-    CommandExecutor, CommandRequest, DockerEnvironment, DockerEnvironmentConfig,
-    EnvironmentError, EnvironmentLifecycle, EnvironmentResetKind, FileSystemOps, ReadFileRequest,
-    ShellState, WriteFileRequest,
+    CommandExecutor, CommandRequest, DockerEnvironment, DockerEnvironmentConfig, EnvironmentError,
+    EnvironmentLifecycle, EnvironmentResetKind, FileSystemOps, ReadFileRequest, ShellState,
+    WriteFileRequest,
 };
 
 fn workspace_root() -> PathBuf {
@@ -96,7 +96,13 @@ async fn docker_basic_execution_test() {
 
     let result = env
         .execute_command(
-            request("/bin/sh", &["-lc", "echo -n basic-ok"], 10_000, 16 * 1024, 1_024),
+            request(
+                "/bin/sh",
+                &["-lc", "echo -n basic-ok"],
+                10_000,
+                16 * 1024,
+                1_024,
+            ),
             default_shell_state(),
         )
         .await
@@ -160,7 +166,9 @@ async fn docker_archive_io_tmpfs_test() {
 
     assert_eq!(read_result.contents, payload);
 
-    env.shutdown().await.expect("shutdown after archive IO test");
+    env.shutdown()
+        .await
+        .expect("shutdown after archive IO test");
 }
 
 #[tokio::test]
@@ -265,8 +273,8 @@ async fn docker_pid_limit_exhaustion_test() {
 
     let pid_err = match initial {
         Err(err @ EnvironmentError::PidLimitExceeded { .. }) => err,
-        Ok(_) => {
-            env.execute_command(
+        Ok(_) => env
+            .execute_command(
                 request(
                     "/bin/sh",
                     &[
@@ -280,8 +288,7 @@ async fn docker_pid_limit_exhaustion_test() {
                 default_shell_state(),
             )
             .await
-            .expect_err("expected PID exhaustion fallback from background spawn loop")
-        }
+            .expect_err("expected PID exhaustion fallback from background spawn loop"),
         Err(other) => panic!("expected PID limit fallback, got: {other:?}"),
     };
 

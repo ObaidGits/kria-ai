@@ -23,9 +23,7 @@ use crate::safety::RiskLevel;
 /// Substrings that indicate compound/redirected commands.
 /// If any of these appear in the raw command string, the command is immediately
 /// classified as Red — compound commands are inherently unpredictable.
-const SHELL_METACHARACTERS: &[&str] = &[
-    "|", ">>", ">", "<", "&&", "||", ";", "$(", "`",
-];
+const SHELL_METACHARACTERS: &[&str] = &["|", ">>", ">", "<", "&&", "||", ";", "$(", "`"];
 
 // ─── Classification Result ───────────────────────────────────────────────────
 
@@ -139,9 +137,29 @@ static TABLE: Lazy<Vec<TierEntry>> = Lazy::new(|| {
 
     // ── Green Tier: Constrained first-arg entries ──────────────────────────
     let green_constrained: &[(&str, &[&str], &str)] = &[
-        ("systemctl", &["status", "list-units", "is-active", "is-enabled", "is-failed", "show", "cat"], "inspect systemd unit status"),
-        ("virsh", &["list", "dominfo", "domstate", "domid", "domuuid", "dumpxml"], "inspect libvirt domain info"),
-        ("ip", &["addr", "link", "route", "neigh", "maddr"], "inspect network configuration"),
+        (
+            "systemctl",
+            &[
+                "status",
+                "list-units",
+                "is-active",
+                "is-enabled",
+                "is-failed",
+                "show",
+                "cat",
+            ],
+            "inspect systemd unit status",
+        ),
+        (
+            "virsh",
+            &["list", "dominfo", "domstate", "domid", "domuuid", "dumpxml"],
+            "inspect libvirt domain info",
+        ),
+        (
+            "ip",
+            &["addr", "link", "route", "neigh", "maddr"],
+            "inspect network configuration",
+        ),
     ];
 
     for (binary, allowed_args, reason) in green_constrained {
@@ -155,8 +173,22 @@ static TABLE: Lazy<Vec<TierEntry>> = Lazy::new(|| {
 
     // ── Yellow Tier: Reversible Modifications ──────────────────────────────
     let yellow_constrained: &[(&str, &[&str], &str)] = &[
-        ("systemctl", &["restart", "reload", "start", "try-restart", "try-reload-or-restart"], "reversible systemd unit control"),
-        ("virsh", &["suspend", "resume", "start"], "reversible VM state change"),
+        (
+            "systemctl",
+            &[
+                "restart",
+                "reload",
+                "start",
+                "try-restart",
+                "try-reload-or-restart",
+            ],
+            "reversible systemd unit control",
+        ),
+        (
+            "virsh",
+            &["suspend", "resume", "start"],
+            "reversible VM state change",
+        ),
     ];
 
     for (binary, allowed_args, reason) in yellow_constrained {
@@ -239,7 +271,7 @@ pub fn classify(command: &str) -> CommandClassification {
         let matches = match &entry.arg_constraint {
             ArgConstraint::Any => true,
             ArgConstraint::Allowed(vals) => {
-                first_arg.map_or(false, |arg| vals.iter().any(|v| v == arg))
+                first_arg.is_some_and(|arg| vals.iter().any(|v| v == arg))
             }
         };
         if matches {

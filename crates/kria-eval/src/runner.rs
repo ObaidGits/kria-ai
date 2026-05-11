@@ -19,8 +19,7 @@ static EVAL_ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 /// Server lifecycle management for eval - ensures kria-server is running
 /// before executing prompts, just like real usage would do.
-static SERVER_GUARD: LazyLock<Mutex<Option<ServerHandle>>> =
-    LazyLock::new(|| Mutex::new(None));
+static SERVER_GUARD: LazyLock<Mutex<Option<ServerHandle>>> = LazyLock::new(|| Mutex::new(None));
 
 pub struct ServerHandle {
     pub port: u16,
@@ -79,12 +78,12 @@ fn find_server_binary() -> Option<PathBuf> {
 
 /// Start kria-server on the configured port and wait for it to be healthy
 async fn start_server(port: u16) -> Result<ServerHandle, String> {
-    let server_bin = find_server_binary()
-        .ok_or_else(|| "kria-server binary not found".to_string())?;
+    let server_bin =
+        find_server_binary().ok_or_else(|| "kria-server binary not found".to_string())?;
 
     eprintln!("Starting kria-server on port {port}...");
 
-    let mut child = tokio::process::Command::new(&server_bin)
+    let child = tokio::process::Command::new(&server_bin)
         .env("KRIA_LOG_LEVEL", "warn")
         .env("RUST_BACKTRACE", "1")
         .stdout(std::process::Stdio::piped())
@@ -106,7 +105,10 @@ async fn start_server(port: u16) -> Result<ServerHandle, String> {
 
     while start.elapsed() < timeout {
         if handle.check_health().await {
-            eprintln!("kria-server ready at {base_url} in {:.1}s", start.elapsed().as_secs_f64());
+            eprintln!(
+                "kria-server ready at {base_url} in {:.1}s",
+                start.elapsed().as_secs_f64()
+            );
             return Ok(handle);
         }
         sleep(Duration::from_millis(500)).await;
@@ -190,7 +192,9 @@ pub async fn send_prompt_via_http(prompt: &str, session_id: &str) -> Result<Stri
         return Err(format!("Server returned error: {}", resp.status()));
     }
 
-    let json: Value = resp.json().await
+    let json: Value = resp
+        .json()
+        .await
         .map_err(|e| format!("Failed to parse JSON response: {e}"))?;
 
     // Extract response text from various possible JSON shapes
@@ -343,8 +347,14 @@ pub fn detect_response_issues(response: &str, prompt: &str) -> Vec<ResponseIssue
 
     // ─── Unavailable / Cannot Do patterns ───
     let unavailable_patterns = [
-        ("i cannot access real-time", "Real-time data access claimed unavailable"),
-        ("i can't access real-time", "Real-time data access claimed unavailable"),
+        (
+            "i cannot access real-time",
+            "Real-time data access claimed unavailable",
+        ),
+        (
+            "i can't access real-time",
+            "Real-time data access claimed unavailable",
+        ),
         ("i do not have access to", "Tool access claimed unavailable"),
         ("i don't have access to", "Tool access claimed unavailable"),
         ("i cannot check", "Action claimed unavailable"),
@@ -352,7 +362,10 @@ pub fn detect_response_issues(response: &str, prompt: &str) -> Vec<ResponseIssue
         ("i cannot access", "Access claimed unavailable"),
         ("i can't access", "Access claimed unavailable"),
         ("i am not able to access", "Access claimed unavailable"),
-        ("unable to access real-time", "Real-time data access claimed unavailable"),
+        (
+            "unable to access real-time",
+            "Real-time data access claimed unavailable",
+        ),
         ("do not have permission", "Permission claimed denied"),
         ("don't have the ability", "Capability claimed missing"),
         ("don't have the capability", "Capability claimed missing"),
@@ -411,11 +424,17 @@ pub fn detect_response_issues(response: &str, prompt: &str) -> Vec<ResponseIssue
 
     // ─── Hallucination markers ───
     let hallucination_patterns = [
-        ("here are the steps to check", "Instructions instead of actual data"),
+        (
+            "here are the steps to check",
+            "Instructions instead of actual data",
+        ),
         ("based on my training", "Dated knowledge disclaimer"),
         ("as of my last training", "Training data date claim"),
         ("according to my knowledge", "Knowledge disclaimer"),
-        ("i don't have real-time", "Real-time data hallucination disclaimer"),
+        (
+            "i don't have real-time",
+            "Real-time data hallucination disclaimer",
+        ),
         ("i may not have the most", "Data freshness disclaimer"),
     ];
 
@@ -517,7 +536,8 @@ pub async fn run_eval_case(case: EvalCase) -> (EvalObservation, EvalVerdict) {
         .ok()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "docker".to_string());
-    let _eval_execution_guard = EnvVarGuard::set("KRIA_EVAL_EXECUTION_ENV", &requested_execution_env);
+    let _eval_execution_guard =
+        EnvVarGuard::set("KRIA_EVAL_EXECUTION_ENV", &requested_execution_env);
 
     if !requested_execution_env.eq_ignore_ascii_case("docker") {
         let obs = EvalObservation {
@@ -730,7 +750,10 @@ pub async fn run_eval_case(case: EvalCase) -> (EvalObservation, EvalVerdict) {
     }
 
     if final_response.is_empty() {
-        if let Some(last_assistant) = messages.iter().rev().find(|message| message.role == "assistant")
+        if let Some(last_assistant) = messages
+            .iter()
+            .rev()
+            .find(|message| message.role == "assistant")
         {
             final_response = last_assistant.content.clone();
         }

@@ -25,7 +25,9 @@ fn integration_oc_install_and_invoke() {
     let skills = registry.list_installed().expect("list_installed failed");
     assert_eq!(skills.len(), 3);
 
-    let calc = registry.get("oc_calculator").expect("oc_calculator not found");
+    let calc = registry
+        .get("oc_calculator")
+        .expect("oc_calculator not found");
     assert_eq!(calc.name, "Calculator");
     assert!(calc.is_usable());
 
@@ -48,7 +50,9 @@ fn integration_oc_container_crash_recovery() {
     initialize_curated_skills(&registry);
 
     // Verify skill is active before crash
-    let before = registry.get("oc_web_fetch").expect("get before crash failed");
+    let before = registry
+        .get("oc_web_fetch")
+        .expect("get before crash failed");
     assert!(before.is_usable());
 
     // Simulate a "crash" by toggling the skill to disabled (quarantine)
@@ -59,7 +63,10 @@ fn integration_oc_container_crash_recovery() {
     // Verify it's listed correctly when filtering by status
     let active_skills = registry.list_active().expect("list_active failed");
     let fetch_active = active_skills.iter().any(|s| s.skill_id == "oc_web_fetch");
-    assert!(!fetch_active, "oc_web_fetch should not appear in active list after disable");
+    assert!(
+        !fetch_active,
+        "oc_web_fetch should not appear in active list after disable"
+    );
 
     // Recovery: re-enable the skill
     registry
@@ -67,9 +74,14 @@ fn integration_oc_container_crash_recovery() {
         .expect("toggle to enabled failed");
 
     // Verify recovery: skill should now appear in active list again
-    let active_after = registry.list_active().expect("list_active after recovery failed");
+    let active_after = registry
+        .list_active()
+        .expect("list_active after recovery failed");
     let fetch_recovered = active_after.iter().any(|s| s.skill_id == "oc_web_fetch");
-    assert!(fetch_recovered, "oc_web_fetch should be active after recovery");
+    assert!(
+        fetch_recovered,
+        "oc_web_fetch should be active after recovery"
+    );
 }
 
 #[test]
@@ -92,8 +104,7 @@ fn integration_oc_subsystem_boot_creates_both_tables() {
     let dir = TempDir::new().expect("failed to create temp dir");
 
     // Boot the subsystem — this should create skills.db with both tables
-    let subsystem = OpenClawSubsystem::boot(dir.path())
-        .expect("OpenClawSubsystem::boot failed");
+    let subsystem = OpenClawSubsystem::boot(dir.path()).expect("OpenClawSubsystem::boot failed");
 
     // Verify skills were seeded
     let skills = subsystem.registry.list_installed().expect("list failed");

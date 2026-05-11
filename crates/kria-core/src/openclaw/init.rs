@@ -41,20 +41,17 @@ impl OpenClawSubsystem {
 
         // Ensure the parent directory exists.
         if let Some(parent) = db_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                OpenClawBootError::Io(format!("failed to create data dir: {e}"))
-            })?;
+            std::fs::create_dir_all(parent)
+                .map_err(|e| OpenClawBootError::Io(format!("failed to create data dir: {e}")))?;
         }
 
         // 1. Open SkillRegistry (creates `installed_skills` table synchronously)
-        let registry = SkillRegistry::open(&db_path).map_err(|e| {
-            OpenClawBootError::Registry(format!("{e}"))
-        })?;
+        let registry = SkillRegistry::open(&db_path)
+            .map_err(|e| OpenClawBootError::Registry(format!("{e}")))?;
 
         // 2. Open AuditLedger (creates `audit_log` table synchronously)
-        let audit = AuditLedger::open(&db_path, DEV_HMAC_KEY.to_vec()).map_err(|e| {
-            OpenClawBootError::Audit(format!("{e}"))
-        })?;
+        let audit = AuditLedger::open(&db_path, DEV_HMAC_KEY.to_vec())
+            .map_err(|e| OpenClawBootError::Audit(format!("{e}")))?;
 
         let registry = Arc::new(registry);
         let audit = Arc::new(audit);
@@ -84,7 +81,9 @@ impl OpenClawSubsystem {
         let skills = match self.registry.list_active() {
             Ok(s) => s,
             Err(e) => {
-                tracing::warn!("[OpenClaw] failed to list active skills for tool registration: {e}");
+                tracing::warn!(
+                    "[OpenClaw] failed to list active skills for tool registration: {e}"
+                );
                 return;
             }
         };
@@ -149,7 +148,10 @@ impl OpenClawSubsystem {
         }
 
         if registered > 0 {
-            tracing::info!(count = registered, "[OpenClaw] registered oc_* tools in ToolRegistry");
+            tracing::info!(
+                count = registered,
+                "[OpenClaw] registered oc_* tools in ToolRegistry"
+            );
         }
     }
 }

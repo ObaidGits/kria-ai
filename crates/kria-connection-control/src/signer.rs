@@ -187,7 +187,10 @@ impl DualKeyHmacEnvelopeSigner {
         })
     }
 
-    pub async fn verify(&self, envelope: &SignedEnvelope) -> Result<VerificationMetadata, SignerError> {
+    pub async fn verify(
+        &self,
+        envelope: &SignedEnvelope,
+    ) -> Result<VerificationMetadata, SignerError> {
         if envelope.ttl_ms <= 0 {
             return Err(SignerError::InvalidTtl);
         }
@@ -285,7 +288,11 @@ impl DualKeyHmacEnvelopeSigner {
         }
 
         {
-            let replay_key = (envelope.target_id, envelope.lease_id, envelope.nonce.clone());
+            let replay_key = (
+                envelope.target_id,
+                envelope.lease_id,
+                envelope.nonce.clone(),
+            );
             let mut replay = self.replay_nonces.write().await;
             if replay.contains_key(&replay_key) {
                 return Err(SignerError::ReplayNonceDetected);
@@ -326,7 +333,11 @@ fn sign_with_key(secret: &[u8], canonical: &CanonicalEnvelope) -> Result<String,
     Ok(URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes()))
 }
 
-fn verify_with_key(secret: &[u8], canonical: &CanonicalEnvelope, sig_b64: &str) -> Result<bool, SignerError> {
+fn verify_with_key(
+    secret: &[u8],
+    canonical: &CanonicalEnvelope,
+    sig_b64: &str,
+) -> Result<bool, SignerError> {
     let data = serde_json::to_vec(canonical)?;
     let sig = URL_SAFE_NO_PAD.decode(sig_b64.as_bytes())?;
     let mut mac = HmacSha256::new_from_slice(secret)?;
@@ -349,8 +360,5 @@ pub fn now_unix_ms() -> i64 {
 
 pub fn now_mono_ms() -> i64 {
     static MONO_BASE: OnceLock<Instant> = OnceLock::new();
-    MONO_BASE
-        .get_or_init(Instant::now)
-        .elapsed()
-        .as_millis() as i64
+    MONO_BASE.get_or_init(Instant::now).elapsed().as_millis() as i64
 }

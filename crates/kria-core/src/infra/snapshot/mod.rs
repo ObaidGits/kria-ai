@@ -1,6 +1,6 @@
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
@@ -14,6 +14,12 @@ use crate::infra::environment::EnvironmentError;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SnapshotId(pub Uuid);
+
+impl Default for SnapshotId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl SnapshotId {
     pub fn new() -> Self {
@@ -141,21 +147,30 @@ impl VmSnapshotProvider for QemuSshEnvironment {
             generation: self.generation.load(Ordering::Acquire),
             epoch_uuid: *self.epoch_uuid.load_full().as_ref(),
             transport_generation_id: self.transport_generation_id.load(Ordering::Acquire),
-            toolchain_fingerprint: self.config.host_artifact_gc.host_binary_sha256_or_build_id.clone(),
+            toolchain_fingerprint: self
+                .config
+                .host_artifact_gc
+                .host_binary_sha256_or_build_id
+                .clone(),
             baseline_fingerprint: baseline_fingerprint.clone(),
             created_unix_ms,
         };
 
-        let payload_bytes = serde_json::to_vec(&payload).map_err(|error| EnvironmentError::Serialization {
-            details: format!("serialize snapshot payload failed: {error}"),
-        })?;
+        let payload_bytes =
+            serde_json::to_vec(&payload).map_err(|error| EnvironmentError::Serialization {
+                details: format!("serialize snapshot payload failed: {error}"),
+            })?;
         let digest_sha256 = sha256_hex(&payload_bytes);
 
         let metadata = SnapshotMetadata {
             snapshot_id: snapshot_id.clone(),
             target_instance_id: self.config.instance_id.clone(),
             created_unix_ms,
-            toolchain_fingerprint: self.config.host_artifact_gc.host_binary_sha256_or_build_id.clone(),
+            toolchain_fingerprint: self
+                .config
+                .host_artifact_gc
+                .host_binary_sha256_or_build_id
+                .clone(),
             digest_sha256: digest_sha256.clone(),
             baseline_fingerprint,
         };
@@ -205,7 +220,9 @@ impl VmSnapshotProvider for QemuSshEnvironment {
             self.tainted.store(true, Ordering::Release);
             *self.taint_reason.lock().await = Some(format!(
                 "snapshot integrity mismatch for {} (expected={}, computed={})",
-                request.snapshot_id.0, integrity.expected_digest_sha256, integrity.computed_digest_sha256
+                request.snapshot_id.0,
+                integrity.expected_digest_sha256,
+                integrity.computed_digest_sha256
             ));
 
             emit_snapshot_packet(SnapshotTelemetryPacket {
@@ -231,7 +248,9 @@ impl VmSnapshotProvider for QemuSshEnvironment {
 
         let payload = read_snapshot_payload(self, &request.snapshot_id)?;
 
-        if payload.toolchain_fingerprint != self.config.host_artifact_gc.host_binary_sha256_or_build_id {
+        if payload.toolchain_fingerprint
+            != self.config.host_artifact_gc.host_binary_sha256_or_build_id
+        {
             self.tainted.store(true, Ordering::Release);
             *self.taint_reason.lock().await = Some(format!(
                 "snapshot toolchain fingerprint mismatch for {}",
@@ -275,7 +294,8 @@ impl VmSnapshotProvider for QemuSshEnvironment {
         }
 
         let post_fingerprint = runtime_fingerprint(self).await?;
-        let drift_distance = normalized_hash_distance(&payload.baseline_fingerprint, &post_fingerprint);
+        let drift_distance =
+            normalized_hash_distance(&payload.baseline_fingerprint, &post_fingerprint);
 
         if drift_distance > request.drift_tolerance.max_normalized_hash_distance {
             self.tainted.store(true, Ordering::Release);
@@ -331,7 +351,9 @@ impl VmSnapshotProvider for QemuSshEnvironment {
     }
 }
 
-pub async fn ensure_baseline_snapshot(provider: &QemuSshEnvironment) -> Result<(), EnvironmentError> {
+pub async fn ensure_baseline_snapshot(
+    provider: &QemuSshEnvironment,
+) -> Result<(), EnvironmentError> {
     if read_latest_snapshot_pointer(provider)?.is_some() {
         return Ok(());
     }
@@ -373,7 +395,6 @@ pub async fn try_fast_restore_latest_snapshot(
 }
 
 async fn runtime_fingerprint(provider: &QemuSshEnvironment) -> Result<String, EnvironmentError> {
-
     // Only include stable runtime state in the fingerprint — volatile counters
     // (inflight_registry, staged_artifacts, etc.) are always cleared to 0 on
     // snapshot restore so they would cause false-positive drift every time.
@@ -390,9 +411,10 @@ async fn runtime_fingerprint(provider: &QemuSshEnvironment) -> Result<String, En
             .clone(),
     });
 
-    let bytes = serde_json::to_vec(&fingerprint_json).map_err(|error| EnvironmentError::Serialization {
-        details: format!("serialize runtime fingerprint failed: {error}"),
-    })?;
+    let bytes =
+        serde_json::to_vec(&fingerprint_json).map_err(|error| EnvironmentError::Serialization {
+            details: format!("serialize runtime fingerprint failed: {error}"),
+        })?;
 
     Ok(sha256_hex(&bytes))
 }
@@ -427,9 +449,10 @@ fn persist_snapshot(
     let metadata_path = snapshot_metadata_path(provider, &metadata.snapshot_id);
     let payload_path = snapshot_payload_path(provider, &metadata.snapshot_id);
 
-    let metadata_json = serde_json::to_vec_pretty(metadata).map_err(|error| EnvironmentError::Serialization {
-        details: format!("serialize snapshot metadata failed: {error}"),
-    })?;
+    let metadata_json =
+        serde_json::to_vec_pretty(metadata).map_err(|error| EnvironmentError::Serialization {
+            details: format!("serialize snapshot metadata failed: {error}"),
+        })?;
 
     std::fs::write(&metadata_path, metadata_json).map_err(|error| EnvironmentError::Io {
         operation: "snapshot::write_metadata".to_string(),
@@ -451,9 +474,10 @@ fn write_latest_snapshot_pointer(
     let pointer = LatestSnapshotPointer {
         snapshot_id: snapshot_id.clone(),
     };
-    let pointer_json = serde_json::to_vec_pretty(&pointer).map_err(|error| EnvironmentError::Serialization {
-        details: format!("serialize latest snapshot pointer failed: {error}"),
-    })?;
+    let pointer_json =
+        serde_json::to_vec_pretty(&pointer).map_err(|error| EnvironmentError::Serialization {
+            details: format!("serialize latest snapshot pointer failed: {error}"),
+        })?;
 
     let path = latest_snapshot_pointer_path(provider);
     std::fs::write(&path, pointer_json).map_err(|error| EnvironmentError::Io {
@@ -495,8 +519,10 @@ fn read_snapshot_metadata(
         details: format!("{} ({})", error, path.display()),
     })?;
 
-    serde_json::from_slice::<SnapshotMetadata>(&bytes).map_err(|error| EnvironmentError::Serialization {
-        details: format!("deserialize snapshot metadata failed: {error}"),
+    serde_json::from_slice::<SnapshotMetadata>(&bytes).map_err(|error| {
+        EnvironmentError::Serialization {
+            details: format!("deserialize snapshot metadata failed: {error}"),
+        }
     })
 }
 
@@ -516,8 +542,10 @@ fn read_snapshot_payload(
     snapshot_id: &SnapshotId,
 ) -> Result<SnapshotPayload, EnvironmentError> {
     let bytes = read_snapshot_payload_bytes(provider, snapshot_id)?;
-    serde_json::from_slice::<SnapshotPayload>(&bytes).map_err(|error| EnvironmentError::Serialization {
-        details: format!("deserialize snapshot payload failed: {error}"),
+    serde_json::from_slice::<SnapshotPayload>(&bytes).map_err(|error| {
+        EnvironmentError::Serialization {
+            details: format!("deserialize snapshot payload failed: {error}"),
+        }
     })
 }
 
@@ -549,8 +577,8 @@ fn normalized_hash_distance(a: &str, b: &str) -> f64 {
 }
 
 fn emit_snapshot_packet(packet: SnapshotTelemetryPacket) {
-    let payload = serde_json::to_string(&packet)
-        .unwrap_or_else(|error| format!("telemetry_error:{error}"));
+    let payload =
+        serde_json::to_string(&packet).unwrap_or_else(|error| format!("telemetry_error:{error}"));
     tracing::info!(target: "kria_snapshot", packet = %payload, "snapshot_telemetry");
 }
 

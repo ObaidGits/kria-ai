@@ -29,7 +29,11 @@ async fn main() {
                 std::process::exit(1);
             }
         };
-        println!("Loaded {} evaluation cases from {}", loaded.len(), prompt_file);
+        println!(
+            "Loaded {} evaluation cases from {}",
+            loaded.len(),
+            prompt_file
+        );
         cases.append(&mut loaded);
     }
 
@@ -83,8 +87,7 @@ async fn main() {
     );
 
     std::fs::create_dir_all("tests-logs/eval_reports").expect("Failed to create report directory");
-    let json =
-        serde_json::to_string_pretty(&report).expect("Failed to serialize report");
+    let json = serde_json::to_string_pretty(&report).expect("Failed to serialize report");
     std::fs::write("tests-logs/eval_reports/latest_run.json", json)
         .expect("Failed to write report file");
     println!("\n📝 Full evaluation report saved to: tests-logs/eval_reports/latest_run.json");

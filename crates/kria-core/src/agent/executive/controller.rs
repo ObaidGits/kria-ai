@@ -22,8 +22,8 @@
 //! All heavy work (command execution, audit logging, HITL waits)
 //! happens inside spawned worker tasks.
 
-use std::collections::BinaryHeap;
 use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 use std::sync::Arc;
 
 use tokio::sync::{mpsc, watch};
@@ -152,9 +152,8 @@ impl ExecutiveController {
             cancel: shutdown.clone(),
         };
 
-        let preemption = PreemptionManager::new(std::time::Duration::from_millis(
-            config.preemption_grace_ms,
-        ));
+        let preemption =
+            PreemptionManager::new(std::time::Duration::from_millis(config.preemption_grace_ms));
 
         let controller = Self {
             config,
@@ -255,7 +254,10 @@ impl ExecutiveController {
             ScheduleDecision::Enqueue(task) => {
                 self.enqueue(task);
             }
-            ScheduleDecision::Preempt { victim_id, replacement } => {
+            ScheduleDecision::Preempt {
+                victim_id,
+                replacement,
+            } => {
                 self.preempt_and_replace(victim_id, replacement).await;
             }
             ScheduleDecision::Reject { task_id, reason } => {
@@ -323,7 +325,10 @@ impl ExecutiveController {
             TaskPriority::Maintenance => {
                 // Maintenance tasks only run when system is truly idle
                 // (no foreground, no background, queue is empty).
-                if self.foreground.is_some() || !self.background.is_empty() || !self.queue.is_empty() {
+                if self.foreground.is_some()
+                    || !self.background.is_empty()
+                    || !self.queue.is_empty()
+                {
                     ScheduleDecision::Enqueue(task)
                 } else {
                     ScheduleDecision::Execute(task)
@@ -476,7 +481,10 @@ impl ExecutiveController {
     }
 
     /// Handle background task completion.
-    fn on_background_complete(&mut self, result: Result<(uuid::Uuid, TaskResult), tokio::task::JoinError>) {
+    fn on_background_complete(
+        &mut self,
+        result: Result<(uuid::Uuid, TaskResult), tokio::task::JoinError>,
+    ) {
         match result {
             Ok((task_id, task_result)) => {
                 tracing::debug!(
@@ -559,7 +567,11 @@ impl ExecutiveController {
         let start = std::time::Instant::now();
 
         match payload {
-            TaskPayload::UserTurn { text, is_voice, session_id } => {
+            TaskPayload::UserTurn {
+                text,
+                is_voice,
+                session_id,
+            } => {
                 // TODO: Wire into AgentLoop.run()
                 tracing::info!(
                     text = %text,
@@ -578,7 +590,11 @@ impl ExecutiveController {
                 tracing::info!(command = ?command, "Executing command");
                 TaskResult::Success {
                     total_duration: start.elapsed(),
-                    output: Some(format!("Executed: {} {}", command.binary, command.args.join(" "))),
+                    output: Some(format!(
+                        "Executed: {} {}",
+                        command.binary,
+                        command.args.join(" ")
+                    )),
                 }
             }
 
@@ -596,7 +612,10 @@ impl ExecutiveController {
                 // TODO: Execute each command via SubprocessExecutor
                 TaskResult::Success {
                     total_duration: start.elapsed(),
-                    output: Some(format!("Gathered evidence from {} commands", commands.len())),
+                    output: Some(format!(
+                        "Gathered evidence from {} commands",
+                        commands.len()
+                    )),
                 }
             }
 
@@ -618,7 +637,10 @@ impl ExecutiveController {
                 }
             }
 
-            TaskPayload::HitlResponse { request_id, approved } => {
+            TaskPayload::HitlResponse {
+                request_id,
+                approved,
+            } => {
                 tracing::info!(
                     request_id = %request_id,
                     approved = approved,
@@ -627,7 +649,10 @@ impl ExecutiveController {
                 // TODO: Wire into HitlGateway.respond()
                 TaskResult::Success {
                     total_duration: start.elapsed(),
-                    output: Some(format!("HITL response: {}", if approved { "approved" } else { "rejected" })),
+                    output: Some(format!(
+                        "HITL response: {}",
+                        if approved { "approved" } else { "rejected" }
+                    )),
                 }
             }
 

@@ -173,34 +173,97 @@ impl SchemaValidator {
         let mut safe_binaries = HashSet::new();
         // Common CLI tools that accept --help without side effects.
         for binary in &[
-            "ls", "cat", "head", "tail", "grep", "find", "wc", "sort",
-            "awk", "sed", "cut", "tr", "diff", "file", "stat", "du",
-            "df", "free", "top", "ps", "uptime", "uname", "hostname",
-            "ip", "ss", "ping", "traceroute", "dig", "curl", "wget",
-            "git", "docker", "podman", "systemctl", "journalctl",
-            "lscpu", "lspci", "lsusb", "lsblk", "jq", "tree",
-            "python3", "node", "npm", "pip", "cargo", "rustc",
+            "ls",
+            "cat",
+            "head",
+            "tail",
+            "grep",
+            "find",
+            "wc",
+            "sort",
+            "awk",
+            "sed",
+            "cut",
+            "tr",
+            "diff",
+            "file",
+            "stat",
+            "du",
+            "df",
+            "free",
+            "top",
+            "ps",
+            "uptime",
+            "uname",
+            "hostname",
+            "ip",
+            "ss",
+            "ping",
+            "traceroute",
+            "dig",
+            "curl",
+            "wget",
+            "git",
+            "docker",
+            "podman",
+            "systemctl",
+            "journalctl",
+            "lscpu",
+            "lspci",
+            "lsusb",
+            "lsblk",
+            "jq",
+            "tree",
+            "python3",
+            "node",
+            "npm",
+            "pip",
+            "cargo",
+            "rustc",
         ] {
             safe_binaries.insert(binary.to_string());
         }
 
         let mut safe_flags = HashSet::new();
         for flag in &[
-            "--help", "-h", "--version", "-V", "-v", "--dry-run",
-            "--dry-run", "--list", "--status", "--info", "--show",
-            "--describe", "--get", "--check", "--verify", "--test",
-            "--print-config", "--dump", "--query", "--search",
-            "--whoami", "--me", "status", "list", "show", "get",
-            "describe", "info", "help", "version",
+            "--help",
+            "-h",
+            "--version",
+            "-V",
+            "-v",
+            "--dry-run",
+            "--dry-run",
+            "--list",
+            "--status",
+            "--info",
+            "--show",
+            "--describe",
+            "--get",
+            "--check",
+            "--verify",
+            "--test",
+            "--print-config",
+            "--dump",
+            "--query",
+            "--search",
+            "--whoami",
+            "--me",
+            "status",
+            "list",
+            "show",
+            "get",
+            "describe",
+            "info",
+            "help",
+            "version",
         ] {
             safe_flags.insert(flag.to_string());
         }
 
         let mut safe_prefixes = HashSet::new();
         for prefix in &[
-            "list", "get", "show", "describe", "info", "status",
-            "check", "verify", "search", "find", "query", "read",
-            "fetch", "browse", "inspect", "examine", "audit",
+            "list", "get", "show", "describe", "info", "status", "check", "verify", "search",
+            "find", "query", "read", "fetch", "browse", "inspect", "examine", "audit",
         ] {
             safe_prefixes.insert(prefix.to_string());
         }
@@ -259,7 +322,9 @@ impl SchemaValidator {
             }
         }
 
-        let valid = errors.iter().all(|e| e.severity != ValidationSeverity::Error);
+        let valid = errors
+            .iter()
+            .all(|e| e.severity != ValidationSeverity::Error);
 
         ValidationResult {
             valid,
@@ -281,7 +346,10 @@ impl SchemaValidator {
         } else if !tool.name.chars().all(|c| c.is_alphanumeric() || c == '_') {
             errors.push(ValidationError {
                 field: "name".to_string(),
-                message: format!("Tool name '{}' contains invalid characters (must be snake_case)", tool.name),
+                message: format!(
+                    "Tool name '{}' contains invalid characters (must be snake_case)",
+                    tool.name
+                ),
                 severity: ValidationSeverity::Error,
             });
         }
@@ -323,7 +391,11 @@ impl SchemaValidator {
                     });
                 }
             }
-            ToolInvocation::Http { method, url_template, .. } => {
+            ToolInvocation::Http {
+                method,
+                url_template,
+                ..
+            } => {
                 if url_template.is_empty() {
                     errors.push(ValidationError {
                         field: "invocation.url_template".to_string(),
@@ -356,9 +428,10 @@ impl SchemaValidator {
         }
 
         match &tool.invocation {
-            ToolInvocation::Cli { binary, args_template } => {
-                self.can_dry_run_cli(binary, args_template)
-            }
+            ToolInvocation::Cli {
+                binary,
+                args_template,
+            } => self.can_dry_run_cli(binary, args_template),
             ToolInvocation::Http { method, .. } => {
                 // Only GET, HEAD, OPTIONS are safe.
                 method.is_read_only()
@@ -414,7 +487,10 @@ impl SchemaValidator {
                 }
                 "HTTP method is read-only but tool is not marked idempotent".to_string()
             }
-            ToolInvocation::Cli { binary, args_template } => {
+            ToolInvocation::Cli {
+                binary,
+                args_template,
+            } => {
                 if !tool.idempotent {
                     return "Tool is explicitly marked as non-idempotent".to_string();
                 }
@@ -465,16 +541,19 @@ impl SchemaValidator {
                         .map_err(|e| format!("Failed to execute '{} --version': {}", binary, e))?;
 
                     if version_output.status.success() {
-                        Ok(String::from_utf8_lossy(&version_output.stdout).trim().to_string())
+                        Ok(String::from_utf8_lossy(&version_output.stdout)
+                            .trim()
+                            .to_string())
                     } else {
-                        Err(format!(
-                            "Both --help and --version failed for '{}'",
-                            binary
-                        ))
+                        Err(format!("Both --help and --version failed for '{}'", binary))
                     }
                 }
             }
-            ToolInvocation::Http { url_template, headers, .. } => {
+            ToolInvocation::Http {
+                url_template,
+                headers,
+                ..
+            } => {
                 // Replace template variables with test values.
                 let test_url = url_template
                     .replace("{id}", "0")
@@ -533,11 +612,12 @@ impl DynamicToolGenerator {
         let validation = self.validator.validate(generated).await;
 
         if !validation.valid {
-            let errors: Vec<String> = validation.errors.iter().map(|e| e.message.clone()).collect();
-            return Ok(RegistrationResult::ValidationFailed {
-                tool_name,
-                errors,
-            });
+            let errors: Vec<String> = validation
+                .errors
+                .iter()
+                .map(|e| e.message.clone())
+                .collect();
+            return Ok(RegistrationResult::ValidationFailed { tool_name, errors });
         }
 
         let _tool = validation.tool.unwrap();
@@ -557,7 +637,10 @@ impl DynamicToolGenerator {
     /// Estimate the risk level of a generated tool.
     fn estimate_risk(&self, tool: &GeneratedToolDef) -> RiskLevel {
         match &tool.invocation {
-            ToolInvocation::Cli { binary, args_template } => {
+            ToolInvocation::Cli {
+                binary,
+                args_template,
+            } => {
                 let risk = self.validator.policy_gate.classify_risk(binary, &[]);
                 if risk != RiskLevel::Green {
                     return risk;
@@ -567,21 +650,38 @@ impl DynamicToolGenerator {
                 if let Some(first_arg) = args_template.first() {
                     let bare = first_arg.trim_start_matches('-');
                     let destructive_prefixes = [
-                        "delete", "remove", "rm", "kill", "stop", "destroy",
-                        "drop", "truncate", "purge", "wipe", "erase", "nuke",
-                        "install", "uninstall", "apt", "apt-get", "pip",
-                        "push", "force", "reset", "revert", "undo",
+                        "delete",
+                        "remove",
+                        "rm",
+                        "kill",
+                        "stop",
+                        "destroy",
+                        "drop",
+                        "truncate",
+                        "purge",
+                        "wipe",
+                        "erase",
+                        "nuke",
+                        "install",
+                        "uninstall",
+                        "apt",
+                        "apt-get",
+                        "pip",
+                        "push",
+                        "force",
+                        "reset",
+                        "revert",
+                        "undo",
                     ];
-                    if destructive_prefixes.iter().any(|p| bare == *p) {
+                    if destructive_prefixes.contains(&bare) {
                         return RiskLevel::Red;
                     }
 
                     let write_prefixes = [
-                        "create", "add", "set", "update", "modify", "write",
-                        "edit", "patch", "move", "rename", "copy", "cp",
-                        "start", "restart", "enable", "disable",
+                        "create", "add", "set", "update", "modify", "write", "edit", "patch",
+                        "move", "rename", "copy", "cp", "start", "restart", "enable", "disable",
                     ];
-                    if write_prefixes.iter().any(|p| bare == *p) {
+                    if write_prefixes.contains(&bare) {
                         return RiskLevel::Yellow;
                     }
                 }
@@ -625,7 +725,12 @@ mod tests {
         SchemaValidator::new(policy_gate)
     }
 
-    fn make_cli_tool(name: &str, binary: &str, args: Vec<&str>, idempotent: bool) -> GeneratedToolDef {
+    fn make_cli_tool(
+        name: &str,
+        binary: &str,
+        args: Vec<&str>,
+        idempotent: bool,
+    ) -> GeneratedToolDef {
         GeneratedToolDef {
             name: name.to_string(),
             description: format!("Test tool: {}", name),
@@ -664,7 +769,11 @@ mod tests {
         let validator = make_validator();
         let tool = make_cli_tool("list_files", "ls", vec!["-la"], true);
         let result = validator.validate(tool).await;
-        assert!(result.valid, "Expected valid, got errors: {:?}", result.errors);
+        assert!(
+            result.valid,
+            "Expected valid, got errors: {:?}",
+            result.errors
+        );
     }
 
     #[tokio::test]
@@ -756,28 +865,44 @@ mod tests {
     #[tokio::test]
     async fn test_dry_run_blocked_for_http_post() {
         let validator = make_validator();
-        let tool = make_http_tool("create_item", HttpMethod::Post, "https://api.example.com/items");
+        let tool = make_http_tool(
+            "create_item",
+            HttpMethod::Post,
+            "https://api.example.com/items",
+        );
         assert!(!validator.can_dry_run(&tool));
     }
 
     #[tokio::test]
     async fn test_dry_run_blocked_for_http_delete() {
         let validator = make_validator();
-        let tool = make_http_tool("delete_item", HttpMethod::Delete, "https://api.example.com/items/{id}");
+        let tool = make_http_tool(
+            "delete_item",
+            HttpMethod::Delete,
+            "https://api.example.com/items/{id}",
+        );
         assert!(!validator.can_dry_run(&tool));
     }
 
     #[tokio::test]
     async fn test_dry_run_allowed_for_http_get() {
         let validator = make_validator();
-        let tool = make_http_tool("get_item", HttpMethod::Get, "https://api.example.com/items/{id}");
+        let tool = make_http_tool(
+            "get_item",
+            HttpMethod::Get,
+            "https://api.example.com/items/{id}",
+        );
         assert!(validator.can_dry_run(&tool));
     }
 
     #[tokio::test]
     async fn test_dry_run_blocked_for_http_put() {
         let validator = make_validator();
-        let tool = make_http_tool("update_item", HttpMethod::Put, "https://api.example.com/items/{id}");
+        let tool = make_http_tool(
+            "update_item",
+            HttpMethod::Put,
+            "https://api.example.com/items/{id}",
+        );
         assert!(!validator.can_dry_run(&tool));
     }
 
@@ -797,7 +922,12 @@ mod tests {
     #[tokio::test]
     async fn test_dry_run_explanation_for_non_idempotent() {
         let validator = make_validator();
-        let tool = make_cli_tool("deploy", "kubectl", vec!["apply", "-f", "deploy.yaml"], false);
+        let tool = make_cli_tool(
+            "deploy",
+            "kubectl",
+            vec!["apply", "-f", "deploy.yaml"],
+            false,
+        );
         let reason = validator.explain_why_not_dry_run(&tool);
         assert!(reason.contains("non-idempotent"));
     }
@@ -814,17 +944,17 @@ mod tests {
 
     #[test]
     fn test_http_get_is_green() {
-        assert_eq!(HttpMethod::Get.is_read_only(), true);
-        assert_eq!(HttpMethod::Head.is_read_only(), true);
-        assert_eq!(HttpMethod::Options.is_read_only(), true);
+        assert!(HttpMethod::Get.is_read_only());
+        assert!(HttpMethod::Head.is_read_only());
+        assert!(HttpMethod::Options.is_read_only());
     }
 
     #[test]
     fn test_http_post_is_not_read_only() {
-        assert_eq!(HttpMethod::Post.is_read_only(), false);
-        assert_eq!(HttpMethod::Put.is_read_only(), false);
-        assert_eq!(HttpMethod::Delete.is_read_only(), false);
-        assert_eq!(HttpMethod::Patch.is_read_only(), false);
+        assert!(!HttpMethod::Post.is_read_only());
+        assert!(!HttpMethod::Put.is_read_only());
+        assert!(!HttpMethod::Delete.is_read_only());
+        assert!(!HttpMethod::Patch.is_read_only());
     }
 
     // ── Blocked Binary Tests ───────────────────────────────────────────────
@@ -836,6 +966,9 @@ mod tests {
         let tool = make_cli_tool("disk_copy", "dd", vec!["if=/dev/zero", "of=/dev/sda"], true);
         let result = validator.validate(tool).await;
         assert!(!result.valid);
-        assert!(result.errors.iter().any(|e| e.message.contains("permanently blocked")));
+        assert!(result
+            .errors
+            .iter()
+            .any(|e| e.message.contains("permanently blocked")));
     }
 }

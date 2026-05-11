@@ -28,7 +28,10 @@ fn cognitive_score_report_schema_is_valid() {
     assert!(json.get("total_prompts").is_some(), "missing total_prompts");
     assert!(json.get("passed").is_some(), "missing passed");
     assert!(json.get("failed").is_some(), "missing failed");
-    assert!(json.get("cognitive_score").is_some(), "missing cognitive_score");
+    assert!(
+        json.get("cognitive_score").is_some(),
+        "missing cognitive_score"
+    );
 }
 
 #[test]
@@ -65,7 +68,10 @@ fn cognitive_trend_floor_guard() {
         .get("cognitive_score")
         .and_then(Value::as_str)
         .unwrap_or("0%");
-    let score = score_text.trim_end_matches('%').parse::<f64>().unwrap_or(0.0);
+    let score = score_text
+        .trim_end_matches('%')
+        .parse::<f64>()
+        .unwrap_or(0.0);
     let floor = std::env::var("KRIA_TREND_COGNITIVE_FLOOR")
         .ok()
         .and_then(|v| v.parse::<f64>().ok())
@@ -77,4 +83,3 @@ fn cognitive_trend_floor_guard() {
         floor
     );
 }
-

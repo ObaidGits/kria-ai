@@ -1,4 +1,3 @@
-
 use super::*;
 
 pub(super) fn build_fallback_call_for_hint(
@@ -718,9 +717,7 @@ pub(super) fn build_fallback_call_for_hint(
                 arguments: serde_json::json!({ "pid": pid }),
             })
         }
-        "manage_service" | "execute_bash"
-            if allowed_tool_names.contains("execute_bash") =>
-        {
+        "manage_service" | "execute_bash" if allowed_tool_names.contains("execute_bash") => {
             let action = if lower.contains("start") {
                 "start"
             } else if lower.contains("stop") {

@@ -173,7 +173,8 @@ pub trait CommandExecutor: Send + Sync {
 /// RFC-001 FINAL (Section 3.3): Filesystem capability.
 #[async_trait]
 pub trait FileSystemOps: Send + Sync {
-    async fn read_file(&self, request: ReadFileRequest) -> Result<ReadFileResult, EnvironmentError>;
+    async fn read_file(&self, request: ReadFileRequest)
+        -> Result<ReadFileResult, EnvironmentError>;
 
     async fn write_file(
         &self,

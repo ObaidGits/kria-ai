@@ -1,4 +1,3 @@
-
 use super::*;
 
 pub(super) fn is_gmail_tool_name(tool_name: &str) -> bool {
@@ -152,7 +151,9 @@ pub(super) fn build_image_failure_response(data: &serde_json::Value) -> String {
     msg
 }
 
-pub(super) fn build_grounded_gmail_count_summary(tool_result: &serde_json::Value) -> Option<String> {
+pub(super) fn build_grounded_gmail_count_summary(
+    tool_result: &serde_json::Value,
+) -> Option<String> {
     let (requested, returned) = extract_grounded_gmail_counts(tool_result)?;
 
     if requested == returned {
@@ -190,7 +191,10 @@ pub(super) fn contains_gmail_placeholder_scaffold(text: &str) -> bool {
     .any(|marker| lower.contains(marker))
 }
 
-pub(super) fn extract_prefixed_value_case_insensitive<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+pub(super) fn extract_prefixed_value_case_insensitive<'a>(
+    line: &'a str,
+    key: &str,
+) -> Option<&'a str> {
     let trimmed = line.trim();
     let (prefix, value) = trimmed.split_once(':')?;
     if !prefix.trim().eq_ignore_ascii_case(key) {
@@ -251,7 +255,9 @@ pub(super) fn contains_duplicate_gmail_rows(text: &str) -> bool {
     (id_occurrences >= 2 && duplicate_ids > 0) || duplicate_pairs > 0
 }
 
-pub(super) fn dedupe_grounded_gmail_messages(messages: &[serde_json::Value]) -> Vec<&serde_json::Value> {
+pub(super) fn dedupe_grounded_gmail_messages(
+    messages: &[serde_json::Value],
+) -> Vec<&serde_json::Value> {
     let mut deduped: Vec<&serde_json::Value> = Vec::with_capacity(messages.len());
     let mut seen_ids: HashSet<String> = HashSet::new();
     let mut seen_from_subject_pairs: HashSet<String> = HashSet::new();
@@ -297,7 +303,9 @@ pub(super) fn dedupe_grounded_gmail_messages(messages: &[serde_json::Value]) -> 
     deduped
 }
 
-pub(super) fn build_grounded_gmail_message_list_summary(tool_result: &serde_json::Value) -> Option<String> {
+pub(super) fn build_grounded_gmail_message_list_summary(
+    tool_result: &serde_json::Value,
+) -> Option<String> {
     let payload = tool_result.get("data").unwrap_or(tool_result);
     let messages = payload
         .get("messages")
@@ -807,7 +815,10 @@ pub(super) fn query_contains_path_like_token(query: &str) -> bool {
     })
 }
 
-pub(super) fn resolve_intent_fallback_query(last_user_text: &str, messages: &[ChatMessage]) -> String {
+pub(super) fn resolve_intent_fallback_query(
+    last_user_text: &str,
+    messages: &[ChatMessage],
+) -> String {
     let mut resolved = infer_confirmation_send_query_from_history(last_user_text, messages)
         .unwrap_or_else(|| last_user_text.trim().to_string());
 
@@ -840,4 +851,3 @@ pub(super) fn looks_like_vision_unavailable_error(error_message: &str) -> bool {
         || (lower.contains("mmproj") && lower.contains("image"))
         || (lower.contains("mmproj") && lower.contains("vision"))
 }
-

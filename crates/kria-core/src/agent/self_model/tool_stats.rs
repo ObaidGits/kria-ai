@@ -53,8 +53,8 @@ impl ToolStats {
     pub fn new(tool_name: impl Into<String>) -> Self {
         Self {
             tool_name: tool_name.into(),
-            alpha: 1.0,  // Prior: 1 success
-            beta: 1.0,   // Prior: 1 failure
+            alpha: 1.0, // Prior: 1 success
+            beta: 1.0,  // Prior: 1 failure
             total_calls: 0,
             avg_latency_ms: 0.0,
             last_used_epoch: 0,
@@ -192,7 +192,8 @@ impl SelfModel {
             return 0.5;
         }
 
-        let product: f64 = tool_names.iter()
+        let product: f64 = tool_names
+            .iter()
             .map(|name| self.success_rate(name))
             .product();
 
@@ -238,8 +239,11 @@ mod tests {
     #[test]
     fn beta_prior_starts_at_0_5() {
         let stats = ToolStats::new("test_tool");
-        assert!((stats.success_rate() - 0.5).abs() < 0.001,
-            "Beta(1,1) prior should give 0.50, got {}", stats.success_rate());
+        assert!(
+            (stats.success_rate() - 0.5).abs() < 0.001,
+            "Beta(1,1) prior should give 0.50, got {}",
+            stats.success_rate()
+        );
     }
 
     #[test]
@@ -247,8 +251,11 @@ mod tests {
         let mut stats = ToolStats::new("test_tool");
         stats.record_success(Duration::from_millis(100));
         // (1+1)/(1+1+2) = 2/3 ≈ 0.667
-        assert!((stats.success_rate() - 0.6667).abs() < 0.01,
-            "1 success should give ~0.67, got {}", stats.success_rate());
+        assert!(
+            (stats.success_rate() - 0.6667).abs() < 0.01,
+            "1 success should give ~0.67, got {}",
+            stats.success_rate()
+        );
     }
 
     #[test]
@@ -258,8 +265,11 @@ mod tests {
             stats.record_success(Duration::from_millis(100));
         }
         // (10+1)/(10+1+2) = 11/12 ≈ 0.917
-        assert!((stats.success_rate() - 0.9167).abs() < 0.01,
-            "10 successes should give ~0.92, got {}", stats.success_rate());
+        assert!(
+            (stats.success_rate() - 0.9167).abs() < 0.01,
+            "10 successes should give ~0.92, got {}",
+            stats.success_rate()
+        );
     }
 
     #[test]
@@ -267,8 +277,11 @@ mod tests {
         let mut stats = ToolStats::new("test_tool");
         stats.record_failure(Duration::from_millis(100));
         // 1/(1+1+2) = 1/3 ≈ 0.333
-        assert!((stats.success_rate() - 0.3333).abs() < 0.01,
-            "1 failure should give ~0.33, got {}", stats.success_rate());
+        assert!(
+            (stats.success_rate() - 0.3333).abs() < 0.01,
+            "1 failure should give ~0.33, got {}",
+            stats.success_rate()
+        );
     }
 
     #[test]
@@ -280,8 +293,11 @@ mod tests {
         // After 1 success: α=2, β=1
         // After 1 failure: α=2, β=2
         // Posterior: 2/(2+2) = 0.5
-        assert!((stats.success_rate() - 0.5).abs() < 0.001,
-            "Balanced outcomes should give 0.5, got {}", stats.success_rate());
+        assert!(
+            (stats.success_rate() - 0.5).abs() < 0.001,
+            "Balanced outcomes should give 0.5, got {}",
+            stats.success_rate()
+        );
     }
 
     #[test]
@@ -294,49 +310,74 @@ mod tests {
         }
         let ci_after = stats.confidence_width();
 
-        assert!(ci_after < ci_before,
-            "CI should narrow with more data: before={}, after={}", ci_before, ci_after);
+        assert!(
+            ci_after < ci_before,
+            "CI should narrow with more data: before={}, after={}",
+            ci_before,
+            ci_after
+        );
     }
 
     #[test]
     fn unknown_tool_gets_0_5() {
         let model = SelfModel::new();
-        assert!((model.success_rate("nonexistent_tool") - 0.5).abs() < 0.001,
-            "Unknown tool should get 0.5, got {}", model.success_rate("nonexistent_tool"));
+        assert!(
+            (model.success_rate("nonexistent_tool") - 0.5).abs() < 0.001,
+            "Unknown tool should get 0.5, got {}",
+            model.success_rate("nonexistent_tool")
+        );
     }
 
     #[test]
     fn score_path_geometric_mean() {
         let mut model = SelfModel::new();
         // Tool A: 0.8 success rate
-        for _ in 0..7 { model.record_outcome("tool_a", true, Duration::from_millis(100)); }
-        for _ in 0..2 { model.record_outcome("tool_a", false, Duration::from_millis(100)); }
+        for _ in 0..7 {
+            model.record_outcome("tool_a", true, Duration::from_millis(100));
+        }
+        for _ in 0..2 {
+            model.record_outcome("tool_a", false, Duration::from_millis(100));
+        }
 
         // Tool B: 0.8 success rate
-        for _ in 0..7 { model.record_outcome("tool_b", true, Duration::from_millis(100)); }
-        for _ in 0..2 { model.record_outcome("tool_b", false, Duration::from_millis(100)); }
+        for _ in 0..7 {
+            model.record_outcome("tool_b", true, Duration::from_millis(100));
+        }
+        for _ in 0..2 {
+            model.record_outcome("tool_b", false, Duration::from_millis(100));
+        }
 
         let score = model.score_path(&["tool_a", "tool_b"]);
         // Geometric mean of 0.8 and 0.8 = 0.8
-        assert!((score - 0.8).abs() < 0.1,
-            "Path score should be ~0.8, got {}", score);
+        assert!(
+            (score - 0.8).abs() < 0.1,
+            "Path score should be ~0.8, got {}",
+            score
+        );
     }
 
     #[test]
     fn score_path_fails_if_any_tool_fails() {
         let mut model = SelfModel::new();
         // Tool A: good (0.9)
-        for _ in 0..9 { model.record_outcome("good_tool", true, Duration::from_millis(100)); }
+        for _ in 0..9 {
+            model.record_outcome("good_tool", true, Duration::from_millis(100));
+        }
         model.record_outcome("good_tool", false, Duration::from_millis(100));
 
         // Tool B: bad (0.2)
         model.record_outcome("bad_tool", true, Duration::from_millis(100));
-        for _ in 0..4 { model.record_outcome("bad_tool", false, Duration::from_millis(100)); }
+        for _ in 0..4 {
+            model.record_outcome("bad_tool", false, Duration::from_millis(100));
+        }
 
         let score = model.score_path(&["good_tool", "bad_tool"]);
         // Geometric mean of ~0.9 and ~0.2 = ~0.42
-        assert!(score < 0.5,
-            "Path with a bad tool should score low, got {}", score);
+        assert!(
+            score < 0.5,
+            "Path with a bad tool should score low, got {}",
+            score
+        );
     }
 
     #[test]
@@ -347,16 +388,22 @@ mod tests {
 
         stats.record_success(Duration::from_millis(200));
         // EMA: 100 * 0.9 + 200 * 0.1 = 110
-        assert!((stats.avg_latency_ms - 110.0).abs() < 1.0,
-            "Latency EMA should be ~110, got {}", stats.avg_latency_ms);
+        assert!(
+            (stats.avg_latency_ms - 110.0).abs() < 1.0,
+            "Latency EMA should be ~110, got {}",
+            stats.avg_latency_ms
+        );
     }
 
     #[test]
     fn adjustable_prior() {
         // Trusted built-in tool with Beta(2,1) prior (starts at 0.67)
         let stats = ToolStats::with_prior("ls", 2.0, 1.0);
-        assert!((stats.success_rate() - 0.6667).abs() < 0.01,
-            "Beta(2,1) prior should give ~0.67, got {}", stats.success_rate());
+        assert!(
+            (stats.success_rate() - 0.6667).abs() < 0.01,
+            "Beta(2,1) prior should give ~0.67, got {}",
+            stats.success_rate()
+        );
     }
 
     #[test]

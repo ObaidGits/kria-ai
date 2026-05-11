@@ -61,7 +61,10 @@ fn patterns() -> &'static Patterns {
         // Absolute file paths: /usr/bin/foo, /etc/nginx/nginx.conf
         file_path: Regex::new(r"(/(?:[\w.\-]+/)+[\w.\-]+)").unwrap(),
         // Numeric KV: "CPU: 87%", "MemFree: 1234 kB", "Load: 1.23"
-        numeric_kv: Regex::new(r"([\w][\w\s./]*?):\s*(\d+\.?\d*)\s*(%|MB|GB|KB|kB|ms|s|B|b|Mbps|GHz)?").unwrap(),
+        numeric_kv: Regex::new(
+            r"([\w][\w\s./]*?):\s*(\d+\.?\d*)\s*(%|MB|GB|KB|kB|ms|s|B|b|Mbps|GHz)?",
+        )
+        .unwrap(),
         // Exit codes: "exit code 1", "exit status 0", "status=1"
         exit_code: Regex::new(r"(?:exit|status|code)[=:\s]+(\d+)").unwrap(),
         // JSON-like: "key": "value" or "key": 123
@@ -175,7 +178,10 @@ impl StructuredExtractor {
         for cap in p.numeric_kv.captures_iter(text) {
             let key = cap[1].trim().to_string();
             let value = cap[2].to_string();
-            let unit = cap.get(3).map(|m| m.as_str().to_string()).unwrap_or_default();
+            let unit = cap
+                .get(3)
+                .map(|m| m.as_str().to_string())
+                .unwrap_or_default();
             let entry = (key, value, unit);
             if !fields.numeric_values.contains(&entry) {
                 fields.numeric_values.push(entry);
@@ -249,12 +255,32 @@ impl StructuredExtractor {
         let mut total = 0usize;
 
         // Structured fields (compact)
-        total += fields.error_codes.iter().map(|s| s.len() + 10).sum::<usize>(); // "ERR: X\n"
-        total += fields.ipv4_addresses.iter().map(|s| s.len() + 5).sum::<usize>();
+        total += fields
+            .error_codes
+            .iter()
+            .map(|s| s.len() + 10)
+            .sum::<usize>(); // "ERR: X\n"
+        total += fields
+            .ipv4_addresses
+            .iter()
+            .map(|s| s.len() + 5)
+            .sum::<usize>();
         total += fields.file_paths.iter().map(|s| s.len() + 5).sum::<usize>();
-        total += fields.numeric_values.iter().map(|(k, v, u)| k.len() + v.len() + u.len() + 5).sum::<usize>();
-        total += fields.exit_codes.iter().map(|s| s.len() + 10).sum::<usize>();
-        total += fields.kv_pairs.iter().map(|(k, v)| k.len() + v.len() + 5).sum::<usize>();
+        total += fields
+            .numeric_values
+            .iter()
+            .map(|(k, v, u)| k.len() + v.len() + u.len() + 5)
+            .sum::<usize>();
+        total += fields
+            .exit_codes
+            .iter()
+            .map(|s| s.len() + 10)
+            .sum::<usize>();
+        total += fields
+            .kv_pairs
+            .iter()
+            .map(|(k, v)| k.len() + v.len() + 5)
+            .sum::<usize>();
 
         // Raw snippet
         total += fields.raw_snippet.len();
@@ -330,8 +356,14 @@ mod tests {
         let ext = StructuredExtractor::new();
         let text = "CPU: 87%\nMemFree: 1234 kB\nLoad: 1.23";
         let fields = ext.extract(text);
-        assert!(fields.numeric_values.iter().any(|(k, v, u)| k == "CPU" && v == "87" && u == "%"));
-        assert!(fields.numeric_values.iter().any(|(k, v, u)| k == "MemFree" && v == "1234" && u == "kB"));
+        assert!(fields
+            .numeric_values
+            .iter()
+            .any(|(k, v, u)| k == "CPU" && v == "87" && u == "%"));
+        assert!(fields
+            .numeric_values
+            .iter()
+            .any(|(k, v, u)| k == "MemFree" && v == "1234" && u == "kB"));
     }
 
     #[test]
@@ -348,14 +380,23 @@ mod tests {
         let ext = StructuredExtractor::new();
         let text = "State: active (running)\nMain PID: 1234\nMemory: 45.2M";
         let fields = ext.extract(text);
-        assert!(fields.kv_pairs.iter().any(|(k, v)| k == "State" && v == "active (running)"));
-        assert!(fields.kv_pairs.iter().any(|(k, v)| k == "Main PID" && v == "1234"));
+        assert!(fields
+            .kv_pairs
+            .iter()
+            .any(|(k, v)| k == "State" && v == "active (running)"));
+        assert!(fields
+            .kv_pairs
+            .iter()
+            .any(|(k, v)| k == "Main PID" && v == "1234"));
     }
 
     #[test]
     fn truncates_raw_snippet() {
         let ext = StructuredExtractor::with_max_lines(5);
-        let text = (0..20).map(|i| format!("Line {}", i)).collect::<Vec<_>>().join("\n");
+        let text = (0..20)
+            .map(|i| format!("Line {}", i))
+            .collect::<Vec<_>>()
+            .join("\n");
         let fields = ext.extract(&text);
         assert!(fields.truncated);
         assert_eq!(fields.raw_snippet.lines().count(), 5);
@@ -395,13 +436,28 @@ mod tests {
 
         let fields = ext.extract(text);
         // Should extract numeric values
-        assert!(fields.numeric_values.iter().any(|(k, _, _)| k.contains("Memory")),
-            "Should extract Memory numeric value");
-        assert!(fields.numeric_values.iter().any(|(k, _, _)| k.contains("Tasks")),
-            "Should extract Tasks numeric value");
+        assert!(
+            fields
+                .numeric_values
+                .iter()
+                .any(|(k, _, _)| k.contains("Memory")),
+            "Should extract Memory numeric value"
+        );
+        assert!(
+            fields
+                .numeric_values
+                .iter()
+                .any(|(k, _, _)| k.contains("Tasks")),
+            "Should extract Tasks numeric value"
+        );
         // Should extract file paths
-        assert!(fields.file_paths.iter().any(|p| p.contains("nginx.service")),
-            "Should extract nginx.service path");
+        assert!(
+            fields
+                .file_paths
+                .iter()
+                .any(|p| p.contains("nginx.service")),
+            "Should extract nginx.service path"
+        );
     }
 
     #[test]
@@ -443,6 +499,10 @@ MiB Swap:   2048.0 total,   2048.0 free,      0.0 used.   6543.2 avail Mem
         );
         assert_eq!(evidence.command, "systemctl status nginx");
         assert_eq!(evidence.exit_code, 0);
-        assert!(evidence.stdout_fields.kv_pairs.iter().any(|(k, _)| k.contains("Active")));
+        assert!(evidence
+            .stdout_fields
+            .kv_pairs
+            .iter()
+            .any(|(k, _)| k.contains("Active")));
     }
 }

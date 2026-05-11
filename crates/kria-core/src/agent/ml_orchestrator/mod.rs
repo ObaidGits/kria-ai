@@ -6,30 +6,29 @@
 // The Cloud LLM generates TOML-frontmattered Python code, the Rust
 // orchestrator wraps it with safety guarantees, and Colab executes it.
 
-pub mod types;
-pub mod plan_parser;
+pub mod async_wrapper;
 pub mod code_gate;
 pub mod helpers_template;
-pub mod async_wrapper;
 pub mod integrity;
 pub mod ledger;
+pub mod plan_parser;
 pub mod poller;
 pub mod sync_cell;
+pub mod types;
 
 // Re-exports for convenience
-pub use types::{
-    CellPlan, ParsedCell, Phase, PhaseArtifact, ArtifactType, ContentHash,
-    HashAlgorithm, TrainingMetrics, MlPollerExit, PollResult,
-    RetrievedArtifact, PhaseStatus, PhaseRecord,
-};
-pub use plan_parser::{parse_cell_plan, PlanParseError};
-pub use code_gate::{capability_check, CapabilityError};
-pub use ledger::{LedgerHandle, LedgerActor, LedgerMsg};
-pub use poller::{AdaptiveMlPoller, ColabExecutor, PollEvent};
-pub use integrity::{sha256_file, xxhash64_file, compute_hash, verify_hash};
-pub use sync_cell::{generate_sync_cell, generate_checkpoint_sync};
-pub use helpers_template::render_helpers;
 pub use async_wrapper::{wrap_async_cell, wrap_sync_cell};
+pub use code_gate::{capability_check, CapabilityError};
+pub use helpers_template::render_helpers;
+pub use integrity::{compute_hash, sha256_file, verify_hash, xxhash64_file};
+pub use ledger::{LedgerActor, LedgerHandle, LedgerMsg};
+pub use plan_parser::{parse_cell_plan, PlanParseError};
+pub use poller::{AdaptiveMlPoller, ColabExecutor, PollEvent};
+pub use sync_cell::{generate_checkpoint_sync, generate_sync_cell};
+pub use types::{
+    ArtifactType, CellPlan, ContentHash, HashAlgorithm, MlPollerExit, ParsedCell, Phase,
+    PhaseArtifact, PhaseRecord, PhaseStatus, PollResult, RetrievedArtifact, TrainingMetrics,
+};
 
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
@@ -113,16 +112,26 @@ impl MlOrchestrator {
         cold_root: &str,
         dataset_path: &str,
     ) -> String {
-        let status_file = format!(
-            "{}/{}/training_status.json",
-            hot_root,
-            cell.phase_dir()
-        );
+        let status_file = format!("{}/{}/training_status.json", hot_root, cell.phase_dir());
 
         if cell.is_async {
-            wrap_async_cell(cell, job_id, hot_root, cold_root, dataset_path, &status_file)
+            wrap_async_cell(
+                cell,
+                job_id,
+                hot_root,
+                cold_root,
+                dataset_path,
+                &status_file,
+            )
         } else {
-            wrap_sync_cell(cell, job_id, hot_root, cold_root, dataset_path, &status_file)
+            wrap_sync_cell(
+                cell,
+                job_id,
+                hot_root,
+                cold_root,
+                dataset_path,
+                &status_file,
+            )
         }
     }
 
@@ -148,10 +157,18 @@ impl MlOrchestrator {
         hot_root: &str,
         cold_root: &str,
     ) -> String {
-        let artifact_names: Vec<&str> = cell.outputs.iter()
-            .map(|o| o.split('/').last().unwrap_or(o))
+        let artifact_names: Vec<&str> = cell
+            .outputs
+            .iter()
+            .map(|o| o.split('/').next_back().unwrap_or(o))
             .collect();
-        generate_sync_cell(job_id, &cell.phase_dir(), hot_root, cold_root, &artifact_names)
+        generate_sync_cell(
+            job_id,
+            &cell.phase_dir(),
+            hot_root,
+            cold_root,
+            &artifact_names,
+        )
     }
 }
 

@@ -199,7 +199,11 @@ impl ToolHandler for ListNewsSources {
             Err(error) => return error,
         };
 
-        match self.0.call("news.list_sources", serde_json::json!({})).await {
+        match self
+            .0
+            .call("news.list_sources", serde_json::json!({}))
+            .await
+        {
             Ok(value) => ToolResult::ok(value),
             Err(error) => sidecar_error_result(error),
         }

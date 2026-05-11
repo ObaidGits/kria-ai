@@ -154,12 +154,17 @@ impl SkillCompiler {
         let name = generate_skill_name(goal);
 
         // 6. Compute average duration
-        let avg_duration = playbooks.iter().map(|p| p.duration_ms).sum::<i64>() / playbooks.len() as i64;
+        let avg_duration =
+            playbooks.iter().map(|p| p.duration_ms).sum::<i64>() / playbooks.len() as i64;
 
         let skill = CompiledSkill {
             id: None,
             name: name.clone(),
-            description: format!("Compiled from {} successful executions of: {}", playbooks.len(), goal),
+            description: format!(
+                "Compiled from {} successful executions of: {}",
+                playbooks.len(),
+                goal
+            ),
             trigger_patterns: vec![goal.to_string()],
             variables,
             commands,
@@ -327,12 +332,16 @@ impl SkillCompiler {
                     id: Some(row.get(0)?),
                     name: row.get(1)?,
                     description: row.get(2)?,
-                    trigger_patterns: serde_json::from_str(&row.get::<_, String>(3)?).unwrap_or_default(),
+                    trigger_patterns: serde_json::from_str(&row.get::<_, String>(3)?)
+                        .unwrap_or_default(),
                     variables: serde_json::from_str(&row.get::<_, String>(4)?).unwrap_or_default(),
                     commands: serde_json::from_str(&row.get::<_, String>(5)?).unwrap_or_default(),
                     success_count: row.get(6)?,
                     failure_count: row.get(7)?,
-                    status: row.get::<_, String>(8)?.parse().unwrap_or(SkillStatus::Accumulating),
+                    status: row
+                        .get::<_, String>(8)?
+                        .parse()
+                        .unwrap_or(SkillStatus::Accumulating),
                     confidence: row.get(9)?,
                     avg_duration_ms: row.get(10)?,
                     first_seen: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(11)?)
@@ -386,7 +395,10 @@ fn extract_common_structure(playbooks: &[Playbook]) -> Option<CommonStructure> {
     // All playbooks must have the same arg count per command
     for i in 0..command_count {
         let arg_count = first.commands[i].args.len();
-        if playbooks.iter().any(|p| p.commands[i].args.len() != arg_count) {
+        if playbooks
+            .iter()
+            .any(|p| p.commands[i].args.len() != arg_count)
+        {
             return None;
         }
     }
@@ -406,7 +418,8 @@ fn extract_variables(playbooks: &[Playbook], structure: &CommonStructure) -> Vec
 
         for arg_idx in 0..arg_count {
             // Collect all values for this argument position across playbooks
-            let values: Vec<&str> = playbooks.iter()
+            let values: Vec<&str> = playbooks
+                .iter()
                 .map(|p| p.commands[cmd_idx].args[arg_idx].as_str())
                 .collect();
 
@@ -423,16 +436,21 @@ fn extract_variables(playbooks: &[Playbook], structure: &CommonStructure) -> Vec
             }
 
             // Infer type from the values
-            let inferred_type = values.iter()
+            let inferred_type = values
+                .iter()
                 .map(|v| infer_variable_type(v))
-                .min_by_key(|t| type_specificity(t))
+                .min_by_key(type_specificity)
                 .unwrap_or(VariableType::String);
 
             // Validate ALL values against the inferred type
-            let all_valid = values.iter().all(|v| validate_variable(v, &inferred_type).is_ok());
+            let all_valid = values
+                .iter()
+                .all(|v| validate_variable(v, &inferred_type).is_ok());
             if !all_valid {
                 // Fall back to String type
-                let all_string_valid = values.iter().all(|v| validate_variable(v, &VariableType::String).is_ok());
+                let all_string_valid = values
+                    .iter()
+                    .all(|v| validate_variable(v, &VariableType::String).is_ok());
                 if !all_string_valid {
                     continue; // Some values are invalid even as strings — skip
                 }
@@ -441,8 +459,15 @@ fn extract_variables(playbooks: &[Playbook], structure: &CommonStructure) -> Vec
             let var_name = format!("arg_{}_{}", cmd_idx, arg_idx);
             variables.push(SkillVariable {
                 name: var_name,
-                var_type: if all_valid { inferred_type } else { VariableType::String },
-                description: format!("Argument {} of command {}", arg_idx, structure.binaries[cmd_idx]),
+                var_type: if all_valid {
+                    inferred_type
+                } else {
+                    VariableType::String
+                },
+                description: format!(
+                    "Argument {} of command {}",
+                    arg_idx, structure.binaries[cmd_idx]
+                ),
                 examples: distinct.into_iter().map(|s| s.to_string()).collect(),
                 required: true,
             });
@@ -457,29 +482,39 @@ fn parameterize_commands(
     commands: &[crate::tools::subprocess_executor::StructuredCommand],
     variables: &[SkillVariable],
 ) -> Vec<ParameterizedCommand> {
-    commands.iter().enumerate().map(|(cmd_idx, cmd)| {
-        let args = cmd.args.iter().enumerate().map(|(arg_idx, arg)| {
-            // Check if this argument position has a variable
-            let var_name = format!("arg_{}_{}", cmd_idx, arg_idx);
-            if variables.iter().any(|v| v.name == var_name) {
-                format!("{{{}}}", var_name)
-            } else {
-                arg.clone()
-            }
-        }).collect();
+    commands
+        .iter()
+        .enumerate()
+        .map(|(cmd_idx, cmd)| {
+            let args = cmd
+                .args
+                .iter()
+                .enumerate()
+                .map(|(arg_idx, arg)| {
+                    // Check if this argument position has a variable
+                    let var_name = format!("arg_{}_{}", cmd_idx, arg_idx);
+                    if variables.iter().any(|v| v.name == var_name) {
+                        format!("{{{}}}", var_name)
+                    } else {
+                        arg.clone()
+                    }
+                })
+                .collect();
 
-        ParameterizedCommand {
-            binary: cmd.binary.clone(),
-            args,
-            target: cmd.target.clone(),
-            timeout_secs: cmd.timeout_secs,
-        }
-    }).collect()
+            ParameterizedCommand {
+                binary: cmd.binary.clone(),
+                args,
+                target: cmd.target.clone(),
+                timeout_secs: cmd.timeout_secs,
+            }
+        })
+        .collect()
 }
 
 /// Generate a skill name from a goal string.
 fn generate_skill_name(goal: &str) -> String {
-    let sanitized: String = goal.chars()
+    let sanitized: String = goal
+        .chars()
         .map(|c| if c.is_alphanumeric() { c } else { '_' })
         .collect::<String>()
         .split('_')
@@ -531,12 +566,17 @@ mod tests {
         assert!(!compiler.check_compilable("fix nginx").unwrap());
 
         for i in 0..3 {
-            compiler.record_success(
-                "fix nginx",
-                &[make_cmd("systemctl", &["restart", &format!("service_{}", i)])],
-                "local",
-                1000 + i * 100,
-            ).unwrap();
+            compiler
+                .record_success(
+                    "fix nginx",
+                    &[make_cmd(
+                        "systemctl",
+                        &["restart", &format!("service_{}", i)],
+                    )],
+                    "local",
+                    1000 + i * 100,
+                )
+                .unwrap();
         }
 
         assert!(compiler.check_compilable("fix nginx").unwrap());
@@ -547,9 +587,30 @@ mod tests {
         let compiler = test_compiler();
 
         // 3 playbooks with different service names
-        compiler.record_success("fix service", &[make_cmd("systemctl", &["restart", "nginx"])], "local", 1000).unwrap();
-        compiler.record_success("fix service", &[make_cmd("systemctl", &["restart", "postgresql"])], "local", 1500).unwrap();
-        compiler.record_success("fix service", &[make_cmd("systemctl", &["restart", "redis"])], "local", 800).unwrap();
+        compiler
+            .record_success(
+                "fix service",
+                &[make_cmd("systemctl", &["restart", "nginx"])],
+                "local",
+                1000,
+            )
+            .unwrap();
+        compiler
+            .record_success(
+                "fix service",
+                &[make_cmd("systemctl", &["restart", "postgresql"])],
+                "local",
+                1500,
+            )
+            .unwrap();
+        compiler
+            .record_success(
+                "fix service",
+                &[make_cmd("systemctl", &["restart", "redis"])],
+                "local",
+                800,
+            )
+            .unwrap();
 
         let skill = compiler.try_compile("fix service").unwrap();
         assert!(skill.is_some());
@@ -562,8 +623,12 @@ mod tests {
     #[test]
     fn compile_rejects_insufficient_playbooks() {
         let compiler = test_compiler();
-        compiler.record_success("test", &[make_cmd("ls", &["-la"])], "local", 100).unwrap();
-        compiler.record_success("test", &[make_cmd("ls", &["-la"])], "local", 100).unwrap();
+        compiler
+            .record_success("test", &[make_cmd("ls", &["-la"])], "local", 100)
+            .unwrap();
+        compiler
+            .record_success("test", &[make_cmd("ls", &["-la"])], "local", 100)
+            .unwrap();
 
         let skill = compiler.try_compile("test").unwrap();
         assert!(skill.is_none()); // Only 2 playbooks, need 3
@@ -572,9 +637,15 @@ mod tests {
     #[test]
     fn compile_rejects_different_binaries() {
         let compiler = test_compiler();
-        compiler.record_success("test", &[make_cmd("ls", &["-la"])], "local", 100).unwrap();
-        compiler.record_success("test", &[make_cmd("cat", &["file"])], "local", 100).unwrap();
-        compiler.record_success("test", &[make_cmd("head", &["-5"])], "local", 100).unwrap();
+        compiler
+            .record_success("test", &[make_cmd("ls", &["-la"])], "local", 100)
+            .unwrap();
+        compiler
+            .record_success("test", &[make_cmd("cat", &["file"])], "local", 100)
+            .unwrap();
+        compiler
+            .record_success("test", &[make_cmd("head", &["-5"])], "local", 100)
+            .unwrap();
 
         let skill = compiler.try_compile("test").unwrap();
         assert!(skill.is_none()); // Different binaries
@@ -585,9 +656,30 @@ mod tests {
         let compiler = test_compiler();
 
         // Create a skill
-        compiler.record_success("test", &[make_cmd("systemctl", &["restart", "nginx"])], "local", 100).unwrap();
-        compiler.record_success("test", &[make_cmd("systemctl", &["restart", "postgresql"])], "local", 100).unwrap();
-        compiler.record_success("test", &[make_cmd("systemctl", &["restart", "redis"])], "local", 100).unwrap();
+        compiler
+            .record_success(
+                "test",
+                &[make_cmd("systemctl", &["restart", "nginx"])],
+                "local",
+                100,
+            )
+            .unwrap();
+        compiler
+            .record_success(
+                "test",
+                &[make_cmd("systemctl", &["restart", "postgresql"])],
+                "local",
+                100,
+            )
+            .unwrap();
+        compiler
+            .record_success(
+                "test",
+                &[make_cmd("systemctl", &["restart", "redis"])],
+                "local",
+                100,
+            )
+            .unwrap();
         let skill = compiler.try_compile("test").unwrap().unwrap();
 
         // Promote it
@@ -605,6 +697,9 @@ mod tests {
     #[test]
     fn generate_skill_name_sanitizes() {
         assert_eq!(generate_skill_name("Fix My VM!"), "skill_fix_my_vm");
-        assert_eq!(generate_skill_name("restart nginx service"), "skill_restart_nginx_service");
+        assert_eq!(
+            generate_skill_name("restart nginx service"),
+            "skill_restart_nginx_service"
+        );
     }
 }

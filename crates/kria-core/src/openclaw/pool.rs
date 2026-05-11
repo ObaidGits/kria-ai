@@ -99,9 +99,10 @@ impl ContainerPool {
             .map_err(|e| PoolError::CreationFailed(format!("Docker connection failed: {}", e)))?;
 
         // Verify Docker is accessible
-        docker.ping().await.map_err(|e| {
-            PoolError::CreationFailed(format!("Docker ping failed: {}", e))
-        })?;
+        docker
+            .ping()
+            .await
+            .map_err(|e| PoolError::CreationFailed(format!("Docker ping failed: {}", e)))?;
 
         let (shutdown, _) = broadcast::channel(1);
         let max_concurrent = config.max_concurrent_invocations;
@@ -119,7 +120,11 @@ impl ContainerPool {
 
     /// Pre-warm containers for all resource classes.
     pub async fn initialize(&self) -> Result<(), PoolError> {
-        for class in &[ResourceClass::Light, ResourceClass::Medium, ResourceClass::Heavy] {
+        for class in &[
+            ResourceClass::Light,
+            ResourceClass::Medium,
+            ResourceClass::Heavy,
+        ] {
             for _ in 0..self.config.warm_per_class {
                 let container = self.create_container(*class).await?;
                 self.pools
@@ -151,9 +156,11 @@ impl ContainerPool {
     ) -> Result<ContainerHandle, PoolError> {
         // Acquire concurrency permit — released automatically when
         // ActiveInvocation is dropped in checkin().
-        let permit = self.semaphore.clone().try_acquire_owned().map_err(|_| {
-            PoolError::MaxConcurrent(self.config.max_concurrent_invocations)
-        })?;
+        let permit = self
+            .semaphore
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| PoolError::MaxConcurrent(self.config.max_concurrent_invocations))?;
 
         // Bump generation counter (CAS guard for concurrent recycle races).
         let _gen = self.generation.fetch_add(1, Ordering::AcqRel);
@@ -166,11 +173,8 @@ impl ContainerPool {
         let workspace_path = format!("/workspace/{}", invocation_id);
 
         // mkdir inside the container's tmpfs (already mounted at /workspace).
-        self.exec_in_container(
-            &warm.container_id,
-            &["mkdir", "-p", &workspace_path],
-        )
-        .await?;
+        self.exec_in_container(&warm.container_id, &["mkdir", "-p", &workspace_path])
+            .await?;
 
         let handle = ContainerHandle {
             invocation_id: invocation_id.clone(),
@@ -219,7 +223,12 @@ impl ContainerPool {
         tokio::spawn(async move {
             match create_container_static(&docker, &config, class).await {
                 Ok(container) => {
-                    pools.lock().await.entry(class).or_default().push_back(container);
+                    pools
+                        .lock()
+                        .await
+                        .entry(class)
+                        .or_default()
+                        .push_back(container);
                 }
                 Err(e) => {
                     tracing::warn!(error = %e, resource_class = %class, "Failed to pre-warm replacement container");
@@ -272,21 +281,13 @@ impl ContainerPool {
             .inspect_container(container_id, None::<InspectContainerOptions>)
             .await
         {
-            Ok(info) => info
-                .state
-                .as_ref()
-                .and_then(|s| s.running)
-                .unwrap_or(false),
+            Ok(info) => info.state.as_ref().and_then(|s| s.running).unwrap_or(false),
             Err(_) => false,
         }
     }
 
     /// Execute a command inside a running container.
-    async fn exec_in_container(
-        &self,
-        container_id: &str,
-        cmd: &[&str],
-    ) -> Result<(), PoolError> {
+    async fn exec_in_container(&self, container_id: &str, cmd: &[&str]) -> Result<(), PoolError> {
         use bollard::exec::{CreateExecOptions, StartExecOptions, StartExecResults};
 
         let exec = self
@@ -302,15 +303,12 @@ impl ContainerPool {
             )
             .await?;
 
-        match self
+        if let StartExecResults::Attached { mut output, .. } = self
             .docker
             .start_exec(&exec.id, Some(StartExecOptions::default()))
             .await?
         {
-            StartExecResults::Attached { mut output, .. } => {
-                while let Some(Ok(_)) = output.next().await {}
-            }
-            _ => {}
+            while let Some(Ok(_)) = output.next().await {}
         }
 
         Ok(())
@@ -404,7 +402,9 @@ impl ContainerPool {
                 };
 
                 for _ in current..target {
-                    match create_container_static(&pool.docker, &pool.config, ResourceClass::Light).await {
+                    match create_container_static(&pool.docker, &pool.config, ResourceClass::Light)
+                        .await
+                    {
                         Ok(container) => {
                             pool.pools
                                 .lock()
@@ -431,16 +431,25 @@ async fn create_container_static(
     config: &OpenClawConfig,
     class: ResourceClass,
 ) -> Result<WarmContainer, PoolError> {
-    let container_name = format!("{}-{}-{}", config.container_name, class, uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("x"));
+    let container_name = format!(
+        "{}-{}-{}",
+        config.container_name,
+        class,
+        uuid::Uuid::new_v4()
+            .to_string()
+            .split('-')
+            .next()
+            .unwrap_or("x")
+    );
 
     let memory_limit = match class {
-        ResourceClass::Light => 256 * 1024 * 1024i64,   // 256MB
-        ResourceClass::Medium => 512 * 1024 * 1024i64,  // 512MB
+        ResourceClass::Light => 256 * 1024 * 1024i64,  // 256MB
+        ResourceClass::Medium => 512 * 1024 * 1024i64, // 512MB
         ResourceClass::Heavy => 2 * 1024 * 1024 * 1024i64, // 2GB
     };
 
     let cpu_limit = match class {
-        ResourceClass::Light => 500_000i64,   // 0.5 CPU
+        ResourceClass::Light => 500_000i64,    // 0.5 CPU
         ResourceClass::Medium => 1_000_000i64, // 1.0 CPU
         ResourceClass::Heavy => 2_000_000i64,  // 2.0 CPU
     };

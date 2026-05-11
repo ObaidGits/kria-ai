@@ -23,7 +23,10 @@ pub enum RootCause {
     /// Network unreachable.
     NetworkUnreachable { target: String },
     /// Configuration error.
-    ConfigError { file: Option<String>, detail: String },
+    ConfigError {
+        file: Option<String>,
+        detail: String,
+    },
     /// Unknown — could not determine root cause deterministically.
     Unknown { stderr_snippet: String },
 }
@@ -36,13 +39,24 @@ impl RootCause {
             Self::StderrPattern { pattern, category } => format!("{}: {}", category, pattern),
             Self::Timeout { seconds } => format!("Timed out after {}s", seconds),
             Self::PermissionDenied { path } => {
-                format!("Permission denied{}", path.as_ref().map(|p| format!(": {}", p)).unwrap_or_default())
+                format!(
+                    "Permission denied{}",
+                    path.as_ref()
+                        .map(|p| format!(": {}", p))
+                        .unwrap_or_default()
+                )
             }
             Self::ResourceExhausted { resource } => format!("Resource exhausted: {}", resource),
             Self::ServiceNotRunning { service } => format!("Service not running: {}", service),
             Self::NetworkUnreachable { target } => format!("Network unreachable: {}", target),
             Self::ConfigError { file, detail } => {
-                format!("Config error{}: {}", file.as_ref().map(|f| format!(" in {}", f)).unwrap_or_default(), detail)
+                format!(
+                    "Config error{}: {}",
+                    file.as_ref()
+                        .map(|f| format!(" in {}", f))
+                        .unwrap_or_default(),
+                    detail
+                )
             }
             Self::Unknown { stderr_snippet } => format!("Unknown error: {}", stderr_snippet),
         }

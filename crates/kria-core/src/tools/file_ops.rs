@@ -1,7 +1,7 @@
-use crate::infra::sandbox::resolve_path;
 use crate::infra::environment::{
     EnvironmentError, ListDirRequest, ReadFileRequest, WriteFileRequest,
 };
+use crate::infra::sandbox::resolve_path;
 use crate::infra::ToolResult;
 use crate::safety::RiskLevel;
 use crate::tools::registry::{ParamDef, ToolDef, ToolHandler, ToolRegistry};
@@ -25,7 +25,8 @@ fn param(name: &str, ty: &str, desc: &str, required: bool) -> ParamDef {
 }
 
 fn parse_input<T: DeserializeOwned>(params: serde_json::Value) -> Result<T, ToolResult> {
-    serde_json::from_value(params).map_err(|error| ToolResult::err(format!("invalid parameters: {error}")))
+    serde_json::from_value(params)
+        .map_err(|error| ToolResult::err(format!("invalid parameters: {error}")))
 }
 
 fn require_non_empty(value: &str, field: &str) -> Result<(), ToolResult> {
@@ -86,11 +87,10 @@ async fn env_read_bytes(ctx: &ToolContext, path: PathBuf) -> Result<Vec<u8>, Too
         .await
         .map(|result| result.contents)
         .map_err(|error| {
-            ToolResult::err(ToolExecutionError::operation(
-                "read_file",
-                format!("{display}: {error}"),
+            ToolResult::err(
+                ToolExecutionError::operation("read_file", format!("{display}: {error}"))
+                    .to_string(),
             )
-            .to_string())
         })
 }
 
@@ -115,11 +115,10 @@ async fn env_write_bytes(
         .await
         .map(|result| result.bytes_written)
         .map_err(|error| {
-            ToolResult::err(ToolExecutionError::operation(
-                "write_file",
-                format!("{display}: {error}"),
+            ToolResult::err(
+                ToolExecutionError::operation("write_file", format!("{display}: {error}"))
+                    .to_string(),
             )
-            .to_string())
         })
 }
 
@@ -316,7 +315,11 @@ struct AnalyzeCodeInput {
 struct ReadFile;
 #[async_trait]
 impl ToolHandler for ReadFile {
-    async fn execute_with_context(&self, params: serde_json::Value, ctx: ToolContext) -> ToolResult {
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
         let input: ReadFileInput = match parse_input(params) {
             Ok(input) => input,
             Err(error) => return error,
@@ -347,7 +350,11 @@ impl ToolHandler for ReadFile {
 struct SearchFiles;
 #[async_trait]
 impl ToolHandler for SearchFiles {
-    async fn execute_with_context(&self, params: serde_json::Value, _ctx: ToolContext) -> ToolResult {
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        _ctx: ToolContext,
+    ) -> ToolResult {
         let input: SearchFilesInput = match parse_input(params) {
             Ok(input) => input,
             Err(error) => return error,
@@ -393,7 +400,11 @@ impl ToolHandler for SearchFiles {
 struct ListDirectory;
 #[async_trait]
 impl ToolHandler for ListDirectory {
-    async fn execute_with_context(&self, params: serde_json::Value, ctx: ToolContext) -> ToolResult {
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
         let input: ListDirectoryInput = match parse_input(params) {
             Ok(input) => input,
             Err(error) => return error,
@@ -437,7 +448,11 @@ impl ToolHandler for ListDirectory {
 struct GetFileInfo;
 #[async_trait]
 impl ToolHandler for GetFileInfo {
-    async fn execute_with_context(&self, params: serde_json::Value, ctx: ToolContext) -> ToolResult {
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
         let input: GetFileInfoInput = match parse_input(params) {
             Ok(input) => input,
             Err(error) => return error,
@@ -473,7 +488,11 @@ impl ToolHandler for GetFileInfo {
 struct CalculateDirSize;
 #[async_trait]
 impl ToolHandler for CalculateDirSize {
-    async fn execute_with_context(&self, params: serde_json::Value, _ctx: ToolContext) -> ToolResult {
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        _ctx: ToolContext,
+    ) -> ToolResult {
         let input: CalculateDirSizeInput = match parse_input(params) {
             Ok(input) => input,
             Err(error) => return error,
@@ -501,7 +520,11 @@ impl ToolHandler for CalculateDirSize {
 struct WriteFile;
 #[async_trait]
 impl ToolHandler for WriteFile {
-    async fn execute_with_context(&self, params: serde_json::Value, ctx: ToolContext) -> ToolResult {
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
         const MAX_SIZE_BYTES: usize = 10 * 1024 * 1024;
 
         let input: WriteFileInput = match parse_input(params) {
@@ -539,26 +562,26 @@ impl ToolHandler for WriteFile {
         if !input.overwrite && existing_content.is_some() {
             return op_error(
                 "write_file",
-                format!(
-                    "file already exists and overwrite is false: {}",
-                    input.path
-                ),
+                format!("file already exists and overwrite is false: {}", input.path),
             );
         }
 
         if let Some(parent) = resolved_path.parent() {
             if !parent.as_os_str().is_empty() {
                 if let Err(error) = std::fs::create_dir_all(parent) {
-                    return io_error(
-                        "write_file",
-                        parent.to_string_lossy().to_string(),
-                        error,
-                    );
+                    return io_error("write_file", parent.to_string_lossy().to_string(), error);
                 }
             }
         }
 
-        match env_write_bytes(&ctx, resolved_path, input.content.clone().into_bytes(), true).await {
+        match env_write_bytes(
+            &ctx,
+            resolved_path,
+            input.content.clone().into_bytes(),
+            true,
+        )
+        .await
+        {
             Ok(bytes_written) => ToolResult::ok(serde_json::json!({
                 "path": input.path,
                 "bytes_written": bytes_written,
@@ -573,7 +596,11 @@ impl ToolHandler for WriteFile {
 struct CreateDirectory;
 #[async_trait]
 impl ToolHandler for CreateDirectory {
-    async fn execute_with_context(&self, params: serde_json::Value, ctx: ToolContext) -> ToolResult {
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
         let input: CreateDirectoryInput = match parse_input(params) {
             Ok(input) => input,
             Err(error) => return error,
@@ -620,7 +647,11 @@ impl ToolHandler for CreateDirectory {
 struct RenameFile;
 #[async_trait]
 impl ToolHandler for RenameFile {
-    async fn execute_with_context(&self, params: serde_json::Value, ctx: ToolContext) -> ToolResult {
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
         let input: RenameFileInput = match parse_input(params) {
             Ok(input) => input,
             Err(error) => return error,
@@ -651,7 +682,11 @@ impl ToolHandler for RenameFile {
 struct CopyFile;
 #[async_trait]
 impl ToolHandler for CopyFile {
-    async fn execute_with_context(&self, params: serde_json::Value, ctx: ToolContext) -> ToolResult {
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
         let input: CopyFileInput = match parse_input(params) {
             Ok(input) => input,
             Err(error) => return error,
@@ -683,7 +718,11 @@ impl ToolHandler for CopyFile {
 struct DeleteFile;
 #[async_trait]
 impl ToolHandler for DeleteFile {
-    async fn execute_with_context(&self, params: serde_json::Value, ctx: ToolContext) -> ToolResult {
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
         let input: DeleteFileInput = match parse_input(params) {
             Ok(input) => input,
             Err(error) => return error,
@@ -731,7 +770,11 @@ impl ToolHandler for DeleteFile {
 struct DeleteDirectory;
 #[async_trait]
 impl ToolHandler for DeleteDirectory {
-    async fn execute_with_context(&self, params: serde_json::Value, ctx: ToolContext) -> ToolResult {
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
         let input: DeleteDirectoryInput = match parse_input(params) {
             Ok(input) => input,
             Err(error) => return error,
@@ -779,7 +822,11 @@ impl ToolHandler for DeleteDirectory {
 struct MoveFile;
 #[async_trait]
 impl ToolHandler for MoveFile {
-    async fn execute_with_context(&self, params: serde_json::Value, ctx: ToolContext) -> ToolResult {
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
         let input: MoveFileInput = match parse_input(params) {
             Ok(input) => input,
             Err(error) => return error,
@@ -830,7 +877,11 @@ impl ToolHandler for MoveFile {
 struct SearchFileContents;
 #[async_trait]
 impl ToolHandler for SearchFileContents {
-    async fn execute_with_context(&self, params: serde_json::Value, _ctx: ToolContext) -> ToolResult {
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        _ctx: ToolContext,
+    ) -> ToolResult {
         let input: SearchFileContentsInput = match parse_input(params) {
             Ok(input) => input,
             Err(error) => return error,
@@ -850,9 +901,9 @@ impl ToolHandler for SearchFileContents {
         };
 
         let binary_extensions = [
-            "png", "jpg", "jpeg", "gif", "bmp", "ico", "woff", "woff2", "ttf", "otf", "mp3",
-            "mp4", "avi", "mov", "zip", "tar", "gz", "rar", "7z", "exe", "dll", "so", "o",
-            "a", "dylib", "bin", "dat", "db", "sqlite", "gguf", "onnx", "pdf",
+            "png", "jpg", "jpeg", "gif", "bmp", "ico", "woff", "woff2", "ttf", "otf", "mp3", "mp4",
+            "avi", "mov", "zip", "tar", "gz", "rar", "7z", "exe", "dll", "so", "o", "a", "dylib",
+            "bin", "dat", "db", "sqlite", "gguf", "onnx", "pdf",
         ];
 
         let mut results = Vec::new();
@@ -933,7 +984,11 @@ impl ToolHandler for SearchFileContents {
 struct FindFilesByPattern;
 #[async_trait]
 impl ToolHandler for FindFilesByPattern {
-    async fn execute_with_context(&self, params: serde_json::Value, _ctx: ToolContext) -> ToolResult {
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        _ctx: ToolContext,
+    ) -> ToolResult {
         let input: FindFilesByPatternInput = match parse_input(params) {
             Ok(input) => input,
             Err(error) => return error,
@@ -1015,7 +1070,11 @@ impl ToolHandler for FindFilesByPattern {
 struct GetProjectStructure;
 #[async_trait]
 impl ToolHandler for GetProjectStructure {
-    async fn execute_with_context(&self, params: serde_json::Value, _ctx: ToolContext) -> ToolResult {
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        _ctx: ToolContext,
+    ) -> ToolResult {
         let input: GetProjectStructureInput = match parse_input(params) {
             Ok(input) => input,
             Err(error) => return error,
@@ -1025,7 +1084,12 @@ impl ToolHandler for GetProjectStructure {
             return error;
         }
 
-        fn build_tree(path: &Path, depth: usize, max_depth: usize, show_hidden: bool) -> Vec<serde_json::Value> {
+        fn build_tree(
+            path: &Path,
+            depth: usize,
+            max_depth: usize,
+            show_hidden: bool,
+        ) -> Vec<serde_json::Value> {
             if depth >= max_depth {
                 return vec![];
             }
@@ -1085,7 +1149,12 @@ impl ToolHandler for GetProjectStructure {
             tree
         }
 
-        let tree = build_tree(Path::new(&input.path), 0, input.max_depth, input.show_hidden);
+        let tree = build_tree(
+            Path::new(&input.path),
+            0,
+            input.max_depth,
+            input.show_hidden,
+        );
         ToolResult::ok(serde_json::json!({
             "path": input.path,
             "tree": tree,
@@ -1096,7 +1165,11 @@ impl ToolHandler for GetProjectStructure {
 struct CountLinesOfCode;
 #[async_trait]
 impl ToolHandler for CountLinesOfCode {
-    async fn execute_with_context(&self, params: serde_json::Value, _ctx: ToolContext) -> ToolResult {
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        _ctx: ToolContext,
+    ) -> ToolResult {
         let input: CountLinesOfCodeInput = match parse_input(params) {
             Ok(input) => input,
             Err(error) => return error,
@@ -1158,7 +1231,11 @@ impl ToolHandler for CountLinesOfCode {
 struct DiffFiles;
 #[async_trait]
 impl ToolHandler for DiffFiles {
-    async fn execute_with_context(&self, params: serde_json::Value, ctx: ToolContext) -> ToolResult {
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
         let input: DiffFilesInput = match parse_input(params) {
             Ok(input) => input,
             Err(error) => return error,
@@ -1211,7 +1288,11 @@ impl ToolHandler for DiffFiles {
 struct FindTodos;
 #[async_trait]
 impl ToolHandler for FindTodos {
-    async fn execute_with_context(&self, params: serde_json::Value, _ctx: ToolContext) -> ToolResult {
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        _ctx: ToolContext,
+    ) -> ToolResult {
         let input: FindTodosInput = match parse_input(params) {
             Ok(input) => input,
             Err(error) => return error,
@@ -1221,15 +1302,17 @@ impl ToolHandler for FindTodos {
             return error;
         }
 
-        let pattern = match regex::Regex::new(r"(?i)\b(TODO|FIXME|HACK|XXX|BUG|OPTIMIZE|REFACTOR)\b[:\s]*(.*)") {
+        let pattern = match regex::Regex::new(
+            r"(?i)\b(TODO|FIXME|HACK|XXX|BUG|OPTIMIZE|REFACTOR)\b[:\s]*(.*)",
+        ) {
             Ok(pattern) => pattern,
             Err(error) => return op_error("find_todos", format!("invalid todo regex: {error}")),
         };
 
         let binary_extensions = [
-            "png", "jpg", "jpeg", "gif", "bmp", "ico", "woff", "woff2", "ttf", "otf", "mp3",
-            "mp4", "zip", "tar", "gz", "rar", "exe", "dll", "so", "o", "a", "bin", "dat",
-            "db", "sqlite", "gguf", "onnx", "pdf",
+            "png", "jpg", "jpeg", "gif", "bmp", "ico", "woff", "woff2", "ttf", "otf", "mp3", "mp4",
+            "zip", "tar", "gz", "rar", "exe", "dll", "so", "o", "a", "bin", "dat", "db", "sqlite",
+            "gguf", "onnx", "pdf",
         ];
 
         let mut results = Vec::new();
@@ -1265,8 +1348,14 @@ impl ToolHandler for FindTodos {
                         break;
                     }
                     if let Some(captures) = pattern.captures(line) {
-                        let tag = captures.get(1).map(|value| value.as_str()).unwrap_or("TODO");
-                        let message = captures.get(2).map(|value| value.as_str().trim()).unwrap_or("");
+                        let tag = captures
+                            .get(1)
+                            .map(|value| value.as_str())
+                            .unwrap_or("TODO");
+                        let message = captures
+                            .get(2)
+                            .map(|value| value.as_str().trim())
+                            .unwrap_or("");
                         results.push(serde_json::json!({
                             "file": path.to_string_lossy(),
                             "line": index + 1,
@@ -1290,7 +1379,11 @@ impl ToolHandler for FindTodos {
 struct AnalyzeCode;
 #[async_trait]
 impl ToolHandler for AnalyzeCode {
-    async fn execute_with_context(&self, params: serde_json::Value, _ctx: ToolContext) -> ToolResult {
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        _ctx: ToolContext,
+    ) -> ToolResult {
         let input: AnalyzeCodeInput = match parse_input(params) {
             Ok(input) => input,
             Err(error) => return error,
@@ -1399,7 +1492,12 @@ pub fn register(reg: &ToolRegistry) {
                 parameters: vec![
                     param("path", "string", "File path", true),
                     param("content", "string", "Content to write", true),
-                    param("overwrite", "boolean", "Overwrite existing file (default true)", false),
+                    param(
+                        "overwrite",
+                        "boolean",
+                        "Overwrite existing file (default true)",
+                        false,
+                    ),
                 ],
             },
             Arc::new(WriteFile),

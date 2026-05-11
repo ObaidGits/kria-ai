@@ -105,13 +105,32 @@ fn flush_cognitive_report() {
 
     eprintln!("\n═══════════════════════════════════════════════════");
     eprintln!("  COGNITIVE E2E SCORE: {score:.1}%  ({passed}/{total} passed)");
-    eprintln!("  TestPrompts:  {}/{}", results.iter().filter(|r| r.source == "TestPrompts" && r.pass).count(), results.iter().filter(|r| r.source == "TestPrompts").count());
-    eprintln!("  VMTestPrompts: {}/{}", results.iter().filter(|r| r.source == "VMTestPrompts" && r.pass).count(), results.iter().filter(|r| r.source == "VMTestPrompts").count());
+    eprintln!(
+        "  TestPrompts:  {}/{}",
+        results
+            .iter()
+            .filter(|r| r.source == "TestPrompts" && r.pass)
+            .count(),
+        results.iter().filter(|r| r.source == "TestPrompts").count()
+    );
+    eprintln!(
+        "  VMTestPrompts: {}/{}",
+        results
+            .iter()
+            .filter(|r| r.source == "VMTestPrompts" && r.pass)
+            .count(),
+        results
+            .iter()
+            .filter(|r| r.source == "VMTestPrompts")
+            .count()
+    );
     if failed > 0 {
         eprintln!("  FAILURES:");
         for r in results.iter().filter(|r| !r.pass) {
-            eprintln!("    [{}] '{}' → expected '{}', got {:?}",
-                r.prompt_id, r.prompt, r.expected_tool, r.actual_tool);
+            eprintln!(
+                "    [{}] '{}' → expected '{}', got {:?}",
+                r.prompt_id, r.prompt, r.expected_tool, r.actual_tool
+            );
         }
     }
     eprintln!("═══════════════════════════════════════════════════\n");
@@ -157,7 +176,7 @@ fn parse_prompt_matrix(path: &Path, source: &str) -> Vec<PromptCase> {
         // Track section-level TOOL PATH
         if line.starts_with("TOOL PATH:") {
             if let Some(colon_pos) = line.find(':') {
-                let tool = line[colon_pos + 1..].trim()
+                let tool = line[colon_pos + 1..]
                     .split_whitespace()
                     .next()
                     .unwrap_or("")
@@ -273,25 +292,49 @@ fn normalize_tool_name(raw: &str) -> Vec<String> {
 
     // Common aliases
     let aliases: HashMap<&str, &[&str]> = HashMap::from([
-        ("get_cpu_usage", &["cpu_usage", "get_cpu", "system_stats"] as &[&str]),
+        (
+            "get_cpu_usage",
+            &["cpu_usage", "get_cpu", "system_stats"] as &[&str],
+        ),
         ("get_memory_info", &["memory_info", "get_memory", "get_ram"]),
         ("get_disk_space", &["disk_space", "get_disk", "disk_usage"]),
-        ("get_battery_status", &["battery_status", "get_battery", "battery"]),
-        ("get_system_uptime", &["system_uptime", "get_uptime", "uptime"]),
-        ("check_system_health", &["system_health", "health_check", "check_health"]),
+        (
+            "get_battery_status",
+            &["battery_status", "get_battery", "battery"],
+        ),
+        (
+            "get_system_uptime",
+            &["system_uptime", "get_uptime", "uptime"],
+        ),
+        (
+            "check_system_health",
+            &["system_health", "health_check", "check_health"],
+        ),
         ("get_alerts", &["alerts", "show_alerts", "list_alerts"]),
         ("dismiss_alert", &["alert_dismiss"]),
         ("get_gpu_info", &["gpu_info", "get_gpu", "nvidia_smi"]),
-        ("get_network_status", &["network_status", "get_network", "network_info"]),
+        (
+            "get_network_status",
+            &["network_status", "get_network", "network_info"],
+        ),
         ("get_volume", &["volume"]),
         ("set_volume", &["change_volume"]),
         ("lock_screen", &["screen_lock"]),
-        ("search_files", &["find_files", "file_search", "search_file"]),
+        (
+            "search_files",
+            &["find_files", "file_search", "search_file"],
+        ),
         ("browser_search", &["web_search", "search_web", "open_url"]),
-        ("open_application", &["open_app", "launch_app", "launch_application"]),
+        (
+            "open_application",
+            &["open_app", "launch_app", "launch_application"],
+        ),
         ("list_files", &["ls", "list_dir"]),
         ("read_file", &["cat_file", "show_file"]),
-        ("execute_fleet_command", &["fleet_command", "remote_command", "vm_command"]),
+        (
+            "execute_fleet_command",
+            &["fleet_command", "remote_command", "vm_command"],
+        ),
         ("list_packages", &["package_list", "apt_list"]),
         ("install_package", &["apt_install", "package_install"]),
         ("send_whatsapp", &["whatsapp_send", "whatsapp"]),
@@ -299,7 +342,10 @@ fn normalize_tool_name(raw: &str) -> Vec<String> {
         ("get_weather", &["weather", "weather_forecast"]),
         ("play_music", &["music_play", "play_song"]),
         ("set_reminder", &["reminder", "create_reminder"]),
-        ("get_screen_brightness", &["brightness", "screen_brightness"]),
+        (
+            "get_screen_brightness",
+            &["brightness", "screen_brightness"],
+        ),
         ("set_screen_brightness", &["change_brightness"]),
         ("toggle_wifi", &["wifi_toggle", "wifi_on", "wifi_off"]),
         ("list_wifi_networks", &["wifi_list", "wifi_networks"]),
@@ -319,7 +365,7 @@ fn normalize_tool_name(raw: &str) -> Vec<String> {
 
     // Check if raw matches any alias key or value
     for (canonical, alts) in &aliases {
-        if raw == *canonical || alts.iter().any(|a| *a == raw.as_str()) {
+        if raw == *canonical || alts.contains(&raw.as_str()) {
             candidates.push(canonical.to_string());
             for alt in *alts {
                 candidates.push(alt.to_string());
@@ -366,11 +412,18 @@ fn run_prompt_matrix(filename: &str, source: &str) {
 
     let cases = parse_prompt_matrix(&matrix_path, source);
     if cases.is_empty() {
-        eprintln!("SKIP: no parseable prompt cases in {}", matrix_path.display());
+        eprintln!(
+            "SKIP: no parseable prompt cases in {}",
+            matrix_path.display()
+        );
         return;
     }
 
-    eprintln!("Loaded {} prompt cases from {}", cases.len(), matrix_path.display());
+    eprintln!(
+        "Loaded {} prompt cases from {}",
+        cases.len(),
+        matrix_path.display()
+    );
 
     let mut failure_count = 0usize;
     for case in &cases {
@@ -408,7 +461,11 @@ fn run_prompt_matrix(filename: &str, source: &str) {
     // Production gate with configurable thresholds.
     let total = cases.len();
     let passed = total - failure_count;
-    let score = if total > 0 { (passed as f64 / total as f64) * 100.0 } else { 0.0 };
+    let score = if total > 0 {
+        (passed as f64 / total as f64) * 100.0
+    } else {
+        0.0
+    };
     eprintln!("  {source} score: {score:.1}% ({passed}/{total})");
 
     let threshold = match source {

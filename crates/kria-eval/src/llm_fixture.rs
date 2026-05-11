@@ -81,9 +81,7 @@ impl LlmFixture {
                     );
                 }
                 Err(error) => {
-                    eprintln!(
-                        "Waiting for LLM health endpoint (attempt {attempt}/30): {error}"
-                    );
+                    eprintln!("Waiting for LLM health endpoint (attempt {attempt}/30): {error}");
                 }
             }
 

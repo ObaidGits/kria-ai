@@ -70,7 +70,7 @@ impl ToolHandler for ShutdownSystem {
             Ok(()) => ToolResult::ok(serde_json::json!({
                 "action": "shutdown", "delay_minutes": delay_minutes,
             })),
-            Err(e) => ToolResult::err(&format!("failed to initiate shutdown: {}", e)),
+            Err(e) => ToolResult::err(format!("failed to initiate shutdown: {}", e)),
         }
     }
 }
@@ -86,7 +86,7 @@ impl ToolHandler for RebootSystem {
         };
         match crate::tools::vm_dispatch_command_with_sudo(cmd, true).await {
             Ok(()) => ToolResult::ok(serde_json::json!({ "action": "reboot" })),
-            Err(e) => ToolResult::err(&format!("failed to reboot: {}", e)),
+            Err(e) => ToolResult::err(format!("failed to reboot: {}", e)),
         }
     }
 }

@@ -256,16 +256,12 @@ impl PromptOptimizer {
                     template: row.get(2)?,
                     successes: row.get::<_, i64>(3)? as u64,
                     failures: row.get::<_, i64>(4)? as u64,
-                    created_at: chrono::DateTime::parse_from_rfc3339(
-                        &row.get::<_, String>(5)?,
-                    )
-                    .unwrap_or_default()
-                    .with_timezone(&chrono::Utc),
-                    last_used: chrono::DateTime::parse_from_rfc3339(
-                        &row.get::<_, String>(6)?,
-                    )
-                    .unwrap_or_default()
-                    .with_timezone(&chrono::Utc),
+                    created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(5)?)
+                        .unwrap_or_default()
+                        .with_timezone(&chrono::Utc),
+                    last_used: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(6)?)
+                        .unwrap_or_default()
+                        .with_timezone(&chrono::Utc),
                 })
             })
             .map_err(|e| format!("Failed to query variants: {}", e))?
@@ -297,7 +293,10 @@ impl PromptOptimizer {
         {
             let variants = self.variants.lock().unwrap();
             if variants.contains_key(&key) {
-                return Err(format!("Variant '{}' already exists for {:?}", variant_id, domain));
+                return Err(format!(
+                    "Variant '{}' already exists for {:?}",
+                    variant_id, domain
+                ));
             }
 
             // Check max variants per domain.
@@ -351,20 +350,21 @@ impl PromptOptimizer {
 
         if random_value < self.config.epsilon && domain_variants.len() > 1 {
             // Explore: pick a random variant (but prefer less-tried ones).
-            let total_uses = self.domain_totals.lock().unwrap()
+            let total_uses = self
+                .domain_totals
+                .lock()
+                .unwrap()
                 .get(domain)
                 .copied()
                 .unwrap_or(0);
 
             // Use UCB1 for exploration — picks the variant with highest
             // upper confidence bound, which balances exploitation and exploration.
-            let best_exploration = domain_variants
-                .iter()
-                .max_by(|a, b| {
-                    a.ucb1_score(total_uses)
-                        .partial_cmp(&b.ucb1_score(total_uses))
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
+            let best_exploration = domain_variants.iter().max_by(|a, b| {
+                a.ucb1_score(total_uses)
+                    .partial_cmp(&b.ucb1_score(total_uses))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
 
             best_exploration.map(|v| (*v).clone())
         } else {
@@ -381,9 +381,7 @@ impl PromptOptimizer {
                 .or_else(|| {
                     // If no variant has enough uses, pick the one with the most uses
                     // (most data = most reliable estimate).
-                    domain_variants
-                        .iter()
-                        .max_by_key(|v| v.total_uses())
+                    domain_variants.iter().max_by_key(|v| v.total_uses())
                 });
 
             best_exploitation.map(|v| (*v).clone())
@@ -395,9 +393,12 @@ impl PromptOptimizer {
         let key = (outcome.domain.clone(), outcome.variant_id.clone());
 
         let mut variants = self.variants.lock().unwrap();
-        let variant = variants
-            .get_mut(&key)
-            .ok_or_else(|| format!("Variant '{}' not found for {:?}", outcome.variant_id, outcome.domain))?;
+        let variant = variants.get_mut(&key).ok_or_else(|| {
+            format!(
+                "Variant '{}' not found for {:?}",
+                outcome.variant_id, outcome.domain
+            )
+        })?;
 
         if outcome.success {
             variant.successes += 1;
@@ -431,7 +432,9 @@ impl PromptOptimizer {
         let variants = self.variants.lock().unwrap();
         variants
             .iter()
-            .filter(|((d, _), v)| d == domain && v.total_uses() >= self.config.min_uses_for_convergence)
+            .filter(|((d, _), v)| {
+                d == domain && v.total_uses() >= self.config.min_uses_for_convergence
+            })
             .map(|(_, v)| v.clone())
             .max_by(|a, b| {
                 a.success_rate()
@@ -511,7 +514,8 @@ mod tests {
     #[test]
     fn test_register_duplicate_variant_rejected() {
         let opt = make_optimizer();
-        opt.register_variant(TaskDomain::Planning, "v1", "template 1").unwrap();
+        opt.register_variant(TaskDomain::Planning, "v1", "template 1")
+            .unwrap();
         let result = opt.register_variant(TaskDomain::Planning, "v1", "template 2");
         assert!(result.is_err());
     }
@@ -524,8 +528,10 @@ mod tests {
         };
         let opt = PromptOptimizer::new(config);
 
-        opt.register_variant(TaskDomain::Planning, "v1", "t1").unwrap();
-        opt.register_variant(TaskDomain::Planning, "v2", "t2").unwrap();
+        opt.register_variant(TaskDomain::Planning, "v1", "t1")
+            .unwrap();
+        opt.register_variant(TaskDomain::Planning, "v2", "t2")
+            .unwrap();
         let result = opt.register_variant(TaskDomain::Planning, "v3", "t3");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Maximum"));
@@ -542,7 +548,8 @@ mod tests {
     #[test]
     fn test_select_returns_only_variant() {
         let opt = make_optimizer();
-        opt.register_variant(TaskDomain::Planning, "v1", "template").unwrap();
+        opt.register_variant(TaskDomain::Planning, "v1", "template")
+            .unwrap();
 
         let selected = opt.select_variant(&TaskDomain::Planning);
         assert!(selected.is_some());
@@ -554,8 +561,10 @@ mod tests {
         let opt = make_optimizer();
 
         // Register two variants.
-        opt.register_variant(TaskDomain::Planning, "good", "good template").unwrap();
-        opt.register_variant(TaskDomain::Planning, "bad", "bad template").unwrap();
+        opt.register_variant(TaskDomain::Planning, "good", "good template")
+            .unwrap();
+        opt.register_variant(TaskDomain::Planning, "bad", "bad template")
+            .unwrap();
 
         // Give "good" variant 20 successes.
         for _ in 0..20 {
@@ -608,8 +617,10 @@ mod tests {
         };
         let opt = PromptOptimizer::new(config);
 
-        opt.register_variant(TaskDomain::Planning, "tried", "tried template").unwrap();
-        opt.register_variant(TaskDomain::Planning, "untried", "untried template").unwrap();
+        opt.register_variant(TaskDomain::Planning, "tried", "tried template")
+            .unwrap();
+        opt.register_variant(TaskDomain::Planning, "untried", "untried template")
+            .unwrap();
 
         // Give "tried" variant many uses.
         for _ in 0..50 {
@@ -633,7 +644,8 @@ mod tests {
     #[test]
     fn test_record_outcome_updates_stats() {
         let opt = make_optimizer();
-        opt.register_variant(TaskDomain::Planning, "v1", "template").unwrap();
+        opt.register_variant(TaskDomain::Planning, "v1", "template")
+            .unwrap();
 
         opt.record_outcome(&TaskOutcome {
             domain: TaskDomain::Planning,
@@ -750,7 +762,8 @@ mod tests {
         };
         let opt = PromptOptimizer::new(config);
 
-        opt.register_variant(TaskDomain::Planning, "v1", "template").unwrap();
+        opt.register_variant(TaskDomain::Planning, "v1", "template")
+            .unwrap();
 
         // 3 uses (below threshold).
         for _ in 0..3 {
@@ -775,8 +788,10 @@ mod tests {
         };
         let opt = PromptOptimizer::new(config);
 
-        opt.register_variant(TaskDomain::Planning, "good", "good template").unwrap();
-        opt.register_variant(TaskDomain::Planning, "bad", "bad template").unwrap();
+        opt.register_variant(TaskDomain::Planning, "good", "good template")
+            .unwrap();
+        opt.register_variant(TaskDomain::Planning, "bad", "bad template")
+            .unwrap();
 
         for _ in 0..5 {
             opt.record_outcome(&TaskOutcome {
@@ -806,7 +821,8 @@ mod tests {
     #[test]
     fn test_outcomes_persisted_to_sqlite() {
         let opt = make_optimizer();
-        opt.register_variant(TaskDomain::Planning, "v1", "template").unwrap();
+        opt.register_variant(TaskDomain::Planning, "v1", "template")
+            .unwrap();
 
         for _ in 0..10 {
             opt.record_outcome(&TaskOutcome {
@@ -835,8 +851,10 @@ mod tests {
     #[test]
     fn test_total_outcomes() {
         let opt = make_optimizer();
-        opt.register_variant(TaskDomain::Planning, "v1", "t1").unwrap();
-        opt.register_variant(TaskDomain::FileOps, "v2", "t2").unwrap();
+        opt.register_variant(TaskDomain::Planning, "v1", "t1")
+            .unwrap();
+        opt.register_variant(TaskDomain::FileOps, "v2", "t2")
+            .unwrap();
 
         for _ in 0..5 {
             opt.record_outcome(&TaskOutcome {
@@ -865,8 +883,10 @@ mod tests {
     #[test]
     fn test_variants_isolated_by_domain() {
         let opt = make_optimizer();
-        opt.register_variant(TaskDomain::Planning, "v1", "planning template").unwrap();
-        opt.register_variant(TaskDomain::FileOps, "v1", "file ops template").unwrap();
+        opt.register_variant(TaskDomain::Planning, "v1", "planning template")
+            .unwrap();
+        opt.register_variant(TaskDomain::FileOps, "v1", "file ops template")
+            .unwrap();
 
         let planning_variants = opt.variants_for_domain(&TaskDomain::Planning);
         let file_ops_variants = opt.variants_for_domain(&TaskDomain::FileOps);

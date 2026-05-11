@@ -136,25 +136,16 @@ pub enum TaskPayload {
     },
 
     /// Compile a skill from a successful plan.
-    CompileSkill {
-        plan_json: String,
-    },
+    CompileSkill { plan_json: String },
 
     /// VRAM maintenance: checkpoint → drop → reload the Planner model.
-    VramMaintenanceRefresh {
-        reason: String,
-    },
+    VramMaintenanceRefresh { reason: String },
 
     /// HITL response: unblock a blocked task.
-    HitlResponse {
-        request_id: String,
-        approved: bool,
-    },
+    HitlResponse { request_id: String, approved: bool },
 
     /// Generic maintenance task.
-    Maintenance {
-        description: String,
-    },
+    Maintenance { description: String },
 }
 
 // ─── Task Request ────────────────────────────────────────────────────────────
@@ -259,13 +250,9 @@ pub enum TaskResult {
         total_duration: Duration,
     },
     /// Task was cancelled (preempted or user-cancelled).
-    Cancelled {
-        reason: String,
-    },
+    Cancelled { reason: String },
     /// Task timed out.
-    TimedOut {
-        timeout: Duration,
-    },
+    TimedOut { timeout: Duration },
 }
 
 impl fmt::Display for TaskResult {
@@ -274,8 +261,16 @@ impl fmt::Display for TaskResult {
             Self::Success { total_duration, .. } => {
                 write!(f, "success ({:.0}ms)", total_duration.as_millis())
             }
-            Self::Failed { reason, total_duration } => {
-                write!(f, "failed: {} ({:.0}ms)", reason, total_duration.as_millis())
+            Self::Failed {
+                reason,
+                total_duration,
+            } => {
+                write!(
+                    f,
+                    "failed: {} ({:.0}ms)",
+                    reason,
+                    total_duration.as_millis()
+                )
             }
             Self::Cancelled { reason } => write!(f, "cancelled: {}", reason),
             Self::TimedOut { timeout } => write!(f, "timed out ({:.0}s)", timeout.as_secs_f64()),

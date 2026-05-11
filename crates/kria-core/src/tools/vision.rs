@@ -255,11 +255,7 @@ impl VisionSidecar {
         };
 
         gpu_lease
-            .acquire_guard(
-                GpuOwner::Vision,
-                turn_label,
-                Some(Duration::from_secs(120)),
-            )
+            .acquire_guard(GpuOwner::Vision, turn_label, Some(Duration::from_secs(120)))
             .map(Some)
             .map_err(Self::map_gpu_lease_error)
     }

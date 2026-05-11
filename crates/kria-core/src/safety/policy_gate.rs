@@ -68,7 +68,10 @@ pub enum CommandCapability {
 impl CommandCapability {
     /// Returns `true` if this capability is read-only (no system modification).
     pub fn is_read_only(&self) -> bool {
-        matches!(self, Self::ReadFilesystem | Self::NetworkRead | Self::ProcessInspect)
+        matches!(
+            self,
+            Self::ReadFilesystem | Self::NetworkRead | Self::ProcessInspect
+        )
     }
 
     /// Returns `true` if this capability is destructive.
@@ -119,9 +122,7 @@ pub enum PolicyDecision {
         reason: String,
     },
     /// Blocked. Cannot be executed under any circumstances.
-    Blocked {
-        reason: String,
-    },
+    Blocked { reason: String },
 }
 
 impl PolicyDecision {
@@ -235,6 +236,12 @@ pub struct CustomRule {
     pub description: String,
     /// Expiry time (None = permanent).
     pub expires_at: Option<std::time::Instant>,
+}
+
+impl Default for CapabilityPolicyGate {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CapabilityPolicyGate {
@@ -487,7 +494,9 @@ impl CapabilityPolicyGate {
                     },
                     ArgCapabilityOverride {
                         pattern: ArgPattern::Exact("run".into()),
-                        capabilities: [ProcessControl, NetworkRead, WriteFilesystem].into_iter().collect(),
+                        capabilities: [ProcessControl, NetworkRead, WriteFilesystem]
+                            .into_iter()
+                            .collect(),
                     },
                     ArgCapabilityOverride {
                         pattern: ArgPattern::Exact("exec".into()),
@@ -558,7 +567,9 @@ impl CapabilityPolicyGate {
         );
 
         // File operations: mkdir/cp/mv/chmod/chown → WriteFilesystem
-        for binary in &["mkdir", "cp", "mv", "ln", "chmod", "chown", "chgrp", "touch"] {
+        for binary in &[
+            "mkdir", "cp", "mv", "ln", "chmod", "chown", "chgrp", "touch",
+        ] {
             self.profiles.insert(
                 binary.to_string(),
                 BinaryProfile {
@@ -598,7 +609,9 @@ impl CapabilityPolicyGate {
                     arg_overrides: vec![
                         ArgCapabilityOverride {
                             pattern: ArgPattern::Prefix("install".into()),
-                            capabilities: [WriteFilesystem, ProcessControl, NetworkRead].into_iter().collect(),
+                            capabilities: [WriteFilesystem, ProcessControl, NetworkRead]
+                                .into_iter()
+                                .collect(),
                         },
                         ArgCapabilityOverride {
                             pattern: ArgPattern::Prefix("remove".into()),
@@ -658,8 +671,10 @@ impl CapabilityPolicyGate {
         // ─── Blocked Argument Patterns ────────────────────────────────────
         self.blocked_arg_patterns
             .push(("rm".into(), vec!["-rf".into(), "/".into()]));
-        self.blocked_arg_patterns
-            .push(("rm".into(), vec!["-rf".into(), "--no-preserve-root".into(), "/".into()]));
+        self.blocked_arg_patterns.push((
+            "rm".into(),
+            vec!["-rf".into(), "--no-preserve-root".into(), "/".into()],
+        ));
         self.blocked_arg_patterns
             .push(("rm".into(), vec!["-rf".into(), "~".into()]));
         self.blocked_arg_patterns
@@ -713,8 +728,7 @@ impl PolicyGate for CapabilityPolicyGate {
         //    on tiering for the same command string (defense-in-depth).
         if matches!(binary, "bash" | "sh" | "zsh" | "fish" | "csh" | "tcsh") {
             if let Some(inner_cmd) = extract_shell_c_command(args) {
-                let classification =
-                    crate::safety::command_classifier::classify(&inner_cmd);
+                let classification = crate::safety::command_classifier::classify(&inner_cmd);
                 return match classification.tier {
                     RiskLevel::Green => PolicyDecision::AutoApproved {
                         risk_level: RiskLevel::Green,
@@ -781,7 +795,9 @@ impl PolicyGate for CapabilityPolicyGate {
                 capabilities: caps.clone(),
                 reason: format!(
                     "Command requires approval: capabilities include {:?}",
-                    caps.iter().filter(|c| !c.is_read_only()).collect::<Vec<_>>()
+                    caps.iter()
+                        .filter(|c| !c.is_read_only())
+                        .collect::<Vec<_>>()
                 ),
             },
             RiskLevel::Black => PolicyDecision::Blocked {
@@ -830,7 +846,10 @@ impl PolicyGate for CapabilityPolicyGate {
         if caps.is_empty() {
             RiskLevel::Yellow
         } else {
-            caps.iter().map(|c| c.risk_level()).max().unwrap_or(RiskLevel::Yellow)
+            caps.iter()
+                .map(|c| c.risk_level())
+                .max()
+                .unwrap_or(RiskLevel::Yellow)
         }
     }
 }

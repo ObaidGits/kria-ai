@@ -8,11 +8,11 @@
 //! Note: When the embedding model is not initialized (test environment),
 //! from_tool_defs() returns an empty index (graceful degradation).
 
-use std::time::{Duration, Instant};
 use kria_core::config::RoutingConfig;
-use kria_core::routing::tool_index::{ToolEmbeddingIndex, SharedToolIndex};
-use kria_core::tools::registry::ToolDef;
+use kria_core::routing::tool_index::{SharedToolIndex, ToolEmbeddingIndex};
 use kria_core::safety::RiskLevel;
+use kria_core::tools::registry::ToolDef;
+use std::time::{Duration, Instant};
 
 fn test_config() -> RoutingConfig {
     RoutingConfig::default()
@@ -104,7 +104,9 @@ fn ti06_rich_description_includes_params() {
 fn ti07_index_rebuild() {
     let config = test_config();
     let mut index = ToolEmbeddingIndex::empty();
-    index.rebuild(&[make_tool("a", "A", "cat")], &config).unwrap();
+    index
+        .rebuild(&[make_tool("a", "A", "cat")], &config)
+        .unwrap();
     assert!(index.is_empty() || index.len() == 1);
     index.rebuild(&[], &config).unwrap();
     assert!(index.is_empty());

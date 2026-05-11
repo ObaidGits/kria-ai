@@ -119,16 +119,17 @@ impl VmEnvironment {
         let ssh_key_raw =
             env::var("KRIA_TEST_VM_SSH_KEY").unwrap_or_else(|_| "~/.ssh/kria_id".to_string());
         let ssh_key_path = expand_tilde(&ssh_key_raw);
-        let pinned_hostkey_sha256 = env::var("KRIA_TEST_VM_HOSTKEY_SHA256")
-            .ok()
-            .and_then(|value| {
-                let trimmed = value.trim().to_string();
-                if trimmed.is_empty() {
-                    None
-                } else {
-                    Some(trimmed)
-                }
-            });
+        let pinned_hostkey_sha256 =
+            env::var("KRIA_TEST_VM_HOSTKEY_SHA256")
+                .ok()
+                .and_then(|value| {
+                    let trimmed = value.trim().to_string();
+                    if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed)
+                    }
+                });
 
         let running_inside_vm = detect_running_inside_vm();
         let docker_fallback = env::var("KRIA_TEST_USE_DOCKER_FALLBACK").is_ok();
@@ -179,8 +180,7 @@ impl RunnerConfig {
                         return Err(anyhow!("--mode requires a value"));
                     };
                     mode = Some(
-                        TestMode::parse(raw)
-                            .ok_or_else(|| anyhow!("unsupported mode: {raw}"))?,
+                        TestMode::parse(raw).ok_or_else(|| anyhow!("unsupported mode: {raw}"))?,
                     );
                 }
                 "--report-dir" => {
@@ -200,8 +200,7 @@ impl RunnerConfig {
                         return Err(anyhow!("--from-zone requires a value"));
                     };
                     from_zone = Some(
-                        TestZone::parse(raw)
-                            .ok_or_else(|| anyhow!("unsupported zone: {raw}"))?,
+                        TestZone::parse(raw).ok_or_else(|| anyhow!("unsupported zone: {raw}"))?,
                     );
                 }
                 "--from-suite" => {
@@ -278,7 +277,13 @@ impl TestCommand {
         Self {
             name: format!("{package}::{test}"),
             program: "cargo".to_string(),
-            args: vec!["test".to_string(), "-p".to_string(), package.to_string(), "--test".to_string(), test.to_string()],
+            args: vec![
+                "test".to_string(),
+                "-p".to_string(),
+                package.to_string(),
+                "--test".to_string(),
+                test.to_string(),
+            ],
             env: Vec::new(),
             current_dir: None,
         }
@@ -420,9 +425,7 @@ async fn execute_plan(config: &RunnerConfig) -> Result<TestReport> {
         .clone()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(timestamp_tag);
-    let run_dir = config
-        .report_root
-        .join(format!("kria-test-{run_tag}"));
+    let run_dir = config.report_root.join(format!("kria-test-{run_tag}"));
     fs::create_dir_all(&run_dir)
         .with_context(|| format!("create run dir {}", run_dir.display()))?;
     let report_path = config.report_root.join(if config.resume_run_id.is_some() {
@@ -496,9 +499,15 @@ async fn execute_plan(config: &RunnerConfig) -> Result<TestReport> {
                                         "INFO: Docker installed, running suite '{}'",
                                         suite.name
                                     );
-                                    let suite_report = run_suite(&suite, &run_dir, &config.vm).await?;
+                                    let suite_report =
+                                        run_suite(&suite, &run_dir, &config.vm).await?;
                                     suite_reports.push(suite_report);
-                                    save_checkpoint(&checkpoint_path, &run_tag, config.mode, &suite_reports)?;
+                                    save_checkpoint(
+                                        &checkpoint_path,
+                                        &run_tag,
+                                        config.mode,
+                                        &suite_reports,
+                                    )?;
                                 } else {
                                     let suite_report = SuiteReport {
                                         name: suite.name.clone(),
@@ -508,7 +517,12 @@ async fn execute_plan(config: &RunnerConfig) -> Result<TestReport> {
                                         commands: Vec::new(),
                                     };
                                     suite_reports.push(suite_report);
-                                    save_checkpoint(&checkpoint_path, &run_tag, config.mode, &suite_reports)?;
+                                    save_checkpoint(
+                                        &checkpoint_path,
+                                        &run_tag,
+                                        config.mode,
+                                        &suite_reports,
+                                    )?;
                                 }
                             }
                             Err(e) => {
@@ -516,11 +530,19 @@ async fn execute_plan(config: &RunnerConfig) -> Result<TestReport> {
                                     name: suite.name.clone(),
                                     zone: suite.zone,
                                     status: SuiteStatus::Skipped,
-                                    skip_reason: Some(format!("VM unreachable, Docker install error: {}", e)),
+                                    skip_reason: Some(format!(
+                                        "VM unreachable, Docker install error: {}",
+                                        e
+                                    )),
                                     commands: Vec::new(),
                                 };
                                 suite_reports.push(suite_report);
-                                save_checkpoint(&checkpoint_path, &run_tag, config.mode, &suite_reports)?;
+                                save_checkpoint(
+                                    &checkpoint_path,
+                                    &run_tag,
+                                    config.mode,
+                                    &suite_reports,
+                                )?;
                             }
                         }
                     }
@@ -540,7 +562,8 @@ async fn execute_plan(config: &RunnerConfig) -> Result<TestReport> {
             continue;
         }
 
-        if suite.destructive && env::var("KRIA_TEST_ALLOW_DESTRUCTIVE").ok().as_deref() != Some("1") {
+        if suite.destructive && env::var("KRIA_TEST_ALLOW_DESTRUCTIVE").ok().as_deref() != Some("1")
+        {
             let suite_report = SuiteReport {
                 name: suite.name,
                 zone: suite.zone,
@@ -717,7 +740,11 @@ async fn run_suite(suite: &TestSuite, run_dir: &Path, vm: &VmEnvironment) -> Res
         }
     }
 
-    let status = if failed == 0 { SuiteStatus::Passed } else { SuiteStatus::Failed };
+    let status = if failed == 0 {
+        SuiteStatus::Passed
+    } else {
+        SuiteStatus::Failed
+    };
 
     Ok(SuiteReport {
         name: suite.name.clone(),
@@ -740,9 +767,10 @@ async fn run_command(command: &TestCommand, run_dir: &Path) -> Result<CommandRep
     cmd.env("RUST_BACKTRACE", "1");
 
     let started = Instant::now();
-    let output = cmd.output().await.with_context(|| {
-        format!("execute {} {}", command.program, command.args.join(" "))
-    })?;
+    let output = cmd
+        .output()
+        .await
+        .with_context(|| format!("execute {} {}", command.program, command.args.join(" ")))?;
     let duration_ms = started.elapsed().as_millis();
 
     let stdout_path = if !output.stdout.is_empty() {
@@ -808,7 +836,10 @@ async fn run_command_on_vm(
                 ws
             }
             Err(e) => {
-                eprintln!("WARN: could not auto-detect VM workspace: {} — falling back to host path", e);
+                eprintln!(
+                    "WARN: could not auto-detect VM workspace: {} — falling back to host path",
+                    e
+                );
                 env::current_dir()
                     .unwrap_or_else(|_| PathBuf::from("."))
                     .to_string_lossy()
@@ -827,20 +858,26 @@ async fn run_command_on_vm(
     // Build SSH command
     let ssh_key = vm.ssh_key_path.to_str().unwrap_or("~/.ssh/kria_id");
     let mut ssh = Command::new("ssh");
-    ssh.arg("-o").arg("StrictHostKeyChecking=no")
-        .arg("-o").arg("ConnectTimeout=10")
-        .arg("-o").arg("BatchMode=yes")
-        .arg("-i").arg(ssh_key)
-        .arg("-p").arg(vm.port.to_string())
+    ssh.arg("-o")
+        .arg("StrictHostKeyChecking=no")
+        .arg("-o")
+        .arg("ConnectTimeout=10")
+        .arg("-o")
+        .arg("BatchMode=yes")
+        .arg("-i")
+        .arg(ssh_key)
+        .arg("-p")
+        .arg(vm.port.to_string())
         .arg(format!("{}@{}", vm.user, vm.host))
         .arg(&remote_cmd);
 
     ssh.stdout(Stdio::piped()).stderr(Stdio::piped());
 
     let started = Instant::now();
-    let output = ssh.output().await.with_context(|| {
-        format!("SSH dispatch to {}@{}: {}", vm.user, vm.host, remote_cmd)
-    })?;
+    let output = ssh
+        .output()
+        .await
+        .with_context(|| format!("SSH dispatch to {}@{}: {}", vm.user, vm.host, remote_cmd))?;
     let duration_ms = started.elapsed().as_millis();
 
     let stdout_path = if !output.stdout.is_empty() {
@@ -907,21 +944,31 @@ async fn detect_vm_workspace(vm: &VmEnvironment) -> Result<String> {
     "#;
 
     let mut ssh = Command::new("ssh");
-    ssh.arg("-o").arg("StrictHostKeyChecking=no")
-        .arg("-o").arg("ConnectTimeout=10")
-        .arg("-o").arg("BatchMode=yes")
-        .arg("-i").arg(ssh_key)
-        .arg("-p").arg(vm.port.to_string())
+    ssh.arg("-o")
+        .arg("StrictHostKeyChecking=no")
+        .arg("-o")
+        .arg("ConnectTimeout=10")
+        .arg("-o")
+        .arg("BatchMode=yes")
+        .arg("-i")
+        .arg(ssh_key)
+        .arg("-p")
+        .arg(vm.port.to_string())
         .arg(format!("{}@{}", vm.user, vm.host))
         .arg(search_cmd);
 
     ssh.stdout(Stdio::piped()).stderr(Stdio::piped());
 
-    let output = ssh.output().await.with_context(|| "SSH workspace detection")?;
+    let output = ssh
+        .output()
+        .await
+        .with_context(|| "SSH workspace detection")?;
     let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
     if result == "NOT_FOUND" || result.is_empty() {
-        Err(anyhow!("KRIA workspace not found on VM — set KRIA_TEST_VM_WORKSPACE env var"))
+        Err(anyhow!(
+            "KRIA workspace not found on VM — set KRIA_TEST_VM_WORKSPACE env var"
+        ))
     } else {
         Ok(result)
     }
@@ -949,11 +996,12 @@ async fn run_command_in_docker(
     remote_parts.push("export KRIA_RUNNING_IN_VM=1".to_string());
 
     // Find the KRIA workspace inside the container
-    let workspace = env::var("KRIA_TEST_VM_WORKSPACE")
-        .unwrap_or_else(|_| env::current_dir()
+    let workspace = env::var("KRIA_TEST_VM_WORKSPACE").unwrap_or_else(|_| {
+        env::current_dir()
             .unwrap_or_else(|_| PathBuf::from("."))
             .to_string_lossy()
-            .to_string());
+            .to_string()
+    });
     remote_parts.push(format!("cd {}", workspace));
 
     // Build the cargo test command
@@ -974,13 +1022,17 @@ async fn run_command_in_docker(
     docker.stdout(Stdio::piped()).stderr(Stdio::piped());
 
     let started = Instant::now();
-    let output = docker.output().await.with_context(|| {
-        format!("docker exec {} bash -c '{}'", container_id, remote_cmd)
-    })?;
+    let output = docker
+        .output()
+        .await
+        .with_context(|| format!("docker exec {} bash -c '{}'", container_id, remote_cmd))?;
     let duration_ms = started.elapsed().as_millis();
 
     let stdout_path = if !output.stdout.is_empty() {
-        let path = run_dir.join(format!("{}_docker_stdout.log", sanitize_name(&command.name)));
+        let path = run_dir.join(format!(
+            "{}_docker_stdout.log",
+            sanitize_name(&command.name)
+        ));
         fs::write(&path, &output.stdout)
             .with_context(|| format!("write Docker stdout log {}", path.display()))?;
         Some(path)
@@ -989,7 +1041,10 @@ async fn run_command_in_docker(
     };
 
     let stderr_path = if !output.stderr.is_empty() {
-        let path = run_dir.join(format!("{}_docker_stderr.log", sanitize_name(&command.name)));
+        let path = run_dir.join(format!(
+            "{}_docker_stderr.log",
+            sanitize_name(&command.name)
+        ));
         fs::write(&path, &output.stderr)
             .with_context(|| format!("write Docker stderr log {}", path.display()))?;
         Some(path)
@@ -1066,13 +1121,11 @@ fn build_suites(mode: TestMode) -> Vec<TestSuite> {
     let chaos = TestSuite {
         name: "Red-Tier Chaos".to_string(),
         zone: TestZone::Chaos,
-        commands: vec![
-            TestCommand::cargo_test_with_args(
-                "kria-core",
-                "remote_qemu_chaos",
-                &["--ignored"],
-            ),
-        ],
+        commands: vec![TestCommand::cargo_test_with_args(
+            "kria-core",
+            "remote_qemu_chaos",
+            &["--ignored"],
+        )],
         requires_vm: true,
         destructive: true,
     };
@@ -1106,7 +1159,10 @@ fn build_suites(mode: TestMode) -> Vec<TestSuite> {
             TestCommand::cargo_test_with_env(
                 "kria-core",
                 "report_contract_tests",
-                &[("KRIA_REQUIRE_REPORTS", "1"), ("KRIA_TREND_COGNITIVE_FLOOR", "60")],
+                &[
+                    ("KRIA_REQUIRE_REPORTS", "1"),
+                    ("KRIA_TREND_COGNITIVE_FLOOR", "60"),
+                ],
             ),
         ],
         requires_vm: false,
@@ -1157,9 +1213,7 @@ fn ui_build_command() -> TestCommand {
     let merged_path = env::join_paths(path_segments)
         .ok()
         .and_then(|value| value.into_string().ok())
-        .unwrap_or_else(|| {
-            env::var("PATH").unwrap_or_default()
-        });
+        .unwrap_or_else(|| env::var("PATH").unwrap_or_default());
 
     TestCommand {
         name: "ui::npm_check".to_string(),
@@ -1235,8 +1289,8 @@ fn mode_label(mode: TestMode) -> &'static str {
 }
 
 fn load_checkpoint(path: &Path) -> Result<CheckpointState> {
-    let raw = fs::read_to_string(path)
-        .with_context(|| format!("read checkpoint {}", path.display()))?;
+    let raw =
+        fs::read_to_string(path).with_context(|| format!("read checkpoint {}", path.display()))?;
     let checkpoint: CheckpointState = serde_json::from_str(&raw)
         .with_context(|| format!("parse checkpoint {}", path.display()))?;
     Ok(checkpoint)
@@ -1254,7 +1308,8 @@ fn save_test_checkpoint(
     assertion_details: Option<&str>,
 ) -> Result<()> {
     let mut checkpoint = if path.exists() {
-        let raw = fs::read_to_string(path).with_context(|| format!("read checkpoint {}", path.display()))?;
+        let raw = fs::read_to_string(path)
+            .with_context(|| format!("read checkpoint {}", path.display()))?;
         serde_json::from_str::<CheckpointState>(&raw).unwrap_or_else(|_| CheckpointState {
             run_tag: String::new(),
             mode: String::new(),
@@ -1336,10 +1391,7 @@ fn render_report(report: &TestReport, run_dir: &Path) -> String {
     let mut out = String::new();
     out.push_str("# KRIA Test Report\n\n");
     out.push_str(&format!("- Mode: {:?}\n", report.mode));
-    out.push_str(&format!(
-        "- Started: {}\n",
-        report.started_at.to_rfc3339()
-    ));
+    out.push_str(&format!("- Started: {}\n", report.started_at.to_rfc3339()));
     out.push_str(&format!(
         "- Finished: {}\n\n",
         report.finished_at.to_rfc3339()
@@ -1354,9 +1406,15 @@ fn render_report(report: &TestReport, run_dir: &Path) -> String {
     out.push_str(&format!("- Host: {}\n", report.vm.host));
     out.push_str(&format!("- User: {}\n", report.vm.user));
     out.push_str(&format!("- Port: {}\n", report.vm.port));
-    out.push_str(&format!("- SSH key: {}\n", report.vm.ssh_key_path.display()));
+    out.push_str(&format!(
+        "- SSH key: {}\n",
+        report.vm.ssh_key_path.display()
+    ));
     out.push_str(&format!("- Reachable: {}\n", report.vm.reachable));
-    out.push_str(&format!("- Running inside VM: {}\n", report.vm.running_inside_vm));
+    out.push_str(&format!(
+        "- Running inside VM: {}\n",
+        report.vm.running_inside_vm
+    ));
     if let Some(ewma) = report.vm.latency_ewma_ms {
         out.push_str(&format!("- Latency EWMA (ms): {:.2}\n", ewma));
     } else {
@@ -1365,7 +1423,7 @@ fn render_report(report: &TestReport, run_dir: &Path) -> String {
     if let Some(fp) = &report.vm.pinned_hostkey_sha256 {
         out.push_str(&format!("- Pinned host key: {}\n", fp));
     }
-    out.push_str("\n");
+    out.push('\n');
 
     out.push_str("## HMAC Verification\n\n");
     if report.hmac.total == 0 {
@@ -1383,7 +1441,11 @@ fn render_report(report: &TestReport, run_dir: &Path) -> String {
     }
     out.push_str(&format!(
         "- Credential integrity: {}\n\n",
-        if report.hmac.credential_integrity_pass { "PASS" } else { "FAIL" }
+        if report.hmac.credential_integrity_pass {
+            "PASS"
+        } else {
+            "FAIL"
+        }
     ));
 
     out.push_str("## Suites\n\n");
@@ -1397,7 +1459,7 @@ fn render_report(report: &TestReport, run_dir: &Path) -> String {
         if !suite.commands.is_empty() {
             out.push_str(&format!("- Logs: {}\n", run_dir.display()));
         }
-        out.push_str("\n");
+        out.push('\n');
 
         for command in &suite.commands {
             out.push_str(&format!("- {}\n", command.name));
@@ -1410,7 +1472,7 @@ fn render_report(report: &TestReport, run_dir: &Path) -> String {
                 out.push_str(&format!("  - Stderr: {}\n", path.display()));
             }
         }
-        out.push_str("\n");
+        out.push('\n');
     }
 
     out
@@ -1443,8 +1505,9 @@ async fn prompt_mode_interactive() -> Result<TestMode> {
         "3" => Ok(TestMode::Destructive),
         "4" => Ok(TestMode::AppLogic),
         "5" => Ok(TestMode::Full),
-        other => TestMode::parse(other)
-            .ok_or_else(|| anyhow!("unsupported mode selection: {other}")),
+        other => {
+            TestMode::parse(other).ok_or_else(|| anyhow!("unsupported mode selection: {other}"))
+        }
     }
 }
 
@@ -1491,9 +1554,8 @@ fn expand_tilde(raw: &str) -> PathBuf {
 async fn probe_latency_ewma(host: &str, port: u16) -> (bool, Option<f64>) {
     let mut ewma = LatencyEwma::new(0.4);
     for _ in 0..3 {
-        match probe_tcp_latency_ms(host, port).await {
-            Ok(sample) => ewma.update(sample),
-            Err(_) => {}
+        if let Ok(sample) = probe_tcp_latency_ms(host, port).await {
+            ewma.update(sample)
         }
     }
 
@@ -1557,7 +1619,8 @@ fn emit_test_result_event(run_dir: &Path, event: &TestResultEvent) {
 }
 
 fn verify_hmac_integrity(run_dir: &Path) -> Result<bool> {
-    let key = env::var("KRIA_TEST_HMAC_KEY").unwrap_or_else(|_| "kria-test-default-hmac-key".to_string());
+    let key =
+        env::var("KRIA_TEST_HMAC_KEY").unwrap_or_else(|_| "kria-test-default-hmac-key".to_string());
     let mut mac = Hmac::<Sha256>::new_from_slice(key.as_bytes())
         .map_err(|e| anyhow!("HMAC key init failed: {e}"))?;
     mac.update(run_dir.to_string_lossy().as_bytes());
@@ -1567,14 +1630,15 @@ fn verify_hmac_integrity(run_dir: &Path) -> Result<bool> {
 }
 
 fn verify_credential_integrity(sequence: u64) -> bool {
-    let key = env::var("KRIA_TEST_HMAC_KEY").unwrap_or_else(|_| "kria-test-default-hmac-key".to_string());
+    let key =
+        env::var("KRIA_TEST_HMAC_KEY").unwrap_or_else(|_| "kria-test-default-hmac-key".to_string());
     let payload = format!("credential-check-seq-{sequence}");
     let mut mac = match Hmac::<Sha256>::new_from_slice(key.as_bytes()) {
         Ok(m) => m,
         Err(_) => return false,
     };
     mac.update(payload.as_bytes());
-    mac.finalize().into_bytes().is_empty() == false
+    !mac.finalize().into_bytes().is_empty()
 }
 
 /// Check if Docker is available and running
@@ -1591,7 +1655,12 @@ async fn docker_available() -> Result<bool> {
 /// Check if docker daemon is running (alternative check)
 async fn dockerd_running() -> bool {
     if let Ok(output) = tokio::process::Command::new("curl")
-        .args(["-s", "--unix-socket", "/var/run/docker.sock", "http://localhost/_ping"])
+        .args([
+            "-s",
+            "--unix-socket",
+            "/var/run/docker.sock",
+            "http://localhost/_ping",
+        ])
         .output()
         .await
     {

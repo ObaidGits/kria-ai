@@ -26,8 +26,7 @@ pub async fn cancel_executive_task(
     let state = state
         .get()
         .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
-    let parsed_id = uuid::Uuid::parse_str(&task_id)
-        .map_err(|e| format!("Invalid task ID: {e}"))?;
+    let parsed_id = uuid::Uuid::parse_str(&task_id).map_err(|e| format!("Invalid task ID: {e}"))?;
 
     // Try the executive sender first (when executive.enabled = true)
     {
@@ -101,20 +100,23 @@ pub async fn submit_turn_feedback(
     // Use the tool name to hint the domain that was originally selected
     let domain = tool_selected
         .as_deref()
-        .and_then(|t| {
+        .map(|t| {
             let cat = t.split('_').next().unwrap_or("conversation").to_lowercase();
-            Some(kria_core::routing::domain::category_to_domain(&cat))
+            kria_core::routing::domain::category_to_domain(&cat)
         })
         .unwrap_or(Domain::Conversation);
 
-    let nudged = state.agent_loop.submit_routing_feedback(
-        &user_text,
-        domain,
-        outcome,
-        tool_selected,
-        &session_id,
-        learning_rate,
-    ).await;
+    let nudged = state
+        .agent_loop
+        .submit_routing_feedback(
+            &user_text,
+            domain,
+            outcome,
+            tool_selected,
+            &session_id,
+            learning_rate,
+        )
+        .await;
 
     tracing::info!(
         session_id = %session_id,

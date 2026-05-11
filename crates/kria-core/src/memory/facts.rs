@@ -1,6 +1,6 @@
 use crate::memory::embeddings::EmbeddingModel;
-use crate::memory::MemoryFact;
 use crate::memory::vectors::VectorIndex;
+use crate::memory::MemoryFact;
 use crate::memory::MemoryManager;
 use chrono::Utc;
 

@@ -53,8 +53,8 @@ impl SkillRegistry {
     /// Install a skill (store its descriptor).
     pub fn install(&self, skill: &SkillDescriptor) -> Result<(), RegistryError> {
         let db = self.db.lock().unwrap();
-        let descriptor_json =
-            serde_json::to_string(skill).map_err(|e| RegistryError::Serialization(e.to_string()))?;
+        let descriptor_json = serde_json::to_string(skill)
+            .map_err(|e| RegistryError::Serialization(e.to_string()))?;
 
         db.execute(
             "INSERT OR REPLACE INTO installed_skills
@@ -196,7 +196,10 @@ impl SkillRegistry {
     }
 
     /// Get all skills matching a given status.
-    pub fn list_by_status(&self, status: SkillStatus) -> Result<Vec<SkillDescriptor>, RegistryError> {
+    pub fn list_by_status(
+        &self,
+        status: SkillStatus,
+    ) -> Result<Vec<SkillDescriptor>, RegistryError> {
         let db = self.db.lock().unwrap();
         let mut stmt = db
             .prepare("SELECT descriptor_json FROM installed_skills WHERE status = ?1 ORDER BY name")

@@ -439,6 +439,5 @@ fn uuid_v4_hex() -> String {
     let tid = std::thread::current().id();
     format!("{:08x}-{:?}", ts, tid)
         .replace("ThreadId(", "")
-        .replace(')', "")
-        .replace(' ', "")
+        .replace([')', ' '], "")
 }

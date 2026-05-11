@@ -22,7 +22,10 @@ pub enum ValidationError {
     /// Value contains shell metacharacters.
     ContainsMetacharacters { value: String, chars: String },
     /// Value doesn't match the type's regex pattern.
-    TypeMismatch { expected_type: VariableType, value: String },
+    TypeMismatch {
+        expected_type: VariableType,
+        value: String,
+    },
     /// Value is too long.
     TooLong { max_len: usize, actual_len: usize },
     /// Value is empty.
@@ -35,12 +38,26 @@ impl std::fmt::Display for ValidationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::ContainsMetacharacters { value, chars } => {
-                write!(f, "value '{}' contains forbidden characters: {}", value, chars)
+                write!(
+                    f,
+                    "value '{}' contains forbidden characters: {}",
+                    value, chars
+                )
             }
-            Self::TypeMismatch { expected_type, value } => {
-                write!(f, "value '{}' does not match type {:?}", value, expected_type)
+            Self::TypeMismatch {
+                expected_type,
+                value,
+            } => {
+                write!(
+                    f,
+                    "value '{}' does not match type {:?}",
+                    value, expected_type
+                )
             }
-            Self::TooLong { max_len, actual_len } => {
+            Self::TooLong {
+                max_len,
+                actual_len,
+            } => {
                 write!(f, "value too long: {} > {}", actual_len, max_len)
             }
             Self::Empty => write!(f, "value is empty"),
@@ -56,7 +73,9 @@ const MAX_VARIABLE_LENGTH: usize = 1024;
 
 /// Shell metacharacters that are NEVER allowed in variable values.
 static SHELL_METACHARACTERS: Lazy<Vec<char>> = Lazy::new(|| {
-    vec![';', '|', '&', '`', '$', '(', ')', '{', '}', '<', '>', '\\', '\n', '\r']
+    vec![
+        ';', '|', '&', '`', '$', '(', ')', '{', '}', '<', '>', '\\', '\n', '\r',
+    ]
 });
 
 /// Validate a variable value against its declared type.
@@ -88,7 +107,8 @@ pub fn validate_variable(value: &str, var_type: &VariableType) -> Result<(), Val
     }
 
     // 4. Shell metacharacters (ALL types reject these)
-    let forbidden: String = SHELL_METACHARACTERS.iter()
+    let forbidden: String = SHELL_METACHARACTERS
+        .iter()
         .filter(|c| value.contains(**c))
         .collect();
     if !forbidden.is_empty() {
@@ -105,7 +125,8 @@ pub fn validate_variable(value: &str, var_type: &VariableType) -> Result<(), Val
     let pattern = var_type.validation_pattern();
     let regex = {
         let mut cache = REGEX_CACHE.lock().unwrap();
-        cache.entry(pattern.to_string())
+        cache
+            .entry(pattern.to_string())
             .or_insert_with(|| Regex::new(pattern).unwrap())
             .clone()
     };
@@ -123,24 +144,14 @@ pub fn validate_variable(value: &str, var_type: &VariableType) -> Result<(), Val
 /// Infer the VariableType from a concrete value.
 pub fn infer_variable_type(value: &str) -> VariableType {
     // Check in order of specificity
-    static IP_RE: Lazy<Regex> = Lazy::new(|| {
-        Regex::new(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$").unwrap()
-    });
-    static PORT_RE: Lazy<Regex> = Lazy::new(|| {
-        Regex::new(r"^\d{1,5}$").unwrap()
-    });
-    static PATH_RE: Lazy<Regex> = Lazy::new(|| {
-        Regex::new(r"^/[\w./\-]+$").unwrap()
-    });
-    static NUMERIC_RE: Lazy<Regex> = Lazy::new(|| {
-        Regex::new(r"^\d+\.?\d*$").unwrap()
-    });
-    static SERVICE_RE: Lazy<Regex> = Lazy::new(|| {
-        Regex::new(r"^[a-zA-Z][\w\-\.]*$").unwrap()
-    });
-    static HOSTNAME_RE: Lazy<Regex> = Lazy::new(|| {
-        Regex::new(r"^[a-zA-Z0-9][\w\-\.]+\.[a-zA-Z]{2,}$").unwrap()
-    });
+    static IP_RE: Lazy<Regex> =
+        Lazy::new(|| Regex::new(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$").unwrap());
+    static PORT_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\d{1,5}$").unwrap());
+    static PATH_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^/[\w./\-]+$").unwrap());
+    static NUMERIC_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\d+\.?\d*$").unwrap());
+    static SERVICE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[a-zA-Z][\w\-\.]*$").unwrap());
+    static HOSTNAME_RE: Lazy<Regex> =
+        Lazy::new(|| Regex::new(r"^[a-zA-Z0-9][\w\-\.]+\.[a-zA-Z]{2,}$").unwrap());
 
     if IP_RE.is_match(value) {
         VariableType::IpAddress
@@ -222,7 +233,10 @@ mod tests {
 
     #[test]
     fn infer_path() {
-        assert_eq!(infer_variable_type("/etc/nginx.conf"), VariableType::FilePath);
+        assert_eq!(
+            infer_variable_type("/etc/nginx.conf"),
+            VariableType::FilePath
+        );
     }
 
     #[test]

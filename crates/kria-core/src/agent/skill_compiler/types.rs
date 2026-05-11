@@ -146,7 +146,10 @@ pub struct ParameterizedCommand {
 
 impl ParameterizedCommand {
     /// Instantiate this command with concrete variable values.
-    pub fn instantiate(&self, vars: &std::collections::HashMap<String, String>) -> Option<StructuredCommand> {
+    pub fn instantiate(
+        &self,
+        vars: &std::collections::HashMap<String, String>,
+    ) -> Option<StructuredCommand> {
         let mut args = Vec::new();
         for arg in &self.args {
             let mut resolved = arg.clone();

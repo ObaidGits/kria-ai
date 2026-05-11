@@ -5,7 +5,9 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::Notify;
 
-use super::telemetry::{ReconciliationResult, ResourceProcess, ResourceSnapshot, ResourceTelemetry};
+use super::telemetry::{
+    ReconciliationResult, ResourceProcess, ResourceSnapshot, ResourceTelemetry,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LeaseToken(u64);
@@ -224,9 +226,7 @@ impl GpuLeaseManager {
                 if let GpuLeaseState::Degraded { reason } = state_snapshot {
                     inner.queue.retain(|queued| queued.id != request_id);
                     pending_cleanup.disarm();
-                    return Err(GpuLeaseError::Degraded {
-                        reason,
-                    });
+                    return Err(GpuLeaseError::Degraded { reason });
                 }
 
                 match state_snapshot {
@@ -249,7 +249,9 @@ impl GpuLeaseManager {
                             AcquireAction::Wait
                         }
                     }
-                    GpuLeaseState::Held { owner: held_owner, .. } => {
+                    GpuLeaseState::Held {
+                        owner: held_owner, ..
+                    } => {
                         let held_background = inner
                             .active
                             .as_ref()
@@ -319,8 +321,7 @@ impl GpuLeaseManager {
                         }
                         Err(GpuLeaseError::Recovering { .. }) => {
                             {
-                                let mut inner =
-                                    self.inner.lock().expect("gpu lease lock poisoned");
+                                let mut inner = self.inner.lock().expect("gpu lease lock poisoned");
                                 if inner.grant_in_progress == Some(request_id) {
                                     inner.grant_in_progress = None;
                                 }
@@ -385,9 +386,7 @@ impl GpuLeaseManager {
                         reason: RecoveryReason::LeaseExpired,
                     });
                 }
-                Err(GpuLeaseError::Busy {
-                    owner: held_owner,
-                })
+                Err(GpuLeaseError::Busy { owner: held_owner })
             }
             GpuLeaseState::Recovering {
                 owner: Some(recovering_owner),
@@ -397,12 +396,8 @@ impl GpuLeaseManager {
                 let is_foreground = !matches!(owner, GpuOwner::Maintenance);
                 Ok(self.grant_locked(&mut inner, owner, turn_id, ttl, is_foreground))
             }
-            GpuLeaseState::Recovering { reason, .. } => Err(GpuLeaseError::Recovering {
-                reason,
-            }),
-            GpuLeaseState::Degraded { reason } => Err(GpuLeaseError::Degraded {
-                reason,
-            }),
+            GpuLeaseState::Recovering { reason, .. } => Err(GpuLeaseError::Recovering { reason }),
+            GpuLeaseState::Degraded { reason } => Err(GpuLeaseError::Degraded { reason }),
         }
     }
 
@@ -491,9 +486,7 @@ impl GpuLeaseManager {
         match inner.state.clone() {
             GpuLeaseState::Idle | GpuLeaseState::Degraded { .. } => {}
             GpuLeaseState::Held {
-                owner,
-                deadline,
-                ..
+                owner, deadline, ..
             } => {
                 if deadline <= now {
                     self.transition_to_recovering_locked(
@@ -577,12 +570,12 @@ impl GpuLeaseManager {
     }
 
     async fn ensure_idle_reconciled_for_grant(self: &Arc<Self>) -> Result<(), GpuLeaseError> {
-        let telemetry = self.telemetry_source().ok_or_else(|| {
-            GpuLeaseError::Degraded {
+        let telemetry = self
+            .telemetry_source()
+            .ok_or_else(|| GpuLeaseError::Degraded {
                 reason: "resource telemetry source is not configured for gpu lease manager"
                     .to_string(),
-            }
-        })?;
+            })?;
 
         let snapshot = match telemetry.sample().await {
             Ok(snapshot) => snapshot,
@@ -632,7 +625,9 @@ impl GpuLeaseManager {
     fn schedule_recovery_worker(self: &Arc<Self>) {
         let should_spawn = {
             let mut inner = self.inner.lock().expect("gpu lease lock poisoned");
-            if inner.recovery_worker_running || !matches!(inner.state, GpuLeaseState::Recovering { .. }) {
+            if inner.recovery_worker_running
+                || !matches!(inner.state, GpuLeaseState::Recovering { .. })
+            {
                 false
             } else {
                 inner.recovery_worker_running = true;
@@ -690,7 +685,8 @@ impl GpuLeaseManager {
                             inner.grant_in_progress = None;
                             inner.recovery_worker_running = false;
                             RecoveryPostAction::Stop
-                        } else if now.saturating_duration_since(started_at) >= self.recovery_timeout {
+                        } else if now.saturating_duration_since(started_at) >= self.recovery_timeout
+                        {
                             inner.state = GpuLeaseState::Degraded {
                                 reason: format!("recovery timed out: {reason:?}"),
                             };
@@ -734,7 +730,9 @@ impl GpuLeaseManager {
             return true;
         }
 
-        let _ = self.cleanup_orphaned_processes(&first_snapshot.processes).await;
+        let _ = self
+            .cleanup_orphaned_processes(&first_snapshot.processes)
+            .await;
 
         let second_snapshot = match telemetry.sample().await {
             Ok(snapshot) => snapshot,
@@ -948,8 +946,8 @@ impl Drop for GpuLeaseGuard {
 mod tests {
     use super::*;
     use crate::resource::{
-        ImageRuntimeSnapshot, L1ResidencySnapshot, L1RuntimeSnapshot, RamSnapshot,
-        ResourceProcess, ResourceSnapshot, VramSnapshot,
+        ImageRuntimeSnapshot, L1ResidencySnapshot, L1RuntimeSnapshot, RamSnapshot, ResourceProcess,
+        ResourceSnapshot, VramSnapshot,
     };
 
     fn busy_snapshot(now: Instant) -> ResourceSnapshot {
@@ -1051,7 +1049,10 @@ mod tests {
     #[test]
     fn stuck_recovery_degrades() {
         let manager = GpuLeaseManager::new(Duration::from_secs(180), Duration::from_millis(1));
-        manager.mark_recovering(Some(GpuOwner::L1Worker), RecoveryReason::OwnerReleaseRequested);
+        manager.mark_recovering(
+            Some(GpuOwner::L1Worker),
+            RecoveryReason::OwnerReleaseRequested,
+        );
 
         std::thread::sleep(Duration::from_millis(2));
         manager.reconcile(&busy_snapshot(Instant::now()));

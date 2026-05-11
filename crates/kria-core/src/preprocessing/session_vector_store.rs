@@ -80,17 +80,16 @@ impl SessionVectorStore {
     /// Returns `true` if the session has any indexed document chunks.
     pub async fn has_documents(&self, session_id: &str) -> bool {
         let index = self.index.read().await;
-        index.get(session_id).map(|v| !v.is_empty()).unwrap_or(false)
+        index
+            .get(session_id)
+            .map(|v| !v.is_empty())
+            .unwrap_or(false)
     }
 
     /// Retrieve the top-K most relevant chunks for a query embedding.
     ///
     /// Returns chunks sorted by descending cosine similarity.
-    pub async fn retrieve(
-        &self,
-        session_id: &str,
-        query_embedding: &[f32],
-    ) -> Vec<RetrievedChunk> {
+    pub async fn retrieve(&self, session_id: &str, query_embedding: &[f32]) -> Vec<RetrievedChunk> {
         let index = self.index.read().await;
         let chunks = match index.get(session_id) {
             Some(c) if !c.is_empty() => c,
@@ -149,7 +148,9 @@ impl SessionVectorStore {
                 index.insert(session_id.to_string(), chunks);
             }
             Ok(_) => {}
-            Err(e) => tracing::debug!("[SessionVectorStore] no persisted chunks for {session_id}: {e}"),
+            Err(e) => {
+                tracing::debug!("[SessionVectorStore] no persisted chunks for {session_id}: {e}")
+            }
         }
     }
 
@@ -186,7 +187,7 @@ impl RetrievedChunk {
 
         let mut context = String::from(
             "The following content was extracted from the user's uploaded document(s). \
-             Use it to answer the user's question accurately:\n\n"
+             Use it to answer the user's question accurately:\n\n",
         );
 
         for (filename, file_chunks) in &by_file {

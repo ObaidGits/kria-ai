@@ -137,9 +137,7 @@ async fn wait_for_lease_reclaim(
 #[ignore = "live GPU collision harness: requires local llama-server + ComfyUI + NVIDIA GPU"]
 async fn live_collision_stress_preempts_image_turn_and_completes_text_turn() {
     if !llm_available() {
-        eprintln!(
-            "SKIP: live collision stress requires local LLM server at 127.0.0.1:8080"
-        );
+        eprintln!("SKIP: live collision stress requires local LLM server at 127.0.0.1:8080");
         return;
     }
 
@@ -147,7 +145,8 @@ async fn live_collision_stress_preempts_image_turn_and_completes_text_turn() {
         "Generate a highly detailed 4k image of a cyberpunk city at night with dense traffic.";
     let preempt_prompt = "Cancel that, just tell me a joke.";
 
-    let gpu_lease_manager = GpuLeaseManager::shared(Duration::from_secs(180), Duration::from_secs(20));
+    let gpu_lease_manager =
+        GpuLeaseManager::shared(Duration::from_secs(180), Duration::from_secs(20));
     assert!(
         matches!(gpu_lease_manager.state(), GpuLeaseState::Idle),
         "fresh test-scoped lease manager should start idle"
@@ -162,7 +161,10 @@ async fn live_collision_stress_preempts_image_turn_and_completes_text_turn() {
     );
     let plan_preempt = turn_gate.plan_turn(preempt_prompt, false);
     assert!(
-        matches!(plan_preempt.intent.operation, Operation::Converse | Operation::Cancel),
+        matches!(
+            plan_preempt.intent.operation,
+            Operation::Converse | Operation::Cancel
+        ),
         "preempt prompt must stay text-path compatible"
     );
 
@@ -176,8 +178,10 @@ async fn live_collision_stress_preempts_image_turn_and_completes_text_turn() {
     let model_router = Arc::new(ModelRouter::from_config(&config));
 
     let tool_registry = registry::build_default_registry();
-    let image_orchestrator =
-        kria_core::image::ImageOrchestrator::new(config.image_generation.clone(), &resolve_kria_data_dir());
+    let image_orchestrator = kria_core::image::ImageOrchestrator::new(
+        config.image_generation.clone(),
+        &resolve_kria_data_dir(),
+    );
 
     let image_backend: Arc<dyn kria_core::image::ImageBackend> = image_orchestrator.clone();
     let llm_orch: Arc<tokio::sync::RwLock<Option<Arc<Orchestrator>>>> =
@@ -198,11 +202,7 @@ async fn live_collision_stress_preempts_image_turn_and_completes_text_turn() {
     let audit_conn = rusqlite::Connection::open(tmp.path().join("collision_audit.db"))
         .expect("open collision audit db");
     let audit_logger = Arc::new(AuditLogger::new(audit_conn));
-    let rollback_mgr = Arc::new(RollbackManager::new(
-        tmp.path().join("rollback"),
-        1,
-        10,
-    ));
+    let rollback_mgr = Arc::new(RollbackManager::new(tmp.path().join("rollback"), 1, 10));
     let mount_mgr = Arc::new(tokio::sync::RwLock::new(
         kria_core::tools::mount_manager::ToolMountManager::new(),
     ));
@@ -245,12 +245,9 @@ async fn live_collision_stress_preempts_image_turn_and_completes_text_turn() {
     });
 
     let mut turn1_events = Vec::new();
-    let saw_generate_image_start = wait_for_generate_image_tool_start(
-        &mut rx1,
-        &mut turn1_events,
-        Duration::from_secs(45),
-    )
-    .await;
+    let saw_generate_image_start =
+        wait_for_generate_image_tool_start(&mut rx1, &mut turn1_events, Duration::from_secs(45))
+            .await;
     assert!(
         saw_generate_image_start,
         "turn1 never reached generate_image ToolStart; ensure local LLM and image backend are available. pre-start events: {:?}",
@@ -339,7 +336,8 @@ async fn live_collision_stress_preempts_image_turn_and_completes_text_turn() {
         "turn2 reported OOM path; events: {turn2_events:?}"
     );
 
-    let reclaimed_state = wait_for_lease_reclaim(&image_orchestrator, Duration::from_secs(12)).await;
+    let reclaimed_state =
+        wait_for_lease_reclaim(&image_orchestrator, Duration::from_secs(12)).await;
     assert!(
         !matches!(reclaimed_state, GpuLeaseState::Held { .. }),
         "image GPU lease remained held after preemption: {reclaimed_state:?}"

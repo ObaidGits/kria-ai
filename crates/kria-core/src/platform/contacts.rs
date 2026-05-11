@@ -74,15 +74,11 @@ fn double_metaphone_primary(name: &str) -> String {
         let next = chars.get(i + 1).copied();
 
         match ch {
-            'a' | 'e' | 'i' | 'o' | 'u' => {
-                if i == 0 {
-                    result.push('A');
-                }
+            'a' | 'e' | 'i' | 'o' | 'u' if i == 0 => {
+                result.push('A');
             }
-            'b' => {
-                if prev != Some('m') {
-                    result.push('P');
-                }
+            'b' if prev != Some('m') => {
+                result.push('P');
             }
             'c' => {
                 if next == Some('h') {
@@ -110,16 +106,12 @@ fn double_metaphone_primary(name: &str) -> String {
                     result.push('K');
                 }
             }
-            'h' => {
-                if next.map(|c| "aeiou".contains(c)).unwrap_or(false) {
-                    result.push('H');
-                }
+            'h' if next.map(|c| "aeiou".contains(c)).unwrap_or(false) => {
+                result.push('H');
             }
             'j' => result.push('J'),
-            'k' => {
-                if prev != Some('c') {
-                    result.push('K');
-                }
+            'k' if prev != Some('c') => {
+                result.push('K');
             }
             'l' => result.push('L'),
             'm' => result.push('M'),
@@ -148,16 +140,12 @@ fn double_metaphone_primary(name: &str) -> String {
                 }
             }
             'v' => result.push('F'),
-            'w' => {
-                if next.map(|c| "aeiou".contains(c)).unwrap_or(false) {
-                    result.push('W');
-                }
+            'w' if next.map(|c| "aeiou".contains(c)).unwrap_or(false) => {
+                result.push('W');
             }
             'x' => result.push_str("KS"),
-            'y' => {
-                if next.map(|c| "aeiou".contains(c)).unwrap_or(false) {
-                    result.push('Y');
-                }
+            'y' if next.map(|c| "aeiou".contains(c)).unwrap_or(false) => {
+                result.push('Y');
             }
             'z' => result.push('S'),
             _ => {}

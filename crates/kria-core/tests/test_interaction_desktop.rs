@@ -260,8 +260,7 @@ async fn functional_dt01_dt02_clipboard_roundtrip() {
     }
 
     assert_eq!(
-        content,
-        "Hello from KRIA test",
+        content, "Hello from KRIA test",
         "get_clipboard must return exactly what was set"
     );
 }

@@ -37,7 +37,11 @@ pub fn sanitize(raw: &str, filename: &str) -> SanitizedDocument {
 
     let text = step4.into_owned();
     let char_count = text.chars().count();
-    SanitizedDocument { text, warnings, char_count }
+    SanitizedDocument {
+        text,
+        warnings,
+        char_count,
+    }
 }
 
 // ─── Step 1: Control Character Strip ────────────────────────────────────────
@@ -61,19 +65,29 @@ fn replace_homoglyphs(text: &str) -> String {
     // Covers common homoglyph attack vectors
     text.chars()
         .map(|c| match c {
-            '\u{0410}' => 'A', '\u{0430}' => 'a', // Cyrillic А/а
-            '\u{0412}' => 'B', '\u{0432}' => 'b', // Cyrillic В/в
-            '\u{0421}' => 'C', '\u{0441}' => 'c', // Cyrillic С/с
-            '\u{0415}' => 'E', '\u{0435}' => 'e', // Cyrillic Е/е
-            '\u{041C}' => 'M', '\u{043C}' => 'm', // Cyrillic М/м
-            '\u{041E}' => 'O', '\u{043E}' => 'o', // Cyrillic О/о
-            '\u{0420}' => 'R', '\u{0440}' => 'r', // Cyrillic Р/р
-            '\u{0422}' => 'T', '\u{0442}' => 't', // Cyrillic Т/т
-            '\u{0425}' => 'X', '\u{0445}' => 'x', // Cyrillic Х/х
-            '\u{0423}' => 'Y', '\u{0443}' => 'y', // Cyrillic У/у
+            '\u{0410}' => 'A',
+            '\u{0430}' => 'a', // Cyrillic А/а
+            '\u{0412}' => 'B',
+            '\u{0432}' => 'b', // Cyrillic В/в
+            '\u{0421}' => 'C',
+            '\u{0441}' => 'c', // Cyrillic С/с
+            '\u{0415}' => 'E',
+            '\u{0435}' => 'e', // Cyrillic Е/е
+            '\u{041C}' => 'M',
+            '\u{043C}' => 'm', // Cyrillic М/м
+            '\u{041E}' => 'O',
+            '\u{043E}' => 'o', // Cyrillic О/о
+            '\u{0420}' => 'R',
+            '\u{0440}' => 'r', // Cyrillic Р/р
+            '\u{0422}' => 'T',
+            '\u{0442}' => 't', // Cyrillic Т/т
+            '\u{0425}' => 'X',
+            '\u{0445}' => 'x', // Cyrillic Х/х
+            '\u{0423}' => 'Y',
+            '\u{0443}' => 'y',                            // Cyrillic У/у
             '\u{2018}' | '\u{2019}' | '\u{0060}' => '\'', // Smart quotes → apostrophe
-            '\u{201C}' | '\u{201D}' => '"',                // Smart quotes → double quote
-            '\u{2013}' | '\u{2014}' => '-',                // En/em dash → hyphen
+            '\u{201C}' | '\u{201D}' => '"',               // Smart quotes → double quote
+            '\u{2013}' | '\u{2014}' => '-',               // En/em dash → hyphen
             '\u{00AD}' => '\0', // Soft hyphen (invisible, used in injection) → strip
             _ => c,
         })
@@ -185,9 +199,7 @@ fn strip_macro_fragments<'a>(text: &'a str, warnings: &mut Vec<String>) -> Cow<'
     let mut result = String::with_capacity(text.len());
     for line in text.lines() {
         let lower_line = line.to_lowercase();
-        let is_macro = MACRO_PATTERNS
-            .iter()
-            .any(|&pat| lower_line.contains(pat));
+        let is_macro = MACRO_PATTERNS.iter().any(|&pat| lower_line.contains(pat));
 
         if !is_macro {
             result.push_str(line);
@@ -200,8 +212,8 @@ fn strip_macro_fragments<'a>(text: &'a str, warnings: &mut Vec<String>) -> Cow<'
 // ─── Step 5: PII Detection (annotate only, no redaction) ────────────────────
 
 fn detect_pii(text: &str, filename: &str, warnings: &mut Vec<String>) {
-    use std::sync::OnceLock;
     use regex::Regex;
+    use std::sync::OnceLock;
 
     static EMAIL_RE: OnceLock<Regex> = OnceLock::new();
     static PHONE_RE: OnceLock<Regex> = OnceLock::new();
@@ -210,17 +222,21 @@ fn detect_pii(text: &str, filename: &str, warnings: &mut Vec<String>) {
     let email_re = EMAIL_RE.get_or_init(|| {
         Regex::new(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b").unwrap()
     });
-    let phone_re = PHONE_RE.get_or_init(|| {
-        Regex::new(r"\b(\+?\d[\d\s\-().]{7,}\d)\b").unwrap()
-    });
+    let phone_re = PHONE_RE.get_or_init(|| Regex::new(r"\b(\+?\d[\d\s\-().]{7,}\d)\b").unwrap());
     let card_re = CARD_RE.get_or_init(|| {
         Regex::new(r"\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12})\b").unwrap()
     });
 
     let mut found_types: Vec<&str> = Vec::new();
-    if email_re.is_match(text) { found_types.push("email addresses"); }
-    if phone_re.is_match(text) { found_types.push("phone numbers"); }
-    if card_re.is_match(text) { found_types.push("credit card numbers"); }
+    if email_re.is_match(text) {
+        found_types.push("email addresses");
+    }
+    if phone_re.is_match(text) {
+        found_types.push("phone numbers");
+    }
+    if card_re.is_match(text) {
+        found_types.push("credit card numbers");
+    }
 
     if !found_types.is_empty() {
         warnings.push(format!(

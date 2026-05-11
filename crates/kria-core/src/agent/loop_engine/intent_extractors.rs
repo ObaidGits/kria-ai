@@ -1,4 +1,3 @@
-
 use super::*;
 
 // ─── App-lifecycle intent extractors ─────────────────────────────────────────

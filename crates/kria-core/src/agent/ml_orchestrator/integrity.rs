@@ -2,12 +2,12 @@
 //
 // Fast integrity checks: xxhash64 for datasets, SHA-256 for model weights.
 
+use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
-use sha2::{Sha256, Digest};
 
-use super::types::{HashAlgorithm, ContentHash};
+use super::types::{ContentHash, HashAlgorithm};
 
 /// Compute SHA-256 hex digest of a file.
 pub fn sha256_file(path: &Path) -> anyhow::Result<String> {
@@ -16,7 +16,9 @@ pub fn sha256_file(path: &Path) -> anyhow::Result<String> {
     let mut buf = [0u8; 64 * 1024];
     loop {
         let n = file.read(&mut buf)?;
-        if n == 0 { break; }
+        if n == 0 {
+            break;
+        }
         hasher.update(&buf[..n]);
     }
     Ok(format!("{:x}", hasher.finalize()))
@@ -31,7 +33,9 @@ pub fn xxhash64_file(path: &Path) -> anyhow::Result<u64> {
     let mut buf = [0u8; 64 * 1024];
     loop {
         let n = reader.read(&mut buf)?;
-        if n == 0 { break; }
+        if n == 0 {
+            break;
+        }
         hasher.update(&buf[..n]);
     }
     Ok(hasher.digest())
@@ -67,7 +71,6 @@ pub fn verify_hash(path: &Path, expected: &ContentHash) -> anyhow::Result<bool> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
 
     #[test]
     fn sha256_deterministic() {
@@ -104,7 +107,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("model.pth");
         std::fs::write(&path, b"fake model weights").unwrap();
-        let hash = ContentHash::Sha256("0000000000000000000000000000000000000000000000000000000000000000".into());
+        let hash = ContentHash::Sha256(
+            "0000000000000000000000000000000000000000000000000000000000000000".into(),
+        );
         assert!(!verify_hash(&path, &hash).unwrap());
     }
 }

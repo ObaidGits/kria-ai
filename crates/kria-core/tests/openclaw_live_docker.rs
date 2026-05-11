@@ -33,7 +33,10 @@ async fn live_pool_checkout_and_checkin() {
     let active_before = pool.active_count().await;
     let warm_before = pool.warm_count_total().await;
     println!("Before checkout: active={active_before}, warm={warm_before}");
-    assert!(warm_before > 0, "expected at least one warm container after initialize");
+    assert!(
+        warm_before > 0,
+        "expected at least one warm container after initialize"
+    );
 
     // Checkout a Light container
     use kria_core::openclaw::ResourceClass;
@@ -75,12 +78,21 @@ async fn live_pool_prewarm_loop_maintains_count() {
 
     let initial = pool.warm_count_total().await;
     println!("Initial warm count: {initial}");
-    assert!(initial >= 2, "expected at least warm_per_class=2 containers");
+    assert!(
+        initial >= 2,
+        "expected at least warm_per_class=2 containers"
+    );
 
     // Checkout all Light containers to drain that class
     use kria_core::openclaw::ResourceClass;
-    let h1 = pool.checkout(ResourceClass::Light, "test").await.expect("checkout 1 failed");
-    let h2 = pool.checkout(ResourceClass::Light, "test").await.expect("checkout 2 failed");
+    let h1 = pool
+        .checkout(ResourceClass::Light, "test")
+        .await
+        .expect("checkout 1 failed");
+    let h2 = pool
+        .checkout(ResourceClass::Light, "test")
+        .await
+        .expect("checkout 2 failed");
 
     println!("Drained Light pool — active={}", pool.active_count().await);
 
@@ -94,7 +106,10 @@ async fn live_pool_prewarm_loop_maintains_count() {
     let after_prewarm = pool.warm_count_total().await;
     println!("After pre-warm loop cycle: warm={after_prewarm}");
     // Pool should have recovered (pre-warm loop refills it)
-    assert!(after_prewarm >= 2, "pre-warm loop should have refilled the pool");
+    assert!(
+        after_prewarm >= 2,
+        "pre-warm loop should have refilled the pool"
+    );
 
     println!("[PASS] live_pool_prewarm_loop_maintains_count");
 }
@@ -103,9 +118,9 @@ async fn live_pool_prewarm_loop_maintains_count() {
 async fn live_audit_records_invocation_started() {
     require_docker!();
 
+    use kria_core::infra::ToolResult;
     use kria_core::openclaw::audit::AuditLedger;
     use kria_core::openclaw::types::AuditEventType;
-    use kria_core::infra::ToolResult;
     use tempfile::TempDir;
 
     let dir = TempDir::new().unwrap();
@@ -121,7 +136,11 @@ async fn live_audit_records_invocation_started() {
         "oc_calculator",
         "green",
         &serde_json::json!({"expr": "2+2"}),
-        &ToolResult { success: true, data: serde_json::Value::Null, error: None },
+        &ToolResult {
+            success: true,
+            data: serde_json::Value::Null,
+            error: None,
+        },
         0,
         "light",
         "",
@@ -140,7 +159,11 @@ async fn live_audit_records_invocation_started() {
         "oc_calculator",
         "green",
         &serde_json::json!({"expr": "2+2"}),
-        &ToolResult { success: true, data: serde_json::json!("4"), error: None },
+        &ToolResult {
+            success: true,
+            data: serde_json::json!("4"),
+            error: None,
+        },
         45,
         "light",
         "c0ntainer123",

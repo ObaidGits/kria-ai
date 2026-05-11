@@ -277,7 +277,10 @@ impl MemoryStore {
         Ok(turns.into_iter().rev().collect())
     }
 
-    pub fn fetch_memories(&self, request: &MemoryFetchRequest) -> anyhow::Result<Vec<ConversationTurn>> {
+    pub fn fetch_memories(
+        &self,
+        request: &MemoryFetchRequest,
+    ) -> anyhow::Result<Vec<ConversationTurn>> {
         self.get_recent_turns(&request.session_id, request.limit)
     }
 

@@ -13,7 +13,8 @@ fn tool_names(obs: &EvalObservation) -> Vec<String> {
 }
 
 fn any_tool_match(names: &[String], candidates: &[&str]) -> bool {
-    names.iter()
+    names
+        .iter()
         .any(|name| candidates.iter().any(|candidate| name.contains(candidate)))
 }
 
@@ -42,7 +43,8 @@ fn hard_fail_reason(case: &EvalCase, obs: &EvalObservation) -> Option<String> {
         || prompt.contains("recall")
         || prompt.contains("knowledge")
         || prompt.contains("rag");
-    let mcp_prompt = prompt.contains("mcp") || prompt.contains("google workspace") || prompt.contains("gmail");
+    let mcp_prompt =
+        prompt.contains("mcp") || prompt.contains("google workspace") || prompt.contains("gmail");
 
     if weather_prompt {
         let weather_tool_ok = any_tool_match(
@@ -56,7 +58,9 @@ fn hard_fail_reason(case: &EvalCase, obs: &EvalObservation) -> Option<String> {
             ],
         );
         if !weather_tool_ok {
-            return Some("Stage A: weather prompt did not use a weather/live-search tool".to_string());
+            return Some(
+                "Stage A: weather prompt did not use a weather/live-search tool".to_string(),
+            );
         }
         let weather_bad_phrases = [
             "cannot check weather",
@@ -88,7 +92,10 @@ fn hard_fail_reason(case: &EvalCase, obs: &EvalObservation) -> Option<String> {
             "unable to fetch news",
             "here are steps to check news",
         ];
-        if news_bad_phrases.iter().any(|phrase| response.contains(phrase)) {
+        if news_bad_phrases
+            .iter()
+            .any(|phrase| response.contains(phrase))
+        {
             return Some(
                 "Stage A: news prompt returned disclaimer/instructions instead of grounded result"
                     .to_string(),
@@ -107,7 +114,9 @@ fn hard_fail_reason(case: &EvalCase, obs: &EvalObservation) -> Option<String> {
             ],
         );
         if !install_tool_ok {
-            return Some("Stage A: install prompt did not trigger install/exec tool path".to_string());
+            return Some(
+                "Stage A: install prompt did not trigger install/exec tool path".to_string(),
+            );
         }
         let install_bad_phrases = [
             "you can install",
@@ -118,7 +127,10 @@ fn hard_fail_reason(case: &EvalCase, obs: &EvalObservation) -> Option<String> {
         if install_bad_phrases
             .iter()
             .any(|phrase| response.contains(phrase))
-            && !any_tool_match(&names, &["install_package", "execute_fleet_command", "execute_bash"])
+            && !any_tool_match(
+                &names,
+                &["install_package", "execute_fleet_command", "execute_bash"],
+            )
         {
             return Some(
                 "Stage A: install prompt returned only instructions without execution attempt"
@@ -156,7 +168,13 @@ fn hard_fail_reason(case: &EvalCase, obs: &EvalObservation) -> Option<String> {
     if memory_prompt {
         let memory_tool_ok = any_tool_match(
             &names,
-            &["remember_fact", "recall_fact", "rag_query", "ingest_document", "list_knowledge_base"],
+            &[
+                "remember_fact",
+                "recall_fact",
+                "rag_query",
+                "ingest_document",
+                "list_knowledge_base",
+            ],
         );
         if !memory_tool_ok {
             return Some("Stage A: memory/knowledge prompt did not use memory tools".to_string());
@@ -166,7 +184,9 @@ fn hard_fail_reason(case: &EvalCase, obs: &EvalObservation) -> Option<String> {
     if mcp_prompt {
         let mcp_tool_ok = any_tool_match(&names, &["gw_", "gmail", "calendar", "drive", "mcp_"]);
         if !mcp_tool_ok {
-            return Some("Stage A: MCP/GWorkspace prompt did not use MCP-related tools".to_string());
+            return Some(
+                "Stage A: MCP/GWorkspace prompt did not use MCP-related tools".to_string(),
+            );
         }
     }
 
@@ -245,8 +265,8 @@ pub async fn evaluate_case(case: &EvalCase, obs: &EvalObservation) -> EvalVerdic
         Ok("1")
     );
 
-    let tool_calls_text = serde_json::to_string_pretty(&obs.tool_calls)
-        .unwrap_or_else(|_| "[]".to_string());
+    let tool_calls_text =
+        serde_json::to_string_pretty(&obs.tool_calls).unwrap_or_else(|_| "[]".to_string());
 
     let system_prompt = format!(
         "Evaluation inputs:\n\
@@ -353,7 +373,8 @@ TOOL_CALLS:\n{tool_calls_text}\n",
             judge_grade: "PASS".to_string(),
             confidence: 0.55,
             reasons: vec![
-                "Judge JSON parse failed; Stage A already passed, applying graceful pass".to_string(),
+                "Judge JSON parse failed; Stage A already passed, applying graceful pass"
+                    .to_string(),
             ],
             artifacts: serde_json::json!({
                 "stage": "B",

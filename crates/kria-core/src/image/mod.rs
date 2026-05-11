@@ -10,8 +10,8 @@
 //! - `cloud`          — Tier C cloud fallback (Pollinations.ai / HF Inference)
 //! - `orchestrator`   — top-level facade wiring all pieces together
 
-pub mod capabilities;
 pub mod backend;
+pub mod capabilities;
 pub mod cloud;
 pub mod comfy;
 pub mod mode;
@@ -21,11 +21,11 @@ pub mod styles;
 pub mod swap;
 pub mod ws_bridge;
 
-pub use capabilities::QualityProfile;
 pub use backend::{
     ImageBackend, ImageBackendCapabilities, ImageBackendHealth, ImageBackendId,
     ImageBackendRegistry, ImageEstimate, ImageExecutionContext, ImageJobId,
 };
+pub use capabilities::QualityProfile;
 pub use mode::{resolve_image_mode, ImageMode, ModeError, ResolvedMode};
 pub use orchestrator::{
     FailureReport, FailureStage, ImageError, ImageOrchestrator, ImageRequest, ImageResult,

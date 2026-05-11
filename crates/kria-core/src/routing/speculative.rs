@@ -303,14 +303,29 @@ impl SpeculativeRouter {
         // Simple domain matching using anchor sentences
         // For speed, we compare against a small set of domain anchors
         let anchors = [
-            (Domain::SystemInfo, "check system status hardware information CPU memory"),
+            (
+                Domain::SystemInfo,
+                "check system status hardware information CPU memory",
+            ),
             (Domain::FileOps, "read write copy move delete files folders"),
-            (Domain::AppLifecycle, "open close launch start application window"),
-            (Domain::Comms, "email send message calendar schedule reminder"),
-            (Domain::Knowledge, "search web find information news weather"),
+            (
+                Domain::AppLifecycle,
+                "open close launch start application window",
+            ),
+            (
+                Domain::Comms,
+                "email send message calendar schedule reminder",
+            ),
+            (
+                Domain::Knowledge,
+                "search web find information news weather",
+            ),
             (Domain::Power, "shutdown reboot volume brightness mute"),
             (Domain::Vision, "screenshot image analysis describe screen"),
-            (Domain::Packages, "install uninstall update software package list installed apps"),
+            (
+                Domain::Packages,
+                "install uninstall update software package list installed apps",
+            ),
             (Domain::Developer, "run shell command git build lint"),
             (Domain::Workspace, "google docs drive sheets presentation"),
         ];
@@ -372,10 +387,7 @@ mod tests {
     #[test]
     fn short_text_waits() {
         let mut router = SpeculativeRouter::new();
-        assert_eq!(
-            router.on_partial("set", 0.9),
-            SpeculativeAction::Wait
-        );
+        assert_eq!(router.on_partial("set", 0.9), SpeculativeAction::Wait);
     }
 
     #[test]

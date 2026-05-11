@@ -46,7 +46,11 @@ fn critical_tool_presence_matrix() {
         }
     }
 
-    assert!(missing.is_empty(), "critical tool matrix missing entries: {:?}", missing);
+    assert!(
+        missing.is_empty(),
+        "critical tool matrix missing entries: {:?}",
+        missing
+    );
 }
 
 #[test]

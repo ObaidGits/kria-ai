@@ -82,25 +82,23 @@ const LIVE_FACT_ANCHORS_TEXT: &[&str] = &[
     "current time",
 ];
 
-static ANCHOR_EMBEDDINGS: Lazy<Option<Vec<Vec<f32>>>> = Lazy::new(|| {
-    match embed_batch(LIVE_FACT_ANCHORS_TEXT) {
+static ANCHOR_EMBEDDINGS: Lazy<Option<Vec<Vec<f32>>>> =
+    Lazy::new(|| match embed_batch(LIVE_FACT_ANCHORS_TEXT) {
         Ok(vectors) => Some(vectors),
         Err(_) => {
-            tracing::warn!("[LiveFactClassifier] Failed to pre-embed anchors; semantic layer disabled");
+            tracing::warn!(
+                "[LiveFactClassifier] Failed to pre-embed anchors; semantic layer disabled"
+            );
             None
         }
-    }
-});
+    });
 
 fn embed_batch(texts: &[&str]) -> Result<Vec<Vec<f32>>, String> {
     super::embed::embed_batch(texts).map_err(|e| e.to_string())
 }
 
 fn anchors() -> Vec<Vec<f32>> {
-    ANCHOR_EMBEDDINGS
-        .as_ref()
-        .cloned()
-        .unwrap_or_default()
+    ANCHOR_EMBEDDINGS.as_ref().cloned().unwrap_or_default()
 }
 
 // ─── Gate 3: Historical Rejection Filter ──────────────────────────────────────
@@ -125,7 +123,7 @@ static PAST_YEAR_RE: Lazy<Regex> = Lazy::new(|| {
             let mut parts = vec!["19\\d{2}".to_string()];
             for decade in 0..tens {
                 if decade == 0 {
-                    parts.push(format!("200\\d"));
+                    parts.push("200\\d".to_string());
                 } else {
                     parts.push(format!("20{}\\d", decade));
                 }
@@ -139,8 +137,7 @@ static PAST_YEAR_RE: Lazy<Regex> = Lazy::new(|| {
     } else {
         r"(?:19\d{2})".to_string()
     };
-    Regex::new(&format!(r"\b{}\b", year_pattern))
-        .expect("Invalid past year regex")
+    Regex::new(&format!(r"\b{}\b", year_pattern)).expect("Invalid past year regex")
 });
 
 /// Gate 3: Returns true if query contains historical markers (past-tense, old years).
@@ -266,8 +263,12 @@ mod tests {
 
     #[test]
     fn test_gate1_temporal_signals() {
-        assert!(contains_temporal_signal("How many years since Indian independence?"));
-        assert!(contains_temporal_signal("Who is the current chief minister?"));
+        assert!(contains_temporal_signal(
+            "How many years since Indian independence?"
+        ));
+        assert!(contains_temporal_signal(
+            "Who is the current chief minister?"
+        ));
         assert!(contains_temporal_signal("What is the latest news?"));
         assert!(contains_temporal_signal("Bitcoin price today"));
         assert!(contains_temporal_signal("Live cricket score"));
@@ -281,9 +282,15 @@ mod tests {
         assert!(contains_temporal_signal("How long has it been since 1947?"));
         assert!(contains_temporal_signal("Who is the current PM?"));
         // Awkward phrasings from real user queries
-        assert!(contains_temporal_signal("how many years of Indian Independence have been since?"));
-        assert!(contains_temporal_signal("How many Yeas of Independence have been since today?"));
-        assert!(contains_temporal_signal("years of independence have been since"));
+        assert!(contains_temporal_signal(
+            "how many years of Indian Independence have been since?"
+        ));
+        assert!(contains_temporal_signal(
+            "How many Yeas of Independence have been since today?"
+        ));
+        assert!(contains_temporal_signal(
+            "years of independence have been since"
+        ));
     }
 
     #[test]
@@ -297,10 +304,16 @@ mod tests {
 
     #[test]
     fn test_gate3_historical_rejection() {
-        assert!(contains_historical_markers("Who was the chief minister in 1995?"));
-        assert!(contains_historical_markers("History of Tamil Nadu politics"));
+        assert!(contains_historical_markers(
+            "Who was the chief minister in 1995?"
+        ));
+        assert!(contains_historical_markers(
+            "History of Tamil Nadu politics"
+        ));
         assert!(contains_historical_markers("Former president of India"));
-        assert!(!contains_historical_markers("Who is the chief minister now?"));
+        assert!(!contains_historical_markers(
+            "Who is the chief minister now?"
+        ));
     }
 
     #[test]
@@ -308,7 +321,10 @@ mod tests {
         let current_year = chrono::Utc::now().year();
         assert!(contains_historical_markers("Chief minister in 2003"));
         assert!(contains_historical_markers("President in 1999"));
-        assert!(!contains_historical_markers(&format!("Chief minister in {}", current_year)));
+        assert!(!contains_historical_markers(&format!(
+            "Chief minister in {}",
+            current_year
+        )));
     }
 
     // ─── Integration: 3-Gate Pipeline Tests ─────────────────────────────────
@@ -316,9 +332,13 @@ mod tests {
     #[test]
     fn test_live_fact_temporal_drift_queries() {
         // These should be caught by Gate 1 (temporal signals)
-        assert!(is_live_fact_query("How many years since Indian independence?"));
+        assert!(is_live_fact_query(
+            "How many years since Indian independence?"
+        ));
         assert!(is_live_fact_query("How old is Narendra Modi?"));
-        assert!(is_live_fact_query("What is the current population of India?"));
+        assert!(is_live_fact_query(
+            "What is the current population of India?"
+        ));
         assert!(is_live_fact_query("Bitcoin price today"));
         assert!(is_live_fact_query("Live cricket score"));
         assert!(is_live_fact_query("Latest news on elections"));
@@ -330,7 +350,9 @@ mod tests {
         // These should be rejected by Gate 3 even if Gate 1/2 triggers
         assert!(!is_live_fact_query("Who was the chief minister in 1995?"));
         assert!(!is_live_fact_query("History of the prime minister"));
-        assert!(!is_live_fact_query("How many years since 1995 independence?"));
+        assert!(!is_live_fact_query(
+            "How many years since 1995 independence?"
+        ));
     }
 
     #[test]

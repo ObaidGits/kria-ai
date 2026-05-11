@@ -50,17 +50,18 @@ fn live_search_filter_by_query() {
         })
         .collect();
 
-    assert_eq!(matched.len(), 2, "web query should match Web Search + Web Fetch");
+    assert_eq!(
+        matched.len(),
+        2,
+        "web query should match Web Search + Web Fetch"
+    );
     println!("✓ search 'web': {} results", matched.len());
 
     // Empty query returns all
     let q2 = "".to_lowercase();
     let all_results: Vec<_> = all
         .iter()
-        .filter(|s| {
-            q2.is_empty()
-                || s.name.to_lowercase().contains(&q2)
-        })
+        .filter(|s| q2.is_empty() || s.name.to_lowercase().contains(&q2))
         .collect();
     assert_eq!(all_results.len(), 3);
     println!("✓ search '': {} results (all)", all_results.len());
@@ -116,7 +117,10 @@ fn live_audit_log_table_queryable_via_raw_sql() {
     let count: i64 = conn
         .query_row("SELECT COUNT(*) FROM audit_log", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(count, 0, "audit_log is empty (entries written only by OpenClawToolHandler during live invocations)");
+    assert_eq!(
+        count, 0,
+        "audit_log is empty (entries written only by OpenClawToolHandler during live invocations)"
+    );
 
     let use_count: i64 = conn
         .query_row(
@@ -126,5 +130,8 @@ fn live_audit_log_table_queryable_via_raw_sql() {
         )
         .unwrap();
     assert_eq!(use_count, 2);
-    println!("✓ audit_log exists and queryable; oc_calculator use_count = {}", use_count);
+    println!(
+        "✓ audit_log exists and queryable; oc_calculator use_count = {}",
+        use_count
+    );
 }

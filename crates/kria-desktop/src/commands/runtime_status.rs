@@ -570,8 +570,8 @@ pub async fn delete_target(
     let registry_path = resolve_target_registry_path(state)
         .await
         .map_err(|e| e.message)?;
-    let mut registry = load_fleet_enrollment_registry(registry_path.as_path())
-        .map_err(|e| e.message)?;
+    let mut registry =
+        load_fleet_enrollment_registry(registry_path.as_path()).map_err(|e| e.message)?;
 
     let idx = registry
         .targets
@@ -580,8 +580,7 @@ pub async fn delete_target(
         .ok_or_else(|| format!("Target {target_id} not found in registry"))?;
 
     let removed_record = registry.targets.remove(idx);
-    save_fleet_enrollment_registry(registry_path.as_path(), &registry)
-        .map_err(|e| e.message)?;
+    save_fleet_enrollment_registry(registry_path.as_path(), &registry).map_err(|e| e.message)?;
 
     // Remove from runtime projections and broadcast removal via SSE
     if let Ok(uuid) = uuid::Uuid::parse_str(&target_id) {
@@ -676,8 +675,8 @@ pub async fn update_target(
     let registry_path = resolve_target_registry_path(state)
         .await
         .map_err(|e| e.message)?;
-    let mut registry = load_fleet_enrollment_registry(registry_path.as_path())
-        .map_err(|e| e.message)?;
+    let mut registry =
+        load_fleet_enrollment_registry(registry_path.as_path()).map_err(|e| e.message)?;
 
     let idx = registry
         .targets
@@ -713,8 +712,7 @@ pub async fn update_target(
     }
 
     let updated_record = record.clone();
-    save_fleet_enrollment_registry(registry_path.as_path(), &registry)
-        .map_err(|e| e.message)?;
+    save_fleet_enrollment_registry(registry_path.as_path(), &registry).map_err(|e| e.message)?;
 
     // Update runtime projection display name
     if let Ok(uuid) = uuid::Uuid::parse_str(&request.target_id) {

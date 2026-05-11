@@ -191,8 +191,14 @@ pub enum PollResult {
     StillRunning(TrainingMetrics),
     Completed(TrainingMetrics),
     Failed(String),
-    ProcessCrashed { pid: u32 },
-    ProcessHung { pid: u32, threshold_secs: f64, last_heartbeat_age_secs: f64 },
+    ProcessCrashed {
+        pid: u32,
+    },
+    ProcessHung {
+        pid: u32,
+        threshold_secs: f64,
+        last_heartbeat_age_secs: f64,
+    },
     NoStatusFile,
     Cancelled,
 }

@@ -441,12 +441,9 @@ impl IntentClassifier {
         }
 
         // Context boost: if classifier agrees with context domain, boost confidence
-        if let (Some(ref mut classification), Some(last_domain)) =
-            (&mut result, ctx.last_domain)
-        {
+        if let (Some(ref mut classification), Some(last_domain)) = (&mut result, ctx.last_domain) {
             if classification.domain == last_domain && ctx.turn_count_in_topic >= 2 {
-                classification.confidence =
-                    (classification.confidence + 0.1).min(0.99);
+                classification.confidence = (classification.confidence + 0.1).min(0.99);
             }
         }
 
@@ -476,10 +473,7 @@ fn worker_loop(rx: Receiver<ClassifierJob>, mut runtime: Option<IntentRuntime>) 
 impl IntentRuntime {
     fn load(settings: &RuntimeSettings) -> anyhow::Result<Self> {
         if !settings.model_path.exists() {
-            bail!(
-                "model file not found at {}",
-                settings.model_path.display()
-            );
+            bail!("model file not found at {}", settings.model_path.display());
         }
 
         let session = Session::builder()
@@ -519,7 +513,8 @@ impl IntentRuntime {
         let input_ids_i64: Vec<i64> = input_ids.iter().map(|&x| x as i64).collect();
         let attention_mask_i64: Vec<i64> = attention_mask.iter().map(|&x| x as i64).collect();
 
-        let input_ids_tensor = ort::value::Tensor::from_array(([1, input_ids.len()], input_ids_i64)).ok()?;
+        let input_ids_tensor =
+            ort::value::Tensor::from_array(([1, input_ids.len()], input_ids_i64)).ok()?;
         let attention_mask_tensor =
             ort::value::Tensor::from_array(([1, attention_mask.len()], attention_mask_i64)).ok()?;
 

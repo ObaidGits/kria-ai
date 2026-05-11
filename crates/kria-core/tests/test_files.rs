@@ -9,7 +9,7 @@
 
 mod common;
 
-use common::{assert_tool_success, SandboxDir};
+use common::SandboxDir;
 use kria_core::agent::router::{Intent, IntentRouter};
 use kria_core::safety::policy::{PolicyEngine, RiskLevel};
 use kria_core::tools::registry;

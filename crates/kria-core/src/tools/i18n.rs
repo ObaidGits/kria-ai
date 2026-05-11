@@ -23,8 +23,8 @@ fn looks_hinglish_latin(text: &str) -> bool {
     // Lightweight lexical hints for common Hindi words written in Latin script.
     // Require at least two matches to avoid false positives on English text.
     const HINGLISH_HINTS: &[&str] = &[
-        "aaj", "kal", "abhi", "mausam", "bahut", "accha", "acha", "hai", "nahi", "kyu",
-        "kaise", "mera", "meri", "mujhe", "tum", "kya", "haan", "theek", "thik", "kripya",
+        "aaj", "kal", "abhi", "mausam", "bahut", "accha", "acha", "hai", "nahi", "kyu", "kaise",
+        "mera", "meri", "mujhe", "tum", "kya", "haan", "theek", "thik", "kripya",
     ];
 
     let mut hint_hits = 0usize;

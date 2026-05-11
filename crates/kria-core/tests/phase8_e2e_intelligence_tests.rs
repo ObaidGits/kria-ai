@@ -29,18 +29,12 @@ use kria_core::agent::executive::{ExecutiveConfig, ExecutiveController, Executiv
 use kria_core::agent::perception::{
     EventDebouncer, EventKind, EventSeverity, FilesystemOp, PerceptionBus, PerceptionEvent,
 };
-use kria_core::agent::planner_v2::{
-    BranchingPlanner, PathRisk, PlannedPath, PlannedStep,
-};
+use kria_core::agent::planner_v2::{BranchingPlanner, PathRisk, PlannedPath, PlannedStep};
 use kria_core::agent::self_model::SelfModel;
 use kria_core::agent::working_set::{StructuredEvidence, WorkingSet};
-use kria_core::llm::{
-    ChatMessage, LlmBackend, LlmResponse, TokenUsage, ToolSchema,
-};
+use kria_core::llm::{ChatMessage, LlmBackend, LlmResponse, TokenUsage, ToolSchema};
 use kria_core::resource::gpu_lease::GpuLeaseManager;
-use kria_core::safety::policy_gate::{
-    CommandCapability, PolicyDecision, PolicyGate,
-};
+use kria_core::safety::policy_gate::{CommandCapability, PolicyDecision, PolicyGate};
 use kria_core::safety::RiskLevel;
 use kria_core::tools::subprocess_executor::StructuredCommand;
 
@@ -251,10 +245,34 @@ pub struct MockPolicyGate;
 impl MockPolicyGate {
     /// Binaries that are always auto-approved (read-only).
     const READONLY_BINARIES: &'static [&'static str] = &[
-        "top", "ps", "df", "free", "uptime", "uname", "hostname",
-        "cat", "head", "tail", "grep", "find", "wc", "ls", "stat",
-        "ip", "ss", "ping", "lscpu", "lspci", "lsusb", "lsblk",
-        "dmesg", "journalctl", "du", "sensors", "iostat", "vmstat",
+        "top",
+        "ps",
+        "df",
+        "free",
+        "uptime",
+        "uname",
+        "hostname",
+        "cat",
+        "head",
+        "tail",
+        "grep",
+        "find",
+        "wc",
+        "ls",
+        "stat",
+        "ip",
+        "ss",
+        "ping",
+        "lscpu",
+        "lspci",
+        "lsusb",
+        "lsblk",
+        "dmesg",
+        "journalctl",
+        "du",
+        "sensors",
+        "iostat",
+        "vmstat",
     ];
 
     /// Binaries that are always blocked.
@@ -308,9 +326,7 @@ impl PolicyGate for MockPolicyGate {
     }
 
     fn is_known_binary(&self, binary: &str) -> bool {
-        Self::is_readonly_binary(binary)
-            || Self::is_blocked_binary(binary)
-            || binary == "systemctl"
+        Self::is_readonly_binary(binary) || Self::is_blocked_binary(binary) || binary == "systemctl"
     }
 
     fn classify_risk(&self, binary: &str, _args: &[String]) -> RiskLevel {
@@ -332,10 +348,7 @@ impl PolicyGate for MockPolicyGate {
 fn build_test_controller(
     max_background: usize,
 ) -> (ExecutiveController, ExecutiveSender, Arc<GpuLeaseManager>) {
-    let gpu_lease = GpuLeaseManager::shared(
-        Duration::from_secs(180),
-        Duration::from_secs(15),
-    );
+    let gpu_lease = GpuLeaseManager::shared(Duration::from_secs(180), Duration::from_secs(15));
     let policy_gate: Arc<dyn PolicyGate> = Arc::new(MockPolicyGate);
 
     let config = ExecutiveConfig {
@@ -455,7 +468,10 @@ async fn e2e01_voice_preemption() {
     // Step 3: Submit another interactive task to verify voice priority.
     let interactive2 = interactive_task("Another interactive task");
     let interactive2_result = sender.submit(interactive2);
-    assert!(interactive2_result.is_ok(), "Interactive task must be accepted");
+    assert!(
+        interactive2_result.is_ok(),
+        "Interactive task must be accepted"
+    );
 
     // Step 4: Submit ANOTHER voice task to test preemption.
     let voice2 = voice_task("Emergency stop!");
@@ -600,7 +616,10 @@ async fn e2e14c_curiosity_loop_yields_on_cancel() {
     let result = tokio::time::timeout(Duration::from_millis(500), curiosity_handle).await;
     let elapsed = start.elapsed();
 
-    assert!(result.is_ok(), "CuriosityLoop should exit cleanly on cancel");
+    assert!(
+        result.is_ok(),
+        "CuriosityLoop should exit cleanly on cancel"
+    );
     assert!(
         elapsed < Duration::from_millis(500),
         "CuriosityLoop should yield within 500ms, took {:?}",
@@ -943,14 +962,8 @@ async fn e2e15b_perception_event_flood() {
         .expect("Channel should not be closed");
 
     assert_eq!(event.count, 5000);
-    assert_eq!(
-        event.kind,
-        EventKind::Filesystem(FilesystemOp::Modified)
-    );
-    assert_eq!(
-        event.primary_path,
-        Some("/tmp/hot_file.rs".to_string())
-    );
+    assert_eq!(event.kind, EventKind::Filesystem(FilesystemOp::Modified));
+    assert_eq!(event.primary_path, Some("/tmp/hot_file.rs".to_string()));
 
     // No more events should arrive.
     assert!(rx.try_recv().is_err());
@@ -966,11 +979,7 @@ async fn e2e15b_perception_event_flood() {
 async fn e2e06_working_set_to_planner() {
     let ws = WorkingSet::builder("Make VM faster")
         .with_max_tokens(2048)
-        .add_constraint(
-            "Don't restart nginx during business hours",
-            "user",
-            true,
-        )
+        .add_constraint("Don't restart nginx during business hours", "user", true)
         .add_evidence(StructuredEvidence {
             command: "top -bn1".to_string(),
             target: "local".to_string(),
@@ -998,7 +1007,10 @@ async fn e2e06_working_set_to_planner() {
     let prompt = ws.to_prompt();
 
     // The prompt should contain the goal, constraints, and evidence.
-    assert!(prompt.contains("Make VM faster"), "Prompt should contain goal");
+    assert!(
+        prompt.contains("Make VM faster"),
+        "Prompt should contain goal"
+    );
     assert!(
         prompt.contains("Don't restart nginx"),
         "Prompt should contain constraint"
@@ -1195,7 +1207,10 @@ async fn e2e10_heuristic_planner_fallback() {
     assert_eq!(plan.paths.len(), 3, "Heuristic plan should have 3 paths");
 
     // Path A should be DiagnoseFirst (read-only).
-    let path_a = plan.paths.iter().find(|p| p.risk == PathRisk::DiagnoseFirst);
+    let path_a = plan
+        .paths
+        .iter()
+        .find(|p| p.risk == PathRisk::DiagnoseFirst);
     assert!(path_a.is_some(), "Should have DiagnoseFirst path");
 
     // Path B should be MinimalRisk.
@@ -1224,10 +1239,7 @@ async fn e2e10_heuristic_planner_fallback() {
 /// and that voice tasks always get priority.
 #[tokio::test]
 async fn e2e11_gpu_lease_safety() {
-    let _gpu_lease = GpuLeaseManager::shared(
-        Duration::from_secs(180),
-        Duration::from_secs(15),
-    );
+    let _gpu_lease = GpuLeaseManager::shared(Duration::from_secs(180), Duration::from_secs(15));
 
     // Background task (P3) should NOT be able to acquire GPU.
     // TaskPriority::Background.can_acquire_gpu() == false
@@ -1300,7 +1312,11 @@ async fn e2e13_evidence_gatherer_domain_specific() {
         "Disk at 95%",
     );
     let disk_plan = EvidenceGatherer::plan_for(&disk_event).unwrap();
-    let disk_binaries: Vec<&str> = disk_plan.commands.iter().map(|c| c.binary.as_str()).collect();
+    let disk_binaries: Vec<&str> = disk_plan
+        .commands
+        .iter()
+        .map(|c| c.binary.as_str())
+        .collect();
     assert!(disk_binaries.contains(&"df"), "Disk plan should include df");
 
     // Health breach: memory → should include free, ps
@@ -1310,8 +1326,15 @@ async fn e2e13_evidence_gatherer_domain_specific() {
         "RAM at 90%",
     );
     let mem_plan = EvidenceGatherer::plan_for(&mem_event).unwrap();
-    let mem_binaries: Vec<&str> = mem_plan.commands.iter().map(|c| c.binary.as_str()).collect();
-    assert!(mem_binaries.contains(&"free"), "Memory plan should include free");
+    let mem_binaries: Vec<&str> = mem_plan
+        .commands
+        .iter()
+        .map(|c| c.binary.as_str())
+        .collect();
+    assert!(
+        mem_binaries.contains(&"free"),
+        "Memory plan should include free"
+    );
 
     // Process lifecycle → should include systemctl, journalctl, ps
     let proc_event = perception_event(
@@ -1320,7 +1343,11 @@ async fn e2e13_evidence_gatherer_domain_specific() {
         "nginx crashed",
     );
     let proc_plan = EvidenceGatherer::plan_for(&proc_event).unwrap();
-    let proc_binaries: Vec<&str> = proc_plan.commands.iter().map(|c| c.binary.as_str()).collect();
+    let proc_binaries: Vec<&str> = proc_plan
+        .commands
+        .iter()
+        .map(|c| c.binary.as_str())
+        .collect();
     assert!(
         proc_binaries.contains(&"ps"),
         "Process plan should include ps"
@@ -1333,8 +1360,15 @@ async fn e2e13_evidence_gatherer_domain_specific() {
         "eth0 down",
     );
     let net_plan = EvidenceGatherer::plan_for(&net_event).unwrap();
-    let net_binaries: Vec<&str> = net_plan.commands.iter().map(|c| c.binary.as_str()).collect();
-    assert!(net_binaries.contains(&"ip"), "Network plan should include ip");
+    let net_binaries: Vec<&str> = net_plan
+        .commands
+        .iter()
+        .map(|c| c.binary.as_str())
+        .collect();
+    assert!(
+        net_binaries.contains(&"ip"),
+        "Network plan should include ip"
+    );
     assert!(
         net_binaries.contains(&"ping"),
         "Network plan should include ping"

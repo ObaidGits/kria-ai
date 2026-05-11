@@ -82,8 +82,13 @@ pub struct ReconciliationSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReconciliationResult {
     Healthy,
-    VramWarning { available: u64 },
-    ProcessMismatch { expected: String, actual: Vec<String> },
+    VramWarning {
+        available: u64,
+    },
+    ProcessMismatch {
+        expected: String,
+        actual: Vec<String>,
+    },
     CriticalOomRisk,
 }
 

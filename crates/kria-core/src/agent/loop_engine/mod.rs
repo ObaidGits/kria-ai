@@ -29,13 +29,13 @@ use crate::tools::mount_manager::{google_meet_fallback_metadata, ToolMountManage
 use crate::tools::registry::{ToolDef, ToolRegistry};
 
 mod helpers;
-mod intent_fallback;
 mod intent_extractors;
+mod intent_fallback;
 mod response_helpers;
 
 use helpers::*;
-use intent_fallback::*;
 use intent_extractors::*;
+use intent_fallback::*;
 use response_helpers::*;
 fn build_message_preview(messages: &[ChatMessage], max_messages: usize) -> serde_json::Value {
     let start = messages.len().saturating_sub(max_messages);
@@ -110,7 +110,11 @@ fn build_filtered_tool_schema_catalog(tool_schemas: &[ToolSchema]) -> String {
     lines.join("\n")
 }
 
-fn rewrite_system_prompt_tools_block(system_prompt: &str, tool_schemas: &[ToolSchema], is_live_fact: bool) -> String {
+fn rewrite_system_prompt_tools_block(
+    system_prompt: &str,
+    tool_schemas: &[ToolSchema],
+    is_live_fact: bool,
+) -> String {
     let user_context = extract_user_context_block(system_prompt);
     let mut rebuilt = String::with_capacity(2800);
     rebuilt.push_str(
@@ -464,10 +468,8 @@ fn select_routed_tool_schemas(
                 if is_injected {
                     let mut boosted = schema.clone();
                     if !boosted.description.starts_with(SEMANTIC_OVERRIDE_PREFIX) {
-                        boosted.description = format!(
-                            "{}{}",
-                            SEMANTIC_OVERRIDE_PREFIX, boosted.description
-                        );
+                        boosted.description =
+                            format!("{}{}", SEMANTIC_OVERRIDE_PREFIX, boosted.description);
                     }
                     boosted
                 } else {
@@ -526,8 +528,6 @@ fn build_tool_call_history_content(tool_calls: &[ParsedToolCall]) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
-
-
 
 fn tool_choice_label(name: &str) -> String {
     match name {
@@ -992,9 +992,7 @@ fn prune_stale_search_results(mut val: serde_json::Value, max_age_days: i64) -> 
 
         for r in results.iter_mut() {
             let is_undated = !has_date_field(r);
-            let is_stale = extract_date(r)
-                .map(|dt| dt < cutoff)
-                .unwrap_or(false);
+            let is_stale = extract_date(r).map(|dt| dt < cutoff).unwrap_or(false);
 
             if is_stale {
                 // Drop stale dated results
@@ -1016,9 +1014,7 @@ fn prune_stale_search_results(mut val: serde_json::Value, max_age_days: i64) -> 
 
         // Actually remove stale results
         results.retain(|r| {
-            extract_date(r)
-                .map(|dt| dt >= cutoff)
-                .unwrap_or(true) // Keep undated (they're now warned)
+            extract_date(r).map(|dt| dt >= cutoff).unwrap_or(true) // Keep undated (they're now warned)
         });
 
         (pruned, warned)
@@ -1933,7 +1929,8 @@ pub struct AgentLoop {
     /// Tool-level semantic index for direct execution fast path.
     tool_index: Option<Arc<crate::routing::tool_index::SharedToolIndex>>,
     /// Feedback collector for online learning.
-    feedback_collector: Option<Arc<tokio::sync::Mutex<crate::routing::feedback::FeedbackCollector>>>,
+    feedback_collector:
+        Option<Arc<tokio::sync::Mutex<crate::routing::feedback::FeedbackCollector>>>,
     /// Session vector store for document RAG context injection.
     pub doc_store: Option<Arc<crate::preprocessing::SessionVectorStore>>,
     max_tool_rounds: usize,
@@ -1984,7 +1981,10 @@ impl AgentLoop {
     }
 
     /// Attach a tool-level semantic index for direct execution.
-    pub fn with_tool_index(mut self, index: Arc<crate::routing::tool_index::SharedToolIndex>) -> Self {
+    pub fn with_tool_index(
+        mut self,
+        index: Arc<crate::routing::tool_index::SharedToolIndex>,
+    ) -> Self {
         self.tool_index = Some(index);
         self
     }
@@ -2017,7 +2017,8 @@ impl AgentLoop {
             return None;
         }
         // Find the matching ToolSchema
-        let schema = self.tool_registry
+        let schema = self
+            .tool_registry
             .list_defs()
             .iter()
             .find(|def| def.name == match_result.name)
@@ -2723,11 +2724,12 @@ impl AgentLoop {
 
             if let Some(router) = &self.semantic_router {
                 let ctx = self.turn_gate.context();
-                let (decision, modality, trace) = router.route_with_context(&round_focus_text, ctx).await;
+                let (decision, modality, trace) =
+                    router.route_with_context(&round_focus_text, ctx).await;
                 turn_modality = modality;
                 conversation_only_route =
                     matches!(decision, crate::routing::RouteDecision::Conversation);
-                routed_tool_names.extend(trace.selected_tools.into_iter());
+                routed_tool_names.extend(trace.selected_tools);
             }
             let round_direct_tool_hint = self
                 .turn_gate
@@ -2833,8 +2835,11 @@ impl AgentLoop {
                     .first_mut()
                     .filter(|m| m.role.eq_ignore_ascii_case("system"))
                 {
-                    system_msg.content =
-                        rewrite_system_prompt_tools_block(template, &round_tool_schemas, is_live_fact);
+                    system_msg.content = rewrite_system_prompt_tools_block(
+                        template,
+                        &round_tool_schemas,
+                        is_live_fact,
+                    );
                 } else {
                     messages.insert(
                         0,
@@ -3907,7 +3912,8 @@ impl AgentLoop {
                 if let Some(ref feedback_collector) = self.feedback_collector {
                     // Resolve the actual domain from the turn-gate plan
                     let domain_for_feedback = crate::routing::domain::category_to_domain(
-                        &call.name
+                        &call
+                            .name
                             .split('_')
                             .next()
                             .unwrap_or("conversation")
@@ -4099,8 +4105,10 @@ impl AgentLoop {
                 // too aggressive and dropped Wikipedia/encyclopedic sources that are highly
                 // relevant even if older. Also matches web_search tool (not just searxng_search).
                 let llm_tool_result = if is_live_fact
-                    && matches!(call.name.as_str(), "searxng_search" | "web_search" | "search_news")
-                {
+                    && matches!(
+                        call.name.as_str(),
+                        "searxng_search" | "web_search" | "search_news"
+                    ) {
                     prune_stale_search_results(llm_tool_result, 30)
                 } else {
                     llm_tool_result
@@ -4205,7 +4213,10 @@ impl AgentLoop {
                 // the instruction RIGHT NEXT to the search results where the LLM can
                 // see it, rather than only in the system prompt which may be far away.
                 let tool_msg = if is_live_fact
-                    && matches!(call.name.as_str(), "searxng_search" | "web_search" | "search_news")
+                    && matches!(
+                        call.name.as_str(),
+                        "searxng_search" | "web_search" | "search_news"
+                    )
                     && tool_result.success
                 {
                     format!(

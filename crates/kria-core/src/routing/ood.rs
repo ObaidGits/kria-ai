@@ -94,7 +94,6 @@ fn entropy_softmax(sims: &[f32], tau: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::routing::domain::Domain;
 
     fn fake_ood_dist() -> Vec<f32> {
         // Simulate calibration: OOD prompts get top-1 sim ≈ 0.30

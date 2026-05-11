@@ -15,12 +15,7 @@ use regex::Regex;
 use super::types::RootCause;
 
 /// Extract a deterministic root cause from command output.
-pub fn extract_root_cause(
-    exit_code: i32,
-    stderr: &str,
-    stdout: &str,
-    binary: &str,
-) -> RootCause {
+pub fn extract_root_cause(exit_code: i32, stderr: &str, stdout: &str, binary: &str) -> RootCause {
     // 1. Check exit code first (most reliable signal)
     if let Some(cause) = classify_exit_code(exit_code, stderr) {
         return cause;
@@ -132,66 +127,121 @@ fn classify_exit_code(code: i32, stderr: &str) -> Option<RootCause> {
 static STDERR_PATTERNS: Lazy<Vec<StderrPattern>> = Lazy::new(|| {
     vec![
         // Network errors
-        StderrPattern { regex: r"ECONNREFUSED|Connection refused", category: "connection_refused", root_cause: |_, stderr| {
-            RootCause::NetworkUnreachable { target: extract_host(stderr).unwrap_or_default() }
-        }},
-        StderrPattern { regex: r"ETIMEDOUT|Connection timed out|connect timed out", category: "connection_timeout", root_cause: |_, _| {
-            RootCause::Timeout { seconds: 0 }
-        }},
-        StderrPattern { regex: r"ENETUNREACH|Network is unreachable", category: "network_unreachable", root_cause: |_, _| {
-            RootCause::NetworkUnreachable { target: String::new() }
-        }},
-        StderrPattern { regex: r"DNS resolution failed|Name or service not known", category: "dns_failure", root_cause: |_, stderr| {
-            RootCause::NetworkUnreachable { target: extract_host(stderr).unwrap_or_default() }
-        }},
-
+        StderrPattern {
+            regex: r"ECONNREFUSED|Connection refused",
+            category: "connection_refused",
+            root_cause: |_, stderr| RootCause::NetworkUnreachable {
+                target: extract_host(stderr).unwrap_or_default(),
+            },
+        },
+        StderrPattern {
+            regex: r"ETIMEDOUT|Connection timed out|connect timed out",
+            category: "connection_timeout",
+            root_cause: |_, _| RootCause::Timeout { seconds: 0 },
+        },
+        StderrPattern {
+            regex: r"ENETUNREACH|Network is unreachable",
+            category: "network_unreachable",
+            root_cause: |_, _| RootCause::NetworkUnreachable {
+                target: String::new(),
+            },
+        },
+        StderrPattern {
+            regex: r"DNS resolution failed|Name or service not known",
+            category: "dns_failure",
+            root_cause: |_, stderr| RootCause::NetworkUnreachable {
+                target: extract_host(stderr).unwrap_or_default(),
+            },
+        },
         // Permission errors
-        StderrPattern { regex: r"Permission denied|EACCES|Operation not permitted", category: "permission_denied", root_cause: |_, stderr| {
-            RootCause::PermissionDenied { path: extract_path_from_stderr(stderr) }
-        }},
-        StderrPattern { regex: r"authentication failed|Auth fail|Permission denied \(publickey\)", category: "auth_failed", root_cause: |_, _| {
-            RootCause::PermissionDenied { path: None }
-        }},
-
+        StderrPattern {
+            regex: r"Permission denied|EACCES|Operation not permitted",
+            category: "permission_denied",
+            root_cause: |_, stderr| RootCause::PermissionDenied {
+                path: extract_path_from_stderr(stderr),
+            },
+        },
+        StderrPattern {
+            regex: r"authentication failed|Auth fail|Permission denied \(publickey\)",
+            category: "auth_failed",
+            root_cause: |_, _| RootCause::PermissionDenied { path: None },
+        },
         // Resource errors
-        StderrPattern { regex: r"OOM|Out of memory|Cannot allocate memory|oom-killer", category: "oom", root_cause: |_, _| {
-            RootCause::ResourceExhausted { resource: "memory".into() }
-        }},
-        StderrPattern { regex: r"No space left on device|ENOSPC|disk full", category: "disk_full", root_cause: |_, _| {
-            RootCause::ResourceExhausted { resource: "disk".into() }
-        }},
-        StderrPattern { regex: r"Too many open files|EMFILE", category: "fd_exhausted", root_cause: |_, _| {
-            RootCause::ResourceExhausted { resource: "file_descriptors".into() }
-        }},
-
+        StderrPattern {
+            regex: r"OOM|Out of memory|Cannot allocate memory|oom-killer",
+            category: "oom",
+            root_cause: |_, _| RootCause::ResourceExhausted {
+                resource: "memory".into(),
+            },
+        },
+        StderrPattern {
+            regex: r"No space left on device|ENOSPC|disk full",
+            category: "disk_full",
+            root_cause: |_, _| RootCause::ResourceExhausted {
+                resource: "disk".into(),
+            },
+        },
+        StderrPattern {
+            regex: r"Too many open files|EMFILE",
+            category: "fd_exhausted",
+            root_cause: |_, _| RootCause::ResourceExhausted {
+                resource: "file_descriptors".into(),
+            },
+        },
         // Service errors
-        StderrPattern { regex: r"Unit .+ not found|not-found", category: "service_not_found", root_cause: |_, stderr| {
-            RootCause::ServiceNotRunning { service: extract_service_name(stderr).unwrap_or_default() }
-        }},
-        StderrPattern { regex: r"inactive \(dead\)|service .* not running", category: "service_inactive", root_cause: |_, stderr| {
-            RootCause::ServiceNotRunning { service: extract_service_name(stderr).unwrap_or_default() }
-        }},
-
+        StderrPattern {
+            regex: r"Unit .+ not found|not-found",
+            category: "service_not_found",
+            root_cause: |_, stderr| RootCause::ServiceNotRunning {
+                service: extract_service_name(stderr).unwrap_or_default(),
+            },
+        },
+        StderrPattern {
+            regex: r"inactive \(dead\)|service .* not running",
+            category: "service_inactive",
+            root_cause: |_, stderr| RootCause::ServiceNotRunning {
+                service: extract_service_name(stderr).unwrap_or_default(),
+            },
+        },
         // Config errors
-        StderrPattern { regex: r"(?i)syntax error in|invalid configuration|config.*error|parse error", category: "config_error", root_cause: |_, stderr| {
-            RootCause::ConfigError { file: extract_path_from_stderr(stderr), detail: truncate(stderr, 100) }
-        }},
-        StderrPattern { regex: r"Job for .+ failed because the control process exited with error", category: "service_config_error", root_cause: |_, stderr| {
-            RootCause::ConfigError { file: None, detail: truncate(stderr, 100) }
-        }},
-
+        StderrPattern {
+            regex: r"(?i)syntax error in|invalid configuration|config.*error|parse error",
+            category: "config_error",
+            root_cause: |_, stderr| RootCause::ConfigError {
+                file: extract_path_from_stderr(stderr),
+                detail: truncate(stderr, 100),
+            },
+        },
+        StderrPattern {
+            regex: r"Job for .+ failed because the control process exited with error",
+            category: "service_config_error",
+            root_cause: |_, stderr| RootCause::ConfigError {
+                file: None,
+                detail: truncate(stderr, 100),
+            },
+        },
         // Package management
-        StderrPattern { regex: r"Unable to locate package|E: Package .+ has no installation candidate", category: "package_not_found", root_cause: |_, stderr| {
-            RootCause::ConfigError { file: None, detail: truncate(stderr, 100) }
-        }},
-        StderrPattern { regex: r"dpkg was interrupted|E: Could not get lock", category: "package_lock", root_cause: |_, _| {
-            RootCause::ResourceExhausted { resource: "package_manager_lock".into() }
-        }},
-
+        StderrPattern {
+            regex: r"Unable to locate package|E: Package .+ has no installation candidate",
+            category: "package_not_found",
+            root_cause: |_, stderr| RootCause::ConfigError {
+                file: None,
+                detail: truncate(stderr, 100),
+            },
+        },
+        StderrPattern {
+            regex: r"dpkg was interrupted|E: Could not get lock",
+            category: "package_lock",
+            root_cause: |_, _| RootCause::ResourceExhausted {
+                resource: "package_manager_lock".into(),
+            },
+        },
         // Timeout
-        StderrPattern { regex: r"timed out|timeout|TIMEOUT", category: "timeout", root_cause: |_, _| {
-            RootCause::Timeout { seconds: 0 }
-        }},
+        StderrPattern {
+            regex: r"timed out|timeout|TIMEOUT",
+            category: "timeout",
+            root_cause: |_, _| RootCause::Timeout { seconds: 0 },
+        },
     ]
 });
 
@@ -226,36 +276,40 @@ fn classify_stdout(stdout: &str, binary: &str) -> Option<RootCause> {
 // ── Helper extractors ─────────────────────────────────────────────────────
 
 fn extract_path_from_stderr(stderr: &str) -> Option<String> {
-    static PATH_RE: Lazy<Regex> = Lazy::new(|| {
-        Regex::new(r#"['"]?(/[^\s'":]+)['"]?"#).unwrap()
-    });
-    PATH_RE.captures(stderr).and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
+    static PATH_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r#"['"]?(/[^\s'":]+)['"]?"#).unwrap());
+    PATH_RE
+        .captures(stderr)
+        .and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
 }
 
 fn extract_command_not_found(stderr: &str) -> String {
     static CMD_RE: Lazy<Regex> = Lazy::new(|| {
         Regex::new(r"command not found:\s*(\S+)|(\S+): command not found|(\S+): not found").unwrap()
     });
-    CMD_RE.captures(stderr)
+    CMD_RE
+        .captures(stderr)
         .and_then(|c| {
-            c.get(1).or_else(|| c.get(2)).or_else(|| c.get(3))
+            c.get(1)
+                .or_else(|| c.get(2))
+                .or_else(|| c.get(3))
                 .map(|m| m.as_str().to_string())
         })
         .unwrap_or_else(|| "unknown".into())
 }
 
 fn extract_host(stderr: &str) -> Option<String> {
-    static HOST_RE: Lazy<Regex> = Lazy::new(|| {
-        Regex::new(r"(?:host|Host|connect to)\s+(\S+)").unwrap()
-    });
-    HOST_RE.captures(stderr).and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
+    static HOST_RE: Lazy<Regex> =
+        Lazy::new(|| Regex::new(r"(?:host|Host|connect to)\s+(\S+)").unwrap());
+    HOST_RE
+        .captures(stderr)
+        .and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
 }
 
 fn extract_service_name(stderr: &str) -> Option<String> {
-    static SVC_RE: Lazy<Regex> = Lazy::new(|| {
-        Regex::new(r"(?:Unit|service)\s+(\S+)").unwrap()
-    });
-    SVC_RE.captures(stderr).and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
+    static SVC_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?:Unit|service)\s+(\S+)").unwrap());
+    SVC_RE
+        .captures(stderr)
+        .and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
 }
 
 fn truncate(s: &str, max_chars: usize) -> String {
@@ -285,7 +339,12 @@ mod tests {
 
     #[test]
     fn stderr_econnrefused() {
-        let cause = extract_root_cause(1, "curl: (7) Failed to connect to localhost port 8080: ECONNREFUSED", "", "curl");
+        let cause = extract_root_cause(
+            1,
+            "curl: (7) Failed to connect to localhost port 8080: ECONNREFUSED",
+            "",
+            "curl",
+        );
         assert!(matches!(cause, RootCause::NetworkUnreachable { .. }));
     }
 
@@ -304,7 +363,12 @@ mod tests {
 
     #[test]
     fn stderr_config_error() {
-        let cause = extract_root_cause(1, "nginx: [emerg] syntax error in /etc/nginx/nginx.conf:42", "", "nginx");
+        let cause = extract_root_cause(
+            1,
+            "nginx: [emerg] syntax error in /etc/nginx/nginx.conf:42",
+            "",
+            "nginx",
+        );
         assert!(matches!(cause, RootCause::ConfigError { .. }));
     }
 

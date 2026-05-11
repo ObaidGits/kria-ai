@@ -40,9 +40,9 @@ pub(super) fn migrate_legacy_colab_server_command(
         && server.args[0] == "--from"
         && server.args[1] == COLAB_OFFICIAL_SOURCE
         && server
-        .args
-        .iter()
-        .any(|arg| arg == COLAB_OFFICIAL_ENTRYPOINT)
+            .args
+            .iter()
+            .any(|arg| arg == COLAB_OFFICIAL_ENTRYPOINT)
     {
         return false;
     }
@@ -166,13 +166,11 @@ pub(super) fn build_colab_tier_status_payload(
             runtime.sidecar_server_name
         ));
     }
-    if connected && !capability_ready {
-        if !capability_missing.is_empty() {
-            warnings.push(format!(
-                "Colab capability requirements are not satisfied: {}",
-                capability_missing.join(", ")
-            ));
-        }
+    if connected && !capability_ready && !capability_missing.is_empty() {
+        warnings.push(format!(
+            "Colab capability requirements are not satisfied: {}",
+            capability_missing.join(", ")
+        ));
     }
     if notebook_selection_required {
         warnings.push("Notebook must be selected before executing cloud tasks".into());
@@ -307,9 +305,7 @@ pub(super) async fn collect_colab_tier_status(state: &AppState) -> serde_json::V
                             error = %err,
                             "colab MCP tool refresh failed"
                         );
-                        transient_warnings.push(format!(
-                            "Colab MCP tool refresh failed: {err}"
-                        ));
+                        transient_warnings.push(format!("Colab MCP tool refresh failed: {err}"));
                     }
                     statuses = manager.status().await;
                 }

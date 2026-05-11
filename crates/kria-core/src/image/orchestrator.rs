@@ -16,8 +16,8 @@ use tracing::{error, info, warn};
 
 use crate::config::ImageGenerationConfig;
 use crate::image::backend::{
-    ImageBackend, ImageBackendCapabilities, ImageBackendHealth, ImageBackendId as TraitImageBackendId,
-    ImageEstimate, ImageExecutionContext, ImageJobId,
+    ImageBackend, ImageBackendCapabilities, ImageBackendHealth,
+    ImageBackendId as TraitImageBackendId, ImageEstimate, ImageExecutionContext, ImageJobId,
 };
 use crate::image::capabilities::{resolve as resolve_workflow, QualityProfile, ResolvedWorkflow};
 use crate::image::cloud::{CloudError, CloudFallback};
@@ -373,7 +373,9 @@ fn log_missing_style_lora_once(style: ImageStyle, lora_file: &str, lora_path: &P
     let cache = MISSING_STYLE_LORA_CACHE.get_or_init(|| Mutex::new(HashSet::new()));
 
     let first_seen = {
-        let mut guard = cache.lock().expect("missing style LoRA cache lock poisoned");
+        let mut guard = cache
+            .lock()
+            .expect("missing style LoRA cache lock poisoned");
         guard.insert(lora_path.to_path_buf())
     };
 
@@ -785,19 +787,19 @@ impl ImageOrchestrator {
                             Err(e) => Err(e),
                         }
                     }
-                    ImageTier::BDropSwap => match self.acquire_local_lease(
-                        "image_local_then_cloud_swap",
-                    ) {
-                        Ok(lease) => {
-                            let local = self
-                                .generate_with_swap(&job, emitter, llm_evictor.clone())
-                                .await;
-                            drop(lease);
-                            self.reconcile_gpu_lease(false).await;
-                            local
+                    ImageTier::BDropSwap => {
+                        match self.acquire_local_lease("image_local_then_cloud_swap") {
+                            Ok(lease) => {
+                                let local = self
+                                    .generate_with_swap(&job, emitter, llm_evictor.clone())
+                                    .await;
+                                drop(lease);
+                                self.reconcile_gpu_lease(false).await;
+                                local
+                            }
+                            Err(e) => Err(e),
                         }
-                        Err(e) => Err(e),
-                    },
+                    }
                     ImageTier::CRejectOrCloud => {
                         Err(ImageError::Reported(Box::new(FailureReport {
                             stage: FailureStage::TierAdmission,
@@ -895,18 +897,14 @@ impl ImageOrchestrator {
         emitter: Option<EventEmitter>,
     ) -> Result<ImageResult, ImageError> {
         // Acquire job semaphore.
-        let _permit = self
-            .job_sem
-            .acquire()
-            .await
-            .map_err(|e| {
-                error!(
-                    stage = FailureStage::TierAdmission.as_str(),
-                    error = %e,
-                    "Image generation semaphore acquisition failed"
-                );
-                ImageError::Unknown(format!("image generation semaphore acquire failed: {e}"))
-            })?;
+        let _permit = self.job_sem.acquire().await.map_err(|e| {
+            error!(
+                stage = FailureStage::TierAdmission.as_str(),
+                error = %e,
+                "Image generation semaphore acquisition failed"
+            );
+            ImageError::Unknown(format!("image generation semaphore acquire failed: {e}"))
+        })?;
 
         // Ensure sidecar is running.
         self.sidecar.ensure_running().await.map_err(|e| {
@@ -979,15 +977,18 @@ impl ImageOrchestrator {
                 })?;
 
             // Collect output files.
-            let imgs = self.collect_outputs(outputs, job, img_seed).await.map_err(|e| {
-                error!(
-                    stage = FailureStage::OutputCopy.as_str(),
-                    error = %e,
-                    seed = img_seed,
-                    "ComfyUI output collection failed"
-                );
-                e
-            })?;
+            let imgs = self
+                .collect_outputs(outputs, job, img_seed)
+                .await
+                .map_err(|e| {
+                    error!(
+                        stage = FailureStage::OutputCopy.as_str(),
+                        error = %e,
+                        seed = img_seed,
+                        "ComfyUI output collection failed"
+                    );
+                    e
+                })?;
             all_images.extend(imgs);
         }
 
@@ -1533,7 +1534,8 @@ impl ImageOrchestrator {
             Ok(Err(e)) => {
                 // WS bridge ended with error/cancel/timeout — explicitly interrupt
                 // ComfyUI so orphaned backend generations do not keep consuming VRAM.
-                let _ = tokio::time::timeout(Duration::from_secs(2), self.sidecar.interrupt()).await;
+                let _ =
+                    tokio::time::timeout(Duration::from_secs(2), self.sidecar.interrupt()).await;
                 match e {
                     WsBridgeError::Http { status, message } => {
                         let status_text =
@@ -1561,7 +1563,8 @@ impl ImageOrchestrator {
                 }
             }
             Err(e) => {
-                let _ = tokio::time::timeout(Duration::from_secs(2), self.sidecar.interrupt()).await;
+                let _ =
+                    tokio::time::timeout(Duration::from_secs(2), self.sidecar.interrupt()).await;
                 error!(
                     stage = FailureStage::VaeDecode.as_str(),
                     prompt_id = %job.prompt_id,
@@ -1802,7 +1805,11 @@ impl ImageBackend for ImageOrchestrator {
             requires_gpu: !matches!(tier, ImageTier::CRejectOrCloud) && !request.force_cloud,
             expected_seconds,
             expected_vram_mb,
-            notes: Some(format!("tier={} force_cloud={}", tier.as_str(), request.force_cloud)),
+            notes: Some(format!(
+                "tier={} force_cloud={}",
+                tier.as_str(),
+                request.force_cloud
+            )),
         }
     }
 
@@ -1847,8 +1854,8 @@ impl ImageBackend for ImageOrchestrator {
 
         let result = ImageOrchestrator::generate(self, request, emitter, llm_evictor)
             .await
-            .map_err(|e| {
-                let report = FailureReport::from_error(&e);
+            .inspect_err(|e| {
+                let report = FailureReport::from_error(e);
                 error!(
                     stage = report.stage.as_str(),
                     provider = %report.provider,
@@ -1856,7 +1863,6 @@ impl ImageBackend for ImageOrchestrator {
                     hint = %report.hint,
                     "Image backend generate failed"
                 );
-                e
             });
 
         if let Some(watchdog) = cancel_watchdog {

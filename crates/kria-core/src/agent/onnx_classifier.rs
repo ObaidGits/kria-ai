@@ -194,10 +194,7 @@ pub fn enabled_from_env() -> bool {
 impl OnnxRuntime {
     fn load(settings: &RuntimeSettings) -> anyhow::Result<Self> {
         if !settings.model_path.exists() {
-            bail!(
-                "model file not found at {}",
-                settings.model_path.display()
-            );
+            bail!("model file not found at {}", settings.model_path.display());
         }
         if !settings.tokenizer_path.exists() {
             bail!(
@@ -208,9 +205,7 @@ impl OnnxRuntime {
 
         let session = Session::builder()?
             .commit_from_file(&settings.model_path)
-            .with_context(|| {
-                format!("loading ONNX model {}", settings.model_path.display())
-            })?;
+            .with_context(|| format!("loading ONNX model {}", settings.model_path.display()))?;
 
         let tokenizer = Tokenizer::from_file(&settings.tokenizer_path).map_err(|error| {
             anyhow!(
@@ -280,8 +275,8 @@ impl OnnxRuntime {
         let prototype = &self.prototypes[best_index];
         let softmax_confidence = softmax_confidence(&similarities, best_index);
         let similarity_confidence = ((best_similarity + 1.0) * 0.5).clamp(0.0, 1.0);
-        let confidence = ((softmax_confidence * 0.65) + (similarity_confidence * 0.35))
-            .clamp(0.0, 0.99);
+        let confidence =
+            ((softmax_confidence * 0.65) + (similarity_confidence * 0.35)).clamp(0.0, 0.99);
 
         Ok(Some(OnnxHint {
             operation: prototype.operation,
@@ -311,11 +306,8 @@ impl OnnxRuntime {
             attention_mask = vec![1; seq_len];
         }
 
-        let mut token_type_ids: Vec<i64> = encoding
-            .get_type_ids()
-            .iter()
-            .map(|&t| t as i64)
-            .collect();
+        let mut token_type_ids: Vec<i64> =
+            encoding.get_type_ids().iter().map(|&t| t as i64).collect();
         if token_type_ids.len() != seq_len {
             token_type_ids = vec![0; seq_len];
         }
@@ -474,7 +466,11 @@ fn centroid_from_vectors(vectors: &[Vec<f32>]) -> Option<Vec<f32>> {
     Some(centroid)
 }
 
-fn extract_embedding(shape: &[i64], data: &[f32], attention_mask: &[i64]) -> anyhow::Result<Vec<f32>> {
+fn extract_embedding(
+    shape: &[i64],
+    data: &[f32],
+    attention_mask: &[i64],
+) -> anyhow::Result<Vec<f32>> {
     match shape.len() {
         // [batch, seq, hidden]
         3 => {
@@ -645,7 +641,10 @@ fn resolve_runtime_settings() -> RuntimeSettings {
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
-    push_unique_path(&mut tokenizer_candidates, model_dir.join(TOKENIZER_FILENAME));
+    push_unique_path(
+        &mut tokenizer_candidates,
+        model_dir.join(TOKENIZER_FILENAME),
+    );
     push_unique_path(&mut tokenizer_candidates, workspace_tokenizer_path());
 
     let tokenizer_path = select_existing_or_first(tokenizer_candidates);

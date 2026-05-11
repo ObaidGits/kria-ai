@@ -131,10 +131,7 @@ impl ToolEmbeddingIndex {
         }
 
         // Build rich description strings for embedding
-        let descriptions: Vec<String> = tools
-            .iter()
-            .map(|tool| Self::build_rich_description(tool))
-            .collect();
+        let descriptions: Vec<String> = tools.iter().map(Self::build_rich_description).collect();
 
         // Embed all tool descriptions in one batch
         let text_refs: Vec<&str> = descriptions.iter().map(|s| s.as_str()).collect();
@@ -235,16 +232,14 @@ impl ToolEmbeddingIndex {
 
             let sim = embed::cosine_sim(query_embedding, &entry.embedding);
 
-            if sim >= entry.threshold {
-                if best.as_ref().map_or(true, |b| sim > b.confidence) {
-                    best = Some(ToolMatch {
-                        name: entry.name.clone(),
-                        description: entry.description.clone(),
-                        category: entry.category.clone(),
-                        confidence: sim,
-                        direct_execution: sim >= self.global_threshold,
-                    });
-                }
+            if sim >= entry.threshold && best.as_ref().is_none_or(|b| sim > b.confidence) {
+                best = Some(ToolMatch {
+                    name: entry.name.clone(),
+                    description: entry.description.clone(),
+                    category: entry.category.clone(),
+                    confidence: sim,
+                    direct_execution: sim >= self.global_threshold,
+                });
             }
         }
 
@@ -298,7 +293,12 @@ impl ToolEmbeddingIndex {
     /// regardless of confidence.  Used for cross-domain tool injection
     /// so the LLM always sees the right tools even when the domain
     /// classifier is wrong.
-    pub fn top_k_unfiltered(&self, query_embedding: &[f32], k: usize, current_tier: &str) -> Vec<ToolMatch> {
+    pub fn top_k_unfiltered(
+        &self,
+        query_embedding: &[f32],
+        k: usize,
+        current_tier: &str,
+    ) -> Vec<ToolMatch> {
         if self.entries.is_empty() {
             return Vec::new();
         }
@@ -367,10 +367,7 @@ pub struct SharedToolIndex {
 
 impl SharedToolIndex {
     /// Create a new shared tool index.
-    pub async fn new(
-        tools: Vec<ToolDef>,
-        config: RoutingConfig,
-    ) -> Arc<Self> {
+    pub async fn new(tools: Vec<ToolDef>, config: RoutingConfig) -> Arc<Self> {
         let index = tokio::task::spawn_blocking(move || {
             ToolEmbeddingIndex::from_tool_defs(&tools, &config).unwrap_or_else(|e| {
                 warn!("Failed to build tool index: {} — starting empty", e);
@@ -405,11 +402,7 @@ impl SharedToolIndex {
     }
 
     /// Rebuild the index with new tools.
-    pub async fn rebuild(
-        &self,
-        tools: Vec<ToolDef>,
-        config: RoutingConfig,
-    ) -> Result<()> {
+    pub async fn rebuild(&self, tools: Vec<ToolDef>, config: RoutingConfig) -> Result<()> {
         let mut index = self.index.write().await;
         index.rebuild(&tools, &config)?;
         info!(tool_count = index.len(), "Tool index rebuilt");

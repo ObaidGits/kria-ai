@@ -15,10 +15,10 @@
 //! commands against known failure patterns. If a match is found, the
 //! planner is warned and can adjust the plan.
 
-mod types;
-mod store;
 mod patterns;
+mod store;
+mod types;
 
-pub use types::{FailurePattern, FailureContext, RootCause};
-pub use store::FailureAnalyzerStore;
 pub use patterns::extract_root_cause;
+pub use store::FailureAnalyzerStore;
+pub use types::{FailureContext, FailurePattern, RootCause};

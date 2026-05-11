@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex as StdMutex};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
@@ -16,6 +16,12 @@ use crate::infra::qos::{AdaptiveQosScheduler, QosAdaptationPacket, QosAdmission,
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TargetId(pub Uuid);
 
+impl Default for TargetId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TargetId {
     pub fn new() -> Self {
         Self(Uuid::new_v4())
@@ -24,6 +30,12 @@ impl TargetId {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct LeaseId(pub Uuid);
+
+impl Default for LeaseId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl LeaseId {
     pub fn new() -> Self {
@@ -217,7 +229,9 @@ impl InventoryRegistry {
         };
 
         match state {
-            InventoryState::Leased { lease_id: active, .. } if active == lease_id => {
+            InventoryState::Leased {
+                lease_id: active, ..
+            } if active == lease_id => {
                 self.states.insert(target_id.clone(), InventoryState::Ready);
                 Ok(())
             }
@@ -381,7 +395,10 @@ pub struct HealthGateProbeResult {
 #[async_trait]
 pub trait HealthGateProbe: Send + Sync {
     fn name(&self) -> &'static str;
-    async fn run(&self, target: Arc<QemuSshEnvironment>) -> Result<HealthGateProbeResult, EnvironmentError>;
+    async fn run(
+        &self,
+        target: Arc<QemuSshEnvironment>,
+    ) -> Result<HealthGateProbeResult, EnvironmentError>;
 }
 
 #[derive(Debug, Default)]
@@ -393,7 +410,10 @@ impl HealthGateProbe for DiskHeadroomProbe {
         "disk_headroom"
     }
 
-    async fn run(&self, target: Arc<QemuSshEnvironment>) -> Result<HealthGateProbeResult, EnvironmentError> {
+    async fn run(
+        &self,
+        target: Arc<QemuSshEnvironment>,
+    ) -> Result<HealthGateProbeResult, EnvironmentError> {
         let started = Instant::now();
         target.probe_disk_headroom().await?;
         Ok(HealthGateProbeResult {
@@ -413,7 +433,10 @@ impl HealthGateProbe for WriteabilityProbe {
         "writeability"
     }
 
-    async fn run(&self, target: Arc<QemuSshEnvironment>) -> Result<HealthGateProbeResult, EnvironmentError> {
+    async fn run(
+        &self,
+        target: Arc<QemuSshEnvironment>,
+    ) -> Result<HealthGateProbeResult, EnvironmentError> {
         let started = Instant::now();
         target.probe_writeability().await?;
         Ok(HealthGateProbeResult {
@@ -433,7 +456,10 @@ impl HealthGateProbe for TransportProbe {
         "transport"
     }
 
-    async fn run(&self, target: Arc<QemuSshEnvironment>) -> Result<HealthGateProbeResult, EnvironmentError> {
+    async fn run(
+        &self,
+        target: Arc<QemuSshEnvironment>,
+    ) -> Result<HealthGateProbeResult, EnvironmentError> {
         let started = Instant::now();
         target.probe_transport_health().await?;
         Ok(HealthGateProbeResult {
@@ -453,7 +479,10 @@ impl HealthGateProbe for EnsureReadyProbe {
         "ensure_ready"
     }
 
-    async fn run(&self, target: Arc<QemuSshEnvironment>) -> Result<HealthGateProbeResult, EnvironmentError> {
+    async fn run(
+        &self,
+        target: Arc<QemuSshEnvironment>,
+    ) -> Result<HealthGateProbeResult, EnvironmentError> {
         let started = Instant::now();
         target.ensure_ready().await?;
         Ok(HealthGateProbeResult {
@@ -473,7 +502,10 @@ impl HealthGateProbe for AdmissionBarrierProbe {
         "admission_barrier"
     }
 
-    async fn run(&self, target: Arc<QemuSshEnvironment>) -> Result<HealthGateProbeResult, EnvironmentError> {
+    async fn run(
+        &self,
+        target: Arc<QemuSshEnvironment>,
+    ) -> Result<HealthGateProbeResult, EnvironmentError> {
         let started = Instant::now();
         target.probe_admission_barrier().await?;
         Ok(HealthGateProbeResult {
@@ -743,7 +775,8 @@ impl TargetPool {
 
         if let Some(target_id) = expired_target {
             self.expired_lease_count.fetch_add(1, Ordering::AcqRel);
-            self.taint_target_for_lease_expiry(&target_id, lease_id).await?;
+            self.taint_target_for_lease_expiry(&target_id, lease_id)
+                .await?;
             return Err(EnvironmentError::EnvironmentResetRequired {
                 reason: format!(
                     "lease {} expired before heartbeat; target tainted",
@@ -834,7 +867,11 @@ impl TargetPool {
             })
     }
 
-    pub async fn quarantine_target(&self, target_id: &TargetId, reason: &str) -> Result<(), EnvironmentError> {
+    pub async fn quarantine_target(
+        &self,
+        target_id: &TargetId,
+        reason: &str,
+    ) -> Result<(), EnvironmentError> {
         {
             let mut inventory = self.inventory.write().await;
             inventory.transition_to_tainted(target_id, reason.to_string())?;
@@ -857,13 +894,19 @@ impl TargetPool {
         Ok(())
     }
 
-    pub async fn run_quarantine_health_gates(&self, target_id: &TargetId) -> Result<(), EnvironmentError> {
-        let state = self.inventory.read().await.state(target_id).ok_or_else(|| {
-            EnvironmentError::ProviderUnavailable {
+    pub async fn run_quarantine_health_gates(
+        &self,
+        target_id: &TargetId,
+    ) -> Result<(), EnvironmentError> {
+        let state = self
+            .inventory
+            .read()
+            .await
+            .state(target_id)
+            .ok_or_else(|| EnvironmentError::ProviderUnavailable {
                 provider: "target_pool".to_string(),
                 details: format!("target {} not found", target_id.0),
-            }
-        })?;
+            })?;
 
         if let InventoryState::Tainted { reason, .. } = state {
             {
@@ -888,10 +931,7 @@ impl TargetPool {
             InventoryState::Quarantined(q) => q.cooldown_until,
             _ => {
                 return Err(EnvironmentError::EnvironmentResetRequired {
-                    reason: format!(
-                        "target {} is neither tainted nor quarantined",
-                        target_id.0
-                    ),
+                    reason: format!("target {} is neither tainted nor quarantined", target_id.0),
                 });
             }
         };
@@ -922,7 +962,9 @@ impl TargetPool {
             if !outcome.passed {
                 let detail = format!(
                     "probe={} failed latency_ms={} detail={}",
-                    probe.name(), outcome.latency_ms, outcome.detail
+                    probe.name(),
+                    outcome.latency_ms,
+                    outcome.detail
                 );
                 {
                     let mut inventory = self.inventory.write().await;
@@ -970,7 +1012,10 @@ impl TargetPool {
             .map(|(target_id, _)| target_id)
     }
 
-    async fn environment_for_target(&self, target_id: &TargetId) -> Option<Arc<QemuSshEnvironment>> {
+    async fn environment_for_target(
+        &self,
+        target_id: &TargetId,
+    ) -> Option<Arc<QemuSshEnvironment>> {
         self.targets
             .read()
             .await
@@ -1032,7 +1077,8 @@ impl TargetPool {
 
         for (lease_id, target_id) in expired {
             self.expired_lease_count.fetch_add(1, Ordering::AcqRel);
-            self.taint_target_for_lease_expiry(&target_id, &lease_id).await?;
+            self.taint_target_for_lease_expiry(&target_id, &lease_id)
+                .await?;
         }
 
         Ok(())

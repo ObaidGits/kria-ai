@@ -8,17 +8,14 @@
 //! - Feature flag behavior
 //! - Graceful degradation when model is unavailable
 
-use std::path::Path;
 use std::time::{Duration, Instant};
 
+use kria_core::agent::turn_gate::{ComputeClass, HazardHint, Operation};
 use kria_core::config::RoutingConfig;
 use kria_core::routing::context::RoutingContext;
 use kria_core::routing::domain::Domain;
-use kria_core::routing::intent_classifier::{
-    IntentClassification, IntentClassifier, IntentLabel,
-};
+use kria_core::routing::intent_classifier::{IntentClassifier, IntentLabel};
 use kria_core::routing::verbs::IntentModality;
-use kria_core::agent::turn_gate::{ComputeClass, HazardHint, Operation};
 
 // ─── Helper Functions ───────────────────────────────────────────────────────
 
@@ -83,9 +80,15 @@ fn ic06_label_from_str_roundtrip() {
 
 #[test]
 fn ic07_label_from_str_case_insensitive() {
-    assert_eq!(IntentLabel::from_str_label("CONVERSE"), Some(IntentLabel::Converse));
+    assert_eq!(
+        IntentLabel::from_str_label("CONVERSE"),
+        Some(IntentLabel::Converse)
+    );
     assert_eq!(IntentLabel::from_str_label("read"), Some(IntentLabel::Read));
-    assert_eq!(IntentLabel::from_str_label("Delete"), Some(IntentLabel::Delete));
+    assert_eq!(
+        IntentLabel::from_str_label("Delete"),
+        Some(IntentLabel::Delete)
+    );
 }
 
 #[test]
@@ -98,10 +101,7 @@ fn ic08_label_from_str_invalid() {
 
 #[test]
 fn ic09_converse_maps_to_converse() {
-    assert_eq!(
-        IntentLabel::Converse.to_operation(),
-        Operation::Converse
-    );
+    assert_eq!(IntentLabel::Converse.to_operation(), Operation::Converse);
 }
 
 #[test]
@@ -300,7 +300,7 @@ fn ic33_config_serialization_roundtrip() {
     let config = RoutingConfig::default();
     let json = serde_json::to_string(&config).unwrap();
     let restored: RoutingConfig = serde_json::from_str(&json).unwrap();
-    assert_eq!(restored.intent_classifier_enabled, false);
-    assert_eq!(restored.context_enabled, true);
+    assert!(!restored.intent_classifier_enabled);
+    assert!(restored.context_enabled);
     assert_eq!(restored.feedback_learning_rate, 0.01);
 }

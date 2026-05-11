@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use super::types::{TrainingMetrics, MlPollerExit, PollResult};
+use super::types::{MlPollerExit, PollResult, TrainingMetrics};
 
 /// Trait for executing cells on Colab. Abstracted for testability.
 #[async_trait::async_trait]
@@ -46,7 +46,8 @@ impl AdaptiveMlPoller {
             let code = format!(
                 "import os\ntry:\n    os.kill({}, 0)\n    print('ALIVE')\n\
                  except ProcessLookupError:\n    print('DEAD')\n\
-                 except PermissionError:\n    print('ALIVE')", pid
+                 except PermissionError:\n    print('ALIVE')",
+                pid
             );
             match colab.execute_cell(&code).await {
                 Ok(out) if out.contains("DEAD") => return PollResult::ProcessCrashed { pid },
@@ -97,7 +98,11 @@ impl AdaptiveMlPoller {
         }
     }
 
-    async fn read_status(&self, colab: &dyn ColabExecutor, path: &str) -> anyhow::Result<TrainingMetrics> {
+    async fn read_status(
+        &self,
+        colab: &dyn ColabExecutor,
+        path: &str,
+    ) -> anyhow::Result<TrainingMetrics> {
         let code = format!(
             r#"import json, os
 f = "{}"
@@ -128,9 +133,12 @@ else:
         loop {
             if self.cancel.is_cancelled() {
                 if let Some(pid) = expected_pid {
-                    let _ = colab.execute_cell(&format!(
-                        "import os, signal; os.kill({}, signal.SIGTERM)", pid
-                    )).await;
+                    let _ = colab
+                        .execute_cell(&format!(
+                            "import os, signal; os.kill({}, signal.SIGTERM)",
+                            pid
+                        ))
+                        .await;
                 }
                 return MlPollerExit::Cancelled;
             }
@@ -139,7 +147,16 @@ else:
                 return MlPollerExit::Timeout;
             }
 
-            match self.poll_once(colab, status_path, expected_pid, &mut last_heartbeat, &mut stale_since).await {
+            match self
+                .poll_once(
+                    colab,
+                    status_path,
+                    expected_pid,
+                    &mut last_heartbeat,
+                    &mut stale_since,
+                )
+                .await
+            {
                 PollResult::StillRunning(m) => {
                     consecutive_no_file = 0;
                     if let Some(tx) = event_tx {
@@ -159,10 +176,15 @@ else:
                 PollResult::ProcessCrashed { pid } => {
                     return MlPollerExit::Failed(format!("Worker PID {} crashed (OOM?)", pid));
                 }
-                PollResult::ProcessHung { pid, threshold_secs, last_heartbeat_age_secs } => {
+                PollResult::ProcessHung {
+                    pid,
+                    threshold_secs,
+                    last_heartbeat_age_secs,
+                } => {
                     return MlPollerExit::Failed(format!(
                         "Worker PID {} hung — no heartbeat for {:.0}s (threshold: {:.0}s)",
-                        pid, last_heartbeat_age_secs, threshold_secs));
+                        pid, last_heartbeat_age_secs, threshold_secs
+                    ));
                 }
                 PollResult::NoStatusFile => {
                     consecutive_no_file += 1;

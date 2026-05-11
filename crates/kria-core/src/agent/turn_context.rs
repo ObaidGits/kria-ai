@@ -66,10 +66,7 @@ pub struct ActiveTurn {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TurnAdmissionError {
-    QueueFull {
-        session_id: SessionId,
-        limit: usize,
-    },
+    QueueFull { session_id: SessionId, limit: usize },
 }
 
 #[derive(Debug, Clone)]
@@ -430,9 +427,18 @@ mod tests {
             .unwrap();
 
         assert_eq!(admission.queued_len(&session_id), 3);
-        assert_eq!(admission.dequeue_next_turn(&session_id).as_deref(), Some("turn-1"));
-        assert_eq!(admission.dequeue_next_turn(&session_id).as_deref(), Some("turn-2"));
-        assert_eq!(admission.dequeue_next_turn(&session_id).as_deref(), Some("turn-3"));
+        assert_eq!(
+            admission.dequeue_next_turn(&session_id).as_deref(),
+            Some("turn-1")
+        );
+        assert_eq!(
+            admission.dequeue_next_turn(&session_id).as_deref(),
+            Some("turn-2")
+        );
+        assert_eq!(
+            admission.dequeue_next_turn(&session_id).as_deref(),
+            Some("turn-3")
+        );
         assert_eq!(admission.dequeue_next_turn(&session_id), None);
         assert_eq!(admission.queued_len(&session_id), 0);
     }

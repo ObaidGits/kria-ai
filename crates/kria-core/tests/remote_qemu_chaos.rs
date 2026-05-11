@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use kria_core::infra::environment::remote_qemu::{
@@ -17,8 +17,7 @@ use kria_core::infra::environment::{
     ShellState,
 };
 use kria_core::infra::pool::{
-    InventoryState, SelectionWeights, TargetHealthTelemetry, TargetId, TargetPool,
-    TargetPoolConfig,
+    InventoryState, SelectionWeights, TargetHealthTelemetry, TargetId, TargetPool, TargetPoolConfig,
 };
 use kria_core::infra::qos::AdaptiveQosScheduler;
 use kria_core::infra::snapshot::{
@@ -395,7 +394,10 @@ async fn chaos_pid_collision_forgery_rejected_by_binary_fingerprint() {
         .get("forged-command")
         .and_then(|entries| entries.get(&staged_path))
         .is_some();
-    assert!(!still_indexed, "forged artifact should be removed from index");
+    assert!(
+        !still_indexed,
+        "forged artifact should be removed from index"
+    );
 }
 
 #[tokio::test]
@@ -432,7 +434,10 @@ async fn lease_expiry_tainting_marks_inventory_tainted() {
 
     let heartbeat = pool.heartbeat(&lease.lease_id).await;
     assert!(
-        matches!(heartbeat, Err(EnvironmentError::EnvironmentResetRequired { .. })),
+        matches!(
+            heartbeat,
+            Err(EnvironmentError::EnvironmentResetRequired { .. })
+        ),
         "expired lease heartbeat should fail closed"
     );
 

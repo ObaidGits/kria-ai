@@ -131,7 +131,7 @@ pub fn truncate_string(s: &str, budget: usize) -> String {
     }
     // Keep 75 % at the front, 12.5 % at the tail.
     let head = (budget * 3 / 4).max(1);
-    let tail = (budget / 8).max(0);
+    let tail = budget / 8;
     let elided = chars.len().saturating_sub(head + tail);
     let head_str: String = chars[..head].iter().collect();
     let tail_str: String = if tail > 0 {

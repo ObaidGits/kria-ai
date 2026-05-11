@@ -6,8 +6,8 @@
 
 use chrono::Utc;
 use kria_core::memory::embeddings::EmbeddingModel;
-use kria_core::memory::{AuditEntry, ConversationTurn, MemoryFact, MemoryStore};
 use kria_core::memory::vectors::VectorIndex;
+use kria_core::memory::{AuditEntry, ConversationTurn, MemoryFact, MemoryStore};
 use std::path::Path;
 
 // ── MemoryStore — conversation turns ────────────────────────────────

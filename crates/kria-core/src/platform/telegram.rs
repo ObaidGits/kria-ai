@@ -17,8 +17,8 @@ use crate::config::TelegramConfig;
 use crate::llm::orchestrator::Orchestrator;
 use crate::llm::ChatMessage;
 use crate::memory::embeddings::EmbeddingModel;
-use crate::memory::{MemoryManager, MemoryRuntime, MemoryTurnWrite, SemanticMemoryParser};
 use crate::memory::vectors::VectorIndex;
+use crate::memory::{MemoryManager, MemoryRuntime, MemoryTurnWrite, SemanticMemoryParser};
 use crate::platform::detect::get_available_package_managers;
 use crate::safety::hitl::ApprovalResponse;
 use crate::tools::ToolRegistry;
@@ -467,8 +467,7 @@ pub async fn process_message(
     // denial for any RED-tier action.
     is_owner: bool,
 ) -> String {
-    let memory_writer: Arc<dyn MemoryManager> =
-        Arc::clone(memory_store) as Arc<dyn MemoryManager>;
+    let memory_writer: Arc<dyn MemoryManager> = Arc::clone(memory_store) as Arc<dyn MemoryManager>;
 
     // Build system prompt (similar to desktop send_message)
     let tool_descriptions = tool_registry
@@ -643,15 +642,11 @@ pub async fn process_message(
         match event {
             StreamEvent::TurnAccepted { .. } => {}
             StreamEvent::Token(t) => full_response.push_str(&t),
-            StreamEvent::Done(final_text) => {
-                if !final_text.is_empty() && full_response.is_empty() {
-                    full_response = final_text;
-                }
+            StreamEvent::Done(final_text) if !final_text.is_empty() && full_response.is_empty() => {
+                full_response = final_text;
             }
-            StreamEvent::Error(err) => {
-                if full_response.is_empty() {
-                    full_response = format!("⚠️ Error: {err}");
-                }
+            StreamEvent::Error(err) if full_response.is_empty() => {
+                full_response = format!("⚠️ Error: {err}");
             }
             StreamEvent::ToolStart { name, .. } => {
                 tracing::debug!("Telegram agent: tool call {name}");

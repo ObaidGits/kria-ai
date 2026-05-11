@@ -79,8 +79,7 @@ impl DomainValidator {
 
     /// Returns `Ok(())` if `raw_url` is safe, `Err(reason)` otherwise.
     pub fn validate(&self, raw_url: &str) -> Result<(), String> {
-        let parsed = Url::parse(raw_url)
-            .map_err(|e| format!("invalid URL: {e}"))?;
+        let parsed = Url::parse(raw_url).map_err(|e| format!("invalid URL: {e}"))?;
 
         if parsed.scheme() != "https" {
             return Err(format!(

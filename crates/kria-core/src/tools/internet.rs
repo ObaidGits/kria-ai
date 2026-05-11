@@ -1,6 +1,8 @@
 use crate::infra::ToolResult;
 use crate::safety::RiskLevel;
-use crate::tools::exec::{CommandOutput, ExecWrapper, ToolExecutionError as ExecToolExecutionError};
+use crate::tools::exec::{
+    CommandOutput, ExecWrapper, ToolExecutionError as ExecToolExecutionError,
+};
 use crate::tools::registry::{ParamDef, ToolDef, ToolHandler, ToolRegistry};
 use async_trait::async_trait;
 use schemars::JsonSchema;
@@ -125,7 +127,10 @@ fn local_test_urls_enabled() -> bool {
         .unwrap_or(false)
 }
 
-fn validate_safe_url(operation: &'static str, raw_url: &str) -> Result<reqwest::Url, ToolExecutionError> {
+fn validate_safe_url(
+    operation: &'static str,
+    raw_url: &str,
+) -> Result<reqwest::Url, ToolExecutionError> {
     let parsed = reqwest::Url::parse(raw_url).map_err(|error| ToolExecutionError::UnsafeUrl {
         operation,
         url: raw_url.to_string(),
@@ -269,8 +274,7 @@ fn default_download_max_size_mb() -> u64 {
 }
 
 fn default_searxng_instance_url() -> String {
-    std::env::var("KRIA_SEARXNG_URL")
-        .unwrap_or_else(|_| "http://localhost:8888".to_string())
+    std::env::var("KRIA_SEARXNG_URL").unwrap_or_else(|_| "http://localhost:8888".to_string())
 }
 
 fn default_searxng_language() -> String {
@@ -469,7 +473,11 @@ fn format_exec_error(error: ExecToolExecutionError) -> String {
     }
 }
 
-async fn run_command(operation: &'static str, program: &str, args: &[&str]) -> Result<CommandOutput, ToolResult> {
+async fn run_command(
+    operation: &'static str,
+    program: &str,
+    args: &[&str],
+) -> Result<CommandOutput, ToolResult> {
     exec_wrapper(COMMAND_TIMEOUT_SECS)
         .execute(program, args)
         .await
@@ -482,7 +490,10 @@ async fn run_command(operation: &'static str, program: &str, args: &[&str]) -> R
         })
 }
 
-async fn search_duckduckgo_lite(query: &str, max_results: usize) -> Result<Vec<String>, ToolExecutionError> {
+async fn search_duckduckgo_lite(
+    query: &str,
+    max_results: usize,
+) -> Result<Vec<String>, ToolExecutionError> {
     let operation = "web_search";
     if std::env::var("KRIA_EVAL_MODE").is_ok() {
         return Err(ToolExecutionError::Operation {
@@ -492,11 +503,12 @@ async fn search_duckduckgo_lite(query: &str, max_results: usize) -> Result<Vec<S
         });
     }
 
-    let endpoint = reqwest::Url::parse("https://lite.duckduckgo.com/lite/")
-        .map_err(|error| ToolExecutionError::Operation {
+    let endpoint = reqwest::Url::parse("https://lite.duckduckgo.com/lite/").map_err(|error| {
+        ToolExecutionError::Operation {
             operation,
             reason: format!("invalid search endpoint: {error}"),
-        })?;
+        }
+    })?;
 
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(5))
@@ -827,7 +839,10 @@ impl ToolHandler for GetPublicIp {
         let body: serde_json::Value = match response.json().await {
             Ok(body) => body,
             Err(error) => {
-                return op_error(operation, format!("failed to decode JSON response: {error}"));
+                return op_error(
+                    operation,
+                    format!("failed to decode JSON response: {error}"),
+                );
             }
         };
 
@@ -850,7 +865,7 @@ impl ToolHandler for PingHost {
         }
 
         let count = input.count.clamp(1, 10).to_string();
-        let args = vec!["-c".to_string(), count.clone(), host.clone()];
+        let args = ["-c".to_string(), count.clone(), host.clone()];
         let refs: Vec<&str> = args.iter().map(String::as_str).collect();
 
         let output = match run_command("ping_host", "ping", &refs).await {
@@ -882,7 +897,7 @@ impl ToolHandler for DnsLookup {
             return error;
         }
 
-        let args = vec!["+short".to_string(), domain.clone()];
+        let args = ["+short".to_string(), domain.clone()];
         let refs: Vec<&str> = args.iter().map(String::as_str).collect();
 
         let output = match run_command("dns_lookup", "dig", &refs).await {
@@ -1011,7 +1026,11 @@ impl ToolHandler for DownloadFile {
         let bytes = match response.bytes().await {
             Ok(bytes) => bytes,
             Err(error) => {
-                return tool_error(map_http_request_error("download_file", &response_url, error));
+                return tool_error(map_http_request_error(
+                    "download_file",
+                    &response_url,
+                    error,
+                ));
             }
         };
 
@@ -1029,11 +1048,7 @@ impl ToolHandler for DownloadFile {
         if let Some(parent) = Path::new(&input.destination).parent() {
             if !parent.as_os_str().is_empty() {
                 if let Err(error) = tokio::fs::create_dir_all(parent).await {
-                    return io_error(
-                        "download_file",
-                        parent.to_string_lossy().to_string(),
-                        error,
-                    );
+                    return io_error("download_file", parent.to_string_lossy().to_string(), error);
                 }
             }
         }
@@ -1116,12 +1131,14 @@ impl ToolHandler for SearxngSearch {
         let search_url = format!("{}/search", input.instance_url.trim_end_matches('/'));
 
         // Validate time_range
-        let time_range = input.time_range.as_deref().and_then(|t| {
-            match t.to_lowercase().as_str() {
-                "day" | "week" | "month" | "year" => Some(t),
-                _ => None,
-            }
-        });
+        let time_range =
+            input
+                .time_range
+                .as_deref()
+                .and_then(|t| match t.to_lowercase().as_str() {
+                    "day" | "week" | "month" | "year" => Some(t),
+                    _ => None,
+                });
 
         let client = match build_http_client("searxng_search", 15, true) {
             Ok(client) => client,
@@ -1416,14 +1433,21 @@ impl ToolHandler for GetWeather {
             Err(error) => return error,
         };
 
-        let geocode_url = match reqwest::Url::parse("https://geocoding-api.open-meteo.com/v1/search") {
-            Ok(url) => url,
-            Err(error) => return op_error("get_weather", format!("invalid geocoding url: {error}")),
-        };
+        let geocode_url =
+            match reqwest::Url::parse("https://geocoding-api.open-meteo.com/v1/search") {
+                Ok(url) => url,
+                Err(error) => {
+                    return op_error("get_weather", format!("invalid geocoding url: {error}"))
+                }
+            };
 
         let geocode_response = client
             .get(geocode_url.clone())
-            .query(&[("name", location.as_str()), ("count", "1"), ("language", "en")])
+            .query(&[
+                ("name", location.as_str()),
+                ("count", "1"),
+                ("language", "en"),
+            ])
             .send()
             .await;
 
@@ -1449,7 +1473,10 @@ impl ToolHandler for GetWeather {
                     (
                         result["latitude"].as_f64().unwrap_or(52.52),
                         result["longitude"].as_f64().unwrap_or(13.41),
-                        result["name"].as_str().unwrap_or(location.as_str()).to_string(),
+                        result["name"]
+                            .as_str()
+                            .unwrap_or(location.as_str())
+                            .to_string(),
                     )
                 } else {
                     return op_error("get_weather", format!("location not found: {location}"));
@@ -1574,7 +1601,9 @@ impl ToolHandler for GetNews {
 
                 let xml = match response.text().await {
                     Ok(xml) => xml,
-                    Err(error) => return tool_error(map_http_request_error("get_news", &safe_url, error)),
+                    Err(error) => {
+                        return tool_error(map_http_request_error("get_news", &safe_url, error))
+                    }
                 };
 
                 let mut items = Vec::new();
@@ -1662,7 +1691,10 @@ impl ToolHandler for GetExchangeRate {
             return op_error("get_exchange_rate", "base_currency must be a 3-letter code");
         }
         if target.len() != 3 || !target.chars().all(|value| value.is_ascii_alphabetic()) {
-            return op_error("get_exchange_rate", "target_currency must be a 3-letter code");
+            return op_error(
+                "get_exchange_rate",
+                "target_currency must be a 3-letter code",
+            );
         }
 
         let client = match build_http_client("get_exchange_rate", 10, true) {
@@ -1673,7 +1705,10 @@ impl ToolHandler for GetExchangeRate {
         let url = match reqwest::Url::parse(&format!("https://open.er-api.com/v6/latest/{base}")) {
             Ok(url) => url,
             Err(error) => {
-                return op_error("get_exchange_rate", format!("invalid exchange-rate url: {error}"));
+                return op_error(
+                    "get_exchange_rate",
+                    format!("invalid exchange-rate url: {error}"),
+                );
             }
         };
 
@@ -1849,8 +1884,7 @@ fn eval_atom(chars: &mut std::iter::Peekable<std::str::Chars>) -> Result<f64, St
         match name_lower.as_str() {
             "pi" => return Ok(std::f64::consts::PI),
             "e" => return Ok(std::f64::consts::E),
-            "sqrt" | "abs" | "sin" | "cos" | "tan" | "log" | "ln" | "ceil" | "floor"
-            | "round" => {
+            "sqrt" | "abs" | "sin" | "cos" | "tan" | "log" | "ln" | "ceil" | "floor" | "round" => {
                 skip_spaces(chars);
                 if chars.peek() == Some(&'(') {
                     chars.next();

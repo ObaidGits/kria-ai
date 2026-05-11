@@ -626,6 +626,7 @@ fn parse_env_bool(value: &str) -> Option<bool> {
 /// for SRE/runtime policy knobs that should not be hardcoded in infra modules.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
+#[derive(Default)]
 pub struct KriaSystemConfig {
     pub qos: KriaSystemQosConfig,
     pub target_pool: KriaSystemTargetPoolConfig,
@@ -656,16 +657,6 @@ pub struct KriaSystemTargetPoolConfig {
 #[serde(default)]
 pub struct KriaSystemSnapshotConfig {
     pub max_normalized_hash_distance: f64,
-}
-
-impl Default for KriaSystemConfig {
-    fn default() -> Self {
-        Self {
-            qos: KriaSystemQosConfig::default(),
-            target_pool: KriaSystemTargetPoolConfig::default(),
-            snapshot: KriaSystemSnapshotConfig::default(),
-        }
-    }
 }
 
 impl Default for KriaSystemQosConfig {
@@ -774,8 +765,7 @@ impl KriaSystemConfig {
 
         self.target_pool.lease_ttl_ms = self.target_pool.lease_ttl_ms.max(1);
         self.target_pool.heartbeat_grace_ms = self.target_pool.heartbeat_grace_ms.max(1);
-        self.target_pool.quarantine_cooldown_ms =
-            self.target_pool.quarantine_cooldown_ms.max(1);
+        self.target_pool.quarantine_cooldown_ms = self.target_pool.quarantine_cooldown_ms.max(1);
 
         if !(0.0..=1.0).contains(&self.snapshot.max_normalized_hash_distance) {
             tracing::warn!(

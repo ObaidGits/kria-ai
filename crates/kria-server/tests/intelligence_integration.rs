@@ -58,11 +58,7 @@ async fn build_app_executive() -> Router {
         ..Default::default()
     };
 
-    let (mut controller, sender) = ExecutiveController::new(
-        executive_config,
-        gpu,
-        policy_gate,
-    );
+    let (mut controller, sender) = ExecutiveController::new(executive_config, gpu, policy_gate);
 
     // Spawn the controller's dispatch loop so it can process tasks.
     tokio::spawn(async move {
@@ -237,10 +233,7 @@ async fn executive_snapshot_returns_structure() {
     assert_eq!(res.status(), StatusCode::OK);
     let body: serde_json::Value = res.json().await.unwrap();
     // Snapshot should expose config and queue state
-    assert!(
-        body.get("config").is_some(),
-        "snapshot must include config"
-    );
+    assert!(body.get("config").is_some(), "snapshot must include config");
     assert_eq!(body["config"]["enabled"], true);
 }
 

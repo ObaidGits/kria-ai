@@ -73,6 +73,12 @@ pub struct SkillIndex {
     snapshot: ArcSwap<SkillSnapshot>,
 }
 
+impl Default for SkillIndex {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SkillIndex {
     pub fn new() -> Self {
         Self {
@@ -96,10 +102,7 @@ impl SkillIndex {
         let entries: Vec<SkillEntry> = skills
             .iter()
             .map(|skill| {
-                let text = format!(
-                    "{} {} {}",
-                    skill.name, skill.description, skill.category
-                );
+                let text = format!("{} {} {}", skill.name, skill.description, skill.category);
                 let embedding = embed_fn(&text);
                 SkillEntry {
                     skill_id: skill.skill_id.clone(),
@@ -183,10 +186,7 @@ impl Bm25Index {
             }
 
             for (term, freq) in tf {
-                inverted_index
-                    .entry(term)
-                    .or_default()
-                    .push((i, freq));
+                inverted_index.entry(term).or_default().push((i, freq));
             }
         }
 
@@ -250,9 +250,17 @@ fn contains_word(text: &str, word: &str) -> bool {
         Some(i) => i,
         None => return false,
     };
-    let before = if idx == 0 { ' ' } else { text.as_bytes()[idx - 1] as char };
+    let before = if idx == 0 {
+        ' '
+    } else {
+        text.as_bytes()[idx - 1] as char
+    };
     let after_end = idx + word.len();
-    let after = if after_end >= text.len() { ' ' } else { text.as_bytes()[after_end] as char };
+    let after = if after_end >= text.len() {
+        ' '
+    } else {
+        text.as_bytes()[after_end] as char
+    };
     !before.is_alphanumeric() && !after.is_alphanumeric()
 }
 
@@ -282,6 +290,12 @@ pub enum IntentClass {
     MayNeedOpenClaw,
 }
 
+impl Default for IntentClassifier {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl IntentClassifier {
     pub fn new() -> Self {
         Self
@@ -297,41 +311,76 @@ impl IntentClassifier {
         // false positives (e.g., "drive" matching "drivers").
         let native_patterns: &[(&str, bool)] = &[
             // File operations
-            ("file", true), ("folder", false), ("directory", false),
-            ("read file", false), ("write file", false),
-            ("create directory", false), ("delete file", false),
-            ("copy file", false), ("move file", false),
+            ("file", true),
+            ("folder", false),
+            ("directory", false),
+            ("read file", false),
+            ("write file", false),
+            ("create directory", false),
+            ("delete file", false),
+            ("copy file", false),
+            ("move file", false),
             // System info
-            ("system", false), ("cpu", true), ("memory", false),
-            ("ram", true), ("disk", true), ("battery", false),
-            ("uptime", false), ("process", false), ("running app", false),
+            ("system", false),
+            ("cpu", true),
+            ("memory", false),
+            ("ram", true),
+            ("disk", true),
+            ("battery", false),
+            ("uptime", false),
+            ("process", false),
+            ("running app", false),
             // Package management
-            ("install package", false), ("uninstall package", false),
+            ("install package", false),
+            ("uninstall package", false),
             ("update package", false),
-            ("apt", true), ("snap", true), ("flatpak", false),
+            ("apt", true),
+            ("snap", true),
+            ("flatpak", false),
             // System config
-            ("brightness", false), ("volume", false), ("wifi", true),
+            ("brightness", false),
+            ("volume", false),
+            ("wifi", true),
             ("bluetooth", false),
-            ("power plan", false), ("display", false), ("screen resolution", false),
+            ("power plan", false),
+            ("display", false),
+            ("screen resolution", false),
             // Clipboard
-            ("clipboard", false), ("copy", true), ("paste", false),
+            ("clipboard", false),
+            ("copy", true),
+            ("paste", false),
             // Window management
-            ("window", false), ("minimize", false), ("maximize", false),
+            ("window", false),
+            ("minimize", false),
+            ("maximize", false),
             ("focus", false),
             // Google Workspace (already have MCP tools)
-            ("gmail", false), ("email", false), ("calendar", false),
-            ("drive", true), ("google docs", false),
+            ("gmail", false),
+            ("email", false),
+            ("calendar", false),
+            ("drive", true),
+            ("google docs", false),
             // Knowledge/memory
-            ("remember", false), ("recall", false), ("fact", true),
-            ("snippet", false), ("knowledge", false),
+            ("remember", false),
+            ("recall", false),
+            ("fact", true),
+            ("snippet", false),
+            ("knowledge", false),
             // Documents
-            ("pdf", true), ("docx", false), ("xlsx", false),
-            ("csv", true), ("parse document", false),
+            ("pdf", true),
+            ("docx", false),
+            ("xlsx", false),
+            ("csv", true),
+            ("parse document", false),
             // Git
-            ("git status", false), ("git log", false),
-            ("git diff", false), ("git commit", false),
+            ("git status", false),
+            ("git log", false),
+            ("git diff", false),
+            ("git commit", false),
             // Scheduling
-            ("schedule", false), ("reminder", false), ("cron", true),
+            ("schedule", false),
+            ("reminder", false),
+            ("cron", true),
         ];
 
         for &(pattern, word_boundary) in native_patterns {
@@ -369,11 +418,7 @@ pub struct SkillMatch {
 }
 
 impl CapabilityResolver {
-    pub fn new(
-        skill_index: Arc<SkillIndex>,
-        max_oc_tools: usize,
-        dense_threshold: f32,
-    ) -> Self {
+    pub fn new(skill_index: Arc<SkillIndex>, max_oc_tools: usize, dense_threshold: f32) -> Self {
         Self {
             skill_index,
             intent_classifier: IntentClassifier::new(),
@@ -385,11 +430,7 @@ impl CapabilityResolver {
 
     /// Resolve OpenClaw skills for a user prompt.
     /// Returns an empty vec if the prompt is clearly native-only.
-    pub async fn resolve(
-        &self,
-        user_prompt: &str,
-        query_embedding: &[f32],
-    ) -> Vec<SkillMatch> {
+    pub async fn resolve(&self, user_prompt: &str, query_embedding: &[f32]) -> Vec<SkillMatch> {
         // Stage 0: Intent pre-classification
         if self.intent_classifier.classify(user_prompt) == IntentClass::NativeOnly {
             return Vec::new();
@@ -442,10 +483,7 @@ fn normalize_bm25(score: f32, results: &[Bm25Result]) -> f32 {
     if results.is_empty() {
         return 0.0;
     }
-    let max = results
-        .iter()
-        .map(|r| r.bm25_score)
-        .fold(0.0f32, f32::max);
+    let max = results.iter().map(|r| r.bm25_score).fold(0.0f32, f32::max);
     if max > 0.0 {
         (score / max).clamp(0.0, 1.0)
     } else {
@@ -504,10 +542,25 @@ mod tests {
 
     #[test]
     fn bm25_finds_keyword_match() {
-        let skills = vec![
-            make_skill("oc_web_search", "web_search", "Searches the web for information", "web"),
-            make_skill("oc_music", "music_generate", "Generates music tracks from text", "media"),
-            make_skill("oc_calculator", "calculator", "Calculates mathematical expressions", "productivity"),
+        let skills = [
+            make_skill(
+                "oc_web_search",
+                "web_search",
+                "Searches the web for information",
+                "web",
+            ),
+            make_skill(
+                "oc_music",
+                "music_generate",
+                "Generates music tracks from text",
+                "media",
+            ),
+            make_skill(
+                "oc_calculator",
+                "calculator",
+                "Calculates mathematical expressions",
+                "productivity",
+            ),
         ];
 
         let entries: Vec<SkillEntry> = skills
@@ -535,14 +588,35 @@ mod tests {
     fn intent_classifier_skips_native_only() {
         let classifier = IntentClassifier::new();
 
-        assert_eq!(classifier.classify("read the file at /tmp/test.txt"), IntentClass::NativeOnly);
-        assert_eq!(classifier.classify("what's my cpu usage"), IntentClass::NativeOnly);
-        assert_eq!(classifier.classify("install package neovim"), IntentClass::NativeOnly);
-        assert_eq!(classifier.classify("check my gmail inbox"), IntentClass::NativeOnly);
+        assert_eq!(
+            classifier.classify("read the file at /tmp/test.txt"),
+            IntentClass::NativeOnly
+        );
+        assert_eq!(
+            classifier.classify("what's my cpu usage"),
+            IntentClass::NativeOnly
+        );
+        assert_eq!(
+            classifier.classify("install package neovim"),
+            IntentClass::NativeOnly
+        );
+        assert_eq!(
+            classifier.classify("check my gmail inbox"),
+            IntentClass::NativeOnly
+        );
 
-        assert_eq!(classifier.classify("search the web for CUDA drivers"), IntentClass::MayNeedOpenClaw);
-        assert_eq!(classifier.classify("generate some lo-fi music"), IntentClass::MayNeedOpenClaw);
-        assert_eq!(classifier.classify("take a screenshot of my screen"), IntentClass::MayNeedOpenClaw);
+        assert_eq!(
+            classifier.classify("search the web for CUDA drivers"),
+            IntentClass::MayNeedOpenClaw
+        );
+        assert_eq!(
+            classifier.classify("generate some lo-fi music"),
+            IntentClass::MayNeedOpenClaw
+        );
+        assert_eq!(
+            classifier.classify("take a screenshot of my screen"),
+            IntentClass::MayNeedOpenClaw
+        );
     }
 
     #[test]
@@ -575,10 +649,25 @@ mod tests {
 
     #[test]
     fn bm25_multiple_keyword_matches_ranked_correctly() {
-        let skills = vec![
-            make_skill("oc_search", "web_search", "Search the web for any topic", "web"),
-            make_skill("oc_fetch", "web_fetch", "Fetch a webpage and extract content", "web"),
-            make_skill("oc_music", "music_gen", "Generate music from description", "media"),
+        let skills = [
+            make_skill(
+                "oc_search",
+                "web_search",
+                "Search the web for any topic",
+                "web",
+            ),
+            make_skill(
+                "oc_fetch",
+                "web_fetch",
+                "Fetch a webpage and extract content",
+                "web",
+            ),
+            make_skill(
+                "oc_music",
+                "music_gen",
+                "Generate music from description",
+                "media",
+            ),
         ];
 
         let entries: Vec<SkillEntry> = skills

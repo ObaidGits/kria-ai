@@ -73,7 +73,7 @@ impl UncertaintyEngine {
         // Factor 1: Belief graph coverage
         // Check if we have relevant beliefs for this goal
         let relevant_keywords: Vec<&str> = goal_lower.split_whitespace().collect();
-        let keyword_refs: Vec<&str> = relevant_keywords.iter().map(|s| *s).collect();
+        let keyword_refs: Vec<&str> = relevant_keywords.to_vec();
         let belief_confidence = self.belief_graph.confidence_for(&keyword_refs);
 
         // Factor 2: Goal specificity (more words = more specific = higher base confidence)
@@ -114,19 +114,32 @@ impl UncertaintyEngine {
         });
 
         // Domain-specific diagnostics
-        if goal_lower.contains("vm") || goal_lower.contains("server") || goal_lower.contains("system") {
+        if goal_lower.contains("vm")
+            || goal_lower.contains("server")
+            || goal_lower.contains("system")
+        {
             commands.extend(self.vm_diagnostics());
         }
-        if goal_lower.contains("slow") || goal_lower.contains("performance") || goal_lower.contains("cpu") {
+        if goal_lower.contains("slow")
+            || goal_lower.contains("performance")
+            || goal_lower.contains("cpu")
+        {
             commands.extend(self.performance_diagnostics());
         }
-        if goal_lower.contains("disk") || goal_lower.contains("space") || goal_lower.contains("full") {
+        if goal_lower.contains("disk")
+            || goal_lower.contains("space")
+            || goal_lower.contains("full")
+        {
             commands.extend(self.disk_diagnostics());
         }
-        if goal_lower.contains("network") || goal_lower.contains("connect") || goal_lower.contains("internet") {
+        if goal_lower.contains("network")
+            || goal_lower.contains("connect")
+            || goal_lower.contains("internet")
+        {
             commands.extend(self.network_diagnostics());
         }
-        if goal_lower.contains("nginx") || goal_lower.contains("web") || goal_lower.contains("http") {
+        if goal_lower.contains("nginx") || goal_lower.contains("web") || goal_lower.contains("http")
+        {
             commands.extend(self.web_diagnostics());
         }
 
@@ -186,7 +199,11 @@ impl UncertaintyEngine {
             },
             StructuredCommand {
                 binary: "systemctl".into(),
-                args: vec!["list-units".into(), "--type=service".into(), "--state=running".into()],
+                args: vec![
+                    "list-units".into(),
+                    "--type=service".into(),
+                    "--state=running".into(),
+                ],
                 target: "local".into(),
                 timeout_secs: 10,
                 working_dir: None,
@@ -228,7 +245,12 @@ impl UncertaintyEngine {
             },
             StructuredCommand {
                 binary: "du".into(),
-                args: vec!["-sh".into(), "/var/log".into(), "/tmp".into(), "/home".into()],
+                args: vec![
+                    "-sh".into(),
+                    "/var/log".into(),
+                    "/tmp".into(),
+                    "/home".into(),
+                ],
                 target: "local".into(),
                 timeout_secs: 30,
                 working_dir: None,
@@ -278,7 +300,14 @@ impl UncertaintyEngine {
             },
             StructuredCommand {
                 binary: "curl".into(),
-                args: vec!["-s".into(), "-o".into(), "/dev/null".into(), "-w".into(), "%{http_code}".into(), "http://localhost".into()],
+                args: vec![
+                    "-s".into(),
+                    "-o".into(),
+                    "/dev/null".into(),
+                    "-w".into(),
+                    "%{http_code}".into(),
+                    "http://localhost".into(),
+                ],
                 target: "local".into(),
                 timeout_secs: 10,
                 working_dir: None,
@@ -302,8 +331,15 @@ mod tests {
     fn vague_goal_low_confidence() {
         let engine = UncertaintyEngine::new();
         let (confidence, action) = engine.evaluate("fix it");
-        assert!(confidence < 0.5, "Vague goal should have low confidence, got {}", confidence);
-        assert!(action != UncertaintyAction::Plan, "Vague goal should not plan");
+        assert!(
+            confidence < 0.5,
+            "Vague goal should have low confidence, got {}",
+            confidence
+        );
+        assert!(
+            action != UncertaintyAction::Plan,
+            "Vague goal should not plan"
+        );
     }
 
     #[test]
@@ -311,7 +347,10 @@ mod tests {
         let engine = UncertaintyEngine::new();
         let (confidence, _) = engine.evaluate("check nginx status on VM1");
         // Even without prior beliefs, specific diagnostic goals should have some confidence
-        assert!(confidence > 0.0, "Specific goal should have some confidence");
+        assert!(
+            confidence > 0.0,
+            "Specific goal should have some confidence"
+        );
     }
 
     #[test]
@@ -322,8 +361,20 @@ mod tests {
         for cmd in &commands {
             // All diagnostic commands should be read-only binaries
             assert!(
-                ["uptime", "top", "free", "df", "systemctl", "vmstat", "du", "ip", "ss", "ping", "curl"]
-                    .contains(&cmd.binary.as_str()),
+                [
+                    "uptime",
+                    "top",
+                    "free",
+                    "df",
+                    "systemctl",
+                    "vmstat",
+                    "du",
+                    "ip",
+                    "ss",
+                    "ping",
+                    "curl"
+                ]
+                .contains(&cmd.binary.as_str()),
                 "Diagnostic command should be read-only, got: {}",
                 cmd.binary
             );
@@ -336,8 +387,14 @@ mod tests {
         let commands = engine.plan_diagnostics("my VM is slow");
 
         let binaries: Vec<&str> = commands.iter().map(|c| c.binary.as_str()).collect();
-        assert!(binaries.contains(&"top"), "Should include top for VM diagnostics");
-        assert!(binaries.contains(&"free"), "Should include free for VM diagnostics");
+        assert!(
+            binaries.contains(&"top"),
+            "Should include top for VM diagnostics"
+        );
+        assert!(
+            binaries.contains(&"free"),
+            "Should include free for VM diagnostics"
+        );
     }
 
     #[test]
@@ -346,7 +403,10 @@ mod tests {
         let commands = engine.plan_diagnostics("network is down");
 
         let binaries: Vec<&str> = commands.iter().map(|c| c.binary.as_str()).collect();
-        assert!(binaries.contains(&"ping"), "Should include ping for network diagnostics");
+        assert!(
+            binaries.contains(&"ping"),
+            "Should include ping for network diagnostics"
+        );
     }
 
     #[test]
@@ -355,7 +415,10 @@ mod tests {
         let commands = engine.plan_diagnostics("nginx is not responding");
 
         let binaries: Vec<&str> = commands.iter().map(|c| c.binary.as_str()).collect();
-        assert!(binaries.contains(&"systemctl"), "Should include systemctl for nginx diagnostics");
+        assert!(
+            binaries.contains(&"systemctl"),
+            "Should include systemctl for nginx diagnostics"
+        );
     }
 
     #[test]
@@ -374,23 +437,31 @@ mod tests {
         let engine_empty = UncertaintyEngine::new();
         let (conf_without_belief, _) = engine_empty.evaluate("check nginx status");
 
-        assert!(conf_with_belief > conf_without_belief,
+        assert!(
+            conf_with_belief > conf_without_belief,
             "Beliefs should increase confidence: with={}, without={}",
-            conf_with_belief, conf_without_belief);
+            conf_with_belief,
+            conf_without_belief
+        );
     }
 
     #[test]
     fn decay_beliefs_works() {
         let mut engine = UncertaintyEngine::new();
-        engine.belief_graph_mut().update("fact", 0.9, "evidence", BeliefSource::Detected);
+        engine
+            .belief_graph_mut()
+            .update("fact", 0.9, "evidence", BeliefSource::Detected);
 
         // Set fact to old
-        if let Some(fact) = engine.belief_graph_mut().all_facts().get("fact") {
+        if let Some(_fact) = engine.belief_graph_mut().all_facts().get("fact") {
             // Can't mutate through all_facts(), so we use decay directly
         }
         engine.decay_beliefs();
         // After decay, confidence should be slightly lower (but not zero)
         let fact = engine.belief_graph().get("fact").unwrap();
-        assert!(fact.confidence > 0.0, "Confidence should not be zero after decay");
+        assert!(
+            fact.confidence > 0.0,
+            "Confidence should not be zero after decay"
+        );
     }
 }

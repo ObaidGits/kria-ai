@@ -20,10 +20,10 @@
 //! 4. **Confidence decay**: Compiled skills lose confidence over time without use.
 //!    Skills below 0.3 confidence are auto-archived.
 
-mod types;
 mod compiler;
+mod types;
 mod variable_safety;
 
-pub use types::{CompiledSkill, SkillVariable, VariableType, SkillStatus};
 pub use compiler::SkillCompiler;
+pub use types::{CompiledSkill, SkillStatus, SkillVariable, VariableType};
 pub use variable_safety::{validate_variable, ValidationError};

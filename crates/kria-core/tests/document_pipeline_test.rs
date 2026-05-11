@@ -7,9 +7,7 @@
 //!   cargo test -p kria-core --test document_pipeline_test doc_pipeline_pdf -- --nocapture
 
 use kria_core::preprocessing::{
-    document::DocumentProcessor,
-    document_sanitizer::sanitize,
-    split_into_chunks_sync,
+    document::DocumentProcessor, document_sanitizer::sanitize, split_into_chunks_sync,
 };
 
 const TEST_PDF: &str = "/home/obaid/Downloads/Sem-8.pdf";
@@ -23,7 +21,10 @@ async fn run_pipeline(path: &str) {
         .await
         .unwrap_or_else(|e| panic!("Extraction failed for '{path}': {e}"));
 
-    assert!(!raw.trim().is_empty(), "Extracted text is empty — check pdftotext installation");
+    assert!(
+        !raw.trim().is_empty(),
+        "Extracted text is empty — check pdftotext installation"
+    );
     println!(
         "\n[1/3] EXTRACT  {} → {} chars\nFirst 400 chars:\n---\n{}\n---",
         p.file_name().unwrap().to_string_lossy(),
@@ -46,17 +47,28 @@ async fn run_pipeline(path: &str) {
 
     // ── 3. Chunk ─────────────────────────────────────────────────────────────
     let chunks = split_into_chunks_sync(&sanitized.text);
-    assert!(!chunks.is_empty(), "Chunker produced 0 chunks from non-empty text");
+    assert!(
+        !chunks.is_empty(),
+        "Chunker produced 0 chunks from non-empty text"
+    );
     println!("\n[3/3] CHUNK    {} chunks", chunks.len());
     for (i, c) in chunks.iter().take(5).enumerate() {
         let preview_len = c.text.len().min(120);
         println!(
             "  [{}] lines {}-{}  {} chars  {:?}",
-            i, c.start_line, c.end_line, c.text.len(),
+            i,
+            c.start_line,
+            c.end_line,
+            c.text.len(),
             &c.text[..preview_len]
         );
     }
-    println!("\n✅ Pipeline OK — {}: {} chars → {} chunks", filename, sanitized.char_count, chunks.len());
+    println!(
+        "\n✅ Pipeline OK — {}: {} chars → {} chunks",
+        filename,
+        sanitized.char_count,
+        chunks.len()
+    );
 }
 
 #[tokio::test]

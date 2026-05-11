@@ -979,9 +979,9 @@ impl QemuSshEnvironment {
 
         #[cfg(unix)]
         {
-            return Ok(QmpEndpoint::Unix(
+            Ok(QmpEndpoint::Unix(
                 self.config.remote_control_dir.join("qmp.sock"),
-            ));
+            ))
         }
 
         #[cfg(not(unix))]
@@ -1309,7 +1309,7 @@ impl QemuSshEnvironment {
                     details: format!("{} (pid {pid})", error),
                 })?;
 
-            return Ok(start_time);
+            Ok(start_time)
         }
 
         #[cfg(windows)]
@@ -1757,7 +1757,7 @@ impl QemuSshEnvironment {
                 *child_guard = Some(child);
                 *self.provider_spawned_qemu.lock().await = true;
             }
-            return Ok(());
+            Ok(())
         }
 
         #[cfg(windows)]
@@ -2319,9 +2319,8 @@ impl QemuSshEnvironment {
             .high_priority_queue_capacity
             .max(1);
 
-        let reserved = (high_capacity * INFRA_RESET_RESERVED_NUMERATOR
-            + (INFRA_RESET_RESERVED_DENOMINATOR - 1))
-            / INFRA_RESET_RESERVED_DENOMINATOR;
+        let reserved = (high_capacity * INFRA_RESET_RESERVED_NUMERATOR)
+            .div_ceil(INFRA_RESET_RESERVED_DENOMINATOR);
         reserved.max(1).min(high_capacity)
     }
 
@@ -3279,9 +3278,7 @@ impl FileSystemOps for QemuSshEnvironment {
             }
         };
 
-        if let Err(error) = commit_result {
-            return Err(error);
-        }
+        commit_result?;
 
         let sidecar_cleanup_path = sidecar_active_path.clone();
         let _ = self

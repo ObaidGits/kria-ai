@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
 

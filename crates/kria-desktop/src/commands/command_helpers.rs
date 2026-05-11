@@ -143,15 +143,15 @@ pub(crate) fn merge_ironclad_config_document(
 
     table.insert(
         "qos".to_string(),
-        toml::Value::try_from(config.qos.clone()).map_err(|e| e.to_string())?,
+        toml::Value::try_from(config.qos).map_err(|e| e.to_string())?,
     );
     table.insert(
         "target_pool".to_string(),
-        toml::Value::try_from(config.target_pool.clone()).map_err(|e| e.to_string())?,
+        toml::Value::try_from(config.target_pool).map_err(|e| e.to_string())?,
     );
     table.insert(
         "snapshot".to_string(),
-        toml::Value::try_from(config.snapshot.clone()).map_err(|e| e.to_string())?,
+        toml::Value::try_from(config.snapshot).map_err(|e| e.to_string())?,
     );
 
     Ok(document)

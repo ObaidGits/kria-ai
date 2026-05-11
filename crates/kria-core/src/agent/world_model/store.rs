@@ -152,12 +152,13 @@ impl WorldModelStore {
                     let new_conf = 1.0 - (1.0 - existing_conf) * (1.0 - confidence);
 
                     // Merge evidence arrays
-                    let mut ev_vec: Vec<String> = serde_json::from_str(&existing_evidence)
-                        .unwrap_or_default();
+                    let mut ev_vec: Vec<String> =
+                        serde_json::from_str(&existing_evidence).unwrap_or_default();
                     if !ev_vec.contains(&evidence.to_string()) {
                         ev_vec.push(evidence.to_string());
                     }
-                    let merged_evidence = serde_json::to_string(&ev_vec).unwrap_or_else(|_| "[]".into());
+                    let merged_evidence =
+                        serde_json::to_string(&ev_vec).unwrap_or_else(|_| "[]".into());
 
                     let now = Utc::now().to_rfc3339();
                     conn.execute(
@@ -184,7 +185,10 @@ impl WorldModelStore {
                     let archived_id = conn.last_insert_rowid();
 
                     // Delete old fact
-                    conn.execute("DELETE FROM world_facts WHERE id = ?1", params![existing_id])?;
+                    conn.execute(
+                        "DELETE FROM world_facts WHERE id = ?1",
+                        params![existing_id],
+                    )?;
 
                     // Update FTS
                     conn.execute(
@@ -273,7 +277,10 @@ impl WorldModelStore {
                     object: row.get(3)?,
                     confidence: row.get(4)?,
                     evidence: serde_json::from_str(&row.get::<_, String>(5)?).unwrap_or_default(),
-                    source: row.get::<_, String>(6)?.parse().unwrap_or(FactSource::Inferred),
+                    source: row
+                        .get::<_, String>(6)?
+                        .parse()
+                        .unwrap_or(FactSource::Inferred),
                     last_verified: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(7)?)
                         .map(|d| d.with_timezone(&Utc))
                         .unwrap_or_else(|_| Utc::now()),
@@ -306,7 +313,10 @@ impl WorldModelStore {
                     object: row.get(3)?,
                     confidence: row.get(4)?,
                     evidence: serde_json::from_str(&row.get::<_, String>(5)?).unwrap_or_default(),
-                    source: row.get::<_, String>(6)?.parse().unwrap_or(FactSource::Inferred),
+                    source: row
+                        .get::<_, String>(6)?
+                        .parse()
+                        .unwrap_or(FactSource::Inferred),
                     last_verified: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(7)?)
                         .map(|d| d.with_timezone(&Utc))
                         .unwrap_or_else(|_| Utc::now()),
@@ -326,13 +336,9 @@ impl WorldModelStore {
         let now = Utc::now();
 
         // Get all facts
-        let mut stmt = conn.prepare(
-            "SELECT id, confidence, last_verified FROM world_facts",
-        )?;
+        let mut stmt = conn.prepare("SELECT id, confidence, last_verified FROM world_facts")?;
         let rows: Vec<(i64, f64, String)> = stmt
-            .query_map([], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-            })?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
             .collect::<Result<Vec<_>, _>>()?;
 
         let mut archived_count = 0i64;
@@ -371,15 +377,22 @@ impl WorldModelStore {
         let conn = self.conn.lock().unwrap();
 
         let total: i64 = conn.query_row("SELECT COUNT(*) FROM world_facts", [], |r| r.get(0))?;
-        let archived: i64 = conn.query_row("SELECT COUNT(*) FROM world_facts_archive", [], |r| r.get(0))?;
-        let avg_conf: f64 = conn.query_row("SELECT COALESCE(AVG(confidence), 0.0) FROM world_facts", [], |r| r.get(0))?;
+        let archived: i64 =
+            conn.query_row("SELECT COUNT(*) FROM world_facts_archive", [], |r| r.get(0))?;
+        let avg_conf: f64 = conn.query_row(
+            "SELECT COALESCE(AVG(confidence), 0.0) FROM world_facts",
+            [],
+            |r| r.get(0),
+        )?;
         let stale: i64 = conn.query_row(
             "SELECT COUNT(*) FROM world_facts WHERE confidence < 0.1",
-            [], |r| r.get(0),
+            [],
+            |r| r.get(0),
         )?;
 
         let mut by_source = HashMap::new();
-        let mut src_stmt = conn.prepare("SELECT source, COUNT(*) FROM world_facts GROUP BY source")?;
+        let mut src_stmt =
+            conn.prepare("SELECT source, COUNT(*) FROM world_facts GROUP BY source")?;
         let src_rows = src_stmt.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
         })?;
@@ -419,7 +432,16 @@ mod tests {
     #[test]
     fn insert_new_fact() {
         let store = test_store();
-        let res = store.upsert("VM1", "runs", "Ubuntu 24.04", 0.9, FactSource::Detected, "ssh uname -a").unwrap();
+        let res = store
+            .upsert(
+                "VM1",
+                "runs",
+                "Ubuntu 24.04",
+                0.9,
+                FactSource::Detected,
+                "ssh uname -a",
+            )
+            .unwrap();
         assert!(matches!(res, ConflictResolution::Inserted { .. }));
 
         let fact = store.query("VM1", "runs").unwrap().unwrap();
@@ -430,8 +452,26 @@ mod tests {
     #[test]
     fn merge_same_fact_merges_evidence() {
         let store = test_store();
-        store.upsert("VM1", "runs", "Ubuntu 24.04", 0.9, FactSource::Detected, "ssh uname -a").unwrap();
-        let res = store.upsert("VM1", "runs", "Ubuntu 24.04", 0.8, FactSource::Detected, "cat /etc/os-release").unwrap();
+        store
+            .upsert(
+                "VM1",
+                "runs",
+                "Ubuntu 24.04",
+                0.9,
+                FactSource::Detected,
+                "ssh uname -a",
+            )
+            .unwrap();
+        let res = store
+            .upsert(
+                "VM1",
+                "runs",
+                "Ubuntu 24.04",
+                0.8,
+                FactSource::Detected,
+                "cat /etc/os-release",
+            )
+            .unwrap();
 
         assert!(matches!(res, ConflictResolution::Merged { .. }));
         let fact = store.query("VM1", "runs").unwrap().unwrap();
@@ -443,8 +483,26 @@ mod tests {
     #[test]
     fn contradict_old_fact_archives_it() {
         let store = test_store();
-        store.upsert("VM1", "runs", "Ubuntu 22.04", 0.9, FactSource::Detected, "old").unwrap();
-        let res = store.upsert("VM1", "runs", "Ubuntu 24.04", 0.95, FactSource::Detected, "new").unwrap();
+        store
+            .upsert(
+                "VM1",
+                "runs",
+                "Ubuntu 22.04",
+                0.9,
+                FactSource::Detected,
+                "old",
+            )
+            .unwrap();
+        let res = store
+            .upsert(
+                "VM1",
+                "runs",
+                "Ubuntu 24.04",
+                0.95,
+                FactSource::Detected,
+                "new",
+            )
+            .unwrap();
 
         assert!(matches!(res, ConflictResolution::Overwritten { .. }));
 
@@ -461,13 +519,19 @@ mod tests {
     fn decay_archives_stale_facts() {
         let store = test_store();
         // Insert a fact with low confidence that will decay below threshold
-        store.upsert("test", "is", "stale", 0.11, FactSource::Inferred, "old").unwrap();
+        store
+            .upsert("test", "is", "stale", 0.11, FactSource::Inferred, "old")
+            .unwrap();
 
         // Manually set last_verified to 48 hours ago
         {
             let conn = store.conn.lock().unwrap();
             let old = (Utc::now() - chrono::Duration::hours(48)).to_rfc3339();
-            conn.execute("UPDATE world_facts SET last_verified = ?1 WHERE subject = 'test'", params![old]).unwrap();
+            conn.execute(
+                "UPDATE world_facts SET last_verified = ?1 WHERE subject = 'test'",
+                params![old],
+            )
+            .unwrap();
         }
 
         let archived = store.decay_and_archive(0.1).unwrap();
@@ -478,8 +542,26 @@ mod tests {
     #[test]
     fn full_text_search() {
         let store = test_store();
-        store.upsert("VM1", "runs_service", "nginx web server", 0.9, FactSource::Detected, "ps aux").unwrap();
-        store.upsert("VM2", "runs_service", "postgres database", 0.8, FactSource::Detected, "ps aux").unwrap();
+        store
+            .upsert(
+                "VM1",
+                "runs_service",
+                "nginx web server",
+                0.9,
+                FactSource::Detected,
+                "ps aux",
+            )
+            .unwrap();
+        store
+            .upsert(
+                "VM2",
+                "runs_service",
+                "postgres database",
+                0.8,
+                FactSource::Detected,
+                "ps aux",
+            )
+            .unwrap();
 
         let results = store.search("nginx").unwrap();
         assert_eq!(results.len(), 1);
@@ -489,9 +571,22 @@ mod tests {
     #[test]
     fn query_subject_returns_all_predicates() {
         let store = test_store();
-        store.upsert("VM1", "runs", "Ubuntu", 0.9, FactSource::Detected, "").unwrap();
-        store.upsert("VM1", "has_ip", "192.168.1.1", 0.95, FactSource::Detected, "").unwrap();
-        store.upsert("VM1", "has_ram", "8GB", 0.8, FactSource::Detected, "").unwrap();
+        store
+            .upsert("VM1", "runs", "Ubuntu", 0.9, FactSource::Detected, "")
+            .unwrap();
+        store
+            .upsert(
+                "VM1",
+                "has_ip",
+                "192.168.1.1",
+                0.95,
+                FactSource::Detected,
+                "",
+            )
+            .unwrap();
+        store
+            .upsert("VM1", "has_ram", "8GB", 0.8, FactSource::Detected, "")
+            .unwrap();
 
         let facts = store.query_subject("VM1").unwrap();
         assert_eq!(facts.len(), 3);

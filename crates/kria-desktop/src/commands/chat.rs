@@ -41,10 +41,7 @@ async fn send_message_with_profile(
             &format!("{ev_prefix}:token"),
             serde_json::json!({ "text": &user_visible_error }),
         );
-        let _ = app.emit(
-            &format!("{ev_prefix}:done"),
-            serde_json::json!({}),
-        );
+        let _ = app.emit(&format!("{ev_prefix}:done"), serde_json::json!({}));
         return Err(e);
     }
 

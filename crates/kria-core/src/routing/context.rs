@@ -114,7 +114,11 @@ pub struct EnrichedInput {
 impl EnrichedInput {
     /// Create an enriched input with context injected.
     pub fn enriched(text: String, original: String, reason: EnrichmentReason) -> Self {
-        Self { text, original, reason }
+        Self {
+            text,
+            original,
+            reason,
+        }
     }
 
     /// Create an input with no enrichment.
@@ -336,18 +340,48 @@ mod tests {
     #[test]
     fn record_turn_increments_topic_count() {
         let mut ctx = RoutingContext::default();
-        ctx.record_turn(Domain::SystemInfo, None, IntentModality::Read, vec![0.1; 10]);
-        ctx.record_turn(Domain::SystemInfo, None, IntentModality::Read, vec![0.1; 10]);
-        ctx.record_turn(Domain::SystemInfo, None, IntentModality::Read, vec![0.1; 10]);
+        ctx.record_turn(
+            Domain::SystemInfo,
+            None,
+            IntentModality::Read,
+            vec![0.1; 10],
+        );
+        ctx.record_turn(
+            Domain::SystemInfo,
+            None,
+            IntentModality::Read,
+            vec![0.1; 10],
+        );
+        ctx.record_turn(
+            Domain::SystemInfo,
+            None,
+            IntentModality::Read,
+            vec![0.1; 10],
+        );
         assert_eq!(ctx.turn_count_in_topic, 3);
     }
 
     #[test]
     fn record_turn_resets_on_topic_change() {
         let mut ctx = RoutingContext::default();
-        ctx.record_turn(Domain::SystemInfo, None, IntentModality::Read, vec![0.1; 10]);
-        ctx.record_turn(Domain::SystemInfo, None, IntentModality::Read, vec![0.1; 10]);
-        ctx.record_turn(Domain::SystemInfo, None, IntentModality::Read, vec![0.1; 10]);
+        ctx.record_turn(
+            Domain::SystemInfo,
+            None,
+            IntentModality::Read,
+            vec![0.1; 10],
+        );
+        ctx.record_turn(
+            Domain::SystemInfo,
+            None,
+            IntentModality::Read,
+            vec![0.1; 10],
+        );
+        ctx.record_turn(
+            Domain::SystemInfo,
+            None,
+            IntentModality::Read,
+            vec![0.1; 10],
+        );
         assert_eq!(ctx.turn_count_in_topic, 3);
 
         ctx.record_turn(Domain::Comms, None, IntentModality::Send, vec![0.2; 10]);
@@ -364,14 +398,24 @@ mod tests {
     #[test]
     fn context_is_not_stale_immediately() {
         let mut ctx = RoutingContext::default();
-        ctx.record_turn(Domain::SystemInfo, None, IntentModality::Read, vec![0.1; 10]);
+        ctx.record_turn(
+            Domain::SystemInfo,
+            None,
+            IntentModality::Read,
+            vec![0.1; 10],
+        );
         assert!(!ctx.is_stale());
     }
 
     #[test]
     fn reset_clears_everything() {
         let mut ctx = RoutingContext::default();
-        ctx.record_turn(Domain::SystemInfo, Some("tool".into()), IntentModality::Read, vec![0.1; 10]);
+        ctx.record_turn(
+            Domain::SystemInfo,
+            Some("tool".into()),
+            IntentModality::Read,
+            vec![0.1; 10],
+        );
         ctx.set_correction_pending();
         ctx.reset();
 
@@ -384,7 +428,12 @@ mod tests {
     #[test]
     fn correction_detection_with_context() {
         let mut ctx = RoutingContext::default();
-        ctx.record_turn(Domain::SystemInfo, None, IntentModality::Read, vec![0.1; 10]);
+        ctx.record_turn(
+            Domain::SystemInfo,
+            None,
+            IntentModality::Read,
+            vec![0.1; 10],
+        );
 
         let signal = detect_correction("no I meant the network", &ctx);
         assert!(signal.is_correction());
@@ -400,7 +449,12 @@ mod tests {
     #[test]
     fn no_correction_on_normal_input() {
         let mut ctx = RoutingContext::default();
-        ctx.record_turn(Domain::SystemInfo, None, IntentModality::Read, vec![0.1; 10]);
+        ctx.record_turn(
+            Domain::SystemInfo,
+            None,
+            IntentModality::Read,
+            vec![0.1; 10],
+        );
 
         let signal = detect_correction("check the disk", &ctx);
         assert_eq!(signal, CorrectionSignal::None);
@@ -409,7 +463,12 @@ mod tests {
     #[test]
     fn enrichment_topic_continuation() {
         let mut ctx = RoutingContext::default();
-        ctx.record_turn(Domain::SystemInfo, None, IntentModality::Read, vec![0.1; 10]);
+        ctx.record_turn(
+            Domain::SystemInfo,
+            None,
+            IntentModality::Read,
+            vec![0.1; 10],
+        );
 
         let enriched = enrich_with_context("also check disk", &ctx);
         assert!(enriched.text.contains("system")); // domain anchor injected
@@ -419,7 +478,12 @@ mod tests {
     #[test]
     fn enrichment_correction() {
         let mut ctx = RoutingContext::default();
-        ctx.record_turn(Domain::SystemInfo, None, IntentModality::Read, vec![0.1; 10]);
+        ctx.record_turn(
+            Domain::SystemInfo,
+            None,
+            IntentModality::Read,
+            vec![0.1; 10],
+        );
         ctx.set_correction_pending();
 
         let enriched = enrich_with_context("the network", &ctx);
@@ -430,7 +494,12 @@ mod tests {
     #[test]
     fn no_enrichment_long_input() {
         let mut ctx = RoutingContext::default();
-        ctx.record_turn(Domain::SystemInfo, None, IntentModality::Read, vec![0.1; 10]);
+        ctx.record_turn(
+            Domain::SystemInfo,
+            None,
+            IntentModality::Read,
+            vec![0.1; 10],
+        );
 
         let long_text = "a".repeat(100);
         let enriched = enrich_with_context(&long_text, &ctx);
@@ -441,7 +510,12 @@ mod tests {
     #[test]
     fn no_enrichment_stale_context() {
         let mut ctx = RoutingContext::default();
-        ctx.record_turn(Domain::SystemInfo, None, IntentModality::Read, vec![0.1; 10]);
+        ctx.record_turn(
+            Domain::SystemInfo,
+            None,
+            IntentModality::Read,
+            vec![0.1; 10],
+        );
         // Manually set last_turn_at to 120s ago to simulate stale context
         ctx.last_turn_at = Some(Instant::now() - Duration::from_secs(120));
 
@@ -460,7 +534,12 @@ mod tests {
     #[test]
     fn no_enrichment_very_short_input() {
         let mut ctx = RoutingContext::default();
-        ctx.record_turn(Domain::SystemInfo, None, IntentModality::Read, vec![0.1; 10]);
+        ctx.record_turn(
+            Domain::SystemInfo,
+            None,
+            IntentModality::Read,
+            vec![0.1; 10],
+        );
 
         let enriched = enrich_with_context("ab", &ctx); // 2 chars < MIN_ENRICH_LENGTH
         assert_eq!(enriched.text, "ab");

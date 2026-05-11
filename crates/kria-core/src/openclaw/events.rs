@@ -31,7 +31,10 @@ pub enum ContainerEvent {
     /// Container started successfully.
     Started { container_id: String },
     /// Container died (exit code non-zero).
-    Died { container_id: String, exit_code: i64 },
+    Died {
+        container_id: String,
+        exit_code: i64,
+    },
     /// Container was OOM-killed.
     OomKilled { container_id: String },
     /// Container was forcefully killed.
@@ -118,10 +121,7 @@ impl DockerEventSubscriber {
     async fn connect_and_stream(&self) -> Result<(), EventStreamError> {
         // Filter for container events matching our prefix
         let mut filters = std::collections::HashMap::new();
-        filters.insert(
-            "type".to_string(),
-            vec!["container".to_string()],
-        );
+        filters.insert("type".to_string(), vec!["container".to_string()]);
         filters.insert(
             "event".to_string(),
             vec![

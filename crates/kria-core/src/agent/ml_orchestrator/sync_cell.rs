@@ -3,8 +3,6 @@
 // Generates Python code for atomic artifact sync from hot SSD to Drive.
 // Protocol: .tmp → fsync → os.replace → manifest.json
 
-
-
 /// Generate a Python sync cell that atomically copies artifacts from hot to cold storage.
 pub fn generate_sync_cell(
     job_id: &str,
@@ -13,7 +11,8 @@ pub fn generate_sync_cell(
     cold_root: &str,
     artifacts: &[&str],
 ) -> String {
-    let artifact_list = artifacts.iter()
+    let artifact_list = artifacts
+        .iter()
         .map(|a| format!("\"{}\"", a))
         .collect::<Vec<_>>()
         .join(", ");
@@ -80,7 +79,13 @@ mod tests {
 
     #[test]
     fn sync_cell_contains_atomic_protocol() {
-        let code = generate_sync_cell("j1", "04_train", "/hot", "/cold", &["model.pth", "status.json"]);
+        let code = generate_sync_cell(
+            "j1",
+            "04_train",
+            "/hot",
+            "/cold",
+            &["model.pth", "status.json"],
+        );
         assert!(code.contains(".tmp"));
         assert!(code.contains("os.fsync"));
         assert!(code.contains("os.replace"));

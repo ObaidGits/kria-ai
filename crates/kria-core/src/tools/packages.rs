@@ -88,7 +88,8 @@ fn param(name: &str, ty: &str, desc: &str, required: bool) -> ParamDef {
 }
 
 fn parse_input<T: DeserializeOwned>(params: serde_json::Value) -> Result<T, ToolResult> {
-    serde_json::from_value(params).map_err(|error| ToolResult::err(format!("invalid parameters: {error}")))
+    serde_json::from_value(params)
+        .map_err(|error| ToolResult::err(format!("invalid parameters: {error}")))
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -144,9 +145,16 @@ async fn run_cmd_with_timeout(
                 Err(non_zero_error(stderr, stdout))
             }
         }
-        Err(ToolExecutionError::TimedOut { stderr, stdout, timeout_secs, .. }) => {
+        Err(ToolExecutionError::TimedOut {
+            stderr,
+            stdout,
+            timeout_secs,
+            ..
+        }) => {
             let details = non_zero_error(stderr, stdout);
-            Err(format!("command timed out after {timeout_secs}s: {details}"))
+            Err(format!(
+                "command timed out after {timeout_secs}s: {details}"
+            ))
         }
         Err(error) => Err(error.to_string()),
     }
@@ -172,7 +180,9 @@ async fn run_apply_cmd(program: &str, args: &[&str]) -> Result<String, String> {
             ..
         }) => {
             let details = non_zero_error(stderr, stdout);
-            Err(format!("command timed out after {timeout_secs}s: {details}"))
+            Err(format!(
+                "command timed out after {timeout_secs}s: {details}"
+            ))
         }
         Err(error) => Err(error.to_string()),
     }
@@ -299,9 +309,18 @@ async fn run_priv_cmd(priv_esc: PrivEsc, program: &str, args: &[&str]) -> Result
             if !stderr.is_empty() {
                 warn!("[packages] stderr: {}", &stderr[..stderr.len().min(500)]);
             }
-            Ok(if stdout.trim().is_empty() { stderr } else { stdout })
+            Ok(if stdout.trim().is_empty() {
+                stderr
+            } else {
+                stdout
+            })
         }
-        Err(ToolExecutionError::NonZeroExit { exit_code, stdout, stderr, .. }) => {
+        Err(ToolExecutionError::NonZeroExit {
+            exit_code,
+            stdout,
+            stderr,
+            ..
+        }) => {
             if !stdout.is_empty() {
                 info!("[packages] stdout: {}", &stdout[..stdout.len().min(500)]);
             }
@@ -309,11 +328,20 @@ async fn run_priv_cmd(priv_esc: PrivEsc, program: &str, args: &[&str]) -> Result
                 warn!("[packages] stderr: {}", &stderr[..stderr.len().min(500)]);
             }
             let err_output = non_zero_error(stderr, stdout);
-            Err(format!("command exited with code {exit_code:?}: {err_output}"))
+            Err(format!(
+                "command exited with code {exit_code:?}: {err_output}"
+            ))
         }
-        Err(ToolExecutionError::TimedOut { timeout_secs, stdout, stderr, .. }) => {
+        Err(ToolExecutionError::TimedOut {
+            timeout_secs,
+            stdout,
+            stderr,
+            ..
+        }) => {
             let err_output = non_zero_error(stderr, stdout);
-            Err(format!("command timed out after {timeout_secs}s: {err_output}"))
+            Err(format!(
+                "command timed out after {timeout_secs}s: {err_output}"
+            ))
         }
         Err(error) => {
             error!("[packages] Failed to spawn '{display_cmd}': {error}");

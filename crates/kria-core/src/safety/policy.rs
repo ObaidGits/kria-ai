@@ -7,7 +7,9 @@ use crate::platform::intent::scheme::{classify_url, SchemeError};
 use crate::safety::blacklist::BlacklistChecker;
 
 /// Risk classification tier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub enum RiskLevel {
     Green,
     Yellow,
@@ -397,8 +399,7 @@ impl PolicyEngine {
         //    command string to apply granular Green/Yellow/Red tiering.
         if matches!(action, "execute_bash" | "execute_powershell") {
             if let Some(cmd) = params.get("command").and_then(|v| v.as_str()) {
-                let classification =
-                    crate::safety::command_classifier::classify(cmd);
+                let classification = crate::safety::command_classifier::classify(cmd);
                 let mut reason = if classification.had_sudo {
                     format!(
                         "command-level tiering (sudo stripped): {}",

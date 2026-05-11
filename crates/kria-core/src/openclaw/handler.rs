@@ -30,11 +30,7 @@ pub struct OpenClawToolHandler {
 }
 
 impl OpenClawToolHandler {
-    pub fn new(
-        skill: SkillDescriptor,
-        pool: Arc<ContainerPool>,
-        audit: Arc<AuditLedger>,
-    ) -> Self {
+    pub fn new(skill: SkillDescriptor, pool: Arc<ContainerPool>, audit: Arc<AuditLedger>) -> Self {
         Self { skill, pool, audit }
     }
 
@@ -73,7 +69,11 @@ impl ToolHandler for OpenClawToolHandler {
             &self.skill.skill_id,
             self.skill.risk_level.as_str(),
             &params,
-            &ToolResult { success: true, data: serde_json::Value::Null, error: None },
+            &ToolResult {
+                success: true,
+                data: serde_json::Value::Null,
+                error: None,
+            },
             0,
             self.skill.resource_profile.resource_class.as_str(),
             "",
@@ -83,51 +83,76 @@ impl ToolHandler for OpenClawToolHandler {
         // 2. Checkout a container from the pool.
         let container = match self
             .pool
-            .checkout(self.skill.resource_profile.resource_class, &self.skill.skill_id)
+            .checkout(
+                self.skill.resource_profile.resource_class,
+                &self.skill.skill_id,
+            )
             .await
         {
             Ok(h) => h,
             Err(PoolError::MaxConcurrent(max)) => {
                 let err_msg = format!(
-                    "OpenClaw substrate: max concurrent invocations reached ({})", max
+                    "OpenClaw substrate: max concurrent invocations reached ({})",
+                    max
                 );
                 let mut entry = AuditLedger::create_invocation_entry(
                     AuditEventType::InvocationFailed,
-                    &self.skill.skill_id, &invocation_id, "", "",
-                    &self.skill.skill_id, self.skill.risk_level.as_str(),
+                    &self.skill.skill_id,
+                    &invocation_id,
+                    "",
+                    "",
+                    &self.skill.skill_id,
+                    self.skill.risk_level.as_str(),
                     &params,
-                    &ToolResult { success: false, data: serde_json::Value::Null, error: Some(err_msg.clone()) },
+                    &ToolResult {
+                        success: false,
+                        data: serde_json::Value::Null,
+                        error: Some(err_msg.clone()),
+                    },
                     start.elapsed().as_millis() as u64,
-                    self.skill.resource_profile.resource_class.as_str(), "",
+                    self.skill.resource_profile.resource_class.as_str(),
+                    "",
                 );
                 self.audit_append(&mut entry);
-                return ToolResult { success: false, data: serde_json::Value::Null, error: Some(err_msg) };
+                return ToolResult {
+                    success: false,
+                    data: serde_json::Value::Null,
+                    error: Some(err_msg),
+                };
             }
             Err(e) => {
                 let err_msg = format!("OpenClaw substrate error: {}", e);
                 let mut entry = AuditLedger::create_invocation_entry(
                     AuditEventType::InvocationFailed,
-                    &self.skill.skill_id, &invocation_id, "", "",
-                    &self.skill.skill_id, self.skill.risk_level.as_str(),
+                    &self.skill.skill_id,
+                    &invocation_id,
+                    "",
+                    "",
+                    &self.skill.skill_id,
+                    self.skill.risk_level.as_str(),
                     &params,
-                    &ToolResult { success: false, data: serde_json::Value::Null, error: Some(err_msg.clone()) },
+                    &ToolResult {
+                        success: false,
+                        data: serde_json::Value::Null,
+                        error: Some(err_msg.clone()),
+                    },
                     start.elapsed().as_millis() as u64,
-                    self.skill.resource_profile.resource_class.as_str(), "",
+                    self.skill.resource_profile.resource_class.as_str(),
+                    "",
                 );
                 self.audit_append(&mut entry);
-                return ToolResult { success: false, data: serde_json::Value::Null, error: Some(err_msg) };
+                return ToolResult {
+                    success: false,
+                    data: serde_json::Value::Null,
+                    error: Some(err_msg),
+                };
             }
         };
 
         // 3. Execute via MCP bridge inside the ephemeral container.
         let timeout = Duration::from_secs(self.skill.resource_profile.timeout_secs);
-        let raw_result = execute_in_container(
-            &container,
-            &self.skill.skill_id,
-            &params,
-            timeout,
-        )
-        .await;
+        let raw_result =
+            execute_in_container(&container, &self.skill.skill_id, &params, timeout).await;
 
         let duration_ms = start.elapsed().as_millis() as u64;
         let container_id = container.container_id.clone();
@@ -245,8 +270,7 @@ async fn execute_in_container(
                 }
             } else {
                 // Try to parse as JSON, fall back to string
-                let data = serde_json::from_str(&text)
-                    .unwrap_or(serde_json::json!(text));
+                let data = serde_json::from_str(&text).unwrap_or(serde_json::json!(text));
 
                 ToolResult {
                     success: true,

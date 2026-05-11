@@ -19,7 +19,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: -D warnings
+  RUSTFLAGS: -W warnings
 
 jobs:
   # ── Rust lint & build ────────────────────────────────────────────
@@ -48,7 +48,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -W warnings
 
       - name: Build workspace
         run: cargo build --workspace

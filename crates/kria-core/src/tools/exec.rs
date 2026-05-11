@@ -143,8 +143,10 @@ impl ExecWrapper {
             })?;
 
         let max_output_bytes = self.max_output_bytes;
-        let stdout_task = tokio::spawn(async move { read_stream_limited(stdout, max_output_bytes).await });
-        let stderr_task = tokio::spawn(async move { read_stream_limited(stderr, max_output_bytes).await });
+        let stdout_task =
+            tokio::spawn(async move { read_stream_limited(stdout, max_output_bytes).await });
+        let stderr_task =
+            tokio::spawn(async move { read_stream_limited(stderr, max_output_bytes).await });
 
         let status = match tokio::time::timeout(self.timeout, child.wait()).await {
             Ok(Ok(status)) => status,
@@ -211,7 +213,10 @@ struct LimitedOutput {
     truncated: bool,
 }
 
-async fn read_stream_limited<R>(mut reader: R, max_output_bytes: usize) -> std::io::Result<LimitedOutput>
+async fn read_stream_limited<R>(
+    mut reader: R,
+    max_output_bytes: usize,
+) -> std::io::Result<LimitedOutput>
 where
     R: AsyncRead + Unpin,
 {

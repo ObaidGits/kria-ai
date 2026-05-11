@@ -1,3 +1,4 @@
+pub(crate) mod analytics;
 pub(crate) mod app_commands;
 pub(crate) mod app_state;
 pub(crate) mod automation;
@@ -8,24 +9,23 @@ pub(crate) mod command_helpers;
 pub(crate) mod constants;
 pub(crate) mod device_enrollment;
 pub(crate) mod device_tools;
+pub(crate) mod document_chat;
 pub(crate) mod google_workspace;
 pub(crate) mod history_helpers;
-pub(crate) mod document_chat;
 pub(crate) mod image_chat;
-pub(crate) mod runtime_status;
 pub(crate) mod local_api;
 pub(crate) mod mcp;
 pub(crate) mod media;
+pub(crate) mod openclaw;
 pub(crate) mod orchestrator_helpers;
 pub(crate) mod provisioning;
 pub(crate) mod runtime;
+pub(crate) mod runtime_status;
 pub(crate) mod sessions;
 pub(crate) mod telegram;
 pub(crate) mod test_runner;
 pub(crate) mod tool_result_helpers;
-pub(crate) mod analytics;
 pub(crate) mod voice;
-pub(crate) mod openclaw;
 pub(crate) mod voice_diagnostics;
 pub(crate) mod voice_runtime_helpers;
 
@@ -43,7 +43,6 @@ use google_workspace::{
     remove_google_account_registry_entry, GoogleWorkspaceRuntimeSnapshot,
 };
 use history_helpers::*;
-use runtime_status::collect_ironclad_status_from_parts;
 #[cfg(test)]
 use local_api::{local_api_chat, LocalApiBridgeState, LocalApiChatRequest};
 use local_api::{start_local_api_bridge, AgentLoopLocalApiResponder, LocalApiResponder};
@@ -52,9 +51,12 @@ use mcp::{
     sync_google_workspace_client_ref, update_mcp_health_status,
 };
 use orchestrator_helpers::*;
+use runtime_status::collect_ironclad_status_from_parts;
 use tool_result_helpers::*;
 use voice_runtime_helpers::*;
 
+#[allow(unused_imports)]
+pub use analytics::get_analytics_dashboard;
 #[allow(unused_imports)]
 pub use app_commands::{
     approve_action, cancel_executive_task, cancel_request, cancel_turn, deny_action, get_alerts,
@@ -74,11 +76,11 @@ pub use automation::{
 #[allow(unused_imports)]
 pub use chat::{send_lab_message, send_message};
 #[allow(unused_imports)]
-pub use document_chat::send_document_message;
-#[allow(unused_imports)]
 pub use colab::{
     connect_colab_tier, disconnect_colab_tier, get_colab_tier_status, set_colab_selected_notebook,
 };
+#[allow(unused_imports)]
+pub use document_chat::send_document_message;
 #[allow(unused_imports)]
 pub use google_workspace::{
     connect_google_workspace, disconnect_google_workspace, get_google_workspace_status,
@@ -86,12 +88,6 @@ pub use google_workspace::{
 };
 #[allow(unused_imports)]
 pub use image_chat::send_image_message;
-#[allow(unused_imports)]
-pub use runtime_status::{
-    delete_target, get_ironclad_config, get_ironclad_forensics, get_ironclad_status,
-    get_orchestrator_status, register_new_target, request_ironclad_hard_reset,
-    request_ironclad_soft_reset, update_ironclad_config, update_target,
-};
 #[allow(unused_imports)]
 pub use mcp::{
     add_mcp_server, list_mcp_servers, reconcile_mcp_runtime, remove_mcp_server,
@@ -102,12 +98,24 @@ pub use media::{
     get_session_media, open_html_for_print, read_local_image, save_export_file, save_uploaded_image,
 };
 #[allow(unused_imports)]
+pub use openclaw::{
+    clawhub_fetch_remote_skills, clawhub_install_skill, clawhub_list_skills, clawhub_search_skills,
+    clawhub_toggle_skill, clawhub_uninstall_skill, openclaw_substrate_restart,
+    openclaw_substrate_status,
+};
+#[allow(unused_imports)]
 pub use provisioning::{
     complete_provisioning, get_hardware_profile, get_provisioning_diagnostics,
     get_provisioning_state, run_provisioning_step, set_provisioning_backend, start_provisioning,
 };
 #[allow(unused_imports)]
 pub use runtime::{init_runtime, shutdown_runtime};
+#[allow(unused_imports)]
+pub use runtime_status::{
+    delete_target, get_ironclad_config, get_ironclad_forensics, get_ironclad_status,
+    get_orchestrator_status, register_new_target, request_ironclad_hard_reset,
+    request_ironclad_soft_reset, update_ironclad_config, update_target,
+};
 #[allow(unused_imports)]
 pub use sessions::{
     auto_rename_session, create_session, delete_session, get_session_history, list_sessions,
@@ -119,8 +127,6 @@ pub use telegram::{
     update_telegram_config,
 };
 #[allow(unused_imports)]
-pub use analytics::get_analytics_dashboard;
-#[allow(unused_imports)]
 pub use test_runner::{
     delete_all_test_logs, delete_test_report, get_test_run_state, list_docker_containers,
     list_test_history, list_test_targets, read_test_report, start_test_run, stop_test_run,
@@ -129,12 +135,6 @@ pub use test_runner::{
 pub use voice::{get_voice_status, start_voice, stop_voice, voice_v2_abort, voice_v2_speak};
 #[allow(unused_imports)]
 pub use voice_diagnostics::voice_v2_status;
-#[allow(unused_imports)]
-pub use openclaw::{
-    clawhub_fetch_remote_skills, clawhub_install_skill, clawhub_list_skills,
-    clawhub_search_skills, clawhub_toggle_skill, clawhub_uninstall_skill,
-    openclaw_substrate_restart, openclaw_substrate_status,
-};
 
 use async_stream::stream;
 use async_trait::async_trait;

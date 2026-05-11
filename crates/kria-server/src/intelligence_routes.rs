@@ -13,15 +13,13 @@ use crate::ServerState;
 use axum::{
     extract::State,
     http::StatusCode,
-    response::{sse::Event, sse::KeepAlive, sse::Sse, IntoResponse, Response},
+    response::{sse::Event, sse::KeepAlive, sse::Sse},
     routing::{get, post},
     Json, Router,
 };
-use kria_core::agent::executive::types::ControllerEvent;
 use std::convert::Infallible;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::watch;
 
 /// Register all intelligence-related routes on the given router.
 pub fn intelligence_routes() -> Router<Arc<ServerState>> {
@@ -32,7 +30,10 @@ pub fn intelligence_routes() -> Router<Arc<ServerState>> {
         .route("/api/executive/tasks/{task_id}/cancel", post(cancel_task))
         // Quarantine Registry
         .route("/api/quarantine/tools", get(quarantine_list))
-        .route("/api/quarantine/{tool_id}/approve", post(quarantine_approve))
+        .route(
+            "/api/quarantine/{tool_id}/approve",
+            post(quarantine_approve),
+        )
         .route("/api/quarantine/{tool_id}/reject", post(quarantine_reject))
         // Intelligence Status
         .route("/api/intelligence/status", get(intelligence_status))
@@ -199,9 +200,7 @@ async fn quarantine_reject(
 /// Returns the current feature flag state for all intelligence modules.
 /// This endpoint always works (no feature gate) so the frontend can
 /// discover which modules are enabled.
-async fn intelligence_status(
-    State(state): State<Arc<ServerState>>,
-) -> Json<serde_json::Value> {
+async fn intelligence_status(State(state): State<Arc<ServerState>>) -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "executive": {
             "enabled": state.config.executive.enabled,

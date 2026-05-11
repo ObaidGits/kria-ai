@@ -168,9 +168,7 @@ async fn live_install_workflow_opt_in_real_install() {
         search_result.error
     );
 
-    let before = check
-        .execute(serde_json::json!({ "name": package }))
-        .await;
+    let before = check.execute(serde_json::json!({ "name": package })).await;
     assert!(
         before.success,
         "check_package_installed preflight call failed: {:?}",
@@ -194,9 +192,7 @@ async fn live_install_workflow_opt_in_real_install() {
         "install_package must report success=true in payload"
     );
 
-    let after = check
-        .execute(serde_json::json!({ "name": package }))
-        .await;
+    let after = check.execute(serde_json::json!({ "name": package })).await;
     assert!(
         after.success,
         "check_package_installed post-install call failed: {:?}",
