@@ -152,6 +152,8 @@ fn main() {
             commands::openclaw::clawhub_toggle_skill,
             commands::openclaw::openclaw_substrate_status,
             commands::openclaw::openclaw_substrate_restart,
+            commands::gui_automation_control::get_gui_automation_status,
+            commands::gui_automation_control::set_gui_automation_enabled,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

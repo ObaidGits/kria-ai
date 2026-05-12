@@ -1,11 +1,12 @@
 import { Component, Show, For, createSignal, createEffect, createMemo, onMount, onCleanup } from "solid-js";
 import { listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 import { appStore } from "../stores/app";
 import { SUPPORTED_LANGUAGES, setLocale } from "../stores/i18n";
 import SkillMarketplace from "./SkillMarketplace";
 import SubstrateStatus from "./SubstrateStatus";
 
-type Tab = "llm" | "voice" | "safety" | "ui" | "assistant" | "labs" | "search" | "services" | "telegram" | "automation" | "hardware" | "knowledge" | "google" | "colab" | "ironclad" | "marketplace";
+type Tab = "llm" | "voice" | "safety" | "ui" | "assistant" | "labs" | "search" | "services" | "telegram" | "automation" | "gui_automation" | "hardware" | "knowledge" | "google" | "colab" | "ironclad" | "marketplace";
 
 interface AssistantFrontendPrefs {
   persona: "operator" | "coach" | "researcher" | "chief_of_staff";
@@ -95,6 +96,58 @@ const SettingsModal: Component = () => {
   const [colabNotebookId, setColabNotebookId] = createSignal("");
   const [colabBusy, setColabBusy] = createSignal(false);
   const [colabMessage, setColabMessage] = createSignal("");
+
+  // RFC 008: GUI Automation state
+  type GuiAutomationStatus = {
+    vision_sidecar: string;
+    uinput_daemon: string;
+    automation_enabled: boolean;
+    global_halt_engaged: boolean;
+    halt_reason: string | null;
+    vision_pid: number | null;
+    uinput_pid: number | null;
+    orchestrator_available: boolean;
+  };
+  const [guiAutomationStatus, setGuiAutomationStatus] = createSignal<GuiAutomationStatus | null>(null);
+  const [guiAutomationBusy, setGuiAutomationBusy] = createSignal(false);
+  const [guiAutomationError, setGuiAutomationError] = createSignal("");
+
+  async function loadGuiAutomationStatus() {
+    try {
+      const status = await invoke<GuiAutomationStatus>("get_gui_automation_status");
+      setGuiAutomationStatus(status);
+      setGuiAutomationError("");
+    } catch (e: any) {
+      setGuiAutomationError(String(e?.message ?? e));
+    }
+  }
+
+  async function toggleGuiAutomation(enabled: boolean) {
+    setGuiAutomationBusy(true);
+    setGuiAutomationError("");
+    try {
+      const status = await invoke<GuiAutomationStatus>("set_gui_automation_enabled", { enabled });
+      setGuiAutomationStatus(status);
+    } catch (e: any) {
+      setGuiAutomationError(String(e?.message ?? e));
+    } finally {
+      setGuiAutomationBusy(false);
+    }
+  }
+
+  // Poll GUI automation status when its tab is active
+  createEffect(() => {
+    if (activeTab() !== "gui_automation") return;
+    let cancelled = false;
+    void loadGuiAutomationStatus();
+    const timer = setInterval(() => {
+      if (!cancelled) void loadGuiAutomationStatus();
+    }, 2000);
+    onCleanup(() => {
+      cancelled = true;
+      clearInterval(timer);
+    });
+  });
 
   // Ironclad state
   const [ironcladHighRecoverySlo, setIroncladHighRecoverySlo] = createSignal("500");
@@ -733,6 +786,12 @@ const SettingsModal: Component = () => {
           label: "Automation",
           icon: "U",
           description: "Inspect health, schedule jobs, and manage stored macros and workflow assets.",
+        },
+        {
+          id: "gui_automation",
+          label: "GUI Automation",
+          icon: "G",
+          description: "Master switch for GUI automation, with live status of vision sidecar and uinput daemon.",
         },
         {
           id: "hardware",
@@ -1943,6 +2002,144 @@ const SettingsModal: Component = () => {
                   )}
                 </For>
               </div>
+            </section>
+          </Show>
+
+          {/* RFC 008: GUI Automation Tab — Master Toggle + Service Liveness */}
+          <Show when={activeTab() === "gui_automation"}>
+            <section class="settings-section">
+              <h3>GUI Automation Master Switch</h3>
+              <p class="field-hint">
+                When enabled, KRIA can control your mouse, keyboard, and read your screen for
+                GUI automation tasks. When disabled, both the vision sidecar and the uinput
+                input daemon are killed and an internal safety halt is engaged.
+              </p>
+
+              <Show when={!guiAutomationStatus()?.orchestrator_available}>
+                <div class="settings-field" style={{ "background": "#3a1f1f", "padding": "12px", "border-radius": "6px", "border": "1px solid #6b3030" }}>
+                  <strong style={{ "color": "#ff8080" }}>⚠ Orchestrator Unavailable</strong>
+                  <p class="field-hint" style={{ "margin-top": "8px" }}>
+                    The service orchestrator failed to start. Common causes:
+                  </p>
+                  <ul style={{ "margin": "8px 0 0 16px", "color": "#cccccc", "font-size": "13px" }}>
+                    <li>The <code>kria-uinput-daemon</code> binary is missing — run <code>cargo build --release -p kria-uinput-daemon</code></li>
+                    <li>Passwordless sudo is not configured for <code>kria-uinput-daemon</code></li>
+                    <li>The vision sidecar's <code>main.py</code> could not be located</li>
+                  </ul>
+                </div>
+              </Show>
+
+              <div class="settings-field" style={{ "display": "flex", "align-items": "center", "gap": "16px" }}>
+                <label class="toggle-switch" style={{ "display": "inline-flex", "align-items": "center", "gap": "12px", "cursor": guiAutomationBusy() ? "wait" : "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={guiAutomationStatus()?.automation_enabled ?? false}
+                    disabled={guiAutomationBusy() || !guiAutomationStatus()?.orchestrator_available}
+                    onChange={(e) => {
+                      void toggleGuiAutomation((e.currentTarget as HTMLInputElement).checked);
+                    }}
+                  />
+                  <span style={{ "font-size": "16px", "font-weight": "600" }}>
+                    {guiAutomationStatus()?.automation_enabled ? "Enabled" : "Disabled"}
+                  </span>
+                </label>
+                <Show when={guiAutomationStatus()?.global_halt_engaged}>
+                  <span style={{
+                    "background": "#5a2020",
+                    "color": "#ff9090",
+                    "padding": "4px 10px",
+                    "border-radius": "12px",
+                    "font-size": "12px",
+                    "font-weight": "600",
+                  }}>
+                    🛑 SAFETY HALT ENGAGED
+                  </span>
+                </Show>
+              </div>
+
+              <Show when={guiAutomationStatus()?.global_halt_engaged && guiAutomationStatus()?.halt_reason}>
+                <div class="settings-field" style={{
+                  "padding": "10px 14px",
+                  "background": "#3a1f1f",
+                  "border": "1px solid #6b3030",
+                  "border-radius": "6px",
+                  "color": "#ffd0d0",
+                  "font-family": "monospace",
+                  "font-size": "13px",
+                }}>
+                  <strong style={{ "color": "#ff8080" }}>Halt reason:</strong>{" "}
+                  {guiAutomationStatus()?.halt_reason}
+                </div>
+              </Show>
+
+              <Show when={guiAutomationError()}>
+                <div class="settings-field" style={{ "color": "#ff8080", "padding": "8px 12px", "background": "#2a1010", "border-radius": "4px" }}>
+                  Error: {guiAutomationError()}
+                </div>
+              </Show>
+
+              <h3 style={{ "margin-top": "24px" }}>Service Status</h3>
+              <div class="settings-field">
+                <For each={[
+                  { key: "vision_sidecar" as const, label: "Vision Sidecar (Python OmniParser)", pid: "vision_pid" as const },
+                  { key: "uinput_daemon" as const, label: "UInput Daemon (Input Injection)", pid: "uinput_pid" as const },
+                ]}>
+                  {(svc) => {
+                    const status = () => guiAutomationStatus()?.[svc.key] ?? "stopped";
+                    const pid = () => guiAutomationStatus()?.[svc.pid];
+                    const colorFor = (s: string) => {
+                      switch (s) {
+                        case "running": return "#4ade80";
+                        case "starting": return "#fbbf24";
+                        case "failed": return "#f87171";
+                        case "stopped":
+                        default: return "#94a3b8";
+                      }
+                    };
+                    return (
+                      <div style={{
+                        "display": "flex",
+                        "align-items": "center",
+                        "justify-content": "space-between",
+                        "padding": "10px 14px",
+                        "margin-bottom": "8px",
+                        "background": "#1f2937",
+                        "border-radius": "6px",
+                        "border": "1px solid #374151",
+                      }}>
+                        <div style={{ "display": "flex", "align-items": "center", "gap": "12px" }}>
+                          <span style={{
+                            "width": "10px",
+                            "height": "10px",
+                            "border-radius": "50%",
+                            "background": colorFor(status()),
+                            "display": "inline-block",
+                            "box-shadow": `0 0 8px ${colorFor(status())}`,
+                          }} />
+                          <span style={{ "font-weight": "500" }}>{svc.label}</span>
+                        </div>
+                        <div style={{ "display": "flex", "align-items": "center", "gap": "12px", "color": "#9ca3af", "font-size": "13px" }}>
+                          <span style={{ "color": colorFor(status()), "font-weight": "600", "text-transform": "uppercase" }}>
+                            {status()}
+                          </span>
+                          <Show when={pid()}>
+                            <span style={{ "font-family": "monospace" }}>PID {pid()}</span>
+                          </Show>
+                        </div>
+                      </div>
+                    );
+                  }}
+                </For>
+              </div>
+
+              <h3 style={{ "margin-top": "24px" }}>Safety Anchors (RFC 008)</h3>
+              <ul style={{ "color": "#cccccc", "font-size": "13px", "line-height": "1.8", "margin": "0 0 0 16px" }}>
+                <li><strong>Logical Anchor:</strong> Hard 100-action budget cap enforced in <code>execute_workflow</code></li>
+                <li><strong>Physical Anchor:</strong> Target window lock — immediate halt on PID/class mismatch for type/click</li>
+                <li><strong>Hardware Anchor:</strong> Dead-man's switch — daemon flushes buffered keys on disconnect</li>
+                <li><strong>Intelligence Anchor:</strong> CompletionFlag prevents re-typing on self-induced perceptual diffs</li>
+                <li><strong>Master Kill:</strong> Global safety halt blocks all tool calls when this toggle is off</li>
+              </ul>
             </section>
           </Show>
 

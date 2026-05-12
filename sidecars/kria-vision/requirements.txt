@@ -1,0 +1,23 @@
+# KRIA Vision Sidecar Dependencies
+# Python 3.10+ required
+
+# FastAPI framework
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+
+# Image processing
+pillow>=10.0.0
+numpy>=1.24.0
+
+# Data validation
+pydantic>=2.0.0
+
+# FastAPI multipart form parsing (required for UploadFile)
+python-multipart>=0.0.9
+
+# Future ML dependencies (commented until Phase 3)
+# torch>=2.0.0
+# torchvision>=0.15.0
+# onnxruntime>=1.16.0
+# transformers>=4.35.0
+# opencv-python>=4.8.0

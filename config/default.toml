@@ -200,7 +200,7 @@ mmproj_vram_mb = 1300                        # mmproj-F16.gguf ~1291 MiB
 
 # ── Colab Cloud Tier ────────────────────────────────────────────────
 [colab]
-enabled = false
+enabled = true
 mcp_server_name = "colab-mcp"               # Official Colab MCP server name (uvx --from git+https://github.com/googlecolab/colab-mcp colab-mcp)
 connect_timeout_secs = 60
 keepalive_interval_secs = 120
@@ -248,7 +248,7 @@ conditioning_cache_max_mb = 500
 idle_unload_secs = 300                       # Seconds of inactivity before ComfyUI model unload
 prewarm = "auto"                             # "auto" | "always" | "never"
 prewarm_delay_secs = 30                      # Delay after startup before prewarm attempt
-cloud_fallback = "always"                    # "auto_offer" | "always" | "off" — always use cloud when no local GPU
+cloud_fallback = "auto_offer"                    # "auto_offer" | "always" | "off" — always use cloud when no local GPU
 pollinations_base_url = "https://image.pollinations.ai"
 max_concurrent_jobs = 2
 max_queued_swap_jobs = 4
@@ -269,4 +269,4 @@ prompt_enhance_mode = "auto"
 #   "local_with_cloud_fallback"  Local primary; cloud on any local failure
 #   "cloud_with_local_fallback"  Cloud primary; local on cloud failure
 # Runtime override: KRIA_IMAGE_MODE env var (e.g. KRIA_IMAGE_MODE=cloud_only)
-image_mode = "auto"
+image_mode = "local_only"

@@ -331,6 +331,8 @@ pub fn build_registry_full(
     super::vision::register(&reg, None, None);
     super::desktop::register(&reg);
     super::developer::register(&reg);
+    super::gui_automation::register(&reg);
+    super::vision_automation::register(&reg);
     super::i18n::register(&reg);
 
     // Keep Google Workspace tools visible in the core registry even when MCP is

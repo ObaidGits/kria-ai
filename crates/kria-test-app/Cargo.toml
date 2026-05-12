@@ -1,0 +1,16 @@
+[package]
+name = "kria-test-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Disposable GUI stand-in app for KRIA's safe E2E automation tests"
+
+[[bin]]
+name = "kria-test-app"
+path = "src/main.rs"
+
+[dependencies]
+# Skeleton: only stdlib + anyhow until P5/P6 wires in a real Xvfb-compatible
+# GUI toolkit (likely `eframe`/`egui`). Keeping dep surface small now so the
+# default workspace `cargo build` stays fast.
+anyhow = { workspace = true }

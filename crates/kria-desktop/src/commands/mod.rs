@@ -11,6 +11,7 @@ pub(crate) mod device_enrollment;
 pub(crate) mod device_tools;
 pub(crate) mod document_chat;
 pub(crate) mod google_workspace;
+pub(crate) mod gui_automation_control;
 pub(crate) mod history_helpers;
 pub(crate) mod image_chat;
 pub(crate) mod local_api;

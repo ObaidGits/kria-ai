@@ -5,12 +5,42 @@ import DOMPurify from "dompurify";
 import { invoke } from "@tauri-apps/api/core";
 import { appStore, type Message, type ToolCall } from "../stores/app";
 import ToolCallBadge from "./ToolCallBadge";
+import GuiWorkflowViewer from "./GuiWorkflowViewer";
+import type { GuiWorkflow } from "../types/guiAutomation";
 
 function inferExecutionSource(toolName: string): "native" | "mcp" | "openclaw" | "cloud" {
   if (toolName.startsWith("oc_")) return "openclaw";
   if (toolName.startsWith("gw_")) return "cloud";
   if (toolName.startsWith("mcp_") || toolName.includes("_mcp")) return "mcp";
   return "native";
+}
+
+// Detect if tool call is a GUI workflow execution
+function isGuiWorkflowTool(tc: ToolCall): boolean {
+  return tc.name === "execute_gui_workflow" || 
+         tc.name === "gui_click_element" ||
+         tc.name === "gui_type_text" ||
+         tc.name === "gui_press_shortcut" ||
+         tc.name === "gui_get_screen_elements";
+}
+
+// Extract GuiWorkflow from tool call result
+function extractGuiWorkflow(tc: ToolCall): GuiWorkflow | null {
+  if (!isGuiWorkflowTool(tc)) return null;
+  const result = tc.result as Record<string, unknown> | undefined;
+  if (!result) return null;
+  
+  // If result has workflow field, extract it
+  if (result.workflow && typeof result.workflow === "object") {
+    return result.workflow as GuiWorkflow;
+  }
+  
+  // If result IS the workflow
+  if (result.task_id && Array.isArray(result.sub_goals)) {
+    return result as unknown as GuiWorkflow;
+  }
+  
+  return null;
 }
 
 function msgFileIcon(mime: string, name: string): string {
@@ -1014,7 +1044,24 @@ const MessageBubble: Component<Props> = (props) => {
         <Show when={props.message.toolCalls?.length}>
           <div class="msg-tool-calls">
             <For each={props.message.toolCalls}>
-              {(tc) => <ToolCallBlock tc={tc} onOpenImage={openImagePreview} />}
+              {(tc) => {
+                // Check if this is a GUI workflow tool call
+                const workflow = extractGuiWorkflow(tc);
+                if (workflow) {
+                  // Render GUI workflow viewer instead of standard tool block
+                  return (
+                    <div class="gui-workflow-container my-3">
+                      <GuiWorkflowViewer
+                        initialWorkflow={workflow}
+                        taskId={workflow.task_id}
+                        showKillSwitch={tc.status === "running"}
+                      />
+                    </div>
+                  );
+                }
+                // Standard tool call block
+                return <ToolCallBlock tc={tc} onOpenImage={openImagePreview} />;
+              }}
             </For>
           </div>
         </Show>

@@ -16,6 +16,7 @@ pub mod documents;
 pub mod dynamic_gen;
 pub mod exec;
 pub mod file_ops;
+pub mod gui_automation;
 pub mod google_workspace;
 pub mod google_workspace_contract;
 pub mod i18n;
@@ -39,6 +40,7 @@ pub mod subprocess_executor;
 pub mod system_config;
 pub mod system_info;
 pub mod vision;
+pub mod vision_automation;
 
 #[derive(Clone)]
 pub struct ToolContext {

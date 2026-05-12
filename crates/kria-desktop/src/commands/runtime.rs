@@ -830,6 +830,36 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
 
     let fleet_control_runtime_for_bridge = fleet_control_runtime.clone();
 
+    // RFC 008: Spawn the unified GUI service orchestrator (vision sidecar + uinput daemon).
+    // Best-effort: if binaries are missing or sudo isn't configured, we set the field to
+    // None and rely on the GlobalSafetyHalt (engaged by the orchestrator on failure) to
+    // prevent any unsafe automation.
+    let gui_orchestrator = match kria_core::orchestrator::OrchestratorConfig::auto_detect() {
+        Ok(cfg) => {
+            let orch = Arc::new(kria_core::orchestrator::ServiceOrchestrator::new(cfg));
+            match orch.start().await {
+                Ok(()) => {
+                    tracing::info!("[INIT] GUI service orchestrator started");
+                    Some(orch)
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "[INIT] GUI service orchestrator failed to start: {e} — automation disabled"
+                    );
+                    kria_core::safety::engage_halt("orchestrator startup failure");
+                    None
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                "[INIT] GUI orchestrator auto-detect failed: {e} — automation disabled"
+            );
+            kria_core::safety::engage_halt("orchestrator auto-detect failure");
+            None
+        }
+    };
+
     let state = AppState {
         config,
         model_router,
@@ -868,6 +898,7 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         image_orchestrator,
         skill_registry: openclaw_registry,
         container_pool: openclaw_pool,
+        gui_orchestrator,
     };
 
     if handle.state::<AppStateCell>().set(state).is_err() {
@@ -1345,6 +1376,13 @@ pub async fn shutdown_runtime(handle: &AppHandle) {
     };
 
     tracing::info!("runtime shutdown started");
+
+    // RFC 008: Engage global halt + shut down GUI orchestrator early so no further
+    // automation tool calls can fire during the rest of the shutdown sequence.
+    kria_core::safety::engage_halt("runtime shutdown");
+    if let Some(gui_orch) = state.gui_orchestrator.as_ref() {
+        gui_orch.shutdown().await;
+    }
 
     state
         .voice_active

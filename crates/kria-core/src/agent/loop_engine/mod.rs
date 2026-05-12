@@ -2446,6 +2446,155 @@ impl AgentLoop {
             return;
         }
 
+        // ═══════════════════════════════════════════════════════════════════════════
+        // RFC 007 Phase 4: GUI HTN Routing - BYPASS ReAct loop for GUI automation
+        // ═══════════════════════════════════════════════════════════════════════════
+        // Check if this intent should route to HTN GuiExecutor instead of ReAct loop.
+        // This ensures GUI automation gets: kill switch protection, visual hash verification,
+        // bounded micro-retries, and safe abort sequences.
+        use crate::agent::gui_wiring::GuiExecutionCoordinator;
+        use crate::agent::htn_integration::requires_gui_automation;
+        
+        let should_route_to_gui = GuiExecutionCoordinator::should_route_to_gui_executor(&turn_gate_plan)
+            || requires_gui_automation(&last_user_text);
+        
+        if should_route_to_gui {
+            log_pipeline_step(
+                session_id,
+                "gui_htn_routing",
+                "Routing to HTN GuiExecutor (bypassing ReAct loop)",
+                Some(serde_json::json!({
+                    "turn_gate": {
+                        "operation": format!("{:?}", turn_gate_plan.intent.operation),
+                        "direct_tool_hint": turn_gate_plan.direct_tool_hint,
+                    },
+                    "user_text_preview": sanitize_text_for_logs(&last_user_text, 100),
+                })),
+            );
+            
+            // Create kill switch interceptor for this workflow
+            let socket_path = std::path::PathBuf::from(
+                std::env::var("KRIA_UINPUT_SOCKET")
+                    .unwrap_or_else(|_| "/tmp/kria-uinput.sock".to_string())
+            );
+            let gui_backend = Arc::new(crate::tools::gui_automation::YdotoolBackend::new(socket_path));
+            let workflow_cancellation = tokio_util::sync::CancellationToken::new();
+            let kill_switch = Arc::new(crate::tools::gui_automation::KillSwitchInterceptor::new(
+                workflow_cancellation.clone(),
+                gui_backend,
+            ));
+            
+            // Create coordinator and generate workflow
+            let mut coordinator = GuiExecutionCoordinator::new(
+                Arc::clone(&self.tool_registry),
+                kill_switch,
+            );
+            
+            // First try the deterministic rule-based planner; if it cannot
+            // build a concrete workflow, ask the LLM to emit an HTN JSON plan.
+            let mut planned_workflow = coordinator.generate_workflow(
+                session_id,
+                &turn_gate_plan.intent,
+                &last_user_text,
+            );
+
+            if planned_workflow.is_none() {
+                if let Some(backend) = self.model_router.route("chat").await {
+                    log_pipeline_step(
+                        session_id,
+                        "gui_htn_llm_planner",
+                        "Rule-based planner produced no workflow; invoking LLM HTN planner",
+                        None,
+                    );
+                    match crate::agent::htn_integration::plan_gui_workflow_via_llm(
+                        backend.as_ref(),
+                        session_id,
+                        &last_user_text,
+                    )
+                    .await
+                    {
+                        Ok(wf) => {
+                            tracing::info!(
+                                target: "gui_htn_routing",
+                                task_id = %wf.task_id,
+                                steps = wf.sub_goals.len(),
+                                "LLM HTN planner produced workflow"
+                            );
+                            planned_workflow = Some(wf);
+                        }
+                        Err(e) => {
+                            log_pipeline_step(
+                                session_id,
+                                "gui_htn_llm_planner_failed",
+                                "LLM HTN planner failed; falling back to ReAct loop",
+                                Some(serde_json::json!({ "error": e })),
+                            );
+                        }
+                    }
+                } else {
+                    log_pipeline_step(
+                        session_id,
+                        "gui_htn_llm_planner_unavailable",
+                        "No chat backend available for LLM HTN planner; falling back to ReAct loop",
+                        None,
+                    );
+                }
+            }
+
+            if let Some(workflow) = planned_workflow {
+                // Emit workflow started event
+                let _ = event_tx.send(StreamEvent::Plan(format!(
+                    "Starting GUI workflow: {} ({} steps)",
+                    workflow.task_id,
+                    workflow.sub_goals.len()
+                )));
+                
+                // Execute via HTN executor (NOT ReAct loop)
+                let result = coordinator.execute_workflow(
+                    &workflow,
+                    workflow_cancellation,
+                ).await;
+                
+                // Emit completion event
+                if result.success {
+                    let summary = format!(
+                        "Done! I completed the GUI automation task ({} steps in {}ms).",
+                        result.completed_steps,
+                        result.duration_ms
+                    );
+                    tracing::info!(
+                        target: "gui_htn_routing",
+                        summary = %summary,
+                        "Emitting GUI workflow success token to UI"
+                    );
+                    // Emit token so the UI chat bubble displays the result
+                    let _ = event_tx.send(StreamEvent::Token(summary.clone()));
+                    let _ = event_tx.send(StreamEvent::Done(summary));
+                } else {
+                    let _ = event_tx.send(StreamEvent::Error(format!(
+                        "GUI workflow failed at step {}/{}: {}",
+                        result.completed_steps,
+                        result.total_steps,
+                        result.error.as_deref().unwrap_or("unknown error")
+                    )));
+                }
+                
+                // EARLY RETURN - completely bypass ReAct loop
+                return;
+            } else {
+                log_pipeline_step(
+                    session_id,
+                    "gui_htn_fallback",
+                    "GUI routing detected but no workflow generated; falling back to ReAct",
+                    None,
+                );
+            }
+        }
+        
+        // ═══════════════════════════════════════════════════════════════════════════
+        // Standard ReAct Loop (continues for non-GUI intents)
+        // ═══════════════════════════════════════════════════════════════════════════
+
         let backend = if wants_vision_backend {
             if inline_images_allowed_for_turn {
                 match self.model_router.route_vision().await {

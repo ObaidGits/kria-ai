@@ -101,6 +101,10 @@ pub struct AppState {
     pub skill_registry: Arc<kria_core::openclaw::registry::SkillRegistry>,
     /// OpenClaw container pool — None if Docker is unavailable (graceful degradation).
     pub container_pool: Option<Arc<kria_core::openclaw::ContainerPool>>,
+    /// RFC 008 Service Orchestrator — manages vision sidecar + uinput daemon lifecycle.
+    /// `None` if orchestrator failed to start (e.g. missing binaries); automation will
+    /// be globally halted in that case.
+    pub gui_orchestrator: Option<Arc<kria_core::orchestrator::ServiceOrchestrator>>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
