@@ -72,11 +72,21 @@
 
 ## Structure Change Watch
 <!-- AI-CONTEXT:START generated-change-watch -->
-- Last checked: 2026-05-11 14:21 UTC
-- Commit: `cff202237482`
+- Last checked: 2026-05-12 18:34 UTC
+- Commit: `4b327340d467`
 - Reason: structural changes.
-- `crates/kria-core/src/config.rs` changed; review stable summary only if its public role changed.
+- `Cargo.toml` changed; review stable summary only if its public role changed.
+- `crates/kria-core/src/agent/environment_grounder.rs` added; include only if it becomes an important navigation point.
+- `crates/kria-core/src/agent/execution_verifier.rs` added; include only if it becomes an important navigation point.
+- `crates/kria-core/src/agent/gui_wiring.rs` added; include only if it becomes an important navigation point.
+- `crates/kria-core/src/agent/htn_executor.rs` added; include only if it becomes an important navigation point.
+- `crates/kria-core/src/agent/htn_integration.rs` added; include only if it becomes an important navigation point.
+- `crates/kria-core/src/agent/intent_compiler.rs` added; include only if it becomes an important navigation point.
+- `crates/kria-core/src/agent/tool_dependencies.rs` added; include only if it becomes an important navigation point.
+- `crates/kria-core/src/agent/visual_reasoning.rs` added; include only if it becomes an important navigation point.
+- `crates/kria-core/src/bin/test_gui_e2e.rs` added; include only if it becomes an important navigation point.
 - `crates/kria-core/src/lib.rs` changed; review stable summary only if its public role changed.
-- `crates/kria-server/src/main.rs` changed; review stable summary only if its public role changed.
+- `crates/kria-core/src/orchestrator/mod.rs` added; include only if it becomes an important navigation point.
+- 9 more relevant files omitted for brevity.
 - Next action: Use `ai-context/prompts/update_map.txt` only if stable structure changed.
 <!-- AI-CONTEXT:END generated-change-watch -->

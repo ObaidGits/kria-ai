@@ -1,4 +1,9 @@
 {
-  "last_checked_utc": "2026-05-11T14:44:37.049712+00:00",
-  "last_processed_commit": "9684e2ae8279a9ecadfd296ea3334be90e69e40e"
+  "last_checked_utc": "2026-05-12T18:34:00.161847+00:00",
+  "last_processed_commit": "4b327340d4675378de0d90faf0309d89081c12dc",
+  "updated_docs": [
+    "CODEBASE_MAP.md",
+    "COMMON_FLOWS.md",
+    "FILE_INDEX.md"
+  ]
 }

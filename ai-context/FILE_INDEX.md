@@ -193,12 +193,9 @@
 
 ## File Index Change Watch
 <!-- AI-CONTEXT:START generated-change-watch -->
-- Last checked: 2026-05-11 13:47 UTC
-- Commit: `55bb04a50c32`
+- Last checked: 2026-05-12 18:34 UTC
+- Commit: `4b327340d467`
 - Reason: important file-level changes.
-- `crates/kria-core/src/agent/ml_orchestrator/mod.rs` added; include only if it becomes an important navigation point.
-- `crates/kria-core/src/openclaw/config.rs` added; include only if it becomes an important navigation point.
-- `crates/kria-core/src/openclaw/mod.rs` added; include only if it becomes an important navigation point.
-- `crates/kria-core/src/openclaw/registry.rs` added; include only if it becomes an important navigation point.
+- `crates/kria-core/src/orchestrator/mod.rs` added; include only if it becomes an important navigation point.
 - Next action: Use `ai-context/prompts/update_index.txt` only for important file additions/removals.
 <!-- AI-CONTEXT:END generated-change-watch -->

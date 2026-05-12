@@ -88,6 +88,7 @@ test.png
 # ── Graphify artifacts (generated) ───────────────────────────────
 /.graphify-cache/
 /.graphify-tmp/
+/.graphify-out/cache/
 
 # ── Test sandboxes & eval reports (generated) ────────────────────
 /target/test-sandbox/

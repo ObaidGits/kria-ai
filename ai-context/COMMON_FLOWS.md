@@ -104,21 +104,21 @@
 
 ## Flow Change Watch
 <!-- AI-CONTEXT:START generated-change-watch -->
-- Last checked: 2026-05-11 14:21 UTC
-- Commit: `cff202237482`
+- Last checked: 2026-05-12 18:34 UTC
+- Commit: `4b327340d467`
 - Reason: logic or control-flow changes.
-- `crates/kria-core/src/agent/curiosity/mod.rs` changed flow-adjacent logic; review exact behavior (needs verification).
-- `crates/kria-core/src/agent/executive/controller.rs` changed flow-adjacent logic; review exact behavior (needs verification).
-- `crates/kria-core/src/agent/executive/types.rs` changed flow-adjacent logic; review exact behavior (needs verification).
-- `crates/kria-core/src/agent/failure_analyzer/mod.rs` changed flow-adjacent logic; review exact behavior (needs verification).
-- `crates/kria-core/src/agent/failure_analyzer/patterns.rs` changed flow-adjacent logic; review exact behavior (needs verification).
-- `crates/kria-core/src/agent/failure_analyzer/store.rs` changed flow-adjacent logic; review exact behavior (needs verification).
-- `crates/kria-core/src/agent/failure_analyzer/types.rs` changed flow-adjacent logic; review exact behavior (needs verification).
-- `crates/kria-core/src/agent/loop_engine/intent_fallback.rs` changed flow-adjacent logic; review exact behavior (needs verification).
+- `crates/kria-core/src/agent/environment_grounder.rs` added; include only if it becomes an important navigation point.
+- `crates/kria-core/src/agent/execution_verifier.rs` added; include only if it becomes an important navigation point.
+- `crates/kria-core/src/agent/gui_wiring.rs` added; include only if it becomes an important navigation point.
+- `crates/kria-core/src/agent/htn_executor.rs` added; include only if it becomes an important navigation point.
+- `crates/kria-core/src/agent/htn_integration.rs` added; include only if it becomes an important navigation point.
+- `crates/kria-core/src/agent/intent_compiler.rs` added; include only if it becomes an important navigation point.
 - `crates/kria-core/src/agent/loop_engine/mod.rs` changed flow-adjacent logic; review exact behavior (needs verification).
-- `crates/kria-core/src/agent/loop_engine/response_helpers.rs` changed flow-adjacent logic; review exact behavior (needs verification).
-- `crates/kria-core/src/agent/ml_orchestrator/async_wrapper.rs` changed flow-adjacent logic; review exact behavior (needs verification).
-- `crates/kria-core/src/agent/ml_orchestrator/code_gate.rs` changed flow-adjacent logic; review exact behavior (needs verification).
-- 82 more relevant files omitted for brevity.
+- `crates/kria-core/src/agent/mod.rs` changed flow-adjacent logic; review exact behavior (needs verification).
+- `crates/kria-core/src/agent/tool_dependencies.rs` added; include only if it becomes an important navigation point.
+- `crates/kria-core/src/agent/visual_reasoning.rs` added; include only if it becomes an important navigation point.
+- `crates/kria-core/src/safety/global_halt.rs` added; include only if it becomes an important navigation point.
+- `crates/kria-core/src/safety/mod.rs` changed flow-adjacent logic; review exact behavior (needs verification).
+- 9 more relevant files omitted for brevity.
 - Next action: Use `ai-context/prompts/update_flows.txt` only when behavior changed.
 <!-- AI-CONTEXT:END generated-change-watch -->
