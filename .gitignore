@@ -89,6 +89,7 @@ test.png
 /.graphify-cache/
 /.graphify-tmp/
 /.graphify-out/cache/
+/.graphify-out/cache/*
 
 # ── Test sandboxes & eval reports (generated) ────────────────────
 /target/test-sandbox/

@@ -72,21 +72,21 @@
 
 ## Structure Change Watch
 <!-- AI-CONTEXT:START generated-change-watch -->
-- Last checked: 2026-05-12 18:34 UTC
-- Commit: `4b327340d467`
+- Last checked: 2026-05-15 19:08 UTC
+- Commit: `9c8f824d0631`
 - Reason: structural changes.
 - `Cargo.toml` changed; review stable summary only if its public role changed.
-- `crates/kria-core/src/agent/environment_grounder.rs` added; include only if it becomes an important navigation point.
-- `crates/kria-core/src/agent/execution_verifier.rs` added; include only if it becomes an important navigation point.
-- `crates/kria-core/src/agent/gui_wiring.rs` added; include only if it becomes an important navigation point.
-- `crates/kria-core/src/agent/htn_executor.rs` added; include only if it becomes an important navigation point.
-- `crates/kria-core/src/agent/htn_integration.rs` added; include only if it becomes an important navigation point.
-- `crates/kria-core/src/agent/intent_compiler.rs` added; include only if it becomes an important navigation point.
-- `crates/kria-core/src/agent/tool_dependencies.rs` added; include only if it becomes an important navigation point.
-- `crates/kria-core/src/agent/visual_reasoning.rs` added; include only if it becomes an important navigation point.
-- `crates/kria-core/src/bin/test_gui_e2e.rs` added; include only if it becomes an important navigation point.
-- `crates/kria-core/src/lib.rs` changed; review stable summary only if its public role changed.
-- `crates/kria-core/src/orchestrator/mod.rs` added; include only if it becomes an important navigation point.
-- 9 more relevant files omitted for brevity.
+- `crates/kria-core/src/agent/execution_verifier_impl.rs` added; include only if it becomes an important navigation point.
+- `crates/kria-core/src/agent/goal_tree.rs` added; include only if it becomes an important navigation point.
+- `crates/kria-core/src/agent/gui_planner.rs` added; include only if it becomes an important navigation point.
+- `crates/kria-core/src/agent/intent_compiler_llm.rs` added; include only if it becomes an important navigation point.
+- `crates/kria-core/src/agent/intent_gate.rs` added; include only if it becomes an important navigation point.
+- `crates/kria-core/src/agent/prompt_compiler.rs` added; include only if it becomes an important navigation point.
+- `crates/kria-core/src/agent/stage_executor.rs` added; include only if it becomes an important navigation point.
+- `crates/kria-core/src/agent/turn_memory.rs` added; include only if it becomes an important navigation point.
+- `crates/kria-core/src/agent/workflow_compiler.rs` added; include only if it becomes an important navigation point.
+- `crates/kria-core/src/config.rs` changed; review stable summary only if its public role changed.
+- `crates/kria-core/src/llm/budget.rs` added; include only if it becomes an important navigation point.
+- 39 more relevant files omitted for brevity.
 - Next action: Use `ai-context/prompts/update_map.txt` only if stable structure changed.
 <!-- AI-CONTEXT:END generated-change-watch -->
