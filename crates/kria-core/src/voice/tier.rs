@@ -147,7 +147,10 @@ impl VoiceTierProfile {
             "" | "auto" => tier.stt_engine().to_string(),
             other => other.to_string(),
         };
-        let stt_model = if cfg.stt_model.is_empty() || cfg.stt_model == "ggml-base.en.bin" {
+        let stt_model = if cfg.stt_model.is_empty()
+            || cfg.stt_model.eq_ignore_ascii_case("auto")
+            || cfg.stt_model == "ggml-base.en.bin"
+        {
             // Legacy default cannot transcribe Hindi — silently upgrade.
             tier.stt_model().to_string()
         } else {

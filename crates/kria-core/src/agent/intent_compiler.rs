@@ -45,7 +45,10 @@ pub enum TargetRef {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContentClass {
     Literal(String),
-    Generated { hint: String, language: Option<String> },
+    Generated {
+        hint: String,
+        language: Option<String>,
+    },
 }
 
 /// A precondition the user has *implicitly or explicitly declared* in the
@@ -96,11 +99,12 @@ pub struct ClarifyRequest {
 }
 
 /// The compiler contract.
+#[async_trait::async_trait]
 pub trait IntentCompiler: Send + Sync {
     /// Compile user text into a typed task spec. Returns `Err(ClarifyRequest)`
     /// when any blocking [`Ambiguity`] is present; the caller MUST forward
     /// the clarification to the user instead of attempting execution.
-    fn compile(
+    async fn compile(
         &self,
         user_text: &str,
         intent: &IntentEnvelope,
@@ -114,8 +118,9 @@ pub trait IntentCompiler: Send + Sync {
 /// implementation.
 pub struct NoopIntentCompiler;
 
+#[async_trait::async_trait]
 impl IntentCompiler for NoopIntentCompiler {
-    fn compile(
+    async fn compile(
         &self,
         _user_text: &str,
         _intent: &IntentEnvelope,
@@ -134,12 +139,11 @@ impl IntentCompiler for NoopIntentCompiler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::turn_gate::{
-        ComputeClass, HazardHint, IntentSource, Modality, Operation,
-    };
+    use crate::agent::intent_compiler::IntentCompiler;
+    use crate::agent::turn_gate::{ComputeClass, HazardHint, IntentSource, Modality, Operation};
 
-    #[test]
-    fn noop_compiler_never_errors() {
+    #[tokio::test]
+    async fn noop_compiler_never_errors() {
         let compiler = NoopIntentCompiler;
         let intent = IntentEnvelope::new(
             Modality::Text,
@@ -149,7 +153,10 @@ mod tests {
             0.9,
             IntentSource::FastEmbedSemanticRouter,
         );
-        let spec = compiler.compile("anything", &intent).expect("noop never errs");
+        let spec = compiler
+            .compile("anything", &intent)
+            .await
+            .expect("noop never errs");
         assert!(spec.targets.is_empty());
         assert!(spec.ambiguities.is_empty());
     }

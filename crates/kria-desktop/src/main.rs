@@ -144,6 +144,8 @@ fn main() {
             commands::provisioning::get_provisioning_diagnostics,
             commands::provisioning::get_hardware_profile,
             commands::voice_diagnostics::voice_v2_status,
+            commands::voice_diagnostics::voice_transcribe_audio_file,
+            commands::voice_diagnostics::voice_transcribe_uploaded_audio,
             commands::openclaw::clawhub_list_skills,
             commands::openclaw::clawhub_search_skills,
             commands::openclaw::clawhub_fetch_remote_skills,
@@ -154,6 +156,18 @@ fn main() {
             commands::openclaw::openclaw_substrate_restart,
             commands::gui_automation_control::get_gui_automation_status,
             commands::gui_automation_control::set_gui_automation_enabled,
+            commands::gui_automation_control::get_grounding_status,
+            // Universal Model Provider System
+            commands::providers::list_providers,
+            commands::providers::get_active_provider,
+            commands::providers::switch_provider,
+            commands::providers::switch_model,
+            commands::providers::test_provider_connection_cmd,
+            commands::providers::test_provider_config,
+            commands::providers::discover_provider_models,
+            commands::providers::upsert_provider,
+            commands::providers::remove_provider,
+            commands::providers::get_provider_types,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

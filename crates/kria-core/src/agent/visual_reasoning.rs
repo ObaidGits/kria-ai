@@ -45,7 +45,7 @@ impl EvidenceWrapper {
     pub fn from_ocr(text: &str, confidence: f32) -> Self {
         // Apply sentence-aware truncation (preserve negation context)
         let (truncated, was_truncated) = Self::sentence_aware_truncate(text, 100);
-        
+
         Self {
             raw_text: truncated,
             was_truncated,
@@ -54,17 +54,17 @@ impl EvidenceWrapper {
             captured_at: Instant::now(),
         }
     }
-    
+
     /// Sentence-aware truncation preserving negation context.
     /// Per RFC 008: "Do NOT delete" vs "Delete" - negation changes meaning
     fn sentence_aware_truncate(text: &str, max_chars: usize) -> (String, bool) {
         if text.len() <= max_chars {
             return (text.to_string(), false);
         }
-        
+
         // Find sentence boundary before max_chars
         let trunc_point = text.chars().take(max_chars).collect::<String>();
-        
+
         // Look for sentence-ending punctuation
         if let Some(last_sentence_end) = trunc_point.rfind(|c| c == '.' || c == '!' || c == '?') {
             // End at sentence boundary + 1 (include the punctuation)
@@ -74,12 +74,14 @@ impl EvidenceWrapper {
             // Find last negation modifier before truncation point
             let negation_keywords = ["not", "don't", "doesn't", "can't", "won't", "never"];
             let before_truncation = &text[..last_space];
-            
+
             // Check if we're cutting after a negation
             let has_negation_before = negation_keywords.iter().any(|&kw| {
-                before_truncation.to_lowercase().contains(&format!(" {} ", kw))
+                before_truncation
+                    .to_lowercase()
+                    .contains(&format!(" {} ", kw))
             });
-            
+
             if has_negation_before {
                 // Extend to next sentence boundary or safe word
                 if let Some(next_sentence) = text[last_space..].find(|c| c == '.' || c == '!') {
@@ -87,7 +89,7 @@ impl EvidenceWrapper {
                     return (extended, true);
                 }
             }
-            
+
             // Word boundary truncation
             (text[..last_space].to_string(), true)
         } else {
@@ -95,7 +97,7 @@ impl EvidenceWrapper {
             (trunc_point, true)
         }
     }
-    
+
     /// Get trust level for this evidence.
     /// OCR is always untrusted per RFC 008
     pub fn trust_level(&self) -> TrustLevel {
@@ -105,15 +107,22 @@ impl EvidenceWrapper {
             EvidenceSource::Library => TrustLevel::High,
         }
     }
-    
+
     /// Check if evidence contains destructive action keywords.
     /// Per RFC 008: "OCR action-verb heuristic reduces confidence"
     pub fn contains_destructive_keywords(&self) -> bool {
         let destructive_keywords = [
-            "delete", "remove", "destroy", "format", "wipe", "clear all",
-            "empty trash", "permanently delete", "uninstall",
+            "delete",
+            "remove",
+            "destroy",
+            "format",
+            "wipe",
+            "clear all",
+            "empty trash",
+            "permanently delete",
+            "uninstall",
         ];
-        
+
         let lower = self.raw_text.to_lowercase();
         destructive_keywords.iter().any(|&kw| lower.contains(kw))
     }
@@ -177,11 +186,11 @@ impl ContradictionDetector {
     ) -> Option<VisualOcrContradiction> {
         // Get expected semantic from icon library
         let visual_signature = Self::extract_visual_signature(element);
-        
+
         if let Some(icon_semantic) = icon_library.lookup_semantic(&visual_signature) {
             // Check for semantic mismatch
             let ocr_lower = ocr_text.raw_text.to_lowercase();
-            
+
             // Destructive icon with benign text (e.g., trash + "Save")
             if icon_semantic.is_destructive && !Self::is_destructive_text(&ocr_lower) {
                 return Some(VisualOcrContradiction {
@@ -192,7 +201,7 @@ impl ContradictionDetector {
                     forces_zero_confidence: true,
                 });
             }
-            
+
             // Benign icon with destructive text
             if !icon_semantic.is_destructive && Self::is_destructive_text(&ocr_lower) {
                 return Some(VisualOcrContradiction {
@@ -203,7 +212,7 @@ impl ContradictionDetector {
                     forces_zero_confidence: true,
                 });
             }
-            
+
             // General semantic mismatch
             if !Self::semantics_match(&icon_semantic.semantic_meaning, &ocr_lower) {
                 return Some(VisualOcrContradiction {
@@ -215,10 +224,10 @@ impl ContradictionDetector {
                 });
             }
         }
-        
+
         None
     }
-    
+
     /// Extract visual signature from element (scaffolding).
     fn extract_visual_signature(element: &OmniElement) -> VisualSignature {
         // In production: would use actual visual features (pHash, CNN embeddings)
@@ -229,13 +238,13 @@ impl ContradictionDetector {
             bbox: element.bbox,
         }
     }
-    
+
     /// Check if OCR text indicates destructive action.
     fn is_destructive_text(text: &str) -> bool {
         let destructive = ["delete", "remove", "destroy", "trash", "wipe", "format"];
         destructive.iter().any(|&kw| text.contains(kw))
     }
-    
+
     /// Check if visual semantics match OCR text.
     fn semantics_match(visual: &str, ocr: &str) -> bool {
         let visual_lower = visual.to_lowercase();
@@ -264,11 +273,11 @@ impl ConfidenceChain {
     /// Calculate final confidence via multiplicative propagation.
     /// Per RFC 008: "Multiplicative propagation ensures uncertainty compounds"
     pub fn calculate_final(&self) -> f32 {
-        self.prerequisite_confidence 
-            * self.visual_reasoning_confidence 
+        self.prerequisite_confidence
+            * self.visual_reasoning_confidence
             * self.exploration_confidence
     }
-    
+
     /// Apply lower bound clamp per RFC 008.
     pub fn apply_lower_bound(confidence: f32) -> f32 {
         const LOWER_BOUND: f32 = 0.15;
@@ -281,19 +290,17 @@ impl ConfidenceChain {
 pub const NOVEL_ELEMENT_CONFIDENCE_CEILING: f32 = 0.90;
 
 /// Apply confidence ceiling for novel elements.
-pub fn apply_novel_element_ceiling(
-    calculated_confidence: f32,
-    is_known_element: bool,
-) -> f32 {
+pub fn apply_novel_element_ceiling(calculated_confidence: f32, is_known_element: bool) -> f32 {
     if !is_known_element {
         // Novel element: cap at 0.90 regardless of reasoning
         let capped = calculated_confidence.min(NOVEL_ELEMENT_CONFIDENCE_CEILING);
-        
+
         tracing::info!(
             "Novel element confidence capped: {} -> {}",
-            calculated_confidence, capped
+            calculated_confidence,
+            capped
         );
-        
+
         capped
     } else {
         // Known element: use calculated confidence
@@ -367,86 +374,110 @@ impl SemanticIconLibrary {
         library.register_default_icons();
         library
     }
-    
+
     /// Register default icon semantics per RFC 008.
     fn register_default_icons(&mut self) {
         // Plus sign = Create/Add
-        self.register("plus_sign", IconSemantics {
-            semantic_meaning: "create or add new item".to_string(),
-            action_verb: "create".to_string(),
-            is_destructive: false,
-            min_confidence: 0.85,
-        });
-        
+        self.register(
+            "plus_sign",
+            IconSemantics {
+                semantic_meaning: "create or add new item".to_string(),
+                action_verb: "create".to_string(),
+                is_destructive: false,
+                min_confidence: 0.85,
+            },
+        );
+
         // Trash can = Delete
-        self.register("trash_icon", IconSemantics {
-            semantic_meaning: "delete or remove item".to_string(),
-            action_verb: "delete".to_string(),
-            is_destructive: true,
-            min_confidence: 0.90,
-        });
-        
+        self.register(
+            "trash_icon",
+            IconSemantics {
+                semantic_meaning: "delete or remove item".to_string(),
+                action_verb: "delete".to_string(),
+                is_destructive: true,
+                min_confidence: 0.90,
+            },
+        );
+
         // Magnifying glass = Search
-        self.register("magnifying_glass", IconSemantics {
-            semantic_meaning: "search or find".to_string(),
-            action_verb: "search".to_string(),
-            is_destructive: false,
-            min_confidence: 0.85,
-        });
-        
+        self.register(
+            "magnifying_glass",
+            IconSemantics {
+                semantic_meaning: "search or find".to_string(),
+                action_verb: "search".to_string(),
+                is_destructive: false,
+                min_confidence: 0.85,
+            },
+        );
+
         // Floppy disk = Save
-        self.register("floppy_disk", IconSemantics {
-            semantic_meaning: "save changes".to_string(),
-            action_verb: "save".to_string(),
-            is_destructive: false,
-            min_confidence: 0.90,
-        });
-        
+        self.register(
+            "floppy_disk",
+            IconSemantics {
+                semantic_meaning: "save changes".to_string(),
+                action_verb: "save".to_string(),
+                is_destructive: false,
+                min_confidence: 0.90,
+            },
+        );
+
         // Pencil = Edit
-        self.register("pencil_icon", IconSemantics {
-            semantic_meaning: "edit or modify".to_string(),
-            action_verb: "edit".to_string(),
-            is_destructive: false,
-            min_confidence: 0.85,
-        });
-        
+        self.register(
+            "pencil_icon",
+            IconSemantics {
+                semantic_meaning: "edit or modify".to_string(),
+                action_verb: "edit".to_string(),
+                is_destructive: false,
+                min_confidence: 0.85,
+            },
+        );
+
         // Gear/Settings = Configure
-        self.register("gear_icon", IconSemantics {
-            semantic_meaning: "open settings or configuration".to_string(),
-            action_verb: "configure".to_string(),
-            is_destructive: false,
-            min_confidence: 0.85,
-        });
-        
+        self.register(
+            "gear_icon",
+            IconSemantics {
+                semantic_meaning: "open settings or configuration".to_string(),
+                action_verb: "configure".to_string(),
+                is_destructive: false,
+                min_confidence: 0.85,
+            },
+        );
+
         // X/Cross = Close/Cancel
-        self.register("x_icon", IconSemantics {
-            semantic_meaning: "close dialog or cancel action".to_string(),
-            action_verb: "close".to_string(),
-            is_destructive: false,
-            min_confidence: 0.80,
-        });
-        
+        self.register(
+            "x_icon",
+            IconSemantics {
+                semantic_meaning: "close dialog or cancel action".to_string(),
+                action_verb: "close".to_string(),
+                is_destructive: false,
+                min_confidence: 0.80,
+            },
+        );
+
         // Checkmark = Confirm/OK
-        self.register("checkmark_icon", IconSemantics {
-            semantic_meaning: "confirm or accept".to_string(),
-            action_verb: "confirm".to_string(),
-            is_destructive: false,
-            min_confidence: 0.85,
-        });
+        self.register(
+            "checkmark_icon",
+            IconSemantics {
+                semantic_meaning: "confirm or accept".to_string(),
+                action_verb: "confirm".to_string(),
+                is_destructive: false,
+                min_confidence: 0.85,
+            },
+        );
     }
-    
+
     /// Register icon semantic mapping.
     pub fn register(&mut self, pattern: &str, semantics: IconSemantics) {
         self.known_icons.insert(pattern.to_string(), semantics);
     }
-    
+
     /// Lookup semantic meaning for visual signature.
     pub fn lookup_semantic(&self, signature: &VisualSignature) -> Option<&IconSemantics> {
         // Exact match first
         if let Some(semantic) = self.known_icons.get(&signature.feature_hash) {
             return Some(semantic);
         }
-        
+
         // Pattern match on element type (scaffolding)
         match signature.element_type.as_str() {
             "button" => self.known_icons.get("plus_sign"),
@@ -454,27 +485,27 @@ impl SemanticIconLibrary {
             _ => None,
         }
     }
-    
+
     /// Check if element is known in library.
     pub fn contains(&self, signature: &VisualSignature) -> bool {
         self.known_icons.contains_key(&signature.feature_hash)
             || self.known_icons.contains_key(&signature.element_type)
     }
-    
+
     /// Add contradiction exception (user teach-in).
     pub fn add_exception(&mut self, exception: ContradictionException) {
         self.contradiction_exceptions.push(exception);
     }
-    
+
     /// Find matching exception for contradiction.
     pub fn find_exception(
         &self,
         app_name: &str,
         visual_pattern: &str,
     ) -> Option<&ContradictionException> {
-        self.contradiction_exceptions.iter().find(|e| {
-            e.app_name == app_name && e.visual_pattern == visual_pattern
-        })
+        self.contradiction_exceptions
+            .iter()
+            .find(|e| e.app_name == app_name && e.visual_pattern == visual_pattern)
     }
 }
 
@@ -552,28 +583,30 @@ impl SafeExplorer {
             max_exploration_actions: 3,
         }
     }
-    
+
     /// Set exploration tier based on app context.
     /// Per RFC 008: "Runtime-sensitive overrides: browser payment detection"
     pub fn set_tier_for_context(&mut self, context: &AppContext) {
         let new_tier = self.determine_tier(context);
-        
+
         if new_tier != self.current_tier {
             tracing::info!(
                 "Exploration tier changed: {:?} -> {:?} for {}",
-                self.current_tier, new_tier, context.app_name
+                self.current_tier,
+                new_tier,
+                context.app_name
             );
             self.current_tier = new_tier;
         }
     }
-    
+
     /// Determine tier from app context.
     fn determine_tier(&self, context: &AppContext) -> ExplorationTier {
         // Payment/checkout pages: Forbidden
         if context.is_payment_page {
             return ExplorationTier::Forbidden;
         }
-        
+
         // Check URL for payment keywords
         if let Some(url) = &context.current_url {
             let url_lower = url.to_lowercase();
@@ -582,23 +615,29 @@ impl SafeExplorer {
                 return ExplorationTier::Forbidden;
             }
         }
-        
+
         // Known safe applications
         let safe_apps = ["gedit", "notepad", "calculator", "files"];
-        if safe_apps.iter().any(|&app| context.app_name.to_lowercase().contains(app)) {
+        if safe_apps
+            .iter()
+            .any(|&app| context.app_name.to_lowercase().contains(app))
+        {
             return ExplorationTier::Safe;
         }
-        
+
         // Known restricted applications
         let restricted_apps = ["terminal", "vscode", "settings"];
-        if restricted_apps.iter().any(|&app| context.app_name.to_lowercase().contains(app)) {
+        if restricted_apps
+            .iter()
+            .any(|&app| context.app_name.to_lowercase().contains(app))
+        {
             return ExplorationTier::Restricted;
         }
-        
+
         // Default: Restricted for unknown
         ExplorationTier::Restricted
     }
-    
+
     /// Check if exploration is allowed.
     pub fn can_explore(&self) -> bool {
         match self.current_tier {
@@ -606,7 +645,7 @@ impl SafeExplorer {
             ExplorationTier::Forbidden => false,
         }
     }
-    
+
     /// Check if hover is allowed.
     pub fn can_hover(&self) -> bool {
         match self.current_tier {
@@ -614,7 +653,7 @@ impl SafeExplorer {
             ExplorationTier::Forbidden => false,
         }
     }
-    
+
     /// Check if click is allowed.
     pub fn can_click(&self) -> bool {
         match self.current_tier {
@@ -622,7 +661,7 @@ impl SafeExplorer {
             ExplorationTier::Restricted | ExplorationTier::Forbidden => false,
         }
     }
-    
+
     /// Hover over element and capture tooltip.
     /// Per RFC 008: "Hover-only for uncertain elements"
     pub async fn hover_element(&mut self, element: &OmniElement) -> Option<ExplorationResult> {
@@ -630,7 +669,7 @@ impl SafeExplorer {
             tracing::warn!("Hover not allowed in {:?} tier", self.current_tier);
             return None;
         }
-        
+
         // Check if already explored
         if let Some(result) = self.explored_elements.get(&element.id) {
             // Reuse if recent (< 30 seconds)
@@ -638,13 +677,13 @@ impl SafeExplorer {
                 return Some(result.clone());
             }
         }
-        
+
         // Scaffolding: In production, would:
         // 1. Move mouse to element
         // 2. Wait for tooltip
         // 3. Capture tooltip region
         // 4. OCR tooltip text
-        
+
         let result = ExplorationResult {
             element_id: element.id.clone(),
             tooltip_text: Some(format!("Tooltip for {}", element.id)),
@@ -652,12 +691,13 @@ impl SafeExplorer {
             confidence: 0.75,
             explored_at: Instant::now(),
         };
-        
-        self.explored_elements.insert(element.id.clone(), result.clone());
-        
+
+        self.explored_elements
+            .insert(element.id.clone(), result.clone());
+
         Some(result)
     }
-    
+
     /// Infer visual semantics from element.
     fn infer_visual_semantics(&self, element: &OmniElement) -> Option<String> {
         let signature = VisualSignature {
@@ -665,11 +705,12 @@ impl SafeExplorer {
             element_type: element.element_type.clone(),
             bbox: element.bbox,
         };
-        
-        self.icon_library.lookup_semantic(&signature)
+
+        self.icon_library
+            .lookup_semantic(&signature)
             .map(|s| s.semantic_meaning.clone())
     }
-    
+
     /// Get current tier.
     pub fn current_tier(&self) -> ExplorationTier {
         self.current_tier
@@ -737,37 +778,81 @@ impl ContentGenerator {
     ///   4. Default → Literal (safe fallback)
     pub fn classify_content_type(user_intent: &str) -> ContentType {
         let lower = user_intent.to_lowercase();
-        
+
         // Keywords indicating generated content (requires reasoning)
         let generated_keywords = [
-            "code", "program", "script", "function", "algorithm",
-            "implement", "write a", "generate", "create a", "solve",
-            "fibonacci", "factorial", "sort", "search", "algorithm",
-            "calculate", "compute", "equation", "formula", "math",
-            "essay", "article", "summary", "analysis", "report",
-            "python", "javascript", "rust", "java", "cpp", "c++",
-            "data structure", "class", "method", "api", "library",
-            "sequence", "prime", "binary", "recursive", "loop",
+            "code",
+            "program",
+            "script",
+            "function",
+            "algorithm",
+            "implement",
+            "write a",
+            "generate",
+            "create a",
+            "solve",
+            "fibonacci",
+            "factorial",
+            "sort",
+            "search",
+            "algorithm",
+            "calculate",
+            "compute",
+            "equation",
+            "formula",
+            "math",
+            "essay",
+            "article",
+            "summary",
+            "analysis",
+            "report",
+            "python",
+            "javascript",
+            "rust",
+            "java",
+            "cpp",
+            "c++",
+            "data structure",
+            "class",
+            "method",
+            "api",
+            "library",
+            "sequence",
+            "prime",
+            "binary",
+            "recursive",
+            "loop",
         ];
-        
+
         // Keywords indicating literal content (use as-is)
         let literal_keywords = [
-            "username", "password",
-            "login", "credential", "name:", "email:", "phone:",
-            "address:", "specific", "exactly", "literally",
-            "my name is", "i am ", "call me", "signed",
+            "username",
+            "password",
+            "login",
+            "credential",
+            "name:",
+            "email:",
+            "phone:",
+            "address:",
+            "specific",
+            "exactly",
+            "literally",
+            "my name is",
+            "i am ",
+            "call me",
+            "signed",
         ];
-        
+
         // Check for generated content indicators
         let has_generated_keyword = generated_keywords.iter().any(|kw| lower.contains(kw));
         let has_literal_marker = literal_keywords.iter().any(|kw| lower.contains(kw));
-        
+
         // Rule 1: Explicit typing command at start → always Literal
         // "type Hello World" or "enter my name" are direct commands
         let is_explicit_typing_command = lower.starts_with("type ")
             || lower.starts_with("enter ")
             || lower.starts_with("input ");
-        
+
         if is_explicit_typing_command && !has_generated_keyword {
             tracing::debug!(
                 "classify_content_type: '{}' → Literal (explicit typing command, no generation keywords)",
@@ -775,7 +860,7 @@ impl ContentGenerator {
             );
             return ContentType::Literal;
         }
-        
+
         // Rule 2: Generation keywords present → Generated wins
         // Mid-sentence "type" (e.g., "open gedit and type a fibonacci program")
         // is a verb describing action, NOT a literal typing command
@@ -786,7 +871,7 @@ impl ContentGenerator {
             );
             return ContentType::Generated;
         }
-        
+
         // Rule 3: Only literal markers, no generation keywords → Literal
         if has_literal_marker {
             tracing::debug!(
@@ -795,7 +880,7 @@ impl ContentGenerator {
             );
             return ContentType::Literal;
         }
-        
+
         // Rule 4: Default to literal for safety
         tracing::debug!(
             "classify_content_type: '{}' → Literal (default fallback)",
@@ -803,18 +888,18 @@ impl ContentGenerator {
         );
         ContentType::Literal
     }
-    
+
     /// Generate content based on intent.
     /// Per RFC 008: "Invoke internal reasoning for Generated Content"
     pub fn generate_content(user_intent: &str) -> GeneratedContent {
         let content_type = Self::classify_content_type(user_intent);
-        
+
         match content_type {
             ContentType::Generated => {
                 // Scaffolding: In production, would use LLM to generate content
                 // For now, use pattern-based generation for common cases
                 let generated = Self::pattern_based_generation(user_intent);
-                
+
                 GeneratedContent {
                     content: generated,
                     content_type: ContentType::Generated,
@@ -826,7 +911,7 @@ impl ContentGenerator {
             ContentType::Literal => {
                 // Extract literal text after "type " or similar markers
                 let literal = Self::extract_literal_text(user_intent);
-                
+
                 GeneratedContent {
                     content: literal,
                     content_type: ContentType::Literal,
@@ -837,12 +922,12 @@ impl ContentGenerator {
             }
         }
     }
-    
+
     /// Pattern-based content generation for common intents.
     /// Scaffolding: In production, would call LLM
     fn pattern_based_generation(user_intent: &str) -> String {
         let lower = user_intent.to_lowercase();
-        
+
         // Fibonacci program generation
         if lower.contains("fibonacci") {
             return r#"def fibonacci(n):
@@ -862,9 +947,10 @@ impl ContentGenerator {
 # Example usage
 if __name__ == "__main__":
     n = 10
-    print(f"Fibonacci sequence ({n} terms): {fibonacci(n)}")"#.to_string();
+    print(f"Fibonacci sequence ({n} terms): {fibonacci(n)}")"#
+                .to_string();
         }
-        
+
         // Factorial program generation
         if lower.contains("factorial") {
             return r#"def factorial(n):
@@ -878,18 +964,19 @@ if __name__ == "__main__":
 # Example usage
 if __name__ == "__main__":
     for i in range(6):
-        print(f"{i}! = {factorial(i)}")"#.to_string();
+        print(f"{i}! = {factorial(i)}")"#
+                .to_string();
         }
-        
+
         // Hello World (basic case)
         if lower.contains("hello world") {
             return "Hello World".to_string();
         }
-        
+
         // Default: return intent as-is (fallback)
         user_intent.to_string()
     }
-    
+
     /// Extract literal text from user intent.
     ///
     /// Only matches "type "/"enter "/"input " when they appear as command verbs:
@@ -900,37 +987,36 @@ if __name__ == "__main__":
     /// contains "t" but not "type ").
     fn extract_literal_text(user_intent: &str) -> String {
         let lower = user_intent.to_lowercase();
-        
+
         // Markers and their lengths
-        let markers: &[(&str, usize)] = &[
-            ("type ", 5),
-            ("enter ", 6),
-            ("input ", 6),
-        ];
-        
+        let markers: &[(&str, usize)] = &[("type ", 5), ("enter ", 6), ("input ", 6)];
+
         for &(marker, len) in markers {
             // Check at start of string
             if lower.starts_with(marker) {
                 let result = user_intent[len..].trim().to_string();
                 tracing::debug!(
                     "extract_literal_text: found '{}' at start → '{}'",
-                    marker.trim(), result
+                    marker.trim(),
+                    result
                 );
                 return result;
             }
-            
+
             // Check after "and " (compound sentence)
             let compound = format!("and {}", marker);
             if let Some(pos) = lower.find(&compound) {
                 let result = user_intent[pos + 4 + len..].trim().to_string();
                 tracing::debug!(
                     "extract_literal_text: found 'and {}' at pos {} → '{}'",
-                    marker.trim(), pos, result
+                    marker.trim(),
+                    pos,
+                    result
                 );
                 return result;
             }
         }
-        
+
         // Default: return full intent
         tracing::debug!(
             "extract_literal_text: no marker found, returning full intent: '{}'",
@@ -938,10 +1024,12 @@ if __name__ == "__main__":
         );
         user_intent.to_string()
     }
-    
+
     /// Wrap content in EvidenceWrapper for trust boundary.
     /// Per RFC 008: "Generated content marked as Agent-Generated"
-    pub fn wrap_with_evidence(content: &GeneratedContent) -> crate::agent::visual_reasoning::EvidenceWrapper {
+    pub fn wrap_with_evidence(
+        content: &GeneratedContent,
+    ) -> crate::agent::visual_reasoning::EvidenceWrapper {
         match content.content_type {
             ContentType::Generated => {
                 crate::agent::visual_reasoning::EvidenceWrapper {
@@ -1005,7 +1093,7 @@ impl VisualReasoner {
             confidence_chain: ConfidenceChain::default(),
         }
     }
-    
+
     /// Reason about element visual appearance.
     /// Per RFC 008: "Visual reasoning scope restricted: no full scene cognition"
     pub fn reason_about_element(
@@ -1016,14 +1104,14 @@ impl VisualReasoner {
     ) -> VisualReasoningOutput {
         // Set exploration tier based on context
         self.explorer.set_tier_for_context(app_context);
-        
+
         // Step 1: Check for contradictions
         let visual_sig = VisualSignature {
             feature_hash: element.visual_hash.clone(),
             element_type: element.element_type.clone(),
             bbox: element.bbox,
         };
-        
+
         if let Some(icon_semantic) = self.icon_library.lookup_semantic(&visual_sig) {
             // Check contradiction
             if let Some(contradiction) = ContradictionDetector::detect(
@@ -1035,29 +1123,29 @@ impl VisualReasoner {
                 // Contradiction forces HITL escalation
                 return VisualReasoningOutput::ContradictionDetected(contradiction);
             }
-            
+
             // Known element: calculate confidence
             let base_confidence = icon_semantic.min_confidence;
-            
+
             // Apply novel element ceiling if not in library
             let is_known = self.icon_library.contains(&visual_sig);
             let final_confidence = apply_novel_element_ceiling(base_confidence, is_known);
-            
+
             return VisualReasoningOutput::ElementClassification(
                 icon_semantic.semantic_meaning.clone(),
                 final_confidence,
             );
         }
-        
+
         // Novel element: insufficient confidence, requires exploration
         VisualReasoningOutput::InsufficientConfidence
     }
-    
+
     /// Get reference to safe explorer.
     pub fn explorer(&mut self) -> &mut SafeExplorer {
         &mut self.explorer
     }
-    
+
     /// Get reference to icon library.
     pub fn icon_library(&self) -> &SemanticIconLibrary {
         &self.icon_library
@@ -1085,36 +1173,36 @@ mod tests {
         let (result, was_truncated) = EvidenceWrapper::sentence_aware_truncate(short, 100);
         assert_eq!(result, short);
         assert!(!was_truncated);
-        
+
         // Long text - truncation
         let long = "This is a very long sentence that should be truncated at some point. And this is another sentence.";
         let (result, was_truncated) = EvidenceWrapper::sentence_aware_truncate(long, 50);
         assert!(was_truncated);
         assert!(result.len() <= 50);
     }
-    
+
     #[test]
     fn test_evidence_wrapper_preserve_negation() {
         // Negation context should be preserved
         let negation = "Do NOT delete this file under any circumstances. It is very important.";
         let (result, _) = EvidenceWrapper::sentence_aware_truncate(negation, 40);
-        
+
         // Should include "Do NOT delete" not just "Do NOT"
         assert!(result.contains("delete") || result.len() >= 40);
     }
-    
+
     #[test]
     fn test_destructive_keywords_detection() {
         let save = EvidenceWrapper::from_ocr("Save file", 0.95);
         assert!(!save.contains_destructive_keywords());
-        
+
         let delete = EvidenceWrapper::from_ocr("Delete permanently", 0.95);
         assert!(delete.contains_destructive_keywords());
-        
+
         let remove = EvidenceWrapper::from_ocr("Remove item", 0.95);
         assert!(remove.contains_destructive_keywords());
     }
-    
+
     #[test]
     fn test_confidence_chain_multiplicative() {
         let chain = ConfidenceChain {
@@ -1122,30 +1210,30 @@ mod tests {
             visual_reasoning_confidence: 0.9,
             exploration_confidence: 0.9,
         };
-        
+
         // 0.9 * 0.9 * 0.9 = 0.729
         let final_conf = chain.calculate_final();
         assert!((final_conf - 0.729).abs() < 0.001);
     }
-    
+
     #[test]
     fn test_novel_element_ceiling() {
         // Novel element should be capped at 0.90
         let novel = apply_novel_element_ceiling(0.95, false);
         assert_eq!(novel, 0.90);
-        
+
         let novel_low = apply_novel_element_ceiling(0.85, false);
         assert_eq!(novel_low, 0.85); // Below ceiling, unchanged
-        
+
         // Known element should not be capped
         let known = apply_novel_element_ceiling(0.95, true);
         assert_eq!(known, 0.95);
     }
-    
+
     #[test]
     fn test_icon_library_default_icons() {
         let library = SemanticIconLibrary::new();
-        
+
         // Trash icon should be destructive
         let trash_sig = VisualSignature {
             feature_hash: "trash_icon".to_string(),
@@ -1155,7 +1243,7 @@ mod tests {
         let trash = library.lookup_semantic(&trash_sig).unwrap();
         assert!(trash.is_destructive);
         assert_eq!(trash.action_verb, "delete");
-        
+
         // Plus icon should not be destructive
         let plus_sig = VisualSignature {
             feature_hash: "plus_sign".to_string(),
@@ -1166,11 +1254,11 @@ mod tests {
         assert!(!plus.is_destructive);
         assert_eq!(plus.action_verb, "create");
     }
-    
+
     #[test]
     fn test_exploration_tier_payment_forbidden() {
         let mut explorer = SafeExplorer::new();
-        
+
         // Payment page should be Forbidden
         let payment_context = AppContext {
             app_name: "Chrome".to_string(),
@@ -1178,17 +1266,17 @@ mod tests {
             current_url: Some("https://example.com/checkout".to_string()),
             is_payment_page: true,
         };
-        
+
         explorer.set_tier_for_context(&payment_context);
         assert_eq!(explorer.current_tier(), ExplorationTier::Forbidden);
         assert!(!explorer.can_explore());
         assert!(!explorer.can_hover());
     }
-    
+
     #[test]
     fn test_exploration_tier_safe_apps() {
         let mut explorer = SafeExplorer::new();
-        
+
         // Gedit should be Safe
         let gedit_context = AppContext {
             app_name: "gedit".to_string(),
@@ -1196,17 +1284,17 @@ mod tests {
             current_url: None,
             is_payment_page: false,
         };
-        
+
         explorer.set_tier_for_context(&gedit_context);
         assert_eq!(explorer.current_tier(), ExplorationTier::Safe);
         assert!(explorer.can_explore());
         assert!(explorer.can_click());
     }
-    
+
     #[test]
     fn test_contradiction_trash_vs_save() {
         let library = SemanticIconLibrary::new();
-        
+
         // Create element with trash icon
         let trash_element = OmniElement {
             id: "btn_1".to_string(),
@@ -1219,9 +1307,9 @@ mod tests {
             dpi_scale: 1.0,
             visual_hash: "trash_icon".to_string(), // Visual is trash
         };
-        
+
         let ocr_evidence = EvidenceWrapper::from_ocr("Save", 0.90);
-        
+
         // This should detect contradiction: trash icon + "Save" text
         let contradiction = ContradictionDetector::detect(
             &trash_element,
@@ -1229,17 +1317,20 @@ mod tests {
             &ocr_evidence,
             &library,
         );
-        
+
         assert!(contradiction.is_some());
         let c = contradiction.unwrap();
-        assert_eq!(c.contradiction_type, ContradictionType::DestructiveIconBenignText);
+        assert_eq!(
+            c.contradiction_type,
+            ContradictionType::DestructiveIconBenignText
+        );
         assert!(c.forces_zero_confidence);
     }
-    
+
     #[test]
     fn test_contradiction_no_conflict() {
         let library = SemanticIconLibrary::new();
-        
+
         // Create element with save icon
         let save_element = OmniElement {
             id: "btn_2".to_string(),
@@ -1252,24 +1343,20 @@ mod tests {
             dpi_scale: 1.0,
             visual_hash: "floppy_disk".to_string(), // Visual is save
         };
-        
+
         let ocr_evidence = EvidenceWrapper::from_ocr("Save", 0.90);
-        
+
         // This should NOT detect contradiction: save icon + "Save" text
-        let contradiction = ContradictionDetector::detect(
-            &save_element,
-            "save changes",
-            &ocr_evidence,
-            &library,
-        );
-        
+        let contradiction =
+            ContradictionDetector::detect(&save_element, "save changes", &ocr_evidence, &library);
+
         assert!(contradiction.is_none());
     }
-    
+
     #[test]
     fn test_visual_reasoner_contradiction_escalation() {
         let mut reasoner = VisualReasoner::new();
-        
+
         let trash_element = OmniElement {
             id: "btn_1".to_string(),
             element_type: "icon".to_string(),
@@ -1281,7 +1368,7 @@ mod tests {
             dpi_scale: 1.0,
             visual_hash: "trash_icon".to_string(),
         };
-        
+
         let ocr_evidence = EvidenceWrapper::from_ocr("Save", 0.90);
         let app_context = AppContext {
             app_name: "TestApp".to_string(),
@@ -1289,9 +1376,9 @@ mod tests {
             current_url: None,
             is_payment_page: false,
         };
-        
+
         let result = reasoner.reason_about_element(&trash_element, &ocr_evidence, &app_context);
-        
+
         // Should detect contradiction and escalate
         match result {
             VisualReasoningOutput::ContradictionDetected(c) => {

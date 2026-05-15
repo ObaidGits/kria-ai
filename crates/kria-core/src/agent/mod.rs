@@ -4,13 +4,16 @@ pub mod failure_analyzer;
 pub mod gui_wiring;
 pub mod htn_executor;
 pub mod htn_integration;
+pub mod intent_gate;
 pub mod interaction;
 pub mod loop_engine;
+pub mod turn_memory;
 pub mod ml_orchestrator;
 pub mod onnx_classifier;
 pub mod perception;
 pub mod planner;
 pub mod planner_v2;
+pub mod prompt_compiler;
 pub mod prompt_optimizer;
 pub mod prompts;
 pub mod response_parser;
@@ -20,19 +23,21 @@ pub mod skill_compiler;
 pub mod tool_dependencies;
 pub mod turn_context;
 pub mod turn_gate;
-pub mod uncertainty;
 pub mod visual_reasoning;
 pub mod working_set;
-pub mod world_model;
 
-// RFC v2: GUI cognition skeletons (trait + type sketches, behind feature flag).
-// Implementations land in phases P1–P5 per docs/GUI_INTELLIGENCE_REVIEW.md.
-#[cfg(feature = "gui_cognition_v2")]
-pub mod intent_compiler;
-#[cfg(feature = "gui_cognition_v2")]
+// RFC v2: GUI cognition modules (always compiled, single authority).
 pub mod environment_grounder;
-#[cfg(feature = "gui_cognition_v2")]
 pub mod execution_verifier;
+pub mod execution_verifier_impl;
+pub mod gui_planner;
+pub mod intent_compiler;
+pub mod intent_compiler_llm;
+
+// P3: GoalTree workflow cognition (multi-stage bounded workflows).
+pub mod goal_tree;
+pub mod stage_executor;
+pub mod workflow_compiler;
 
 pub use interaction::Interaction;
 pub use loop_engine::{AgentLoop, StreamEvent};

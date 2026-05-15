@@ -1,5 +1,5 @@
 //! GUI System Control - Phase 1: Mechanical Bridge & Immune System
-//! 
+//!
 //! RFC 007 Implementation: Atomic GUI automation with safety boundaries.
 //! This module provides host-level GUI control through a privilege-isolated
 //! architecture communicating via IPC to a minimal ydotool helper process.
@@ -26,13 +26,17 @@ use tokio_util::sync::CancellationToken;
 pub trait GuiBackend: Send + Sync {
     /// Execute a mouse click at the specified coordinates.
     async fn click_mouse(&self, x: i32, y: i32, button: MouseButton) -> Result<(), GuiError>;
-    
+
     /// Type text with optional inter-keystroke interval.
     async fn type_text(&self, text: &str, interval_ms: Option<u64>) -> Result<(), GuiError>;
-    
+
     /// Press a key combination (shortcut).
-    async fn press_shortcut(&self, keys: &[Key], hold_duration_ms: Option<u64>) -> Result<(), GuiError>;
-    
+    async fn press_shortcut(
+        &self,
+        keys: &[Key],
+        hold_duration_ms: Option<u64>,
+    ) -> Result<(), GuiError>;
+
     /// Release all modifier keys (used for kill switch teardown).
     async fn release_all_modifiers(&self) -> Result<(), GuiError>;
 
@@ -41,7 +45,7 @@ pub trait GuiBackend: Send + Sync {
 
     /// Get current active window information for verification.
     async fn get_active_window(&self) -> Result<WindowInfo, GuiError>;
-    
+
     /// RFC 008: Send heartbeat to uinput daemon for dead-man's switch.
     /// Must be called every 2-3 seconds to prevent daemon from halting input.
     async fn send_heartbeat(&self) -> Result<(), GuiError>;
@@ -68,7 +72,18 @@ pub enum Key {
     Alt,
     Super,
     // Function keys
-    F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12,
+    F1,
+    F2,
+    F3,
+    F4,
+    F5,
+    F6,
+    F7,
+    F8,
+    F9,
+    F10,
+    F11,
+    F12,
     // Special keys
     Escape,
     Enter,
@@ -118,7 +133,7 @@ pub enum GuiError {
 // ============================================================================
 
 /// Ydotool backend communicating via Unix Domain Socket to isolated helper.
-/// 
+///
 /// Architecture: KRIA core (unprivileged) -> IPC socket -> ydotool-helper (uinput access)
 /// This ensures the main process never requires elevated privileges.
 pub struct YdotoolBackend {
@@ -130,9 +145,19 @@ pub struct YdotoolBackend {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
 pub enum IpcRequest {
-    Click { x: i32, y: i32, button: String },
-    Type { text: String, interval_ms: Option<u64> },
-    Shortcut { keys: Vec<String>, hold_duration_ms: Option<u64> },
+    Click {
+        x: i32,
+        y: i32,
+        button: String,
+    },
+    Type {
+        text: String,
+        interval_ms: Option<u64>,
+    },
+    Shortcut {
+        keys: Vec<String>,
+        hold_duration_ms: Option<u64>,
+    },
     ReleaseAll,
     GetActiveWindow,
     /// RFC 008: Heartbeat for dead-man's switch
@@ -145,8 +170,13 @@ pub enum IpcRequest {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum IpcResponse {
-    Ok { data: Option<serde_json::Value> },
-    Error { message: String, code: Option<String> },
+    Ok {
+        data: Option<serde_json::Value>,
+    },
+    Error {
+        message: String,
+        code: Option<String>,
+    },
 }
 
 impl YdotoolBackend {
@@ -154,14 +184,14 @@ impl YdotoolBackend {
     pub fn new(socket_path: std::path::PathBuf) -> Self {
         Self { socket_path }
     }
-    
+
     /// Calculate dynamic timeout based on request type.
     /// Type commands need longer timeouts to allow the daemon to finish typing
     /// long text. Formula: base_timeout + chars * (interval + 5ms safety margin)
     fn calculate_timeout(request: &IpcRequest) -> Duration {
         const BASE_TIMEOUT_SECS: u64 = 10;
         const MAX_TIMEOUT_SECS: u64 = 120;
-        
+
         match request {
             IpcRequest::Type { text, interval_ms } => {
                 let interval = interval_ms.unwrap_or(10);
@@ -173,84 +203,77 @@ impl YdotoolBackend {
             _ => Duration::from_secs(BASE_TIMEOUT_SECS),
         }
     }
-    
+
     /// Send IPC command to daemon via Unix Domain Socket.
     async fn send_ipc_request(&self, request: &IpcRequest) -> Result<IpcResponse, GuiError> {
         // RFC 008 FIX: Dynamic timeout - Type commands need longer for big payloads
         let timeout = Self::calculate_timeout(request);
-        
+
         tracing::debug!(target: "ydotool_ipc", 
             "Connecting to daemon at {:?} (timeout: {}ms)", 
             self.socket_path, timeout.as_millis());
-        
+
         // Connect to daemon with short connection timeout (independent of read timeout)
         let connect_timeout = Duration::from_secs(10);
         let stream = tokio::time::timeout(
             connect_timeout,
-            tokio::net::UnixStream::connect(&self.socket_path)
-        ).await
+            tokio::net::UnixStream::connect(&self.socket_path),
+        )
+        .await
         .map_err(|_| GuiError::IpcError("Connection timeout".to_string()))?
         .map_err(|e| GuiError::IpcError(format!("Failed to connect to daemon: {}", e)))?;
-        
+
         let (reader, mut writer) = stream.into_split();
-        
+
         // Serialize and send request
         let request_json = serde_json::to_string(request)
             .map_err(|e| GuiError::IpcError(format!("Failed to serialize request: {}", e)))?;
-        
+
         tracing::debug!(target: "ydotool_ipc", "Sending: {}", request_json);
-        
+
         // Write timeouts use connection timeout (write should be fast)
-        tokio::time::timeout(
-            connect_timeout,
-            writer.write_all(request_json.as_bytes())
-        ).await
-        .map_err(|_| GuiError::IpcError("Write timeout".to_string()))?
-        .map_err(|e| GuiError::IpcError(format!("Failed to write: {}", e)))?;
-        
-        tokio::time::timeout(
-            connect_timeout,
-            writer.write_all(b"\n")
-        ).await
-        .map_err(|_| GuiError::IpcError("Write newline timeout".to_string()))?
-        .map_err(|e| GuiError::IpcError(format!("Failed to write newline: {}", e)))?;
-        
-        tokio::time::timeout(
-            connect_timeout,
-            writer.flush()
-        ).await
-        .map_err(|_| GuiError::IpcError("Flush timeout".to_string()))?
-        .map_err(|e| GuiError::IpcError(format!("Failed to flush: {}", e)))?;
-        
+        tokio::time::timeout(connect_timeout, writer.write_all(request_json.as_bytes()))
+            .await
+            .map_err(|_| GuiError::IpcError("Write timeout".to_string()))?
+            .map_err(|e| GuiError::IpcError(format!("Failed to write: {}", e)))?;
+
+        tokio::time::timeout(connect_timeout, writer.write_all(b"\n"))
+            .await
+            .map_err(|_| GuiError::IpcError("Write newline timeout".to_string()))?
+            .map_err(|e| GuiError::IpcError(format!("Failed to write newline: {}", e)))?;
+
+        tokio::time::timeout(connect_timeout, writer.flush())
+            .await
+            .map_err(|_| GuiError::IpcError("Flush timeout".to_string()))?
+            .map_err(|e| GuiError::IpcError(format!("Failed to flush: {}", e)))?;
+
         // Read response line - uses DYNAMIC timeout for slow Type operations
         let mut buf_reader = tokio::io::BufReader::new(reader);
         let mut response_line = String::new();
-        
-        tokio::time::timeout(
-            timeout,
-            buf_reader.read_line(&mut response_line)
-        ).await
-        .map_err(|_| GuiError::IpcError(format!("Read timeout after {}s", timeout.as_secs())))?
-        .map_err(|e| GuiError::IpcError(format!("Failed to read response: {}", e)))?;
-        
+
+        tokio::time::timeout(timeout, buf_reader.read_line(&mut response_line))
+            .await
+            .map_err(|_| GuiError::IpcError(format!("Read timeout after {}s", timeout.as_secs())))?
+            .map_err(|e| GuiError::IpcError(format!("Failed to read response: {}", e)))?;
+
         tracing::debug!(target: "ydotool_ipc", "Received: {}", response_line.trim());
-        
+
         // Parse response
         let response: IpcResponse = serde_json::from_str(&response_line)
             .map_err(|e| GuiError::IpcError(format!("Failed to parse response: {}", e)))?;
-        
+
         Ok(response)
     }
-    
+
     /// Execute command and return success or error.
     async fn execute_command(&self, request: IpcRequest) -> Result<(), GuiError> {
         match self.send_ipc_request(&request).await? {
             IpcResponse::Ok { .. } => Ok(()),
-            IpcResponse::Error { message, code } => {
-                Err(GuiError::IpcError(format!("{}: {}", 
-                    code.unwrap_or_else(|| "DAEMON_ERROR".to_string()), 
-                    message)))
-            }
+            IpcResponse::Error { message, code } => Err(GuiError::IpcError(format!(
+                "{}: {}",
+                code.unwrap_or_else(|| "DAEMON_ERROR".to_string()),
+                message
+            ))),
         }
     }
 }
@@ -261,11 +284,8 @@ impl YdotoolBackend {
 #[inline]
 fn check_global_halt() -> Result<(), GuiError> {
     if crate::safety::is_halted() {
-        let reason = crate::safety::halt_reason()
-            .unwrap_or_else(|| "unknown".to_string());
-        Err(GuiError::IpcError(format!(
-            "GLOBAL_SAFETY_HALT: {reason}"
-        )))
+        let reason = crate::safety::halt_reason().unwrap_or_else(|| "unknown".to_string());
+        Err(GuiError::IpcError(format!("GLOBAL_SAFETY_HALT: {reason}")))
     } else {
         Ok(())
     }
@@ -275,52 +295,57 @@ fn check_global_halt() -> Result<(), GuiError> {
 impl GuiBackend for YdotoolBackend {
     async fn click_mouse(&self, x: i32, y: i32, button: MouseButton) -> Result<(), GuiError> {
         check_global_halt()?;
-        
+
         if x < 0 || y < 0 {
             return Err(GuiError::InvalidCoordinates(x, y));
         }
-        
+
         let button_str = match button {
             MouseButton::Left => "left",
             MouseButton::Right => "right",
             MouseButton::Middle => "middle",
         };
-        
+
         let request = IpcRequest::Click {
             x,
             y,
             button: button_str.to_string(),
         };
-        
+
         self.execute_command(request).await
     }
-    
+
     async fn type_text(&self, text: &str, interval_ms: Option<u64>) -> Result<(), GuiError> {
         check_global_halt()?;
-        
+
         let request = IpcRequest::Type {
             text: text.to_string(),
             interval_ms,
         };
-        
+
         self.execute_command(request).await
     }
-    
-    async fn press_shortcut(&self, keys: &[Key], hold_duration_ms: Option<u64>) -> Result<(), GuiError> {
+
+    async fn press_shortcut(
+        &self,
+        keys: &[Key],
+        hold_duration_ms: Option<u64>,
+    ) -> Result<(), GuiError> {
         check_global_halt()?;
-        
-        let key_strings: Vec<String> = keys.iter()
+
+        let key_strings: Vec<String> = keys
+            .iter()
             .map(|k| key_to_ydotool(k))
             .collect::<Result<Vec<_>, _>>()?;
-        
+
         let request = IpcRequest::Shortcut {
             keys: key_strings,
             hold_duration_ms,
         };
-        
+
         self.execute_command(request).await
     }
-    
+
     async fn release_all_modifiers(&self) -> Result<(), GuiError> {
         let request = IpcRequest::ReleaseAll;
 
@@ -328,7 +353,7 @@ impl GuiBackend for YdotoolBackend {
         let _ = self.execute_command(request).await;
         Ok(())
     }
-    
+
     async fn send_heartbeat(&self) -> Result<(), GuiError> {
         let request = IpcRequest::Heartbeat;
         self.execute_command(request).await
@@ -349,14 +374,21 @@ impl GuiBackend for YdotoolBackend {
             .args(["getactivewindow"])
             .output()
             .await
-            .map_err(|e| GuiError::IpcError(format!("Failed to execute xdotool getactivewindow: {}", e)))?;
+            .map_err(|e| {
+                GuiError::IpcError(format!("Failed to execute xdotool getactivewindow: {}", e))
+            })?;
 
         if !window_id.status.success() {
             let stderr = String::from_utf8_lossy(&window_id.stderr);
-            return Err(GuiError::IpcError(format!("xdotool getactivewindow failed: {}", stderr)));
+            return Err(GuiError::IpcError(format!(
+                "xdotool getactivewindow failed: {}",
+                stderr
+            )));
         }
 
-        let window_id_str = String::from_utf8_lossy(&window_id.stdout).trim().to_string();
+        let window_id_str = String::from_utf8_lossy(&window_id.stdout)
+            .trim()
+            .to_string();
         if window_id_str.is_empty() {
             return Err(GuiError::IpcError("No active window found".to_string()));
         }
@@ -365,11 +397,16 @@ impl GuiBackend for YdotoolBackend {
             .args(["windowactivate", &window_id_str])
             .output()
             .await
-            .map_err(|e| GuiError::IpcError(format!("Failed to execute xdotool windowactivate: {}", e)))?;
+            .map_err(|e| {
+                GuiError::IpcError(format!("Failed to execute xdotool windowactivate: {}", e))
+            })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(GuiError::IpcError(format!("xdotool windowactivate failed: {}", stderr)));
+            return Err(GuiError::IpcError(format!(
+                "xdotool windowactivate failed: {}",
+                stderr
+            )));
         }
 
         Ok(())
@@ -377,7 +414,7 @@ impl GuiBackend for YdotoolBackend {
 
     async fn get_active_window(&self) -> Result<WindowInfo, GuiError> {
         let request = IpcRequest::GetActiveWindow;
-        
+
         match self.send_ipc_request(&request).await? {
             IpcResponse::Ok { data } => {
                 if let Some(data) = data {
@@ -385,17 +422,17 @@ impl GuiBackend for YdotoolBackend {
                     let title = data["title"].as_str().unwrap_or("Unknown").to_string();
                     let class = data["class"].as_str().unwrap_or("Unknown").to_string();
                     let pid = data["pid"].as_u64().unwrap_or(0) as u32;
-                    
+
                     Ok(WindowInfo { title, class, pid })
                 } else {
                     Err(GuiError::IpcError("No window data in response".to_string()))
                 }
             }
-            IpcResponse::Error { message, code } => {
-                Err(GuiError::IpcError(format!("{}: {}", 
-                    code.unwrap_or_else(|| "WINDOW_ERROR".to_string()), 
-                    message)))
-            }
+            IpcResponse::Error { message, code } => Err(GuiError::IpcError(format!(
+                "{}: {}",
+                code.unwrap_or_else(|| "WINDOW_ERROR".to_string()),
+                message
+            ))),
         }
     }
 }
@@ -443,7 +480,7 @@ fn key_to_ydotool(key: &Key) -> Result<String, GuiError> {
 // ============================================================================
 
 /// Thread-safe atomic clipboard backup held in main thread scope.
-/// 
+///
 /// This ensures clipboard restoration even if the agent async task panics
 /// or is killed mid-typing, preventing permanent data loss.
 pub struct ClipboardAtomicBackup {
@@ -460,28 +497,29 @@ impl ClipboardAtomicBackup {
             has_backup: RwLock::new(false),
         }
     }
-    
+
     /// Create atomic backup of current clipboard.
     /// Must be called before any clipboard-modifying operation.
     pub async fn backup(&self) -> Result<(), String> {
-        let mut clipboard = arboard::Clipboard::new()
-            .map_err(|e| format!("Failed to access clipboard: {}", e))?;
-        
-        let text = clipboard.get_text()
+        let mut clipboard =
+            arboard::Clipboard::new().map_err(|e| format!("Failed to access clipboard: {}", e))?;
+
+        let text = clipboard
+            .get_text()
             .map_err(|e| format!("Failed to read clipboard: {}", e))?;
-        
+
         let mut content = self.content.write().await;
         *content = Some(text);
-        
+
         let mut has_backup = self.has_backup.write().await;
         *has_backup = true;
-        
+
         tracing::debug!(target: "clipboard_backup", "Clipboard backed up ({} chars)", 
             content.as_ref().map(|s| s.len()).unwrap_or(0));
-        
+
         Ok(())
     }
-    
+
     /// Restore clipboard to backed-up state.
     /// Safe to call multiple times - subsequent calls are no-ops if already restored.
     pub async fn restore(&self) -> Result<(), String> {
@@ -489,26 +527,27 @@ impl ClipboardAtomicBackup {
         if !has_backup {
             return Ok(()); // Nothing to restore
         }
-        
+
         let content = self.content.read().await;
         if let Some(text) = content.as_ref() {
             let mut clipboard = arboard::Clipboard::new()
                 .map_err(|e| format!("Failed to access clipboard for restore: {}", e))?;
-            
-            clipboard.set_text(text.clone())
+
+            clipboard
+                .set_text(text.clone())
                 .map_err(|e| format!("Failed to restore clipboard: {}", e))?;
-            
+
             tracing::debug!(target: "clipboard_backup", "Clipboard restored ({} chars)", text.len());
         }
-        
+
         // Clear backup state
         drop(content);
         let mut has_backup = self.has_backup.write().await;
         *has_backup = false;
-        
+
         Ok(())
     }
-    
+
     /// Clear backup without restoring (used when operation succeeds).
     pub async fn clear(&self) {
         let mut content = self.content.write().await;
@@ -532,7 +571,7 @@ static CLIPBOARD_BACKUP: Lazy<ClipboardAtomicBackup> = Lazy::new(ClipboardAtomic
 // ============================================================================
 
 /// Interceptor providing kill switch, rate limiting, and teardown safety.
-/// 
+///
 /// This struct wraps all GUI tool execution and enforces:
 /// - Cancellation token checks before every action
 /// - Hard rate limiting (max 2 actions/sec, min 500ms delay)
@@ -588,7 +627,7 @@ impl KillSwitchInterceptor {
         self.modifier_was_pressed
             .load(std::sync::atomic::Ordering::Relaxed)
     }
-    
+
     /// Check cancellation and rate limits before executing action.
     /// Returns Err if operation should not proceed.
     pub async fn check_preconditions(&self) -> Result<(), GuiError> {
@@ -597,19 +636,19 @@ impl KillSwitchInterceptor {
             self.execute_teardown().await;
             return Err(GuiError::Cancelled);
         }
-        
+
         // Enforce rate limiting
         self.enforce_rate_limit().await?;
-        
+
         Ok(())
     }
-    
+
     /// Enforce hard rate limits per RFC 007.
     /// - Max 2 actions per second
     /// - Min 500ms between actions
     async fn enforce_rate_limit(&self) -> Result<(), GuiError> {
         let now = Instant::now();
-        
+
         // Check minimum delay between actions
         let mut last = self.last_action.lock().await;
         if let Some(last_time) = *last {
@@ -622,11 +661,11 @@ impl KillSwitchInterceptor {
         }
         *last = Some(Instant::now());
         drop(last);
-        
+
         // Check max actions per second
         let mut window_start = self.rate_window_start.lock().await;
         let mut count = self.action_count.lock().await;
-        
+
         if now.duration_since(*window_start) >= Duration::from_secs(1) {
             // New window
             *window_start = now;
@@ -639,7 +678,7 @@ impl KillSwitchInterceptor {
             drop(count);
             drop(window_start);
             tokio::time::sleep(wait).await;
-            
+
             // Reset for new window
             let mut window_start = self.rate_window_start.lock().await;
             let mut count = self.action_count.lock().await;
@@ -648,15 +687,15 @@ impl KillSwitchInterceptor {
         } else {
             *count += 1;
         }
-        
+
         Ok(())
     }
-    
+
     /// Get reference to the GUI backend.
     pub fn get_backend(&self) -> Arc<dyn GuiBackend> {
         Arc::clone(&self.backend)
     }
-    
+
     /// Execute teardown sequence: release all modifier keys.
     /// This prevents OS keyboard lockup when agent is killed.
     ///
@@ -664,7 +703,10 @@ impl KillSwitchInterceptor {
     /// release call is skipped entirely. Eliminates the noisy `xdotool keyup`
     /// burst that previously followed every clean workflow.
     pub async fn execute_teardown(&self) {
-        if !self.modifier_was_pressed.load(std::sync::atomic::Ordering::Relaxed) {
+        if !self
+            .modifier_was_pressed
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
             tracing::debug!(
                 target: "kill_switch",
                 "Teardown skipped — no modifier was pressed this session"
@@ -694,7 +736,10 @@ impl KillSwitchInterceptor {
 impl Drop for KillSwitchInterceptor {
     fn drop(&mut self) {
         // RFC v2 (F8): Skip Drop teardown if no modifier was ever pressed.
-        if !self.modifier_was_pressed.load(std::sync::atomic::Ordering::Relaxed) {
+        if !self
+            .modifier_was_pressed
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
             return;
         }
         // Best-effort teardown on drop
@@ -713,7 +758,7 @@ impl Drop for KillSwitchInterceptor {
 // ============================================================================
 
 /// Protected Mode detection using allowlists/blocklists.
-/// 
+///
 /// Per RFC 007 Section 2.4, this prevents automation in sensitive contexts
 /// like password managers, banking sites, and system auth dialogs.
 pub struct ProtectedModeDetector {
@@ -736,12 +781,12 @@ impl ProtectedModeDetector {
             blocked_urls: HashSet::new(),
             allowed_titles: HashSet::new(),
         };
-        
+
         // Initialize with default blocklist per RFC 007
         detector.initialize_defaults();
         detector
     }
-    
+
     fn initialize_defaults(&mut self) {
         // Password managers
         self.blocked_titles.insert("KeePass".to_lowercase());
@@ -750,32 +795,34 @@ impl ProtectedModeDetector {
         self.blocked_titles.insert("Bitwarden".to_lowercase());
         self.blocked_titles.insert("Dashlane".to_lowercase());
         self.blocked_titles.insert("password".to_lowercase()); // Generic heuristic
-        
+
         // Banking sites (browser titles often contain these)
         self.blocked_titles.insert("chase.com".to_lowercase());
         self.blocked_titles.insert("wellsfargo.com".to_lowercase());
-        self.blocked_titles.insert("bankofamerica.com".to_lowercase());
+        self.blocked_titles
+            .insert("bankofamerica.com".to_lowercase());
         self.blocked_titles.insert("citi.com".to_lowercase());
         self.blocked_titles.insert("usbank.com".to_lowercase());
         self.blocked_titles.insert("paypal.com".to_lowercase());
-        
+
         // System auth
         self.blocked_titles.insert("sudo".to_lowercase());
         self.blocked_titles.insert("authentication".to_lowercase());
-        self.blocked_titles.insert("password required".to_lowercase());
+        self.blocked_titles
+            .insert("password required".to_lowercase());
         self.blocked_titles.insert("unlock".to_lowercase());
-        
+
         // Blocked classes
         self.blocked_classes.insert("pinentry".to_lowercase());
         self.blocked_classes.insert("polkit".to_lowercase());
         self.blocked_classes.insert("gcr-prompter".to_lowercase());
     }
-    
+
     /// Check if automation should be blocked for the given window.
     pub fn is_protected(&self, window: &WindowInfo) -> bool {
         let title_lower = window.title.to_lowercase();
         let class_lower = window.class.to_lowercase();
-        
+
         // Check blocklists
         for blocked in &self.blocked_titles {
             if title_lower.contains(blocked) {
@@ -785,7 +832,7 @@ impl ProtectedModeDetector {
                 return true;
             }
         }
-        
+
         for blocked in &self.blocked_classes {
             if class_lower.contains(blocked) {
                 tracing::warn!(target: "protected_mode",
@@ -794,10 +841,12 @@ impl ProtectedModeDetector {
                 return true;
             }
         }
-        
+
         // If allowlist is populated, check it
         if !self.allowed_titles.is_empty() {
-            let allowed = self.allowed_titles.iter()
+            let allowed = self
+                .allowed_titles
+                .iter()
                 .any(|allowed| title_lower.contains(allowed));
             if !allowed {
                 tracing::warn!(target: "protected_mode",
@@ -805,37 +854,39 @@ impl ProtectedModeDetector {
                 return true;
             }
         }
-        
+
         false
     }
-    
+
     /// Verify active window matches expected context before input.
-    pub async fn verify_active_window(&self, backend: &dyn GuiBackend, expected_title: Option<&str>) 
-        -> Result<WindowInfo, GuiError> 
-    {
+    pub async fn verify_active_window(
+        &self,
+        backend: &dyn GuiBackend,
+        expected_title: Option<&str>,
+    ) -> Result<WindowInfo, GuiError> {
         let window = backend.get_active_window().await?;
-        
+
         // Check protected mode
         if self.is_protected(&window) {
-            return Err(GuiError::PermissionDenied(
-                format!("Protected mode active for window: '{}' (class: '{}')", 
-                    window.title, window.class)
-            ));
+            return Err(GuiError::PermissionDenied(format!(
+                "Protected mode active for window: '{}' (class: '{}')",
+                window.title, window.class
+            )));
         }
-        
+
         // Verify expected title if provided
         if let Some(expected) = expected_title {
             let window_lower = window.title.to_lowercase();
             let expected_lower = expected.to_lowercase();
-            
+
             if !window_lower.contains(&expected_lower) {
-                return Err(GuiError::PermissionDenied(
-                    format!("Active window '{}' does not match expected '{}'", 
-                        window.title, expected)
-                ));
+                return Err(GuiError::PermissionDenied(format!(
+                    "Active window '{}' does not match expected '{}'",
+                    window.title, expected
+                )));
             }
         }
-        
+
         Ok(window)
     }
 }
@@ -878,30 +929,33 @@ impl ToolHandler for ClickMouse {
             None => return ToolResult::err("Missing y parameter"),
         };
         let button = params["button"].as_str().unwrap_or("left");
-        
+
         let button = match button {
             "left" => MouseButton::Left,
             "right" => MouseButton::Right,
             "middle" => MouseButton::Middle,
             _ => return ToolResult::err(format!("Invalid button: {}", button)),
         };
-        
+
         // Create interceptor (kill switch + rate limiting)
         let cancellation = CancellationToken::new();
         let interceptor = KillSwitchInterceptor::new(cancellation, Arc::clone(&self.state.backend));
-        
+
         // Check preconditions
         if let Err(e) = interceptor.check_preconditions().await {
             return ToolResult::err(format!("Precondition check failed: {}", e));
         }
-        
+
         // Verify active window (no protected mode)
-        if let Err(e) = self.state.detector.verify_active_window(
-            self.state.backend.as_ref(), None
-        ).await {
+        if let Err(e) = self
+            .state
+            .detector
+            .verify_active_window(self.state.backend.as_ref(), None)
+            .await
+        {
             return ToolResult::err(format!("Window verification failed: {}", e));
         }
-        
+
         // Execute
         // Serialize button as string for JSON
         let button_str = match button {
@@ -909,7 +963,7 @@ impl ToolHandler for ClickMouse {
             MouseButton::Right => "right",
             MouseButton::Middle => "middle",
         };
-        
+
         match self.state.backend.click_mouse(x, y, button).await {
             Ok(_) => ToolResult::ok(serde_json::json!({
                 "clicked": true,
@@ -936,7 +990,7 @@ impl ToolHandler for TypeText {
         };
         let interval_ms = params["interval_ms"].as_u64();
         let expected_window = params["expected_window"].as_str();
-        
+
         // Check for control characters (terminal safety)
         let is_terminal = params["is_terminal"].as_bool().unwrap_or(false);
         if is_terminal {
@@ -944,41 +998,43 @@ impl ToolHandler for TypeText {
                 if SHELL_CONTROL_CHARS.contains(&ch) {
                     return ToolResult::err(format!(
                         "Control character '{}' detected in terminal context. \
-                        Requires explicit HITL approval per RFC 007.", ch
+                        Requires explicit HITL approval per RFC 007.",
+                        ch
                     ));
                 }
             }
         }
-        
+
         // Create interceptor
         let cancellation = CancellationToken::new();
         let interceptor = KillSwitchInterceptor::new(cancellation, Arc::clone(&self.state.backend));
-        
+
         if let Err(e) = interceptor.check_preconditions().await {
             return ToolResult::err(format!("Precondition check failed: {}", e));
         }
-        
+
         // Verify active window
-        if let Err(e) = self.state.detector.verify_active_window(
-            self.state.backend.as_ref(), expected_window
-        ).await {
+        if let Err(e) = self
+            .state
+            .detector
+            .verify_active_window(self.state.backend.as_ref(), expected_window)
+            .await
+        {
             return ToolResult::err(format!("Window verification failed: {}", e));
         }
-        
+
         // Atomic clipboard backup
         if let Err(e) = CLIPBOARD_BACKUP.backup().await {
             tracing::warn!(target: "type_text", "Failed to backup clipboard: {}", e);
             // Continue anyway - backup is best-effort safety
         }
-        
+
         // Execute typing
         let result = match self.state.backend.type_text(text, interval_ms).await {
-            Ok(_) => {
-                ToolResult::ok(serde_json::json!({
-                    "typed": true,
-                    "length": text.len(),
-                }))
-            }
+            Ok(_) => ToolResult::ok(serde_json::json!({
+                "typed": true,
+                "length": text.len(),
+            })),
             Err(e) => {
                 // Restore clipboard on failure
                 if let Err(restore_err) = CLIPBOARD_BACKUP.restore().await {
@@ -987,12 +1043,12 @@ impl ToolHandler for TypeText {
                 ToolResult::err(format!("Type failed: {}", e))
             }
         };
-        
+
         // Clear backup on success (clipboard was intentionally modified)
         if result.success {
             CLIPBOARD_BACKUP.clear().await;
         }
-        
+
         result
     }
 }
@@ -1010,7 +1066,7 @@ impl ToolHandler for PressShortcut {
             None => return ToolResult::err("Missing keys parameter (array expected)"),
         };
         let hold_duration_ms = params["hold_duration_ms"].as_u64();
-        
+
         // Parse key strings
         let mut keys: Vec<Key> = Vec::new();
         for key_json in keys_json {
@@ -1019,39 +1075,51 @@ impl ToolHandler for PressShortcut {
                 None => return ToolResult::err("Keys must be strings"),
             };
             let key = match parse_key_string(key_str) {
-            Ok(k) => k,
-            Err(e) => return ToolResult::err(e),
-        };
+                Ok(k) => k,
+                Err(e) => return ToolResult::err(e),
+            };
             keys.push(key);
         }
-        
+
         // Check for dangerous combinations
-        let has_dangerous = keys.iter().any(|k| matches!(k, Key::Control | Key::Alt | Key::Super))
-            && keys.iter().any(|k| matches!(k, Key::Char('c') | Key::Char('x') | Key::Char('v')));
-        
+        let has_dangerous = keys
+            .iter()
+            .any(|k| matches!(k, Key::Control | Key::Alt | Key::Super))
+            && keys
+                .iter()
+                .any(|k| matches!(k, Key::Char('c') | Key::Char('x') | Key::Char('v')));
+
         if has_dangerous {
-            // Log but allow - these are common shortcuts. 
+            // Log but allow - these are common shortcuts.
             // PolicyEngine should enforce RED tier PIN.
             tracing::info!(target: "press_shortcut", "Dangerous shortcut detected: {:?}", keys);
         }
-        
+
         // Create interceptor
         let cancellation = CancellationToken::new();
         let interceptor = KillSwitchInterceptor::new(cancellation, Arc::clone(&self.state.backend));
-        
+
         if let Err(e) = interceptor.check_preconditions().await {
             return ToolResult::err(format!("Precondition check failed: {}", e));
         }
-        
+
         // Verify active window
-        if let Err(e) = self.state.detector.verify_active_window(
-            self.state.backend.as_ref(), None
-        ).await {
+        if let Err(e) = self
+            .state
+            .detector
+            .verify_active_window(self.state.backend.as_ref(), None)
+            .await
+        {
             return ToolResult::err(format!("Window verification failed: {}", e));
         }
-        
+
         // Execute shortcut
-        match self.state.backend.press_shortcut(&keys, hold_duration_ms).await {
+        match self
+            .state
+            .backend
+            .press_shortcut(&keys, hold_duration_ms)
+            .await
+        {
             Ok(_) => ToolResult::ok(serde_json::json!({
                 "pressed": true,
                 "keys": keys_json.clone(),
@@ -1160,16 +1228,15 @@ fn parse_key_string(s: &str) -> Result<Key, String> {
 pub fn register(reg: &ToolRegistry) {
     // Initialize GUI backend with socket path matching the kria-uinput-daemon
     let socket_path = std::path::PathBuf::from(
-        std::env::var("KRIA_UINPUT_SOCKET")
-            .unwrap_or_else(|_| "/tmp/kria-uinput.sock".to_string())
+        std::env::var("KRIA_UINPUT_SOCKET").unwrap_or_else(|_| "/tmp/kria-uinput.sock".to_string()),
     );
     let backend: Arc<dyn GuiBackend> = Arc::new(YdotoolBackend::new(socket_path));
-    
+
     let state = Arc::new(GuiToolState {
         backend: Arc::clone(&backend),
         detector: ProtectedModeDetector::new(),
     });
-    
+
     let tools: Vec<(ToolDef, Arc<dyn ToolHandler>)> = vec![
         (
             ToolDef {
@@ -1327,7 +1394,7 @@ pub fn register(reg: &ToolRegistry) {
     for (def, handler) in tools {
         reg.register(def, handler);
     }
-    
+
     tracing::info!(target: "gui_automation", "Registered {} GUI automation tools", tool_count);
 }
 
@@ -1342,7 +1409,7 @@ mod tests {
     #[test]
     fn test_protected_mode_detection() {
         let detector = ProtectedModeDetector::new();
-        
+
         // Test password manager detection
         let keepass = WindowInfo {
             title: "KeePass - Password Database".to_string(),
@@ -1350,7 +1417,7 @@ mod tests {
             pid: 1234,
         };
         assert!(detector.is_protected(&keepass));
-        
+
         // Test safe window
         let safe = WindowInfo {
             title: "Document - LibreOffice Writer".to_string(),
@@ -1359,7 +1426,7 @@ mod tests {
         };
         assert!(!detector.is_protected(&safe));
     }
-    
+
     #[test]
     fn test_key_parsing() {
         assert!(matches!(parse_key_string("ctrl").unwrap(), Key::Control));
@@ -1367,13 +1434,15 @@ mod tests {
         assert!(matches!(parse_key_string("F12").unwrap(), Key::F12));
         assert!(matches!(parse_key_string("Escape").unwrap(), Key::Escape));
     }
-    
+
     #[test]
     fn test_control_char_detection() {
         let has_control = "rm -rf /".chars().any(|c| SHELL_CONTROL_CHARS.contains(&c));
         assert!(!has_control); // Space is not in the list
-        
-        let has_pipe = "cat file | grep text".chars().any(|c| SHELL_CONTROL_CHARS.contains(&c));
+
+        let has_pipe = "cat file | grep text"
+            .chars()
+            .any(|c| SHELL_CONTROL_CHARS.contains(&c));
         assert!(has_pipe);
     }
 }

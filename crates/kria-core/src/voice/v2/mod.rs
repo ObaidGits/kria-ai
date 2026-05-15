@@ -74,14 +74,85 @@ pub fn build_v2_with_cli_engines(
 ) {
     use std::sync::Arc;
     let profile = crate::voice::tier::VoiceTierProfile::build(voice_cfg, hw_tier);
-    let stt_v2: Arc<dyn Stt> = Arc::new(stt::CliWhisperStt::new(stt));
-    let tts_v2: Arc<dyn Tts> = Arc::new(tts::CliPiperTts::new(tts, 22_050));
+
+    let stt_v2: Arc<dyn Stt> = {
+        #[cfg(feature = "voice-whisper-rs")]
+        {
+            let requested = profile.stt_engine.trim().to_ascii_lowercase();
+            let wants_whisper_rs = matches!(
+                requested.as_str(),
+                "" | "auto" | "whisper-rs" | "whisper-rs-cuda" | "whisper-cuda"
+            );
+            let model_path = stt.model_path().clone();
+            if wants_whisper_rs && model_path.exists() {
+                let n_threads = std::thread::available_parallelism()
+                    .map(|n| n.get())
+                    .unwrap_or(4)
+                    .clamp(1, 8);
+                tracing::info!(
+                    model = %model_path.display(),
+                    threads = n_threads,
+                    "voice v2 selecting whisper-rs as primary STT backend"
+                );
+                Arc::new(stt::WhisperRsStt::new(
+                    model_path,
+                    n_threads,
+                    voice_cfg.language.clone(),
+                    Some(stt.clone()),
+                ))
+            } else {
+                if wants_whisper_rs {
+                    tracing::warn!(
+                        model = %model_path.display(),
+                        "voice v2 whisper-rs requested but model path is missing; falling back to whisper-cli"
+                    );
+                }
+                Arc::new(stt::CliWhisperStt::new(stt))
+            }
+        }
+        #[cfg(not(feature = "voice-whisper-rs"))]
+        {
+            Arc::new(stt::CliWhisperStt::new(stt))
+        }
+    };
+
+    let tts_v2: Arc<dyn Tts> = {
+        #[cfg(feature = "voice-piper-rs")]
+        {
+            let requested = profile.tts_engine.trim().to_ascii_lowercase();
+            let wants_piper_rs = matches!(requested.as_str(), "" | "auto" | "piper-rs");
+            let model_path = tts.model_path().clone();
+            if wants_piper_rs && model_path.exists() {
+                tracing::info!(
+                    model = %model_path.display(),
+                    "voice v2 selecting piper-rs as primary TTS backend"
+                );
+                Arc::new(tts::PiperRsTts::new(model_path))
+            } else {
+                if wants_piper_rs {
+                    tracing::warn!(
+                        model = %model_path.display(),
+                        "voice v2 piper-rs requested but model path is missing; falling back to piper-cli"
+                    );
+                }
+                Arc::new(tts::CliPiperTts::new(tts, 22_050))
+            }
+        }
+        #[cfg(not(feature = "voice-piper-rs"))]
+        {
+            Arc::new(tts::CliPiperTts::new(tts, 22_050))
+        }
+    };
     let playback = PlaybackSink::new(22_050);
     let aec = AecProcessor::passthrough(AecSettings::default());
     let post_editor =
         HinglishPostEditor::from_config(&voice_cfg.post_edit, profile.post_edit_timeout_ms);
+    
+    // P1.3: Optional Whisper refiner for post-commit transcript improvement
+    let refiner = None; // TODO: Wire from config when voice-whisper-rs feature is enabled
+    
     let (pipeline, state_rx, telemetry_rx) =
-        VoicePipelineV2::new(profile, stt_v2, tts_v2, playback, wake, aec, post_editor);
+        VoicePipelineV2::new(profile, stt_v2, tts_v2, playback, wake, aec, post_editor, refiner);
     (Arc::new(pipeline), state_rx, telemetry_rx)
 }
 

@@ -31,6 +31,8 @@ pub struct KriaConfig {
     pub browser_agent: BrowserAgentConfig,
     // ─── OpenClaw Skill Substrate ───
     pub openclaw: crate::openclaw::OpenClawConfig,
+    // ─── Universal Model Provider System ───
+    pub providers: crate::llm::provider::config::ProvidersConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1191,6 +1193,18 @@ fn merge_config(base: &mut KriaConfig, user: &KriaConfig) {
     }
     if !user.llm.cloud_endpoint.is_empty() {
         base.llm.cloud_endpoint = user.llm.cloud_endpoint.clone();
+    }
+    if !user.llm.cloud_provider.is_empty() {
+        base.llm.cloud_provider = user.llm.cloud_provider.clone();
+    }
+    if !user.llm.cloud_model_id.is_empty() {
+        base.llm.cloud_model_id = user.llm.cloud_model_id.clone();
+    }
+    // Merge providers config if user has any providers defined
+    if !user.providers.providers.is_empty() {
+        base.providers = user.providers.clone();
+    } else if !user.providers.active_provider.is_empty() {
+        base.providers.active_provider = user.providers.active_provider.clone();
     }
     if user.voice != VoiceConfig::default() {
         base.voice = user.voice.clone();

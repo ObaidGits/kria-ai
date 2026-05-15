@@ -17,5 +17,5 @@
 pub mod service_orchestrator;
 
 pub use service_orchestrator::{
-    ServiceLiveness, ServiceOrchestrator, ServiceStatus, OrchestratorConfig,
+    OrchestratorConfig, ServiceLiveness, ServiceOrchestrator, ServiceStatus,
 };

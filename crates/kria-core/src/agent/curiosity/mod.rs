@@ -176,6 +176,8 @@ impl NoveltyDetector {
             kind,
             EventKind::HealthBreach(_) | EventKind::ProcessLifecycle(_)
         )
+        // Note: DesktopEvent is NOT interesting for curiosity — it's handled
+        // by the EnvironmentGrounder's invalidation listener instead.
     }
 }
 
@@ -217,6 +219,11 @@ impl EvidenceGatherer {
                 } else {
                     None
                 }
+            }
+            EventKind::DesktopEvent(_) => {
+                // Desktop events are handled by the EnvironmentGrounder's
+                // cache invalidation listener — not by curiosity.
+                None
             }
         }
     }

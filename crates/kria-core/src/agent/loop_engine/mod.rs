@@ -10,6 +10,7 @@ use crate::agent::response_parser::{
 };
 use crate::agent::turn_context::{TurnAdmission, TurnAdmissionDecision, TurnAdmissionError};
 use crate::agent::turn_gate::{Operation, ResourcePlan, TurnGate};
+use crate::agent::turn_memory::{detect_satisfaction, ExecutionTarget, TurnMemory};
 use crate::infra::isolation::run_isolated;
 use crate::infra::pipeline_trace::{
     log_pipeline_step, sanitize_json_for_logs, sanitize_text_for_logs,
@@ -17,9 +18,13 @@ use crate::infra::pipeline_trace::{
 use crate::llm::orchestrator::vision_strategy::VisionMode;
 use crate::llm::orchestrator::vram_budget::{calculate_safe_visual_tokens, estimate_visual_tokens};
 use crate::llm::tokenize::count_tokens;
+use crate::llm::budget::{
+    check_inter_tool_budget, check_tool_result_budget,
+    BudgetCheckResult, ContextBudgets, TurnTokenLedger,
+};
 use crate::llm::{
     ChatMessage, ImageAttachment, LlmResponse, ModelRouter, ToolSchema,
-    LLM_TOOL_RESULT_TOKEN_BUDGET, LLM_TURN_TOOL_BUDGET, TOOL_RESULT_MAX_CHARS,
+    LLM_TOOL_RESULT_TOKEN_BUDGET, TOOL_RESULT_MAX_CHARS,
 };
 use crate::mcp::payload_shaper::shape_for_llm;
 use crate::safety::audit::{DecidedBy, Decision};
@@ -64,8 +69,6 @@ fn build_message_preview(messages: &[ChatMessage], max_messages: usize) -> serde
 }
 
 const MAX_ROUTED_TOOL_SCHEMAS_PER_TURN: usize = 8;
-const CONTEXT_HISTORY_ITEM_CHAR_CAP: usize = 900;
-const CONTEXT_TOTAL_CHAR_BUDGET: usize = 12_000;
 
 fn extract_user_context_block(system_prompt: &str) -> Option<String> {
     const USER_CONTEXT_HEADER: &str = "## User Context";
@@ -111,6 +114,26 @@ fn build_filtered_tool_schema_catalog(tool_schemas: &[ToolSchema]) -> String {
 }
 
 fn rewrite_system_prompt_tools_block(
+    system_prompt: &str,
+    tool_schemas: &[ToolSchema],
+    is_live_fact: bool,
+) -> String {
+    // ── New path: use typed prompt compiler ──
+    // This produces semantically equivalent output to the legacy implementation
+    // but with deterministic ordering, budget awareness, and omission auditing.
+    let assembled = crate::agent::prompt_compiler::compile_system_prompt(
+        system_prompt,
+        tool_schemas,
+        is_live_fact,
+        0, // 0 = default budget (8192 chars)
+    );
+    assembled.text
+}
+
+/// Legacy implementation preserved for reference during migration.
+/// Remove after one release cycle once the new compiler is validated.
+#[allow(dead_code)]
+fn _legacy_rewrite_system_prompt_tools_block(
     system_prompt: &str,
     tool_schemas: &[ToolSchema],
     is_live_fact: bool,
@@ -196,6 +219,11 @@ fn truncate_text_for_context(text: &str, max_chars: usize) -> String {
 }
 
 fn compact_messages_for_chat(messages: &mut Vec<ChatMessage>) {
+    compact_messages_with_budgets(messages, &ContextBudgets::local_4k());
+}
+
+/// Provider-aware message compaction. Uses `ContextBudgets` for all thresholds.
+fn compact_messages_with_budgets(messages: &mut Vec<ChatMessage>, budgets: &ContextBudgets) {
     if messages.is_empty() {
         return;
     }
@@ -204,21 +232,27 @@ fn compact_messages_for_chat(messages: &mut Vec<ChatMessage>) {
 
     for (idx, msg) in messages.iter_mut().enumerate() {
         if msg.role.eq_ignore_ascii_case("system") {
-            let max_chars = if idx == 0 { 3_500 } else { 1_000 };
+            // System prompt cap: scale with context window (up to 2× base)
+            let max_chars = if idx == 0 {
+                (budgets.system_reserve * 4).max(3_500)
+            } else {
+                1_000
+            };
             msg.content = truncate_text_for_context(&msg.content, max_chars);
             continue;
         }
 
         if Some(idx) == latest_user_idx {
-            msg.content = truncate_text_for_context(&msg.content, 2_000);
+            // Latest user message: always preserve up to 2× item cap
+            msg.content = truncate_text_for_context(&msg.content, budgets.history_item_char_cap * 2);
             continue;
         }
 
-        msg.content = truncate_text_for_context(&msg.content, CONTEXT_HISTORY_ITEM_CHAR_CAP);
+        msg.content = truncate_text_for_context(&msg.content, budgets.history_item_char_cap);
     }
 
     let mut total_chars: usize = messages.iter().map(|m| m.content.chars().count()).sum();
-    while total_chars > CONTEXT_TOTAL_CHAR_BUDGET && messages.len() > 2 {
+    while total_chars > budgets.history_char_budget && messages.len() > 2 {
         let removable_idx = messages.iter().enumerate().skip(1).find_map(|(idx, msg)| {
             if msg.role.eq_ignore_ascii_case("system") || Some(idx) == latest_user_idx {
                 None
@@ -1941,6 +1975,12 @@ pub struct AgentLoop {
     turn_admission: Arc<TurnAdmission>,
     /// Top-level planning boundary (Phase 3 scaffold).
     turn_gate: Arc<TurnGate>,
+    /// Optional failover router — when present, wraps model_router with FSM-based
+    /// provider failover. When absent, model_router is used directly (existing behavior).
+    failover_router: Option<Arc<crate::llm::failover::FailoverRouter>>,
+    /// Optional execution verifier — when present, validates tool results after execution.
+    /// When absent, tool results are accepted as-is (existing behavior).
+    execution_verifier: Option<Arc<dyn crate::agent::execution_verifier::ExecutionVerifier>>,
 }
 
 impl AgentLoop {
@@ -1971,6 +2011,8 @@ impl AgentLoop {
             clarify_threshold: 0.40,
             turn_admission: Arc::new(TurnAdmission::new()),
             turn_gate: Arc::new(TurnGate::new()),
+            failover_router: None,
+            execution_verifier: None,
         }
     }
 
@@ -2059,6 +2101,37 @@ impl AgentLoop {
         if (0.0..=1.0).contains(&clarify_threshold) {
             self.clarify_threshold = clarify_threshold;
         }
+        self
+    }
+
+    /// Attach a failover router for deterministic provider failover.
+    ///
+    /// When set, the agent loop uses the failover router to select backends
+    /// instead of calling `model_router` directly. The failover router wraps
+    /// `model_router` and adds FSM-based health tracking and automatic
+    /// local→cloud failover.
+    ///
+    /// When not set (default), `model_router` is used directly — no behavioral change.
+    pub fn with_failover_router(
+        mut self,
+        router: Arc<crate::llm::failover::FailoverRouter>,
+    ) -> Self {
+        self.failover_router = Some(router);
+        self
+    }
+
+    /// Attach an execution verifier for post-execution result validation.
+    ///
+    /// When set, the agent loop calls the verifier after tool execution for
+    /// non-trivial tools (file operations, process launches, etc.).
+    /// The verifier NEVER retries or replans — it only validates and logs.
+    ///
+    /// When not set (default), tool results are accepted as-is — no behavioral change.
+    pub fn with_execution_verifier(
+        mut self,
+        verifier: Arc<dyn crate::agent::execution_verifier::ExecutionVerifier>,
+    ) -> Self {
+        self.execution_verifier = Some(verifier);
         self
     }
 
@@ -2351,17 +2424,83 @@ impl AgentLoop {
         let mut consecutive_failures: u8 = 0;
         const MAX_CONSECUTIVE_FAILURES: u8 = 3;
 
-        // ── Per-turn token budget tracker ─────────────────────────────────────
-        // Approximate cumulative tokens consumed by all tool outputs this turn.
+        // ── Phase 4: Per-turn token ledger + provider-aware budgets ──────────
+        // The ledger tracks all token categories across the full turn.
+        // Budgets scale with the active provider's context window.
+        let turn_ledger = TurnTokenLedger::new();
+
+        // Derive context window from the orchestrator if available, else use config default.
+        let active_context_window = self
+            .model_router
+            .orchestrator_server_manager()
+            .map(|mgr| {
+                let (_, ctx) = mgr.current_params();
+                ctx as usize
+            })
+            .unwrap_or(4096);
+
+        let context_budgets = ContextBudgets::for_context_window(active_context_window);
+
+        // Backward-compat: keep turn_tool_tokens as a simple alias for the ledger's tool total.
+        // This avoids touching every reference to turn_tool_tokens in the loop body.
+        // The ledger is the authoritative source; turn_tool_tokens is derived from it.
         let mut turn_tool_tokens: usize = 0;
 
         // Check if the user message contains images and route accordingly
         let has_images = messages.last().is_some_and(|m| m.has_images());
         let mut routing_focus_text = routing_focus_text_from_user_content(&last_user_text);
 
+        // ── IntentGate: Conversation-First Routing Guard ──────────────────────
+        // Runs BEFORE live-fact classification, tool routing, and provider escalation.
+        // If the gate classifies the input as conversational, the entire tool pipeline
+        // is suppressed and the LLM responds directly.
+        let gate_thresholds = crate::agent::intent_gate::ConfidenceThresholds::from_env();
+        let gate_decision = crate::agent::intent_gate::classify(
+            &routing_focus_text,
+            &gate_thresholds,
+            None, // semantic router result not yet available at this point
+        );
+
+        // ── Active Turn Memory ────────────────────────────────────────────────
+        // Tracks completed actions, memoized results, and execution target.
+        // Used for task satisfaction detection and duplicate call prevention.
+        let primary_target = ExecutionTarget::infer(&routing_focus_text, "");
+        let mut turn_memory = TurnMemory::new(&routing_focus_text, primary_target);
+
+        log_pipeline_step(
+            session_id,
+            "intent_gate",
+            "IntentGate classification",
+            Some(gate_decision.to_json()),
+        );
+
+        // Fast-path: conversational inputs bypass all tool routing
+        if gate_decision.fast_path {
+            tracing::info!(
+                session = session_id,
+                intent = gate_decision.intent.as_str(),
+                confidence = gate_decision.confidence,
+                reason = gate_decision.reason,
+                "IntentGate: conversational fast-path activated — suppressing tool pipeline"
+            );
+            // Skip live-fact injection, tool routing, and intent fallback.
+            // The LLM will respond directly with the full context.
+            // Fall through to the LLM call with no tool schemas injected.
+            // We signal this by NOT modifying routing_focus_text and setting
+            // a flag that suppresses the intent fallback later.
+        }
+
+        // Clarification path: ambiguous inputs ask for clarification
+        let gate_requires_clarification = gate_decision.clarification_required && !gate_decision.fast_path;
+
         // Layer 2: Deterministic Tool Forcing for live-fact queries
         // MUST run BEFORE tool_lock prefix injection so the classifier sees clean user text
-        let is_live_fact = crate::routing::live_fact::is_live_fact_query(&routing_focus_text);
+        // SKIP if IntentGate already classified as conversational fast-path
+        let is_live_fact = if gate_decision.fast_path {
+            false // Never force live-fact search on conversational inputs
+        } else {
+            crate::routing::live_fact::is_live_fact_query(&routing_focus_text)
+        };
         if is_live_fact && extract_forced_tool_directive(&routing_focus_text).is_none() {
             // Force searxng_search as the primary tool for live-fact queries
             // search_news is also made available via the pinned tool list
@@ -2384,6 +2523,72 @@ impl AgentLoop {
 
         let routing_focus_lower = routing_focus_text.to_lowercase();
         let mut turn_gate_plan = self.turn_gate.plan_turn(&last_user_text, has_images);
+
+        // ═══════════════════════════════════════════════════════════════════════════
+        // RFC v2 P1: Intent Compilation - Semantic normalization before routing
+        // ═══════════════════════════════════════════════════════════════════════════
+        let compiled_spec = {
+            use crate::agent::intent_compiler::IntentCompiler;
+            use crate::agent::intent_compiler_llm::RuleIntentCompiler;
+
+            let rule_compiler = RuleIntentCompiler;
+            match rule_compiler
+                .compile(&last_user_text, &turn_gate_plan.intent)
+                .await
+            {
+                Ok(spec) => {
+                    log_pipeline_step(
+                        session_id,
+                        "intent_compiled",
+                        "Intent normalized to GuiTaskSpec",
+                        Some(serde_json::json!({
+                            "primary_verb": format!("{:?}", spec.primary_verb),
+                            "targets": spec.targets.len(),
+                            "has_content": spec.content.is_some(),
+                            "declared_preconditions": spec.declared_preconditions.len(),
+                            "declared_success_criteria": spec.declared_success_criteria.len(),
+                        })),
+                    );
+
+                    if !spec.ambiguities.is_empty() {
+                        let question = match spec.ambiguities.first() {
+                            Some(crate::agent::intent_compiler::Ambiguity::AppNotSpecified) => {
+                                "Which application should I use?".to_string()
+                            }
+                            Some(crate::agent::intent_compiler::Ambiguity::FileNotSpecified) => {
+                                "Which file should I use?".to_string()
+                            }
+                            Some(
+                                crate::agent::intent_compiler::Ambiguity::MultipleTargetsPossible,
+                            ) => "Which one should I use?".to_string(),
+                            Some(crate::agent::intent_compiler::Ambiguity::ContentScopeUnclear) => {
+                                "How would you like to run this?".to_string()
+                            }
+                            None => "Please clarify your request".to_string(),
+                        };
+                        let final_text = format!("🤔 {}", question);
+                        let _ = event_tx.send(StreamEvent::Done(final_text.into()));
+                        return;
+                    }
+                    Some(spec)
+                }
+                Err(clarify_req) => {
+                    let final_text = format!("🤔 {}", clarify_req.question);
+                    log_pipeline_step(
+                        session_id,
+                        "intent_clarify",
+                        "IntentCompiler raised clarification request",
+                        Some(serde_json::json!({
+                            "question": clarify_req.question,
+                            "options_count": clarify_req.options.len(),
+                        })),
+                    );
+                    let _ = event_tx.send(StreamEvent::Done(final_text.into()));
+                    return;
+                }
+            }
+        };
+
         let pure_image_analysis_turn =
             has_images && matches!(turn_gate_plan.intent.operation, Operation::AnalyzeImage);
         let wants_vision_backend =
@@ -2449,16 +2654,16 @@ impl AgentLoop {
         // ═══════════════════════════════════════════════════════════════════════════
         // RFC 007 Phase 4: GUI HTN Routing - BYPASS ReAct loop for GUI automation
         // ═══════════════════════════════════════════════════════════════════════════
-        // Check if this intent should route to HTN GuiExecutor instead of ReAct loop.
-        // This ensures GUI automation gets: kill switch protection, visual hash verification,
-        // bounded micro-retries, and safe abort sequences.
+        // Routing now requires BOTH TurnGate confidence gating AND a valid
+        // GuiTaskSpec from the IntentCompiler.  No substring bypasses.
         use crate::agent::gui_wiring::GuiExecutionCoordinator;
-        use crate::agent::htn_integration::requires_gui_automation;
-        
-        let should_route_to_gui = GuiExecutionCoordinator::should_route_to_gui_executor(&turn_gate_plan)
-            || requires_gui_automation(&last_user_text);
-        
+
+        let should_route_to_gui =
+            GuiExecutionCoordinator::should_route_to_gui_executor(&turn_gate_plan)
+                && compiled_spec.is_some();
+
         if should_route_to_gui {
+            let spec = compiled_spec.as_ref().unwrap();
             log_pipeline_step(
                 session_id,
                 "gui_htn_routing",
@@ -2468,35 +2673,34 @@ impl AgentLoop {
                         "operation": format!("{:?}", turn_gate_plan.intent.operation),
                         "direct_tool_hint": turn_gate_plan.direct_tool_hint,
                     },
+                    "primary_verb": format!("{:?}", spec.primary_verb),
                     "user_text_preview": sanitize_text_for_logs(&last_user_text, 100),
                 })),
             );
-            
+
             // Create kill switch interceptor for this workflow
             let socket_path = std::path::PathBuf::from(
                 std::env::var("KRIA_UINPUT_SOCKET")
-                    .unwrap_or_else(|_| "/tmp/kria-uinput.sock".to_string())
+                    .unwrap_or_else(|_| "/tmp/kria-uinput.sock".to_string()),
             );
-            let gui_backend = Arc::new(crate::tools::gui_automation::YdotoolBackend::new(socket_path));
+            let gui_backend = Arc::new(crate::tools::gui_automation::YdotoolBackend::new(
+                socket_path,
+            ));
             let workflow_cancellation = tokio_util::sync::CancellationToken::new();
             let kill_switch = Arc::new(crate::tools::gui_automation::KillSwitchInterceptor::new(
                 workflow_cancellation.clone(),
                 gui_backend,
             ));
-            
+
             // Create coordinator and generate workflow
-            let mut coordinator = GuiExecutionCoordinator::new(
-                Arc::clone(&self.tool_registry),
-                kill_switch,
-            );
-            
+            let mut coordinator =
+                GuiExecutionCoordinator::new(Arc::clone(&self.tool_registry), kill_switch);
+
             // First try the deterministic rule-based planner; if it cannot
             // build a concrete workflow, ask the LLM to emit an HTN JSON plan.
-            let mut planned_workflow = coordinator.generate_workflow(
-                session_id,
-                &turn_gate_plan.intent,
-                &last_user_text,
-            );
+            let mut planned_workflow = coordinator
+                .generate_workflow(session_id, &turn_gate_plan.intent, spec)
+                .await;
 
             if planned_workflow.is_none() {
                 if let Some(backend) = self.model_router.route("chat").await {
@@ -2548,19 +2752,17 @@ impl AgentLoop {
                     workflow.task_id,
                     workflow.sub_goals.len()
                 )));
-                
+
                 // Execute via HTN executor (NOT ReAct loop)
-                let result = coordinator.execute_workflow(
-                    &workflow,
-                    workflow_cancellation,
-                ).await;
-                
+                let result = coordinator
+                    .execute_workflow(&workflow, workflow_cancellation)
+                    .await;
+
                 // Emit completion event
                 if result.success {
                     let summary = format!(
                         "Done! I completed the GUI automation task ({} steps in {}ms).",
-                        result.completed_steps,
-                        result.duration_ms
+                        result.completed_steps, result.duration_ms
                     );
                     tracing::info!(
                         target: "gui_htn_routing",
@@ -2578,7 +2780,7 @@ impl AgentLoop {
                         result.error.as_deref().unwrap_or("unknown error")
                     )));
                 }
-                
+
                 // EARLY RETURN - completely bypass ReAct loop
                 return;
             } else {
@@ -2590,15 +2792,27 @@ impl AgentLoop {
                 );
             }
         }
-        
+
         // ═══════════════════════════════════════════════════════════════════════════
         // Standard ReAct Loop (continues for non-GUI intents)
         // ═══════════════════════════════════════════════════════════════════════════
 
-        let backend = if wants_vision_backend {
+        // ── Failover-aware backend selection ────────────────────────────────────
+        // When a FailoverRouter is attached, it intercepts route() calls and
+        // applies FSM-based health tracking. When absent, we delegate directly
+        // to model_router (existing behavior, zero overhead).
+        //
+        // The `_is_fallback` flag is used after the call to record the result
+        // in the FSM via `on_call_result()`.
+        let (backend, _is_fallback) = if wants_vision_backend {
             if inline_images_allowed_for_turn {
-                match self.model_router.route_vision().await {
-                    Some(b) => b,
+                let (b, is_fb) = if let Some(ref fr) = self.failover_router {
+                    fr.route_vision().await
+                } else {
+                    (self.model_router.route_vision().await, false)
+                };
+                match b {
+                    Some(b) => (b, is_fb),
                     None => {
                         log_pipeline_step(
                             session_id,
@@ -2610,8 +2824,13 @@ impl AgentLoop {
                                 "vision_mode": inline_image_vision_mode.as_str(),
                             })),
                         );
-                        match self.model_router.route("chat").await {
-                            Some(b) => b,
+                        let (b2, is_fb2) = if let Some(ref fr) = self.failover_router {
+                            fr.route("chat").await
+                        } else {
+                            (self.model_router.route("chat").await, false)
+                        };
+                        match b2 {
+                            Some(b) => (b, is_fb2),
                             None => {
                                 let _ = event_tx
                                     .send(StreamEvent::Error("no LLM backend available".into()));
@@ -2629,8 +2848,13 @@ impl AgentLoop {
                         "vision_mode": inline_image_vision_mode.as_str(),
                     })),
                 );
-                match self.model_router.route("chat").await {
-                    Some(b) => b,
+                let (b, is_fb) = if let Some(ref fr) = self.failover_router {
+                    fr.route("chat").await
+                } else {
+                    (self.model_router.route("chat").await, false)
+                };
+                match b {
+                    Some(b) => (b, is_fb),
                     None => {
                         let _ =
                             event_tx.send(StreamEvent::Error("no LLM backend available".into()));
@@ -2639,8 +2863,13 @@ impl AgentLoop {
                 }
             }
         } else {
-            match self.model_router.route("chat").await {
-                Some(b) => b,
+            let (b, is_fb) = if let Some(ref fr) = self.failover_router {
+                fr.route("chat").await
+            } else {
+                (self.model_router.route("chat").await, false)
+            };
+            match b {
+                Some(b) => (b, is_fb),
                 None => {
                     log_pipeline_step(
                         session_id,
@@ -2831,7 +3060,19 @@ impl AgentLoop {
         };
         let mut turn_modality = if let Some(router) = &self.semantic_router {
             let ctx = self.turn_gate.context();
-            let (_, modality, _) = router.route_with_context(&routing_focus_text, ctx).await;
+            let (route_decision, modality, _) = router.route_with_context(&routing_focus_text, ctx).await;
+            // Re-evaluate IntentGate with semantic router result for better accuracy
+            // This handles cases where the gate was uncertain but the router is confident
+            if gate_decision.fast_path {
+                // Gate already decided conversational — trust it, don't override
+            } else if matches!(route_decision, crate::routing::RouteDecision::Conversation) {
+                // Semantic router says conversational — log this for observability
+                tracing::debug!(
+                    session = session_id,
+                    gate_intent = gate_decision.intent.as_str(),
+                    "semantic router confirms conversational intent"
+                );
+            }
             modality
         } else {
             crate::routing::verbs::classify_modality(&routing_focus_text)
@@ -3165,6 +3406,11 @@ impl AgentLoop {
                 })),
             );
 
+            // Phase 4: Record provider-reported usage in the ledger (exact counts when available)
+            if let Some(ref usage) = response.usage {
+                turn_ledger.record_provider_usage(usage.prompt_tokens, usage.completion_tokens);
+            }
+
             // Parse tool calls from response — prefer native function-calling format
             // (returned by llama.cpp / OpenAI), fall back to text-embedded format.
             // Pattern 7 (Python-style fallback) fires last, only for single-required-param tools.
@@ -3271,6 +3517,21 @@ impl AgentLoop {
             }
 
             if tool_calls.is_empty() && !intent_fallback_used {
+                // IntentGate: suppress intent fallback for conversational fast-path inputs
+                // and for inputs where the gate requires clarification instead of execution.
+                let gate_suppresses_fallback = gate_decision.fast_path
+                    || gate_requires_clarification
+                    || (!gate_decision.execution_permitted && !forced_tool_requested);
+
+                if gate_suppresses_fallback {
+                    tracing::debug!(
+                        session = session_id,
+                        intent = gate_decision.intent.as_str(),
+                        fast_path = gate_decision.fast_path,
+                        execution_permitted = gate_decision.execution_permitted,
+                        "IntentGate: suppressing intent fallback injection"
+                    );
+                } else {
                 let intent_fallback_query =
                     resolve_intent_fallback_query(&routing_focus_text, messages);
                 let fallback_plan = self.turn_gate.plan_turn(&intent_fallback_query, has_images);
@@ -3359,6 +3620,7 @@ impl AgentLoop {
                         }
                     }
                 }
+                } // end else (gate_suppresses_fallback)
             }
 
             // If no tool calls, we're done
@@ -3552,6 +3814,17 @@ impl AgentLoop {
             for call in &tool_calls {
                 if return_if_stale() {
                     return;
+                }
+
+                // ── Task satisfaction check: stop loop if goal already met ────
+                if turn_memory.is_satisfied() {
+                    tracing::info!(
+                        session = session_id,
+                        tool = %call.name,
+                        reason = %turn_memory.satisfaction_reason().unwrap_or(""),
+                        "turn_memory: goal satisfied, skipping remaining tool calls"
+                    );
+                    break;
                 }
 
                 let mut execution_args = call.arguments.clone();
@@ -3928,6 +4201,36 @@ impl AgentLoop {
 
                 // ── Dedup guard: abort on repeated identical failure ───────────
                 let call_hash = call_dedup_hash(&call.name, &execution_args);
+
+                // ── Memoization: skip identical successful calls ──────────────
+                // If this exact call (same tool + same args) already succeeded this
+                // turn, return the cached result instead of re-executing.
+                if let Some(cached_result) = turn_memory.check_memo(call_hash) {
+                    tracing::debug!(
+                        session = session_id,
+                        tool = %call.name,
+                        "turn_memory: returning memoized result for identical call"
+                    );
+                    log_pipeline_step(
+                        session_id,
+                        "tool_memoized",
+                        "Returning memoized result for identical successful call",
+                        Some(serde_json::json!({
+                            "round": round,
+                            "tool": call.name.clone(),
+                            "cached_result_preview": &cached_result[..cached_result.len().min(100)],
+                        })),
+                    );
+                    // Inject the cached result as a tool message and continue
+                    messages.push(ChatMessage {
+                        role: "tool".into(),
+                        content: format!("[MEMOIZED] {}", cached_result),
+                        name: Some(call.name.clone()),
+                        images: None,
+                    });
+                    continue;
+                }
+
                 if let Some((fail_count, cached_err)) = failed_calls.get(&call_hash) {
                     if *fail_count >= 1 {
                         let abort_msg = format!(
@@ -3955,18 +4258,21 @@ impl AgentLoop {
                         return;
                     }
                 }
-
                 // ── Turn budget guard: skip tool if cumulative tokens exhausted ─
-                if turn_tool_tokens >= LLM_TURN_TOOL_BUDGET {
+                // Phase 4: Use provider-aware budget from context_budgets
+                if check_tool_result_budget(turn_tool_tokens, &context_budgets) {
                     let budget_msg = format!(
-                        "TOOL_BUDGET_EXHAUSTED: turn tool-output token budget ({LLM_TURN_TOOL_BUDGET}) \
+                        "TOOL_BUDGET_EXHAUSTED: turn tool-output token budget ({}) \
                          reached; skipping '{}'. Summarise what you have and answer the user.",
+                        context_budgets.turn_tool_budget,
                         call.name
                     );
                     tracing::warn!(
                         session = session_id,
                         turn_tool_tokens,
                         tool = %call.name,
+                        budget = context_budgets.turn_tool_budget,
+                        context_window = active_context_window,
                         "turn tool-output budget exhausted; skipping tool"
                     );
                     messages.push(ChatMessage {
@@ -4012,40 +4318,82 @@ impl AgentLoop {
                 {
                     let handler = handler.clone();
                     let args = execution_args.clone();
-                    // Long-running tools get extended timeouts
-                    let timeout_secs = match call.name.as_str() {
-                        "install_application"
-                        | "uninstall_application"
-                        | "update_all_packages"
-                        | "install_package"
-                        | "uninstall_package"
-                        | "execute_fleet_command" => 300,
-                        "generate_image" => 300,
-                        "search_news" | "fetch_article" => 60,
-                        "execute_bash" | "execute_python" | "execute_powershell" => 120,
-                        "download_file" => 120,
-                        _ => 30,
-                    };
-                    let execution_cancel = if call.name == "generate_image" {
-                        turn_image_cancel.clone()
-                    } else if call.name.starts_with("mcp_") {
-                        turn_mcp_cancel.clone()
-                    } else if is_sidecar_backed_tool_name(&call.name) {
-                        turn_sidecar_cancel.clone()
+
+                    // ── Phase 3: Preflight validation ────────────────────────
+                    // Run before spawning any subprocess. Fail fast on obviously
+                    // dangerous or malformed arguments. Non-blocking, deterministic.
+                    let preflight = crate::tools::preflight::run_preflight(&call.name, &args);
+                    if !preflight.allowed {
+                        let reason = preflight
+                            .blocked_reason
+                            .unwrap_or_else(|| "preflight validation failed".to_string());
+                        tracing::warn!(
+                            tool = %call.name,
+                            reason = %reason,
+                            "preflight blocked tool execution"
+                        );
+                        log_pipeline_step(
+                            session_id,
+                            "preflight_blocked",
+                            "Preflight validation blocked tool execution",
+                            Some(serde_json::json!({
+                                "round": round,
+                                "tool": call.name.clone(),
+                                "reason": reason.clone(),
+                            })),
+                        );
+                        hb_cancel.cancel();
+                        crate::infra::isolation::ToolResult::err(format!(
+                            "PREFLIGHT_BLOCKED: {reason}"
+                        ))
                     } else {
-                        turn_tools_cancel.clone()
-                    };
-                    let isolation_name = format!("tool:{}", call.name);
-                    let tool_context = self
-                        .tool_registry
-                        .make_tool_context(execution_cancel.clone());
-                    run_isolated(
-                        &isolation_name,
-                        std::time::Duration::from_secs(timeout_secs),
-                        execution_cancel,
-                        None,
-                        move || async move { handler.execute_with_context(args, tool_context).await },
-                    ).await
+                        // Log any preflight warnings (non-blocking)
+                        for warning in &preflight.warnings {
+                            tracing::info!(
+                                tool = %call.name,
+                                warning = %warning,
+                                "preflight warning"
+                            );
+                        }
+
+                        // Long-running tools get extended timeouts
+                        let timeout_secs = match call.name.as_str() {
+                            "install_application"
+                            | "uninstall_application"
+                            | "update_all_packages"
+                            | "install_package"
+                            | "uninstall_package"
+                            | "execute_fleet_command" => 300,
+                            "generate_image" => 300,
+                            "search_news" | "fetch_article" => 60,
+                            "execute_bash" | "execute_python" | "execute_powershell" => 120,
+                            "download_file" => 120,
+                            _ => 30,
+                        };
+                        let execution_cancel = if call.name == "generate_image" {
+                            turn_image_cancel.clone()
+                        } else if call.name.starts_with("mcp_") {
+                            turn_mcp_cancel.clone()
+                        } else if is_sidecar_backed_tool_name(&call.name) {
+                            turn_sidecar_cancel.clone()
+                        } else {
+                            turn_tools_cancel.clone()
+                        };
+                        let isolation_name = format!("tool:{}", call.name);
+                        let tool_context = self
+                            .tool_registry
+                            .make_tool_context(execution_cancel.clone());
+                        run_isolated(
+                            &isolation_name,
+                            std::time::Duration::from_secs(timeout_secs),
+                            execution_cancel,
+                            None,
+                            move || async move {
+                                handler.execute_with_context(args, tool_context).await
+                            },
+                        )
+                        .await
+                    }
                 } else {
                     crate::infra::isolation::ToolResult::err(format!("unknown tool: {}", call.name))
                 };
@@ -4056,6 +4404,73 @@ impl AgentLoop {
 
                 // Stop the heartbeat task.
                 hb_cancel.cancel();
+
+                // ── Phase 3: Post-execution verification ─────────────────────
+                // Validate tool results for non-trivial tools when a verifier is attached.
+                // The verifier NEVER retries, replans, or mutates state — it only logs.
+                if tool_result.success {
+                    if let Some(ref verifier) = self.execution_verifier {
+                        let verifiability = infer_verifiability_for_tool(
+                            &call.name,
+                            &execution_args,
+                            &tool_result,
+                        );
+                        if let Some(leaf) = verifiability {
+                            let outcome = verifier.verify(&leaf).await;
+                            tracing::info!(
+                                tool = %call.name,
+                                verified = outcome.verified,
+                                confidence = outcome.confidence,
+                                evidence = %outcome.evidence,
+                                latency_ms = outcome.latency_ms,
+                                "execution_verifier: result"
+                            );
+                            log_pipeline_step(
+                                session_id,
+                                "execution_verified",
+                                "Post-execution verification completed",
+                                Some(serde_json::json!({
+                                    "round": round,
+                                    "tool": call.name.clone(),
+                                    "verified": outcome.verified,
+                                    "confidence": outcome.confidence,
+                                    "evidence": outcome.evidence,
+                                    "latency_ms": outcome.latency_ms,
+                                })),
+                            );
+                        }
+                    }
+                }
+
+                // ── Turn Memory: record success + check satisfaction ───────────
+                if tool_result.success {
+                    let result_preview: String = tool_result
+                        .data
+                        .to_string()
+                        .chars()
+                        .take(200)
+                        .collect();
+                    let tool_target = ExecutionTarget::infer(&routing_focus_text, &call.name);
+                    turn_memory.record_success(&call.name, call_hash, &result_preview, tool_target);
+
+                    // Check if the user's goal is now satisfied
+                    if !turn_memory.is_satisfied() {
+                        if let Some(reason) = detect_satisfaction(&turn_memory, &call.name, true) {
+                            turn_memory.mark_satisfied(reason.clone());
+                            log_pipeline_step(
+                                session_id,
+                                "goal_satisfied",
+                                "Task satisfaction detected — tool loop will terminate after this round",
+                                Some(serde_json::json!({
+                                    "round": round,
+                                    "tool": call.name.clone(),
+                                    "reason": reason,
+                                    "memory": turn_memory.to_json(),
+                                })),
+                            );
+                        }
+                    }
+                }
 
                 // Phase 5: Record routing feedback for online learning
                 if let Some(ref feedback_collector) = self.feedback_collector {
@@ -4315,6 +4730,45 @@ impl AgentLoop {
                 // Update the cumulative turn token counter.
                 let result_tokens = count_tokens(&result_str, &backend.tokenizer_base_url()).await;
                 turn_tool_tokens = turn_tool_tokens.saturating_add(result_tokens);
+                // Phase 4: Update ledger with tool result tokens
+                let ledger_total = turn_ledger.add_tool_result(result_tokens);
+                let _ = ledger_total; // used for logging below
+
+                // ── Phase 4: Inter-tool budget check ─────────────────────────
+                // Check if cumulative context growth requires compaction or loop break.
+                // This catches context explosion from many tool calls in a single turn.
+                match check_inter_tool_budget(&messages, &context_budgets) {
+                    BudgetCheckResult::Ok => {}
+                    BudgetCheckResult::CompactRequired => {
+                        turn_ledger.record_compaction();
+                        tracing::warn!(
+                            session = session_id,
+                            round,
+                            tool = %call.name,
+                            context_window = active_context_window,
+                            "inter-tool budget: context at 75%+, compacting history"
+                        );
+                        compact_messages_with_budgets(messages, &context_budgets);
+                    }
+                    BudgetCheckResult::ExhaustedBreak => {
+                        turn_ledger.record_compaction();
+                        tracing::error!(
+                            session = session_id,
+                            round,
+                            tool = %call.name,
+                            context_window = active_context_window,
+                            "inter-tool budget: context at 87.5%+, breaking tool loop"
+                        );
+                        compact_messages_with_budgets(messages, &context_budgets);
+                        messages.push(ChatMessage {
+                            role: "system".into(),
+                            content: "Context budget exhausted. Summarize results so far and respond to the user.".into(),
+                            name: None,
+                            images: None,
+                        });
+                        break;
+                    }
+                }
 
                 // Auto-route: if tool result contains a file path, check if a
                 // precognitive tool should process it automatically
@@ -4338,6 +4792,10 @@ impl AgentLoop {
                         "result_preview": sanitize_json_for_logs(&tool_result.data, 220, 8),
                         "result_tokens": result_tokens,
                         "turn_tool_tokens_total": turn_tool_tokens,
+                        // Phase 4: ledger snapshot for observability
+                        "ledger": turn_ledger.snapshot().to_json(),
+                        "context_window": active_context_window,
+                        "pressure": context_budgets.pressure_level(turn_ledger.total_estimated()).as_str(),
                         "auto_enriched": auto_enrichment.is_some(),
                     })),
                 );

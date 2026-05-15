@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod intelligence_routes;
 pub mod inventory;
+pub mod provider_routes;
 pub mod routes;
 pub mod ws;
 
@@ -24,6 +25,7 @@ pub fn build_router(state: Arc<ServerState>) -> Router {
     Router::new()
         .merge(routes::api_routes())
         .merge(intelligence_routes::intelligence_routes())
+        .merge(provider_routes::provider_routes())
         .merge(ws::ws_routes())
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())

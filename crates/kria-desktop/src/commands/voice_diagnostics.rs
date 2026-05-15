@@ -80,3 +80,130 @@ pub async fn voice_v2_status() -> Result<serde_json::Value, String> {
         "note": "v2 runtime loop pending; engine='v2' currently falls back to v1.",
     }))
 }
+
+/// Debug helper: transcribe a user-provided audio file (WAV) using the same
+/// whisper path configured for voice turns. This isolates STT correctness from
+/// capture/turn orchestration.
+#[tauri::command]
+pub async fn voice_transcribe_audio_file(path: String) -> Result<serde_json::Value, String> {
+    use crate::commands::command_helpers::which_binary;
+    use crate::commands::voice_runtime_helpers::resolve_model_file;
+    use kria_core::voice::stt::SpeechToText;
+
+    let file_path = std::path::PathBuf::from(path.trim());
+    if !file_path.exists() {
+        return Err("Audio file does not exist".into());
+    }
+    if !file_path.is_file() {
+        return Err("Path must point to a file".into());
+    }
+    let ext = file_path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if ext != "wav" {
+        return Err("Only .wav files are supported for now".into());
+    }
+
+    let config = KriaConfig::load(None).map_err(|e| e.to_string())?;
+    let paths = config.resolve_paths().map_err(|e| e.to_string())?;
+    let stt_model_path = resolve_model_file(&paths, "stt", &config.voice.stt_model);
+    let whisper_bin = which_binary("whisper-cpp").or_else(|| which_binary("main"));
+    let Some(whisper_bin) = whisper_bin else {
+        return Err("whisper-cpp binary not found in PATH".into());
+    };
+
+    let mut stt = SpeechToText::new(stt_model_path, Some(whisper_bin));
+    stt.set_language(&config.voice.language);
+    if config.hardware.threads > 0 {
+        stt.set_threads(config.hardware.threads.clamp(1, 12));
+    }
+    let result = stt
+        .transcribe_file(&file_path)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(serde_json::json!({
+        "text": result.text,
+        "language": result.language,
+        "confidence": result.confidence,
+        "duration_ms": result.duration_ms,
+        "engine": "whisper-cli",
+        "path": file_path.display().to_string()
+    }))
+}
+
+/// Debug helper: transcribe uploaded audio bytes from UI without requiring a
+/// direct filesystem path from the webview.
+#[tauri::command]
+pub async fn voice_transcribe_uploaded_audio(
+    name: String,
+    bytes: Vec<u8>,
+) -> Result<serde_json::Value, String> {
+    use crate::commands::command_helpers::which_binary;
+    use crate::commands::voice_runtime_helpers::resolve_model_file;
+    use kria_core::voice::stt::SpeechToText;
+
+    if bytes.is_empty() {
+        return Err("Uploaded audio is empty".into());
+    }
+
+    let ext = std::path::Path::new(name.trim())
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if ext.is_empty() {
+        return Err("Audio filename must include an extension".into());
+    }
+    let allowed = ["wav", "mp3", "m4a", "flac", "ogg", "webm"];
+    if !allowed.contains(&ext.as_str()) {
+        return Err(format!(
+            "Unsupported audio extension .{ext}. Supported: {}",
+            allowed.join(", ")
+        ));
+    }
+
+    let temp_name = format!(
+        "kria_voice_upload_{}_{}.{}",
+        std::process::id(),
+        chrono::Utc::now().timestamp_millis(),
+        ext
+    );
+    let temp_path = std::env::temp_dir().join(temp_name);
+    std::fs::write(&temp_path, &bytes).map_err(|e| format!("Failed to write temp audio file: {e}"))?;
+
+    let run = async {
+        let config = KriaConfig::load(None).map_err(|e| e.to_string())?;
+        let paths = config.resolve_paths().map_err(|e| e.to_string())?;
+        let stt_model_path = resolve_model_file(&paths, "stt", &config.voice.stt_model);
+        let whisper_bin = which_binary("whisper-cpp").or_else(|| which_binary("main"));
+        let Some(whisper_bin) = whisper_bin else {
+            return Err("whisper-cpp binary not found in PATH".into());
+        };
+
+        let mut stt = SpeechToText::new(stt_model_path, Some(whisper_bin));
+        stt.set_language(&config.voice.language);
+        if config.hardware.threads > 0 {
+            stt.set_threads(config.hardware.threads.clamp(1, 12));
+        }
+        let result = stt
+            .transcribe_file(&temp_path)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        Ok::<serde_json::Value, String>(serde_json::json!({
+            "text": result.text,
+            "language": result.language,
+            "confidence": result.confidence,
+            "duration_ms": result.duration_ms,
+            "engine": "whisper-cli",
+            "name": name
+        }))
+    }
+    .await;
+
+    let _ = std::fs::remove_file(&temp_path);
+    run
+}

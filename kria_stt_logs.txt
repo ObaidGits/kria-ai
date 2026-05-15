@@ -1,0 +1,994 @@
+2026-05-14T10:23:55.526399Z  INFO kria_desktop::commands::runtime: orchestrator: idle release monitor enabled idle_after_secs=300 check_interval_secs=10
+2026-05-14T10:23:57.520707Z  INFO kria_core::llm::orchestrator::gpu_watchdog: watchdog: recovery headroom — entering Recovering free_mb=3872 delta_ngl=14
+2026-05-14T10:24:26.331840Z  INFO kria_desktop::commands::voice_runtime_helpers: voice.engine = "v2" requested; constructing compatibility v1 pipeline (v2 hot-swap attempted during start_voice)
+2026-05-14T10:24:26.334626Z  INFO kria_desktop::commands::voice_runtime_helpers: voice v2: starting turn loop turn_index=1
+whisper_init_from_file_with_params_no_state: loading model from '/home/obaid/.kria/models/stt/ggml-large-v3-turbo.bin'
+whisper_init_with_params_no_state: use gpu    = 0
+whisper_init_with_params_no_state: flash attn = 0
+whisper_init_with_params_no_state: gpu_device = 0
+whisper_init_with_params_no_state: dtw        = 0
+whisper_init_with_params_no_state: backends   = 1
+whisper_model_load: loading model
+whisper_model_load: n_vocab       = 51866
+whisper_model_load: n_audio_ctx   = 1500
+whisper_model_load: n_audio_state = 1280
+whisper_model_load: n_audio_head  = 20
+whisper_model_load: n_audio_layer = 32
+whisper_model_load: n_text_ctx    = 448
+whisper_model_load: n_text_state  = 1280
+whisper_model_load: n_text_head   = 20
+whisper_model_load: n_text_layer  = 4
+whisper_model_load: n_mels        = 128
+whisper_model_load: ftype         = 1
+whisper_model_load: qntvr         = 0
+whisper_model_load: type          = 5 (large v3)
+2026-05-14T10:24:26.353129Z  INFO kria_core::voice::capture: audio capture started device=default mode=Light
+whisper_model_load: adding 1609 extra tokens
+whisper_model_load: n_langs       = 100
+whisper_model_load:      CPU total size =  1623.92 MB
+whisper_model_load: model size    = 1623.92 MB
+2026-05-14T10:24:27.018373Z  INFO kria_core::voice::v2::pipeline: v2 capture task started; awaiting audio frames
+2026-05-14T10:24:27.018512Z  INFO kria_core::voice::v2::pipeline: v2 pipeline: waiting for STT final transcript; dropped stt_pcm_tx
+2026-05-14T10:24:27.018637Z  INFO kria_core::voice::v2::pipeline: v2 pipeline: calling stt_handle.join() to await final transcript
+2026-05-14T10:24:27.018717Z  INFO kria_core::voice::v2::pipeline: v2 pipeline: STT handle available, joining...
+2026-05-14T10:24:27.019273Z  INFO kria_core::voice::v2::stt::whisper_rs_impl: whisper-rs: first chunk received chunk_samples=2019 buffer_len=2019 sample_rate=16000
+whisper_init_state: kv self size  =   10.49 MB
+whisper_init_state: kv cross size =   31.46 MB
+whisper_init_state: kv pad  size  =    7.86 MB
+whisper_init_state: compute buffer (conv)   =   36.13 MB
+whisper_init_state: compute buffer (encode) =  212.29 MB
+whisper_init_state: compute buffer (cross)  =    9.25 MB
+whisper_init_state: compute buffer (decode) =   99.10 MB
+2026-05-14T10:24:27.537187Z  INFO kria_core::llm::orchestrator::gpu_watchdog: watchdog: recovery stable — scaling up new_ngl=14
+2026-05-14T10:24:27.537446Z  INFO kria_core::llm::orchestrator::gpu_watchdog: watchdog: executing swap old_ngl=0 old_ctx=4096 new_ngl=14 new_ctx=4096 emergency=false degradation=partial_offload
+2026-05-14T10:24:27.670362Z  INFO kria_core::llm::orchestrator::server_manager: server_manager: API-level model unload requested url=http://127.0.0.1:35617/v1/models/unload model=Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf request_timeout_secs=30
+2026-05-14T10:24:27.679107Z  INFO kria_core::llm::orchestrator::server_manager: server_manager: api_unload_model received HTTP 404 (Router Mode not supported). Falling back to legacy restart path. To enable zero-downtime swaps, upgrade llama-server to b5291+ and use --models-dir. status=404 elapsed_ms=2 url=http://127.0.0.1:35617/v1/models/unload body={"error":{"message":"File Not Found","type":"not_found_error","code":404}}
+2026-05-14T10:24:27.682723Z  INFO kria_core::llm::orchestrator::child_guard: child_guard: SIGTERM → process group pid=154224
+2026-05-14T10:24:28.164954Z  INFO kria_core::llm::orchestrator::child_guard: child_guard: exited gracefully code=Some(0)
+2026-05-14T10:24:28.174249Z  INFO kria_core::llm::orchestrator::server_manager: server_manager: loading mmproj (vision_mode=reduced_gpu) vision_mode=ReducedGpu ngl=14
+2026-05-14T10:24:28.174366Z  INFO kria_core::llm::orchestrator::server_manager: server_manager: spawning llama-server binary=llama-server ngl=14 ctx=4096 router_mode=true model_id=Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf models_dir=Some("/media/obaid/SSD/KRIA/models/llm") vision_requested=true vision_enabled=true batch_size=128 ubatch_size=Some(128) parallel=Some(1) no_warmup=true
+2026-05-14T10:24:28.384588Z  INFO kria_core::voice::v2::pipeline: v2 capture awaiting speech start frame_count=16 waited_ms=2046 rms=0.0002446018625050783 threshold=0.0020000000949949026
+2026-05-14T10:24:28.898288Z  INFO kria_core::voice::v2::pipeline: v2 capture detected speech start frame_count=20 utterance_ms=2558 rms=0.002098820172250271 threshold=0.0020000000949949026
+2026-05-14T10:24:32.133578Z  INFO kria_core::llm::orchestrator::server_manager: server_manager: discovered ephemeral port port=32883 url=http://127.0.0.1:32883/v1
+2026-05-14T10:24:32.199032Z  INFO kria_core::llm::orchestrator::server_manager: server_manager: llama-server is ready ngl=14 ctx=4096 port=32883
+2026-05-14T10:24:32.200138Z  INFO kria_core::llm::orchestrator::gpu_watchdog: watchdog: swap completed new_ngl=14 duration_ms=4661
+2026-05-14T10:24:38.790556Z  INFO kria_core::voice::v2::pipeline: v2 capture detected end-of-speech silence; finalizing STT stream frame_count=97 speech_started=true speech_audio_ms=1024 trailing_silence_ms=768 rms=7.1330250648316e-5 threshold=0.003000000026077032
+2026-05-14T10:24:38.790701Z  INFO kria_core::voice::v2::pipeline: v2 capture task exiting frame_count=97 speech_started=true utterance_ms=12414
+2026-05-14T10:24:39.993246Z  WARN kria_core::voice::v2::stt::whisper_rs_impl: whisper-rs: partial decode still active at finalization boundary; proceeding
+2026-05-14T10:24:39.993360Z  INFO kria_core::voice::v2::stt::whisper_rs_impl: whisper-rs: final decode starting buffer_len=198627 sample_rate=16000 duration_ms=12414
+whisper_init_state: kv self size  =   10.49 MB
+whisper_init_state: kv cross size =   31.46 MB
+whisper_init_state: kv pad  size  =    7.86 MB
+whisper_init_state: compute buffer (conv)   =   36.13 MB
+whisper_init_state: compute buffer (encode) =  212.29 MB
+whisper_init_state: compute buffer (cross)  =    9.25 MB
+whisper_init_state: compute buffer (decode) =   99.10 MB
+2026-05-14T10:24:43.353445Z  INFO kria_desktop::commands::voice_runtime_helpers: whisper warmup complete elapsed_ms=17020
+whisper_full_with_state: auto-detected language: en (p = 0.360457)
+whisper_full_with_state: auto-detected language: is (p = 0.832679)
+2026-05-14T10:24:57.100274Z  WARN kria_core::voice::v2::stt::whisper_rs_impl: whisper-rs: final decode produced empty text; retrying via whisper-cli fallback
+2026-05-14T10:25:06.269413Z  INFO kria_core::voice::v2::stt::whisper_rs_impl: whisper-rs: cli fallback produced non-empty transcript text_len=9 lang=en
+2026-05-14T10:25:06.285903Z  INFO kria_core::voice::v2::stt::whisper_rs_impl: whisper-rs: final decode produced text_len=9 lang="en"
+2026-05-14T10:25:06.293192Z  INFO kria_core::voice::v2::pipeline: v2 pipeline: STT join completed
+2026-05-14T10:25:06.294142Z  INFO kria_core::voice::v2::pipeline: voice v2: STT final transcript ready text_len=9 engine=whisper-rs duration_ms=12414
+2026-05-14T10:25:06.294198Z  INFO kria_core::voice::v2::pipeline: voice v2: STT final transcript text text=Hey, Ría.
+2026-05-14T10:25:06.296754Z  INFO kria_core::voice::v2::pipeline: voice v2: entering thinking; requesting LLM token stream
+2026-05-14T10:25:06.297464Z  INFO kria_desktop::commands::voice_runtime_helpers: voice v2: transcript-only debug mode enabled (LLM bypass) turn=1 user_text_len=9
+2026-05-14T10:25:06.320897Z  INFO ort::logging: Session Options {  execution_mode:0 execution_order:DEFAULT enable_profiling:0 optimized_model_filepath:"" enable_mem_pattern:1 enable_mem_reuse:1 enable_cpu_mem_arena:1 profile_file_prefix:onnxruntime_profile_ session_logid: session_log_severity_level:-1 session_log_verbosity_level:0 max_num_graph_transformation_steps:10 graph_optimization_level:4 intra_op_param:OrtThreadPoolParams { thread_pool_size: 0 auto_set_affinity: 0 allow_spinning: 0 dynamic_block_base_: 0 stack_size: 0 affinity_str:  set_denormal_as_zero: 0 } inter_op_param:OrtThreadPoolParams { thread_pool_size: 0 auto_set_affinity: 0 allow_spinning: 0 dynamic_block_base_: 0 stack_size: 0 affinity_str:  set_denormal_as_zero: 0 } use_per_session_threads:1 thread_pool_allow_spinning:1 use_deterministic_compute:0 ep_selection_policy:5 config_options: {  } }
+2026-05-14T10:25:06.321125Z  INFO ort::logging: Creating and using per session threadpools since use_per_session_threads_ is true
+2026-05-14T10:25:06.321145Z  INFO ort::logging: Dynamic block base set to 0
+2026-05-14T10:25:06.488078Z  INFO ort::logging: Initializing session.
+2026-05-14T10:25:06.488370Z  INFO ort::logging: Creating BFCArena for Cpu with following configs: initial_chunk_size_bytes: 1048576 max_dead_bytes_per_chunk: 134217728 initial_growth_chunk_size_bytes: 2097152 max_power_of_two_extend_bytes: 1073741824 memory limit: 18446744073709551615 arena_extend_strategy: 0
+2026-05-14T10:25:06.490321Z  INFO ort::logging: This model does not have any local functions defined. AOT Inlining is not performed
+2026-05-14T10:25:06.513933Z  INFO ort::logging: GraphTransformer EnsureUniqueDQForNodeUnit modified: 0 with status: OK
+2026-05-14T10:25:06.515854Z  INFO ort::logging: GraphTransformer Level1_RuleBasedTransformer modified: 1 with status: OK
+2026-05-14T10:25:06.530729Z  INFO ort::logging: Removing initializer '/dp/flows.3/Constant_103_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.530798Z  INFO ort::logging: Removing initializer '/dp/flows.3/Constant_41_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.530858Z  INFO ort::logging: Removing initializer '/dp/flows.5/Constant_41_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.530935Z  INFO ort::logging: Removing initializer '/dp/flows.5/Constant_103_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.531023Z  INFO ort::logging: Removing initializer '/dp/flows.5/Constant_155_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.531064Z  INFO ort::logging: Removing initializer '/dp/flows.7/Constant_41_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.531083Z  INFO ort::logging: Removing initializer '/dp/flows.7/Constant_155_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.531109Z  INFO ort::logging: Removing initializer '/dp/flows.3/Constant_155_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.531127Z  INFO ort::logging: Removing initializer '/dp/flows.7/Constant_103_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.532181Z  INFO ort::logging: GraphTransformer DoubleQDQPairsRemover modified: 0 with status: OK
+2026-05-14T10:25:06.542237Z  INFO ort::logging: Total shared scalar initializer count: 2328
+2026-05-14T10:25:06.542396Z  INFO ort::logging: GraphTransformer ConstantSharing modified: 1 with status: OK
+2026-05-14T10:25:06.559641Z  INFO ort::logging: GraphTransformer CommonSubexpressionElimination modified: 1 with status: OK
+2026-05-14T10:25:06.581594Z  INFO ort::logging: GraphTransformer ConstantFolding modified: 1 with status: OK
+2026-05-14T10:25:06.591529Z  INFO ort::logging: Removing initializer '/dp/flows.3/Shape_41_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.591589Z  INFO ort::logging: Removing initializer '/dp/flows.3/Shape_24_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.591605Z  INFO ort::logging: Removing initializer '/dp/flows.3/Shape_12_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.591625Z  INFO ort::logging: Removing initializer '/dp/flows.3/Shape_63_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.591639Z  INFO ort::logging: Removing initializer '/dp/flows.3/Shape_56_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.591653Z  INFO ort::logging: Removing initializer '/dp/flows.3/Shape_48_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.591666Z  INFO ort::logging: Removing initializer '/dp/flows.5/Shape_41_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.591680Z  INFO ort::logging: Removing initializer '/dp/flows.5/Shape_24_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.591694Z  INFO ort::logging: Removing initializer '/dp/flows.5/Shape_69_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.591707Z  INFO ort::logging: Removing initializer '/dp/flows.5/Shape_56_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.591721Z  INFO ort::logging: Removing initializer '/dp/flows.5/Shape_48_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.591735Z  INFO ort::logging: Removing initializer '/dp/flows.7/Shape_41_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.591748Z  INFO ort::logging: Removing initializer '/dp/flows.7/Shape_33_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.591762Z  INFO ort::logging: Removing initializer '/dp/flows.7/Shape_24_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.591775Z  INFO ort::logging: Removing initializer '/dp/flows.7/Shape_12_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.591789Z  INFO ort::logging: Removing initializer '/dp/flows.7/Transpose_1_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.591808Z  INFO ort::logging: Removing initializer '/dp/flows.7/Slice_3_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.591822Z  INFO ort::logging: Removing initializer '/dp/flows.7/Reshape_1_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.591836Z  INFO ort::logging: Removing initializer '/dp/flows.7/Concat_1_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.591849Z  INFO ort::logging: Removing initializer '/dp/flows.7/ConstantOfShape_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.591863Z  INFO ort::logging: Removing initializer '/dp/flows.7/Shape_69_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.591878Z  INFO ort::logging: Removing initializer '/dp/flows.7/Shape_63_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.591892Z  INFO ort::logging: Removing initializer '/dp/flows.7/Shape_56_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.591905Z  INFO ort::logging: Removing initializer '/dp/flows.7/Shape_48_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.591919Z  INFO ort::logging: Removing initializer '/dp/flows.7/Transpose_8_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.591933Z  INFO ort::logging: Removing initializer '/dp/flows.7/Slice_13_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.591946Z  INFO ort::logging: Removing initializer '/dp/flows.7/Reshape_17_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.591960Z  INFO ort::logging: Removing initializer '/dp/flows.7/ConstantOfShape_19_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.591973Z  INFO ort::logging: Removing initializer '/Transpose_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.591986Z  INFO ort::logging: Removing initializer '/Slice_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.591999Z  INFO ort::logging: Removing initializer '/Reshape_2_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592013Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.5/Sub_7_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592026Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.5/Gather_12_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592042Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.5/Sub_8_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592056Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.5/Gather_13_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592070Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.5/Shape_13_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592085Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.5/Sub_4_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592099Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.5/Gather_8_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592113Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.5/Shape_8_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592128Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.5/Sub_9_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592145Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.5/Shape_14_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592161Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.4/Sub_7_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592174Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.4/Gather_12_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592188Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.4/Shape_12_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592202Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.4/Sub_8_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592217Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.4/Gather_13_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592232Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.4/Shape_13_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592246Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.4/Sub_4_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592277Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.4/Gather_8_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592290Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.4/Shape_8_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592304Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.4/Sub_9_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592318Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.4/Shape_14_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592332Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.3/Sub_7_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592346Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.3/Gather_12_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592360Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.3/Shape_12_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592374Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.3/Sub_8_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592388Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.3/Gather_13_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592402Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.3/Shape_13_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592416Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.3/Sub_4_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592431Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.3/Shape_8_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592445Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.3/Sub_9_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592458Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.3/Gather_14_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592472Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.3/Shape_14_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592489Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.2/Sub_7_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592503Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.2/Gather_12_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592518Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.2/Shape_12_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592531Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.2/Gather_13_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592545Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.2/Shape_13_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592560Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.2/Sub_4_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592574Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.2/Gather_8_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592588Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.2/Gather_14_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592602Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.2/Shape_14_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592616Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.1/Sub_7_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592630Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.1/Gather_12_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592644Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.1/Shape_12_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592658Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.1/Sub_8_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592672Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.1/Gather_13_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592686Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.1/Shape_13_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592700Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.1/Sub_4_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592714Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.1/Gather_8_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592729Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.1/Shape_8_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592743Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.1/Sub_9_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592758Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.1/Gather_14_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592773Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.1/Shape_14_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592788Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.0/Sub_7_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592811Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.0/Gather_12_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592832Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.0/Shape_12_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592846Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.0/Sub_8_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592861Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.0/Gather_13_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592875Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.0/Shape_13_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592891Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.0/Transpose_4_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592906Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.0/Slice_2_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592923Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.0/Reshape_5_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592937Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.0/Concat_8_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592951Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.0/Sub_4_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592965Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.0/Gather_8_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.592981Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.0/Shape_8_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.593003Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.0/Sub_9_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.593017Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.0/Gather_14_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.593033Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.0/Shape_14_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.593047Z  INFO ort::logging: Removing initializer '/enc_p/encoder/ffn_layers.5/Transpose_1_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.593061Z  INFO ort::logging: Removing initializer '/enc_p/encoder/ffn_layers.5/Slice_1_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.593075Z  INFO ort::logging: Removing initializer '/enc_p/encoder/ffn_layers.5/Reshape_2_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.593089Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.3/Gather_8_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.593103Z  INFO ort::logging: Removing initializer '/enc_p/encoder/ffn_layers.5/Concat_1_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.593118Z  INFO ort::logging: Removing initializer '/enc_p/encoder/ffn_layers.5/ConstantOfShape_1_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.593133Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.5/Gather_14_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.593148Z  INFO ort::logging: Removing initializer '/Constant_19_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.593162Z  INFO ort::logging: Removing initializer '/dp/flows.3/Constant_213_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.593177Z  INFO ort::logging: Removing initializer '/dp/flows.3/Constant_140_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.593191Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.2/Shape_8_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.593205Z  INFO ort::logging: Removing initializer '/enc_p/encoder/ffn_layers.2/Constant_9_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.593221Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.2/Constant_104_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.593236Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.2/Constant_67_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.593251Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.5/Shape_12_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.593265Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.2/Constant_47_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.593280Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.2/Sub_8_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.593298Z  INFO ort::logging: Removing initializer '/dp/flows.7/Concat_11_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.593311Z  INFO ort::logging: Removing initializer '/dp/flows.3/Shape_33_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.593330Z  INFO ort::logging: Removing initializer '/Concat_2_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.593350Z  INFO ort::logging: Removing initializer '/dp/flows.5/Shape_33_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.593369Z  INFO ort::logging: Removing initializer '/dp/flows.3/Shape_69_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.593386Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.2/Sub_9_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.593406Z  INFO ort::logging: Removing initializer '/dp/flows.3/Constant_20_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.593421Z  INFO ort::logging: Removing initializer '/dp/flows.5/Shape_12_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.593435Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.4/Gather_14_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.593456Z  INFO ort::logging: Removing initializer 'onnx::Exp_8399'. It is no longer used by any node.
+2026-05-14T10:25:06.593479Z  INFO ort::logging: Removing initializer '/dp/flows.5/Shape_63_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.594598Z  INFO ort::logging: GraphTransformer MatMulAddFusion modified: 0 with status: OK
+2026-05-14T10:25:06.595411Z  INFO ort::logging: Fused reshape node: /Reshape_output_0
+2026-05-14T10:25:06.595464Z  INFO ort::logging: Total fused reshape node count: 1
+2026-05-14T10:25:06.595480Z  INFO ort::logging: GraphTransformer ReshapeFusion modified: 1 with status: OK
+2026-05-14T10:25:06.605539Z  INFO ort::logging: GraphTransformer FreeDimensionOverrideTransformer modified: 0 with status: OK
+2026-05-14T10:25:06.605597Z  INFO ort::logging: GraphTransformer GeluFusionL1 modified: 0 with status: OK
+2026-05-14T10:25:06.605613Z  INFO ort::logging: GraphTransformer LayerNormFusionL1 modified: 0 with status: OK
+2026-05-14T10:25:06.606098Z  INFO ort::logging: GraphTransformer QDQPropagationTransformer modified: 0 with status: OK
+2026-05-14T10:25:06.606498Z  INFO ort::logging: GraphTransformer WeightBiasQuantization modified: 0 with status: OK
+2026-05-14T10:25:06.606905Z  INFO ort::logging: GraphTransformer EnsureUniqueDQForNodeUnit modified: 0 with status: OK
+2026-05-14T10:25:06.607295Z  INFO ort::logging: GraphTransformer WhereDummyDq modified: 0 with status: OK
+2026-05-14T10:25:06.614413Z  INFO ort::logging: GraphTransformer TransposeOptimizer modified: 1 with status: OK
+2026-05-14T10:25:06.624046Z  INFO ort::logging: Removing NodeArg 'Transpose_token_323_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624129Z  INFO ort::logging: Removing NodeArg 'Transpose_token_322_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624146Z  INFO ort::logging: Removing NodeArg 'Transpose_token_321_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624160Z  INFO ort::logging: Removing NodeArg 'Transpose_token_319_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624174Z  INFO ort::logging: Removing NodeArg 'Transpose_token_318_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624187Z  INFO ort::logging: Removing NodeArg 'Transpose_token_316_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624201Z  INFO ort::logging: Removing NodeArg 'Transpose_token_312_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624222Z  INFO ort::logging: Removing NodeArg 'Transpose_token_311_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624241Z  INFO ort::logging: Removing NodeArg 'Transpose_token_309_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624256Z  INFO ort::logging: Removing NodeArg 'Transpose_token_308_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624270Z  INFO ort::logging: Removing NodeArg 'Transpose_token_307_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624283Z  INFO ort::logging: Removing NodeArg 'Transpose_token_296_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624297Z  INFO ort::logging: Removing NodeArg 'Transpose_token_292_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624310Z  INFO ort::logging: Removing NodeArg 'Transpose_token_289_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624323Z  INFO ort::logging: Removing NodeArg 'Transpose_token_288_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624336Z  INFO ort::logging: Removing NodeArg 'Transpose_token_281_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624349Z  INFO ort::logging: Removing NodeArg 'Transpose_token_279_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624362Z  INFO ort::logging: Removing NodeArg 'Transpose_token_277_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624376Z  INFO ort::logging: Removing NodeArg 'Transpose_token_273_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624389Z  INFO ort::logging: Removing NodeArg 'Transpose_token_272_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624402Z  INFO ort::logging: Removing NodeArg 'Transpose_token_271_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624414Z  INFO ort::logging: Removing NodeArg 'Transpose_token_270_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624427Z  INFO ort::logging: Removing NodeArg 'Transpose_token_268_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624440Z  INFO ort::logging: Removing NodeArg 'Transpose_token_267_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624454Z  INFO ort::logging: Removing NodeArg 'Transpose_token_266_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624467Z  INFO ort::logging: Removing NodeArg 'Transpose_token_265_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624479Z  INFO ort::logging: Removing NodeArg 'Transpose_token_263_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624494Z  INFO ort::logging: Removing NodeArg 'Transpose_token_261_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624509Z  INFO ort::logging: Removing NodeArg 'Transpose_token_260_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624522Z  INFO ort::logging: Removing NodeArg 'Transpose_token_259_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624536Z  INFO ort::logging: Removing NodeArg 'Transpose_token_258_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624549Z  INFO ort::logging: Removing NodeArg 'Transpose_token_257_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624562Z  INFO ort::logging: Removing NodeArg 'Transpose_token_255_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624575Z  INFO ort::logging: Removing NodeArg 'Transpose_token_253_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624589Z  INFO ort::logging: Removing NodeArg 'Transpose_token_251_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624602Z  INFO ort::logging: Removing NodeArg 'Transpose_token_250_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624615Z  INFO ort::logging: Removing NodeArg 'Transpose_token_249_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624629Z  INFO ort::logging: Removing NodeArg 'Transpose_token_248_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624642Z  INFO ort::logging: Removing NodeArg 'Transpose_token_246_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624655Z  INFO ort::logging: Removing NodeArg 'Transpose_token_286_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624669Z  INFO ort::logging: Removing NodeArg 'Transpose_token_245_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624682Z  INFO ort::logging: Removing NodeArg 'Transpose_token_243_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624696Z  INFO ort::logging: Removing NodeArg 'Transpose_token_240_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624710Z  INFO ort::logging: Removing NodeArg 'Transpose_token_236_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624724Z  INFO ort::logging: Removing NodeArg 'Transpose_token_235_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624737Z  INFO ort::logging: Removing NodeArg 'Transpose_token_234_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624753Z  INFO ort::logging: Removing NodeArg 'Transpose_token_232_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624767Z  INFO ort::logging: Removing NodeArg 'Transpose_token_231_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624781Z  INFO ort::logging: Removing NodeArg 'Transpose_token_230_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624795Z  INFO ort::logging: Removing NodeArg 'Transpose_token_228_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624818Z  INFO ort::logging: Removing NodeArg 'Transpose_token_227_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624834Z  INFO ort::logging: Removing NodeArg 'Transpose_token_225_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624848Z  INFO ort::logging: Removing NodeArg 'Transpose_token_224_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624861Z  INFO ort::logging: Removing NodeArg 'Transpose_token_218_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624875Z  INFO ort::logging: Removing NodeArg 'Transpose_token_217_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624888Z  INFO ort::logging: Removing NodeArg 'Transpose_token_211_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624902Z  INFO ort::logging: Removing NodeArg 'Transpose_token_210_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624915Z  INFO ort::logging: Removing NodeArg 'Transpose_token_207_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624928Z  INFO ort::logging: Removing NodeArg 'Transpose_token_203_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624942Z  INFO ort::logging: Removing NodeArg 'Transpose_token_200_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624955Z  INFO ort::logging: Removing NodeArg 'Transpose_token_199_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624969Z  INFO ort::logging: Removing NodeArg 'Transpose_token_196_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624983Z  INFO ort::logging: Removing NodeArg 'Transpose_token_192_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.624996Z  INFO ort::logging: Removing NodeArg 'Transpose_token_190_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625010Z  INFO ort::logging: Removing NodeArg 'Transpose_token_187_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625023Z  INFO ort::logging: Removing NodeArg 'Transpose_token_186_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625037Z  INFO ort::logging: Removing NodeArg 'Transpose_token_185_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625051Z  INFO ort::logging: Removing NodeArg 'Transpose_token_184_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625064Z  INFO ort::logging: Removing NodeArg 'Transpose_token_183_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625078Z  INFO ort::logging: Removing NodeArg 'Transpose_token_180_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625091Z  INFO ort::logging: Removing NodeArg 'Transpose_token_179_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625104Z  INFO ort::logging: Removing NodeArg 'Transpose_token_178_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625118Z  INFO ort::logging: Removing NodeArg 'Transpose_token_177_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625131Z  INFO ort::logging: Removing NodeArg 'Transpose_token_175_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625144Z  INFO ort::logging: Removing NodeArg 'Transpose_token_173_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625158Z  INFO ort::logging: Removing NodeArg 'Transpose_token_172_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625171Z  INFO ort::logging: Removing NodeArg 'Transpose_token_168_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625185Z  INFO ort::logging: Removing NodeArg 'Transpose_token_167_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625198Z  INFO ort::logging: Removing NodeArg 'Transpose_token_166_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625211Z  INFO ort::logging: Removing NodeArg 'Transpose_token_164_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625225Z  INFO ort::logging: Removing NodeArg 'Transpose_token_162_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625238Z  INFO ort::logging: Removing NodeArg 'Transpose_token_161_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625252Z  INFO ort::logging: Removing NodeArg 'Transpose_token_159_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625265Z  INFO ort::logging: Removing NodeArg 'Transpose_token_158_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625278Z  INFO ort::logging: Removing NodeArg 'Transpose_token_156_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625292Z  INFO ort::logging: Removing NodeArg 'Transpose_token_150_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625306Z  INFO ort::logging: Removing NodeArg 'Transpose_token_149_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625320Z  INFO ort::logging: Removing NodeArg 'Transpose_token_146_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625334Z  INFO ort::logging: Removing NodeArg 'Transpose_token_145_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625347Z  INFO ort::logging: Removing NodeArg 'Transpose_token_143_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625361Z  INFO ort::logging: Removing NodeArg 'Transpose_token_142_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625374Z  INFO ort::logging: Removing NodeArg 'Transpose_token_139_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625387Z  INFO ort::logging: Removing NodeArg 'Transpose_token_138_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625401Z  INFO ort::logging: Removing NodeArg 'Transpose_token_137_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625414Z  INFO ort::logging: Removing NodeArg 'Transpose_token_135_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625427Z  INFO ort::logging: Removing NodeArg 'Transpose_token_131_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625441Z  INFO ort::logging: Removing NodeArg 'Transpose_token_127_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625455Z  INFO ort::logging: Removing NodeArg 'Transpose_token_126_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625468Z  INFO ort::logging: Removing NodeArg 'Transpose_token_125_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625481Z  INFO ort::logging: Removing NodeArg 'Transpose_token_122_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625494Z  INFO ort::logging: Removing NodeArg 'Transpose_token_121_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625508Z  INFO ort::logging: Removing NodeArg 'Transpose_token_120_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625521Z  INFO ort::logging: Removing NodeArg 'Transpose_token_118_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625534Z  INFO ort::logging: Removing NodeArg 'Transpose_token_117_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625549Z  INFO ort::logging: Removing NodeArg 'Transpose_token_116_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625562Z  INFO ort::logging: Removing NodeArg 'Transpose_token_115_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625576Z  INFO ort::logging: Removing NodeArg 'Transpose_token_112_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625589Z  INFO ort::logging: Removing NodeArg 'Transpose_token_110_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625603Z  INFO ort::logging: Removing NodeArg 'Transpose_token_109_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625616Z  INFO ort::logging: Removing NodeArg 'Transpose_token_108_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625629Z  INFO ort::logging: Removing NodeArg 'Transpose_token_107_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625642Z  INFO ort::logging: Removing NodeArg 'Transpose_token_101_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625656Z  INFO ort::logging: Removing NodeArg 'Transpose_token_99_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625669Z  INFO ort::logging: Removing NodeArg 'Transpose_token_98_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625682Z  INFO ort::logging: Removing NodeArg 'Transpose_token_299_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625696Z  INFO ort::logging: Removing NodeArg 'Transpose_token_97_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625709Z  INFO ort::logging: Removing NodeArg 'Transpose_token_95_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625723Z  INFO ort::logging: Removing NodeArg 'Transpose_token_94_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625736Z  INFO ort::logging: Removing NodeArg 'Transpose_token_92_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625750Z  INFO ort::logging: Removing NodeArg 'Transpose_token_91_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625763Z  INFO ort::logging: Removing NodeArg 'Transpose_token_90_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625776Z  INFO ort::logging: Removing NodeArg 'Transpose_token_85_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625789Z  INFO ort::logging: Removing NodeArg 'Transpose_token_84_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625810Z  INFO ort::logging: Removing NodeArg 'Transpose_token_274_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625828Z  INFO ort::logging: Removing NodeArg 'Transpose_token_83_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625842Z  INFO ort::logging: Removing NodeArg 'Transpose_token_82_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625856Z  INFO ort::logging: Removing NodeArg 'Transpose_token_78_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625869Z  INFO ort::logging: Removing NodeArg 'Transpose_token_74_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625883Z  INFO ort::logging: Removing NodeArg 'Transpose_token_70_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625896Z  INFO ort::logging: Removing NodeArg 'Transpose_token_66_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625909Z  INFO ort::logging: Removing NodeArg 'Transpose_token_64_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625922Z  INFO ort::logging: Removing NodeArg 'Transpose_token_63_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625935Z  INFO ort::logging: Removing NodeArg 'Transpose_token_62_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625948Z  INFO ort::logging: Removing NodeArg 'Transpose_token_60_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625961Z  INFO ort::logging: Removing NodeArg 'Transpose_token_57_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625975Z  INFO ort::logging: Removing NodeArg 'Transpose_token_56_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.625988Z  INFO ort::logging: Removing NodeArg 'Transpose_token_55_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626001Z  INFO ort::logging: Removing NodeArg 'Transpose_token_54_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626014Z  INFO ort::logging: Removing NodeArg 'Transpose_token_53_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626028Z  INFO ort::logging: Removing NodeArg 'Transpose_token_287_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626041Z  INFO ort::logging: Removing NodeArg 'Transpose_token_52_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626054Z  INFO ort::logging: Removing NodeArg 'Transpose_token_50_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626067Z  INFO ort::logging: Removing NodeArg 'Transpose_token_48_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626082Z  INFO ort::logging: Removing NodeArg 'Transpose_token_45_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626095Z  INFO ort::logging: Removing NodeArg 'Transpose_token_43_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626108Z  INFO ort::logging: Removing NodeArg 'Transpose_token_40_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626122Z  INFO ort::logging: Removing NodeArg 'Transpose_token_39_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626135Z  INFO ort::logging: Removing NodeArg 'Transpose_token_37_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626148Z  INFO ort::logging: Removing NodeArg 'Transpose_token_34_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626162Z  INFO ort::logging: Removing NodeArg 'Transpose_token_29_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626176Z  INFO ort::logging: Removing NodeArg 'Transpose_token_28_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626189Z  INFO ort::logging: Removing NodeArg 'Transpose_token_24_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626202Z  INFO ort::logging: Removing NodeArg 'Transpose_token_297_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626216Z  INFO ort::logging: Removing NodeArg 'Transpose_token_23_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626229Z  INFO ort::logging: Removing NodeArg 'Transpose_token_22_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626242Z  INFO ort::logging: Removing NodeArg 'Transpose_token_21_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626255Z  INFO ort::logging: Removing NodeArg 'Transpose_token_20_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626268Z  INFO ort::logging: Removing NodeArg 'Transpose_token_293_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626282Z  INFO ort::logging: Removing NodeArg 'Transpose_token_17_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626295Z  INFO ort::logging: Removing NodeArg 'Transpose_token_16_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626308Z  INFO ort::logging: Removing NodeArg 'Transpose_token_12_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626322Z  INFO ort::logging: Removing NodeArg 'Transpose_token_11_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626335Z  INFO ort::logging: Removing NodeArg 'Transpose_token_10_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626349Z  INFO ort::logging: Removing NodeArg 'Transpose_token_8_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626363Z  INFO ort::logging: Removing NodeArg 'Transpose_token_4_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626376Z  INFO ort::logging: Removing NodeArg 'Transpose_token_1_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626389Z  INFO ort::logging: Removing NodeArg 'Gather_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626402Z  INFO ort::logging: Removing NodeArg 'Transpose_token_86_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626419Z  INFO ort::logging: Removing NodeArg 'Transpose_token_205_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626433Z  INFO ort::logging: Removing NodeArg 'Transpose_token_140_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626447Z  INFO ort::logging: Removing NodeArg 'Transpose_token_61_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626460Z  INFO ort::logging: Removing NodeArg 'Transpose_token_214_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626473Z  INFO ort::logging: Removing NodeArg 'Transpose_token_147_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626488Z  INFO ort::logging: Removing NodeArg 'Transpose_token_193_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626502Z  INFO ort::logging: Removing NodeArg 'Transpose_token_7_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626515Z  INFO ort::logging: Removing NodeArg 'Transpose_token_197_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626529Z  INFO ort::logging: Removing NodeArg 'Transpose_token_306_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626544Z  INFO ort::logging: Removing NodeArg 'Transpose_token_68_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626558Z  INFO ort::logging: Removing NodeArg 'Transpose_token_33_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626575Z  INFO ort::logging: Removing NodeArg 'Transpose_token_32_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626593Z  INFO ort::logging: Removing NodeArg 'Transpose_token_88_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626607Z  INFO ort::logging: Removing NodeArg 'Transpose_token_198_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626622Z  INFO ort::logging: Removing NodeArg 'Transpose_token_298_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626637Z  INFO ort::logging: Removing NodeArg 'Transpose_token_163_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626651Z  INFO ort::logging: Removing NodeArg 'Transpose_token_229_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626665Z  INFO ort::logging: Removing NodeArg 'Transpose_token_284_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626679Z  INFO ort::logging: Removing NodeArg 'Transpose_token_195_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626692Z  INFO ort::logging: Removing NodeArg 'Transpose_token_304_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626706Z  INFO ort::logging: Removing NodeArg 'Transpose_token_155_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626719Z  INFO ort::logging: Removing NodeArg 'Transpose_token_238_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626733Z  INFO ort::logging: Removing NodeArg 'Transpose_token_35_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626747Z  INFO ort::logging: Removing NodeArg 'Transpose_token_233_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626761Z  INFO ort::logging: Removing NodeArg 'Transpose_token_188_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626775Z  INFO ort::logging: Removing NodeArg 'Transpose_token_76_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626789Z  INFO ort::logging: Removing NodeArg 'Transpose_token_42_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626811Z  INFO ort::logging: Removing NodeArg 'Transpose_token_310_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626828Z  INFO ort::logging: Removing NodeArg 'Transpose_token_239_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626843Z  INFO ort::logging: Removing NodeArg 'Transpose_token_119_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626858Z  INFO ort::logging: Removing NodeArg 'Transpose_token_315_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626874Z  INFO ort::logging: Removing NodeArg 'Transpose_token_123_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626888Z  INFO ort::logging: Removing NodeArg 'Transpose_token_128_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626902Z  INFO ort::logging: Removing NodeArg 'Transpose_token_31_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626922Z  INFO ort::logging: Removing NodeArg 'Transpose_token_15_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626937Z  INFO ort::logging: Removing NodeArg 'Transpose_token_65_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626956Z  INFO ort::logging: Removing NodeArg 'Transpose_token_58_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626972Z  INFO ort::logging: Removing NodeArg 'Transpose_token_26_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.626989Z  INFO ort::logging: Removing NodeArg 'Transpose_token_221_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627003Z  INFO ort::logging: Removing NodeArg 'Transpose_token_79_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627018Z  INFO ort::logging: Removing NodeArg 'Transpose_token_202_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627034Z  INFO ort::logging: Removing NodeArg 'Transpose_token_219_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627047Z  INFO ort::logging: Removing NodeArg 'Transpose_token_89_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627062Z  INFO ort::logging: Removing NodeArg 'Transpose_token_80_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627079Z  INFO ort::logging: Removing NodeArg 'Transpose_token_317_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627095Z  INFO ort::logging: Removing NodeArg 'Transpose_token_144_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627110Z  INFO ort::logging: Removing NodeArg 'Transpose_token_106_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627128Z  INFO ort::logging: Removing NodeArg 'Transpose_token_320_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627143Z  INFO ort::logging: Removing NodeArg 'Transpose_token_174_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627156Z  INFO ort::logging: Removing NodeArg 'Transpose_token_30_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627170Z  INFO ort::logging: Removing NodeArg 'Transpose_token_148_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627184Z  INFO ort::logging: Removing NodeArg 'Transpose_token_136_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627200Z  INFO ort::logging: Removing NodeArg 'Transpose_token_215_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627219Z  INFO ort::logging: Removing NodeArg 'Transpose_token_47_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627234Z  INFO ort::logging: Removing NodeArg 'Transpose_token_157_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627249Z  INFO ort::logging: Removing NodeArg 'Transpose_token_152_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627264Z  INFO ort::logging: Removing NodeArg 'Transpose_token_19_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627278Z  INFO ort::logging: Removing NodeArg 'Transpose_token_25_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627293Z  INFO ort::logging: Removing NodeArg 'Transpose_token_96_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627308Z  INFO ort::logging: Removing NodeArg 'Transpose_token_189_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627327Z  INFO ort::logging: Removing NodeArg 'Transpose_token_14_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627342Z  INFO ort::logging: Removing NodeArg 'Transpose_token_5_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627359Z  INFO ort::logging: Removing NodeArg 'Transpose_token_36_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627376Z  INFO ort::logging: Removing NodeArg 'Transpose_token_41_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627398Z  INFO ort::logging: Removing NodeArg 'Transpose_token_9_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627413Z  INFO ort::logging: Removing NodeArg 'Transpose_token_241_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627427Z  INFO ort::logging: Removing NodeArg 'Transpose_token_153_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627444Z  INFO ort::logging: Removing NodeArg 'Transpose_token_226_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627465Z  INFO ort::logging: Removing NodeArg 'Transpose_token_194_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627482Z  INFO ort::logging: Removing NodeArg 'Transpose_token_264_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627499Z  INFO ort::logging: Removing NodeArg 'Transpose_token_133_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627514Z  INFO ort::logging: Removing NodeArg 'Transpose_token_305_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627528Z  INFO ort::logging: Removing NodeArg 'Transpose_token_102_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627544Z  INFO ort::logging: Removing NodeArg 'Transpose_token_124_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627560Z  INFO ort::logging: Removing NodeArg 'Transpose_token_27_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627575Z  INFO ort::logging: Removing NodeArg 'Transpose_token_206_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627592Z  INFO ort::logging: Removing NodeArg 'Transpose_token_3_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627608Z  INFO ort::logging: Removing NodeArg 'Transpose_token_72_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627628Z  INFO ort::logging: Removing NodeArg 'Transpose_token_181_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627643Z  INFO ort::logging: Removing NodeArg 'Transpose_token_93_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627658Z  INFO ort::logging: Removing NodeArg 'Transpose_token_252_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627673Z  INFO ort::logging: Removing NodeArg 'Transpose_token_105_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627690Z  INFO ort::logging: Removing NodeArg 'Transpose_token_213_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627705Z  INFO ort::logging: Removing NodeArg 'Transpose_token_170_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627721Z  INFO ort::logging: Removing NodeArg 'Transpose_token_191_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627735Z  INFO ort::logging: Removing NodeArg 'Transpose_token_129_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627751Z  INFO ort::logging: Removing NodeArg 'Transpose_token_237_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627772Z  INFO ort::logging: Removing NodeArg 'Transpose_token_44_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627789Z  INFO ort::logging: Removing NodeArg 'Transpose_token_71_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627812Z  INFO ort::logging: Removing NodeArg 'Transpose_token_87_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627827Z  INFO ort::logging: Removing NodeArg 'Transpose_token_294_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627845Z  INFO ort::logging: Removing NodeArg 'Transpose_token_6_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627861Z  INFO ort::logging: Removing NodeArg 'Transpose_token_130_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627875Z  INFO ort::logging: Removing NodeArg 'Transpose_token_285_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627890Z  INFO ort::logging: Removing NodeArg 'Transpose_token_313_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627905Z  INFO ort::logging: Removing NodeArg 'Transpose_token_75_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627920Z  INFO ort::logging: Removing NodeArg 'Transpose_token_169_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627937Z  INFO ort::logging: Removing NodeArg 'Transpose_token_100_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627954Z  INFO ort::logging: Removing NodeArg 'Transpose_token_269_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627971Z  INFO ort::logging: Removing NodeArg 'Transpose_token_104_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.627984Z  INFO ort::logging: Removing NodeArg 'Transpose_token_103_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628001Z  INFO ort::logging: Removing NodeArg 'Transpose_token_216_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628018Z  INFO ort::logging: Removing NodeArg 'Transpose_token_73_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628032Z  INFO ort::logging: Removing NodeArg 'Transpose_token_301_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628046Z  INFO ort::logging: Removing NodeArg 'Transpose_token_113_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628068Z  INFO ort::logging: Removing NodeArg 'Transpose_token_254_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628081Z  INFO ort::logging: Removing NodeArg 'Transpose_token_302_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628104Z  INFO ort::logging: Removing NodeArg 'Transpose_token_247_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628117Z  INFO ort::logging: Removing NodeArg 'Transpose_token_208_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628132Z  INFO ort::logging: Removing NodeArg 'Transpose_token_276_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628149Z  INFO ort::logging: Removing NodeArg 'Transpose_token_220_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628163Z  INFO ort::logging: Removing NodeArg 'Transpose_token_134_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628178Z  INFO ort::logging: Removing NodeArg 'Transpose_token_256_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628193Z  INFO ort::logging: Removing NodeArg 'Transpose_token_141_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628207Z  INFO ort::logging: Removing NodeArg 'Transpose_token_0_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628224Z  INFO ort::logging: Removing NodeArg 'Transpose_token_69_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628240Z  INFO ort::logging: Removing NodeArg 'Transpose_token_222_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628255Z  INFO ort::logging: Removing NodeArg 'Transpose_token_2_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628269Z  INFO ort::logging: Removing NodeArg 'Transpose_token_51_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628284Z  INFO ort::logging: Removing NodeArg 'Transpose_token_160_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628301Z  INFO ort::logging: Removing NodeArg 'Transpose_token_290_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628320Z  INFO ort::logging: Removing NodeArg 'Transpose_token_212_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628336Z  INFO ort::logging: Removing NodeArg 'Transpose_token_114_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628351Z  INFO ort::logging: Removing NodeArg 'Transpose_token_165_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628370Z  INFO ort::logging: Removing NodeArg 'Transpose_token_278_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628385Z  INFO ort::logging: Removing NodeArg 'Transpose_token_154_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628398Z  INFO ort::logging: Removing NodeArg 'Transpose_token_291_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628413Z  INFO ort::logging: Removing NodeArg 'Transpose_token_275_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628427Z  INFO ort::logging: Removing NodeArg 'Transpose_token_176_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628441Z  INFO ort::logging: Removing NodeArg 'Transpose_token_201_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628455Z  INFO ort::logging: Removing NodeArg 'Transpose_token_283_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628474Z  INFO ort::logging: Removing NodeArg 'Transpose_token_300_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628488Z  INFO ort::logging: Removing NodeArg 'Transpose_token_13_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628503Z  INFO ort::logging: Removing NodeArg 'Transpose_token_242_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628518Z  INFO ort::logging: Removing NodeArg 'Transpose_token_171_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628535Z  INFO ort::logging: Removing NodeArg 'Transpose_token_18_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628560Z  INFO ort::logging: Removing NodeArg 'Transpose_token_282_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628574Z  INFO ort::logging: Removing NodeArg 'Transpose_token_262_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628589Z  INFO ort::logging: Removing NodeArg 'Transpose_token_77_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628603Z  INFO ort::logging: Removing NodeArg 'Transpose_token_132_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628622Z  INFO ort::logging: Removing NodeArg 'Transpose_token_280_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628638Z  INFO ort::logging: Removing NodeArg 'Transpose_token_182_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628655Z  INFO ort::logging: Removing NodeArg 'Transpose_token_303_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628674Z  INFO ort::logging: Removing NodeArg 'Transpose_token_151_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628687Z  INFO ort::logging: Removing NodeArg 'Transpose_token_244_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628703Z  INFO ort::logging: Removing NodeArg 'Transpose_token_204_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628717Z  INFO ort::logging: Removing NodeArg 'Transpose_token_209_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628732Z  INFO ort::logging: Removing NodeArg 'Transpose_token_325_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628746Z  INFO ort::logging: Removing NodeArg 'Transpose_token_314_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628765Z  INFO ort::logging: Removing NodeArg 'Transpose_token_67_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628781Z  INFO ort::logging: Removing NodeArg 'Transpose_token_223_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628795Z  INFO ort::logging: Removing NodeArg 'Transpose_token_295_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628823Z  INFO ort::logging: Removing NodeArg 'Transpose_token_49_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628843Z  INFO ort::logging: Removing NodeArg 'Transpose_token_111_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628857Z  INFO ort::logging: Removing NodeArg 'Transpose_token_38_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628872Z  INFO ort::logging: Removing NodeArg 'Transpose_token_81_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628886Z  INFO ort::logging: Removing NodeArg 'Transpose_token_324_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628905Z  INFO ort::logging: Removing NodeArg 'Transpose_token_46_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.628926Z  INFO ort::logging: Removing NodeArg 'Transpose_token_59_out0'. It is no longer used by any node.
+2026-05-14T10:25:06.630118Z  INFO ort::logging: GraphTransformer Level1_RuleBasedTransformer modified: 0 with status: OK
+2026-05-14T10:25:06.630500Z  INFO ort::logging: GraphTransformer DoubleQDQPairsRemover modified: 0 with status: OK
+2026-05-14T10:25:06.632313Z  INFO ort::logging: GraphTransformer CommonSubexpressionElimination modified: 0 with status: OK
+2026-05-14T10:25:06.633071Z  INFO ort::logging: GraphTransformer ConstantFolding modified: 0 with status: OK
+2026-05-14T10:25:06.633452Z  INFO ort::logging: GraphTransformer MatMulAddFusion modified: 0 with status: OK
+2026-05-14T10:25:06.633949Z  INFO ort::logging: GraphTransformer ReshapeFusion modified: 0 with status: OK
+2026-05-14T10:25:06.633972Z  INFO ort::logging: GraphTransformer FreeDimensionOverrideTransformer modified: 0 with status: OK
+2026-05-14T10:25:06.633987Z  INFO ort::logging: GraphTransformer GeluFusionL1 modified: 0 with status: OK
+2026-05-14T10:25:06.634001Z  INFO ort::logging: GraphTransformer LayerNormFusionL1 modified: 0 with status: OK
+2026-05-14T10:25:06.634411Z  INFO ort::logging: GraphTransformer QDQPropagationTransformer modified: 0 with status: OK
+2026-05-14T10:25:06.634840Z  INFO ort::logging: GraphTransformer WeightBiasQuantization modified: 0 with status: OK
+2026-05-14T10:25:06.635220Z  INFO ort::logging: GraphTransformer EnsureUniqueDQForNodeUnit modified: 0 with status: OK
+2026-05-14T10:25:06.635584Z  INFO ort::logging: GraphTransformer WhereDummyDq modified: 0 with status: OK
+2026-05-14T10:25:06.643076Z  INFO ort::logging: Running graph optimizations in loop 1 time/s (Graph Optimizations Loop Level : 1)
+2026-05-14T10:25:06.643816Z  INFO ort::logging: GraphTransformer Level2_RuleBasedTransformer modified: 0 with status: OK
+2026-05-14T10:25:06.646110Z  INFO ort::logging: GraphTransformer TransposeOptimizer_CPUExecutionProvider modified: 0 with status: OK
+2026-05-14T10:25:06.646537Z  INFO ort::logging: GraphTransformer QDQS8ToU8Transformer modified: 0 with status: OK
+2026-05-14T10:25:06.647286Z  INFO ort::logging: GraphTransformer QDQSelectorActionTransformer modified: 0 with status: OK
+2026-05-14T10:25:06.647647Z  INFO ort::logging: GraphTransformer GemmActivationFusion modified: 0 with status: OK
+2026-05-14T10:25:06.648071Z  INFO ort::logging: GraphTransformer MatMulIntegerToFloatFusion modified: 0 with status: OK
+2026-05-14T10:25:06.648427Z  INFO ort::logging: GraphTransformer DynamicQuantizeMatMulFusion modified: 0 with status: OK
+2026-05-14T10:25:06.649072Z  INFO ort::logging: GraphTransformer ConvActivationFusion modified: 1 with status: OK
+2026-05-14T10:25:06.659937Z  INFO ort::logging: GraphTransformer GeluFusionL2 modified: 1 with status: OK
+2026-05-14T10:25:06.668898Z  INFO ort::logging: Removing initializer '/dp/flows.5/convs/Constant_15_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.668962Z  INFO ort::logging: Removing initializer '/dp/flows.3/convs/Constant_2_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.669848Z  INFO ort::logging: GraphTransformer LayerNormFusionL2 modified: 0 with status: OK
+2026-05-14T10:25:06.670230Z  INFO ort::logging: GraphTransformer SimplifiedLayerNormFusion modified: 0 with status: OK
+2026-05-14T10:25:06.670587Z  INFO ort::logging: GraphTransformer AttentionFusion modified: 0 with status: OK
+2026-05-14T10:25:06.670933Z  INFO ort::logging: GraphTransformer EmbedLayerNormFusion modified: 0 with status: OK
+2026-05-14T10:25:06.671938Z  INFO ort::logging: GraphTransformer GatherSliceToSplitFusion modified: 1 with status: OK
+2026-05-14T10:25:06.680721Z  INFO ort::logging: Removing initializer 'onnx::Slice_7604'. It is no longer used by any node.
+2026-05-14T10:25:06.681628Z  INFO ort::logging: GraphTransformer GatherToSliceFusion modified: 0 with status: OK
+2026-05-14T10:25:06.682121Z  INFO ort::logging: GraphTransformer MatmulTransposeFusion modified: 1 with status: OK
+2026-05-14T10:25:06.693454Z  INFO ort::logging: GraphTransformer BiasGeluFusion modified: 0 with status: OK
+2026-05-14T10:25:06.693865Z  INFO ort::logging: GraphTransformer GroupQueryAttentionFusion modified: 0 with status: OK
+2026-05-14T10:25:06.694208Z  INFO ort::logging: GraphTransformer MatMulAddFusion modified: 0 with status: OK
+2026-05-14T10:25:06.694530Z  INFO ort::logging: GraphTransformer SkipLayerNormFusion modified: 0 with status: OK
+2026-05-14T10:25:06.694936Z  INFO ort::logging: GraphTransformer FastGeluFusion modified: 0 with status: OK
+2026-05-14T10:25:06.695306Z  INFO ort::logging: GraphTransformer QuickGeluFusion modified: 0 with status: OK
+2026-05-14T10:25:06.695637Z  INFO ort::logging: GraphTransformer BiasSoftmaxFusion modified: 0 with status: OK
+2026-05-14T10:25:06.695970Z  INFO ort::logging: GraphTransformer BiasDropoutFusion modified: 0 with status: OK
+2026-05-14T10:25:06.696844Z  INFO ort::logging: GraphTransformer MatMulScaleFusion modified: 1 with status: OK
+2026-05-14T10:25:06.705948Z  INFO ort::logging: Removing initializer '/enc_p/encoder/attn_layers.5/Constant_10_output_0'. It is no longer used by any node.
+2026-05-14T10:25:06.706812Z  INFO ort::logging: GraphTransformer MatMulActivationFusion modified: 0 with status: OK
+2026-05-14T10:25:06.707264Z  INFO ort::logging: GraphTransformer MatMulNBitsFusion modified: 0 with status: OK
+2026-05-14T10:25:06.707616Z  INFO ort::logging: GraphTransformer QDQFinalCleanupTransformer modified: 0 with status: OK
+2026-05-14T10:25:06.707963Z  INFO ort::logging: GraphTransformer Level2_RuleBasedTransformer modified: 0 with status: OK
+2026-05-14T10:25:06.708339Z  INFO ort::logging: GraphTransformer QDQS8ToU8Transformer modified: 0 with status: OK
+2026-05-14T10:25:06.708981Z  INFO ort::logging: GraphTransformer QDQSelectorActionTransformer modified: 0 with status: OK
+2026-05-14T10:25:06.709317Z  INFO ort::logging: GraphTransformer GemmActivationFusion modified: 0 with status: OK
+2026-05-14T10:25:06.709693Z  INFO ort::logging: GraphTransformer MatMulIntegerToFloatFusion modified: 0 with status: OK
+2026-05-14T10:25:06.710028Z  INFO ort::logging: GraphTransformer DynamicQuantizeMatMulFusion modified: 0 with status: OK
+2026-05-14T10:25:06.710450Z  INFO ort::logging: GraphTransformer ConvActivationFusion modified: 0 with status: OK
+2026-05-14T10:25:06.710816Z  INFO ort::logging: GraphTransformer GeluFusionL2 modified: 0 with status: OK
+2026-05-14T10:25:06.711210Z  INFO ort::logging: GraphTransformer LayerNormFusionL2 modified: 0 with status: OK
+2026-05-14T10:25:06.711543Z  INFO ort::logging: GraphTransformer SimplifiedLayerNormFusion modified: 0 with status: OK
+2026-05-14T10:25:06.711896Z  INFO ort::logging: GraphTransformer AttentionFusion modified: 0 with status: OK
+2026-05-14T10:25:06.712243Z  INFO ort::logging: GraphTransformer EmbedLayerNormFusion modified: 0 with status: OK
+2026-05-14T10:25:06.712932Z  INFO ort::logging: GraphTransformer GatherSliceToSplitFusion modified: 0 with status: OK
+2026-05-14T10:25:06.713290Z  INFO ort::logging: GraphTransformer GatherToSliceFusion modified: 0 with status: OK
+2026-05-14T10:25:06.713742Z  INFO ort::logging: GraphTransformer MatmulTransposeFusion modified: 1 with status: OK
+2026-05-14T10:25:06.723766Z  INFO ort::logging: GraphTransformer BiasGeluFusion modified: 0 with status: OK
+2026-05-14T10:25:06.724194Z  INFO ort::logging: GraphTransformer GroupQueryAttentionFusion modified: 0 with status: OK
+2026-05-14T10:25:06.724545Z  INFO ort::logging: GraphTransformer MatMulAddFusion modified: 0 with status: OK
+2026-05-14T10:25:06.724886Z  INFO ort::logging: GraphTransformer SkipLayerNormFusion modified: 0 with status: OK
+2026-05-14T10:25:06.725299Z  INFO ort::logging: GraphTransformer FastGeluFusion modified: 0 with status: OK
+2026-05-14T10:25:06.725678Z  INFO ort::logging: GraphTransformer QuickGeluFusion modified: 0 with status: OK
+2026-05-14T10:25:06.726039Z  INFO ort::logging: GraphTransformer BiasSoftmaxFusion modified: 0 with status: OK
+2026-05-14T10:25:06.726384Z  INFO ort::logging: GraphTransformer BiasDropoutFusion modified: 0 with status: OK
+2026-05-14T10:25:06.726807Z  INFO ort::logging: GraphTransformer MatMulScaleFusion modified: 0 with status: OK
+2026-05-14T10:25:06.727146Z  INFO ort::logging: GraphTransformer MatMulActivationFusion modified: 0 with status: OK
+2026-05-14T10:25:06.727571Z  INFO ort::logging: GraphTransformer MatMulNBitsFusion modified: 0 with status: OK
+2026-05-14T10:25:06.727927Z  INFO ort::logging: GraphTransformer QDQFinalCleanupTransformer modified: 0 with status: OK
+2026-05-14T10:25:06.728275Z  INFO ort::logging: GraphTransformer Level2_RuleBasedTransformer modified: 0 with status: OK
+2026-05-14T10:25:06.728639Z  INFO ort::logging: GraphTransformer QDQS8ToU8Transformer modified: 0 with status: OK
+2026-05-14T10:25:06.729318Z  INFO ort::logging: GraphTransformer QDQSelectorActionTransformer modified: 0 with status: OK
+2026-05-14T10:25:06.729649Z  INFO ort::logging: GraphTransformer GemmActivationFusion modified: 0 with status: OK
+2026-05-14T10:25:06.730043Z  INFO ort::logging: GraphTransformer MatMulIntegerToFloatFusion modified: 0 with status: OK
+2026-05-14T10:25:06.730376Z  INFO ort::logging: GraphTransformer DynamicQuantizeMatMulFusion modified: 0 with status: OK
+2026-05-14T10:25:06.730815Z  INFO ort::logging: GraphTransformer ConvActivationFusion modified: 0 with status: OK
+2026-05-14T10:25:06.731179Z  INFO ort::logging: GraphTransformer GeluFusionL2 modified: 0 with status: OK
+2026-05-14T10:25:06.731553Z  INFO ort::logging: GraphTransformer LayerNormFusionL2 modified: 0 with status: OK
+2026-05-14T10:25:06.731911Z  INFO ort::logging: GraphTransformer SimplifiedLayerNormFusion modified: 0 with status: OK
+2026-05-14T10:25:06.732236Z  INFO ort::logging: GraphTransformer AttentionFusion modified: 0 with status: OK
+2026-05-14T10:25:06.732564Z  INFO ort::logging: GraphTransformer EmbedLayerNormFusion modified: 0 with status: OK
+2026-05-14T10:25:06.733298Z  INFO ort::logging: GraphTransformer GatherSliceToSplitFusion modified: 0 with status: OK
+2026-05-14T10:25:06.733655Z  INFO ort::logging: GraphTransformer GatherToSliceFusion modified: 0 with status: OK
+2026-05-14T10:25:06.734023Z  INFO ort::logging: GraphTransformer MatmulTransposeFusion modified: 0 with status: OK
+2026-05-14T10:25:06.734401Z  INFO ort::logging: GraphTransformer BiasGeluFusion modified: 0 with status: OK
+2026-05-14T10:25:06.734734Z  INFO ort::logging: GraphTransformer GroupQueryAttentionFusion modified: 0 with status: OK
+2026-05-14T10:25:06.735064Z  INFO ort::logging: GraphTransformer MatMulAddFusion modified: 0 with status: OK
+2026-05-14T10:25:06.735415Z  INFO ort::logging: GraphTransformer SkipLayerNormFusion modified: 0 with status: OK
+2026-05-14T10:25:06.735818Z  INFO ort::logging: GraphTransformer FastGeluFusion modified: 0 with status: OK
+2026-05-14T10:25:06.736200Z  INFO ort::logging: GraphTransformer QuickGeluFusion modified: 0 with status: OK
+2026-05-14T10:25:06.736551Z  INFO ort::logging: GraphTransformer BiasSoftmaxFusion modified: 0 with status: OK
+2026-05-14T10:25:06.736904Z  INFO ort::logging: GraphTransformer BiasDropoutFusion modified: 0 with status: OK
+2026-05-14T10:25:06.737325Z  INFO ort::logging: GraphTransformer MatMulScaleFusion modified: 0 with status: OK
+2026-05-14T10:25:06.737649Z  INFO ort::logging: GraphTransformer MatMulActivationFusion modified: 0 with status: OK
+2026-05-14T10:25:06.738096Z  INFO ort::logging: GraphTransformer MatMulNBitsFusion modified: 0 with status: OK
+2026-05-14T10:25:06.738442Z  INFO ort::logging: GraphTransformer QDQFinalCleanupTransformer modified: 0 with status: OK
+2026-05-14T10:25:06.738934Z  INFO ort::logging: GraphTransformer NchwcTransformer modified: 0 with status: OK
+2026-05-14T10:25:06.740368Z  INFO ort::logging: GraphTransformer NhwcTransformer modified: 0 with status: OK
+2026-05-14T10:25:06.741027Z  INFO ort::logging: GraphTransformer ConvAddActivationFusion modified: 0 with status: OK
+2026-05-14T10:25:06.742947Z  INFO ort::logging: GraphTransformer RemoveDuplicateCastTransformer modified: 0 with status: OK
+2026-05-14T10:25:06.742995Z  INFO ort::logging: GraphTransformer CastFloat16Transformer modified: 0 with status: OK
+2026-05-14T10:25:06.743329Z  INFO ort::logging: GraphTransformer FuseFp16InitializerToFp32NodeTransformer modified: 0 with status: OK
+2026-05-14T10:25:06.743364Z  INFO ort::logging: GraphTransformer MemcpyTransformer modified: 0 with status: OK
+2026-05-14T10:25:06.751448Z  INFO ort::logging: Use DeviceBasedPartition as default
+2026-05-14T10:25:07.293589Z  INFO ort::logging: Saving initialized tensors.
+2026-05-14T10:25:07.293753Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.293823Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 32
+2026-05-14T10:25:07.293842Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 8
+2026-05-14T10:25:07.293866Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 24
+2026-05-14T10:25:07.293883Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.293917Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.293941Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.293961Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.293983Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.294001Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.294039Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.294070Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.294083Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.294101Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.294125Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 32
+2026-05-14T10:25:07.294138Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.294153Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 8
+2026-05-14T10:25:07.294179Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 8
+2026-05-14T10:25:07.294204Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.294244Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.294262Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 4
+2026-05-14T10:25:07.294276Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 8
+2026-05-14T10:25:07.294297Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 8
+2026-05-14T10:25:07.294322Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.294337Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.294374Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 8
+2026-05-14T10:25:07.294391Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 8
+2026-05-14T10:25:07.294405Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.294427Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.294443Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.294468Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.294482Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.294496Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 32
+2026-05-14T10:25:07.294527Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.294547Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.294562Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.294578Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 4
+2026-05-14T10:25:07.294596Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 8
+2026-05-14T10:25:07.294614Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 8
+2026-05-14T10:25:07.294627Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 4
+2026-05-14T10:25:07.294644Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 4
+2026-05-14T10:25:07.294657Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.294673Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 4
+2026-05-14T10:25:07.294688Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 32
+2026-05-14T10:25:07.294713Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.294729Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 32
+2026-05-14T10:25:07.294745Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 32
+2026-05-14T10:25:07.294759Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 4
+2026-05-14T10:25:07.294784Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.294812Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.294839Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 8
+2026-05-14T10:25:07.294874Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.294924Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.294972Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.294996Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 8
+2026-05-14T10:25:07.295018Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.295033Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 4
+2026-05-14T10:25:07.295057Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.295094Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.295108Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 32
+2026-05-14T10:25:07.295128Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 8
+2026-05-14T10:25:07.295159Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.295177Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.295213Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 116
+2026-05-14T10:25:07.295229Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.295244Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 32
+2026-05-14T10:25:07.295258Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.295273Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 32
+2026-05-14T10:25:07.295289Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.295302Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.295318Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.295332Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 64
+2026-05-14T10:25:07.295353Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.295368Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.295389Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 24
+2026-05-14T10:25:07.295409Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 48
+2026-05-14T10:25:07.295427Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 4
+2026-05-14T10:25:07.295448Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.295471Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.295494Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.295513Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.295534Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 8
+2026-05-14T10:25:07.295553Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 8
+2026-05-14T10:25:07.295571Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 64
+2026-05-14T10:25:07.295588Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 32
+2026-05-14T10:25:07.295604Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.295651Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 48
+2026-05-14T10:25:07.295671Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.295687Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 8
+2026-05-14T10:25:07.295717Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.295730Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 8
+2026-05-14T10:25:07.295744Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.295764Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 4
+2026-05-14T10:25:07.295779Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 4
+2026-05-14T10:25:07.295796Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.295833Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.295854Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 8
+2026-05-14T10:25:07.295872Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.295889Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.295907Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 8
+2026-05-14T10:25:07.295922Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.295947Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.295965Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 32
+2026-05-14T10:25:07.295986Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 4
+2026-05-14T10:25:07.296003Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 4
+2026-05-14T10:25:07.296017Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.296033Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 8
+2026-05-14T10:25:07.296049Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.296063Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.296078Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.296092Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 4
+2026-05-14T10:25:07.296104Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 32
+2026-05-14T10:25:07.296117Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 32
+2026-05-14T10:25:07.296134Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 116
+2026-05-14T10:25:07.296158Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 24
+2026-05-14T10:25:07.296200Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.296214Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.296227Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.296242Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.296258Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.296274Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 32
+2026-05-14T10:25:07.296289Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.296301Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 4
+2026-05-14T10:25:07.296314Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 8
+2026-05-14T10:25:07.296334Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 8
+2026-05-14T10:25:07.296347Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.296368Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.296385Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 16
+2026-05-14T10:25:07.296406Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 8
+2026-05-14T10:25:07.296433Z  INFO ort::logging: Reserving memory in BFCArena for Cpu size: 116
+2026-05-14T10:25:07.296453Z  INFO ort::logging: Done saving initialized tensors
+2026-05-14T10:25:07.305751Z  INFO ort::logging: Extending BFCArena for Cpu. bin_num:15 (requested) num_bytes: 8388608 (actual) rounded_bytes:8388608
+2026-05-14T10:25:07.305846Z  INFO ort::logging: Extended allocation by 8388608 bytes.
+2026-05-14T10:25:07.305863Z  INFO ort::logging: Total allocated bytes: 8391052
+2026-05-14T10:25:07.305876Z  INFO ort::logging: Allocated memory at 0x7c6145e70400 to 0x7c6146670400
+2026-05-14T10:25:07.313022Z  INFO ort::logging: Extending BFCArena for Cpu. bin_num:13 (requested) num_bytes: 2097152 (actual) rounded_bytes:2097152
+2026-05-14T10:25:07.313083Z  INFO ort::logging: Extended allocation by 8388608 bytes.
+2026-05-14T10:25:07.313097Z  INFO ort::logging: Total allocated bytes: 16779660
+2026-05-14T10:25:07.313110Z  INFO ort::logging: Allocated memory at 0x7c6146670440 to 0x7c6146e70440
+2026-05-14T10:25:07.315640Z  INFO ort::logging: Session successfully initialized.
+Error processing file '/media/obaid/SSD/KRIA/target/debug/build/espeak-rs-sys-b399f57965ca9eb6/out/share/espeak-ng-data/phontab': No such file or directory.
+2026-05-14T10:25:07.320797Z  WARN kria_core::voice::v2::pipeline: tts synth failed: piper-rs streamed synthesis failed: Failed to phonemize given text using espeak-ng. Error: eSpeak-ng Error :Failed to initialize eSpeak-ng. Try setting `PIPER_ESPEAKNG_DATA_DIRECTORY` environment variable to the directory that contains the `espeak-ng-data` directory. Error code: `0`.
+2026-05-14T10:25:07.623681Z  INFO kria_desktop::commands::voice_runtime_helpers: voice v2: starting turn loop turn_index=2
+2026-05-14T10:25:07.630425Z  INFO kria_core::voice::v2::pipeline: v2 pipeline: waiting for STT final transcript; dropped stt_pcm_tx
+2026-05-14T10:25:07.630475Z  INFO kria_core::voice::v2::pipeline: v2 pipeline: calling stt_handle.join() to await final transcript
+2026-05-14T10:25:07.630490Z  INFO kria_core::voice::v2::pipeline: v2 pipeline: STT handle available, joining...
+2026-05-14T10:25:07.630537Z  INFO kria_core::voice::v2::pipeline: v2 capture task started; awaiting audio frames
+2026-05-14T10:25:07.739711Z  INFO kria_core::voice::v2::stt::whisper_rs_impl: whisper-rs: first chunk received chunk_samples=2048 buffer_len=2048 sample_rate=16000
+whisper_init_state: kv self size  =   10.49 MB
+whisper_init_state: kv cross size =   31.46 MB
+whisper_init_state: kv pad  size  =    7.86 MB
+whisper_init_state: compute buffer (conv)   =   36.13 MB
+whisper_init_state: compute buffer (encode) =  212.29 MB
+whisper_init_state: compute buffer (cross)  =    9.25 MB
+whisper_init_state: compute buffer (decode) =   99.10 MB
+2026-05-14T10:25:09.666040Z  INFO kria_core::voice::v2::pipeline: v2 capture awaiting speech start frame_count=16 waited_ms=2048 rms=0.0012974673882126808 threshold=0.0020000000949949026
+2026-05-14T10:25:11.726955Z  INFO kria_core::voice::v2::pipeline: v2 capture detected speech start frame_count=32 utterance_ms=4096 rms=0.08149200677871704 threshold=0.0020000000949949026
+whisper_full_with_state: auto-detected language: en (p = 0.418169)
+whisper_init_state: kv self size  =   10.49 MB
+whisper_init_state: kv cross size =   31.46 MB
+whisper_init_state: kv pad  size  =    7.86 MB
+whisper_init_state: compute buffer (conv)   =   36.13 MB
+whisper_init_state: compute buffer (encode) =  212.29 MB
+whisper_init_state: compute buffer (cross)  =    9.25 MB
+whisper_init_state: compute buffer (decode) =   99.10 MB
+2026-05-14T10:25:25.741031Z  INFO kria_core::voice::v2::pipeline: v2 capture reached max utterance window; finalizing STT stream frame_count=141 utterance_ms=18048
+2026-05-14T10:25:25.741210Z  INFO kria_core::voice::v2::pipeline: v2 capture task exiting frame_count=141 speech_started=true utterance_ms=18048
+2026-05-14T10:25:26.947663Z  WARN kria_core::voice::v2::stt::whisper_rs_impl: whisper-rs: partial decode still active at finalization boundary; proceeding
+2026-05-14T10:25:26.947779Z  INFO kria_core::voice::v2::stt::whisper_rs_impl: whisper-rs: final decode starting buffer_len=288768 sample_rate=16000 duration_ms=18048
+whisper_init_state: kv self size  =   10.49 MB
+whisper_init_state: kv cross size =   31.46 MB
+whisper_init_state: kv pad  size  =    7.86 MB
+whisper_init_state: compute buffer (conv)   =   36.13 MB
+whisper_init_state: compute buffer (encode) =  212.29 MB
+whisper_init_state: compute buffer (cross)  =    9.25 MB
+whisper_init_state: compute buffer (decode) =   99.10 MB
+2026-05-14T10:25:32.314344Z  INFO kria_core::llm::orchestrator::gpu_watchdog: watchdog: cooldown expired
+whisper_full_with_state: auto-detected language: en (p = 0.464219)
+whisper_full_with_state: auto-detected language: en (p = 0.958804)
+2026-05-14T10:25:48.455856Z  WARN kria_core::voice::v2::stt::whisper_rs_impl: whisper-rs: final decode produced empty text; retrying via whisper-cli fallback
+2026-05-14T10:25:48.647963Z  WARN kria_core::voice::v2::stt::whisper_rs_impl: whisper-rs: cli fallback failed after empty final decode: speech GPU lease unavailable: gpu lease degraded: recovery timed out: GuardReleasedAwaitingTelemetry. GPU lease manager is degraded: recovery timed out: GuardReleasedAwaitingTelemetry
+2026-05-14T10:25:48.648051Z  INFO kria_core::voice::v2::stt::whisper_rs_impl: whisper-rs: final decode produced text_len=0 lang="en"
+2026-05-14T10:25:48.648170Z  INFO kria_core::voice::v2::pipeline: v2 pipeline: STT join completed
+2026-05-14T10:25:48.648189Z  INFO kria_core::voice::v2::pipeline: voice v2: STT final transcript ready text_len=0 engine=whisper-rs duration_ms=18048
+2026-05-14T10:25:48.648214Z  WARN kria_core::voice::v2::pipeline: voice v2: STT final transcript is empty engine=whisper-rs duration_ms=18048
+2026-05-14T10:25:48.648679Z  WARN kria_desktop::commands::voice_runtime_helpers: v2 run_turn error turn=2 error=stt produced empty transcript
+2026-05-14T10:25:48.949330Z  INFO kria_desktop::commands::voice_runtime_helpers: voice v2: starting turn loop turn_index=3
+2026-05-14T10:25:48.949630Z  INFO kria_core::voice::v2::pipeline: v2 pipeline: waiting for STT final transcript; dropped stt_pcm_tx
+2026-05-14T10:25:48.949687Z  INFO kria_core::voice::v2::pipeline: v2 pipeline: calling stt_handle.join() to await final transcript
+2026-05-14T10:25:48.949720Z  INFO kria_core::voice::v2::pipeline: v2 pipeline: STT handle available, joining...
+2026-05-14T10:25:48.949770Z  INFO kria_core::voice::v2::pipeline: v2 capture task started; awaiting audio frames
+2026-05-14T10:25:49.027565Z  INFO kria_core::voice::v2::stt::whisper_rs_impl: whisper-rs: first chunk received chunk_samples=2048 buffer_len=2048 sample_rate=16000
+whisper_init_state: kv self size  =   10.49 MB
+whisper_init_state: kv cross size =   31.46 MB
+whisper_init_state: kv pad  size  =    7.86 MB
+whisper_init_state: compute buffer (conv)   =   36.13 MB
+whisper_init_state: compute buffer (encode) =  212.29 MB
+whisper_init_state: compute buffer (cross)  =    9.25 MB
+whisper_init_state: compute buffer (decode) =   99.10 MB
+2026-05-14T10:25:49.666866Z  INFO kria_core::voice::v2::pipeline: v2 capture detected speech start frame_count=6 utterance_ms=768 rms=0.004606906324625015 threshold=0.0020000000949949026
+2026-05-14T10:25:53.014630Z  INFO kria_core::voice::v2::pipeline: v2 capture detected end-of-speech silence; finalizing STT stream frame_count=32 speech_started=true speech_audio_ms=1152 trailing_silence_ms=768 rms=0.0 threshold=0.003000000026077032
+2026-05-14T10:25:53.014774Z  INFO kria_core::voice::v2::pipeline: v2 capture task exiting frame_count=32 speech_started=true utterance_ms=4096
+2026-05-14T10:25:54.219624Z  WARN kria_core::voice::v2::stt::whisper_rs_impl: whisper-rs: partial decode still active at finalization boundary; proceeding
+2026-05-14T10:25:54.219765Z  INFO kria_core::voice::v2::stt::whisper_rs_impl: whisper-rs: final decode starting buffer_len=65536 sample_rate=16000 duration_ms=4096
+whisper_init_state: kv self size  =   10.49 MB
+whisper_init_state: kv cross size =   31.46 MB
+whisper_init_state: kv pad  size  =    7.86 MB
+whisper_init_state: compute buffer (conv)   =   36.13 MB
+whisper_init_state: compute buffer (encode) =  212.29 MB
+whisper_init_state: compute buffer (cross)  =    9.25 MB
+whisper_init_state: compute buffer (decode) =   99.10 MB
+whisper_full_with_state: auto-detected language: en (p = 0.360457)
+whisper_full_with_state: auto-detected language: is (p = 0.985145)
+2026-05-14T10:26:16.416090Z  WARN kria_core::voice::v2::stt::whisper_rs_impl: whisper-rs: final decode produced empty text; retrying via whisper-cli fallback
+2026-05-14T10:26:16.455513Z  WARN kria_core::voice::v2::stt::whisper_rs_impl: whisper-rs: cli fallback failed after empty final decode: speech GPU lease unavailable: gpu lease degraded: recovery timed out: GuardReleasedAwaitingTelemetry. GPU lease manager is degraded: recovery timed out: GuardReleasedAwaitingTelemetry
+2026-05-14T10:26:16.455602Z  INFO kria_core::voice::v2::stt::whisper_rs_impl: whisper-rs: final decode produced text_len=0 lang="is"
+2026-05-14T10:26:16.455753Z  INFO kria_core::voice::v2::pipeline: v2 pipeline: STT join completed
+2026-05-14T10:26:16.455841Z  INFO kria_core::voice::v2::pipeline: voice v2: STT final transcript ready text_len=0 engine=whisper-rs duration_ms=4096
+2026-05-14T10:26:16.455885Z  WARN kria_core::voice::v2::pipeline: voice v2: STT final transcript is empty engine=whisper-rs duration_ms=4096
+2026-05-14T10:26:16.455979Z  WARN kria_desktop::commands::voice_runtime_helpers: v2 run_turn error turn=3 error=stt produced empty transcript
+2026-05-14T10:26:16.758038Z  INFO kria_desktop::commands::voice_runtime_helpers: voice v2: starting turn loop turn_index=4
+2026-05-14T10:26:16.758477Z  INFO kria_core::voice::v2::pipeline: v2 pipeline: waiting for STT final transcript; dropped stt_pcm_tx
+2026-05-14T10:26:16.758501Z  INFO kria_core::voice::v2::pipeline: v2 pipeline: calling stt_handle.join() to await final transcript
+2026-05-14T10:26:16.758514Z  INFO kria_core::voice::v2::pipeline: v2 pipeline: STT handle available, joining...
+2026-05-14T10:26:16.758539Z  INFO kria_core::voice::v2::pipeline: v2 capture task started; awaiting audio frames
+2026-05-14T10:26:16.813289Z  INFO kria_core::voice::v2::stt::whisper_rs_impl: whisper-rs: first chunk received chunk_samples=2048 buffer_len=2048 sample_rate=16000
+whisper_init_state: kv self size  =   10.49 MB
+whisper_init_state: kv cross size =   31.46 MB
+whisper_init_state: kv pad  size  =    7.86 MB
+whisper_init_state: compute buffer (conv)   =   36.13 MB
+whisper_init_state: compute buffer (encode) =  212.29 MB
+whisper_init_state: compute buffer (cross)  =    9.25 MB
+whisper_init_state: compute buffer (decode) =   99.10 MB
+2026-05-14T10:26:18.744068Z  INFO kria_core::voice::v2::pipeline: v2 capture awaiting speech start frame_count=16 waited_ms=2048 rms=0.0 threshold=0.0020000000949949026
+2026-05-14T10:26:19.510462Z  INFO kria_core::voice::v2::pipeline: v2 capture detected speech start frame_count=22 utterance_ms=2816 rms=0.08303219825029373 threshold=0.0020000000949949026
+2026-05-14T10:26:22.209482Z  INFO kria_core::voice::v2::pipeline: v2 capture detected end-of-speech silence; finalizing STT stream frame_count=43 speech_started=true speech_audio_ms=2048 trailing_silence_ms=768 rms=0.0 threshold=0.003000000026077032
+2026-05-14T10:26:22.209630Z  INFO kria_core::voice::v2::pipeline: v2 capture task exiting frame_count=43 speech_started=true utterance_ms=5504
+2026-05-14T10:26:23.415941Z  WARN kria_core::voice::v2::stt::whisper_rs_impl: whisper-rs: partial decode still active at finalization boundary; proceeding
+2026-05-14T10:26:23.416067Z  INFO kria_core::voice::v2::stt::whisper_rs_impl: whisper-rs: final decode starting buffer_len=88064 sample_rate=16000 duration_ms=5504
+whisper_init_state: kv self size  =   10.49 MB
+whisper_init_state: kv cross size =   31.46 MB
+whisper_init_state: kv pad  size  =    7.86 MB
+whisper_init_state: compute buffer (conv)   =   36.13 MB
+whisper_init_state: compute buffer (encode) =  212.29 MB
+whisper_init_state: compute buffer (cross)  =    9.25 MB
+whisper_init_state: compute buffer (decode) =   99.10 MB
+whisper_full_with_state: auto-detected language: en (p = 0.360457)
+whisper_full_with_state: auto-detected language: en (p = 0.927785)
+2026-05-14T10:26:44.704133Z  WARN kria_core::voice::v2::stt::whisper_rs_impl: whisper-rs: final decode produced empty text; retrying via whisper-cli fallback
+2026-05-14T10:26:44.751332Z  WARN kria_core::voice::v2::stt::whisper_rs_impl: whisper-rs: cli fallback failed after empty final decode: speech GPU lease unavailable: gpu lease degraded: recovery timed out: GuardReleasedAwaitingTelemetry. GPU lease manager is degraded: recovery timed out: GuardReleasedAwaitingTelemetry
+2026-05-14T10:26:44.751430Z  INFO kria_core::voice::v2::stt::whisper_rs_impl: whisper-rs: final decode produced text_len=0 lang="en"
+2026-05-14T10:26:44.751576Z  INFO kria_core::voice::v2::pipeline: v2 pipeline: STT join completed
+2026-05-14T10:26:44.751594Z  INFO kria_core::voice::v2::pipeline: voice v2: STT final transcript ready text_len=0 engine=whisper-rs duration_ms=5504
+2026-05-14T10:26:44.751614Z  WARN kria_core::voice::v2::pipeline: voice v2: STT final transcript is empty engine=whisper-rs duration_ms=5504
+2026-05-14T10:26:44.751676Z  WARN kria_desktop::commands::voice_runtime_helpers: v2 run_turn error turn=4 error=stt produced empty transcript
+2026-05-14T10:26:45.052868Z  INFO kria_desktop::commands::voice_runtime_helpers: voice v2: starting turn loop turn_index=5
+2026-05-14T10:26:45.053140Z  INFO kria_core::voice::v2::pipeline: v2 pipeline: waiting for STT final transcript; dropped stt_pcm_tx
+2026-05-14T10:26:45.053167Z  INFO kria_core::voice::v2::pipeline: v2 pipeline: calling stt_handle.join() to await final transcript
+2026-05-14T10:26:45.053180Z  INFO kria_core::voice::v2::pipeline: v2 pipeline: STT handle available, joining...
+2026-05-14T10:26:45.053291Z  INFO kria_core::voice::v2::pipeline: v2 capture task started; awaiting audio frames
+2026-05-14T10:26:45.114609Z  INFO kria_core::voice::v2::stt::whisper_rs_impl: whisper-rs: first chunk received chunk_samples=2048 buffer_len=2048 sample_rate=16000
+whisper_init_state: kv self size  =   10.49 MB
+whisper_init_state: kv cross size =   31.46 MB
+whisper_init_state: kv pad  size  =    7.86 MB
+whisper_init_state: compute buffer (conv)   =   36.13 MB
+whisper_init_state: compute buffer (encode) =  212.29 MB
+whisper_init_state: compute buffer (cross)  =    9.25 MB
+whisper_init_state: compute buffer (decode) =   99.10 MB
+2026-05-14T10:26:47.034072Z  INFO kria_core::voice::v2::pipeline: v2 capture awaiting speech start frame_count=16 waited_ms=2048 rms=0.00010891419515246525 threshold=0.0020000000949949026
+2026-05-14T10:26:48.859633Z  WARN kria_core::voice::v2::pipeline: v2 capture task cancelled by turn token frame_count=30 speech_started=false
+2026-05-14T10:26:48.859691Z  WARN kria_core::voice::v2::pipeline: v2 pipeline: turn was cancelled before STT finalization
+2026-05-14T10:26:48.859768Z  INFO kria_core::voice::v2::pipeline: v2 capture task exiting frame_count=30 speech_started=false utterance_ms=3840
+2026-05-14T10:26:48.859820Z  INFO kria_desktop::commands::voice_runtime_helpers: voice v2: suppressing expected cancel error after stop turn=5 error=turn cancelled before transcription
+2026-05-14T10:26:48.859915Z  INFO kria_desktop::commands::voice_runtime_helpers: v2 voice loop exited
+2026-05-14T10:26:48.861092Z  INFO kria_desktop::commands::voice_runtime_helpers: v2 capture forwarder exited total_frames=1108
+ALSA lib pcm_dmix.c:973:(snd_pcm_dmix_open) The dmix plugin supports only playback stream
+ALSA lib pcm_dmix.c:973:(snd_pcm_dmix_open) The dmix plugin supports only playback stream
+ALSA lib pcm_dmix.c:973:(snd_pcm_dmix_open) The dmix plugin supports only playback stream
+ALSA lib pcm_dmix.c:973:(snd_pcm_dmix_open) The dmix plugin supports only playback stream
+ALSA lib pcm_dmix.c:973:(snd_pcm_dmix_open) The dmix plugin supports only playback stream
+ALSA lib pcm_dmix.c:973:(snd_pcm_dmix_open) The dmix plugin supports only playback stream
+ALSA lib pcm_dmix.c:973:(snd_pcm_dmix_open) The dmix plugin supports only playback stream
+ALSA lib pcm_dmix.c:973:(snd_pcm_dmix_open) The dmix plugin supports only playback stream
+ALSA lib pcm_dmix.c:973:(snd_pcm_dmix_open) The dmix plugin supports only playback stream
+ALSA lib pcm_dmix.c:973:(snd_pcm_dmix_open) The dmix plugin supports only playback stream
+ALSA lib pcm_dmix.c:973:(snd_pcm_dmix_open) The dmix plugin supports only playback stream
+ALSA lib pcm_dmix.c:973:(snd_pcm_dmix_open) The dmix plugin supports only playback stream
+ALSA lib pcm_dmix.c:973:(snd_pcm_dmix_open) The dmix plugin supports only playback stream
+ALSA lib pcm_dmix.c:973:(snd_pcm_dmix_open) The dmix plugin supports only playback stream
+ALSA lib pcm_dmix.c:973:(snd_pcm_dmix_open) The dmix plugin supports only playback stream
+ALSA lib pcm_dmix.c:973:(snd_pcm_dmix_open) The dmix plugin supports only playback stream
+ALSA lib pcm_dmix.c:973:(snd_pcm_dmix_open) The dmix plugin supports only playback stream
+ALSA lib pcm_dmix.c:973:(snd_pcm_dmix_open) The dmix plugin supports only playback stream
+ALSA lib pcm_dsnoop.c:541:(snd_pcm_dsnoop_open) The dsnoop plugin supports only capture stream
+ALSA lib pcm_dsnoop.c:541:(snd_pcm_dsnoop_open) The dsnoop plugin supports only capture stream
+ALSA lib pcm_dsnoop.c:541:(snd_pcm_dsnoop_open) The dsnoop plugin supports only capture stream
+ALSA lib pcm_dmix.c:973:(snd_pcm_dmix_open) The dmix plugin supports only playback stream
+ALSA lib pcm_dmix.c:973:(snd_pcm_dmix_open) The dmix plugin supports only playback stream
+ALSA lib pcm_dmix.c:973:(snd_pcm_dmix_open) The dmix plugin supports only playback stream
+ALSA lib pcm_dmix.c:973:(snd_pcm_dmix_open) The dmix plugin supports only playback stream
+ALSA lib pcm_dmix.c:973:(snd_pcm_dmix_open) The dmix plugin supports only playback stream
+ALSA lib pcm_dmix.c:973:(snd_pcm_dmix_open) The dmix plugin supports only playback stream
+ALSA lib pcm_dmix.c:973:(snd_pcm_dmix_open) The dmix plugin supports only playback stream
+ALSA lib pcm_dmix.c:973:(snd_pcm_dmix_open) The dmix plugin supports only playback stream
+ALSA lib pcm_dmix.c:973:(snd_pcm_dmix_open) The dmix plugin supports only playback stream
+ALSA lib pcm_dsnoop.c:541:(snd_pcm_dsnoop_open) The dsnoop plugin supports only capture stream
+ALSA lib pcm_dsnoop.c:541:(snd_pcm_dsnoop_open) The dsnoop plugin supports only capture stream
+ALSA lib pcm_dsnoop.c:541:(snd_pcm_dsnoop_open) The dsnoop plugin supports only capture stream
+ALSA lib pcm_dsnoop.c:541:(snd_pcm_dsnoop_open) The dsnoop plugin supports only capture stream
+ALSA lib pcm_dsnoop.c:541:(snd_pcm_dsnoop_open) The dsnoop plugin supports only capture stream
+ALSA lib pcm_dsnoop.c:541:(snd_pcm_dsnoop_open) The dsnoop plugin supports only capture stream
+2026-05-14T10:26:51.624969Z  INFO kria_core::mcp::server_manager: refreshed MCP server tools server=colab-mcp removed=1 registered=1
+whisper_full_with_state: auto-detected language: en (p = 0.360457)
+2026-05-14T10:27:00.461870Z  INFO kria_core::config: config saved path=/home/obaid/.kria/config.toml
+2026-05-14T10:27:00.462125Z  INFO kria_core::mcp::client: stopping MCP server server=fs
+2026-05-14T10:27:00.501863Z  INFO kria_core::mcp::server_manager: unregistered MCP tools for server server=fs removed=14
+2026-05-14T10:27:00.502145Z  INFO kria_core::mcp::client: stopping MCP server server=gworkspace
+2026-05-14T10:27:00.547866Z  INFO kria_core::mcp::server_manager: unregistered MCP tools for server server=gworkspace removed=110
+2026-05-14T10:27:00.548025Z  INFO kria_core::mcp::client: stopping MCP server server=colab-mcp
+2026-05-14T10:27:00.750500Z  INFO kria_core::mcp::server_manager: unregistered MCP tools for server server=colab-mcp removed=1

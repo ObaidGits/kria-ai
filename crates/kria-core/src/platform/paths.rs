@@ -25,7 +25,16 @@ impl KriaPaths {
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
         let config_dir = home.join(".kria");
         let data_dir = config_dir.clone();
-        let models_dir = config_dir.join("models");
+        let models_dir = if let Ok(env_models) = std::env::var("KRIA_MODELS_DIR") {
+            let p = PathBuf::from(env_models);
+            if !p.as_os_str().is_empty() {
+                p
+            } else {
+                config_dir.join("models")
+            }
+        } else {
+            config_dir.join("models")
+        };
         let logs_dir = config_dir.join("logs");
 
         let paths = Self {

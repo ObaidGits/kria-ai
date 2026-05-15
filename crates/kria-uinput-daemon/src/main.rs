@@ -1,11 +1,11 @@
 //! KRIA uinput Daemon - Phase 1.5 IPC Implementation
-//! 
+//!
 //! This is an isolated, privileged helper process for GUI automation.
 //! It runs with uinput access but has NO access to:
 //! - KRIA core memory space
 //! - LLM inference paths
 //! - User data or secrets
-//! 
+//!
 //! Architecture: KRIA core (unprivileged) -> Unix Socket -> This daemon (privileged)
 
 use anyhow::{Context, Result};
@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::time::{self, timeout, Duration as TokioDuration};
+use tokio::time::Duration as TokioDuration;
 use tracing::{error, info, warn};
 
 // ============================================================================
@@ -91,7 +91,7 @@ pub struct WindowInfo {
 // ============================================================================
 
 /// Create Unix Domain Socket with strict permissions.
-/// 
+///
 /// Security:
 /// - Socket created with chmod 600 (owner read/write only)
 /// - Parent directory should also be restricted
@@ -103,35 +103,33 @@ async fn create_secure_socket(socket_path: &PathBuf) -> Result<UnixListener> {
             .await
             .context("Failed to remove old socket file")?;
     }
-    
+
     // Ensure parent directory exists
     if let Some(parent) = socket_path.parent() {
         tokio::fs::create_dir_all(parent)
             .await
             .context("Failed to create socket directory")?;
-        
+
         // Set permissions on parent directory to allow non-root access
         let mut perms = std::fs::metadata(parent)?.permissions();
         perms.set_mode(0o755); // owner read/write/execute, group/others read/execute
         std::fs::set_permissions(parent, perms)?;
     }
-    
+
     // Create the listener
-    let listener = UnixListener::bind(socket_path)
-        .context("Failed to bind Unix Domain Socket")?;
+    let listener = UnixListener::bind(socket_path).context("Failed to bind Unix Domain Socket")?;
 
     // Set permissions on socket file (chmod 777 for non-root client access)
     // Note: This is safe because the daemon validates all requests before executing
     let mut perms = std::fs::metadata(socket_path)?.permissions();
     perms.set_mode(0o777); // allow all users to connect
-    std::fs::set_permissions(socket_path, perms)
-        .context("Failed to set socket permissions")?;
+    std::fs::set_permissions(socket_path, perms).context("Failed to set socket permissions")?;
 
     info!(
         socket = %socket_path.display(),
         "Unix Domain Socket created with chmod 777"
     );
-    
+
     Ok(listener)
 }
 
@@ -150,17 +148,22 @@ async fn execute_xdotool(args: &[&str]) -> Result<String> {
     let timeout = Duration::from_secs(10);
 
     // Check for xdotool existence
-    if !std::path::Path::new("/usr/bin/xdotool").exists() && !std::path::Path::new("/usr/local/bin/xdotool").exists() {
-        anyhow::bail!("Missing dependency: sudo apt install xdotool. X11-native automation requires xdotool.");
+    if !std::path::Path::new("/usr/bin/xdotool").exists()
+        && !std::path::Path::new("/usr/local/bin/xdotool").exists()
+    {
+        anyhow::bail!(
+            "Missing dependency: sudo apt install xdotool. X11-native automation requires xdotool."
+        );
     }
 
     let cmd_name = "xdotool";
     info!(command = %format!("{} {}", cmd_name, args.join(" ")), "Executing X11 automation command");
 
-    let output = tokio::time::timeout(timeout, tokio::process::Command::new(cmd_name)
-        .args(args)
-        .output()
-    ).await
+    let output = tokio::time::timeout(
+        timeout,
+        tokio::process::Command::new(cmd_name).args(args).output(),
+    )
+    .await
     .context(format!("{} command timed out", cmd_name))?
     .context(format!("Failed to execute {}", cmd_name))?;
 
@@ -234,7 +237,9 @@ async fn handle_request(request: DaemonRequest) -> DaemonResponse {
             };
 
             // Move mouse to position
-            if let Err(e) = execute_xdotool(&["mousemove", "--sync", &x.to_string(), &y.to_string()]).await {
+            if let Err(e) =
+                execute_xdotool(&["mousemove", "--sync", &x.to_string(), &y.to_string()]).await
+            {
                 return DaemonResponse::Error {
                     message: format!("Failed to move mouse: {}", e),
                     code: Some("MOUSEMOVE_FAILED".to_string()),
@@ -250,7 +255,7 @@ async fn handle_request(request: DaemonRequest) -> DaemonResponse {
                 },
             }
         }
-        
+
         DaemonRequest::Type { text, interval_ms } => {
             info!(text_len = text.len(), interval_ms = ?interval_ms, "Received type command");
 
@@ -287,20 +292,23 @@ async fn handle_request(request: DaemonRequest) -> DaemonResponse {
                 Ok(_) => {
                     info!(chars_typed = escaped_text.len(), "Type command succeeded");
                     DaemonResponse::Ok {
-                        data: Some(serde_json::json!({ "typed_chars": escaped_text.len() }))
+                        data: Some(serde_json::json!({ "typed_chars": escaped_text.len() })),
                     }
                 }
                 Err(e) => {
                     error!(error = %e, "Type command failed");
                     DaemonResponse::Error {
                         message: format!("Type failed: {}", e),
-                        code: Some("TYPE_FAILED".to_string())
+                        code: Some("TYPE_FAILED".to_string()),
                     }
                 }
             }
         }
-        
-        DaemonRequest::Shortcut { keys, hold_duration_ms } => {
+
+        DaemonRequest::Shortcut {
+            keys,
+            hold_duration_ms,
+        } => {
             // Map key names
             let mut mapped_keys = Vec::new();
             for key in &keys {
@@ -332,7 +340,7 @@ async fn handle_request(request: DaemonRequest) -> DaemonResponse {
                 },
             }
         }
-        
+
         DaemonRequest::ReleaseAll => {
             // Release all modifier keys to prevent OS lockup.
             // xdotool syntax: `xdotool keyup <key>` (lowercase key names).
@@ -354,14 +362,14 @@ async fn handle_request(request: DaemonRequest) -> DaemonResponse {
                 }
             }
         }
-        
+
         DaemonRequest::GetActiveWindow => {
             // Get active window ID
             let window_id_result = tokio::process::Command::new("xdotool")
                 .args(["getactivewindow"])
                 .output()
                 .await;
-            
+
             let window_id = match window_id_result {
                 Ok(output) if output.status.success() => {
                     String::from_utf8_lossy(&output.stdout).trim().to_string()
@@ -373,26 +381,26 @@ async fn handle_request(request: DaemonRequest) -> DaemonResponse {
                     };
                 }
             };
-            
+
             // Get window title
             let title_result = tokio::process::Command::new("xdotool")
                 .args(["getwindowname", &window_id])
                 .output()
                 .await;
-            
+
             let title = match title_result {
                 Ok(output) if output.status.success() => {
                     String::from_utf8_lossy(&output.stdout).trim().to_string()
                 }
                 _ => "Unknown".to_string(),
             };
-            
+
             // Get window class using xprop (xdotool doesn't have getwindowclassname)
             let class_result = tokio::process::Command::new("xprop")
                 .args(["-id", &window_id, "WM_CLASS"])
                 .output()
                 .await;
-            
+
             let class = match class_result {
                 Ok(output) if output.status.success() => {
                     // Parse WM_CLASS(STRING) = "instance", "class"
@@ -407,18 +415,18 @@ async fn handle_request(request: DaemonRequest) -> DaemonResponse {
                 }
                 _ => "Unknown".to_string(),
             };
-            
+
             let window_info = WindowInfo {
                 title,
                 class,
                 pid: 0, // Could add PID query if needed
             };
-            
+
             DaemonResponse::Ok {
                 data: Some(serde_json::to_value(window_info).unwrap_or(serde_json::Value::Null)),
             }
         }
-        
+
         DaemonRequest::Heartbeat => {
             // RFC 008: Heartbeat is normally handled in handle_client before reaching here.
             // This is a safety fallback in case handle_request is called directly.
@@ -442,8 +450,13 @@ async fn handle_request(request: DaemonRequest) -> DaemonResponse {
 /// Called when heartbeat expires or client disconnects unexpectedly.
 async fn execute_emergency_release() -> Result<()> {
     error!("RFC 008: Executing EMERGENCY key release - clearing all modifiers");
-    
-    let modifiers = [("shift", "Shift"), ("ctrl", "Control"), ("alt", "Alt"), ("super", "Super")];
+
+    let modifiers = [
+        ("shift", "Shift"),
+        ("ctrl", "Control"),
+        ("alt", "Alt"),
+        ("super", "Super"),
+    ];
     let mut errors = Vec::new();
 
     for (xdotool_name, _label) in &modifiers {
@@ -451,13 +464,16 @@ async fn execute_emergency_release() -> Result<()> {
             errors.push(format!("{}: {}", xdotool_name, e));
         }
     }
-    
+
     if errors.is_empty() {
         info!("RFC 008: Emergency key release succeeded - all modifiers cleared");
         Ok(())
     } else {
         error!(errors = ?errors, "RFC 008: Emergency key release had partial failures");
-        Err(anyhow::anyhow!("Partial emergency release failure: {}", errors.join(", ")))
+        Err(anyhow::anyhow!(
+            "Partial emergency release failure: {}",
+            errors.join(", ")
+        ))
     }
 }
 
@@ -470,22 +486,23 @@ async fn execute_emergency_release() -> Result<()> {
 const HEARTBEAT_TIMEOUT_SECS: u64 = 5;
 
 /// Handle a single client connection with RFC 008 dead-man's switch.
-/// 
+///
 /// Safety: If parent process dies (no heartbeat for 5s), daemon will:
 /// 1. Reject all new input commands
 /// 2. Execute emergency ReleaseAll to clear stuck keys
 /// 3. Return error on any input attempt
 async fn handle_client(stream: UnixStream) -> Result<()> {
-    let peer = stream.peer_cred()
+    let peer = stream
+        .peer_cred()
         .map(|cred| format!("uid:{}", cred.uid()))
         .unwrap_or_else(|_| "unknown".to_string());
-    
+
     info!(peer = %peer, "Client connected - RFC 008 dead-man's switch active (timeout: {}s)", HEARTBEAT_TIMEOUT_SECS);
-    
+
     let (reader, mut writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
     let mut line = String::new();
-    
+
     // RFC 008: Track last heartbeat time for dead-man's switch
     let mut last_heartbeat = tokio::time::Instant::now();
     let mut heartbeat_valid = true;
@@ -560,8 +577,11 @@ async fn handle_client(stream: UnixStream) -> Result<()> {
         }
 
         // RFC 008: Check if input commands should be blocked due to dead-man's switch
-        let is_input_command = matches!(request,
-            DaemonRequest::Type { .. } | DaemonRequest::Click { .. } | DaemonRequest::Shortcut { .. }
+        let is_input_command = matches!(
+            request,
+            DaemonRequest::Type { .. }
+                | DaemonRequest::Click { .. }
+                | DaemonRequest::Shortcut { .. }
         );
         if is_input_command {
             sent_input_command = true;
@@ -627,7 +647,7 @@ async fn handle_client(stream: UnixStream) -> Result<()> {
         info!(peer = %peer, "Client disconnected unexpectedly after input — executing emergency key release");
         let _ = execute_emergency_release().await;
     }
-    
+
     Ok(())
 }
 
@@ -642,11 +662,11 @@ async fn main() -> Result<()> {
         .with_env_filter("info")
         .with_target(true)
         .init();
-    
+
     info!("KRIA uinput Daemon starting");
     info!("SECURITY: This daemon runs with elevated privileges for uinput access");
     info!("SECURITY: Socket created with chmod 777 for non-root client access");
-    
+
     // Determine socket path, in priority order:
     //   1. `--socket <path>` CLI argument (preferred — survives sudo env scrubbing)
     //   2. `KRIA_UINPUT_SOCKET` env var (requires SETENV in sudoers)
@@ -686,12 +706,12 @@ async fn main() -> Result<()> {
                 }
             })
     };
-    
+
     // Create secure socket
     let listener = create_secure_socket(&socket_path).await?;
-    
+
     info!(socket = %socket_path.display(), "Daemon ready - waiting for connections");
-    
+
     // Accept connections
     loop {
         match listener.accept().await {

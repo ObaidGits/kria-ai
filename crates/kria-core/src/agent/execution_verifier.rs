@@ -7,10 +7,11 @@
 //!
 //! See `docs/GUI_INTELLIGENCE_REVIEW.md` §4.5.
 
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// What kind of filesystem effect the verifier should look for.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FsEffect {
     Exists,
     ContainsBytes(Vec<u8>),
@@ -18,7 +19,7 @@ pub enum FsEffect {
 }
 
 /// Where to look for deterministic output.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum VerifyTarget {
     ActiveEditorBuffer,
     TerminalOutput,
@@ -107,9 +108,17 @@ mod tests {
     #[tokio::test]
     async fn noop_verifier_never_falsely_reports_success() {
         let leaves = vec![
-            Verifiability::WindowState { title_contains: None, class: None },
-            Verifiability::FileSystemEffect { path: PathBuf::from("/tmp/x"), kind: FsEffect::Exists },
-            Verifiability::Unverifiable { reason: "demo".into() },
+            Verifiability::WindowState {
+                title_contains: None,
+                class: None,
+            },
+            Verifiability::FileSystemEffect {
+                path: PathBuf::from("/tmp/x"),
+                kind: FsEffect::Exists,
+            },
+            Verifiability::Unverifiable {
+                reason: "demo".into(),
+            },
         ];
         for leaf in leaves {
             let out = NoopExecutionVerifier.verify(&leaf).await;

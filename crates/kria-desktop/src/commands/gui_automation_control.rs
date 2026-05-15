@@ -4,7 +4,7 @@
 //!   - `get_gui_automation_status` → returns `{ vision, uinput, enabled, ... }`
 //!   - `set_gui_automation_enabled(enabled: bool)` → master kill switch
 
-use super::{AppStateCell};
+use super::AppStateCell;
 use kria_core::orchestrator::ServiceStatus;
 use tauri::{AppHandle, Manager};
 
@@ -120,4 +120,47 @@ pub async fn set_gui_automation_enabled(
         .map_err(|e| format!("set_automation_enabled failed: {e}"))?;
 
     Ok(orch.status().await.into())
+}
+
+/// P2g: Get the current environment grounding status for operational visibility.
+///
+/// Returns a lightweight snapshot of:
+/// - cache freshness (generation, age, stale flag)
+/// - system capabilities (xdotool, wmctrl, xrandr availability)
+/// - focused window/app
+/// - visible window and monitor counts
+/// - terminal CWD and IDE project hints
+///
+/// This is strictly operational debugging data. No semantic reasoning,
+/// no confidence scores, no ontology classification.
+#[tauri::command]
+pub async fn get_grounding_status(
+    handle: AppHandle,
+) -> Result<kria_core::agent::environment_grounder::GroundingStatus, String> {
+    use kria_core::agent::environment_grounder::{GroundingCapabilities, GroundingStatus};
+
+    let cell: tauri::State<'_, AppStateCell> = handle.state();
+    let Some(_state) = cell.get() else {
+        // Runtime not initialized — return degraded status
+        return Ok(GroundingStatus {
+            cache_generation: 0,
+            cache_age_ms: 0,
+            cache_stale: true,
+            capabilities: GroundingCapabilities::none(),
+            focused_app: None,
+            focused_window_title: None,
+            visible_window_count: 0,
+            monitor_count: 0,
+            terminal_cwd: None,
+            open_project: None,
+            process_count: 0,
+        });
+    };
+
+    // The grounder is wired into GuiExecutionCoordinator which is created
+    // per-session. For now, do a one-shot ground query for the status endpoint.
+    // In the future this will read from the shared LiveEnvironmentGrounder cache.
+    use kria_core::agent::environment_grounder::LiveEnvironmentGrounder;
+    let grounder = LiveEnvironmentGrounder::new();
+    Ok(grounder.grounding_status())
 }

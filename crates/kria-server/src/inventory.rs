@@ -46,7 +46,7 @@ struct EnrolledTargetRecord {
     #[serde(default)]
     ssh_hostkey_sha256_b64: String,
     #[serde(default, alias = "commanderEpoch")]
-    controller_epoch: i64,
+    _controller_epoch: i64,
 }
 
 #[derive(Debug, Clone)]

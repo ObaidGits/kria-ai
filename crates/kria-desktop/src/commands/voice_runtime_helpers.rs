@@ -17,6 +17,34 @@ fn load_cached_hardware_info(cache_path: &std::path::Path) -> Option<HardwareInf
     serde_json::from_str::<HardwareInfo>(&text).ok()
 }
 
+/// Resolve a model filename against multiple candidate directories.
+///
+/// Resolution order (mirrors the LLM `resolve_model_file` helper in runtime.rs):
+/// 1. `KRIA_MODELS_DIR/<subdir>/` or `~/.kria/models/<subdir>/` (managed location)
+/// 2. Workspace `models/<subdir>/` (walk up from CWD — covers Tauri dev runs)
+/// 3. Return the primary path even if missing, so callers can emit a clear error.
+pub(crate) fn resolve_model_file(
+    paths: &kria_core::platform::paths::KriaPaths,
+    subdir: &str,
+    filename: &str,
+) -> std::path::PathBuf {
+    let primary = paths.models_dir.join(subdir).join(filename);
+    if primary.exists() {
+        return primary;
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        let mut dir = Some(cwd.as_path());
+        while let Some(d) = dir {
+            let candidate = d.join("models").join(subdir).join(filename);
+            if candidate.exists() {
+                return candidate;
+            }
+            dir = d.parent();
+        }
+    }
+    primary
+}
+
 pub(crate) fn resolve_hardware_info(
     config: &KriaConfig,
     cache_path: &std::path::Path,
@@ -61,41 +89,32 @@ pub(crate) fn build_voice_pipeline(
     config: &KriaConfig,
     paths: &kria_core::platform::paths::KriaPaths,
 ) -> Arc<VoicePipeline> {
-    // Log v2 engine selection — the v2 stack is scaffolded under
-    // `kria_core::voice::v2` (sentence splitter, post-edit, playback sink,
-    // AEC + wake skeletons, FSM). Running v2 end-to-end is gated behind
-    // additional cargo features (`voice-whisper-rs`, `voice-piper-rs`, …)
-    // and is not yet the default runtime path. Until then we always build
-    // the v1 pipeline; v2 is exercised through unit tests + the
-    // `voice_v2_status` command.
+    // Build the baseline v1 pipeline for compatibility. `start_voice` may
+    // hot-swap `active_voice` to v2 immediately after this when v2 runtime
+    // dependencies are available.
     let engine = config.voice.engine.to_ascii_lowercase();
     if engine == "v2" {
-        tracing::warn!(
-            "voice.engine = \"v2\" requested; v2 stack is scaffold-only in this build, \
-             falling back to v1. Enable the relevant cargo features and complete the \
-             VoicePipelineV2 runtime loop to switch over."
-        );
+        tracing::info!("voice.engine = \"v2\" requested; constructing compatibility v1 pipeline (v2 hot-swap attempted during start_voice)");
     } else if engine != "v1" && !engine.is_empty() {
         tracing::warn!(engine = %engine, "unknown voice.engine value; using v1");
     }
 
-    let stt_model_path = paths.models_dir.join("stt").join(&config.voice.stt_model);
+    let stt_model_path = resolve_model_file(paths, "stt", &config.voice.stt_model);
     let tts_voice_file = format!("{}.onnx", config.voice.tts_voice);
-    let tts_model_path = paths.models_dir.join("piper").join(&tts_voice_file);
+    let tts_model_path = resolve_model_file(paths, "piper", &tts_voice_file);
 
     // Resolve + log wake-word model wiring so v2 readiness is visible even
     // while the runtime path is still v1. Construction is cheap (no model
     // load when disabled) and any failure falls back silently.
     if config.voice.wake_word.enabled {
-        let wake_dir = paths.models_dir.join("wake");
         let wake_path = if config.voice.wake_word.model_path.is_empty() {
-            wake_dir.join("hey_ria.onnx")
+            resolve_model_file(paths, "wake", "hey_ria.onnx")
         } else {
             let p = std::path::PathBuf::from(&config.voice.wake_word.model_path);
             if p.is_absolute() {
                 p
             } else {
-                wake_dir.join(p.file_name().unwrap_or_default())
+                resolve_model_file(paths, "wake", p.to_string_lossy().as_ref())
             }
         };
         let detector = kria_core::voice::v2::WakeWordDetector::try_load(
@@ -138,7 +157,7 @@ pub(crate) fn build_voice_pipeline(
     stt.set_command_timeout(std::time::Duration::from_secs(45));
     let mut tts = TextToSpeech::new(tts_model_path, piper_bin);
     tts.set_gpu_lease(speech_gpu_lease.clone());
-    let vad_model_path = paths.models_dir.join("vad").join("silero_vad.onnx");
+    let vad_model_path = resolve_model_file(paths, "vad", "silero_vad.onnx");
 
     let pipeline =
         Arc::new(VoicePipeline::new(config.voice.clone(), stt, tts).with_vad_model(vad_model_path));
@@ -195,9 +214,9 @@ pub(crate) fn build_v2_pipeline(
 )> {
     use kria_core::voice::v2;
 
-    let stt_model_path = paths.models_dir.join("stt").join(&config.voice.stt_model);
+    let stt_model_path = resolve_model_file(paths, "stt", &config.voice.stt_model);
     let tts_voice_file = format!("{}.onnx", config.voice.tts_voice);
-    let tts_model_path = paths.models_dir.join("piper").join(&tts_voice_file);
+    let tts_model_path = resolve_model_file(paths, "piper", &tts_voice_file);
 
     let whisper_bin = which_binary("whisper-cpp").or_else(|| which_binary("main"));
     let piper_bin = which_binary("piper");
@@ -218,15 +237,14 @@ pub(crate) fn build_v2_pipeline(
     tts.set_gpu_lease(speech_gpu_lease);
 
     let wake = if config.voice.wake_word.enabled {
-        let wake_dir = paths.models_dir.join("wake");
         let wake_path = if config.voice.wake_word.model_path.is_empty() {
-            wake_dir.join("hey_ria.onnx")
+            resolve_model_file(paths, "wake", "hey_ria.onnx")
         } else {
             let p = std::path::PathBuf::from(&config.voice.wake_word.model_path);
             if p.is_absolute() {
                 p
             } else {
-                wake_dir.join(p.file_name().unwrap_or_default())
+                resolve_model_file(paths, "wake", p.to_string_lossy().as_ref())
             }
         };
         Some(v2::WakeWordDetector::try_load(
@@ -290,52 +308,109 @@ pub(crate) async fn start_voice_v2_loop(
     {
         let capture_cfg = config.read().await;
         let mic_device = capture_cfg.voice.mic_device.clone();
+        let headphone_mode = capture_cfg.voice.mode.eq_ignore_ascii_case("headphone");
         let follow_mic = capture_cfg.voice.follow_system_default_mic
             || mic_device.trim().is_empty()
             || mic_device.eq_ignore_ascii_case("auto");
         let noise_mode = capture_cfg.voice.noise_suppression_mode.clone();
+        let noise_gate_enabled = !noise_mode.eq_ignore_ascii_case("off");
         drop(capture_cfg);
-
-        let capture = AudioCapture::new(16_000)
-            .with_input_device(mic_device)
-            .follow_system_default(follow_mic)
-            .with_noise_suppression_mode(noise_mode);
-
-        let (mut capture_rx, _capture_handle) = match capture.start() {
-            Ok(pair) => pair,
-            Err(e) => {
-                tracing::error!("v2 audio capture failed to start: {e}");
-                let _ = app.emit(
-                    "voice:error",
-                    serde_json::json!({ "error": format!("Mic start failed: {e}") }),
-                );
-                voice_active.store(false, std::sync::atomic::Ordering::Relaxed);
-                return;
-            }
-        };
 
         let bt = broadcast_tx_arc.clone();
         let v2_state = v2.subscribe_state();
-        // Forward mpsc → broadcast, gating when Speaking/Thinking/BargeIn to
-        // prevent recording KRIA's own TTS output (echo cancellation gate).
-        tokio::spawn(async move {
-            // Keep capture_handle alive for the duration of this task.
-            // (_capture_handle is moved here to prevent premature drop.)
-            while let Some(chunk) = capture_rx.recv().await {
-                let st = *v2_state.borrow();
-                if matches!(
-                    st,
-                    VoiceSessionState::Speaking
-                        | VoiceSessionState::Thinking
-                        | VoiceSessionState::BargeIn
-                ) {
-                    // Discard — KRIA is generating/speaking; skip to prevent echo.
-                    continue;
+        let voice_active_capture = voice_active.clone();
+        let app_capture = app.clone();
+        let _ = app.emit(
+            "voice:io_mode",
+            serde_json::json!({
+                "mode": if headphone_mode { "headphone" } else { "half_duplex" },
+                "headphone": headphone_mode
+            }),
+        );
+
+        // Run capture on a blocking worker so the non-Send CPAL stream handle
+        // never has to cross async task thread boundaries.
+        tauri::async_runtime::spawn_blocking(move || {
+            use kria_core::voice::audio_enhance::{EchoGate, SpectralGate};
+
+            let capture = AudioCapture::new(16_000)
+                .with_input_device(mic_device)
+                .follow_system_default(follow_mic)
+                .with_noise_suppression_mode(noise_mode);
+
+            let (mut capture_rx, _capture_handle) = match capture.start() {
+                Ok(pair) => pair,
+                Err(e) => {
+                    tracing::error!("v2 audio capture failed to start: {e}");
+                    let _ = app_capture.emit(
+                        "voice:error",
+                        serde_json::json!({ "error": format!("Mic start failed: {e}") }),
+                    );
+                    voice_active_capture.store(false, std::sync::atomic::Ordering::Relaxed);
+                    return;
                 }
-                if bt.send(chunk).is_err() {
+            };
+
+            // Tier 2: Live audio enhancement pipeline
+            let mut noise_gate = if noise_gate_enabled {
+                SpectralGate::new()
+            } else {
+                SpectralGate::disabled()
+            };
+            let mut echo_gate = if headphone_mode {
+                EchoGate::headphone_mode()
+            } else {
+                EchoGate::speaker_mode()
+            };
+
+            let mut frame_count = 0u64;
+            loop {
+                if !voice_active_capture.load(std::sync::atomic::Ordering::Relaxed) {
                     break;
                 }
+
+                let mut chunk = match capture_rx.try_recv() {
+                    Ok(c) => c,
+                    Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        continue;
+                    }
+                    Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => break,
+                };
+
+                frame_count += 1;
+                if frame_count % 50 == 1 {
+                    tracing::debug!(frame_count, chunk_samples = chunk.samples.len(), "forwarder: received chunk");
+                }
+
+                // Tier 2: Echo gate — suppress mic during/after TTS playback
+                let st = *v2_state.borrow();
+                let is_playing = matches!(
+                    st,
+                    VoiceSessionState::Speaking | VoiceSessionState::Thinking
+                );
+                if is_playing && !echo_gate.is_suppressing() {
+                    echo_gate.playback_started();
+                } else if !is_playing && echo_gate.is_suppressing() {
+                    echo_gate.playback_stopped();
+                }
+                echo_gate.process(&mut chunk.samples);
+
+                // In half-duplex mode, still drop chunks during active playback
+                // (echo gate provides soft suppression, this is the hard gate)
+                if !headphone_mode && is_playing {
+                    continue;
+                }
+
+                // Tier 2: Spectral noise gate — suppress fan/room noise
+                noise_gate.process(&mut chunk.samples);
+
+                if bt.send(chunk).is_err() {
+                    tracing::debug!("v2 capture forwarder: no active turn subscriber yet");
+                    continue;
+                }
             }
+            tracing::info!(total_frames = frame_count, "v2 capture forwarder exited");
         });
     }
 
@@ -348,6 +423,17 @@ pub(crate) async fn start_voice_v2_loop(
             let slot = telemetry_slot.clone();
             tokio::spawn(async move {
                 while let Some(ev) = rx.recv().await {
+                    if let kria_core::voice::v2::VoiceTelemetry::Final { text, .. } = &ev {
+                        let preview = text.chars().take(120).collect::<String>();
+                        let _ = app_h.emit(
+                            "voice:debug",
+                            serde_json::json!({
+                                "stage": "stt_final",
+                                "text_len": text.chars().count(),
+                                "text_preview": preview
+                            }),
+                        );
+                    }
                     let (tauri_event, payload) = v2_telemetry_to_event(&ev);
                     let _ = app_h.emit(tauri_event, payload);
                     // Also forward raw telemetry for debug/UI extensions.
@@ -379,7 +465,14 @@ pub(crate) async fn start_voice_v2_loop(
     let bt_loop = broadcast_tx_arc.clone();
 
     tauri::async_runtime::spawn(async move {
+        let mut turn_index: u64 = 0;
         while voice_active_loop.load(std::sync::atomic::Ordering::Relaxed) {
+            turn_index = turn_index.saturating_add(1);
+            tracing::info!(turn_index, "voice v2: starting turn loop");
+            let _ = app_loop.emit(
+                "voice:debug",
+                serde_json::json!({ "stage": "turn_start", "turn": turn_index }),
+            );
             // Transition to Listening before each turn.
             v2_loop.force_wake("auto");
 
@@ -390,23 +483,83 @@ pub(crate) async fn start_voice_v2_loop(
             let memory_turn = memory_store_loop.clone();
             let tool_reg_turn = tool_registry_loop.clone();
             let hw_turn = hw_info_loop.clone();
+            let transcript_only_mode = env_truthy("KRIA_VOICE_TRANSCRIPT_ONLY");
 
+            let app_for_llm = app_loop.clone();
+            let turn_for_llm = turn_index;
             let llm = move |user_text: String| async move {
                 let (tx, rx) = tokio::sync::mpsc::channel::<String>(64);
-                let backend = match router_turn.route("voice").await {
-                    Some(b) => b,
-                    None => {
+                let user_text_len = user_text.chars().count();
+                if transcript_only_mode {
+                    tracing::info!(
+                        turn = turn_for_llm,
+                        user_text_len,
+                        "voice v2: transcript-only debug mode enabled (LLM bypass)"
+                    );
+                    let _ = app_for_llm.emit(
+                        "voice:debug",
+                        serde_json::json!({
+                            "stage": "llm_bypass_transcript_only",
+                            "turn": turn_for_llm,
+                            "text_len": user_text_len
+                        }),
+                    );
+                    let _ = tx.send(format!("(Transcript only) {}", user_text)).await;
+                    return rx;
+                }
+                tracing::info!(
+                    turn = turn_for_llm,
+                    user_text_len,
+                    "voice v2: invoking LLM route"
+                );
+                let _ = app_for_llm.emit(
+                    "voice:debug",
+                    serde_json::json!({
+                        "stage": "llm_route_start",
+                        "turn": turn_for_llm,
+                        "text_len": user_text_len
+                    }),
+                );
+                let backend = match tokio::time::timeout(
+                    std::time::Duration::from_secs(12),
+                    router_turn.route("voice"),
+                )
+                .await
+                {
+                    Ok(Some(b)) => b,
+                    Ok(None) => {
+                        tracing::warn!(turn = turn_for_llm, "voice v2: no backend routed for voice");
+                        let _ = app_for_llm.emit(
+                            "voice:debug",
+                            serde_json::json!({ "stage": "llm_route_none", "turn": turn_for_llm }),
+                        );
                         let _ = tx
                             .send("(No LLM backend — check model config)".into())
                             .await;
                         return rx;
                     }
+                    Err(_) => {
+                        tracing::warn!(turn = turn_for_llm, "voice v2: backend routing timed out");
+                        let _ = app_for_llm.emit(
+                            "voice:debug",
+                            serde_json::json!({ "stage": "llm_route_timeout", "turn": turn_for_llm }),
+                        );
+                        let _ = tx.send("(LLM routing timeout)".into()).await;
+                        return rx;
+                    }
                 };
+                tracing::info!(turn = turn_for_llm, "voice v2: backend routed");
+                let _ = app_for_llm.emit(
+                    "voice:debug",
+                    serde_json::json!({ "stage": "llm_route_ok", "turn": turn_for_llm }),
+                );
                 // Build messages with system prompt + recent context (mirrors v1 flow).
                 let session_id = session_id_turn.read().await.clone();
                 let cfg = config_turn.read().await;
                 let hw_tier = hw_turn.tier.as_str();
-                let tool_defs = tool_reg_turn.list_for_tier(hw_tier);
+                let mut tool_defs = tool_reg_turn.list_for_tier(hw_tier);
+                // Disable search tools for voice interactions to prevent aggressive searching
+                tool_defs.retain(|t| !t.name.contains("search") && t.name != "search_news");
                 let tool_descriptions = build_tool_descriptions_for_prompt(&tool_defs);
                 let user_name = memory_turn
                     .get_preference("user_name")
@@ -446,18 +599,123 @@ pub(crate) async fn start_voice_v2_loop(
                     name: None,
                     images: None,
                 });
+                let app_for_stream = app_for_llm.clone();
+                let turn_for_stream = turn_for_llm;
                 tokio::spawn(async move {
                     use futures::StreamExt;
-                    match backend.chat_stream(&messages, None, 0.7, 512).await {
-                        Ok(mut stream) => {
-                            while let Some(tok) = stream.next().await {
-                                if tx.send(tok).await.is_err() {
-                                    break;
+                    let stream_started = std::time::Instant::now();
+                    tracing::info!(
+                        turn = turn_for_stream,
+                        message_count = messages.len(),
+                        "voice v2: requesting chat_stream"
+                    );
+                    let _ = app_for_stream.emit(
+                        "voice:debug",
+                        serde_json::json!({
+                            "stage": "llm_stream_request",
+                            "turn": turn_for_stream,
+                            "message_count": messages.len()
+                        }),
+                    );
+                    match tokio::time::timeout(
+                        std::time::Duration::from_secs(20),
+                        backend.chat_stream(&messages, None, 0.7, 512),
+                    )
+                    .await
+                    {
+                        Ok(Ok(mut stream)) => {
+                            let mut seen_token = false;
+                            let mut token_count: usize = 0;
+                            loop {
+                                let wait = if seen_token { 20 } else { 15 };
+                                match tokio::time::timeout(
+                                    std::time::Duration::from_secs(wait),
+                                    stream.next(),
+                                )
+                                .await
+                                {
+                                    Ok(Some(tok)) => {
+                                        token_count = token_count.saturating_add(1);
+                                        if !seen_token {
+                                            tracing::info!(
+                                                turn = turn_for_stream,
+                                                first_token_ms = stream_started.elapsed().as_millis() as u64,
+                                                "voice v2: llm first token"
+                                            );
+                                            let _ = app_for_stream.emit(
+                                                "voice:debug",
+                                                serde_json::json!({
+                                                    "stage": "llm_first_token",
+                                                    "turn": turn_for_stream,
+                                                    "latency_ms": stream_started.elapsed().as_millis() as u64
+                                                }),
+                                            );
+                                        }
+                                        seen_token = true;
+                                        if tx.send(tok).await.is_err() {
+                                            break;
+                                        }
+                                    }
+                                    Ok(None) => {
+                                        tracing::info!(
+                                            turn = turn_for_stream,
+                                            token_count,
+                                            total_ms = stream_started.elapsed().as_millis() as u64,
+                                            "voice v2: llm stream completed"
+                                        );
+                                        let _ = app_for_stream.emit(
+                                            "voice:debug",
+                                            serde_json::json!({
+                                                "stage": "llm_stream_done",
+                                                "turn": turn_for_stream,
+                                                "token_count": token_count
+                                            }),
+                                        );
+                                        break;
+                                    }
+                                    Err(_) => {
+                                        tracing::warn!(
+                                            turn = turn_for_stream,
+                                            token_count,
+                                            "voice v2: llm stream stalled waiting for token"
+                                        );
+                                        let _ = app_for_stream.emit(
+                                            "voice:debug",
+                                            serde_json::json!({
+                                                "stage": "llm_stream_token_timeout",
+                                                "turn": turn_for_stream,
+                                                "token_count": token_count
+                                            }),
+                                        );
+                                        let _ = tx
+                                            .send("(LLM response timeout — please try again)".into())
+                                            .await;
+                                        break;
+                                    }
                                 }
                             }
                         }
-                        Err(e) => {
+                        Ok(Err(e)) => {
+                            tracing::warn!(turn = turn_for_stream, error = %e, "voice v2: chat_stream failed");
+                            let _ = app_for_stream.emit(
+                                "voice:debug",
+                                serde_json::json!({
+                                    "stage": "llm_stream_error",
+                                    "turn": turn_for_stream,
+                                    "error": e.to_string()
+                                }),
+                            );
                             let _ = tx.send(format!("(LLM error: {e})")).await;
+                        }
+                        Err(_) => {
+                            tracing::warn!(turn = turn_for_stream, "voice v2: chat_stream startup timeout");
+                            let _ = app_for_stream.emit(
+                                "voice:debug",
+                                serde_json::json!({ "stage": "llm_stream_start_timeout", "turn": turn_for_stream }),
+                            );
+                            let _ = tx
+                                .send("(LLM startup timeout — model server busy)".into())
+                                .await;
                         }
                     }
                 });
@@ -465,8 +723,17 @@ pub(crate) async fn start_voice_v2_loop(
             };
 
             if let Err(e) = v2_loop.clone().run_turn(audio_rx, llm).await {
-                tracing::warn!("v2 run_turn error: {e}");
-                let _ = app_loop.emit("voice:error", serde_json::json!({ "error": e.to_string() }));
+                let err_text = e.to_string();
+                let stopped = !voice_active_loop.load(std::sync::atomic::Ordering::Relaxed);
+                if stopped
+                    && (err_text.contains("turn cancelled before transcription")
+                        || err_text.contains("stt stream cancelled"))
+                {
+                    tracing::info!(turn = turn_index, error = %err_text, "voice v2: suppressing expected cancel error after stop");
+                } else {
+                    tracing::warn!(turn = turn_index, error = %err_text, "v2 run_turn error");
+                    let _ = app_loop.emit("voice:error", serde_json::json!({ "error": err_text }));
+                }
             }
 
             // Post-turn silence gap: prevents the next turn's STT from picking
@@ -497,9 +764,9 @@ fn v2_telemetry_to_event(
             };
             ("voice:state", serde_json::json!({ "state": s }))
         }
-        VoiceTelemetry::Partial { text, engine } => (
+        VoiceTelemetry::Partial { text, engine, seq } => (
             "voice:partial_transcript",
-            serde_json::json!({ "text": text, "confidence": 0.7, "language": "auto", "stability": 0.5, "engine": engine }),
+            serde_json::json!({ "text": text, "confidence": 0.7, "language": "auto", "stability": 0.5, "engine": engine, "seq": seq }),
         ),
         VoiceTelemetry::Final {
             text,
@@ -512,6 +779,26 @@ fn v2_telemetry_to_event(
         VoiceTelemetry::Error { message } => {
             ("voice:error", serde_json::json!({ "error": message }))
         }
+        VoiceTelemetry::BusyRejected { entrypoint, state } => (
+            "voice:busy",
+            serde_json::json!({
+                "entrypoint": entrypoint,
+                "state": format!("{state:?}").to_lowercase(),
+                "message": "Voice runtime is busy with an active turn"
+            }),
+        ),
+        VoiceTelemetry::PlaybackFailure { message } => (
+            "voice:playback_failure",
+            serde_json::json!({ "error": message }),
+        ),
+        VoiceTelemetry::PlaybackRecovered => (
+            "voice:playback_recovered",
+            serde_json::json!({ "ok": true }),
+        ),
+        VoiceTelemetry::Interruption { reason } => (
+            "voice:interruption",
+            serde_json::json!({ "reason": reason }),
+        ),
         _ => (
             "voice:v2_telemetry",
             serde_json::to_value(ev).unwrap_or_default(),

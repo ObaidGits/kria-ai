@@ -29,7 +29,10 @@ pub enum DependencyType {
     /// Window must be focused (focus check)
     WindowFocused { window_class: String },
     /// Element must be present on screen (vision check)
-    ElementPresent { element_type: String, label: Option<String> },
+    ElementPresent {
+        element_type: String,
+        label: Option<String>,
+    },
     /// File/dependency must exist (filesystem check)
     FileExists { path: String },
     /// Network connectivity required
@@ -99,7 +102,7 @@ impl ToolDependencyGraph {
         tdg.register_default_tools();
         tdg
     }
-    
+
     /// Register default tool definitions per RFC 008.
     fn register_default_tools(&mut self) {
         // click_element: Requires vision (hard), window focus (soft)
@@ -111,8 +114,8 @@ impl ToolDependencyGraph {
                     id: "vision_available".to_string(),
                     description: "OmniParser vision system available".to_string(),
                     strength: DependencyStrength::Hard,
-                    dep_type: DependencyType::ProcessRunning { 
-                        process_name: "omniparser".to_string() 
+                    dep_type: DependencyType::ProcessRunning {
+                        process_name: "omniparser".to_string(),
                     },
                     probe_timeout_secs: 5,
                     retry_attempts: 2,
@@ -121,8 +124,8 @@ impl ToolDependencyGraph {
                     id: "window_focused".to_string(),
                     description: "Target window has focus".to_string(),
                     strength: DependencyStrength::Soft,
-                    dep_type: DependencyType::WindowFocused { 
-                        window_class: "*".to_string() 
+                    dep_type: DependencyType::WindowFocused {
+                        window_class: "*".to_string(),
                     },
                     probe_timeout_secs: 3,
                     retry_attempts: 1,
@@ -130,7 +133,7 @@ impl ToolDependencyGraph {
             ],
             estimated_cost: 1,
         });
-        
+
         // type_text: Requires active element, window focus (hard)
         self.register(ToolDef {
             tool_id: "type_text".to_string(),
@@ -140,8 +143,8 @@ impl ToolDependencyGraph {
                     id: "window_focused".to_string(),
                     description: "Target window has keyboard focus".to_string(),
                     strength: DependencyStrength::Hard,
-                    dep_type: DependencyType::WindowFocused { 
-                        window_class: "*".to_string() 
+                    dep_type: DependencyType::WindowFocused {
+                        window_class: "*".to_string(),
                     },
                     probe_timeout_secs: 5,
                     retry_attempts: 3,
@@ -150,7 +153,7 @@ impl ToolDependencyGraph {
                     id: "input_element_present".to_string(),
                     description: "Input field available for typing".to_string(),
                     strength: DependencyStrength::Hard,
-                    dep_type: DependencyType::ElementPresent { 
+                    dep_type: DependencyType::ElementPresent {
                         element_type: "input".to_string(),
                         label: None,
                     },
@@ -160,7 +163,7 @@ impl ToolDependencyGraph {
             ],
             estimated_cost: 1,
         });
-        
+
         // run_code: Requires terminal/editor process (hard), file access (soft)
         self.register(ToolDef {
             tool_id: "run_code".to_string(),
@@ -170,8 +173,8 @@ impl ToolDependencyGraph {
                     id: "terminal_running".to_string(),
                     description: "Terminal process is running".to_string(),
                     strength: DependencyStrength::Hard,
-                    dep_type: DependencyType::ProcessRunning { 
-                        process_name: "gnome-terminal".to_string() 
+                    dep_type: DependencyType::ProcessRunning {
+                        process_name: "gnome-terminal".to_string(),
                     },
                     probe_timeout_secs: 10,
                     retry_attempts: 2,
@@ -180,8 +183,8 @@ impl ToolDependencyGraph {
                     id: "working_directory_exists".to_string(),
                     description: "Working directory is accessible".to_string(),
                     strength: DependencyStrength::Soft,
-                    dep_type: DependencyType::FileExists { 
-                        path: ".".to_string() 
+                    dep_type: DependencyType::FileExists {
+                        path: ".".to_string(),
                     },
                     probe_timeout_secs: 2,
                     retry_attempts: 1,
@@ -189,7 +192,7 @@ impl ToolDependencyGraph {
             ],
             estimated_cost: 2,
         });
-        
+
         // open_application: Requires process not already running (soft), display available (hard)
         self.register(ToolDef {
             tool_id: "open_application".to_string(),
@@ -199,8 +202,8 @@ impl ToolDependencyGraph {
                     id: "display_available".to_string(),
                     description: "X11/Wayland display available".to_string(),
                     strength: DependencyStrength::Hard,
-                    dep_type: DependencyType::ProcessRunning { 
-                        process_name: "Xorg".to_string() 
+                    dep_type: DependencyType::ProcessRunning {
+                        process_name: "Xorg".to_string(),
                     },
                     probe_timeout_secs: 3,
                     retry_attempts: 1,
@@ -209,8 +212,8 @@ impl ToolDependencyGraph {
                     id: "not_already_running".to_string(),
                     description: "Application not already running (optional)".to_string(),
                     strength: DependencyStrength::Soft,
-                    dep_type: DependencyType::ProcessRunning { 
-                        process_name: "gedit".to_string() 
+                    dep_type: DependencyType::ProcessRunning {
+                        process_name: "gedit".to_string(),
                     },
                     probe_timeout_secs: 2,
                     retry_attempts: 1,
@@ -218,44 +221,42 @@ impl ToolDependencyGraph {
             ],
             estimated_cost: 3,
         });
-        
+
         // get_screen_elements: Requires vision system (hard)
         self.register(ToolDef {
             tool_id: "get_screen_elements".to_string(),
             description: "Capture and parse screen elements".to_string(),
-            dependencies: vec![
-                ToolDependency {
-                    id: "vision_available".to_string(),
-                    description: "OmniParser vision sidecar running".to_string(),
-                    strength: DependencyStrength::Hard,
-                    dep_type: DependencyType::ProcessRunning { 
-                        process_name: "omniparser".to_string() 
-                    },
-                    probe_timeout_secs: 5,
-                    retry_attempts: 2,
+            dependencies: vec![ToolDependency {
+                id: "vision_available".to_string(),
+                description: "OmniParser vision sidecar running".to_string(),
+                strength: DependencyStrength::Hard,
+                dep_type: DependencyType::ProcessRunning {
+                    process_name: "omniparser".to_string(),
                 },
-            ],
+                probe_timeout_secs: 5,
+                retry_attempts: 2,
+            }],
             estimated_cost: 2,
         });
     }
-    
+
     /// Register a tool definition.
     pub fn register(&mut self, tool: ToolDef) {
         self.tools.insert(tool.tool_id.clone(), tool);
     }
-    
+
     /// Get tool definition by ID.
     pub fn get(&self, tool_id: &str) -> Option<&ToolDef> {
         self.tools.get(tool_id)
     }
-    
+
     /// Get dependencies for a tool.
     pub fn get_dependencies(&self, tool_id: &str) -> Vec<&ToolDependency> {
         self.get(tool_id)
             .map(|t| t.dependencies.iter().collect())
             .unwrap_or_default()
     }
-    
+
     /// Check if tool exists in TDG.
     pub fn has_tool(&self, tool_id: &str) -> bool {
         self.tools.contains_key(tool_id)
@@ -314,30 +315,27 @@ impl DependencyLiveness {
             DependencyType::WindowFocused { window_class } => {
                 Self::probe_window_focus(window_class).await
             }
-            DependencyType::ElementPresent { element_type, label } => {
-                Self::probe_element_present(element_type, label.as_deref()).await
-            }
-            DependencyType::FileExists { path } => {
-                Self::probe_file_exists(path).await
-            }
-            DependencyType::NetworkAvailable { host } => {
-                Self::probe_network(host).await
-            }
+            DependencyType::ElementPresent {
+                element_type,
+                label,
+            } => Self::probe_element_present(element_type, label.as_deref()).await,
+            DependencyType::FileExists { path } => Self::probe_file_exists(path).await,
+            DependencyType::NetworkAvailable { host } => Self::probe_network(host).await,
         }
     }
-    
+
     /// Probe process state using OS metadata.
     /// Per RFC 008: "Process responsive + no error state = Healthy"
     async fn probe_process(process_name: &str) -> LivenessResult {
         // Scaffolding: In production, would use /proc or ps
         // For now, simulate based on known processes
-        
+
         let pid = Self::find_process_pid(process_name).await;
-        
+
         if let Some(pid) = pid {
             // Check if process is responsive (would check /proc/{pid}/stat in production)
             let is_responsive = Self::check_process_responsive(pid).await;
-            
+
             if is_responsive {
                 LivenessResult {
                     state: LivenessState::Healthy,
@@ -368,33 +366,33 @@ impl DependencyLiveness {
             }
         }
     }
-    
+
     /// Probe window focus state.
     async fn probe_window_focus(window_class: &str) -> LivenessResult {
         // Scaffolding: Would query X11/Wayland for active window
         // For now, return unfocused (conservative)
-        
+
         LivenessResult {
             state: LivenessState::Unfocused,
             pid: None,
             window_id: None,
             metadata: [
                 ("window_class".to_string(), window_class.to_string()),
-                ("note".to_string(), "scaffolding - always unfocused".to_string()),
+                (
+                    "note".to_string(),
+                    "scaffolding - always unfocused".to_string(),
+                ),
             ]
             .into_iter()
             .collect(),
         }
     }
-    
+
     /// Probe element presence via vision.
-    async fn probe_element_present(
-        element_type: &str,
-        label: Option<&str>,
-    ) -> LivenessResult {
+    async fn probe_element_present(element_type: &str, label: Option<&str>) -> LivenessResult {
         // Scaffolding: Would query OmniParser cache
         // For now, return Dead (requires actual vision check)
-        
+
         LivenessResult {
             state: LivenessState::Dead,
             pid: None,
@@ -402,43 +400,54 @@ impl DependencyLiveness {
             metadata: [
                 ("element_type".to_string(), element_type.to_string()),
                 ("label".to_string(), label.unwrap_or("any").to_string()),
-                ("note".to_string(), "scaffolding - requires vision".to_string()),
+                (
+                    "note".to_string(),
+                    "scaffolding - requires vision".to_string(),
+                ),
             ]
             .into_iter()
             .collect(),
         }
     }
-    
+
     /// Probe file existence.
     async fn probe_file_exists(path: &str) -> LivenessResult {
         let exists = tokio::fs::metadata(path).await.is_ok();
-        
+
         LivenessResult {
-            state: if exists { LivenessState::Healthy } else { LivenessState::Dead },
+            state: if exists {
+                LivenessState::Healthy
+            } else {
+                LivenessState::Dead
+            },
             pid: None,
             window_id: None,
-            metadata: [("path".to_string(), path.to_string())].into_iter().collect(),
+            metadata: [("path".to_string(), path.to_string())]
+                .into_iter()
+                .collect(),
         }
     }
-    
+
     /// Probe network connectivity.
     async fn probe_network(host: &str) -> LivenessResult {
         // Scaffolding: Would ping host
         // For now, assume Healthy (common case)
-        
+
         LivenessResult {
             state: LivenessState::Healthy,
             pid: None,
             window_id: None,
-            metadata: [("host".to_string(), host.to_string())].into_iter().collect(),
+            metadata: [("host".to_string(), host.to_string())]
+                .into_iter()
+                .collect(),
         }
     }
-    
+
     /// Find process PID by name (scaffolding).
     async fn find_process_pid(process_name: &str) -> Option<u32> {
         // Scaffolding: In production, parse /proc or use pgrep
         // For common processes, return mock PIDs
-        
+
         match process_name {
             "omniparser" => Some(1234),
             "gnome-terminal" => Some(5678),
@@ -446,12 +455,12 @@ impl DependencyLiveness {
             _ => None,
         }
     }
-    
+
     /// Check if process is responsive (scaffolding).
     async fn check_process_responsive(pid: u32) -> bool {
         // Scaffolding: In production, check /proc/{pid}/stat
         // or send SIGNULL to verify process can receive signals
-        
+
         // Known mock PIDs are responsive
         matches!(pid, 1234 | 5678 | 999)
     }
@@ -496,17 +505,17 @@ pub async fn wait_for_application_stability(
     let start = Instant::now();
     let check_interval = Duration::from_millis(250);
     let min_wait = Duration::from_millis(500); // RFC 008: minimum 500ms wait
-    
+
     loop {
         let elapsed = start.elapsed();
-        
+
         // Check stability factors
         let factors = check_stability_factors(process_name).await;
         let all_passed = factors.process_responsive
             && factors.compositor_acknowledged
             && factors.no_loading_indicators
             && factors.stable_geometry;
-        
+
         // Must wait at least min_wait, then can exit if stable
         if elapsed >= min_wait && all_passed {
             return StabilityResult {
@@ -515,7 +524,7 @@ pub async fn wait_for_application_stability(
                 wait_duration: elapsed,
             };
         }
-        
+
         // Timeout reached
         if elapsed >= max_wait {
             return StabilityResult {
@@ -524,7 +533,7 @@ pub async fn wait_for_application_stability(
                 wait_duration: elapsed,
             };
         }
-        
+
         // Wait before next check
         tokio::time::sleep(check_interval).await;
     }
@@ -534,7 +543,7 @@ pub async fn wait_for_application_stability(
 async fn check_stability_factors(_process_name: &str) -> StabilityFactors {
     // Scaffolding: In production, would query actual system state
     // For now, simulate typical stable state
-    
+
     StabilityFactors {
         process_responsive: true,
         compositor_acknowledged: true,
@@ -573,9 +582,9 @@ impl HtnExpander {
             tdg: ToolDependencyGraph::new(),
         }
     }
-    
+
     /// Expand raw intent into dependency-aware sub-goal sequence.
-    /// 
+    ///
     /// Example: "type_text" expands to:
     /// 1. get_screen_elements (verify input exists) - dependency
     /// 2. click_element (focus input) - dependency  
@@ -589,12 +598,12 @@ impl HtnExpander {
         let mut sub_goals = Vec::new();
         let mut total_cost = 0;
         let mut failed_soft_deps = Vec::new();
-        
+
         // Get tool definition from TDG
         if let Some(tool_def) = self.tdg.get(intent_action) {
             // First: Add dependency resolution sub-goals (prerequisites)
             let mut dep_step = starting_step;
-            
+
             for dep in &tool_def.dependencies {
                 // Check if we need to inject a sub-goal for this dependency
                 if let Some(dep_subgoal) = self.dependency_to_subgoal(dep, dep_step) {
@@ -609,7 +618,7 @@ impl HtnExpander {
                     // Hard dependency failure would be handled at execution time
                 }
             }
-            
+
             // Finally: Add the original intent action
             sub_goals.push(SubGoal {
                 step: dep_step,
@@ -633,14 +642,14 @@ impl HtnExpander {
             });
             total_cost = 1;
         }
-        
+
         ExpandedIntent {
             sub_goals,
             total_cost,
             failed_soft_deps,
         }
     }
-    
+
     /// Convert dependency to prerequisite sub-goal if needed.
     fn dependency_to_subgoal(&self, dep: &ToolDependency, step: usize) -> Option<SubGoal> {
         // Map dependency types to prerequisite sense/check actions
@@ -674,7 +683,10 @@ impl HtnExpander {
                     timeout_ms: Some(dep.probe_timeout_secs * 1000),
                 })
             }
-            DependencyType::ElementPresent { element_type, label } => {
+            DependencyType::ElementPresent {
+                element_type,
+                label,
+            } => {
                 // Add a "get_screen_elements" sub-goal to verify element exists
                 Some(SubGoal {
                     step,
@@ -694,7 +706,7 @@ impl HtnExpander {
             _ => None, // FileExists, NetworkAvailable don't need sub-goals
         }
     }
-    
+
     /// Get TDG reference.
     pub fn tdg(&self) -> &ToolDependencyGraph {
         &self.tdg
@@ -718,118 +730,110 @@ mod tests {
     #[test]
     fn test_tdg_default_tools() {
         let tdg = ToolDependencyGraph::new();
-        
+
         assert!(tdg.has_tool("click_element"));
         assert!(tdg.has_tool("type_text"));
         assert!(tdg.has_tool("run_code"));
         assert!(tdg.has_tool("open_application"));
         assert!(tdg.has_tool("get_screen_elements"));
     }
-    
+
     #[test]
     fn test_click_element_dependencies() {
         let tdg = ToolDependencyGraph::new();
         let deps = tdg.get_dependencies("click_element");
-        
+
         assert_eq!(deps.len(), 2);
         assert_eq!(deps[0].strength, DependencyStrength::Hard); // vision
         assert_eq!(deps[1].strength, DependencyStrength::Soft); // focus
     }
-    
+
     #[test]
     fn test_type_text_hard_dependencies() {
         let tdg = ToolDependencyGraph::new();
         let deps = tdg.get_dependencies("type_text");
-        
+
         // Both dependencies should be Hard
         assert!(deps.iter().all(|d| d.strength == DependencyStrength::Hard));
     }
-    
+
     #[test]
     fn test_htn_expander_type_text() {
         let expander = HtnExpander::new();
-        
-        let expanded = expander.expand_intent(
-            "type_text",
-            &serde_json::json!({"text": "Hello World"}),
-            1,
-        );
-        
+
+        let expanded =
+            expander.expand_intent("type_text", &serde_json::json!({"text": "Hello World"}), 1);
+
         // Should have: verify_focus + get_screen_elements + type_text
         assert_eq!(expanded.sub_goals.len(), 3);
         assert_eq!(expanded.sub_goals[0].action, "verify_focus");
         assert_eq!(expanded.sub_goals[1].action, "get_screen_elements");
         assert_eq!(expanded.sub_goals[2].action, "type_text");
-        
+
         // Step numbers should be sequential
         assert_eq!(expanded.sub_goals[0].step, 1);
         assert_eq!(expanded.sub_goals[1].step, 2);
         assert_eq!(expanded.sub_goals[2].step, 3);
     }
-    
+
     #[test]
     fn test_htn_expander_click_element() {
         let expander = HtnExpander::new();
-        
+
         let expanded = expander.expand_intent(
             "click_element",
             &serde_json::json!({"element_id": "btn_save"}),
             1,
         );
-        
+
         // Should have: probe_process + verify_focus + click_element
         assert_eq!(expanded.sub_goals.len(), 3);
         assert_eq!(expanded.sub_goals[0].action, "probe_process");
         assert_eq!(expanded.sub_goals[1].action, "verify_focus");
         assert_eq!(expanded.sub_goals[2].action, "click_element");
     }
-    
+
     #[test]
     fn test_htn_expander_unknown_tool() {
         let expander = HtnExpander::new();
-        
-        let expanded = expander.expand_intent(
-            "unknown_tool",
-            &serde_json::json!({}),
-            1,
-        );
-        
+
+        let expanded = expander.expand_intent("unknown_tool", &serde_json::json!({}), 1);
+
         // Should just pass through without expansion
         assert_eq!(expanded.sub_goals.len(), 1);
         assert_eq!(expanded.sub_goals[0].action, "unknown_tool");
     }
-    
+
     #[test]
     fn test_liveness_file_exists() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let result = rt.block_on(async {
-            DependencyLiveness::probe(&DependencyType::FileExists { 
-                path: "/etc/passwd".to_string() 
-            }).await
+            DependencyLiveness::probe(&DependencyType::FileExists {
+                path: "/etc/passwd".to_string(),
+            })
+            .await
         });
-        
+
         assert_eq!(result.state, LivenessState::Healthy);
     }
-    
+
     #[test]
     fn test_liveness_file_not_exists() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let result = rt.block_on(async {
-            DependencyLiveness::probe(&DependencyType::FileExists { 
-                path: "/nonexistent/path/12345".to_string() 
-            }).await
+            DependencyLiveness::probe(&DependencyType::FileExists {
+                path: "/nonexistent/path/12345".to_string(),
+            })
+            .await
         });
-        
+
         assert_eq!(result.state, LivenessState::Dead);
     }
-    
+
     #[tokio::test]
     async fn test_stability_check() {
-        let result = wait_for_application_stability(
-            "test_app",
-            Duration::from_millis(500),
-        ).await;
-        
+        let result = wait_for_application_stability("test_app", Duration::from_millis(500)).await;
+
         // Should complete (scaffolding returns stable)
         assert!(result.is_stable);
         assert!(result.wait_duration >= Duration::from_millis(500));

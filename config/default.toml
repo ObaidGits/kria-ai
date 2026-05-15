@@ -4,11 +4,17 @@
 # Copy to ~/.kria/config.toml and customize.
 
 [llm]
-mode = "local"                              # "local" | "gemini" | "external"
+# mode = "local"                              # "local" | "gemini" | "external"
 # cloud_api_key = ""                        # Set via KRIA_CLOUD_API_KEY env var
-local_host = "127.0.0.1"
-local_port = 8080
-max_context_tokens = 4096
+# local_host = "127.0.0.1"
+# local_port = 8080
+# max_context_tokens = 4096
+
+mode = "external"
+cloud_api_key = "sk-RVBbuAiF3smncocODOARvipPIwueBV2J2DY8EFdXh7E8iyzO5C5jDUw5UPYaCWp3"
+cloud_provider = "opencode"
+cloud_model_id = "minimax-m2.5-free"
+cloud_endpoint = "https://opencode.ai/zen/v1"
 
 [[llm.models]]
 name = "qwen2.5-vl-7b"
@@ -36,7 +42,7 @@ mode = "push_to_talk"
 # v2 (in-process, when wired) keeps the model warm and handles larger variants.
 # Multilingual small model (~181 MB) — fast cold-load, supports Hindi/Hinglish.
 # Run: python scripts/download_models.py --tier lite to fetch it.
-stt_model = "ggml-small-q5_1.bin"
+stt_model = "auto"
 tts_voice = "en_US-ljspeech-high"
 vad_silence_ms = 500
 energy_threshold = 0.02
@@ -270,3 +276,140 @@ prompt_enhance_mode = "auto"
 #   "cloud_with_local_fallback"  Cloud primary; local on cloud failure
 # Runtime override: KRIA_IMAGE_MODE env var (e.g. KRIA_IMAGE_MODE=cloud_only)
 image_mode = "local_only"
+
+# ==========================================
+# Universal Model Provider System
+# ==========================================
+# Configure multiple LLM providers. KRIA can switch between them dynamically.
+# The active_provider determines which backend handles inference requests.
+
+[providers]
+active_provider = "llama_cpp"
+prefer_streaming = true
+# fallback_provider = "ollama"    # Optional: auto-fallback on active failure
+
+# ─── Local llama.cpp (default) ───────────────────────────────────────────────
+[[providers.providers]]
+id = "llama_cpp"
+provider_type = "llama_cpp"
+display_name = "llama.cpp (Local)"
+enabled = true
+active_model = ""
+default_temperature = 0.7
+default_max_tokens = 4096
+prefer_streaming = true
+
+[providers.providers.endpoint]
+base_url = "http://127.0.0.1:8080/v1"
+api_key = ""
+timeout_secs = 120
+max_retries = 2
+rate_limit_rpm = 0
+
+# ─── Ollama (disabled by default) ────────────────────────────────────────────
+# [[providers.providers]]
+# id = "ollama"
+# provider_type = "ollama"
+# display_name = "Ollama"
+# enabled = false
+# active_model = ""
+# default_temperature = 0.7
+# default_max_tokens = 4096
+# prefer_streaming = true
+#
+# [providers.providers.endpoint]
+# base_url = "http://localhost:11434"
+# api_key = ""
+# timeout_secs = 120
+# max_retries = 2
+# rate_limit_rpm = 0
+
+# ─── OpenCode(zen) (disabled by default) ────────────────────────────────────────────
+[[providers.providers]]
+id = "opencode"
+provider_type = "openai_compatible"
+display_name = "OpenCode (MiniMax M2.5 Free)"
+enabled = true
+active_model = "minimax-m2.5-free"
+default_temperature = 0.7
+default_max_tokens = 4096
+prefer_streaming = true
+
+[providers.providers.endpoint]
+base_url = "https://opencode.ai/zen/v1"
+api_key = "sk-RVBbuAiF3smncocODOARvipPIwueBV2J2DY8EFdXh7E8iyzO5C5jDUw5UPYaCWp3"
+timeout_secs = 60
+max_retries = 3
+rate_limit_rpm = 0
+
+# ─── OpenAI (disabled by default) ────────────────────────────────────────────
+# [[providers.providers]]
+# id = "openai"
+# provider_type = "openai"
+# display_name = "OpenAI"
+# enabled = true
+# active_model = "gpt-4o"
+# default_temperature = 0.7
+# default_max_tokens = 4096
+# prefer_streaming = true
+#
+# [providers.providers.endpoint]
+# base_url = "https://api.openai.com/v1"
+# api_key = ""  # Set via KRIA_OPENAI_API_KEY env var
+# timeout_secs = 60
+# max_retries = 3
+# rate_limit_rpm = 60
+
+# ─── Google Gemini (disabled by default) ──────────────────────────────────────
+# [[providers.providers]]
+# id = "gemini"
+# provider_type = "gemini"
+# display_name = "Google Gemini"
+# enabled = true
+# active_model = "gemini-2.0-flash"
+# default_temperature = 0.7
+# default_max_tokens = 8192
+# prefer_streaming = true
+#
+# [providers.providers.endpoint]
+# base_url = "https://generativelanguage.googleapis.com/v1beta"
+# api_key = ""  # Set via KRIA_GEMINI_API_KEY env var
+# timeout_secs = 60
+# max_retries = 3
+# rate_limit_rpm = 60
+
+# ─── Anthropic (disabled by default) ─────────────────────────────────────────
+# [[providers.providers]]
+# id = "anthropic"
+# provider_type = "anthropic"
+# display_name = "Anthropic"
+# enabled = true
+# active_model = "claude-sonnet-4-20250514"
+# default_temperature = 0.7
+# default_max_tokens = 4096
+# prefer_streaming = true
+#
+# [providers.providers.endpoint]
+# base_url = "https://api.anthropic.com/v1"
+# api_key = ""  # Set via KRIA_ANTHROPIC_API_KEY env var
+# timeout_secs = 60
+# max_retries = 3
+# rate_limit_rpm = 60
+
+# ─── OpenRouter (disabled by default) ────────────────────────────────────────
+# [[providers.providers]]
+# id = "openrouter"
+# provider_type = "openrouter"
+# display_name = "OpenRouter"
+# enabled = true
+# active_model = "anthropic/claude-sonnet-4"
+# default_temperature = 0.7
+# default_max_tokens = 4096
+# prefer_streaming = true
+#
+# [providers.providers.endpoint]
+# base_url = "https://openrouter.ai/api/v1"
+# api_key = ""  # Set via KRIA_OPENROUTER_API_KEY env var
+# timeout_secs = 60
+# max_retries = 3
+# rate_limit_rpm = 200

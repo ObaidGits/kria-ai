@@ -398,132 +398,6 @@ impl LocalBackend {
             tool_calls,
         })
     }
-
-    /// Grammar-constrained chat call.
-    ///
-    /// Posts a `json_schema` field to llama.cpp `/v1/chat/completions`, which
-    /// activates llguidance-backed constrained decoding inside llama.cpp.
-    /// The schema **must** be a valid JSON Schema object describing the exact
-    /// structure of the tool-call(s) the LLM may emit.
-    ///
-    /// Falls back transparently to the standard `chat` path if the server
-    /// returns an error for the grammar field (older llama.cpp builds).
-    pub async fn chat_with_grammar(
-        &self,
-        messages: &[ChatMessage],
-        json_schema: serde_json::Value,
-        temperature: f32,
-        max_tokens: u32,
-    ) -> anyhow::Result<LlmResponse> {
-        let max_tokens = self.clamp_max_tokens_for_context(messages, None, max_tokens);
-        if max_tokens == 0 {
-            tracing::warn!(
-                context_window = self.context_window.load(Ordering::Acquire),
-                estimated_prompt_tokens = Self::estimate_prompt_tokens(messages, None),
-                message_count = messages.len(),
-                "grammar prompt leaves no completion budget; returning context overflow"
-            );
-            return Err(ContextTooLargeError.into());
-        }
-
-        // Wait for any in-progress swap before sending (Notify-based, no busy-poll).
-        if !self.wait_for_swap(120).await {
-            anyhow::bail!("local LLM: swap timeout exceeded (120s) waiting for grammar chat");
-        }
-
-        let wire_messages: Vec<serde_json::Value> = messages
-            .iter()
-            .map(|m| {
-                if m.has_images() {
-                    serde_json::json!({ "role": m.role, "content": m.to_multimodal_content() })
-                } else {
-                    let mut msg = serde_json::json!({ "role": m.role, "content": m.content });
-                    if let Some(ref name) = m.name {
-                        msg["name"] = serde_json::json!(name);
-                    }
-                    msg
-                }
-            })
-            .collect();
-
-        let payload = serde_json::json!({
-            "model": self.model_label,
-            "messages": wire_messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "stream": false,
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "tool_call",
-                    "strict": true,
-                    "schema": json_schema,
-                }
-            }
-        });
-
-        let url = format!("{}/chat/completions", self.resolve_api_url());
-        let resp = self
-            .client
-            .post(&url)
-            .json(&payload)
-            .send()
-            .await
-            .map_err(|e| anyhow::anyhow!("grammar chat transport error to {url}: {e}"))?;
-
-        let status = resp.status();
-        if !status.is_success() {
-            let body_text = resp.text().await.unwrap_or_default();
-            // If the server doesn't support json_schema (older llama.cpp), fall back to
-            // standard chat without grammar constraint but log a warning.
-            if matches!(status.as_u16(), 400 | 422)
-                && body_text.to_ascii_lowercase().contains("json_schema")
-            {
-                tracing::warn!(
-                    "[LocalBackend] llama.cpp does not support json_schema response_format; \
-                     falling back to unconstrained chat. Upgrade llama.cpp for llguidance support."
-                );
-                return self.chat(messages, None, temperature, max_tokens).await;
-            }
-            if Self::looks_like_context_overflow_response(status, &body_text) {
-                return Err(ContextTooLargeError.into());
-            }
-            tracing::error!(
-                status = %status,
-                response_body = %body_text,
-                "grammar chat request failed with non-overflow error"
-            );
-            anyhow::bail!("local LLM grammar API error (status {status}): {body_text}");
-        }
-
-        let body: serde_json::Value = resp.json().await?;
-        let choice = &body["choices"][0];
-        let message = &choice["message"];
-        let content = extract_openai_message_text(message);
-
-        // With json_schema mode, the model emits structured JSON in the content field.
-        // Try to extract tool_calls from the JSON content if it looks like a tool-call object.
-        let tool_calls =
-            if content.trim_start().starts_with('{') || content.trim_start().starts_with('[') {
-                extract_tool_calls_from_json_content(&content)
-                    .or_else(|| extract_openai_tool_calls(message))
-            } else {
-                extract_openai_tool_calls(message)
-            };
-
-        let usage = body["usage"].as_object().map(|u| crate::llm::TokenUsage {
-            prompt_tokens: u["prompt_tokens"].as_u64().unwrap_or(0) as u32,
-            completion_tokens: u["completion_tokens"].as_u64().unwrap_or(0) as u32,
-            total_tokens: u["total_tokens"].as_u64().unwrap_or(0) as u32,
-        });
-
-        Ok(LlmResponse {
-            content,
-            model: self.model_label.clone(),
-            usage,
-            tool_calls,
-        })
-    }
 }
 
 #[async_trait]
@@ -782,6 +656,118 @@ impl LlmBackend for LocalBackend {
         });
 
         Ok(Box::pin(stream))
+    }
+
+    async fn chat_with_grammar(
+        &self,
+        messages: &[ChatMessage],
+        json_schema: serde_json::Value,
+        temperature: f32,
+        max_tokens: u32,
+    ) -> anyhow::Result<LlmResponse> {
+        let max_tokens = self.clamp_max_tokens_for_context(messages, None, max_tokens);
+        if max_tokens == 0 {
+            tracing::warn!(
+                context_window = self.context_window.load(Ordering::Acquire),
+                estimated_prompt_tokens = Self::estimate_prompt_tokens(messages, None),
+                message_count = messages.len(),
+                "grammar prompt leaves no completion budget; returning context overflow"
+            );
+            return Err(ContextTooLargeError.into());
+        }
+
+        if !self.wait_for_swap(120).await {
+            anyhow::bail!("local LLM: swap timeout exceeded (120s) waiting for grammar chat");
+        }
+
+        let wire_messages: Vec<serde_json::Value> = messages
+            .iter()
+            .map(|m| {
+                if m.has_images() {
+                    serde_json::json!({ "role": m.role, "content": m.to_multimodal_content() })
+                } else {
+                    let mut msg = serde_json::json!({ "role": m.role, "content": m.content });
+                    if let Some(ref name) = m.name {
+                        msg["name"] = serde_json::json!(name);
+                    }
+                    msg
+                }
+            })
+            .collect();
+
+        let payload = serde_json::json!({
+            "model": self.model_label,
+            "messages": wire_messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": false,
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "tool_call",
+                    "strict": true,
+                    "schema": json_schema,
+                }
+            }
+        });
+
+        let url = format!("{}/chat/completions", self.resolve_api_url());
+        let resp = self
+            .client
+            .post(&url)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("grammar chat transport error to {url}: {e}"))?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let body_text = resp.text().await.unwrap_or_default();
+            if matches!(status.as_u16(), 400 | 422)
+                && body_text.to_ascii_lowercase().contains("json_schema")
+            {
+                tracing::warn!(
+                    "[LocalBackend] llama.cpp does not support json_schema response_format; \
+                     falling back to unconstrained chat. Upgrade llama.cpp for llguidance support."
+                );
+                return self.chat(messages, None, temperature, max_tokens).await;
+            }
+            if Self::looks_like_context_overflow_response(status, &body_text) {
+                return Err(ContextTooLargeError.into());
+            }
+            tracing::error!(
+                status = %status,
+                response_body = %body_text,
+                "grammar chat request failed with non-overflow error"
+            );
+            anyhow::bail!("local LLM grammar API error (status {status}): {body_text}");
+        }
+
+        let body: serde_json::Value = resp.json().await?;
+        let choice = &body["choices"][0];
+        let message = &choice["message"];
+        let content = extract_openai_message_text(message);
+
+        let tool_calls =
+            if content.trim_start().starts_with('{') || content.trim_start().starts_with('[') {
+                extract_tool_calls_from_json_content(&content)
+                    .or_else(|| extract_openai_tool_calls(message))
+            } else {
+                extract_openai_tool_calls(message)
+            };
+
+        let usage = body["usage"].as_object().map(|u| crate::llm::TokenUsage {
+            prompt_tokens: u["prompt_tokens"].as_u64().unwrap_or(0) as u32,
+            completion_tokens: u["completion_tokens"].as_u64().unwrap_or(0) as u32,
+            total_tokens: u["total_tokens"].as_u64().unwrap_or(0) as u32,
+        });
+
+        Ok(LlmResponse {
+            content,
+            model: self.model_label.clone(),
+            usage,
+            tool_calls,
+        })
     }
 
     async fn health_check(&self) -> bool {

@@ -83,6 +83,22 @@ pub enum EventKind {
     HealthBreach(String),
     /// Process lifecycle event (started, crashed, exited).
     ProcessLifecycle(String),
+    /// P2d: Desktop environment change — drives grounding cache invalidation.
+    DesktopEvent(DesktopOp),
+}
+
+/// Desktop operation type for grounding invalidation.
+/// Bounded: exactly 4 variants. No semantic classification.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum DesktopOp {
+    /// X11 focus changed (different window received input focus).
+    FocusChanged,
+    /// A new window was mapped (created/shown).
+    WindowCreated,
+    /// A window was unmapped (destroyed/hidden).
+    WindowDestroyed,
+    /// Active workspace/desktop changed.
+    WorkspaceChanged,
 }
 
 /// Filesystem operation type.
@@ -243,6 +259,7 @@ impl EventDebouncer {
             EventKind::NetworkChange(detail) => format!("net:{}", detail),
             EventKind::HealthBreach(detail) => format!("health:{}", detail),
             EventKind::ProcessLifecycle(detail) => format!("proc:{}", detail),
+            EventKind::DesktopEvent(op) => format!("desktop:{:?}", op),
         };
         match path {
             Some(p) => format!("{}:{}", kind_str, p),

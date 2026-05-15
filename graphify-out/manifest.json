@@ -27,41 +27,57 @@
     "mtime": 1778582882.6912653,
     "hash": "d139ed19882dc7cc2cc64b4e163e41f1"
   },
+  "/media/obaid/SSD/KRIA/crates/kria-core/src/agent/onnx_classifier.rs": {
+    "mtime": 1778508485.6455162,
+    "hash": "38e545410de99c905e8a2fa5b574d40a"
+  },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/agent/environment_grounder.rs": {
-    "mtime": 1778604051.6823747,
-    "hash": "dc610e4920aeecd3b7ca45dab5860bb2"
+    "mtime": 1778687223.034388,
+    "hash": "e9b4036d0573edbcb545d2fe3e04067d"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/agent/execution_verifier.rs": {
-    "mtime": 1778604076.1048229,
-    "hash": "863a4c31a3274c20959f48855d152801"
+    "mtime": 1778687223.0367413,
+    "hash": "a3cd03e0e88dd7314386d4ee52b5768c"
+  },
+  "/media/obaid/SSD/KRIA/crates/kria-core/src/agent/execution_verifier_impl.rs": {
+    "mtime": 1778687223.0481958,
+    "hash": "9ff4aa1fc9edc12810014098efae5d7a"
+  },
+  "/media/obaid/SSD/KRIA/crates/kria-core/src/agent/goal_tree.rs": {
+    "mtime": 1778687223.075657,
+    "hash": "4fc1fef45843181a9d2159b86ddb1872"
+  },
+  "/media/obaid/SSD/KRIA/crates/kria-core/src/agent/gui_planner.rs": {
+    "mtime": 1778687223.079994,
+    "hash": "72c1659d09324b34793fd2a099404c68"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/agent/gui_wiring.rs": {
-    "mtime": 1778603665.7106862,
-    "hash": "3f332a51347fb74ac2ffb6e0eee4bc74"
+    "mtime": 1778687223.0829716,
+    "hash": "348b990cf66644a51d15408e27200bba"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/agent/htn_executor.rs": {
-    "mtime": 1778603649.6267998,
-    "hash": "ad591a68fccd3a99007d50e33b5f87db"
+    "mtime": 1778687223.106146,
+    "hash": "db3b10d41a78f5f5e6c755eacb083286"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/agent/htn_integration.rs": {
-    "mtime": 1778604402.3749218,
-    "hash": "9e8fce87ed2fbe469940673cd513c878"
+    "mtime": 1778687223.112045,
+    "hash": "f4bfc2d1e9954b28d20c64a52dbc25f7"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/agent/intent_compiler.rs": {
-    "mtime": 1778604026.3209991,
-    "hash": "cefb72bebfa5e544a1d330dc1060e23b"
+    "mtime": 1778687223.1130524,
+    "hash": "fdaca26bd302d267f059a55ae06136d2"
+  },
+  "/media/obaid/SSD/KRIA/crates/kria-core/src/agent/intent_compiler_llm.rs": {
+    "mtime": 1778687223.1251514,
+    "hash": "e373caa106e8030b4b141e6b0ffd0778"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/agent/interaction.rs": {
     "mtime": 1776237277.488236,
     "hash": "67447f2b29e18834bab59eabacb3ed0c"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/agent/mod.rs": {
-    "mtime": 1778603999.7074766,
-    "hash": "c9dc5cccadf1b8db7c6190226c69dc55"
-  },
-  "/media/obaid/SSD/KRIA/crates/kria-core/src/agent/onnx_classifier.rs": {
-    "mtime": 1778508485.6455162,
-    "hash": "38e545410de99c905e8a2fa5b574d40a"
+    "mtime": 1778687223.2608716,
+    "hash": "ccca0bf0e35e004a2215e2edbd325501"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/agent/planner.rs": {
     "mtime": 1776457125.5354314,
@@ -76,12 +92,16 @@
     "hash": "c9ae9a5b287657fb5998dc8980c1c2d2"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/agent/router.rs": {
-    "mtime": 1778508684.7921,
+    "mtime": 1778652867.0792992,
     "hash": "6b6d752d58442bdd03b5f2ff5f754425"
   },
+  "/media/obaid/SSD/KRIA/crates/kria-core/src/agent/stage_executor.rs": {
+    "mtime": 1778687223.3492286,
+    "hash": "179e909a89ae3eb5258c05808895ae13"
+  },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/agent/tool_dependencies.rs": {
-    "mtime": 1778574307.3733265,
-    "hash": "0e12993c1c5f6bf75d156157e4417fed"
+    "mtime": 1778687223.3565445,
+    "hash": "8a1c8388a449830427b0ef9b5fe06376"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/agent/turn_context.rs": {
     "mtime": 1778508485.6925807,
@@ -92,12 +112,16 @@
     "hash": "a3a1c580d667c87c38e044a1f7344df2"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/agent/visual_reasoning.rs": {
-    "mtime": 1778577285.7663913,
-    "hash": "0e7ff6c7b23461f3c9d4528bc7eb5abe"
+    "mtime": 1778687223.3771844,
+    "hash": "79c1a9660249cd78da063ee7af2bba52"
+  },
+  "/media/obaid/SSD/KRIA/crates/kria-core/src/agent/workflow_compiler.rs": {
+    "mtime": 1778687223.3891397,
+    "hash": "986655995e27005bffcc9666a752a8dd"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/agent/curiosity/mod.rs": {
-    "mtime": 1778508751.4749806,
-    "hash": "b1e802bc04da6ade37df2b060f8de939"
+    "mtime": 1778664183.9275572,
+    "hash": "0a107ac88e8643a7b00e0cba82bb57ec"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/agent/executive/controller.rs": {
     "mtime": 1778508485.5529943,
@@ -144,8 +168,8 @@
     "hash": "ed2d2520c8975d1025308d64e3fa1a66"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/agent/loop_engine/mod.rs": {
-    "mtime": 1778602364.8320682,
-    "hash": "df56545579ebf4cd54b7ccaaffb6b943"
+    "mtime": 1778687223.222512,
+    "hash": "7e321a8bd33ccdf1556a31a850d688c0"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/agent/loop_engine/response_helpers.rs": {
     "mtime": 1778508485.624134,
@@ -192,8 +216,8 @@
     "hash": "48597d6883f749237dd06baa41c75f93"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/agent/perception/mod.rs": {
-    "mtime": 1778508485.6487553,
-    "hash": "176b78334402689d179442f5422c6c12"
+    "mtime": 1778663910.749707,
+    "hash": "10f4d05906cd00209efb828108702c0f"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/agent/planner_v2/mod.rs": {
     "mtime": 1778508485.652387,
@@ -424,12 +448,12 @@
     "hash": "3f7576851157b7e4b68d4f0bb5002ab4"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/llm/local.rs": {
-    "mtime": 1777143148.7565823,
-    "hash": "af9fa4c15b25431d10cb21de25ff7890"
+    "mtime": 1778687223.5718403,
+    "hash": "63374ff3598a23e4e4be1c693fa784a1"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/llm/mod.rs": {
-    "mtime": 1777044806.8141317,
-    "hash": "50d5ed9814296f87e7054f14c0775645"
+    "mtime": 1778644835.2083216,
+    "hash": "031ddfad3fb948cd45044ab295abbc7a"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/llm/model_manager.rs": {
     "mtime": 1776524434.4138732,
@@ -616,12 +640,12 @@
     "hash": "77d2efb146e5fff188c1187137280e44"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/orchestrator/mod.rs": {
-    "mtime": 1778582805.380263,
-    "hash": "ab83572894b9e32e69f746055a13c541"
+    "mtime": 1778687223.726964,
+    "hash": "3638996812d57615481c730f6cccae8c"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/orchestrator/service_orchestrator.rs": {
-    "mtime": 1778603709.8676372,
-    "hash": "ad02cfd59bed39756d38eb8f98168e83"
+    "mtime": 1778687223.732636,
+    "hash": "0a247b5a62402c0cfe731adfceec676c"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/platform/app_registry.rs": {
     "mtime": 1777115298.7219388,
@@ -644,8 +668,8 @@
     "hash": "268f1a628431a54c828fab2c04fbf76a"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/platform/paths.rs": {
-    "mtime": 1776237277.4872358,
-    "hash": "1eabd3721a150c2ee034da46cdb182c7"
+    "mtime": 1778687223.7675405,
+    "hash": "3e6efaba75949b96bedd572049366495"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/platform/sandbox.rs": {
     "mtime": 1777913114.0071929,
@@ -860,8 +884,8 @@
     "hash": "b90006b68e201cb9c8337bf8ee547c98"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/safety/mod.rs": {
-    "mtime": 1778604105.3867767,
-    "hash": "93eaef24abbdcdc7b9f85d3254fb21bc"
+    "mtime": 1778649240.746816,
+    "hash": "fd1844279e57301518cc43c6175217e4"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/safety/pin_guard.rs": {
     "mtime": 1777115298.8466842,
@@ -878,10 +902,6 @@
   "/media/obaid/SSD/KRIA/crates/kria-core/src/safety/rollback.rs": {
     "mtime": 1776509211.3037736,
     "hash": "eef853e8c803b4011b5c024187631cb7"
-  },
-  "/media/obaid/SSD/KRIA/crates/kria-core/src/safety/ui_trust.rs": {
-    "mtime": 1778604131.9379864,
-    "hash": "3d6f5282cca58b77d3da8505994481a0"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/sidecar/bootstrap.rs": {
     "mtime": 1777115298.864953,
@@ -952,8 +972,8 @@
     "hash": "6cf16e0237ec61113e9a2c7aed8d1ae9"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/tools/gui_automation.rs": {
-    "mtime": 1778603642.474099,
-    "hash": "9aceffe3006afa18da80bf9d8e52f570"
+    "mtime": 1778687224.0055795,
+    "hash": "6edccab55dc07bc75e967d616f518549"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/tools/i18n.rs": {
     "mtime": 1778508486.1250749,
@@ -976,8 +996,8 @@
     "hash": "3bde0376179fb8b1cbe9cc6bf80f4cd3"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/tools/mod.rs": {
-    "mtime": 1778514478.9439473,
-    "hash": "8159ec86a8775c1a5e61f0ecb9a25987"
+    "mtime": 1778687224.04375,
+    "hash": "d82105eddb16ec9a259d659512f13eb2"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/tools/mount_manager.rs": {
     "mtime": 1776537102.7786317,
@@ -1044,16 +1064,16 @@
     "hash": "0338943fa3ce20398f2a6176718094a2"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/tools/vision_automation.rs": {
-    "mtime": 1778598092.4053822,
-    "hash": "fdd380a6f809d41f2692fe83c18ef570"
+    "mtime": 1778687224.1384127,
+    "hash": "3eb7810ac417396db53f2eb6d3fb8f3d"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/voice/capture.rs": {
     "mtime": 1777115298.975129,
     "hash": "c5f4918e21acc2444db1913084cc55d6"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/voice/metrics.rs": {
-    "mtime": 1777010635.036069,
-    "hash": "ceb4c91ca4af106c6cfcb5c5d8cc82d7"
+    "mtime": 1778688686.8337548,
+    "hash": "fa85dd129306f8aae0c2a0464a36796f"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/voice/mod.rs": {
     "mtime": 1777011610.555926,
@@ -1064,43 +1084,59 @@
     "hash": "c30cf81dc1e6c80176ae76791d1dc5c3"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/voice/playback.rs": {
-    "mtime": 1776509211.303557,
-    "hash": "33733dc9d3a363ca54b858b923b49661"
+    "mtime": 1778751329.262615,
+    "hash": "2d1756007ad5b508236d63a0ebf57121"
+  },
+  "/media/obaid/SSD/KRIA/crates/kria-core/src/voice/pre_commit_policy.rs": {
+    "mtime": 1778761350.0187566,
+    "hash": "014796559e647182126ee39ba36a47ac"
+  },
+  "/media/obaid/SSD/KRIA/crates/kria-core/src/voice/reconcile.rs": {
+    "mtime": 1778761536.888696,
+    "hash": "7dcd0265f8a4a9334f09c143fd5a1c94"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/voice/stt.rs": {
-    "mtime": 1778508486.249361,
-    "hash": "49e2432ab7841796f73c43f7c9fe9f6f"
+    "mtime": 1778757204.0111737,
+    "hash": "3f1a36a1ef8751ef061e6c1d36dd17bc"
+  },
+  "/media/obaid/SSD/KRIA/crates/kria-core/src/voice/stt_trace.rs": {
+    "mtime": 1778761522.345512,
+    "hash": "55abec496ee3fd2b5439a3ae41de3093"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/voice/tier.rs": {
-    "mtime": 1777115298.9801333,
-    "hash": "0a3ad840459e8b96887415c2d7c5ad43"
+    "mtime": 1778679743.4648075,
+    "hash": "bc87a66736049ab19f0550fe032d66ed"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/voice/tts.rs": {
-    "mtime": 1777913112.845493,
-    "hash": "fb655dad5c2ecf62316f1f6bc6c4d589"
+    "mtime": 1778692463.9074183,
+    "hash": "9d58def2448afa2084644089d3259482"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/voice/vad.rs": {
     "mtime": 1777913114.0059087,
     "hash": "50e6ca4c4f94df51d5df1edc75756b02"
+  },
+  "/media/obaid/SSD/KRIA/crates/kria-core/src/voice/vad_profile.rs": {
+    "mtime": 1778761345.8886228,
+    "hash": "2c040015b34b45f878b40f9990891e18"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/voice/v2/aec.rs": {
     "mtime": 1777011610.5891407,
     "hash": "8d4c7baf9a34c3289584e2d9513c101b"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/voice/v2/mod.rs": {
-    "mtime": 1777913114.0470772,
-    "hash": "511237adfd460f3853441a4eb862c8df"
+    "mtime": 1778754048.113403,
+    "hash": "bb01879c988f48b613f40d90c4f6d8ef"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/voice/v2/pipeline.rs": {
-    "mtime": 1777115298.988461,
-    "hash": "a6885d3a2a23f2d0e57db13ceab96265"
+    "mtime": 1778754073.3140848,
+    "hash": "9d4d6d0c7c3091d79d731ff4c6f0de3a"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/voice/v2/playback.rs": {
-    "mtime": 1778508751.474167,
-    "hash": "9a4ef1fb1cae052db7a919321222b2d3"
+    "mtime": 1778751267.598223,
+    "hash": "36d2991f5fff95384a773f49547b005c"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/voice/v2/post_edit.rs": {
-    "mtime": 1777115298.9907312,
+    "mtime": 1778686850.8809285,
     "hash": "7070f869f29b08b46877fe1b2af8c6e8"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/voice/v2/sentence.rs": {
@@ -1108,12 +1144,12 @@
     "hash": "c4f25e6e760d61bd912d50f531a04a1f"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/voice/v2/stt.rs": {
-    "mtime": 1777913114.0434525,
-    "hash": "b9e78549945d06c652c82fb84eb6088b"
+    "mtime": 1778757183.1270614,
+    "hash": "e3361b82d3820870b71fd957c47ecb5a"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/voice/v2/tts.rs": {
-    "mtime": 1777115298.9927404,
-    "hash": "7fea51bd0c76dc14bcb8419970bf7d05"
+    "mtime": 1778757215.3564112,
+    "hash": "373fff0acfa03cae999a9537f0c0158b"
   },
   "/media/obaid/SSD/KRIA/crates/kria-core/src/voice/v2/wake.rs": {
     "mtime": 1777913114.0454302,
@@ -1124,12 +1160,12 @@
     "hash": "1be34a5c61c2c35365de3dab14298f0b"
   },
   "/media/obaid/SSD/KRIA/crates/kria-desktop/src/device_control.rs": {
-    "mtime": 1778508486.6202345,
+    "mtime": 1778652867.062929,
     "hash": "30d3024d518d23a27e1995a02c756512"
   },
   "/media/obaid/SSD/KRIA/crates/kria-desktop/src/main.rs": {
-    "mtime": 1778583067.472051,
-    "hash": "302f7cdb7d55b7cf3aad7a9a939ab958"
+    "mtime": 1778750269.4984286,
+    "hash": "65f574b3ee846a71f0140bc61d3dd3d5"
   },
   "/media/obaid/SSD/KRIA/crates/kria-desktop/src/tray.rs": {
     "mtime": 1776457125.784727,
@@ -1188,8 +1224,8 @@
     "hash": "6c545a93b59ad8bdb2bb348645748e9d"
   },
   "/media/obaid/SSD/KRIA/crates/kria-desktop/src/commands/gui_automation_control.rs": {
-    "mtime": 1778585828.728984,
-    "hash": "d231efcc677309ec915af406d0e1fc81"
+    "mtime": 1778687224.6894846,
+    "hash": "b78f17b8437b037dd9e15039915f8d89"
   },
   "/media/obaid/SSD/KRIA/crates/kria-desktop/src/commands/history_helpers.rs": {
     "mtime": 1778101582.7987435,
@@ -1212,8 +1248,8 @@
     "hash": "cae918232e927dbcca937feae351ab31"
   },
   "/media/obaid/SSD/KRIA/crates/kria-desktop/src/commands/mod.rs": {
-    "mtime": 1778583059.3108802,
-    "hash": "dc846c61f2bbd0fc79f67a49acfb7925"
+    "mtime": 1778750277.1877947,
+    "hash": "9190f2a18a7c1d7c3bf256cbbe367c30"
   },
   "/media/obaid/SSD/KRIA/crates/kria-desktop/src/commands/openclaw.rs": {
     "mtime": 1778508486.5682294,
@@ -1228,8 +1264,8 @@
     "hash": "7e6c95335d66ea58cfa797bd93ef533f"
   },
   "/media/obaid/SSD/KRIA/crates/kria-desktop/src/commands/runtime.rs": {
-    "mtime": 1778583016.7865689,
-    "hash": "fae38a5d9e7acddc3a34c6f16e051164"
+    "mtime": 1778687224.7622962,
+    "hash": "ee03f167d1e5d7c16a76837b08735caa"
   },
   "/media/obaid/SSD/KRIA/crates/kria-desktop/src/commands/runtime_status.rs": {
     "mtime": 1778508486.5824194,
@@ -1248,16 +1284,16 @@
     "hash": "1a0c4b7460a3913ffe2977ba95943365"
   },
   "/media/obaid/SSD/KRIA/crates/kria-desktop/src/commands/voice.rs": {
-    "mtime": 1778095969.103637,
-    "hash": "e5f2136ce64aacdfa715b9ee0aeee0f1"
+    "mtime": 1778687224.8364477,
+    "hash": "1402c53445d0408cf290a6d02c335985"
   },
   "/media/obaid/SSD/KRIA/crates/kria-desktop/src/commands/voice_diagnostics.rs": {
-    "mtime": 1778095324.2191267,
-    "hash": "4f5de94c3f916137152e338d10edd670"
+    "mtime": 1778750259.3304088,
+    "hash": "e3e2db912ee5122e9321a8d92b38bad1"
   },
   "/media/obaid/SSD/KRIA/crates/kria-desktop/src/commands/voice_runtime_helpers.rs": {
-    "mtime": 1778101582.842422,
-    "hash": "e4ae3446a5125d35a6239526d6e3f62b"
+    "mtime": 1778752167.5272958,
+    "hash": "349f7a592d7208384da4a788fd5d5e6f"
   },
   "/media/obaid/SSD/KRIA/crates/kria-eval/src/judge.rs": {
     "mtime": 1778508486.6283581,
@@ -1300,8 +1336,8 @@
     "hash": "11864dab0f881f74859dba414e2c9b71"
   },
   "/media/obaid/SSD/KRIA/crates/kria-server/src/inventory.rs": {
-    "mtime": 1778508486.6447728,
-    "hash": "26b7ac6674abb3e75658bfbc096a7893"
+    "mtime": 1778659860.425743,
+    "hash": "609bfaea84199432cf7c1cde471ad1a6"
   },
   "/media/obaid/SSD/KRIA/crates/kria-server/src/lib.rs": {
     "mtime": 1778352419.5375676,
@@ -1320,8 +1356,8 @@
     "hash": "17ce03ce91b3796f2515336723325cf3"
   },
   "/media/obaid/SSD/KRIA/crates/kria-uinput-daemon/src/main.rs": {
-    "mtime": 1778602054.404542,
-    "hash": "536e239f1a7d073cf339a562dde602cc"
+    "mtime": 1778687224.9524813,
+    "hash": "87459f180163711d0ec175cd050a8a11"
   },
   "/media/obaid/SSD/KRIA/kria-modules/src/kria_modules/bridge.py": {
     "mtime": 1776439175.2178855,
@@ -1404,7 +1440,7 @@
     "hash": "f171e0f5b7f19cdc1763d56c0881207a"
   },
   "/media/obaid/SSD/KRIA/ui/src/App.tsx": {
-    "mtime": 1778339320.6341972,
+    "mtime": 1778652867.0630841,
     "hash": "e88a6a12ca185e85b03ce42ceb026b2f"
   },
   "/media/obaid/SSD/KRIA/ui/src/index.tsx": {
@@ -1420,8 +1456,8 @@
     "hash": "3a75602dded4a4428c2e19f5bf28b3cd"
   },
   "/media/obaid/SSD/KRIA/ui/src/components/ChatView.tsx": {
-    "mtime": 1778398040.1071992,
-    "hash": "fdf5edb16b82911e5d63c86fc77207c1"
+    "mtime": 1778753454.6232438,
+    "hash": "4a058f213f1368c1f5098e749f814adb"
   },
   "/media/obaid/SSD/KRIA/ui/src/components/DeviceMatrix.tsx": {
     "mtime": 1778336929.7794735,
@@ -1508,11 +1544,11 @@
     "hash": "4b6b4ba177fd2db94408833fed33e260"
   },
   "/media/obaid/SSD/KRIA/ui/src/components/VoiceOverlay.tsx": {
-    "mtime": 1777017748.5267031,
-    "hash": "5f12bd39f22fa1f108138ca5aa48374f"
+    "mtime": 1778688136.4050188,
+    "hash": "ede42f6979564cc7fc270cdb33ef61a5"
   },
   "/media/obaid/SSD/KRIA/ui/src/hooks/useDeviceStatus.ts": {
-    "mtime": 1778339320.6341498,
+    "mtime": 1778652867.0629215,
     "hash": "9107b44875d03203ab41b50c3bbe4f7e"
   },
   "/media/obaid/SSD/KRIA/ui/src/stores/app.tool-choice.test.ts": {
@@ -1520,8 +1556,8 @@
     "hash": "32469c6d0297deba33ab55f50ca92db6"
   },
   "/media/obaid/SSD/KRIA/ui/src/stores/app.ts": {
-    "mtime": 1778392498.8614,
-    "hash": "814a4bdf4990c19132d77ad80cfbe08b"
+    "mtime": 1778752215.3741171,
+    "hash": "5a09114623861821e053f15e7de6bb67"
   },
   "/media/obaid/SSD/KRIA/ui/src/stores/i18n.ts": {
     "mtime": 1776269059.6193814,
@@ -1547,6 +1583,46 @@
     "mtime": 1778503830.5526948,
     "hash": "69238aa5cf956a55cc371f81faef9cf4"
   },
+  "/media/obaid/SSD/KRIA/vendor/piper-rs/examples/enumerate_speakers.rs": {
+    "mtime": 1778696160.607922,
+    "hash": "6017890274083af7c08d694249923bf5"
+  },
+  "/media/obaid/SSD/KRIA/vendor/piper-rs/examples/usage.rs": {
+    "mtime": 1778696160.6081748,
+    "hash": "fa22440ffae161f1ff4bd7e65b79af38"
+  },
+  "/media/obaid/SSD/KRIA/vendor/piper-rs/examples/wav.rs": {
+    "mtime": 1778696160.608452,
+    "hash": "ca03b06030057e13ec5ffeb9e64e13c6"
+  },
+  "/media/obaid/SSD/KRIA/vendor/piper-rs/src/core.rs": {
+    "mtime": 1778699069.9326835,
+    "hash": "2b84efa1e2723d72060b33f24b495e10"
+  },
+  "/media/obaid/SSD/KRIA/vendor/piper-rs/src/lib.rs": {
+    "mtime": 1778699069.9334805,
+    "hash": "937dad5228f38e6394e50fa8a9f5cd36"
+  },
+  "/media/obaid/SSD/KRIA/vendor/piper-rs/src/audio/hanning_window.rs": {
+    "mtime": 1778696160.609087,
+    "hash": "c2bc6188dae80ee09f9c84547b8ae984"
+  },
+  "/media/obaid/SSD/KRIA/vendor/piper-rs/src/audio/mod.rs": {
+    "mtime": 1778696160.60922,
+    "hash": "cc1b9b8ac6ddb02275460b1f339f59b7"
+  },
+  "/media/obaid/SSD/KRIA/vendor/piper-rs/src/audio/samples.rs": {
+    "mtime": 1778696160.6386046,
+    "hash": "26160b389f3050d123877b30adcec82b"
+  },
+  "/media/obaid/SSD/KRIA/vendor/piper-rs/src/audio/synth.rs": {
+    "mtime": 1778696160.6388626,
+    "hash": "59474ff101fd57725cb08726fd9ecc7f"
+  },
+  "/media/obaid/SSD/KRIA/vendor/piper-rs/src/audio/wave_writer.rs": {
+    "mtime": 1778696160.6391482,
+    "hash": "01f2aebd58314ae58d0538a6de2abb54"
+  },
   "/media/obaid/SSD/KRIA/docker-compose.yml": {
     "mtime": 1776525262.4901977,
     "hash": "26fb3ae745bdfadebda3426dbbd0e382"
@@ -1555,9 +1631,25 @@
     "mtime": 1778608917.6534612,
     "hash": "8e5cee3bfe9a984fe124d212c7a22ef7"
   },
+  "/media/obaid/SSD/KRIA/DEBUG_VOICE_DIAGNOSTICS.md": {
+    "mtime": 1778748879.917101,
+    "hash": "5a0885cc2d45eb56ef2cf967aaa7c46c"
+  },
   "/media/obaid/SSD/KRIA/docker-compose.cpu.yml": {
     "mtime": 1776525262.4902105,
     "hash": "ab9143a6ae729465834543758b38ef51"
+  },
+  "/media/obaid/SSD/KRIA/ENHANCED_STT.md": {
+    "mtime": 1778760614.2015254,
+    "hash": "a0a6efa2d133d18fa82f4b0758de1ee4"
+  },
+  "/media/obaid/SSD/KRIA/HARDWARE_ORCHESTRATOR_IMPROVEMENTS.md": {
+    "mtime": 1778758291.7874198,
+    "hash": "bb9ea8cc6e4b83f4a7915e88b41d2066"
+  },
+  "/media/obaid/SSD/KRIA/kria_stt_logs.txt": {
+    "mtime": 1778754436.7429395,
+    "hash": "2fa4895cc59ce450f4d0aa3639272974"
   },
   "/media/obaid/SSD/KRIA/README.md": {
     "mtime": 1778510016.706367,
@@ -1568,16 +1660,16 @@
     "hash": "e3bb40fbda6b48fa131d90bd22be27a6"
   },
   "/media/obaid/SSD/KRIA/ai-context/CODEBASE_MAP.md": {
-    "mtime": 1778509262.381515,
-    "hash": "3724dbf23e8640f63969782a75c07df4"
+    "mtime": 1778610840.1608675,
+    "hash": "5395bc753b4b74a563e810b955739c3b"
   },
   "/media/obaid/SSD/KRIA/ai-context/CODE_GRAPH_INDEX.md": {
     "mtime": 1778507821.6741683,
     "hash": "81e621086f736278d211229ee69eb02f"
   },
   "/media/obaid/SSD/KRIA/ai-context/COMMON_FLOWS.md": {
-    "mtime": 1778509262.3825428,
-    "hash": "7b8dd7ce0baefeb969e0e561793d6bb5"
+    "mtime": 1778610840.161829,
+    "hash": "a7f0a41d7829c35fc3695af63850cd22"
   },
   "/media/obaid/SSD/KRIA/ai-context/CORE_CONTEXT.md": {
     "mtime": 1778506637.610842,
@@ -1588,8 +1680,8 @@
     "hash": "18fc1161ca72d7ec90080628eb8147eb"
   },
   "/media/obaid/SSD/KRIA/ai-context/FILE_INDEX.md": {
-    "mtime": 1778507258.4515898,
-    "hash": "2ebf694168cf6fb64a4bea72504df242"
+    "mtime": 1778610840.1614165,
+    "hash": "0c2effb327d4399070bf17a4231ce9c1"
   },
   "/media/obaid/SSD/KRIA/ai-context/PROJECT_CONTEXT.md": {
     "mtime": 1778506661.5391998,
@@ -1615,9 +1707,45 @@
     "mtime": 1778606149.337881,
     "hash": "6274f04d1fe65dbbddb3b97eb6203b2e"
   },
+  "/media/obaid/SSD/KRIA/planner_docs/KRIA_UPGRADE.md": {
+    "mtime": 1778643346.454616,
+    "hash": "8a6ee057ac86858b6eec54e096d1451d"
+  },
+  "/media/obaid/SSD/KRIA/planner_docs/P2_ENVIRONMENT_GROUNDER_IMPLEMENTATION.md": {
+    "mtime": 1778666201.5040953,
+    "hash": "4a9f6d07ad1026b3bb15ef87ec5aaedd"
+  },
+  "/media/obaid/SSD/KRIA/planner_docs/P3_GOALTREE_IMPLEMENTATION.md": {
+    "mtime": 1778677824.5910087,
+    "hash": "7587067a9c2ea56c50149d9002b9f0d0"
+  },
+  "/media/obaid/SSD/KRIA/planner_docs/PHASE1_REFACTOR_PLAN.md": {
+    "mtime": 1778644651.65744,
+    "hash": "0f95e46b012e28a92ba5071e18fa4d9c"
+  },
+  "/media/obaid/SSD/KRIA/planner_docs/PHASE1_SYSTEMS_AUDIT.md": {
+    "mtime": 1778644079.4156656,
+    "hash": "fab607a4072b063143c9a0c18e32d53f"
+  },
   "/media/obaid/SSD/KRIA/planner_docs/RFC_008_RECURSIVE_INTELLIGENCE.md": {
     "mtime": 1778573121.4668696,
     "hash": "b743d6fd30cf9eaf5ca0a72a844a16b1"
+  },
+  "/media/obaid/SSD/KRIA/planner_docs/VOICE_PLANNER.md": {
+    "mtime": 1778682474.8398857,
+    "hash": "3cfa6ca8eae380e149f324381ad62fdc"
+  },
+  "/media/obaid/SSD/KRIA/planner_docs/VOICE_PLANNER_REVIEW.md": {
+    "mtime": 1778682958.4337125,
+    "hash": "925f9b4df196920f9060fdaf63e1ed41"
+  },
+  "/media/obaid/SSD/KRIA/planner_docs/VOICE_RUNTIME_IMPLEMENTATION.md": {
+    "mtime": 1778754647.8595893,
+    "hash": "27b04c5be82e3e466f15dcf85bb2d404"
+  },
+  "/media/obaid/SSD/KRIA/planner_docs/VOICE_RUNTIME_REALWORLD_VALIDATION.md": {
+    "mtime": 1778696992.7337155,
+    "hash": "17a0a1558b722170b39a01eb9be9890f"
   },
   "/media/obaid/SSD/KRIA/planner_docs/adr_rfc/RFC_007_GUI_SYSTEM_CONTROL.md": {
     "mtime": 1778512719.4383197,
@@ -1650,6 +1778,14 @@
   "/media/obaid/SSD/KRIA/ui/index.html": {
     "mtime": 1776364019.6972668,
     "hash": "0447a895840b420fed9b42593c3dacaf"
+  },
+  "/media/obaid/SSD/KRIA/vendor/piper-rs/BUILDING.md": {
+    "mtime": 1778696160.606377,
+    "hash": "c3650638825cf22b02bcb6dbf45369f7"
+  },
+  "/media/obaid/SSD/KRIA/vendor/piper-rs/README.md": {
+    "mtime": 1778696160.6076217,
+    "hash": "6c25d1fa8772317207f78249765da94b"
   },
   "/media/obaid/SSD/KRIA/kria-logo.png": {
     "mtime": 1776289712.101996,

@@ -202,6 +202,10 @@ impl TextToSpeech {
         self.sample_rate
     }
 
+    pub fn model_path(&self) -> &PathBuf {
+        &self.model_path
+    }
+
     fn map_gpu_lease_error(error: GpuLeaseError) -> anyhow::Error {
         let hint = match &error {
             GpuLeaseError::Busy { owner } => {

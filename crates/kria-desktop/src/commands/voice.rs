@@ -27,7 +27,7 @@ pub async fn start_voice(state: State<'_, AppStateCell>, app: AppHandle) -> Resu
 
     // Refresh config from disk on every voice start so external edits in
     // ~/.kria/config.toml are not stuck behind stale in-memory state.
-    let effective_config = match KriaConfig::load(None) {
+    let mut effective_config = match KriaConfig::load(None) {
         Ok(cfg) => cfg,
         Err(e) => {
             tracing::warn!(error = %e, "failed to reload config from disk for voice start; using in-memory config");
@@ -39,16 +39,22 @@ pub async fn start_voice(state: State<'_, AppStateCell>, app: AppHandle) -> Resu
         *cfg_guard = effective_config.clone();
     }
 
+    // Resolve tier-aware defaults that init_runtime applies but are lost on reload.
+    if effective_config
+        .voice
+        .stt_model
+        .eq_ignore_ascii_case("auto")
+    {
+        effective_config.voice.stt_model = state.hardware_info.tier.stt_model().to_string();
+    }
+
     // Verify required models and rebuild pipeline from latest saved settings.
     let voice_pipeline = {
         let paths = effective_config
             .resolve_paths()
             .map_err(|e| e.to_string())?;
 
-        let stt_model = paths
-            .models_dir
-            .join("stt")
-            .join(&effective_config.voice.stt_model);
+        let stt_model = resolve_model_file(&paths, "stt", &effective_config.voice.stt_model);
         if !stt_model.exists() {
             return Err(format!(
                 "STT model not found at: {}. Run 'python scripts/download_models.py' to download models.",
@@ -57,7 +63,7 @@ pub async fn start_voice(state: State<'_, AppStateCell>, app: AppHandle) -> Resu
         }
 
         let tts_voice_file = format!("{}.onnx", effective_config.voice.tts_voice);
-        let tts_model = paths.models_dir.join("piper").join(&tts_voice_file);
+        let tts_model = resolve_model_file(&paths, "piper", &tts_voice_file);
         if !tts_model.exists() {
             return Err(format!(
                 "TTS voice model not found at: {}. Run 'python scripts/download_models.py' to download models.",

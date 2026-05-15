@@ -179,7 +179,9 @@ pub async fn get_health(state: State<'_, AppStateCell>) -> Result<serde_json::Va
     };
     // Refresh LLM server health on each call
     let mr_status = state.model_router.status().await;
-    let mr_healthy = mr_status["local_healthy"].as_bool().unwrap_or(false);
+    let mr_healthy = mr_status["active_healthy"].as_bool()
+        .or_else(|| mr_status["local_healthy"].as_bool())
+        .unwrap_or(false);
     let mr_model = mr_status["local_model"].as_str().unwrap_or("unknown");
     if mr_healthy {
         state.health.update(

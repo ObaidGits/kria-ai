@@ -53,11 +53,17 @@ const [promptLabHitlRequest, setPromptLabHitlRequest] = createSignal<HitlRequest
 const [assistantToolChoiceRequest, setAssistantToolChoiceRequest] = createSignal<ToolChoiceRequest | null>(null);
 const [promptLabToolChoiceRequest, setPromptLabToolChoiceRequest] = createSignal<ToolChoiceRequest | null>(null);
 const [voiceActive, setVoiceActive] = createSignal(false);
-const [voiceState, setVoiceState] = createSignal<"idle" | "listening" | "processing" | "speaking">("idle");
+const [voiceState, setVoiceState] = createSignal<"idle" | "listening" | "processing" | "speaking" | "busy">("idle");
 const [voiceLiveTranscript, setVoiceLiveTranscript] = createSignal("");
 const [voiceLiveConfidence, setVoiceLiveConfidence] = createSignal<number | null>(null);
 const [voiceLiveLanguage, setVoiceLiveLanguage] = createSignal("auto");
 const [voiceLiveStability, setVoiceLiveStability] = createSignal<number | null>(null);
+const [voiceInterruptionReason, setVoiceInterruptionReason] = createSignal<string | null>(null);
+const [voicePlaybackHealth, setVoicePlaybackHealth] = createSignal<"ok" | "recovering" | "failed">("ok");
+const [voiceIoMode, setVoiceIoMode] = createSignal<"half_duplex" | "headphone">("half_duplex");
+const [voiceTtfaMs, setVoiceTtfaMs] = createSignal<number | null>(null);
+let suppressVoiceErrorUntil = 0;
+let liveVoiceDraftMessageId: string | null = null;
 const [inputText, setInputText] = createSignal("");
 const [settings, setSettings] = createSignal<Record<string, any> | null>(null);
 const [models, setModels] = createSignal<any[]>([]);
@@ -1091,6 +1097,54 @@ async function sendDocumentMessage(files: PendingFile[], text?: string) {
   }
 }
 
+async function transcribeUploadedAudio(file: File) {
+  const userMsg: Message = {
+    id: crypto.randomUUID(),
+    role: "user",
+    content: `🎙️ Transcribe audio: ${file.name}`,
+    timestamp: Date.now(),
+    attachedFiles: [{ name: file.name, size: file.size, mime: file.type || "audio/*" }],
+  };
+  appendScopedMessage("assistant", userMsg);
+  setScopedThinking("assistant", true);
+
+  try {
+    const buf = await file.arrayBuffer();
+    const result = await invoke<{
+      text: string;
+      language: string;
+      confidence: number;
+      duration_ms: number;
+      engine: string;
+      name: string;
+    }>("voice_transcribe_uploaded_audio", {
+      name: file.name,
+      bytes: Array.from(new Uint8Array(buf)),
+    });
+
+    const text = (result.text || "").trim();
+    const reply: Message = {
+      id: crypto.randomUUID(),
+      role: "assistant",
+      content: text.length > 0
+        ? `📝 Transcript (${result.engine}, ${Math.round((result.confidence ?? 0) * 100)}%):\n\n${text}`
+        : "📝 Transcript is empty.",
+      timestamp: Date.now(),
+    };
+    appendScopedMessage("assistant", reply);
+  } catch (e) {
+    const errMsg: Message = {
+      id: crypto.randomUUID(),
+      role: "system",
+      content: `Audio transcription error: ${e}`,
+      timestamp: Date.now(),
+    };
+    appendScopedMessage("assistant", errMsg);
+  } finally {
+    setScopedThinking("assistant", false);
+  }
+}
+
 async function sendImageMessage(imageData: Uint8Array, mimeType: string, text?: string) {
   const b64 = uint8ToBase64(imageData);
   const dataUrl = `data:${mimeType};base64,${b64}`;
@@ -1142,12 +1196,14 @@ async function denyAction(requestId: string, reason?: string) {
 
 async function toggleVoice() {
   if (voiceActive()) {
+    suppressVoiceErrorUntil = Date.now() + 2500;
     await invoke("stop_voice");
     setVoiceActive(false);
     setVoiceState("idle");
     setVoiceLiveTranscript("");
     setVoiceLiveConfidence(null);
     setVoiceLiveStability(null);
+    liveVoiceDraftMessageId = null;
   } else {
     try {
       await invoke("start_voice");
@@ -2506,46 +2562,140 @@ function initListeners() {
   });
 
   // Voice pipeline events
-  listen<{ state: "idle" | "listening" | "processing" | "speaking" }>("voice:state", (event) => {
+  listen<{ state: "idle" | "listening" | "processing" | "speaking" | "busy" }>("voice:state", (event) => {
     setVoiceState(event.payload.state);
     setVoiceActive(event.payload.state !== "idle");
     if (event.payload.state === "idle") {
       setVoiceLiveTranscript("");
       setVoiceLiveConfidence(null);
       setVoiceLiveStability(null);
+      liveVoiceDraftMessageId = null;
+    } else if (event.payload.state === "listening") {
+      lastPartialSeq = 0;
     }
   });
 
-  listen<{ text: string; confidence?: number; language?: string; stability?: number }>("voice:partial_transcript", (event) => {
+  listen<{ message?: string; entrypoint?: string; state?: string }>("voice:busy", (event) => {
+    const previous = voiceState();
+    setVoiceState("busy");
+    setVoiceActive(true);
+    setVoiceLiveTranscript(event.payload.message ?? "Assistant is busy — current turn is still active.");
+    setTimeout(() => {
+      if (voiceState() === "busy") {
+        setVoiceState(previous === "idle" ? "listening" : previous);
+        if ((event.payload.message ?? "").length > 0) {
+          setVoiceLiveTranscript("");
+        }
+      }
+    }, 750);
+  });
+
+  let lastPartialSeq = 0;
+  let lastPartialAt = 0;
+  listen<{ text: string; confidence?: number; language?: string; stability?: number; seq?: number }>("voice:partial_transcript", (event) => {
+    const seq = event.payload.seq ?? 0;
+    const now = Date.now();
+    if (seq > 0 && seq <= lastPartialSeq) return;
+    if (now - lastPartialAt < 40) return;
+    if (seq > 0) lastPartialSeq = seq;
+    lastPartialAt = now;
     setVoiceLiveTranscript(event.payload.text);
     setVoiceLiveConfidence(event.payload.confidence ?? null);
     setVoiceLiveLanguage(event.payload.language ?? "auto");
     setVoiceLiveStability(event.payload.stability ?? null);
+
+    // Temporary debug UX: mirror live STT partials into chat immediately.
+    // This makes it obvious whether STT is working when LLM/TTS is slow.
+    const partialText = (event.payload.text ?? "").trim();
+    if (partialText.length > 0) {
+      const content = `🎤 (live) ${partialText}`;
+      if (!liveVoiceDraftMessageId) {
+        const draftMsg: Message = {
+          id: crypto.randomUUID(),
+          role: "user",
+          content,
+          timestamp: Date.now(),
+        };
+        liveVoiceDraftMessageId = draftMsg.id;
+        appendScopedMessage("assistant", draftMsg);
+      } else {
+        updateScopedMessages("assistant", (prev) =>
+          prev.map((m) =>
+            m.id === liveVoiceDraftMessageId ? { ...m, content, timestamp: Date.now() } : m
+          )
+        );
+      }
+    }
   });
 
   listen<{ text: string; confidence?: number; language?: string; stability?: number }>("voice:transcript", (event) => {
+    lastPartialSeq = 0;
     setVoiceLiveTranscript("");
     setVoiceLiveConfidence(event.payload.confidence ?? null);
     setVoiceLiveLanguage(event.payload.language ?? "auto");
     setVoiceLiveStability(event.payload.stability ?? null);
-    const userMsg: Message = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: `🎤 ${event.payload.text}`,
-      timestamp: Date.now(),
-    };
-    appendScopedMessage("assistant", userMsg);
+    const finalContent = `🎤 ${event.payload.text}`;
+    if (liveVoiceDraftMessageId) {
+      updateScopedMessages("assistant", (prev) =>
+        prev.map((m) =>
+          m.id === liveVoiceDraftMessageId ? { ...m, content: finalContent, timestamp: Date.now() } : m
+        )
+      );
+      liveVoiceDraftMessageId = null;
+    } else {
+      const userMsg: Message = {
+        id: crypto.randomUUID(),
+        role: "user",
+        content: finalContent,
+        timestamp: Date.now(),
+      };
+      appendScopedMessage("assistant", userMsg);
+    }
   });
 
   listen<{ error: string }>("voice:error", (event) => {
+    const err = event.payload.error ?? "";
+    if (
+      Date.now() < suppressVoiceErrorUntil &&
+      /(turn cancelled before transcription|stt stream cancelled)/i.test(err)
+    ) {
+      return;
+    }
     console.error("Voice error:", event.payload.error);
     const errMsg: Message = {
       id: crypto.randomUUID(),
       role: "system",
-      content: `⚠️ Voice Error: ${event.payload.error}`,
+      content: `⚠️ Voice Error: ${err}`,
       timestamp: Date.now(),
     };
     appendScopedMessage("assistant", errMsg);
+  });
+
+  listen<{ reason?: string }>("voice:interruption", (event) => {
+    setVoiceInterruptionReason(event.payload.reason ?? "interrupted");
+    setVoiceState("listening");
+    setTimeout(() => setVoiceInterruptionReason(null), 1200);
+  });
+
+  listen<{ error: string }>("voice:playback_failure", (event) => {
+    setVoicePlaybackHealth("failed");
+    setVoiceLiveTranscript(`Playback issue: ${event.payload.error}`);
+  });
+
+  listen("voice:playback_recovered", () => {
+    setVoicePlaybackHealth("recovering");
+    setVoiceLiveTranscript("Playback recovered");
+    setTimeout(() => {
+      setVoicePlaybackHealth("ok");
+      if (voiceLiveTranscript() === "Playback recovered") {
+        setVoiceLiveTranscript("");
+      }
+    }, 900);
+  });
+
+  listen<{ mode?: "half_duplex" | "headphone"; headphone?: boolean }>("voice:io_mode", (event) => {
+    const mode = event.payload.mode ?? (event.payload.headphone ? "headphone" : "half_duplex");
+    setVoiceIoMode(mode);
   });
 
   // v2 raw telemetry — all meaningful variants are already forwarded to
@@ -2558,7 +2708,52 @@ function initListeners() {
       // Visual feedback: briefly flash back to listening state.
       setVoiceState("listening");
     }
+    if (kind === "metrics") {
+      const maybe = event.payload.t_first_audio_out_ms;
+      if (typeof maybe === "number") {
+        setVoiceTtfaMs(maybe);
+      }
+    }
     // Metrics / Wake / FirstAudioOut — silently consumed for now.
+  });
+
+  // Extra backend breadcrumbs for diagnosing STT->LLM->TTS stalls.
+  listen<{ stage?: string; turn?: number; [key: string]: unknown }>("voice:debug", (event) => {
+    const stage = String(event.payload.stage ?? "unknown");
+    if (stage === "stt_final") {
+      const chars = Number(event.payload.text_len ?? 0);
+      const preview = String(event.payload.text_preview ?? "").trim();
+      const dbg: Message = {
+        id: crypto.randomUUID(),
+        role: "system",
+        content:
+          preview.length > 0
+            ? `🧪 Voice Debug: STT final received (${Number.isFinite(chars) ? chars : 0} chars): "${preview}"`
+            : `🧪 Voice Debug: STT final received (${Number.isFinite(chars) ? chars : 0} chars)`,
+        timestamp: Date.now(),
+      };
+      appendScopedMessage("assistant", dbg);
+      return;
+    }
+    if (
+      stage === "llm_route_start" ||
+      stage === "llm_route_ok" ||
+      stage === "llm_stream_request" ||
+      stage === "llm_first_token" ||
+      stage === "llm_stream_done" ||
+      stage === "llm_route_timeout" ||
+      stage === "llm_stream_start_timeout" ||
+      stage === "llm_stream_token_timeout" ||
+      stage === "llm_stream_error"
+    ) {
+      const dbg: Message = {
+        id: crypto.randomUUID(),
+        role: "system",
+        content: `🧪 Voice Debug: ${stage} (turn ${String(event.payload.turn ?? "?")})`,
+        timestamp: Date.now(),
+      };
+      appendScopedMessage("assistant", dbg);
+    }
   });
 
   // Orchestrator events — track GPU swap state
@@ -2817,6 +3012,10 @@ export const appStore = {
   voiceLiveConfidence,
   voiceLiveLanguage,
   voiceLiveStability,
+  voiceInterruptionReason,
+  voicePlaybackHealth,
+  voiceIoMode,
+  voiceTtfaMs,
   inputText,
   setInputText,
   currentEnvironment,
@@ -2830,6 +3029,7 @@ export const appStore = {
   sendLabMessage,
   sendImageMessage,
   sendDocumentMessage,
+  transcribeUploadedAudio,
   pendingFiles,
   addPendingFile,
   removePendingFile,

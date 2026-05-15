@@ -1,8 +1,11 @@
+pub mod budget;
 pub mod cloud;
+pub mod failover;
 pub mod local;
 pub mod model_manager;
 pub mod model_router;
 pub mod orchestrator;
+pub mod provider;
 pub mod server_binary;
 pub mod tokenize;
 
@@ -195,6 +198,21 @@ pub trait LlmBackend: Send + Sync {
     ) -> anyhow::Result<Pin<Box<dyn Stream<Item = String> + Send>>>;
 
     async fn health_check(&self) -> bool;
+
+    /// Grammar-constrained chat call.
+    ///
+    /// Posts a `json_schema` field to activate constrained decoding.
+    /// Default implementation falls back to unconstrained `chat`.
+    async fn chat_with_grammar(
+        &self,
+        messages: &[ChatMessage],
+        json_schema: serde_json::Value,
+        temperature: f32,
+        max_tokens: u32,
+    ) -> anyhow::Result<LlmResponse> {
+        let _ = json_schema;
+        self.chat(messages, None, temperature, max_tokens).await
+    }
 }
 
 /// Context overflow error — exempted from circuit breaker failure counts.

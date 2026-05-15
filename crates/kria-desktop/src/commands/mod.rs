@@ -19,6 +19,7 @@ pub(crate) mod mcp;
 pub(crate) mod media;
 pub(crate) mod openclaw;
 pub(crate) mod orchestrator_helpers;
+pub(crate) mod providers;
 pub(crate) mod provisioning;
 pub(crate) mod runtime;
 pub(crate) mod runtime_status;
@@ -105,6 +106,12 @@ pub use openclaw::{
     openclaw_substrate_status,
 };
 #[allow(unused_imports)]
+pub use providers::{
+    discover_provider_models, get_active_provider, get_provider_types, list_providers,
+    remove_provider, switch_model, switch_provider, test_provider_config,
+    test_provider_connection_cmd, upsert_provider,
+};
+#[allow(unused_imports)]
 pub use provisioning::{
     complete_provisioning, get_hardware_profile, get_provisioning_diagnostics,
     get_provisioning_state, run_provisioning_step, set_provisioning_backend, start_provisioning,
@@ -135,7 +142,9 @@ pub use test_runner::{
 #[allow(unused_imports)]
 pub use voice::{get_voice_status, start_voice, stop_voice, voice_v2_abort, voice_v2_speak};
 #[allow(unused_imports)]
-pub use voice_diagnostics::voice_v2_status;
+pub use voice_diagnostics::{
+    voice_transcribe_audio_file, voice_transcribe_uploaded_audio, voice_v2_status,
+};
 
 use async_stream::stream;
 use async_trait::async_trait;

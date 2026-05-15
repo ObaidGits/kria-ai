@@ -703,3 +703,91 @@ pub(super) fn sanitize_assistant_text_response(text: &str) -> String {
         .replace_all(redacted_inline.trim(), "\n\n")
         .to_string()
 }
+
+/// Infer a `Verifiability` leaf for post-execution verification.
+///
+/// Returns `Some(leaf)` for tools whose effects can be verified deterministically.
+/// Returns `None` for tools that are trivial (read-only, informational) or
+/// whose effects cannot be verified without additional context.
+///
+/// The verifier NEVER retries or replans — it only validates and logs.
+pub(super) fn infer_verifiability_for_tool(
+    tool_name: &str,
+    params: &serde_json::Value,
+    result: &crate::infra::isolation::ToolResult,
+) -> Option<crate::agent::execution_verifier::Verifiability> {
+    use crate::agent::execution_verifier::{FsEffect, Verifiability};
+    use std::path::PathBuf;
+
+    // Only verify successful results — failed results are already handled
+    if !result.success {
+        return None;
+    }
+
+    match tool_name {
+        // File write operations: verify the file exists after creation
+        "write_file" | "create_file" | "overwrite_file" => {
+            let path = params.get("path").and_then(|v| v.as_str())?;
+            Some(Verifiability::FileSystemEffect {
+                path: PathBuf::from(path),
+                kind: FsEffect::Exists,
+            })
+        }
+
+        // File write with content: verify file exists and has content
+        "append_to_file" => {
+            let path = params.get("path").and_then(|v| v.as_str())?;
+            Some(Verifiability::FileSystemEffect {
+                path: PathBuf::from(path),
+                kind: FsEffect::SizeGreaterThan(0),
+            })
+        }
+
+        // Process launch: verify the process is running
+        "open_application" | "launch_application" => {
+            let app = params
+                .get("name")
+                .or_else(|| params.get("app"))
+                .or_else(|| params.get("application"))
+                .and_then(|v| v.as_str())?;
+            // Use a short binary name (first word, lowercase)
+            let binary = app.split_whitespace().next()?.to_ascii_lowercase();
+            Some(Verifiability::ProcessLaunched {
+                binary,
+                max_wait_ms: 500,
+            })
+        }
+
+        // Shell execution: if the result contains a file path, verify it exists
+        "execute_bash" | "execute_python" => {
+            // Look for a file path in the result data
+            let output = result.data.as_str().or_else(|| {
+                result
+                    .data
+                    .get("stdout")
+                    .and_then(|v| v.as_str())
+            })?;
+
+            // Simple heuristic: if output contains an absolute path that looks like
+            // a created file, verify it exists
+            let path_line = output.lines().find(|line| {
+                let trimmed = line.trim();
+                trimmed.starts_with('/') && !trimmed.contains(' ') && trimmed.len() > 3
+            })?;
+
+            let path = PathBuf::from(path_line.trim());
+            // Only verify if the path looks like a file (has extension or is in /tmp)
+            if path.extension().is_some() || path.starts_with("/tmp") {
+                Some(Verifiability::FileSystemEffect {
+                    path,
+                    kind: FsEffect::Exists,
+                })
+            } else {
+                None
+            }
+        }
+
+        // All other tools: no specific verification
+        _ => None,
+    }
+}

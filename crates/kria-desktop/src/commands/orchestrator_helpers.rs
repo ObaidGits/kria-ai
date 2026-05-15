@@ -18,6 +18,9 @@ pub(super) async fn ensure_orchestrator_ready_for_turn(
     orchestrator: Option<&Arc<Orchestrator>>,
     reason: &str,
 ) -> Result<(), String> {
+    // Cloud/external providers have no local llama-server — the orchestrator
+    // is None in that case, so this is already a no-op. The explicit check
+    // below is defensive documentation.
     if let Some(orchestrator) = orchestrator {
         orchestrator
             .ensure_ready(reason)
@@ -26,3 +29,5 @@ pub(super) async fn ensure_orchestrator_ready_for_turn(
     }
     Ok(())
 }
+
+

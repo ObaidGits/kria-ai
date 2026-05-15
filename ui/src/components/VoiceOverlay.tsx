@@ -8,6 +8,10 @@ const VoiceOverlay: Component = () => {
     voiceLiveTranscript,
     voiceLiveConfidence,
     voiceLiveLanguage,
+    voiceInterruptionReason,
+    voicePlaybackHealth,
+    voiceIoMode,
+    voiceTtfaMs,
   } = appStore;
 
   const stateLabel = () => {
@@ -15,6 +19,7 @@ const VoiceOverlay: Component = () => {
       case "listening":  return "Listening";
       case "processing": return "Thinking…";
       case "speaking":   return "Speaking";
+      case "busy":       return "Busy";
       default:           return "Voice";
     }
   };
@@ -36,7 +41,7 @@ const VoiceOverlay: Component = () => {
 
         <div class="voice-overlay__icon">
           <Show
-            when={voiceState() === "listening" || voiceState() === "processing"}
+            when={voiceState() === "listening" || voiceState() === "processing" || voiceState() === "busy"}
             fallback={
               <Show when={voiceState() === "speaking"} fallback={<MicGlyph />}>
                 <SpeakerGlyph />
@@ -58,6 +63,20 @@ const VoiceOverlay: Component = () => {
             <span class="voice-overlay__meta">
               {voiceLiveLanguage()}
               {` · ${Math.round((voiceLiveConfidence() ?? 0) * 100)}%`}
+            </span>
+          </Show>
+          <Show when={voiceInterruptionReason() !== null || voiceTtfaMs() !== null}>
+            <span class="voice-overlay__meta">
+              {voiceIoMode() === "headphone" ? "headphone" : "half-duplex"}
+              <Show when={voiceTtfaMs() !== null}>
+                {` · TTFA ${voiceTtfaMs()}ms`}
+              </Show>
+              <Show when={voiceInterruptionReason() !== null}>
+                {` · ${voiceInterruptionReason()}`}
+              </Show>
+              <Show when={voicePlaybackHealth() !== "ok"}>
+                {` · playback ${voicePlaybackHealth()}`}
+              </Show>
             </span>
           </Show>
         </div>

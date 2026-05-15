@@ -200,8 +200,39 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     // The user can override the selection by setting `[llm].active_model` to
     // a model name from `[[llm.models]]`; that override is honoured iff the
     // GGUF file actually exists on disk.
+    //
+    // Cloud/external providers (OpenAI, Gemini, Anthropic, OpenRouter, etc.)
+    // do not use a local llama-server. Skip the orchestrator entirely so no
+    // GPU resources are allocated, no idle-release loop runs, and startup is
+    // instant. The orchestrator is only meaningful for local inference.
+    let routing_mode_is_cloud = {
+        use kria_core::llm::model_router::RoutingMode;
+        let mode: RoutingMode = config.llm.routing_mode.parse().unwrap_or(RoutingMode::Local);
+        mode != RoutingMode::Local
+    };
+
     let (orch_model_path, orch_mmproj_path, orch_config, orch_enabled, selected_model_name) =
-        if config.orchestrator.enabled {
+        if routing_mode_is_cloud {
+            tracing::info!(
+                routing_mode = %config.llm.routing_mode,
+                "orchestrator: skipped — cloud/external provider active, no local GPU resources needed"
+            );
+            let _ = handle.emit(
+                "orchestrator:disabled",
+                serde_json::json!({
+                    "reason": "cloud_provider_active",
+                    "routing_mode": config.llm.routing_mode,
+                    "message": "Cloud provider active — local model runtime not started.",
+                }),
+            );
+            (
+                String::new(),
+                None,
+                config.orchestrator.clone(),
+                false,
+                String::new(),
+            )
+        } else if config.orchestrator.enabled {
             use kria_core::llm::orchestrator::tier_strategy::{
                 derive_model_profile, select_model_for_tier, SelectionReason,
             };
@@ -665,19 +696,37 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         let config_for_probe = config.clone();
         tokio::spawn(async move {
             let status = mr.status().await;
-            let healthy = status["local_healthy"].as_bool().unwrap_or(false);
+            // Use active_healthy: true when the *current routing mode's* backend
+            // is reachable. For cloud/external modes this checks the cloud API,
+            // not the local llama-server (which won't be running).
+            let healthy = status["active_healthy"].as_bool()
+                .or_else(|| status["local_healthy"].as_bool())
+                .unwrap_or(false);
+            let mode = status["mode"].as_str().unwrap_or("local");
             if healthy {
-                // Try to detect the actual model loaded on the server
-                let model_name = match mr.detect_server_model().await {
-                    Some(name) => {
-                        // Update the config's active_model with the detected name
-                        config_for_probe.write().await.llm.active_model = name.clone();
-                        name
+                // For cloud modes, use the configured model ID directly.
+                // detect_server_model() only works for local llama.cpp servers.
+                let model_name = if mode == "local" {
+                    match mr.detect_server_model().await {
+                        Some(name) => {
+                            config_for_probe.write().await.llm.active_model = name.clone();
+                            name
+                        }
+                        None => status["local_model"]
+                            .as_str()
+                            .unwrap_or("unknown")
+                            .to_string(),
                     }
-                    None => status["local_model"]
-                        .as_str()
-                        .unwrap_or("unknown")
-                        .to_string(),
+                } else {
+                    let cfg = config_for_probe.read().await;
+                    let model = cfg.llm.cloud_model_id.clone();
+                    let provider = cfg.llm.cloud_provider.clone();
+                    drop(cfg);
+                    if model.is_empty() {
+                        format!("{} (cloud)", provider)
+                    } else {
+                        model
+                    }
                 };
                 health_mr.update(
                     "model_router",
@@ -852,9 +901,7 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
             }
         }
         Err(e) => {
-            tracing::warn!(
-                "[INIT] GUI orchestrator auto-detect failed: {e} — automation disabled"
-            );
+            tracing::warn!("[INIT] GUI orchestrator auto-detect failed: {e} — automation disabled");
             kria_core::safety::engage_halt("orchestrator auto-detect failure");
             None
         }

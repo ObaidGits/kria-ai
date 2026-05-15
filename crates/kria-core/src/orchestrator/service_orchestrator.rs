@@ -2,10 +2,10 @@
 //! sidecar and the uinput daemon, with Drop-based cleanup.
 
 use anyhow::{anyhow, Context, Result};
+use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
-use std::net::TcpListener;
 use std::time::Duration;
 use tokio::process::{Child, Command};
 use tokio::sync::RwLock;
@@ -137,7 +137,11 @@ impl ServiceOrchestrator {
                 return port;
             }
         }
-        panic!("no free TCP port found in range {}–{}", start, start.saturating_add(100));
+        panic!(
+            "no free TCP port found in range {}–{}",
+            start,
+            start.saturating_add(100)
+        );
     }
 
     pub async fn start(self: &Arc<Self>) -> Result<()> {
@@ -635,7 +639,9 @@ fn detect_workspace_root() -> Result<PathBuf> {
         }
     }
 
-    Err(anyhow!("could not locate KRIA workspace root (set KRIA_WORKSPACE_ROOT)"))
+    Err(anyhow!(
+        "could not locate KRIA workspace root (set KRIA_WORKSPACE_ROOT)"
+    ))
 }
 
 fn detect_uinput_binary(workspace_root: &Path) -> Result<PathBuf> {

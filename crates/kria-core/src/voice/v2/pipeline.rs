@@ -58,11 +58,13 @@ use tokio_util::sync::CancellationToken;
 use crate::voice::capture::AudioChunk;
 use crate::voice::metrics::{MetricsBuilder, VoiceMetrics};
 use crate::voice::playback::AudioPlayer;
+use crate::voice::reconcile::reconcile_ts_whisper;
+use crate::voice::refiner::WhisperRefiner;
 use crate::voice::tier::VoiceTierProfile;
 use crate::voice::vad::VadResult;
 
 use super::aec::AecProcessor;
-use super::playback::{PlaybackSink, PlaybackState};
+use super::playback::{PlaybackRuntimeEvent, PlaybackSink, PlaybackState};
 use super::post_edit::HinglishPostEditor;
 use super::sentence::SentenceSplitter;
 use super::stt::{FinalTranscript, PartialTranscript, Stt};
@@ -93,6 +95,7 @@ pub enum VoiceTelemetry {
     Partial {
         text: String,
         engine: String,
+        seq: u64,
     },
     Final {
         text: String,
@@ -109,6 +112,19 @@ pub enum VoiceTelemetry {
     FirstAudioOut,
     /// Emitted whenever a hard barge-in fires.
     BargeIn,
+    /// Emitted when a new turn request is rejected because another turn is
+    /// already active.
+    BusyRejected {
+        entrypoint: String,
+        state: VoiceSessionState,
+    },
+    Interruption {
+        reason: String,
+    },
+    PlaybackFailure {
+        message: String,
+    },
+    PlaybackRecovered,
 }
 
 /// Sum type for the active voice runtime. Lives in `AppState` behind an
@@ -169,6 +185,9 @@ pub struct VoicePipelineV2 {
     pub wake: Option<Arc<WakeWordDetector>>,
     pub aec: Arc<Mutex<AecProcessor>>,
     pub post_editor: Arc<HinglishPostEditor>,
+    /// Optional Whisper refiner for post-commit transcript improvement.
+    /// When `None`, refinement is skipped (metrics will show `refine_latency_ms: Some(0)`).
+    pub refiner: Option<Arc<WhisperRefiner>>,
     /// Optional real audio output device. When `None` (test environments),
     /// `tts_task` falls back to a detached PCM channel and synth still runs
     /// (so barge-in semantics can be exercised) but no audio is actually
@@ -183,6 +202,12 @@ pub struct VoicePipelineV2 {
     /// Per-turn cancellation root. Replaced on every new turn so a stale
     /// `cancel()` from a previous turn cannot abort the next one.
     turn_cancel: Arc<Mutex<CancellationToken>>,
+    /// Strict mutual exclusion for turn entrypoints (`run_turn`,
+    /// `run_speak_turn`). Exactly one active turn at a time.
+    turn_guard: Arc<Mutex<()>>,
+    /// Current generation counter for refinement staleness detection.
+    /// Incremented on every turn start.
+    generation: Arc<Mutex<u64>>,
 }
 
 impl VoicePipelineV2 {
@@ -194,6 +219,7 @@ impl VoicePipelineV2 {
         wake: Option<WakeWordDetector>,
         aec: AecProcessor,
         post_editor: HinglishPostEditor,
+        refiner: Option<WhisperRefiner>,
     ) -> (
         Self,
         watch::Receiver<VoiceSessionState>,
@@ -209,11 +235,14 @@ impl VoicePipelineV2 {
             wake: wake.map(Arc::new),
             aec: Arc::new(Mutex::new(aec)),
             post_editor: Arc::new(post_editor),
+            refiner: refiner.map(Arc::new),
             audio_player: Arc::new(Mutex::new(None)),
             state_tx,
             telemetry_tx,
             current_turn: Arc::new(Mutex::new(None)),
             turn_cancel: Arc::new(Mutex::new(CancellationToken::new())),
+            turn_guard: Arc::new(Mutex::new(())),
+            generation: Arc::new(Mutex::new(0)),
         };
         (pipeline, state_rx, telemetry_rx)
     }
@@ -242,6 +271,9 @@ impl VoicePipelineV2 {
     }
 
     fn set_state(&self, s: VoiceSessionState) {
+        if self.state() == s {
+            return;
+        }
         // `send_replace` updates the cell unconditionally — `send` returns
         // Err and skips the update if no receivers exist, which would make
         // `state()` lie. Using replace keeps the FSM consistent even if
@@ -267,25 +299,8 @@ impl VoicePipelineV2 {
     /// playback, LLM, sentence-splitter), stop playback now, finalise any
     /// in-flight metrics, drop to Sleeping. Idempotent.
     pub async fn force_abort(&self) {
-        // 1. Cancel the per-turn token first — the scheduler will wake the
-        //    TTS / playback / LLM tasks immediately.
-        {
-            let cancel = self.turn_cancel.lock().await;
-            cancel.cancel();
-        }
-        // 2. Belt-and-braces: clear the rodio sink synchronously in case
-        //    the playback task hasn't drained yet.
-        {
-            let mut pb = self.playback.lock().await;
-            pb.abort();
-        }
-        // 3. Finalise metrics if we were mid-turn.
-        let mut cur = self.current_turn.lock().await;
-        if let Some(builder) = cur.take() {
-            let metrics = builder.finalise();
-            let _ = self.telemetry_tx.send(VoiceTelemetry::Metrics(metrics));
-        }
-        self.set_state(VoiceSessionState::Sleeping);
+        self.abort_root("force_abort", false).await;
+        self.finalise_turn_to(VoiceSessionState::Sleeping).await;
     }
 
     /// Snapshot the playback sub-state.
@@ -299,6 +314,7 @@ impl VoicePipelineV2 {
         let _ = self.telemetry_tx.send(VoiceTelemetry::Partial {
             text: p.text,
             engine: p.engine,
+            seq: p.seq,
         });
     }
 
@@ -308,6 +324,41 @@ impl VoicePipelineV2 {
             engine: f.engine.clone(),
             confidence: f.confidence,
         });
+    }
+
+    fn emit_busy_rejected(&self, entrypoint: &'static str) {
+        let state = self.state();
+        let _ = self.telemetry_tx.send(VoiceTelemetry::BusyRejected {
+            entrypoint: entrypoint.to_string(),
+            state,
+        });
+        tracing::warn!(entrypoint, ?state, "voice turn rejected: runtime busy");
+    }
+
+    async fn abort_root(&self, reason: &'static str, emit_barge: bool) {
+        {
+            let cancel = self.turn_cancel.lock().await;
+            cancel.cancel();
+        }
+        {
+            let mut pb = self.playback.lock().await;
+            pb.abort();
+        }
+        if emit_barge {
+            let _ = self.telemetry_tx.send(VoiceTelemetry::BargeIn);
+        }
+        let _ = self.telemetry_tx.send(VoiceTelemetry::Interruption {
+            reason: reason.to_string(),
+        });
+    }
+
+    async fn finalise_turn_to(&self, state: VoiceSessionState) {
+        let mut cur = self.current_turn.lock().await;
+        if let Some(builder) = cur.take() {
+            let metrics = builder.finalise();
+            let _ = self.telemetry_tx.send(VoiceTelemetry::Metrics(metrics));
+        }
+        self.set_state(state);
     }
 
     // ─── The streaming run loop ───────────────────────────────────────────
@@ -336,6 +387,14 @@ impl VoicePipelineV2 {
         L: FnOnce(String) -> F + Send + 'static,
         F: std::future::Future<Output = mpsc::Receiver<String>> + Send + 'static,
     {
+        let _turn_guard = match self.turn_guard.try_lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                self.emit_busy_rejected("run_turn");
+                anyhow::bail!("voice runtime busy: active turn in progress");
+            }
+        };
+
         // ─── 0. Set up the per-turn cancellation root ─────────────────────
         //
         // Every spawned subtask gets a clone of this token. A single call
@@ -351,6 +410,9 @@ impl VoicePipelineV2 {
         {
             let mut cur = self.current_turn.lock().await;
             *cur = Some(MetricsBuilder::begin_at_speech_end(self.profile.tier));
+            if let Some(builder) = cur.as_mut() {
+                builder.mark_mic_capture();
+            }
         }
 
         // ─── 1. Listening → forward audio to STT until VAD ends speech ───
@@ -365,48 +427,198 @@ impl VoicePipelineV2 {
             .clone()
             .start_stream(stt_pcm_rx, partial_tx)
             .await?;
+        let mut stt_handle = Some(stt_handle);
 
         // Spawn the capture-feed task. Reads from the broadcast, runs the
         // chunk through AEC, fans it out to STT and (later) VAD. Stops on
         // either turn-cancel or audio_rx close.
+        // Also accumulates audio samples for post-commit refinement.
         let aec = self.aec.clone();
         let cap_token = turn.clone();
         let cap_stt_tx = stt_pcm_tx.clone();
         let pipeline_for_partials = self.clone();
+        let accumulated_audio = Arc::new(Mutex::new(Vec::<f32>::new()));
+        let accumulated_audio_for_capture = accumulated_audio.clone();
+        let captured_sample_rate = Arc::new(Mutex::new(16000u32)); // default
+        let captured_sample_rate_for_capture = captured_sample_rate.clone();
 
         let capture_task: JoinHandle<()> = tokio::spawn(async move {
+            const START_RMS_THRESHOLD: f32 = 0.002;
+            const END_RMS_THRESHOLD: f32 = 0.003;
+            const END_SILENCE_MS: u64 = 300;
+            const MIN_SPEECH_AUDIO_MS: u64 = 800;
+            const NO_SPEECH_TIMEOUT_MS: u64 = 12_000;
+            const NO_FRAME_TIMEOUT_MS: u64 = 3_000;
+            const MAX_UTTERANCE_MS: u64 = 18_000;
+
+            let mut speech_started = false;
+            let mut waited_ms: u64 = 0;
+            let mut trailing_silence_ms: u64 = 0;
+            let mut utterance_ms: u64 = 0;
+            let mut speech_audio_ms: u64 = 0;
+            let mut frame_count: u64 = 0;
+            let mut last_frame_at = tokio::time::Instant::now();
+            tracing::info!("v2 capture task started; awaiting audio frames");
             loop {
                 tokio::select! {
                     biased;
-                    _ = cap_token.cancelled() => break,
+                    _ = cap_token.cancelled() => {
+                        tracing::warn!(frame_count, speech_started, "v2 capture task cancelled by turn token");
+                        break;
+                    }
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(250)) => {
+                        if last_frame_at.elapsed().as_millis() as u64 >= NO_FRAME_TIMEOUT_MS {
+                            tracing::error!(
+                                frame_count,
+                                no_frame_ms = last_frame_at.elapsed().as_millis() as u64,
+                                "v2 capture: no audio frames received from broadcast channel; failing turn"
+                            );
+                            break;
+                        }
+                    }
                     chunk = audio_rx.recv() => {
                         match chunk {
                             Ok(c) => {
+                                frame_count = frame_count.saturating_add(1);
+                                last_frame_at = tokio::time::Instant::now();
                                 let processed = {
                                     let mut a = aec.lock().await;
                                     a.process_capture(c)
                                 };
+
+                                // Accumulate audio for refinement (bounded to 30s @ 16kHz = 480,000 samples)
+                                {
+                                    let mut acc = accumulated_audio_for_capture.lock().await;
+                                    acc.extend_from_slice(&processed.samples);
+                                    // Bound accumulation to 480,000 samples (30s @ 16kHz)
+                                    if acc.len() > 480_000 {
+                                        let drain_count = acc.len() - 480_000;
+                                        acc.drain(0..drain_count);
+                                    }
+                                }
+                                {
+                                    let mut sr = captured_sample_rate_for_capture.lock().await;
+                                    *sr = processed.sample_rate;
+                                }
+
+                                let channels = processed.channels.max(1) as u64;
+                                let sample_rate = processed.sample_rate.max(1) as u64;
+                                let chunk_ms = (((processed.samples.len() as u64) * 1000) / (sample_rate * channels)).max(1);
+                                let rms = if processed.samples.is_empty() {
+                                    0.0
+                                } else {
+                                    let energy = processed.samples.iter().map(|s| s * s).sum::<f32>() / (processed.samples.len() as f32);
+                                    energy.sqrt()
+                                };
+
                                 if cap_stt_tx.send(processed).await.is_err() {
+                                    tracing::error!(frame_count, speech_started, utterance_ms, "v2 capture: STT stream closed; breaking");
                                     break;
                                 }
+
+                                utterance_ms = utterance_ms.saturating_add(chunk_ms);
+                                waited_ms = waited_ms.saturating_add(chunk_ms);
+                                if !speech_started && rms >= START_RMS_THRESHOLD {
+                                    speech_started = true;
+                                    trailing_silence_ms = 0;
+                                    tracing::info!(
+                                        frame_count,
+                                        utterance_ms,
+                                        rms,
+                                        threshold = START_RMS_THRESHOLD,
+                                        "v2 capture detected speech start"
+                                    );
+                                }
+
+                                if !speech_started {
+                                    if waited_ms % 2_000 < chunk_ms {
+                                        tracing::info!(
+                                            frame_count,
+                                            waited_ms,
+                                            rms,
+                                            threshold = START_RMS_THRESHOLD,
+                                            "v2 capture awaiting speech start"
+                                        );
+                                    }
+                                    if waited_ms >= NO_SPEECH_TIMEOUT_MS {
+                                        tracing::warn!(
+                                            frame_count,
+                                            waited_ms,
+                                            rms,
+                                            threshold = START_RMS_THRESHOLD,
+                                            "v2 capture timed out waiting for speech"
+                                        );
+                                        break;
+                                    }
+                                }
+                                if speech_started && rms >= START_RMS_THRESHOLD {
+                                    speech_audio_ms = speech_audio_ms.saturating_add(chunk_ms);
+                                }
+
+                                if utterance_ms >= MAX_UTTERANCE_MS {
+                                    tracing::info!(
+                                        frame_count,
+                                        utterance_ms,
+                                        "v2 capture reached max utterance window; finalizing STT stream"
+                                    );
+                                    break;
+                                }
+
+                                if rms < END_RMS_THRESHOLD {
+                                    trailing_silence_ms = trailing_silence_ms.saturating_add(chunk_ms);
+                                    if trailing_silence_ms >= END_SILENCE_MS
+                                        && speech_audio_ms >= MIN_SPEECH_AUDIO_MS
+                                    {
+                                        tracing::info!(
+                                            frame_count,
+                                            speech_started,
+                                            speech_audio_ms,
+                                            trailing_silence_ms,
+                                            rms,
+                                            threshold = END_RMS_THRESHOLD,
+                                            "v2 capture detected end-of-speech silence; finalizing STT stream"
+                                        );
+                                        break;
+                                    }
+                                } else {
+                                    trailing_silence_ms = 0;
+                                }
                             }
-                            Err(broadcast::error::RecvError::Closed) => break,
-                            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                            Err(broadcast::error::RecvError::Closed) => {
+                                tracing::warn!(frame_count, speech_started, "v2 capture: audio_rx broadcast channel closed");
+                                break;
+                            }
+                            Err(broadcast::error::RecvError::Lagged(n)) => {
+                                tracing::warn!(frame_count, lagged = n, "v2 capture: audio_rx lagged");
+                                continue;
+                            }
                         }
                     }
                 }
             }
+            tracing::info!(frame_count, speech_started, utterance_ms, "v2 capture task exiting");
         });
 
         // Forward partials to telemetry while we wait for the final.
         let partial_token = turn.clone();
         let partial_pump: JoinHandle<()> = tokio::spawn(async move {
+            let mut last_seq: u64 = 0;
             loop {
                 tokio::select! {
                     biased;
                     _ = partial_token.cancelled() => break,
                     p = partial_rx.recv() => {
                         let Some(p) = p else { break; };
+                        if p.seq <= last_seq {
+                            continue;
+                        }
+                        {
+                            let mut cur = pipeline_for_partials.current_turn.lock().await;
+                            if let Some(builder) = cur.as_mut() {
+                                builder.mark_first_partial();
+                            }
+                        }
+                        last_seq = p.seq;
                         pipeline_for_partials.emit_partial(p);
                     }
                 }
@@ -415,32 +627,229 @@ impl VoicePipelineV2 {
 
         // ─── 2. Transcribing → await final from STT ──────────────────────
         self.set_state(VoiceSessionState::Transcribing);
+        {
+            let mut cur = self.current_turn.lock().await;
+            if let Some(builder) = cur.as_mut() {
+                builder.mark_vad_trigger();
+            }
+        }
 
         // Drop our handle on the audio side so STT sees end-of-stream when
         // capture closes; capture closes when the turn token is cancelled.
         drop(stt_pcm_tx);
+        tracing::info!("v2 pipeline: waiting for STT final transcript; dropped stt_pcm_tx");
 
         // Wait for either: final transcript, or hard cancel.
         let final_transcript = tokio::select! {
             biased;
             _ = turn.cancelled() => {
+                tracing::warn!("v2 pipeline: turn was cancelled before STT finalization");
+                if let Some(mut handle) = stt_handle.take() {
+                    handle.abort();
+                    let _ = tokio::time::timeout(
+                        std::time::Duration::from_millis(250),
+                        handle.join(),
+                    ).await;
+                }
                 capture_task.abort();
                 partial_pump.abort();
-                self.set_state(VoiceSessionState::Sleeping);
+                self.abort_root("turn_cancelled_pre_transcription", false).await;
+                self.finalise_turn_to(VoiceSessionState::Sleeping).await;
                 anyhow::bail!("turn cancelled before transcription");
             }
-            res = stt_handle.join() => res?,
+            res = async {
+                tracing::info!("v2 pipeline: calling stt_handle.join() to await final transcript");
+                match stt_handle.take() {
+                    Some(handle) => {
+                        tracing::info!("v2 pipeline: STT handle available, joining...");
+                        let join_result = handle.join().await;
+                        tracing::info!("v2 pipeline: STT join completed");
+                        join_result
+                    }
+                    None => {
+                        tracing::error!("v2 pipeline: stt_handle is None (stream was already dropped)");
+                        anyhow::bail!("stt stream handle unavailable")
+                    }
+                }
+            } => res?,
         };
+        tracing::info!(
+            text_len = final_transcript.text.chars().count(),
+            engine = %final_transcript.engine,
+            duration_ms = final_transcript.duration_ms,
+            "voice v2: STT final transcript ready"
+        );
+        if final_transcript.text.trim().is_empty() {
+            tracing::warn!(
+                engine = %final_transcript.engine,
+                duration_ms = final_transcript.duration_ms,
+                "voice v2: STT final transcript is empty"
+            );
+            self.finalise_turn_to(VoiceSessionState::Sleeping).await;
+            anyhow::bail!("stt produced empty transcript");
+        } else {
+            tracing::info!(text = %final_transcript.text, "voice v2: STT final transcript text");
+        }
 
         // Capture finished its job; the partial pump can wind down.
         partial_pump.abort();
 
-        // Post-edit: scaffolded; the plumbing pass passes the transcript
-        // through unchanged. Real wiring goes through `post_editor.decide`
-        // + `post_editor.correct(raw, llm)` once an LLM handle is plumbed
-        // into this loop. Telemetry already emits the (unedited) final.
-        let post_edited = final_transcript.text.clone();
+        // ─── 2.5. Post-commit refinement (P1.3) ──────────────────────────
+        //
+        // After UtteranceCommitted (final_transcript available), optionally
+        // run Whisper refinement for transcript quality improvement.
+        // This is S3→S4 transition per §6.
+        //
+        // Invariants (P1-R1 through P1-R7):
+        // - Only one refinement per turn (generation-gated)
+        // - Timeout ≤ 5s (hard limit in WhisperRefiner)
+        // - Decode window ≤ 30s audio (bounded in accumulation)
+        // - Stale generation refinements rejected
+        // - Refinement only after UtteranceCommitted
+        
+        let current_generation = {
+            let mut gen = self.generation.lock().await;
+            *gen = gen.wrapping_add(1);
+            *gen
+        };
+        
+        let post_edited = if let Some(refiner) = &self.refiner {
+            // Attempt refinement
+            let audio_samples = {
+                let acc = accumulated_audio.lock().await;
+                acc.clone()
+            };
+            let sample_rate = {
+                let sr = captured_sample_rate.lock().await;
+                *sr
+            };
+            
+            if audio_samples.is_empty() {
+                tracing::warn!(
+                    generation = current_generation,
+                    "voice v2: no audio samples accumulated, skipping refinement"
+                );
+                {
+                    let mut cur = self.current_turn.lock().await;
+                    if let Some(builder) = cur.as_mut() {
+                        builder.skip_post_edit();
+                    }
+                }
+                final_transcript.text.clone()
+            } else {
+                tracing::info!(
+                    generation = current_generation,
+                    audio_samples = audio_samples.len(),
+                    sample_rate = sample_rate,
+                    "voice v2: starting Whisper refinement"
+                );
+                
+                match refiner.refine(
+                    &audio_samples,
+                    sample_rate,
+                    current_generation,
+                    &turn,
+                ).await {
+                    Ok(refinement_result) => {
+                        // Check generation staleness
+                        if refinement_result.generation != current_generation {
+                            tracing::warn!(
+                                expected_gen = current_generation,
+                                got_gen = refinement_result.generation,
+                                "voice v2: stale refinement rejected"
+                            );
+                            {
+                                let mut cur = self.current_turn.lock().await;
+                                if let Some(builder) = cur.as_mut() {
+                                    builder.skip_post_edit();
+                                }
+                            }
+                            final_transcript.text.clone()
+                        } else if refinement_result.timed_out {
+                            tracing::warn!(
+                                generation = current_generation,
+                                duration_ms = refinement_result.duration_ms,
+                                "voice v2: refinement timed out, using committed transcript"
+                            );
+                            {
+                                let mut cur = self.current_turn.lock().await;
+                                if let Some(builder) = cur.as_mut() {
+                                    builder.mark_post_edit();
+                                }
+                            }
+                            final_transcript.text.clone()
+                        } else {
+                            // Apply reconciliation (§7)
+                            let ts = &final_transcript.text;
+                            let whisper = &refinement_result.text;
+                            let reconcile_outcome = reconcile_ts_whisper(ts, whisper);
+                            
+                            tracing::info!(
+                                generation = current_generation,
+                                reconcile_kind = reconcile_outcome.kind.as_trace_str(),
+                                ts_len = ts.chars().count(),
+                                whisper_len = whisper.chars().count(),
+                                user_visible_len = reconcile_outcome.user_visible.chars().count(),
+                                duration_ms = refinement_result.duration_ms,
+                                "voice v2: refinement complete, reconciliation applied"
+                            );
+                            
+                            {
+                                let mut cur = self.current_turn.lock().await;
+                                if let Some(builder) = cur.as_mut() {
+                                    builder.mark_post_edit();
+                                    builder.record_reconcile(reconcile_outcome.kind);
+                                }
+                            }
+                            
+                            // Emit observability event (stt_reconcile_result)
+                            // This is part of §17 structured events
+                            tracing::debug!(
+                                kind = reconcile_outcome.kind.as_trace_str(),
+                                ts_norm = %reconcile_outcome.ts_norm,
+                                whisper_norm = %reconcile_outcome.whisper_norm,
+                                user_visible = %reconcile_outcome.user_visible,
+                                "stt_reconcile_result"
+                            );
+                            
+                            reconcile_outcome.user_visible
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            generation = current_generation,
+                            error = %e,
+                            "voice v2: refinement failed, using committed transcript"
+                        );
+                        {
+                            let mut cur = self.current_turn.lock().await;
+                            if let Some(builder) = cur.as_mut() {
+                                builder.skip_post_edit();
+                            }
+                        }
+                        final_transcript.text.clone()
+                    }
+                }
+            }
+        } else {
+            // No refiner configured, skip refinement
+            tracing::debug!("voice v2: no refiner configured, skipping refinement");
+            {
+                let mut cur = self.current_turn.lock().await;
+                if let Some(builder) = cur.as_mut() {
+                    builder.skip_post_edit();
+                }
+            }
+            final_transcript.text.clone()
+        };
+        
         let _ = &self.post_editor; // keep the field reachable for future wiring
+        {
+            let mut cur = self.current_turn.lock().await;
+            if let Some(builder) = cur.as_mut() {
+                builder.mark_final();
+            }
+        }
         self.emit_final(&FinalTranscript {
             text: post_edited.clone(),
             ..final_transcript.clone()
@@ -448,6 +857,7 @@ impl VoicePipelineV2 {
 
         // ─── 3. Thinking → spawn LLM token stream ────────────────────────
         self.set_state(VoiceSessionState::Thinking);
+        tracing::info!("voice v2: entering thinking; requesting LLM token stream");
         let mut llm_token_rx = llm(post_edited).await;
 
         // ─── 4. Speaking → sentence-split → TTS → playback ───────────────
@@ -461,6 +871,18 @@ impl VoicePipelineV2 {
         // (the `Tts` trait predates this module's CancellationToken). We
         // bridge: cancelling `turn` flips the watch.
         self.set_state(VoiceSessionState::Speaking);
+        {
+            let telemetry = self.telemetry_tx.clone();
+            let mut pb = self.playback.lock().await;
+            pb.set_runtime_event_callback(move |ev| match ev {
+                PlaybackRuntimeEvent::Failure { message } => {
+                    let _ = telemetry.send(VoiceTelemetry::PlaybackFailure { message });
+                }
+                PlaybackRuntimeEvent::Recovered => {
+                    let _ = telemetry.send(VoiceTelemetry::PlaybackRecovered);
+                }
+            });
+        }
 
         let tts = self.tts.clone();
         let playback = self.playback.clone();
@@ -518,12 +940,24 @@ impl VoicePipelineV2 {
                             }
                             break 'outer;
                         };
+                        {
+                            let mut cur = pipeline_for_tts.current_turn.lock().await;
+                            if let Some(builder) = cur.as_mut() {
+                                builder.mark_llm_first_token();
+                            }
+                        }
                         for sentence in splitter.push(&tok) {
                             // Cooperative cancel point between sentences.
                             if tts_token.is_cancelled() {
                                 break 'outer;
                             }
                             let abort_clone = abort_rx.clone();
+                            {
+                                let mut cur = pipeline_for_tts.current_turn.lock().await;
+                                if let Some(builder) = cur.as_mut() {
+                                    builder.mark_tts_first_chunk();
+                                }
+                            }
                             // Drive the synth future to completion. The
                             // backend itself observes `abort_rx` (flipped
                             // by the bridge above) and short-circuits;
@@ -555,6 +989,11 @@ impl VoicePipelineV2 {
                 .first_audio_emitted
                 .load(std::sync::atomic::Ordering::SeqCst)
             {
+                drop(pb);
+                let mut cur = pipeline_for_tts.current_turn.lock().await;
+                if let Some(builder) = cur.as_mut() {
+                    builder.mark_first_audio_out();
+                }
                 let _ = pipeline_for_tts
                     .telemetry_tx
                     .send(VoiceTelemetry::FirstAudioOut);
@@ -577,11 +1016,7 @@ impl VoicePipelineV2 {
             biased;
             _ = turn.cancelled() => {
                 self.set_state(VoiceSessionState::BargeIn);
-                let _ = self.telemetry_tx.send(VoiceTelemetry::BargeIn);
-                {
-                    let mut pb = self.playback.lock().await;
-                    pb.abort();
-                }
+                self.abort_root("barge_in", true).await;
                 // Give the in-task bridge ~250 ms to flip abort_rx and
                 // for the synth future to honour it. If the backend is
                 // truly stuck, hard-abort.
@@ -603,12 +1038,7 @@ impl VoicePipelineV2 {
         capture_task.abort();
 
         // ─── 6. Finalise metrics + return to Sleeping ─────────────────────
-        let mut cur = self.current_turn.lock().await;
-        if let Some(builder) = cur.take() {
-            let metrics = builder.finalise();
-            let _ = self.telemetry_tx.send(VoiceTelemetry::Metrics(metrics));
-        }
-        self.set_state(VoiceSessionState::Sleeping);
+        self.finalise_turn_to(VoiceSessionState::Sleeping).await;
         Ok(())
     }
 
@@ -646,6 +1076,14 @@ impl VoicePipelineV2 {
         L: FnOnce(String) -> F + Send + 'static,
         F: std::future::Future<Output = mpsc::Receiver<String>> + Send + 'static,
     {
+        let _turn_guard = match self.turn_guard.try_lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                self.emit_busy_rejected("run_speak_turn");
+                anyhow::bail!("voice runtime busy: active turn in progress");
+            }
+        };
+
         // 0. Per-turn cancellation root.
         let turn = CancellationToken::new();
         {
@@ -655,6 +1093,11 @@ impl VoicePipelineV2 {
         {
             let mut cur = self.current_turn.lock().await;
             *cur = Some(MetricsBuilder::begin_at_speech_end(self.profile.tier));
+            if let Some(builder) = cur.as_mut() {
+                builder.mark_mic_capture();
+                builder.mark_vad_trigger();
+                builder.mark_final();
+            }
         }
 
         // Echo the "transcript" through telemetry so the UI can show what
@@ -671,6 +1114,18 @@ impl VoicePipelineV2 {
         let mut llm_token_rx = llm(prompt).await;
 
         self.set_state(VoiceSessionState::Speaking);
+        {
+            let telemetry = self.telemetry_tx.clone();
+            let mut pb = self.playback.lock().await;
+            pb.set_runtime_event_callback(move |ev| match ev {
+                PlaybackRuntimeEvent::Failure { message } => {
+                    let _ = telemetry.send(VoiceTelemetry::PlaybackFailure { message });
+                }
+                PlaybackRuntimeEvent::Recovered => {
+                    let _ = telemetry.send(VoiceTelemetry::PlaybackRecovered);
+                }
+            });
+        }
 
         let tts = self.tts.clone();
         let playback = self.playback.clone();
@@ -719,11 +1174,23 @@ impl VoicePipelineV2 {
                             }
                             break 'outer;
                         };
+                        {
+                            let mut cur = pipeline_for_tts.current_turn.lock().await;
+                            if let Some(builder) = cur.as_mut() {
+                                builder.mark_llm_first_token();
+                            }
+                        }
                         for sentence in splitter.push(&tok) {
                             if tts_token.is_cancelled() {
                                 break 'outer;
                             }
                             let abort_clone = abort_rx.clone();
+                            {
+                                let mut cur = pipeline_for_tts.current_turn.lock().await;
+                                if let Some(builder) = cur.as_mut() {
+                                    builder.mark_tts_first_chunk();
+                                }
+                            }
                             if let Err(e) = tts
                                 .clone()
                                 .synthesize_sentence(sentence, pcm_tx.clone(), abort_clone)
@@ -746,6 +1213,11 @@ impl VoicePipelineV2 {
                 .first_audio_emitted
                 .load(std::sync::atomic::Ordering::SeqCst)
             {
+                drop(pb);
+                let mut cur = pipeline_for_tts.current_turn.lock().await;
+                if let Some(builder) = cur.as_mut() {
+                    builder.mark_first_audio_out();
+                }
                 let _ = pipeline_for_tts
                     .telemetry_tx
                     .send(VoiceTelemetry::FirstAudioOut);
@@ -758,11 +1230,7 @@ impl VoicePipelineV2 {
             biased;
             _ = turn.cancelled() => {
                 self.set_state(VoiceSessionState::BargeIn);
-                let _ = self.telemetry_tx.send(VoiceTelemetry::BargeIn);
-                {
-                    let mut pb = self.playback.lock().await;
-                    pb.abort();
-                }
+                self.abort_root("barge_in", true).await;
                 if tokio::time::timeout(
                     std::time::Duration::from_millis(250),
                     &mut tts_task,
@@ -777,12 +1245,7 @@ impl VoicePipelineV2 {
             }
         }
 
-        let mut cur = self.current_turn.lock().await;
-        if let Some(builder) = cur.take() {
-            let metrics = builder.finalise();
-            let _ = self.telemetry_tx.send(VoiceTelemetry::Metrics(metrics));
-        }
-        self.set_state(VoiceSessionState::Sleeping);
+        self.finalise_turn_to(VoiceSessionState::Sleeping).await;
         Ok(())
     }
 }
@@ -893,7 +1356,7 @@ mod tests {
             &PostEditConfig::default(),
             profile.post_edit_timeout_ms,
         );
-        let (p, _s, _t) = VoicePipelineV2::new(profile, stt, tts, pb, None, aec, post);
+        let (p, _s, _t) = VoicePipelineV2::new(profile, stt, tts, pb, None, aec, post, None);
         Arc::new(p)
     }
 
@@ -912,7 +1375,7 @@ mod tests {
             &PostEditConfig::default(),
             profile.post_edit_timeout_ms,
         );
-        let (p, _s, t) = VoicePipelineV2::new(profile, stt, tts, pb, None, aec, post);
+        let (p, _s, t) = VoicePipelineV2::new(profile, stt, tts, pb, None, aec, post, None);
         (Arc::new(p), t)
     }
 
@@ -1112,9 +1575,10 @@ mod tests {
             let final_text = self.final_text.to_string();
             tokio::spawn(async move {
                 let drain = tokio::spawn(async move { while pcm_rx.recv().await.is_some() {} });
-                for p in &partials {
+                for (idx, p) in partials.iter().enumerate() {
                     let _ = partial_tx.send(PartialTranscript {
                         text: (*p).into(),
+                        seq: (idx as u64) + 1,
                         confidence: Some(0.5),
                         engine: "stub-partial-stt".into(),
                     });
@@ -1261,5 +1725,71 @@ mod tests {
             "barge-in latency too high: {:?}",
             elapsed
         );
+    }
+
+    #[tokio::test]
+    async fn concurrent_turn_rejected_with_busy_telemetry() {
+        let stt = Arc::new(StubStt {
+            text: "hello".into(),
+            delay_ms: 250,
+        });
+        let tts = Arc::new(StubTts {
+            started: Arc::new(AtomicUsize::new(0)),
+            completed: Arc::new(AtomicUsize::new(0)),
+            per_sentence_ms: 10,
+            cancelled_flag: Arc::new(AtomicBool::new(false)),
+        });
+        let (p, mut tel_rx) = build_with_telemetry(stt, tts);
+        let (audio_tx_1, audio_rx_1) = broadcast::channel::<AudioChunk>(8);
+        let (audio_tx_2, audio_rx_2) = broadcast::channel::<AudioChunk>(8);
+        drop(audio_tx_1);
+        drop(audio_tx_2);
+
+        let llm_1 = |_text: String| async move {
+            let (tx, rx) = mpsc::channel::<String>(2);
+            tokio::spawn(async move {
+                let _ = tx.send("ok.".into()).await;
+            });
+            rx
+        };
+        let llm_2 = |_text: String| async move {
+            let (_tx, rx) = mpsc::channel::<String>(2);
+            rx
+        };
+
+        let p1 = p.clone();
+        let turn_1 = tokio::spawn(async move { p1.run_turn(audio_rx_1, llm_1).await });
+
+        // Give turn #1 a moment to acquire the guard.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        let second = p.clone().run_turn(audio_rx_2, llm_2).await;
+        assert!(second.is_err(), "second overlapping turn must be rejected");
+        assert!(
+            second
+                .err()
+                .map(|e| e.to_string())
+                .unwrap_or_default()
+                .contains("runtime busy"),
+            "busy rejection should return explicit error"
+        );
+
+        // First turn should still complete successfully.
+        let first = tokio::time::timeout(Duration::from_secs(2), turn_1)
+            .await
+            .expect("first turn timed out")
+            .expect("first turn task panicked");
+        assert!(first.is_ok(), "first turn should remain unaffected");
+
+        let mut saw_busy = false;
+        while let Ok(ev) = tel_rx.try_recv() {
+            if let VoiceTelemetry::BusyRejected { entrypoint, .. } = ev {
+                if entrypoint == "run_turn" {
+                    saw_busy = true;
+                    break;
+                }
+            }
+        }
+        assert!(saw_busy, "busy rejection telemetry must be emitted");
     }
 }

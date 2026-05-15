@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use tokio_util::sync::CancellationToken;
 
 use crate::resource::{
     GpuLeaseError, GpuLeaseGuard, GpuLeaseManager, GpuOwner, ImageRuntimeSnapshot,
@@ -9,6 +10,7 @@ use crate::resource::{
 };
 
 static STT_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+static STT_LEASE_BYPASS_LOGGED: std::sync::Once = std::sync::Once::new();
 
 /// Speech-to-Text using whisper.cpp via command-line or whisper-rs.
 ///
@@ -67,40 +69,25 @@ impl SpeechToText {
         &self,
         wav_path: &std::path::Path,
     ) -> anyhow::Result<TranscriptionResult> {
+        let cancel = CancellationToken::new();
+        self.transcribe_file_abortable(wav_path, &cancel).await
+    }
+
+    /// Transcribe a WAV file, observing an external cancellation token.
+    pub async fn transcribe_file_abortable(
+        &self,
+        wav_path: &std::path::Path,
+        cancel: &CancellationToken,
+    ) -> anyhow::Result<TranscriptionResult> {
         let start = Instant::now();
         let lease_guard = self.acquire_speech_lease("speech_stt_transcribe")?;
 
         let result: anyhow::Result<TranscriptionResult> = if let Some(ref binary) = self.binary_path
         {
-            // CLI mode: call whisper.cpp binary
-            let whisper_threads = self.threads.unwrap_or_else(default_whisper_threads);
-            let mut args = vec![
-                "-m".to_string(),
-                self.model_path.to_string_lossy().to_string(),
-                "-f".to_string(),
-                wav_path.to_string_lossy().to_string(),
-                "--no-timestamps".to_string(),
-                "-t".to_string(),
-                whisper_threads.to_string(),
-            ];
-            // Only pass -l if a specific language is set (not "auto")
-            // whisper.cpp auto-detects language when -l is omitted
-            if self.language != "auto" {
-                args.push("-l".to_string());
-                args.push(self.language.clone());
-            }
-
-            let output = tokio::time::timeout(
-                self.command_timeout,
-                tokio::process::Command::new(binary).args(&args).output(),
-            )
-            .await
-            .map_err(|_| {
-                anyhow::anyhow!(
-                    "whisper.cpp timed out after {}s",
-                    self.command_timeout.as_secs()
-                )
-            })??;
+            // CLI mode: call whisper.cpp binary with explicit kill+wait on
+            // timeout/cancel so no subprocess is orphaned.
+            let args = self.build_cli_args(wav_path);
+            let output = self.execute_cli_with_abort(binary, &args, cancel).await?;
 
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
@@ -133,6 +120,18 @@ impl SpeechToText {
         samples: &[f32],
         sample_rate: u32,
     ) -> anyhow::Result<TranscriptionResult> {
+        let cancel = CancellationToken::new();
+        self.transcribe_samples_abortable(samples, sample_rate, &cancel)
+            .await
+    }
+
+    /// Transcribe raw PCM samples with cancellation support.
+    pub async fn transcribe_samples_abortable(
+        &self,
+        samples: &[f32],
+        sample_rate: u32,
+        cancel: &CancellationToken,
+    ) -> anyhow::Result<TranscriptionResult> {
         let nonce = STT_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
         let ts_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -145,7 +144,7 @@ impl SpeechToText {
             nonce
         ));
         write_wav(&temp_path, samples, sample_rate)?;
-        let result = self.transcribe_file(&temp_path).await;
+        let result = self.transcribe_file_abortable(&temp_path, cancel).await;
         let _ = std::fs::remove_file(&temp_path);
         result
     }
@@ -174,10 +173,28 @@ impl SpeechToText {
             return Ok(None);
         };
 
-        gpu_lease
-            .acquire_guard(GpuOwner::Speech, turn_label, Some(Duration::from_secs(120)))
-            .map(Some)
-            .map_err(Self::map_gpu_lease_error)
+        match gpu_lease.acquire_guard(GpuOwner::Speech, turn_label, Some(Duration::from_secs(120))) {
+            Ok(guard) => Ok(Some(guard)),
+            Err(GpuLeaseError::Degraded { reason }) => {
+                STT_LEASE_BYPASS_LOGGED.call_once(|| {
+                    tracing::info!(
+                        %reason,
+                        "speech STT: GPU lease unavailable; whisper-cli will run without lease (CPU subprocess)"
+                    );
+                });
+                Ok(None)
+            }
+            Err(GpuLeaseError::Recovering { reason }) => {
+                STT_LEASE_BYPASS_LOGGED.call_once(|| {
+                    tracing::info!(
+                        ?reason,
+                        "speech STT: GPU lease recovering; whisper-cli will run without lease (CPU subprocess)"
+                    );
+                });
+                Ok(None)
+            }
+            Err(other) => Err(Self::map_gpu_lease_error(other)),
+        }
     }
 
     fn reconcile_speech_lease_idle(&self) {
@@ -212,6 +229,86 @@ impl SpeechToText {
         };
 
         gpu_lease.reconcile(&snapshot);
+    }
+
+    fn build_cli_args(&self, wav_path: &std::path::Path) -> Vec<String> {
+        let whisper_threads = self.threads.unwrap_or_else(default_whisper_threads);
+        let mut args = vec![
+            "-m".to_string(),
+            self.model_path.to_string_lossy().to_string(),
+            "-f".to_string(),
+            wav_path.to_string_lossy().to_string(),
+            "--no-timestamps".to_string(),
+            "-t".to_string(),
+            whisper_threads.to_string(),
+            // Hinglish initial prompt for code-switch accuracy
+            "--prompt".to_string(),
+            crate::voice::v2::stt::INITIAL_PROMPT.to_string(),
+        ];
+        // Only pass -l if a specific language is set (not "auto")
+        // whisper.cpp auto-detects language when -l is omitted.
+        if self.language != "auto" {
+            args.push("-l".to_string());
+            args.push(self.language.clone());
+        }
+        args
+    }
+
+    async fn execute_cli_with_abort(
+        &self,
+        binary: &std::path::Path,
+        args: &[String],
+        cancel: &CancellationToken,
+    ) -> anyhow::Result<std::process::Output> {
+        use tokio::io::AsyncReadExt;
+        let mut child = tokio::process::Command::new(binary)
+            .args(args)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()?;
+        let mut stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("failed to capture whisper stdout"))?;
+        let mut stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("failed to capture whisper stderr"))?;
+        let stdout_task = tokio::spawn(async move {
+            let mut buf = Vec::new();
+            let _ = stdout.read_to_end(&mut buf).await;
+            buf
+        });
+        let stderr_task = tokio::spawn(async move {
+            let mut buf = Vec::new();
+            let _ = stderr.read_to_end(&mut buf).await;
+            buf
+        });
+
+        let mut timeout = Box::pin(tokio::time::sleep(self.command_timeout));
+        let status = tokio::select! {
+            _ = cancel.cancelled() => {
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+                anyhow::bail!("whisper.cpp cancelled");
+            }
+            _ = &mut timeout => {
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+                anyhow::bail!(
+                    "whisper.cpp timed out after {}s",
+                    self.command_timeout.as_secs()
+                );
+            }
+            status = child.wait() => status?,
+        };
+        let stdout = stdout_task.await.unwrap_or_default();
+        let stderr = stderr_task.await.unwrap_or_default();
+        Ok(std::process::Output {
+            status,
+            stdout,
+            stderr,
+        })
     }
 }
 

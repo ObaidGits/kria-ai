@@ -8,11 +8,6 @@ pub mod policy;
 pub mod policy_gate;
 pub mod rollback;
 
-// RFC v2 (P6): UI trust boundary — OCR sanitization, deceptive-dialog
-// heuristics, destructive-click classifier. Skeleton until P6 lands.
-#[cfg(feature = "gui_cognition_v2")]
-pub mod ui_trust;
-
 pub use audit::AuditLogger;
 pub use blacklist::BlacklistChecker;
 pub use command_classifier::CommandClassification;

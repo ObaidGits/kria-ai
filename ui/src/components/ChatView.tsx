@@ -22,6 +22,7 @@ const ChatView: Component = () => {
     sendMessage,
     sendImageMessage,
     sendDocumentMessage,
+    transcribeUploadedAudio,
     pendingFiles,
     addPendingFile,
     removePendingFile,
@@ -67,6 +68,11 @@ const ChatView: Component = () => {
     return true;
   };
 
+  const isAudioFile = (file: File): boolean => {
+    if (file.type.startsWith("audio/")) return true;
+    return !!file.name.match(/\.(wav|mp3|m4a|flac|ogg|webm)$/i);
+  };
+
   const fileTypeIcon = (mime: string, name: string): string => {
     if (mime === "application/pdf" || name.endsWith(".pdf")) return "📄";
     if (mime.includes("spreadsheet") || name.match(/\.(xlsx|xls|csv)$/i)) return "📊";
@@ -76,6 +82,7 @@ const ChatView: Component = () => {
     if (name.endsWith(".ipynb")) return "📓";
     if (name.match(/\.(json|yaml|yml|toml|xml)$/i)) return "⚙️";
     if (name.match(/\.(md|markdown|txt|log)$/i)) return "📃";
+    if (mime.startsWith("audio/") || name.match(/\.(wav|mp3|m4a|flac|ogg|webm)$/i)) return "🎙️";
     return "📎";
   };
 
@@ -206,6 +213,10 @@ const ChatView: Component = () => {
   };
 
   const processFile = async (file: File) => {
+    if (isAudioFile(file)) {
+      await transcribeUploadedAudio(file);
+      return;
+    }
     // Route to document pipeline for non-image or explicit doc extensions
     if (isDocumentFile(file)) {
       addPendingFile(file);
@@ -379,7 +390,6 @@ const ChatView: Component = () => {
             <input
               ref={fileInput}
               type="file"
-              accept=".jpg,.jpeg,.png,.gif,.webp,.bmp,.svg,.pdf,.docx,.doc,.xlsx,.xls,.pptx,.ppt,.txt,.md,.csv,.json,.yaml,.yml,.toml,.py,.rs,.ts,.js,.go,.java,.c,.cpp,.h,.rb,.php,.kt,.swift,.sh,.sql,.lua,.r,.ipynb,.log,.html,.xml"
               multiple
               style={{ display: "none" }}
               onChange={async (e) => {

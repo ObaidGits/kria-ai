@@ -299,11 +299,53 @@ impl ModelRouter {
             Some(l) => l.health_check().await,
             None => false,
         };
+
+        // For cloud/external modes, check the active cloud backend instead.
+        // For non-local modes: any configured cloud client counts as healthy
+        // (CloudBackend::health_check returns is_configured(), no network call).
+        let cloud_healthy = match mode {
+            RoutingMode::Local => false,
+            _ => {
+                let clients = self.cloud_clients.read().await;
+                if clients.is_empty() {
+                    false
+                } else {
+                    // Check by conventional name first, fall back to any client
+                    let key = match mode {
+                        RoutingMode::Colab => "colab",
+                        RoutingMode::Gemini => "gemini",
+                        _ => "external",
+                    };
+                    if let Some(client) = clients.get(key) {
+                        client.health_check().await
+                    } else {
+                        // Provider may be registered under a custom name (e.g. "opencode")
+                        // — accept any configured cloud client
+                        let mut any_healthy = false;
+                        for client in clients.values() {
+                            if client.health_check().await {
+                                any_healthy = true;
+                                break;
+                            }
+                        }
+                        any_healthy
+                    }
+                }
+            }
+        };
+
+        // active_healthy = whichever backend the current mode actually uses
+        let active_healthy = match mode {
+            RoutingMode::Local => local_healthy,
+            _ => cloud_healthy,
+        };
+
         let cloud_count = self.cloud_clients.read().await.len();
 
         serde_json::json!({
             "mode": mode.as_str(),
             "local_healthy": local_healthy,
+            "active_healthy": active_healthy,
             "local_model": self.local.as_ref().map(|l| l.model_label().to_string()),
             "cloud_backends": cloud_count,
         })

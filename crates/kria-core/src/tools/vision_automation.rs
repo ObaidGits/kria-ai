@@ -59,7 +59,7 @@ impl OmniElement {
         // Apply cognitive poisoning defense: truncate and wrap
         let truncated = Self::apply_cognitive_defense(&label);
         let label_wrapped = format!("<evidence>{}</evidence>", truncated);
-        
+
         Self {
             id,
             element_type,
@@ -72,7 +72,7 @@ impl OmniElement {
             visual_hash,
         }
     }
-    
+
     /// Apply cognitive poisoning defense to OCR text.
     /// Per RFC 007 Section 3.2: aggressively truncate to 100 chars max.
     fn apply_cognitive_defense(text: &str) -> String {
@@ -84,14 +84,14 @@ impl OmniElement {
             format!("{}...", truncated)
         }
     }
-    
+
     /// Get center coordinates of bounding box.
     pub fn center(&self) -> (i32, i32) {
         let x = (self.bbox[0] + self.bbox[2]) / 2;
         let y = (self.bbox[1] + self.bbox[3]) / 2;
         (x, y)
     }
-    
+
     /// Get bounding box dimensions.
     pub fn dimensions(&self) -> (i32, i32) {
         let width = self.bbox[2] - self.bbox[0];
@@ -152,11 +152,11 @@ impl OmniParserCache {
             ttl: Duration::from_secs(5),
         }
     }
-    
+
     /// Get cached state if still valid.
     async fn get(&self, key: &str) -> Option<CachedState> {
         let cache = self.cache.read().await;
-        
+
         if let Some(state) = cache.get(key) {
             if state.created_at.elapsed() < self.ttl {
                 // Cache hit and still valid
@@ -170,23 +170,26 @@ impl OmniParserCache {
         }
         None
     }
-    
+
     /// Store new state in cache.
     async fn set(&self, key: String, output: OmniParserOutput, screenshot_data: Vec<u8>) {
         let mut cache = self.cache.write().await;
-        
+
         // Clean up expired entries while we have write lock
         let now = Instant::now();
         cache.retain(|_, state| now.duration_since(state.created_at) < self.ttl);
-        
+
         // Insert new entry
-        cache.insert(key, CachedState {
-            output,
-            created_at: now,
-            screenshot_data,
-        });
+        cache.insert(
+            key,
+            CachedState {
+                output,
+                created_at: now,
+                screenshot_data,
+            },
+        );
     }
-    
+
     /// Instantly invalidate all cached state.
     /// Per RFC 007: "cache must be instantly invalidated the moment a state-changing
     /// action (click or type) occurs"
@@ -195,11 +198,11 @@ impl OmniParserCache {
         cache.clear();
         tracing::info!(target: "vision_cache", "OmniParser cache invalidated due to state-changing action");
     }
-    
+
     /// Get element by ID from cache.
     pub async fn get_element_by_id(&self, element_id: &str) -> Option<OmniElement> {
         let cache = self.cache.read().await;
-        
+
         for state in cache.values() {
             if let Some(element) = state.output.elements.iter().find(|e| e.id == element_id) {
                 // Check if this specific element is still within TTL
@@ -211,12 +214,12 @@ impl OmniParserCache {
         }
         None
     }
-    
+
     /// Get screenshot data for element verification.
     #[allow(dead_code)] // Reserved for future element verification
     async fn get_screenshot_for_element(&self, element_id: &str) -> Option<(Vec<u8>, OmniElement)> {
         let cache = self.cache.read().await;
-        
+
         for state in cache.values() {
             if let Some(element) = state.output.elements.iter().find(|e| e.id == element_id) {
                 if state.created_at.elapsed() < self.ttl {
@@ -275,7 +278,7 @@ impl SaliencyRegion {
     pub fn default_regions(screen_width: u32, screen_height: u32) -> Vec<Self> {
         let cx = (screen_width / 2) as i32;
         let cy = (screen_height / 2) as i32;
-        
+
         vec![
             // Modal overlay region (highest priority) - center screen where modals appear
             SaliencyRegion {
@@ -294,12 +297,7 @@ impl SaliencyRegion {
             // Notification area - typically top-right
             SaliencyRegion {
                 name: "notification_area",
-                bbox: Some([
-                    (screen_width as i32) - 250,
-                    0,
-                    screen_width as i32,
-                    100
-                ]),
+                bbox: Some([(screen_width as i32) - 250, 0, screen_width as i32, 100]),
                 weight: 2.0,
                 region_type: SaliencyRegionType::NotificationArea,
             },
@@ -353,11 +351,11 @@ impl GatedSensing {
             last_parsed_state: None,
             last_sense_time: None,
             ttl: Duration::from_secs(10), // RFC 008: 10s semantic state TTL
-            ssim_threshold: 0.85,       // RFC 008: SSIM < 0.85 = structural change
+            ssim_threshold: 0.85,         // RFC 008: SSIM < 0.85 = structural change
             saliency_regions: SaliencyRegion::default_regions(screen_width, screen_height),
         }
     }
-    
+
     /// RFC 008: Saliency-aware perceptual diff.
     /// Per RFC 008 Section 2.2: "Weighted similarity calculation"
     pub fn saliency_aware_diff(
@@ -371,7 +369,7 @@ impl GatedSensing {
         let mut total_weight = 0.0;
         let mut region_scores = Vec::new();
         let mut modal_appeared = false;
-        
+
         for region in &self.saliency_regions {
             // Calculate local similarity for this region
             let local_similarity = if let Some(bbox) = region.bbox {
@@ -380,26 +378,26 @@ impl GatedSensing {
                 // Background uses global similarity
                 self.calculate_global_ssim(current_hash, cached_hash)
             };
-            
+
             // Check for modal appearance (high similarity change in modal region)
             if region.region_type == SaliencyRegionType::ModalOverlay && local_similarity < 0.70 {
                 modal_appeared = true;
             }
-            
+
             weighted_diff += local_similarity * region.weight;
             total_weight += region.weight;
             region_scores.push((region.name.to_string(), local_similarity));
         }
-        
+
         let weighted_similarity = if total_weight > 0.0 {
             weighted_diff / total_weight
         } else {
             1.0
         };
-        
+
         // Modal appearance forces structural change regardless of global similarity
         let structural_change = weighted_similarity < self.ssim_threshold || modal_appeared;
-        
+
         SaliencyDiffResult {
             weighted_similarity,
             region_scores,
@@ -407,7 +405,7 @@ impl GatedSensing {
             structural_change,
         }
     }
-    
+
     /// Calculate SSIM for a specific region (simplified approximation using pHash).
     fn calculate_local_ssim(
         &self,
@@ -419,38 +417,28 @@ impl GatedSensing {
         let (x1, y1, x2, y2) = (bbox[0], bbox[1], bbox[2], bbox[3]);
         let width = (x2 - x1).max(1) as u32;
         let height = (y2 - y1).max(1) as u32;
-        
+
         // Clamp bounds to image dimensions
         let crop_x = (x1.max(0) as u32).min(current.width() - 1);
         let crop_y = (y1.max(0) as u32).min(current.height() - 1);
         let crop_w = width.min(current.width() - crop_x);
         let crop_h = height.min(current.height() - crop_y);
-        
+
         // Crop current region using imageops::crop_imm
-        let current_region = image::imageops::crop_imm(
-            current,
-            crop_x,
-            crop_y,
-            crop_w,
-            crop_h
-        ).to_image();
+        let current_region =
+            image::imageops::crop_imm(current, crop_x, crop_y, crop_w, crop_h).to_image();
         let current_dynamic = image::DynamicImage::ImageRgba8(current_region);
-        
+
         // Crop cached region
         let cached_x = (x1.max(0) as u32).min(cached.width() - 1);
         let cached_y = (y1.max(0) as u32).min(cached.height() - 1);
         let cached_w = width.min(cached.width() - cached_x);
         let cached_h = height.min(cached.height() - cached_y);
-        
-        let cached_region = image::imageops::crop_imm(
-            cached,
-            cached_x,
-            cached_y,
-            cached_w,
-            cached_h
-        ).to_image();
+
+        let cached_region =
+            image::imageops::crop_imm(cached, cached_x, cached_y, cached_w, cached_h).to_image();
         let cached_dynamic = image::DynamicImage::ImageRgba8(cached_region);
-        
+
         // Calculate pHash for both regions and compare
         if let (Ok(current_hash), Ok(cached_hash)) = (
             VisualHashVerifier::calculate_phash(&current_dynamic),
@@ -461,53 +449,55 @@ impl GatedSensing {
             0.5 // Unknown if hash calculation fails
         }
     }
-    
+
     /// Calculate global SSIM using perceptual hash comparison.
     fn calculate_global_ssim(&self, current_hash: u64, cached_hash: u64) -> f32 {
         // Convert u64 hashes to strings for comparison
         let current_str = format!("{:016x}", current_hash);
         let cached_str = format!("{:016x}", cached_hash);
-        
+
         // Simple Hamming distance approximation on hex strings
-        let distance = current_str.chars().zip(cached_str.chars())
+        let distance = current_str
+            .chars()
+            .zip(cached_str.chars())
             .filter(|(a, b)| a != b)
             .count();
-        
+
         // Convert to similarity (64 hex chars max)
         1.0 - (distance as f32 / 64.0)
     }
-    
+
     /// Check if re-sensing is required.
-    /// Per RFC 008: "Re-evaluation executes ONLY on verification failure, 
+    /// Per RFC 008: "Re-evaluation executes ONLY on verification failure,
     /// major perceptual diff, blocking interrupt, or timer"
     pub fn needs_resense(&self, force_invalidation: bool) -> bool {
         // Force invalidation from OS events or human activity
         if force_invalidation {
             return true;
         }
-        
+
         // TTL expiration
         if let Some(last) = self.last_sense_time {
             if last.elapsed() > self.ttl {
                 return true;
             }
         }
-        
+
         // No previous sense
         if self.last_screen_hash.is_none() {
             return true;
         }
-        
+
         false
     }
-    
+
     /// Update cached state after sensing.
     pub fn update_cache(&mut self, screen_hash: u64, parsed: OmniParserOutput) {
         self.last_screen_hash = Some(screen_hash);
         self.last_parsed_state = Some(parsed);
         self.last_sense_time = Some(Instant::now());
     }
-    
+
     /// Force invalidate cache (e.g., on human activity).
     pub fn invalidate(&mut self) {
         self.last_screen_hash = None;
@@ -555,14 +545,14 @@ impl GpuLeaseManager {
         // 1. Check GPU availability
         // 2. Queue if necessary
         // 3. Return lease handle with timeout
-        
+
         // For now, always succeed (actual GPU management in Phase 2.5)
         Some(GpuLease {
             _id: format!("vision-{}", uuid::Uuid::new_v4()),
             _acquired_at: Instant::now(),
         })
     }
-    
+
     /// Check if GPU is available without acquiring lease.
     pub fn is_available() -> bool {
         // Scaffolding: always true for now
@@ -591,21 +581,24 @@ impl OmniParserClient {
             .timeout(Duration::from_secs(30))
             .build()
             .expect("Failed to build HTTP client");
-        
+
         Self {
             client,
             endpoint,
             timeout: Duration::from_secs(30),
         }
     }
-    
+
     /// Parse screenshot through OmniParser sidecar.
     /// Sends actual screenshot bytes to Python FastAPI service.
-    pub async fn parse_screenshot(&self, screenshot_data: &[u8]) -> Result<OmniParserOutput, VisionError> {
+    pub async fn parse_screenshot(
+        &self,
+        screenshot_data: &[u8],
+    ) -> Result<OmniParserOutput, VisionError> {
         tracing::debug!(target: "omniparser", "Sending screenshot to OmniParser at {}", self.endpoint);
-        
+
         let start = Instant::now();
-        
+
         // Build multipart form with screenshot
         let form = reqwest::multipart::Form::new()
             .part(
@@ -613,33 +606,36 @@ impl OmniParserClient {
                 reqwest::multipart::Part::bytes(screenshot_data.to_vec())
                     .file_name("screenshot.png")
                     .mime_str("image/png")
-                    .map_err(|e| VisionError::ParserError(format!("Failed to build form: {}", e)))?
+                    .map_err(|e| {
+                        VisionError::ParserError(format!("Failed to build form: {}", e))
+                    })?,
             )
             .text("monitor_id", "0")
             .text("confidence_threshold", "0.8");
-        
+
         // Send POST request to /parse_screen
         let url = format!("{}/parse_screen", self.endpoint);
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .multipart(form)
             .send()
             .await
             .map_err(|e| VisionError::ParserError(format!("HTTP request failed: {}", e)))?;
-        
+
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            return Err(VisionError::ParserError(
-                format!("OmniParser returned error {}: {}", status, text)
-            ));
+            return Err(VisionError::ParserError(format!(
+                "OmniParser returned error {}: {}",
+                status, text
+            )));
         }
 
         // Read raw response text for optional debug dump
-        let raw_json = response
-            .text()
-            .await
-            .map_err(|e| VisionError::ParserError(format!("Failed to read response text: {}", e)))?;
+        let raw_json = response.text().await.map_err(|e| {
+            VisionError::ParserError(format!("Failed to read response text: {}", e))
+        })?;
 
         // Vision diagnostics: save raw PNG + JSON when KRIA_DEBUG_VISION=1
         if std::env::var("KRIA_DEBUG_VISION").unwrap_or_default() == "1" {
@@ -680,7 +676,7 @@ impl OmniParserClient {
 
         Ok(parse_response.data)
     }
-    
+
     /// Verify visual hash of image region via sidecar.
     pub async fn verify_hash(
         &self,
@@ -694,32 +690,36 @@ impl OmniParserClient {
                 reqwest::multipart::Part::bytes(image_data.to_vec())
                     .file_name("region.png")
                     .mime_str("image/png")
-                    .map_err(|e| VisionError::ParserError(format!("Failed to build form: {}", e)))?
+                    .map_err(|e| {
+                        VisionError::ParserError(format!("Failed to build form: {}", e))
+                    })?,
             )
             .text("expected_hash", expected_hash.to_string());
-        
+
         if let Some(b) = bbox {
             let bbox_str = format!("[{}, {}, {}, {}]", b[0], b[1], b[2], b[3]);
             form = form.text("bbox", bbox_str);
         }
-        
+
         let url = format!("{}/verify_hash", self.endpoint);
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .multipart(form)
             .send()
             .await
             .map_err(|e| VisionError::ParserError(format!("HTTP request failed: {}", e)))?;
-        
+
         if !response.status().is_success() {
-            return Err(VisionError::ParserError("Hash verification request failed".to_string()));
+            return Err(VisionError::ParserError(
+                "Hash verification request failed".to_string(),
+            ));
         }
-        
-        let verify_response: VerifyHashResponse = response
-            .json()
-            .await
-            .map_err(|e| VisionError::ParserError(format!("Failed to parse verify response: {}", e)))?;
-        
+
+        let verify_response: VerifyHashResponse = response.json().await.map_err(|e| {
+            VisionError::ParserError(format!("Failed to parse verify response: {}", e))
+        })?;
+
         Ok(verify_response.similarity)
     }
 }
@@ -770,7 +770,7 @@ pub struct VisualHashVerifier;
 impl VisualHashVerifier {
     /// Verify element visual hash before clicking.
     /// Per RFC 007 Section 3.2: "Visual Hash Verification step to click_element"
-    /// 
+    ///
     /// Steps:
     /// 1. Capture 50x50 micro-screenshot of target coordinates
     /// 2. Calculate pHash of micro-screenshot
@@ -808,7 +808,7 @@ impl VisualHashVerifier {
     /// Converts image 0.25 buffer directly to img_hash's image 0.23 format —
     /// no PNG encode/decode roundtrip.
     pub fn calculate_phash(img: &image::DynamicImage) -> Result<String, VisionError> {
-        use img_hash::{HasherConfig, HashAlg, image as img23};
+        use img_hash::{image as img23, HashAlg, HasherConfig};
 
         // Convert our image 0.25 RgbaImage to img_hash's image 0.23 ImageBuffer.
         // Both Rgba<u8> types are #[repr(C)] [u8; 4] so raw bytes are compatible.
@@ -816,8 +816,13 @@ impl VisualHashVerifier {
         let (width, height) = (rgba.width(), rgba.height());
         let raw: Vec<u8> = rgba.into_raw();
 
-        let img23_buffer = img23::ImageBuffer::<img23::Rgba<u8>, Vec<u8>>::from_raw(width, height, raw)
-            .ok_or_else(|| VisionError::ScreenshotFailed("Failed to create image buffer for hashing".to_string()))?;
+        let img23_buffer =
+            img23::ImageBuffer::<img23::Rgba<u8>, Vec<u8>>::from_raw(width, height, raw)
+                .ok_or_else(|| {
+                    VisionError::ScreenshotFailed(
+                        "Failed to create image buffer for hashing".to_string(),
+                    )
+                })?;
 
         // Create hasher with gradient hash algorithm (similar to pHash)
         let hasher = HasherConfig::new()
@@ -827,18 +832,18 @@ impl VisualHashVerifier {
 
         // Calculate hash directly from raw buffer (no PNG decode step)
         let hash = hasher.hash_image(&img23_buffer);
-        
+
         // Convert to base64 string
         let hash_str = hash.to_base64();
-        
+
         Ok(hash_str)
     }
-    
+
     /// Calculate similarity using Hamming distance.
     /// Returns similarity score 0.0-1.0 where 1.0 is identical.
     fn calculate_similarity(hash1: &str, hash2: &str) -> f32 {
         use img_hash::ImageHash;
-        
+
         // Parse base64 hash strings with explicit type
         type HashType = Box<[u8]>;
         let h1: ImageHash<HashType> = match ImageHash::from_base64(hash1) {
@@ -849,15 +854,15 @@ impl VisualHashVerifier {
             Ok(h) => h,
             Err(_) => return 0.0,
         };
-        
+
         // Calculate distance (number of differing bits)
         let distance = h1.dist(&h2);
-        
+
         // Convert to similarity (hash size in bits)
         // similarity = 1.0 - (distance / total_bits)
         let total_bits = (h1.as_bytes().len() * 8) as f32;
         let similarity = 1.0 - (distance as f32 / total_bits);
-        
+
         similarity
     }
 }
@@ -873,36 +878,48 @@ impl ScreenshotCapture {
     /// Capture full screenshot of primary monitor.
     pub async fn capture_full() -> Result<Vec<u8>, VisionError> {
         tracing::debug!(target: "screenshot", "Capturing full screenshot via xcap");
-        
+
         // Spawn blocking screenshot capture in separate task
         let screenshot = tokio::task::spawn_blocking(|| {
             // Get primary monitor
-            let monitors = xcap::Monitor::all()
-                .map_err(|e| VisionError::ScreenshotFailed(format!("Failed to get monitors: {}", e)))?;
-            
-            let primary = monitors.first()
+            let monitors = xcap::Monitor::all().map_err(|e| {
+                VisionError::ScreenshotFailed(format!("Failed to get monitors: {}", e))
+            })?;
+
+            let primary = monitors
+                .first()
                 .ok_or_else(|| VisionError::ScreenshotFailed("No monitors found".to_string()))?;
-            
+
             // Capture screenshot
-            let image = primary.capture_image()
+            let image = primary
+                .capture_image()
                 .map_err(|e| VisionError::ScreenshotFailed(format!("Failed to capture: {}", e)))?;
-            
+
             // Encode to PNG bytes
             let mut buffer = Cursor::new(Vec::new());
-            image.write_to(&mut buffer, image::ImageFormat::Png)
-                .map_err(|e| VisionError::ScreenshotFailed(format!("Failed to encode PNG: {}", e)))?;
-            
+            image
+                .write_to(&mut buffer, image::ImageFormat::Png)
+                .map_err(|e| {
+                    VisionError::ScreenshotFailed(format!("Failed to encode PNG: {}", e))
+                })?;
+
             Ok::<Vec<u8>, VisionError>(buffer.into_inner())
-        }).await
+        })
+        .await
         .map_err(|e| VisionError::ScreenshotFailed(format!("Screenshot task failed: {}", e)))?;
-        
+
         screenshot
     }
-    
+
     /// Capture an exact screen region for visual verification.
     /// Uses the element's precise bbox — no hardcoded 50x50 square.
     /// Returns DynamicImage directly — no PNG encode/decode roundtrip for local ops.
-    pub async fn capture_region(x: i32, y: i32, width: u32, height: u32) -> Result<image::DynamicImage, VisionError> {
+    pub async fn capture_region(
+        x: i32,
+        y: i32,
+        width: u32,
+        height: u32,
+    ) -> Result<image::DynamicImage, VisionError> {
         tracing::debug!(
             target: "screenshot",
             "Capturing region {}x{} at ({}, {}) via xcap",
@@ -911,9 +928,10 @@ impl ScreenshotCapture {
 
         // Validate coordinates
         if x < 0 || y < 0 || width == 0 || height == 0 {
-            return Err(VisionError::ScreenshotFailed(
-                format!("Invalid region: ({}, {}), size={}x{}", x, y, width, height)
-            ));
+            return Err(VisionError::ScreenshotFailed(format!(
+                "Invalid region: ({}, {}), size={}x{}",
+                x, y, width, height
+            )));
         }
 
         let x_u32 = x as u32;
@@ -922,14 +940,17 @@ impl ScreenshotCapture {
         // Spawn blocking screenshot capture
         let screenshot = tokio::task::spawn_blocking(move || {
             // Get primary monitor
-            let monitors = xcap::Monitor::all()
-                .map_err(|e| VisionError::ScreenshotFailed(format!("Failed to get monitors: {}", e)))?;
+            let monitors = xcap::Monitor::all().map_err(|e| {
+                VisionError::ScreenshotFailed(format!("Failed to get monitors: {}", e))
+            })?;
 
-            let primary = monitors.first()
+            let primary = monitors
+                .first()
                 .ok_or_else(|| VisionError::ScreenshotFailed("No monitors found".to_string()))?;
 
             // Capture screenshot (xcap returns image::RgbaImage)
-            let image = primary.capture_image()
+            let image = primary
+                .capture_image()
                 .map_err(|e| VisionError::ScreenshotFailed(format!("Failed to capture: {}", e)))?;
 
             // Extract exact region using provided dimensions
@@ -943,18 +964,14 @@ impl ScreenshotCapture {
             let crop_height = height.min(screen_height - crop_y);
 
             // Crop the region
-            let cropped = image::imageops::crop_imm(
-                &image,
-                crop_x,
-                crop_y,
-                crop_width,
-                crop_height
-            );
+            let cropped =
+                image::imageops::crop_imm(&image, crop_x, crop_y, crop_width, crop_height);
 
             // Convert directly to DynamicImage — no PNG serialization for local ops
             let cropped_image = cropped.to_image();
             Ok::<image::DynamicImage, VisionError>(image::DynamicImage::ImageRgba8(cropped_image))
-        }).await
+        })
+        .await
         .map_err(|e| VisionError::ScreenshotFailed(format!("Region capture task failed: {}", e)))?;
 
         screenshot
@@ -982,15 +999,17 @@ impl ToolHandler for GetScreenElements {
         let filter_type = params["filter_type"].as_str();
         let min_confidence = params["min_confidence"].as_f64().unwrap_or(0.8) as f32;
         let monitor_id = params["monitor_id"].as_u64().unwrap_or(0) as u32;
-        
+
         // Check cache first
         let cache_key = format!("monitor_{}", monitor_id);
-        
+
         if let Some(cached) = OMNI_CACHE.get(&cache_key).await {
             tracing::debug!(target: "get_screen_elements", "Cache hit for {}", cache_key);
-            
+
             // Filter cached elements
-            let elements: Vec<_> = cached.output.elements
+            let elements: Vec<_> = cached
+                .output
+                .elements
                 .iter()
                 .filter(|e| {
                     // Apply confidence filter
@@ -1017,7 +1036,7 @@ impl ToolHandler for GetScreenElements {
                     })
                 })
                 .collect();
-            
+
             return ToolResult::ok(serde_json::json!({
                 "elements": elements,
                 "count": elements.len(),
@@ -1025,10 +1044,10 @@ impl ToolHandler for GetScreenElements {
                 "cache_age_ms": cached.created_at.elapsed().as_millis(),
             }));
         }
-        
+
         // Cache miss - need to parse screen
         tracing::info!(target: "get_screen_elements", "Cache miss, parsing screen");
-        
+
         // Step 1: Request GPU lease
         let _gpu_lease = match GpuLeaseManager::request_lease().await {
             Some(lease) => lease,
@@ -1036,15 +1055,20 @@ impl ToolHandler for GetScreenElements {
                 return ToolResult::err("GPU lease unavailable - vision parsing blocked");
             }
         };
-        
+
         // Step 2: Capture screenshot
         let screenshot_data = match ScreenshotCapture::capture_full().await {
             Ok(data) => data,
             Err(e) => return ToolResult::err(format!("Screenshot failed: {}", e)),
         };
-        
+
         // Step 3: Parse through OmniParser
-        let mut parsed = match self.state.omni_client.parse_screenshot(&screenshot_data).await {
+        let mut parsed = match self
+            .state
+            .omni_client
+            .parse_screenshot(&screenshot_data)
+            .await
+        {
             Ok(output) => output,
             Err(e) => return ToolResult::err(format!("OmniParser failed: {}", e)),
         };
@@ -1052,7 +1076,9 @@ impl ToolHandler for GetScreenElements {
         // Step 3.5: Recalculate visual hashes from real pixels (bypass dummy sidecar data)
         let screenshot_img = match image::load_from_memory(&screenshot_data) {
             Ok(img) => img,
-            Err(e) => return ToolResult::err(format!("Failed to decode screenshot for hashing: {}", e)),
+            Err(e) => {
+                return ToolResult::err(format!("Failed to decode screenshot for hashing: {}", e))
+            }
         };
 
         for element in parsed.elements.iter_mut() {
@@ -1075,7 +1101,9 @@ impl ToolHandler for GetScreenElements {
                     );
 
                     // Always save baseline crop for physical inspection (not behind debug flag)
-                    if let Err(e) = dynamic_crop.save(format!("/tmp/kria_baseline_{}.png", element.id)) {
+                    if let Err(e) =
+                        dynamic_crop.save(format!("/tmp/kria_baseline_{}.png", element.id))
+                    {
                         tracing::warn!(target: "omniparser", "Failed to save baseline crop: {}", e);
                     }
                     if let Err(e) = dynamic_crop.save("/tmp/kria_baseline.png") {
@@ -1100,10 +1128,13 @@ impl ToolHandler for GetScreenElements {
         drop(_gpu_lease);
 
         // Step 5: Cache the results (now with real pixel-calculated hashes)
-        OMNI_CACHE.set(cache_key.clone(), parsed.clone(), screenshot_data).await;
-        
+        OMNI_CACHE
+            .set(cache_key.clone(), parsed.clone(), screenshot_data)
+            .await;
+
         // Step 6: Filter and return elements
-        let elements: Vec<_> = parsed.elements
+        let elements: Vec<_> = parsed
+            .elements
             .iter()
             .filter(|e| {
                 if e.confidence < min_confidence {
@@ -1127,7 +1158,7 @@ impl ToolHandler for GetScreenElements {
                 })
             })
             .collect();
-        
+
         ToolResult::ok(serde_json::json!({
             "elements": elements,
             "count": elements.len(),
@@ -1151,7 +1182,7 @@ impl ToolHandler for ClickElement {
             None => return ToolResult::err("Missing element_id parameter"),
         };
         let button = params["button"].as_str().unwrap_or("left");
-        
+
         // Step 1: Get element from cache
         let element = match OMNI_CACHE.get_element_by_id(element_id).await {
             Some(el) => el,
@@ -1162,17 +1193,17 @@ impl ToolHandler for ClickElement {
                 ));
             }
         };
-        
+
         // Check element TTL (RFC 007: 10 second max for element IDs)
         // Note: Cache TTL is 5 seconds, but we also check element-specific
         // The cache get_element_by_id already checks TTL
-        
+
         tracing::info!(
             target: "click_element",
             "Clicking element {} at bbox {:?}",
             element_id, element.bbox
         );
-        
+
         // Step 2: Visual Hash Verification (or bypass)
         let [x1, y1, x2, y2] = element.bbox;
         let region_width = ((x2 - x1).max(1)) as u32;
@@ -1194,11 +1225,19 @@ impl ToolHandler for ClickElement {
             );
         } else {
             // Capture verification crop using the EXACT same bbox geometry as the baseline
-            let verification_crop = match ScreenshotCapture::capture_region(region_x, region_y, region_width, region_height).await {
+            let verification_crop = match ScreenshotCapture::capture_region(
+                region_x,
+                region_y,
+                region_width,
+                region_height,
+            )
+            .await
+            {
                 Ok(img) => img,
                 Err(e) => {
                     return ToolResult::err(format!(
-                        "Visual hash verification failed (screenshot): {}", e
+                        "Visual hash verification failed (screenshot): {}",
+                        e
                     ));
                 }
             };
@@ -1212,8 +1251,12 @@ impl ToolHandler for ClickElement {
 
             // Log the verification hash for comparison
             match VisualHashVerifier::calculate_phash(&verification_crop) {
-                Ok(hash) => tracing::info!(target: "click_element", "Verification hash for {}: {}", element_id, hash),
-                Err(e) => tracing::warn!(target: "click_element", "Failed to calculate verification hash: {}", e),
+                Ok(hash) => {
+                    tracing::info!(target: "click_element", "Verification hash for {}: {}", element_id, hash)
+                }
+                Err(e) => {
+                    tracing::warn!(target: "click_element", "Failed to calculate verification hash: {}", e)
+                }
             }
 
             // Verify visual hash (DynamicImage passed directly, no PNG roundtrip)
@@ -1223,7 +1266,8 @@ impl ToolHandler for ClickElement {
                 }
                 Ok(false) => {
                     return ToolResult::err(
-                        "Visual hash mismatch - UI has shifted. Element may have moved.".to_string()
+                        "Visual hash mismatch - UI has shifted. Element may have moved."
+                            .to_string(),
                     );
                 }
                 Err(e) => {
@@ -1231,7 +1275,7 @@ impl ToolHandler for ClickElement {
                 }
             }
         }
-        
+
         // Step 3: Execute the click via GUI backend
         let button_enum = match button {
             "left" => MouseButton::Left,
@@ -1239,14 +1283,19 @@ impl ToolHandler for ClickElement {
             "middle" => MouseButton::Middle,
             _ => return ToolResult::err(format!("Invalid button: {}", button)),
         };
-        
-        match self.state.gui_backend.click_mouse(center_x, center_y, button_enum).await {
+
+        match self
+            .state
+            .gui_backend
+            .click_mouse(center_x, center_y, button_enum)
+            .await
+        {
             Ok(_) => {
                 // Step 4: Cache Invalidation
                 // Per RFC 007: "cache must be instantly invalidated the moment
                 // a state-changing action (click or type) occurs"
                 OMNI_CACHE.invalidate_all().await;
-                
+
                 ToolResult::ok(serde_json::json!({
                     "clicked": true,
                     "element_id": element_id,
@@ -1270,29 +1319,29 @@ pub fn register(reg: &ToolRegistry) {
     // Create OmniParser client
     let omni_endpoint = std::env::var("KRIA_OMNIPARSER_ENDPOINT")
         .unwrap_or_else(|_| "http://localhost:8080".to_string());
-    
+
     let omni_client = OmniParserClient::new(omni_endpoint);
-    
+
     // Create GUI backend for click execution
     // Socket path must match the daemon's --socket argument (/tmp/kria-uinput.sock).
     let socket_path = std::path::PathBuf::from(
-        std::env::var("KRIA_UINPUT_SOCKET")
-            .unwrap_or_else(|_| "/tmp/kria-uinput.sock".to_string())
+        std::env::var("KRIA_UINPUT_SOCKET").unwrap_or_else(|_| "/tmp/kria-uinput.sock".to_string()),
     );
     let gui_backend: Arc<dyn GuiBackend> = Arc::new(YdotoolBackend::new(socket_path));
-    
+
     let state = Arc::new(VisionToolState {
         omni_client,
         gui_backend,
     });
-    
+
     let tools: Vec<(ToolDef, Arc<dyn ToolHandler>)> = vec![
         (
             ToolDef {
                 name: "get_screen_elements".into(),
                 description: "Get UI elements from screen using OmniParser vision. \
                     Returns elements with cognitive defense applied (<evidence> wrapping). \
-                    Uses 5-second cache. Requires GPU lease.".into(),
+                    Uses 5-second cache. Requires GPU lease."
+                    .into(),
                 category: "vision_automation".into(),
                 default_tier: RiskLevel::Red,
                 min_tier: "standard",
@@ -1320,13 +1369,16 @@ pub fn register(reg: &ToolRegistry) {
                     },
                 ],
             },
-            Arc::new(GetScreenElements { state: Arc::clone(&state) }),
+            Arc::new(GetScreenElements {
+                state: Arc::clone(&state),
+            }),
         ),
         (
             ToolDef {
                 name: "click_element".into(),
                 description: "Click a UI element by ID with visual hash verification. \
-                    Validates UI hasn't shifted before clicking. Invalidates cache after.".into(),
+                    Validates UI hasn't shifted before clicking. Invalidates cache after."
+                    .into(),
                 category: "vision_automation".into(),
                 default_tier: RiskLevel::Red,
                 min_tier: "standard",
@@ -1347,15 +1399,17 @@ pub fn register(reg: &ToolRegistry) {
                     },
                 ],
             },
-            Arc::new(ClickElement { state: Arc::clone(&state) }),
+            Arc::new(ClickElement {
+                state: Arc::clone(&state),
+            }),
         ),
     ];
-    
+
     let tool_count = tools.len();
     for (def, handler) in tools {
         reg.register(def, handler);
     }
-    
+
     tracing::info!(
         target: "vision_automation",
         "Registered {} vision automation tools (RED tier)",
@@ -1384,7 +1438,7 @@ mod tests {
             1.0,
             "hash".to_string(),
         );
-        
+
         // Label should be truncated
         assert!(element.label.len() == 150);
         assert!(element.label_wrapped.len() < 150);
@@ -1392,7 +1446,7 @@ mod tests {
         assert!(element.label_wrapped.ends_with("</evidence>"));
         assert!(element.label_wrapped.contains("...")); // Truncation indicator
     }
-    
+
     #[test]
     fn test_element_center_calculation() {
         let element = OmniElement::new(
@@ -1405,16 +1459,16 @@ mod tests {
             1.0,
             "hash".to_string(),
         );
-        
+
         let (x, y) = element.center();
         assert_eq!(x, 200); // (100 + 300) / 2
         assert_eq!(y, 300); // (200 + 400) / 2
-        
+
         let (w, h) = element.dimensions();
         assert_eq!(w, 200); // 300 - 100
         assert_eq!(h, 200); // 400 - 200
     }
-    
+
     #[test]
     fn test_cache_ttl() {
         let cache = OmniParserCache::new();

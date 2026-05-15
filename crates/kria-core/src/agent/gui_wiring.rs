@@ -3,16 +3,23 @@
 //! This module provides the integration between the AgentLoop and the HTN GuiExecutor.
 //! It detects GUI workflows from TurnGate and routes them appropriately.
 
+use crate::agent::environment_grounder::{EnvironmentGrounder, NoopEnvironmentGrounder};
+use crate::agent::gui_planner::{GuiPlanner, RuleBasedPlanner};
 use crate::agent::htn_executor::{
     GuiExecutor, GuiWorkflow, SafeAbortExecutor, ToolExecutor, WorkflowResult,
 };
-use crate::agent::htn_integration::{generate_gui_workflow, requires_gui_automation};
+use crate::agent::intent_compiler::GuiTaskSpec;
 use crate::agent::turn_gate::{IntentEnvelope, Operation, TurnGatePlan};
+use crate::infra::ToolResult;
 use crate::tools::gui_automation::KillSwitchInterceptor;
 use crate::tools::registry::ToolRegistry;
-use crate::infra::ToolResult;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
+
+// P3: GoalTree multi-stage workflow types
+use crate::agent::goal_tree::GoalTree;
+use crate::agent::stage_executor::{GoalTreeResult, StageExecutor};
+use crate::agent::workflow_compiler::{MultiVerbSpec, RuleBasedWorkflowCompiler, WorkflowCompiler};
 
 /// GUI execution coordinator that wires AgentLoop to GuiExecutor.
 #[allow(dead_code)] // Fields reserved for future tool-based actions
@@ -25,38 +32,40 @@ pub struct GuiExecutionCoordinator {
     gui_backend: Arc<dyn crate::tools::gui_automation::GuiBackend>,
     /// Kill switch interceptor for safety
     kill_switch: Arc<KillSwitchInterceptor>,
+    /// P2: Environment grounder for operational facts
+    grounder: Arc<dyn EnvironmentGrounder>,
 }
 
 impl GuiExecutionCoordinator {
     /// Create new coordinator with all required components.
-    pub fn new(
-        tool_registry: Arc<ToolRegistry>,
-        kill_switch: Arc<KillSwitchInterceptor>,
-    ) -> Self {
+    pub fn new(tool_registry: Arc<ToolRegistry>, kill_switch: Arc<KillSwitchInterceptor>) -> Self {
         let gui_backend = kill_switch.get_backend();
-        
+
         // Create tool executor wrapper
-        let tool_executor: Arc<dyn ToolExecutor> = 
-            Arc::new(RegistryToolExecutor { registry: Arc::clone(&tool_registry) });
-        
+        let tool_executor: Arc<dyn ToolExecutor> = Arc::new(RegistryToolExecutor {
+            registry: Arc::clone(&tool_registry),
+        });
+
         // Create safe abort executor
         let abort_executor = SafeAbortExecutor::new(Arc::clone(&tool_executor));
-        
+
         // Create GUI executor
-        let executor = GuiExecutor::new(
-            kill_switch.clone(),
-            tool_executor,
-            abort_executor,
-        );
-        
+        let executor = GuiExecutor::new(kill_switch.clone(), tool_executor, abort_executor);
+
         Self {
             executor,
             tool_registry,
             gui_backend,
             kill_switch,
+            grounder: Arc::new(NoopEnvironmentGrounder),
         }
     }
-    
+
+    /// Set a custom grounder (e.g. LiveEnvironmentGrounder at app startup).
+    pub fn set_grounder(&mut self, grounder: Arc<dyn EnvironmentGrounder>) {
+        self.grounder = grounder;
+    }
+
     /// Check if TurnGate plan should trigger GUI workflow execution.
     /// Per RFC 007: Route to GuiExecutor when intent requires GUI automation.
     ///
@@ -113,36 +122,48 @@ impl GuiExecutionCoordinator {
             false
         }
     }
-    
-    /// Generate or retrieve GUI workflow for the intent.
+
+    /// Generate GUI workflow from a compiled `GuiTaskSpec`.
     ///
     /// Returns `Some(workflow)` only when the rule-based planner can produce a
-    /// concrete, actionable plan. When the prompt looks GUI-bound but no
-    /// concrete plan can be built, this returns `None` so the caller can route
-    /// to the LLM HTN planner / ReAct loop instead of executing a trivial
-    /// "discovery" stub that would falsely report success.
-    pub fn generate_workflow(
+    /// concrete, actionable plan. On failure the caller falls back to the
+    /// LLM HTN planner.
+    pub async fn generate_workflow(
         &self,
-        task_id: &str,
+        _task_id: &str,
         _intent: &IntentEnvelope,
-        user_text: &str,
+        spec: &GuiTaskSpec,
     ) -> Option<GuiWorkflow> {
-        if let Some(workflow) = generate_gui_workflow(task_id, user_text) {
-            return Some(workflow);
-        }
+        // P2: Ground operational facts before planning
+        let facts = self.grounder.ground(&spec.targets).await;
+        tracing::debug!(
+            target: "gui_wiring",
+            focused_app = ?facts.focused_app,
+            visible_windows = facts.visible_windows.len(),
+            capabilities = ?facts.capabilities,
+            "grounding complete"
+        );
 
-        if requires_gui_automation(user_text) {
-            tracing::warn!(
-                target: "gui_wiring",
-                task_id = %task_id,
-                "GUI intent detected but rule-based planner produced no workflow; \
-                 deferring to LLM HTN planner / ReAct loop instead of trivial discovery stub"
-            );
+        match RuleBasedPlanner.plan(spec, &facts).await {
+            Ok(workflow) => {
+                tracing::debug!(
+                    target: "gui_wiring",
+                    verb = ?spec.primary_verb,
+                    "Rule-based planner produced workflow"
+                );
+                Some(workflow)
+            }
+            Err(e) => {
+                tracing::info!(
+                    target: "gui_wiring",
+                    error = %e,
+                    "Rule-based planner declined intent; caller should fall back to LLM"
+                );
+                None
+            }
         }
-
-        None
     }
-    
+
     /// Execute GUI workflow with full RFC 007 safety pipeline.
     pub async fn execute_workflow(
         &mut self,
@@ -166,35 +187,107 @@ impl GuiExecutionCoordinator {
                 tracing::debug!("RFC 008: Uinput daemon heartbeat sent");
             }
         });
-        
+
         // Execute through HTN executor (fetches window context dynamically)
-        self.executor.execute_workflow(
-            workflow,
-            cancellation,
-        ).await
+        self.executor.execute_workflow(workflow, cancellation).await
     }
-    
-    /// Build a generic discovery workflow for unknown GUI tasks.
-    fn build_discovery_workflow(&self, task_id: &str) -> GuiWorkflow {
-        use crate::agent::htn_executor::{GuiWorkflowBuilder, VerificationType};
-        
-        GuiWorkflowBuilder::new(task_id)
-            .max_duration(60)
-            // Step 1: Get screen elements to understand current UI
-            .add_step(
-                1,
-                "get_screen_elements",
-                serde_json::json!({}),
-                VerificationType::ElementsFound {
-                    element_ids: vec![],
-                    min_count: 0,
-                },
-            )
-            .add_abort_step(
-                "press_shortcut",
-                serde_json::json!({"keys": ["Escape"]}),
-            )
-            .build()
+
+    // ================================================================
+    // P3: Multi-stage GoalTree workflow path
+    // ================================================================
+
+    /// Compile a multi-verb specification into a GoalTree.
+    ///
+    /// This is the P3 entry point for multi-stage workflows. The coordinator:
+    /// 1. Grounds operational facts via the existing grounder
+    /// 2. Compiles the MultiVerbSpec into a GoalTree via RuleBasedWorkflowCompiler
+    /// 3. Returns the compiled GoalTree for execution
+    ///
+    /// If compilation fails (single verb, unsupported pattern, etc.), returns None.
+    /// The caller should fall back to the existing single-verb GuiPlanner path.
+    ///
+    /// **Invariant**: This method does NOT execute. It only compiles.
+    pub async fn generate_multi_stage_workflow(&self, spec: &MultiVerbSpec) -> Option<GoalTree> {
+        // Ground operational facts for advisory context hints
+        // Extract targets from all clauses for grounder relevance filtering
+        let all_targets: Vec<_> = spec
+            .clauses
+            .iter()
+            .flat_map(|c| c.targets.iter().cloned())
+            .collect();
+        let facts = self.grounder.ground(&all_targets).await;
+
+        tracing::debug!(
+            target: "gui_wiring",
+            clauses = spec.clauses.len(),
+            focused_app = ?facts.focused_app,
+            "P3: Grounding complete for multi-verb workflow"
+        );
+
+        // Compile via deterministic rule-based compiler
+        let compiler = RuleBasedWorkflowCompiler;
+        match compiler.compile(spec, &facts) {
+            Ok(tree) => {
+                tracing::info!(
+                    target: "gui_wiring",
+                    workflow_id = %tree.workflow_id,
+                    stages = tree.stages.len(),
+                    "P3: GoalTree compiled successfully"
+                );
+                Some(tree)
+            }
+            Err(e) => {
+                tracing::info!(
+                    target: "gui_wiring",
+                    error = %e,
+                    "P3: WorkflowCompiler declined multi-verb spec; fall back to single-verb path"
+                );
+                None
+            }
+        }
+    }
+
+    /// Execute a compiled GoalTree via the StageExecutor.
+    ///
+    /// This wraps the StageExecutor with:
+    /// - Heartbeat task for uinput daemon (same as existing execute_workflow)
+    /// - Cancellation propagation
+    ///
+    /// **Invariant**: The GoalTree is borrowed immutably. The StageExecutor
+    /// never calls planners, never mutates the tree, never invents stages.
+    pub async fn execute_goal_tree(
+        &self,
+        tree: &GoalTree,
+        cancellation: CancellationToken,
+    ) -> GoalTreeResult {
+        // RFC 008: Start heartbeat task (same pattern as existing execute_workflow)
+        let backend = Arc::clone(&self.gui_backend);
+        let heartbeat_cancel = cancellation.clone();
+        let _heartbeat_task = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(2));
+            loop {
+                interval.tick().await;
+                if heartbeat_cancel.is_cancelled() {
+                    break;
+                }
+                if let Err(e) = backend.send_heartbeat().await {
+                    tracing::error!("P3: Uinput daemon heartbeat failed: {}", e);
+                    break;
+                }
+                tracing::debug!("P3: Uinput daemon heartbeat sent");
+            }
+        });
+
+        // Create StageExecutor using the same ToolExecutor as the existing executor
+        let tool_executor: Arc<dyn ToolExecutor> = Arc::new(RegistryToolExecutor {
+            registry: Arc::clone(&self.tool_registry),
+        });
+        let verifier: Arc<dyn crate::agent::execution_verifier::ExecutionVerifier> =
+            Arc::new(crate::agent::execution_verifier_impl::BoundedExecutionVerifier::new());
+
+        let stage_executor = StageExecutor::new(tool_executor, verifier);
+
+        stage_executor.execute_goal_tree(tree, cancellation).await
     }
 }
 
@@ -226,8 +319,8 @@ pub trait KillSwitchBackendExt {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::turn_gate::{HazardHint, ComputeClass, IntentSource, Modality};
-    
+    use crate::agent::turn_gate::{ComputeClass, HazardHint, IntentSource, Modality};
+
     #[test]
     fn test_should_route_to_gui_executor() {
         // GUI operation should route
@@ -244,9 +337,11 @@ mod tests {
             direct_tool_hint: None,
             fallback_tool_hints: vec![],
         };
-        
-        assert!(GuiExecutionCoordinator::should_route_to_gui_executor(&gui_plan));
-        
+
+        assert!(GuiExecutionCoordinator::should_route_to_gui_executor(
+            &gui_plan
+        ));
+
         // Non-GUI operation should not route
         let chat_plan = TurnGatePlan {
             intent: IntentEnvelope {
@@ -257,16 +352,18 @@ mod tests {
                 confidence: 0.9,
                 source: IntentSource::DeterministicGuard,
             },
-            resource_plan: crate::agent::turn_gate::ResourcePlan::L1Text { 
-                residency: crate::agent::turn_gate::L1ResidencyRequirement::Auto 
+            resource_plan: crate::agent::turn_gate::ResourcePlan::L1Text {
+                residency: crate::agent::turn_gate::L1ResidencyRequirement::Auto,
             },
             direct_tool_hint: None,
             fallback_tool_hints: vec![],
         };
-        
-        assert!(!GuiExecutionCoordinator::should_route_to_gui_executor(&chat_plan));
+
+        assert!(!GuiExecutionCoordinator::should_route_to_gui_executor(
+            &chat_plan
+        ));
     }
-    
+
     #[test]
     fn test_gui_tool_hint_routing() {
         let plan = TurnGatePlan {
@@ -282,7 +379,7 @@ mod tests {
             direct_tool_hint: Some("click_mouse".to_string()),
             fallback_tool_hints: vec![],
         };
-        
+
         assert!(GuiExecutionCoordinator::should_route_to_gui_executor(&plan));
     }
 }

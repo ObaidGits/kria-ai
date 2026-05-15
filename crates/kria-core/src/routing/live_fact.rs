@@ -150,6 +150,10 @@ fn contains_historical_markers(query: &str) -> bool {
 
 const DEFAULT_LIVE_FACT_THRESHOLD: f32 = 0.72;
 
+/// Minimum query length (chars) for Gate 2 semantic matching.
+/// Short inputs (greetings, single words) are never live-fact queries.
+const MIN_QUERY_LENGTH_FOR_GATE2: usize = 8;
+
 fn get_threshold() -> f32 {
     env::var("KRIA_LIVE_FACT_THRESHOLD")
         .ok()
@@ -218,6 +222,17 @@ pub fn is_live_fact_query(query: &str) -> bool {
 /// Gate 2: Semantic anchor match using FastEmbed cosine similarity.
 /// Returns true if the query's embedding is close enough to any anchor embedding.
 fn semantic_anchor_match(query: &str) -> bool {
+    // Short inputs (greetings, single words, typos) are never live-fact queries.
+    // "Hye", "Hi", "Hello", "ok" etc. must not trigger semantic matching.
+    if query.trim().chars().count() < MIN_QUERY_LENGTH_FOR_GATE2 {
+        tracing::debug!(
+            query = %query,
+            min_length = MIN_QUERY_LENGTH_FOR_GATE2,
+            "LiveFactClassifier: Gate 2 skipped — query too short"
+        );
+        return false;
+    }
+
     let query_vec = match embed_one(query) {
         Ok(v) => v,
         Err(e) => {
@@ -360,5 +375,17 @@ mod tests {
         // These should not trigger any gate
         assert!(!is_live_fact_query("What is photosynthesis?"));
         assert!(!is_live_fact_query("Explain quantum mechanics"));
+    }
+
+    #[test]
+    fn test_live_fact_short_inputs_rejected() {
+        // Short greetings and single words must never be classified as live-fact
+        assert!(!is_live_fact_query("Hye"));
+        assert!(!is_live_fact_query("Hi"));
+        assert!(!is_live_fact_query("Hello"));
+        assert!(!is_live_fact_query("ok"));
+        assert!(!is_live_fact_query("hey"));
+        assert!(!is_live_fact_query("yo"));
+        assert!(!is_live_fact_query("test"));
     }
 }

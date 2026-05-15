@@ -5,6 +5,7 @@ import { appStore } from "../stores/app";
 import { SUPPORTED_LANGUAGES, setLocale } from "../stores/i18n";
 import SkillMarketplace from "./SkillMarketplace";
 import SubstrateStatus from "./SubstrateStatus";
+import ProviderSettings from "./ProviderSettings";
 
 type Tab = "llm" | "voice" | "safety" | "ui" | "assistant" | "labs" | "search" | "services" | "telegram" | "automation" | "gui_automation" | "hardware" | "knowledge" | "google" | "colab" | "ironclad" | "marketplace";
 
@@ -890,7 +891,10 @@ const SettingsModal: Component = () => {
           {/* LLM Tab */}
           <Show when={activeTab() === "llm"}>
             <section class="settings-section">
-              <h3>Routing Mode</h3>
+              {/* Universal Model Provider System */}
+              <ProviderSettings />
+
+              <h3>Legacy Routing Mode</h3>
               <div class="settings-field">
                 <label>Mode</label>
                 <select

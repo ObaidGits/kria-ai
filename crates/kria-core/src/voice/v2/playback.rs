@@ -32,6 +32,13 @@ pub enum PlaybackState {
     Aborted,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PlaybackRuntimeEvent {
+    Failure { message: String },
+    Recovered,
+}
+
 /// One streaming TTS playback session.
 pub struct PlaybackSink {
     sample_rate: u32,
@@ -51,6 +58,10 @@ pub struct PlaybackSink {
     /// Optional callback fired exactly once when the first audio chunk is
     /// queued to rodio. Used by the pipeline to record TTFA telemetry.
     first_audio_callback: Option<Arc<dyn Fn(Instant) + Send + Sync>>,
+    /// Optional callback for playback runtime failures/recovery.
+    runtime_event_callback: Option<Arc<dyn Fn(PlaybackRuntimeEvent) + Send + Sync>>,
+    /// Active player for the current session so abort can stop immediately.
+    active_player: Option<Arc<AudioPlayer>>,
 }
 
 impl PlaybackSink {
@@ -64,6 +75,8 @@ impl PlaybackSink {
             aec_ref_tx: None,
             first_audio_emitted: Arc::new(AtomicBool::new(false)),
             first_audio_callback: None,
+            runtime_event_callback: None,
+            active_player: None,
         }
     }
 
@@ -80,6 +93,13 @@ impl PlaybackSink {
         F: Fn(Instant) + Send + Sync + 'static,
     {
         self.first_audio_callback = Some(Arc::new(cb));
+    }
+
+    pub fn set_runtime_event_callback<F>(&mut self, cb: F)
+    where
+        F: Fn(PlaybackRuntimeEvent) + Send + Sync + 'static,
+    {
+        self.runtime_event_callback = Some(Arc::new(cb));
     }
 
     /// Subscribe a synthesis task to the abort signal.
@@ -100,6 +120,8 @@ impl PlaybackSink {
         let sr = self.sample_rate;
         let first_flag = self.first_audio_emitted.clone();
         let cb = self.first_audio_callback.clone();
+        let runtime_cb = self.runtime_event_callback.clone();
+        self.active_player = Some(player.clone());
         let mut abort_rx = self.abort_tx.subscribe();
 
         let drain = tokio::spawn(async move {
@@ -131,9 +153,31 @@ impl PlaybackSink {
                         // playing, so this loop also serialises chunks for
                         // smooth playback. On abort, the next iteration
                         // wakes via `abort_rx.changed()`.
-                        if let Err(e) = player.play_samples(chunk, sr).await {
+                        if let Err(e) = player.play_samples(chunk.clone(), sr).await {
                             tracing::warn!("playback error: {e}");
-                            break;
+                            if let Some(ref runtime_cb) = runtime_cb {
+                                runtime_cb(PlaybackRuntimeEvent::Failure {
+                                    message: e.to_string(),
+                                });
+                            }
+                            player.invalidate_runtime();
+                            // Lazy reopen + retry exactly once.
+                            match player.play_samples(chunk, sr).await {
+                                Ok(_) => {
+                                    if let Some(ref runtime_cb) = runtime_cb {
+                                        runtime_cb(PlaybackRuntimeEvent::Recovered);
+                                    }
+                                }
+                                Err(retry_err) => {
+                                    tracing::warn!("playback recovery retry failed: {retry_err}");
+                                    if let Some(ref runtime_cb) = runtime_cb {
+                                        runtime_cb(PlaybackRuntimeEvent::Failure {
+                                            message: retry_err.to_string(),
+                                        });
+                                    }
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
@@ -152,6 +196,12 @@ impl PlaybackSink {
         // Drop the TX to close the channel from the producer side; the
         // drain task will wake on `abort_rx.changed()` and stop the player.
         self.pcm_tx.take();
+        if let Some(player) = self.active_player.take() {
+            // Spawn a background task to stop playback without blocking.
+            tokio::spawn(async move {
+                let _ = player.stop_now().await;
+            });
+        }
     }
 
     pub fn state(&self) -> PlaybackState {

@@ -164,3 +164,6 @@ lto = "thin"
 codegen-units = 16
 strip = "debuginfo"
 panic = "abort"
+
+[patch.crates-io]
+piper-rs = { path = "vendor/piper-rs" }
