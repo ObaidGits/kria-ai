@@ -500,10 +500,7 @@ impl FailoverRouter {
         let fallback_id = fallback_id.into();
         Self {
             primary_fsm: Arc::new(ProviderFsm::new("primary", config.clone())),
-            fallback_fsm: Some(Arc::new(ProviderFsm::new(
-                fallback_id,
-                config.clone(),
-            ))),
+            fallback_fsm: Some(Arc::new(ProviderFsm::new(fallback_id, config.clone()))),
             fallback_backend: Some(fallback_backend),
             inner,
             session_lock: Mutex::new(None),
@@ -942,7 +939,10 @@ mod tests {
         // session-level decisions, not at the per-failure level.
         let should_failover2 = fsm.on_hard_failure().await;
         // Conservative: second failure is allowed (recovery_count_for_hysteresis = 0)
-        assert!(should_failover2, "second failure should also trigger failover (conservative hysteresis)");
+        assert!(
+            should_failover2,
+            "second failure should also trigger failover (conservative hysteresis)"
+        );
     }
 
     // ── Snapshot ─────────────────────────────────────────────────────────────
@@ -974,7 +974,7 @@ mod tests {
             fsm.on_soft_failure().await;
             fsm.on_soft_failure().await; // → Degraded
             fsm.on_hard_failure().await; // → Failed
-            fsm.enter_cooldown().await;  // → CoolingDown
+            fsm.enter_cooldown().await; // → CoolingDown
             fsm.state()
         }
 
@@ -1007,7 +1007,10 @@ mod tests {
         // FSM should still be in a valid state (not stuck)
         let state = fsm.state();
         assert!(
-            matches!(state, ProviderState::Recovering | ProviderState::CoolingDown),
+            matches!(
+                state,
+                ProviderState::Recovering | ProviderState::CoolingDown
+            ),
             "unexpected state: {:?}",
             state
         );

@@ -42,6 +42,12 @@ static CONVERSATION_RE: Lazy<Vec<Regex>> = Lazy::new(|| {
 // ─── Direct tool patterns (trigger specific tools) ───
 static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
     let mappings: Vec<(&str, &str)> = vec![
+        // news_status — MUST come before system health so "news system status" is not
+        // mis-classified as check_system_health via the "system stat(us)" pattern below.
+        (
+            r"(?i)\bnews\s+(system\s+)?(status|health|state)\b",
+            "news_status",
+        ),
         // System stats / health (multi-metric — maps to check_system_health as entry point)
         (
             r"(?i)\b(system\s+stat(s|us)|my\s+system\s+stat|mera\s+system|system\s+vitals?)\b",
@@ -91,6 +97,13 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             "get_wifi_networks",
         ),
         // Active window / window management
+        // type_text — MUST come before get_active_window so
+        // "Type 'X' in the active window" doesn't match the active-window getter.
+        (
+            r#"(?i)\b(type|input)\b.{0,20}['"']?.{1,80}['"']?.{0,20}\b(in(to)?|on)\s+(the\s+)?(active\s+)?(window|field|input|box)\b"#,
+            "type_text",
+        ),
+        (r#"(?i)\btype\s+['"].{1,80}['"]"#, "type_text"),
         (
             r"(?i)\b(active|current|focused)\b.{0,15}\bwindow\b|\bwindow.{0,15}\b(active|current|focused)\b",
             "get_active_window",
@@ -104,10 +117,10 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\b(active|open|current)\b.{0,20}\b(network\s+connections?|connections?|sockets?)\b",
             "get_active_connections",
         ),
-        // Service management — routed to execute_bash for command-level granularity
+        // Service management — routed to manage_service for lifecycle control
         (
             r"(?i)\b(start|stop|restart|status|check)\b.{0,20}\b(service|daemon|systemd)\b",
-            "execute_bash",
+            "manage_service",
         ),
         // Scheduled tasks
         (
@@ -126,6 +139,12 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
         (
             r"(?i)\b(ram|memory)\s*(usage|info|status|stats?|stat)\b",
             "get_memory_info",
+        ),
+        // Disk/CPU/memory queries on a VM must route to fleet command, not local tools.
+        // This must come BEFORE the local get_disk_space / get_cpu_usage rules.
+        (
+            r"(?i)\b(disk\s+space|disk\s+usage|cpu\s+usage|memory\s+usage|ram\s+usage)\b.{0,50}\b(?:on|in)\s+(?:my\s+)?(?:vm|virtual\s+machine|remote)\b",
+            "execute_fleet_command",
         ),
         (
             r"(?i)\b(disk|storage)\s*(space|usage|info)\b",
@@ -174,9 +193,15 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\b(generate|create|make|compute|get)\s+(text\s+)?embeddings?\b|\bembedding\s+for\b",
             "embeddings_generate",
         ),
-        // send_message: "text/message/WhatsApp/signal Anjali", "send a WhatsApp to X"
-        // Excludes "text embeddings" / "text message" via the embeddings rule above.
-        (r"(?i)\b(text|message|msg)\s+\w+\b", "send_message"),
+        // send_message: "text/msg Anjali", "send a WhatsApp to X"
+        // Excludes "text embeddings" via the embeddings rule above.
+        // Negative lookahead prevents false positives on:
+        //   "text from/to/in/on" (clipboard/file ops),
+        //   "message by/id/with" (Gmail read), "message to" (covered by line below).
+        (
+            r"(?i)\b(text|msg)\s+(?!(from|to|in|on|at|the|a|an|by|my|this|that|it|with|of|for|is|are|all|any|some|via|into|about)\b)\w+\b",
+            "send_message",
+        ),
         (
             r"(?i)\b(send|open)\s+(a\s+)?(whatsapp|telegram|signal)\b",
             "send_message",
@@ -194,9 +219,64 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\b(open|go\s+to|navigate\s+to|visit)\s+https?://\S+",
             "open_url",
         ),
-        // Remote VM / connected target command execution
+        // ── Skill / ClawHub routing — MUST come before fleet_command and install_package ──
+        // These patterns contain the word "skill" which distinguishes them from generic
+        // VM/package operations that would otherwise match the broader rules below.
         (
-            r"(?i)\b(?:run|execute|install|uninstall|update|upgrade)\b.{0,80}\b(?:on|in)\s+(?:my\s+)?(?:vm|remote\s+(?:vm|host|machine|computer)|connected\s+(?:vm|computer|machine|host))\b",
+            r"(?i)\b(run|execute|use|invoke)\b.{0,50}\bskill\b",
+            "invoke_skill",
+        ),
+        (
+            r"(?i)\b(install|add)\b.{0,30}\bskill\b",
+            "clawhub_install_skill",
+        ),
+        (
+            r"(?i)\b(uninstall|remove)\b.{0,30}\bskill\b",
+            "uninstall_skill",
+        ),
+        (
+            r"(?i)\b(skill\s+container|substrate)\s+(status|health|state)\b",
+            "get_substrate_status",
+        ),
+        (
+            r"(?i)\b(container\s+pool\s+status|skill\s+pool)\b",
+            "get_substrate_status",
+        ),
+        (
+            r"(?i)\b(list|show|what|which)\b.{0,30}\bskills?\b.{0,20}\b(installed|have|available)\b",
+            "list_installed_skills",
+        ),
+        (
+            r"(?i)\b(browse|fetch|list)\b.{0,20}\b(available|remote)\b.{0,20}\bskills?\b",
+            "clawhub_fetch_remote_skills",
+        ),
+        (
+            r"(?i)\b(skill)\b.{0,20}\b(audit|log|history|invocation)\b",
+            "get_skill_audit_log",
+        ),
+        (
+            r"(?i)\b(emergency\s+stop|shutdown)\b.{0,30}\b(skill|substrate)\b",
+            "shutdown_substrate",
+        ),
+        // ── Sidecar image analysis — MUST come before open_application (“run” verb) ──
+        (
+            r"(?i)\b(run|perform)\s+(sidecar\s+)?image\s+analy[sz]is\b",
+            "image_analyze",
+        ),
+        (
+            r"(?i)\bimage\s+analy[sz]e?\b.{0,30}\b(ocr|metadata|inference|model)\b",
+            "image_analyze",
+        ),
+        // Remote VM / connected target command execution
+        // CRITICAL: Must NOT match "on my host", "on the host", "on host" (those are local)
+        // Only match: "on my vm", "on remote host", "on connected machine", etc.
+        (
+            r"(?i)\b(?:show|list|get|display|view|find|check|run|execute|install|uninstall|update|upgrade|start|stop|restart|kill|ps|top)\b.{0,80}\b(?:on|in|from|at)\s+(?:my\s+)?(?:vm|virtual\s+machine|remote\s+(?:vm|host|machine|computer|server)|connected\s+(?:vm|computer|machine|host))\b",
+            "execute_fleet_command",
+        ),
+        // Also match "X from VM" / "X from my VM" / "X from the VM"
+        (
+            r"(?i)\b(?:show|list|get|display|view|find|check|fetch|pull)\b.{0,80}\b(?:from|off)\s+(?:my\s+|the\s+)?(?:vm|virtual\s+machine|remote\s+(?:vm|host|machine|computer|server)|connected\s+(?:vm|computer|machine|host))\b",
             "execute_fleet_command",
         ),
         (r"(?i)\bremote\s+command\s*:\s*.+", "execute_fleet_command"),
@@ -236,6 +316,16 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
         (
             r"(?i)\bvia\s+ssh\b|\bssh\s+[a-z0-9_.-]+@[a-z0-9_.:-]+\b",
             "execute_fleet_command",
+        ),
+        // Host docker commands — MUST come before fleet patterns
+        // Match: "show docker containers on my host", "docker ps", "list containers on host"
+        (
+            r"(?i)\b(show|list|get|check)\b.{0,40}\bdocker\s+(containers?|images?|ps|networks?|volumes?)\b.{0,30}\b(on\s+)?(my\s+)?(host|local|machine|laptop|computer)\b",
+            "execute_bash",
+        ),
+        (
+            r"(?i)\bdocker\s+(ps|images?|container|network|volume|system)\b",
+            "execute_bash",
         ),
         // Shell execution — MUST come before open_application so "Run bash:" is not misclassified
         (r"(?i)^run\s*:\s*\S+", "execute_bash"),
@@ -334,6 +424,32 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\b(list|ls|dir)\s+(the\s+)?(directory|folder|files)\b",
             "list_directory",
         ),
+        // Content search — MUST come before the generic "search files" rule below so that
+        // "search for 'TODO' in all .py files" routes to search_file_contents, not search_files.
+        (
+            r#"(?i)\b(search|grep|find)\s+(for\s+)?["']?\w+["']?\s+(in|across|through)\s+(all\s+)?(.+\s+)?files\b"#,
+            "search_file_contents",
+        ),
+        (
+            r"(?i)\b(grep|search\s+content|find\s+text|find\s+in)\s+(files?|all)\b",
+            "search_file_contents",
+        ),
+        // Advanced-pattern file search — MUST come before generic search_files
+        (
+            r"(?i)\b(find|search)\s+(all\s+)?\w+\s+files\s+(under|in|at)\s+\S+",
+            "find_files_by_pattern",
+        ),
+        (
+            r"(?i)\b(find|search)\s+(files?|\w+\s+files?)\b.{0,40}\b(advanced|pattern|recursive|deep)\b",
+            "find_files_by_pattern",
+        ),
+        // search news about — MUST come before generic search_files so
+        // "Search news about AI, then save to a file" doesn't false-positive on 'file'
+        (
+            r"(?i)\b(search|find|get|fetch)\s+(news|headlines?)\s+(about|on|for|regarding)\b",
+            "search_news",
+        ),
+        (r"(?i)\bnews\s+(about|on|for|regarding)\b", "search_news"),
         (r"(?i)\b(search|find)\s+(for\s+)?files?\b", "search_files"),
         (
             r"(?i)\b(search|find|locate|look\s*for)\b.*\b(files?|folder|directory|directories|folders)\b",
@@ -350,6 +466,16 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
         ),
         (r"(?i)\b(write|create|save)\s+(a\s+)?file\b", "write_file"),
         (r"(?i)\b(delete|remove|rm)\s+(the\s+)?file\b", "delete_file"),
+        // Clipboard ops — transform_clipboard must come before set/get so
+        // "convert clipboard text to uppercase" routes correctly.
+        (
+            r"(?i)\b(convert|transform|change|modify)\b.{0,30}\bclipboard\b.{0,20}\b(to|into|uppercase|lowercase|base64|url)\b",
+            "transform_clipboard",
+        ),
+        (
+            r"(?i)\bclipboard\b.{0,30}\b(convert|transform|to\s+uppercase|to\s+lowercase|encode|decode)\b",
+            "transform_clipboard",
+        ),
         // Clipboard (set rule must run before generic get rule)
         (
             r"(?i)\b(copy|set)\b.{0,24}\bclipboard\b|\bclipboard\b.{0,12}\b(to|with)\b",
@@ -359,8 +485,22 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\b(get|show|read|paste)\b.{0,24}\bclipboard\b|\bwhat.*copied\b|\bclipboard\b",
             "get_clipboard",
         ),
+        // screenshot_analyze MUST come before the generic screenshot rule below
+        // so "take a screenshot and analyze it" is not lost to the simpler rule.
+        (
+            r"(?i)\b(take|capture)\s+(a\s+)?screenshot\s+(and|then)\s+(analyze|analyse|describe|ocr)\b",
+            "screenshot_analyze",
+        ),
+        (
+            r"(?i)\bscreenshot\s+(and|then)\s+(analyze|analyse|describe|ocr)\b",
+            "screenshot_analyze",
+        ),
         (r"(?i)\bscreenshot\b", "screenshot"),
-        // Power
+        // Power — cancel/abort shutdown must come before the shutdown rule
+        (
+            r"(?i)\b(cancel|abort|stop|undo)\s+(the\s+)?(scheduled\s+)?shutdown\b",
+            "execute_bash",
+        ),
         (
             r"(?i)\b(shutdown|shut\s+down|power\s+off)\b",
             "shutdown_system",
@@ -371,6 +511,12 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
         ),
         (r"(?i)\block\s*(screen|computer)\b", "lock_screen"),
         (r"(?i)\b(sleep|suspend)\s*(mode|computer)?\b", "sleep"),
+        // Desktop interaction
+        (
+            r#"(?i)\b(type|input)\b.{0,20}['"]?.{1,80}['"]?.{0,20}\b(in(to)?|on)\s+(the\s+)?(active\s+)?(window|field|input|box)\b"#,
+            "type_text",
+        ),
+        (r"(?i)\btype\s+(the\s+text|text)\b", "type_text"),
         // System config — volume
         (
             r"(?i)\b(volume|sound)\s*(set|to|at)\s*(\d+)\b",
@@ -414,6 +560,12 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\b(news|headlines|updates?)\b.*\b(authentic|trusted|reliable|verified)\b",
             "search_news",
         ),
+        // search_package — MUST come before the generic web_search rule below so that
+        // "Search for the package 'htop'" routes to search_package, not web_search.
+        (
+            r#"(?i)\bsearch\s+(for\s+)?(the\s+)?package\s+['"]?\w+['"]?"#,
+            "search_package",
+        ),
         (
             r"(?i)\b(search|google|look\s+up|find\s+online)\b.*\b(web|online|internet)\b",
             "web_search",
@@ -452,6 +604,11 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             "gw_gmail_send",
         ),
         // Google Workspace (Calendar / Meet fallback via Calendar)
+        // "search calendar for" — must be explicit since generic "search" is caught earlier.
+        (
+            r"(?i)\b(search|find|look\s*for)\b.{0,20}\b(calendar|schedule|events?)\b",
+            "gw_calendar_search",
+        ),
         (
             r"(?i)\b(what'?s|show|list|check|get|view)\b.*\b(calendar|schedule|events?)\b",
             "gw_calendar_search",
@@ -467,6 +624,16 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
         (
             r"(?i)\b(delete|remove|cancel)\b.*\b(calendar\s+event|event|meeting|appointment)\b",
             "gw_calendar_delete",
+        ),
+        // summarize_document for local file paths — MUST come before gw_docs_read
+        // so "Summarize the document at /path/file.pdf" routes correctly.
+        (
+            r"(?i)\b(summarize|summarise)\s+(the\s+)?(document|doc|pdf)\s+(at|in|from)\s+\S+",
+            "summarize_document",
+        ),
+        (
+            r"(?i)\b(summarize|summarise)\s+(the\s+)?(?:local\s+)?(document|doc|pdf)\b",
+            "summarize_document",
         ),
         // Google Workspace (Docs)
         (
@@ -554,6 +721,12 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
         (
             r"(?i)\bsearch.{0,15}(my\s+)?(memory|knowledge)\b",
             "search_knowledge",
+        ),
+        // list_snippets — MUST come before list_remembered so "list saved snippets"
+        // routes to the dedicated snippets tool.
+        (
+            r"(?i)\blist\b.{0,30}\b(saved\s+)?snippets?\b",
+            "list_snippets",
         ),
         (
             r"(?i)\blist.{0,20}(remember|snippets?|knowledge)\b",
@@ -806,6 +979,12 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\b(info|details|metadata)\s+(about|for|of)\s+(/|~/)\S+",
             "get_file_info",
         ),
+        // delete_directory — must come before the path-based delete_file rule so that
+        // "Delete /home/obaid/kria_test directory" routes to delete_directory not delete_file.
+        (
+            r"(?i)\b(delete|remove|rm)\s+(/|~/)\S+\s+(folder|directory)\b",
+            "delete_directory",
+        ),
         (r"(?i)\b(delete|remove|rm)\s+(/|~/)\S+", "delete_file"),
         (
             r"(?i)\b(delete|remove)\s+(the\s+)?(folder|directory)\s+(at|in)\s+\S+",
@@ -885,20 +1064,25 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\b(check|verify)\s+if\s+(the\s+)?(package\s+)?\w+\s+is\s+installed\b",
             "check_package_installed",
         ),
+        // Package patterns accept quoted names: search_package 'htop' / get_package_info 'curl'
         (
-            r"(?i)\bsearch\s+(for\s+)?(the\s+)?package\s+\w+",
+            r#"(?i)\bsearch\s+(for\s+)?(the\s+)?package\s+['"]?\w+['"]?"#,
             "search_package",
         ),
         (
-            r"(?i)\b(info|information|details)\s+(about|for)\s+(the\s+)?package\s+\w+",
+            r#"(?i)\b(info|information|details)\s+(about|for)\s+(the\s+)?package\s+['"]?\w+['"]?"#,
             "get_package_info",
         ),
         (
-            r"(?i)\b(check|are\s+there)\s+(any\s+)?updates?\s+(for|available\s+for)\s+\w+",
+            r#"(?i)\b(get|show)\s+(info|information|details)\s+(about|for|of)\s+(the\s+)?package\s+['"]?\w+['"]?"#,
+            "get_package_info",
+        ),
+        (
+            r#"(?i)\b(check|are\s+there)\s+(any\s+)?updates?\s+(for|available\s+for)\s+['"]?\w+['"]?"#,
             "check_package_updates",
         ),
         (
-            r"(?i)\bupdates?\s+(for|available\s+for)\s+\w+",
+            r#"(?i)\bupdates?\s+(for|available\s+for)\s+['"]?\w+['"]?"#,
             "check_package_updates",
         ),
         // ── Scheduling ──
@@ -1032,6 +1216,21 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             "summarize_document",
         ),
         // ── Colab / Google Workspace — extended ──
+        // "In Colab, [action]" context — any action taken inside Colab routes to execute_cell.
+        // These MUST come before the generic open/list/read/drive rules below.
+        (r"(?i)\bin\s+colab\s*,", "execute_cell"),
+        (
+            r"(?i)\bcolab\s+mein\s+(code\s+)?(chalaao|run|execute|chalao)",
+            "execute_cell",
+        ),
+        (
+            r"(?i)\b(run|execute)\s+(a\s+)?cell\s+(in|on|at|within)\s+colab\b",
+            "execute_cell",
+        ),
+        (
+            r"(?i)\b(run|execute)\s+(this\s+)?(code|python|cell)\s+(in|on|at)\s+colab\b",
+            "execute_cell",
+        ),
         (
             r"(?i)\b(create|make|new)\s+(a\s+)?(google\s+)?colab\s+notebook\b",
             "gw_drive_create",
@@ -1041,14 +1240,10 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             "mcp_colab-mcp_open_colab_browser_connection",
         ),
         (
-            r"(?i)\b(execute|run)\s+(this\s+)?(code|python|cell)\s+(in|on|at)\s+colab\b",
-            "open_colab_browser_connection",
-        ),
-        (
             r"(?i)\bcolab\s+(chalao|start|open|run|execute)\b",
             "mcp_colab-mcp_open_colab_browser_connection",
         ),
-        (r"(?i)\bcolab\s+mein\s+(notebook|code)\b", "gw_drive_create"),
+        (r"(?i)\bcolab\s+mein\s+(notebook)\b", "gw_drive_create"),
         // ── Direct tool invocation syntax ──
         (r"(?i)^!!tool:(\w+)", "DIRECT_TOOL_OVERRIDE"),
         // ── Database ──
@@ -1056,14 +1251,27 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\b(describe|show|list)\s+(the\s+)?(database|db)\s+schema\b",
             "describe_database",
         ),
-        // ── Screenshot + analyze ──
+        // ── Screenshot + analyze (duplicate guard for late-section) ──
         (
             r"(?i)\b(take|capture)\s+(a\s+)?screenshot\s+(and|then)\s+(analyze|analyse|describe|ocr)\b",
             "screenshot_analyze",
         ),
-        // ── Image on clipboard ──
+        // ── Sidecar image analysis (OCR / metadata / model inference) ──
         (
-            r"(?i)\b(read|extract|get)\s+(the\s+)?text\s+(from|on)\s+(the\s+)?(image\s+on\s+)?clipboard\b",
+            r"(?i)\b(run|perform)\s+(sidecar\s+)?image\s+analy[sz]is\b",
+            "image_analyze",
+        ),
+        (
+            r"(?i)\bimage\s+analy[sz]e?\b.{0,30}\b(ocr|metadata|inference|model)\b",
+            "image_analyze",
+        ),
+        (
+            r"(?i)\b(ocr|metadata)\b.{0,40}\bimage\s+analy[sz]",
+            "image_analyze",
+        ),
+        // ── Image on clipboard — allow 'my clipboard' variant ──
+        (
+            r"(?i)\b(read|extract|get)\s+(the\s+)?text\s+(from|on)\s+(the\s+)?(image\s+on\s+(my\s+)?)?clipboard\b",
             "get_clipboard",
         ),
         // Hinglish patterns
@@ -1423,5 +1631,78 @@ mod tests {
         let result = IntentRouter::classify("what programs are installed on my system");
         assert!(matches!(result.intent, Intent::DirectTool(_)));
         assert_eq!(result.tool_hint.as_deref(), Some("list_installed_packages"));
+    }
+
+    #[test]
+    fn routes_docker_ps_on_host_to_execute_bash() {
+        let result =
+            IntentRouter::classify("Show all docker containers running on my host machine");
+        assert!(matches!(result.intent, Intent::DirectTool(_)));
+        assert_eq!(result.tool_hint.as_deref(), Some("execute_bash"));
+    }
+
+    #[test]
+    fn routes_docker_ps_command_to_execute_bash() {
+        let result = IntentRouter::classify("docker ps");
+        assert!(matches!(result.intent, Intent::DirectTool(_)));
+        assert_eq!(result.tool_hint.as_deref(), Some("execute_bash"));
+    }
+
+    #[test]
+    fn routes_list_docker_containers_on_local_to_execute_bash() {
+        let result = IntentRouter::classify("list docker containers on my local machine");
+        assert!(matches!(result.intent, Intent::DirectTool(_)));
+        assert_eq!(result.tool_hint.as_deref(), Some("execute_bash"));
+    }
+
+    #[test]
+    fn routes_docker_images_to_execute_bash() {
+        let result = IntentRouter::classify("show me docker images");
+        assert!(matches!(result.intent, Intent::DirectTool(_)));
+        assert_eq!(result.tool_hint.as_deref(), Some("execute_bash"));
+    }
+
+    #[test]
+    fn routes_vm_docker_check_to_fleet_command() {
+        let result = IntentRouter::classify("check docker containers on my vm");
+        assert!(matches!(result.intent, Intent::DirectTool(_)));
+        assert_eq!(result.tool_hint.as_deref(), Some("execute_fleet_command"));
+    }
+
+    #[test]
+    fn routes_show_docker_from_vm_to_fleet_command() {
+        let result = IntentRouter::classify("Show all docker containers from VM");
+        assert!(matches!(result.intent, Intent::DirectTool(_)));
+        assert_eq!(result.tool_hint.as_deref(), Some("execute_fleet_command"));
+    }
+
+    #[test]
+    fn routes_list_containers_on_vm_to_fleet_command() {
+        let result = IntentRouter::classify("list docker containers on my VM");
+        assert!(matches!(result.intent, Intent::DirectTool(_)));
+        assert_eq!(result.tool_hint.as_deref(), Some("execute_fleet_command"));
+    }
+
+    #[test]
+    fn routes_get_containers_from_remote_to_fleet_command() {
+        let result = IntentRouter::classify("get all containers from remote server");
+        assert!(matches!(result.intent, Intent::DirectTool(_)));
+        assert_eq!(result.tool_hint.as_deref(), Some("execute_fleet_command"));
+    }
+
+    #[test]
+    fn routes_docker_ps_on_host_still_goes_to_execute_bash() {
+        // Local docker queries must NOT go to fleet
+        let result =
+            IntentRouter::classify("Show all docker containers running on my host machine");
+        assert!(matches!(result.intent, Intent::DirectTool(_)));
+        assert_eq!(result.tool_hint.as_deref(), Some("execute_bash"));
+    }
+
+    #[test]
+    fn routes_remote_host_command_to_fleet_command() {
+        let result = IntentRouter::classify("run ls on remote host");
+        assert!(matches!(result.intent, Intent::DirectTool(_)));
+        assert_eq!(result.tool_hint.as_deref(), Some("execute_fleet_command"));
     }
 }

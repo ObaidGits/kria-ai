@@ -2,13 +2,15 @@
 
 #[cfg(test)]
 mod tests {
-    use super::super::*;
-    use super::super::config::{ProviderConfig, ProviderEndpointConfig, ProviderType, ProvidersConfig};
+    use super::super::capabilities;
+    use super::super::config::{
+        ProviderConfig, ProviderEndpointConfig, ProviderType, ProvidersConfig,
+    };
     use super::super::connection_test::ConnectionTestStatus;
     use super::super::error::{ProviderError, ProviderErrorKind};
     use super::super::registry::ProviderRegistry;
     use super::super::types::ExecutionLocation;
-    use super::super::capabilities;
+    use super::super::*;
 
     // ─── Config Tests ────────────────────────────────────────────────────────
 
@@ -125,11 +127,7 @@ mod tests {
 
     #[test]
     fn test_error_display() {
-        let err = ProviderError::new(
-            ProviderErrorKind::AuthFailure,
-            "Invalid API key",
-            "openai",
-        );
+        let err = ProviderError::new(ProviderErrorKind::AuthFailure, "Invalid API key", "openai");
         let display = format!("{}", err);
         assert!(display.contains("openai"));
         assert!(display.contains("Authentication Error"));
@@ -140,11 +138,8 @@ mod tests {
 
     #[test]
     fn test_model_capabilities() {
-        let caps = capabilities::ModelCapabilities::full_featured(
-            "gpt-4o".to_string(),
-            128000,
-            16384,
-        );
+        let caps =
+            capabilities::ModelCapabilities::full_featured("gpt-4o".to_string(), 128000, 16384);
 
         assert!(caps.can_use_tools());
         assert!(caps.can_see());
@@ -156,11 +151,7 @@ mod tests {
 
     #[test]
     fn test_chat_only_capabilities() {
-        let caps = capabilities::ModelCapabilities::chat_only(
-            "phi-4-mini".to_string(),
-            4096,
-            2048,
-        );
+        let caps = capabilities::ModelCapabilities::chat_only("phi-4-mini".to_string(), 4096, 2048);
 
         assert!(!caps.can_use_tools());
         assert!(!caps.can_see());

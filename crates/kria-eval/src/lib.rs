@@ -1,6 +1,9 @@
+pub mod gui_eval;
+pub mod integration_eval;
 pub mod judge;
 pub mod llm_fixture;
 pub mod report;
 pub mod runner;
 pub mod sandbox;
 pub mod suite;
+pub mod workflow_eval;

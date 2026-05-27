@@ -10,13 +10,10 @@
 use crate::ServerState;
 use axum::{
     extract::State,
-    routing::{get, post, delete},
+    routing::{delete, get, post},
     Json, Router,
 };
-use kria_core::llm::provider::{
-    config::ProviderConfig,
-    types::ProviderStatus,
-};
+use kria_core::llm::provider::{config::ProviderConfig, types::ProviderStatus};
 use serde::Deserialize;
 use std::sync::Arc;
 
@@ -34,9 +31,7 @@ pub fn provider_routes() -> Router<Arc<ServerState>> {
 }
 
 /// List all configured providers with their status.
-async fn list_providers(
-    State(state): State<Arc<ServerState>>,
-) -> Json<serde_json::Value> {
+async fn list_providers(State(state): State<Arc<ServerState>>) -> Json<serde_json::Value> {
     // For now, return provider config from the static config.
     // When ProviderRegistry is wired into ServerState, this will use it.
     let providers_config = &state.config.providers;
@@ -66,9 +61,7 @@ async fn list_providers(
 }
 
 /// Get the currently active provider details.
-async fn get_active_provider(
-    State(state): State<Arc<ServerState>>,
-) -> Json<serde_json::Value> {
+async fn get_active_provider(State(state): State<Arc<ServerState>>) -> Json<serde_json::Value> {
     let config = &state.config.providers;
     match config.active() {
         Some(p) => Json(serde_json::json!({
@@ -128,9 +121,10 @@ async fn test_connection(
     let config = &state.config.providers;
     match config.get(&provider_id) {
         Some(provider_config) => {
-            let result =
-                kria_core::llm::provider::connection_test::test_provider_connection(provider_config)
-                    .await;
+            let result = kria_core::llm::provider::connection_test::test_provider_connection(
+                provider_config,
+            )
+            .await;
             Json(serde_json::to_value(&result).unwrap_or_default())
         }
         None => Json(serde_json::json!({
@@ -148,9 +142,10 @@ async fn discover_models(
     let config = &state.config.providers;
     match config.get(&provider_id) {
         Some(provider_config) => {
-            let result =
-                kria_core::llm::provider::connection_test::test_provider_connection(provider_config)
-                    .await;
+            let result = kria_core::llm::provider::connection_test::test_provider_connection(
+                provider_config,
+            )
+            .await;
             Json(serde_json::json!({
                 "models": result.discovered_models,
                 "status": format!("{:?}", result.status),
@@ -192,7 +187,6 @@ async fn test_config(
     State(_state): State<Arc<ServerState>>,
     Json(config): Json<ProviderConfig>,
 ) -> Json<serde_json::Value> {
-    let result =
-        kria_core::llm::provider::connection_test::test_provider_connection(&config).await;
+    let result = kria_core::llm::provider::connection_test::test_provider_connection(&config).await;
     Json(serde_json::to_value(&result).unwrap_or_default())
 }

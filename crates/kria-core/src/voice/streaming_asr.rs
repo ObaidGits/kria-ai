@@ -48,12 +48,12 @@ pub struct StreamingAsrConfig {
 impl Default for StreamingAsrConfig {
     fn default() -> Self {
         Self {
-            fast_window_ms: 1_500,       // 1.5s rolling window for fast layer
-            fast_cadence_ms: 200,        // Decode every 200ms
+            fast_window_ms: 1_500,        // 1.5s rolling window for fast layer
+            fast_cadence_ms: 200,         // Decode every 200ms
             min_audio_for_decode_ms: 300, // Wait 300ms before first decode
             max_concurrent_decodes: 1,
             incremental_stabilization: true,
-            stability_threshold: 2,      // 2 consecutive matching prefixes = stable
+            stability_threshold: 2, // 2 consecutive matching prefixes = stable
         }
     }
 }
@@ -153,7 +153,11 @@ impl IncrementalStabilizer {
         self.total_partials += 1;
 
         if text.is_empty() {
-            return (self.stable_prefix.clone(), String::new(), !self.stable_prefix.is_empty());
+            return (
+                self.stable_prefix.clone(),
+                String::new(),
+                !self.stable_prefix.is_empty(),
+            );
         }
 
         // Check if new text shares a word-prefix with the last text
@@ -176,13 +180,12 @@ impl IncrementalStabilizer {
 
         self.last_text = text.to_string();
 
-        let volatile = if text.len() > self.stable_prefix.len()
-            && text.starts_with(&self.stable_prefix)
-        {
-            text[self.stable_prefix.len()..].to_string()
-        } else {
-            text.to_string()
-        };
+        let volatile =
+            if text.len() > self.stable_prefix.len() && text.starts_with(&self.stable_prefix) {
+                text[self.stable_prefix.len()..].to_string()
+            } else {
+                text.to_string()
+            };
 
         let is_stable = !self.stable_prefix.is_empty();
         (self.stable_prefix.clone(), volatile, is_stable)
@@ -272,7 +275,9 @@ impl DecodeCadenceController {
         }
 
         // Don't decode faster than the last decode took
-        let effective_cadence = self.current_cadence_ms.max(self.last_decode_duration_ms + 50);
+        let effective_cadence = self
+            .current_cadence_ms
+            .max(self.last_decode_duration_ms + 50);
 
         match self.last_decode_at {
             Some(last) => last.elapsed().as_millis() as u64 >= effective_cadence,
@@ -388,9 +393,11 @@ impl StreamingLatencyCollector {
         let decode_hz = self.partial_count as f64 / elapsed_s;
 
         StreamingLatencyMetrics {
-            first_partial_ms: self.first_partial_at
+            first_partial_ms: self
+                .first_partial_at
                 .map(|t| t.duration_since(self.turn_start).as_millis() as u64),
-            first_stable_ms: self.first_stable_at
+            first_stable_ms: self
+                .first_stable_at
                 .map(|t| t.duration_since(self.turn_start).as_millis() as u64),
             avg_decode_ms: avg_decode,
             peak_decode_ms: peak_decode,
@@ -451,7 +458,10 @@ mod tests {
 
     #[test]
     fn common_word_prefix_basic() {
-        assert_eq!(common_word_prefix("hello world", "hello world how"), "hello world");
+        assert_eq!(
+            common_word_prefix("hello world", "hello world how"),
+            "hello world"
+        );
         assert_eq!(common_word_prefix("hello", "goodbye"), "");
         assert_eq!(common_word_prefix("a b c", "a b d"), "a b");
         assert_eq!(common_word_prefix("", "hello"), "");

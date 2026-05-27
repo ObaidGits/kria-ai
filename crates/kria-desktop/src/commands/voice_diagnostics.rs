@@ -172,7 +172,8 @@ pub async fn voice_transcribe_uploaded_audio(
         ext
     );
     let temp_path = std::env::temp_dir().join(temp_name);
-    std::fs::write(&temp_path, &bytes).map_err(|e| format!("Failed to write temp audio file: {e}"))?;
+    std::fs::write(&temp_path, &bytes)
+        .map_err(|e| format!("Failed to write temp audio file: {e}"))?;
 
     let run = async {
         let config = KriaConfig::load(None).map_err(|e| e.to_string())?;

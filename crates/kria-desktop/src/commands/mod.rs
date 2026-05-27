@@ -17,6 +17,7 @@ pub(crate) mod image_chat;
 pub(crate) mod local_api;
 pub(crate) mod mcp;
 pub(crate) mod media;
+pub(crate) mod n8n;
 pub(crate) mod openclaw;
 pub(crate) mod orchestrator_helpers;
 pub(crate) mod providers;
@@ -61,14 +62,18 @@ use voice_runtime_helpers::*;
 pub use analytics::get_analytics_dashboard;
 #[allow(unused_imports)]
 pub use app_commands::{
-    approve_action, cancel_executive_task, cancel_request, cancel_turn, deny_action, get_alerts,
-    get_hardware_info, get_health, get_settings, list_audio_devices, list_knowledge_base,
-    list_models, submit_turn_feedback, update_settings,
+    approve_action, cancel_continuation, cancel_executive_task, cancel_interaction_decision,
+    cancel_interaction_execution, cancel_request, cancel_turn, check_continuation_after_decision,
+    continue_after_decision_execution, deny_action, execute_resolved_interaction_decision,
+    get_alerts, get_hardware_info, get_health, get_runtime_diagnostics, get_settings,
+    list_audio_devices, list_interaction_decisions, list_knowledge_base, list_models,
+    replay_interaction_decisions, resolve_interaction_decision, resume_interaction_decision,
+    submit_turn_feedback, update_settings,
 };
 #[allow(unused_imports)]
 pub use app_state::{
     AppState, AppStateCell, ColabRuntimeSnapshot, ColabRuntimeState, FleetRuntimeState,
-    McpFailureRecord,
+    LlmRuntimeApplySnapshot, McpFailureRecord,
 };
 #[allow(unused_imports)]
 pub use automation::{
@@ -100,6 +105,8 @@ pub use media::{
     get_session_media, open_html_for_print, read_local_image, save_export_file, save_uploaded_image,
 };
 #[allow(unused_imports)]
+pub use n8n::{discover_n8n_workflows, get_n8n_status, import_n8n_workflow, reconcile_n8n_run};
+#[allow(unused_imports)]
 pub use openclaw::{
     clawhub_fetch_remote_skills, clawhub_install_skill, clawhub_list_skills, clawhub_search_skills,
     clawhub_toggle_skill, clawhub_uninstall_skill, openclaw_substrate_restart,
@@ -107,8 +114,9 @@ pub use openclaw::{
 };
 #[allow(unused_imports)]
 pub use providers::{
-    discover_provider_models, get_active_provider, get_provider_types, list_providers,
-    remove_provider, switch_model, switch_provider, test_provider_config,
+    discover_provider_models, get_active_llm_runtime, get_active_provider,
+    get_llm_runtime_apply_status, get_provider_types, list_providers, remove_provider,
+    set_active_llm_selection, switch_model, switch_provider, test_provider_config,
     test_provider_connection_cmd, upsert_provider,
 };
 #[allow(unused_imports)]
@@ -149,11 +157,12 @@ pub use voice_diagnostics::{
 use async_stream::stream;
 use async_trait::async_trait;
 use axum::{
+    body::Bytes,
     extract::{
         ws::Message, ws::WebSocket, ws::WebSocketUpgrade, Path as AxumPath, Query,
         State as AxumState,
     },
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{sse::Event, sse::KeepAlive, sse::Sse, IntoResponse},
     routing::{get, post},
     Json, Router,
@@ -168,7 +177,7 @@ use kria_core::agent::loop_engine::{
     PromptLabToolSelectionStrategy, StreamEvent, TurnExecutionMode, TurnExecutionProfile,
 };
 use kria_core::agent::AgentLoop;
-use kria_core::automation::{AutomationScheduler, MacroRecorder, WorkflowEngine};
+use kria_core::automation::{AutomationScheduler, MacroRecorder};
 use kria_core::config::{ColabConfig, KriaConfig, KriaSystemConfig};
 use kria_core::image::ImageOrchestrator;
 use kria_core::infra::environment::remote_qemu::{

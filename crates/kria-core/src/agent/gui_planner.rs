@@ -82,15 +82,20 @@ impl GuiPlanner for RuleBasedPlanner {
                     })
                     .ok_or_else(|| PlannerError::MissingParameter("target app".into()))?;
 
+                // FIX: Use ProcessLaunched instead of WindowState.
+                // WindowState requires xdotool IPC which always fails on Wayland
+                // (WINDOW_ID_FAILED). ProcessLaunched polls /proc directly and
+                // works on both X11 and Wayland without any IPC dependency.
+                let binary = crate::agent::gui_substrate_planner::app_alias_to_binary_pub(&app);
                 sub_goals.push(SubGoal {
                     step: 1,
                     action: "open_application".into(),
                     params: serde_json::json!({"name": app}),
-                    verify: VerificationType::WindowState {
-                        title_contains: Some(app.clone()),
-                        class: None,
+                    verify: VerificationType::ProcessLaunched {
+                        binary,
+                        max_wait_ms: 6000,
                     },
-                    timeout_ms: Some(5000),
+                    timeout_ms: Some(8000),
                 });
             }
             Verb::Type => {
@@ -160,15 +165,19 @@ impl GuiPlanner for RuleBasedPlanner {
                     })
                     .ok_or_else(|| PlannerError::MissingParameter("target app".into()))?;
 
+                // FIX: Use ProcessLaunched for Switch too — WindowState requires
+                // xdotool IPC which fails on Wayland. ProcessLaunched verifies
+                // the process is running, which is the meaningful check here.
+                let binary = crate::agent::gui_substrate_planner::app_alias_to_binary_pub(&app);
                 sub_goals.push(SubGoal {
                     step: 1,
                     action: "switch_to_window".into(),
                     params: serde_json::json!({"name": app}),
-                    verify: VerificationType::WindowState {
-                        title_contains: Some(app.clone()),
-                        class: None,
+                    verify: VerificationType::ProcessLaunched {
+                        binary,
+                        max_wait_ms: 3000,
                     },
-                    timeout_ms: Some(2000),
+                    timeout_ms: Some(5000),
                 });
             }
             Verb::Run => {

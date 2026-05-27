@@ -490,7 +490,7 @@ where
             RemoteInfraObservabilityEvent::PoolTelemetry(packet) => {
                 let payload = serde_json::to_string(packet)
                     .unwrap_or_else(|error| format!("telemetry_error:{error}"));
-                tracing::info!(
+                tracing::debug!(
                     target: "kria_orchestrator",
                     packet = %payload,
                     "orchestrator_pool_telemetry"

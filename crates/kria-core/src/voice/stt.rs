@@ -173,7 +173,8 @@ impl SpeechToText {
             return Ok(None);
         };
 
-        match gpu_lease.acquire_guard(GpuOwner::Speech, turn_label, Some(Duration::from_secs(120))) {
+        match gpu_lease.acquire_guard(GpuOwner::Speech, turn_label, Some(Duration::from_secs(120)))
+        {
             Ok(guard) => Ok(Some(guard)),
             Err(GpuLeaseError::Degraded { reason }) => {
                 STT_LEASE_BYPASS_LOGGED.call_once(|| {

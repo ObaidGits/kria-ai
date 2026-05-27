@@ -8,6 +8,7 @@ use uuid::Uuid;
 use crate::agent::response_parser::{
     extract_text_response, parse_tool_calls_with_known, ParsedToolCall,
 };
+use crate::agent::result_synthesizer::{ResultSynthesizer, VerificationOutcome};
 use crate::agent::turn_context::{TurnAdmission, TurnAdmissionDecision, TurnAdmissionError};
 use crate::agent::turn_gate::{Operation, ResourcePlan, TurnGate};
 use crate::agent::turn_memory::{detect_satisfaction, ExecutionTarget, TurnMemory};
@@ -15,13 +16,13 @@ use crate::infra::isolation::run_isolated;
 use crate::infra::pipeline_trace::{
     log_pipeline_step, sanitize_json_for_logs, sanitize_text_for_logs,
 };
+use crate::llm::budget::{
+    check_inter_tool_budget, check_tool_result_budget, BudgetCheckResult, ContextBudgets,
+    TurnTokenLedger,
+};
 use crate::llm::orchestrator::vision_strategy::VisionMode;
 use crate::llm::orchestrator::vram_budget::{calculate_safe_visual_tokens, estimate_visual_tokens};
 use crate::llm::tokenize::count_tokens;
-use crate::llm::budget::{
-    check_inter_tool_budget, check_tool_result_budget,
-    BudgetCheckResult, ContextBudgets, TurnTokenLedger,
-};
 use crate::llm::{
     ChatMessage, ImageAttachment, LlmResponse, ModelRouter, ToolSchema,
     LLM_TOOL_RESULT_TOKEN_BUDGET, TOOL_RESULT_MAX_CHARS,
@@ -42,6 +43,963 @@ use helpers::*;
 use intent_extractors::*;
 use intent_fallback::*;
 use response_helpers::*;
+
+fn strip_notice_prefix(summary: &str) -> &str {
+    summary
+        .trim()
+        .strip_prefix("Proceeding with:")
+        .unwrap_or(summary.trim())
+        .trim()
+}
+
+fn strip_label_prefix<'a>(value: &'a str, label: &str) -> Option<&'a str> {
+    let value = value.trim();
+    let prefix = value.get(..label.len())?;
+    if prefix.eq_ignore_ascii_case(label) {
+        Some(value[label.len()..].trim())
+    } else {
+        None
+    }
+}
+
+fn format_autonomy_notice_for_user(summary: &str) -> String {
+    let clean = strip_notice_prefix(summary);
+    if clean.is_empty() {
+        return "Starting the requested task.".to_string();
+    }
+
+    if let Some(task) = strip_label_prefix(clean, "Coding workflow:") {
+        if task.is_empty() {
+            return "Starting coding workflow. I will create the code, run it when requested, and report the result.".to_string();
+        }
+        return format!(
+            "Starting coding workflow. I will create the code, run it when requested, and report the final result.\nTask: {}",
+            task
+        );
+    }
+
+    if let Some(task) = strip_label_prefix(clean, "GUI workflow:") {
+        if task.is_empty() {
+            return "Starting GUI workflow. I will report each major result and any blocker."
+                .to_string();
+        }
+        return format!(
+            "Starting GUI workflow. I will report each major result and any blocker.\nTask: {}",
+            task
+        );
+    }
+
+    format!("Starting task: {}", clean)
+}
+
+fn contains_token(text: &str, needle: &str) -> bool {
+    text.split(|ch: char| !ch.is_ascii_alphanumeric())
+        .any(|token| token == needle)
+}
+
+fn should_force_browser_search_for_gui_launch_query(query: &str) -> bool {
+    let lower = query.to_ascii_lowercase();
+
+    let looks_like_editor_coding_workflow = (lower.contains("open code")
+        || lower.contains("launch code")
+        || lower.contains("open vscode")
+        || lower.contains("launch vscode")
+        || lower.contains("visual studio code"))
+        && [
+            "write", "program", "script", "function", "code", "run", "execute", "compile", "debug",
+            "save",
+        ]
+        .iter()
+        .any(|marker| lower.contains(marker));
+    if looks_like_editor_coding_workflow {
+        return false;
+    }
+
+    lower.contains("http://")
+        || lower.contains("https://")
+        || lower.contains("www.")
+        || lower.contains("search for")
+        || lower.contains("search ")
+        || lower.contains("google")
+        || lower.contains("youtube")
+        || lower.contains("website")
+        || lower.contains("url")
+        || contains_token(&lower, "browser")
+        || contains_token(&lower, "chrome")
+        || contains_token(&lower, "chromium")
+        || contains_token(&lower, "firefox")
+        || contains_token(&lower, "brave")
+        || contains_token(&lower, "edge")
+}
+
+fn gui_action_label(action: &str) -> &'static str {
+    match action {
+        "write_file" => "Write generated file",
+        "execute_bash" => "Run command and capture output",
+        "open_application_with_file" => "Open the created file",
+        "open_application" => "Open application",
+        "browser_search" | "managed_browser_navigate" | "open_url" => "Open browser target",
+        "click_element" | "click_ui_element" | "click_mouse" => "Click target",
+        "type_text" => "Type requested text",
+        "press_shortcut" => "Press shortcut",
+        "focus_window" => "Focus target window",
+        _ => "Run workflow step",
+    }
+}
+
+fn format_gui_workflow_start_for_user(
+    workflow: &crate::agent::htn_executor::GuiWorkflow,
+) -> String {
+    let total = workflow.sub_goals.len();
+    let has_terminal_run = workflow
+        .sub_goals
+        .iter()
+        .any(|goal| goal.action == "execute_bash");
+    let mut lines = Vec::with_capacity(total + 1);
+    lines.push(format!(
+        "{} {} step{} planned.",
+        if has_terminal_run {
+            "Starting coding workflow."
+        } else {
+            "Starting GUI workflow."
+        },
+        total,
+        if total == 1 { "" } else { "s" }
+    ));
+    for goal in &workflow.sub_goals {
+        lines.push(format!(
+            "Step {}/{}: {}.",
+            goal.step,
+            total,
+            gui_action_label(&goal.action)
+        ));
+    }
+    lines.join("\n")
+}
+
+fn emit_gui_workflow_initial_task_steps(
+    event_tx: &mpsc::UnboundedSender<StreamEvent>,
+    workflow: &crate::agent::htn_executor::GuiWorkflow,
+) {
+    let total = workflow.sub_goals.len() as u32;
+    for goal in &workflow.sub_goals {
+        let status = if goal.step == 1 {
+            TaskStepStatus::Running
+        } else {
+            TaskStepStatus::Starting
+        };
+        let _ = event_tx.send(StreamEvent::TaskStep(TaskStep {
+            index: goal.step as u32,
+            total: Some(total),
+            description: gui_action_label(&goal.action).to_string(),
+            status,
+        }));
+    }
+}
+
+fn emit_gui_workflow_final_task_steps(
+    event_tx: &mpsc::UnboundedSender<StreamEvent>,
+    workflow: &crate::agent::htn_executor::GuiWorkflow,
+    result: &crate::agent::htn_executor::WorkflowResult,
+) {
+    let total = workflow.sub_goals.len() as u32;
+    let failed_step = if result.success {
+        None
+    } else {
+        Some(result.completed_steps.saturating_add(1))
+    };
+    for goal in &workflow.sub_goals {
+        let status = if goal.step <= result.completed_steps {
+            TaskStepStatus::Done
+        } else if failed_step == Some(goal.step) {
+            TaskStepStatus::Failed
+        } else {
+            TaskStepStatus::Skipped
+        };
+        let _ = event_tx.send(StreamEvent::TaskStep(TaskStep {
+            index: goal.step as u32,
+            total: Some(total),
+            description: gui_action_label(&goal.action).to_string(),
+            status,
+        }));
+    }
+}
+
+fn artifact_summary_for_user(paths: &[std::path::PathBuf]) -> Option<String> {
+    if paths.is_empty() {
+        return None;
+    }
+    let mut lines = vec!["Created files:".to_string()];
+    for path in paths.iter().take(5) {
+        lines.push(format!("- {}", path.display()));
+    }
+    if paths.len() > 5 {
+        lines.push(format!("- {} more file(s)", paths.len() - 5));
+    }
+    Some(lines.join("\n"))
+}
+
+fn cap_output_for_user(raw: &str, max_chars: usize) -> String {
+    let trimmed = raw.trim();
+    if trimmed.chars().count() <= max_chars {
+        return trimmed.to_string();
+    }
+    let clipped: String = trimmed.chars().take(max_chars).collect();
+    format!(
+        "{}\n[output truncated after {} characters]",
+        clipped, max_chars
+    )
+}
+
+fn output_preview_from_artifacts(paths: &[std::path::PathBuf]) -> Option<String> {
+    paths
+        .iter()
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| name.starts_with("output_") && name.ends_with(".txt"))
+                .unwrap_or(false)
+        })
+        .find_map(|path| std::fs::read_to_string(path).ok())
+        .map(|content| cap_output_for_user(&content, 2000))
+        .filter(|content| !content.trim().is_empty())
+}
+
+fn format_gui_workflow_success_for_user(
+    result: &crate::agent::htn_executor::WorkflowResult,
+    observable_narrative: Option<&str>,
+) -> String {
+    let mut lines = vec![format!(
+        "Task completed. KRIA verified {} step{} in {}ms.",
+        result.completed_steps,
+        if result.completed_steps == 1 { "" } else { "s" },
+        result.duration_ms
+    )];
+    if let Some(narrative) = observable_narrative.filter(|value| !value.trim().is_empty()) {
+        lines.push(narrative.trim().to_string());
+    }
+    if let Some(artifacts) = artifact_summary_for_user(&result.created_artifacts) {
+        lines.push(artifacts);
+    }
+    if let Some(output) = output_preview_from_artifacts(&result.created_artifacts) {
+        lines.push(format!("Captured output:\n```\n{}\n```", output));
+    }
+    lines.join("\n\n")
+}
+
+fn observable_narrative_requires_partial_completion(observable_narrative: Option<&str>) -> bool {
+    observable_narrative
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            value.starts_with('⚠')
+                || value.contains("Expected outcome not yet visible")
+                || value.contains("not yet visible")
+        })
+        .unwrap_or(false)
+}
+
+fn format_gui_workflow_partial_for_user(
+    result: &crate::agent::htn_executor::WorkflowResult,
+    observable_narrative: Option<&str>,
+) -> String {
+    let mut lines = vec![format!(
+        "Task partially completed. KRIA verified {} step{} structurally in {}ms, but the required visible outcome was not verified.",
+        result.completed_steps,
+        if result.completed_steps == 1 { "" } else { "s" },
+        result.duration_ms
+    )];
+    if let Some(narrative) = observable_narrative.filter(|value| !value.trim().is_empty()) {
+        lines.push(narrative.trim().to_string());
+    }
+    if let Some(artifacts) = artifact_summary_for_user(&result.created_artifacts) {
+        lines.push(artifacts);
+    }
+    if let Some(output) = output_preview_from_artifacts(&result.created_artifacts) {
+        lines.push(format!("Captured output:\n```\n{}\n```", output));
+    }
+    lines.push(
+        "KRIA did not silently downgrade this to full GUI success; retry visible surfacing or inspect the artifacts above."
+            .to_string(),
+    );
+    lines.join("\n\n")
+}
+
+fn format_gui_workflow_failure_for_user(
+    result: &crate::agent::htn_executor::WorkflowResult,
+) -> String {
+    let detail = result.error.as_deref().unwrap_or("unknown error").trim();
+    let mut lines = vec![format!(
+        "Task did not fully complete. KRIA verified {} of {} step{} before stopping.",
+        result.completed_steps,
+        result.total_steps,
+        if result.total_steps == 1 { "" } else { "s" }
+    )];
+    if result.completed_steps >= 2 && detail.contains("open_application_with_file") {
+        lines.push(
+            "The code was written and executed, but KRIA could not open the created file/output in the requested application."
+                .to_string(),
+        );
+    }
+    lines.push(format!("Failure: {}", detail));
+    if let Some(artifacts) = artifact_summary_for_user(&result.created_artifacts) {
+        lines.push(artifacts);
+    }
+    if let Some(output) = output_preview_from_artifacts(&result.created_artifacts) {
+        lines.push(format!("Captured output:\n```\n{}\n```", output));
+    }
+    lines.push("No further actions were executed after this failure.".to_string());
+    lines.join("\n\n")
+}
+
+/// Produce a TaskStep event reflecting the current package flow state after
+/// a tool result has been observed. Returns None if no step is relevant.
+///
+/// Package flow steps:
+///   Step 1: Search for package
+///   Step 2: Check if already installed
+///   Step 3: Install / Uninstall
+///   Step 4: Verify installation state
+fn package_flow_step_event(
+    flow: &PackageFlowState,
+    completed_tool: &str,
+    success: bool,
+) -> Option<TaskStep> {
+    // Determine total steps based on intent
+    let total: u32 = match flow.intent {
+        PackageIntent::Install => 4,   // search → check → install → verify
+        PackageIntent::Uninstall => 3, // check → uninstall → verify
+    };
+
+    let status = if success {
+        TaskStepStatus::Done
+    } else {
+        TaskStepStatus::Failed
+    };
+
+    match completed_tool {
+        "search_package" => {
+            let found = flow.search_found.unwrap_or(false);
+            Some(TaskStep {
+                index: 1,
+                total: Some(total),
+                description: if found {
+                    format!("Found '{}' in repositories", flow.package_name)
+                } else {
+                    format!("'{}' not found in repositories", flow.package_name)
+                },
+                status: if found {
+                    TaskStepStatus::Done
+                } else {
+                    TaskStepStatus::Failed
+                },
+            })
+        }
+
+        "check_package_installed" => {
+            let step_index = match flow.intent {
+                PackageIntent::Install => {
+                    if flow.action_attempted {
+                        4
+                    } else {
+                        2
+                    }
+                }
+                PackageIntent::Uninstall => {
+                    if flow.action_attempted {
+                        3
+                    } else {
+                        1
+                    }
+                }
+            };
+
+            let installed = flow
+                .postcheck_installed
+                .or(flow.precheck_installed)
+                .unwrap_or(false);
+
+            let description = if flow.action_attempted {
+                // Post-action verification
+                match flow.intent {
+                    PackageIntent::Install => {
+                        if installed {
+                            format!("Verified: '{}' is installed", flow.package_name)
+                        } else {
+                            format!("Verification failed: '{}' not installed", flow.package_name)
+                        }
+                    }
+                    PackageIntent::Uninstall => {
+                        if !installed {
+                            format!("Verified: '{}' is removed", flow.package_name)
+                        } else {
+                            format!(
+                                "Verification failed: '{}' still installed",
+                                flow.package_name
+                            )
+                        }
+                    }
+                }
+            } else {
+                // Pre-action check
+                match flow.intent {
+                    PackageIntent::Install => {
+                        if installed {
+                            format!("'{}' is already installed", flow.package_name)
+                        } else {
+                            format!("'{}' is not installed — will install", flow.package_name)
+                        }
+                    }
+                    PackageIntent::Uninstall => {
+                        if installed {
+                            format!("'{}' is installed — will uninstall", flow.package_name)
+                        } else {
+                            format!("'{}' is not installed — nothing to do", flow.package_name)
+                        }
+                    }
+                }
+            };
+
+            Some(TaskStep {
+                index: step_index,
+                total: Some(total),
+                description,
+                status,
+            })
+        }
+
+        "install_package" => Some(TaskStep {
+            index: 3,
+            total: Some(total),
+            description: if success {
+                format!("Installed '{}'", flow.package_name)
+            } else {
+                format!("Failed to install '{}'", flow.package_name)
+            },
+            status,
+        }),
+
+        "uninstall_package" => Some(TaskStep {
+            index: 2,
+            total: Some(total),
+            description: if success {
+                format!("Uninstalled '{}'", flow.package_name)
+            } else {
+                format!("Failed to uninstall '{}'", flow.package_name)
+            },
+            status,
+        }),
+
+        _ => None,
+    }
+}
+
+/// Classify any tool failure and produce structured recovery options./// Returns None if the failure is not actionable (e.g. generic LLM errors).
+/// This is 100% deterministic — no LLM calls.
+fn classify_tool_failure(
+    tool_name: &str,
+    error: &str,
+    args: &serde_json::Value,
+) -> Option<(String, String, Vec<RecoveryOption>)> {
+    let err_lower = error.to_ascii_lowercase();
+
+    // ── Fleet / remote command failures ──────────────────────────────────
+    if tool_name == "execute_fleet_command" {
+        let command = args.get("command").and_then(|v| v.as_str()).unwrap_or("");
+        let target = args.get("target").and_then(|v| v.as_str()).unwrap_or("VM");
+
+        // Docker not installed
+        if err_lower.contains("docker: command not found")
+            || err_lower.contains("docker: not found")
+            || (err_lower.contains("docker") && err_lower.contains("not found"))
+        {
+            return Some((
+                format!("Docker is not installed on {target}"),
+                error.to_string(),
+                vec![
+                    RecoveryOption {
+                        label: "Install Docker on VM".into(),
+                        action_prompt: format!(
+                            "Install Docker on {target} using the appropriate package manager"
+                        ),
+                        style: "primary",
+                    },
+                    RecoveryOption {
+                        label: "Check what's installed".into(),
+                        action_prompt: format!(
+                            "List installed packages on {target} to see what container tools are available"
+                        ),
+                        style: "secondary",
+                    },
+                ],
+            ));
+        }
+
+        // Docker daemon not running
+        if err_lower.contains("cannot connect to the docker daemon")
+            || err_lower.contains("docker daemon is not running")
+            || (err_lower.contains("docker") && err_lower.contains("is the docker daemon running"))
+        {
+            return Some((
+                format!("Docker daemon is not running on {target}"),
+                error.to_string(),
+                vec![
+                    RecoveryOption {
+                        label: "Start Docker service".into(),
+                        action_prompt: format!(
+                            "Start the Docker service on {target} with: sudo systemctl start docker"
+                        ),
+                        style: "primary",
+                    },
+                    RecoveryOption {
+                        label: "Enable Docker on boot".into(),
+                        action_prompt: format!(
+                            "Enable Docker to start automatically on {target}: sudo systemctl enable docker"
+                        ),
+                        style: "secondary",
+                    },
+                ],
+            ));
+        }
+
+        // Permission denied (non-SSH)
+        if err_lower.contains("permission denied") && !err_lower.contains("publickey") {
+            return Some((
+                format!("Permission denied running command on {target}"),
+                error.to_string(),
+                vec![
+                    RecoveryOption {
+                        label: "Run with sudo".into(),
+                        action_prompt: format!(
+                            "Run this command with sudo on {target}: sudo {command}"
+                        ),
+                        style: "primary",
+                    },
+                    RecoveryOption {
+                        label: "Check user permissions".into(),
+                        action_prompt: format!(
+                            "Check what groups and permissions the current user has on {target}"
+                        ),
+                        style: "secondary",
+                    },
+                ],
+            ));
+        }
+
+        // Service not found / not installed
+        if err_lower.contains("unit") && err_lower.contains("not found") {
+            return Some((
+                format!("Service not found on {target}"),
+                error.to_string(),
+                vec![RecoveryOption {
+                    label: "List running services".into(),
+                    action_prompt: format!("List all running systemd services on {target}"),
+                    style: "primary",
+                }],
+            ));
+        }
+
+        // Non-zero exit with stderr — generic command failure
+        if !err_lower.is_empty() && err_lower.contains("non-zero status") {
+            return Some((
+                format!("Command failed on {target}"),
+                error.to_string(),
+                vec![
+                    RecoveryOption {
+                        label: "Retry command".into(),
+                        action_prompt: format!(
+                            "Try running this command again on {target}: {command}"
+                        ),
+                        style: "primary",
+                    },
+                    RecoveryOption {
+                        label: "Check system logs".into(),
+                        action_prompt: format!(
+                            "Show recent system logs on {target} to diagnose the failure"
+                        ),
+                        style: "secondary",
+                    },
+                ],
+            ));
+        }
+
+        return None;
+    }
+
+    // ── File operation failures ───────────────────────────────────────────
+    if matches!(
+        tool_name,
+        "read_file" | "write_file" | "delete_file" | "copy_file" | "move_file"
+    ) {
+        let path = args
+            .get("path")
+            .and_then(|v| v.as_str())
+            .or_else(|| args.get("source").and_then(|v| v.as_str()))
+            .unwrap_or("the file");
+
+        if err_lower.contains("no such file") || err_lower.contains("not found") {
+            return Some((
+                format!("File not found: {path}"),
+                error.to_string(),
+                vec![
+                    RecoveryOption {
+                        label: "Search for file".into(),
+                        action_prompt: format!(
+                            "Search for a file named '{}' on this system",
+                            std::path::Path::new(path)
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or(path)
+                        ),
+                        style: "primary",
+                    },
+                    RecoveryOption {
+                        label: "List directory".into(),
+                        action_prompt: format!(
+                            "List files in '{}'",
+                            std::path::Path::new(path)
+                                .parent()
+                                .and_then(|p| p.to_str())
+                                .unwrap_or(".")
+                        ),
+                        style: "secondary",
+                    },
+                ],
+            ));
+        }
+
+        if err_lower.contains("permission denied") {
+            return Some((
+                format!("Permission denied accessing: {path}"),
+                error.to_string(),
+                vec![RecoveryOption {
+                    label: "Check file permissions".into(),
+                    action_prompt: format!("Show permissions for: {path}"),
+                    style: "primary",
+                }],
+            ));
+        }
+
+        return None;
+    }
+
+    // ── Package management failures ───────────────────────────────────────
+    if matches!(
+        tool_name,
+        "install_package" | "uninstall_package" | "search_package"
+    ) {
+        let pkg = args
+            .get("name")
+            .or_else(|| args.get("query"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("the package");
+
+        if err_lower.contains("not found")
+            || err_lower.contains("no candidates")
+            || err_lower.contains("unable to locate")
+        {
+            return Some((
+                format!("Package '{pkg}' not found in repositories"),
+                error.to_string(),
+                vec![
+                    RecoveryOption {
+                        label: "Search with different name".into(),
+                        action_prompt: format!(
+                            "Search for packages related to '{pkg}' to find the correct package name"
+                        ),
+                        style: "primary",
+                    },
+                    RecoveryOption {
+                        label: "Update package list".into(),
+                        action_prompt: "Update the package repository list and try again".into(),
+                        style: "secondary",
+                    },
+                ],
+            ));
+        }
+
+        if err_lower.contains("permission denied") || err_lower.contains("are you root") {
+            return Some((
+                format!("Need elevated permissions to install '{pkg}'"),
+                error.to_string(),
+                vec![RecoveryOption {
+                    label: "Retry with sudo".into(),
+                    action_prompt: format!("Install '{pkg}' using sudo"),
+                    style: "primary",
+                }],
+            ));
+        }
+
+        return None;
+    }
+
+    // ── Shell execution failures ──────────────────────────────────────────
+    if tool_name == "execute_bash" || tool_name == "execute_python" {
+        let command = args
+            .get("command")
+            .or_else(|| args.get("code"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        if err_lower.contains("command not found") || err_lower.contains(": not found") {
+            // Extract the missing command name
+            let missing_cmd = err_lower
+                .split(':')
+                .next()
+                .unwrap_or(command)
+                .trim()
+                .split_whitespace()
+                .last()
+                .unwrap_or(command);
+            return Some((
+                format!("Command not found: {missing_cmd}"),
+                error.to_string(),
+                vec![
+                    RecoveryOption {
+                        label: format!("Install {missing_cmd}"),
+                        action_prompt: format!("Install the '{missing_cmd}' tool/package"),
+                        style: "primary",
+                    },
+                    RecoveryOption {
+                        label: "Check alternatives".into(),
+                        action_prompt: format!(
+                            "Find an alternative to '{missing_cmd}' that is already installed"
+                        ),
+                        style: "secondary",
+                    },
+                ],
+            ));
+        }
+
+        if err_lower.contains("permission denied") {
+            return Some((
+                "Permission denied".into(),
+                error.to_string(),
+                vec![RecoveryOption {
+                    label: "Run with sudo".into(),
+                    action_prompt: format!("Run this command with sudo: {command}"),
+                    style: "primary",
+                }],
+            ));
+        }
+
+        return None;
+    }
+
+    // ── Web / network failures ────────────────────────────────────────────
+    if matches!(
+        tool_name,
+        "fetch_webpage" | "fetch_article" | "web_search" | "searxng_search"
+    ) {
+        if err_lower.contains("timeout") || err_lower.contains("timed out") {
+            let url = args
+                .get("url")
+                .and_then(|v| v.as_str())
+                .unwrap_or("the URL");
+            return Some((
+                "Request timed out".into(),
+                error.to_string(),
+                vec![
+                    RecoveryOption {
+                        label: "Retry".into(),
+                        action_prompt: format!("Try fetching {url} again"),
+                        style: "primary",
+                    },
+                    RecoveryOption {
+                        label: "Check internet connection".into(),
+                        action_prompt: "Check if the internet connection is working".into(),
+                        style: "secondary",
+                    },
+                ],
+            ));
+        }
+
+        if err_lower.contains("connection refused") || err_lower.contains("unreachable") {
+            return Some((
+                "Cannot reach the server".into(),
+                error.to_string(),
+                vec![RecoveryOption {
+                    label: "Check internet connection".into(),
+                    action_prompt: "Check if the internet connection is working".into(),
+                    style: "primary",
+                }],
+            ));
+        }
+
+        return None;
+    }
+
+    // No actionable recovery for this failure
+    None
+}
+
+/// Classify a fleet connectivity failure and produce structured recovery options./// This is model-agnostic: all logic is deterministic, no LLM calls.
+fn classify_fleet_connectivity_failure(
+    target: &str,
+    error: &str,
+    original_tool: &str,
+    original_args: &serde_json::Value,
+) -> (String, String, Vec<RecoveryOption>) {
+    let error_lower = error.to_ascii_lowercase();
+    let command = original_args
+        .get("command")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let (context, detail, mut options) = if error_lower.contains("host unreachable")
+        || error_lower.contains("no route to host")
+        || error_lower.contains("network unreachable")
+    {
+        (
+            format!("Cannot reach {target} — host is unreachable"),
+            format!("Network error: {error}"),
+            vec![
+                RecoveryOption {
+                    label: "Check VM status".into(),
+                    action_prompt: format!("Check if {target} is online and reachable"),
+                    style: "primary",
+                },
+                RecoveryOption {
+                    label: "List enrolled VMs".into(),
+                    action_prompt: "Show me all my enrolled VMs and their status".into(),
+                    style: "secondary",
+                },
+            ],
+        )
+    } else if error_lower.contains("connection refused") {
+        (
+            format!("{target} refused the connection — SSH may not be running"),
+            format!("SSH connection refused: {error}"),
+            vec![
+                RecoveryOption {
+                    label: "Check VM status".into(),
+                    action_prompt: format!("Check if {target} is online and SSH is running"),
+                    style: "primary",
+                },
+                RecoveryOption {
+                    label: "List enrolled VMs".into(),
+                    action_prompt: "Show me all my enrolled VMs and their status".into(),
+                    style: "secondary",
+                },
+            ],
+        )
+    } else if error_lower.contains("timed out") || error_lower.contains("timeout") {
+        (
+            format!("{target} is not responding — connection timed out"),
+            format!("SSH timeout: {error}"),
+            vec![
+                RecoveryOption {
+                    label: "Retry connection".into(),
+                    action_prompt: format!("Try connecting to {target} again and run: {command}"),
+                    style: "primary",
+                },
+                RecoveryOption {
+                    label: "Check VM status".into(),
+                    action_prompt: format!("Check if {target} is online"),
+                    style: "secondary",
+                },
+            ],
+        )
+    } else if error_lower.contains("permission denied") || error_lower.contains("publickey") {
+        (
+            format!("SSH authentication failed for {target}"),
+            format!("Permission denied (publickey): {error}"),
+            vec![
+                RecoveryOption {
+                    label: "Check SSH keys".into(),
+                    action_prompt: format!(
+                        "Check SSH key configuration for {target} and show enrollment status"
+                    ),
+                    style: "primary",
+                },
+                RecoveryOption {
+                    label: "Re-enroll VM".into(),
+                    action_prompt: format!("Show me how to re-enroll {target} with KRIA fleet"),
+                    style: "secondary",
+                },
+            ],
+        )
+    } else if error_lower.contains("no target")
+        || error_lower.contains("no enrolled")
+        || error_lower.contains("no ready")
+    {
+        (
+            "No VM is enrolled or connected".into(),
+            "KRIA fleet has no ready targets. Enroll a VM first.".into(),
+            vec![
+                RecoveryOption {
+                    label: "How to enroll a VM".into(),
+                    action_prompt: "How do I enroll a VM with KRIA fleet?".into(),
+                    style: "primary",
+                },
+                RecoveryOption {
+                    label: "List enrolled VMs".into(),
+                    action_prompt: "Show me all my enrolled VMs".into(),
+                    style: "secondary",
+                },
+            ],
+        )
+    } else {
+        (
+            format!("Could not connect to {target}"),
+            error.to_string(),
+            vec![
+                RecoveryOption {
+                    label: "Check VM status".into(),
+                    action_prompt: format!("Check if {target} is online and reachable"),
+                    style: "primary",
+                },
+                RecoveryOption {
+                    label: "List enrolled VMs".into(),
+                    action_prompt: "Show me all my enrolled VMs and their status".into(),
+                    style: "secondary",
+                },
+            ],
+        )
+    };
+
+    // Always add a "Retry" option if there was a specific command
+    if !command.is_empty() && original_tool == "execute_fleet_command" {
+        options.push(RecoveryOption {
+            label: "Retry when connected".into(),
+            action_prompt: format!("Once {target} is connected, run this command on it: {command}"),
+            style: "secondary",
+        });
+    }
+
+    (context, detail, options)
+}
+
+fn format_tool_satisfaction_summary(turn_memory: &TurnMemory) -> String {
+    use crate::agent::result_synthesizer::ResultSynthesizer;
+
+    let completed = turn_memory.get_completed_actions();
+    if completed.is_empty() {
+        return "Done. The requested action completed successfully.".into();
+    }
+
+    let synthesizer = ResultSynthesizer::default();
+
+    if completed.len() == 1 {
+        let action = &completed[0];
+        // Use the synthesizer to produce a proper human-readable response
+        let tool_result = crate::infra::isolation::ToolResult::ok(action.result_data.clone());
+        let synthesized = synthesizer.synthesize(&action.tool_name, &tool_result, None);
+        return synthesized.human_readable;
+    }
+
+    // Multiple tools: synthesize each and combine
+    let mut out = String::new();
+    for action in completed {
+        let tool_result = crate::infra::isolation::ToolResult::ok(action.result_data.clone());
+        let synthesized = synthesizer.synthesize(&action.tool_name, &tool_result, None);
+        out.push_str(&synthesized.human_readable);
+        out.push('\n');
+    }
+    out
+}
+
 fn build_message_preview(messages: &[ChatMessage], max_messages: usize) -> serde_json::Value {
     let start = messages.len().saturating_sub(max_messages);
     let preview: Vec<serde_json::Value> = messages
@@ -244,7 +1202,8 @@ fn compact_messages_with_budgets(messages: &mut Vec<ChatMessage>, budgets: &Cont
 
         if Some(idx) == latest_user_idx {
             // Latest user message: always preserve up to 2× item cap
-            msg.content = truncate_text_for_context(&msg.content, budgets.history_item_char_cap * 2);
+            msg.content =
+                truncate_text_for_context(&msg.content, budgets.history_item_char_cap * 2);
             continue;
         }
 
@@ -341,13 +1300,41 @@ fn fallback_routed_tool_candidates(
         add_tool_if_available(allowed_tool_names, &mut selected, "search_news");
     }
 
-    if lower.contains("search")
-        || lower.contains("look up")
-        || lower.contains("find information")
-        || lower.contains("web")
+    // ── Web search vs GUI launch disambiguation ───────────────────────────
+    // Use the GuiIntentClassifier to distinguish:
+    //   "search for X online" → web_search / searxng_search
+    //   "open chrome and search for X" → browser_search
+    //   "search for X on youtube" → browser_search (site navigation)
+    // This avoids the keyword collision where "search" appears in both intents.
     {
-        add_tool_if_available(allowed_tool_names, &mut selected, "web_search");
-        add_tool_if_available(allowed_tool_names, &mut selected, "searxng_search");
+        use crate::routing::gui_intent::{classify_gui_intent, GuiIntent};
+        let gui_score = classify_gui_intent(user_text);
+
+        match gui_score.intent {
+            GuiIntent::GuiLaunch => {
+                // User wants to open a browser/app — route to GUI tools
+                add_tool_if_available(allowed_tool_names, &mut selected, "browser_search");
+                add_tool_if_available(allowed_tool_names, &mut selected, "open_application");
+                add_tool_if_available(allowed_tool_names, &mut selected, "open_url");
+            }
+            GuiIntent::InfoRetrieval => {
+                // User wants information — route to search tools
+                add_tool_if_available(allowed_tool_names, &mut selected, "web_search");
+                add_tool_if_available(allowed_tool_names, &mut selected, "searxng_search");
+            }
+            GuiIntent::Ambiguous => {
+                // Ambiguous: expose both sets and let the LLM + system prompt decide.
+                // The system prompt's rule 32 will guide the LLM correctly.
+                if lower.contains("search")
+                    || lower.contains("look up")
+                    || lower.contains("find information")
+                    || lower.contains("web")
+                {
+                    add_tool_if_available(allowed_tool_names, &mut selected, "web_search");
+                    add_tool_if_available(allowed_tool_names, &mut selected, "searxng_search");
+                }
+            }
+        }
     }
 
     if lower.contains("file") || lower.contains("folder") || lower.contains("directory") {
@@ -355,6 +1342,87 @@ fn fallback_routed_tool_candidates(
             "mcp_fs_search_files",
             "search_files",
             "find_files_by_pattern",
+            "list_directory",
+            "list_files",
+            "mcp_fs_list_directory",
+        ] {
+            add_tool_if_available(allowed_tool_names, &mut selected, tool);
+        }
+    }
+
+    // Webpage / URL analysis: when the user references a URL or talks about
+    // analyzing/summarizing a page, expose fetch_webpage and fetch_article.
+    let mentions_url = lower.contains("http://")
+        || lower.contains("https://")
+        || lower.contains("www.")
+        || lower.contains("url")
+        || lower.contains("link")
+        || lower.contains("webpage")
+        || lower.contains("web page")
+        || lower.contains("website");
+    let analysis_intent = lower.contains("analyze")
+        || lower.contains("summarize")
+        || lower.contains("summarise")
+        || lower.contains("read")
+        || lower.contains("fetch")
+        || lower.contains("scrape")
+        || lower.contains("extract");
+    if mentions_url || (analysis_intent && lower.contains("page")) {
+        for tool in ["fetch_webpage", "fetch_article"] {
+            add_tool_if_available(allowed_tool_names, &mut selected, tool);
+        }
+    }
+
+    // Docker / container inspection.
+    // If the query references a remote target (VM, server, remote host), route to
+    // execute_fleet_command so the command runs on the enrolled target.
+    // Otherwise route to local execute_bash.
+    if lower.contains("docker") || lower.contains("container") {
+        let is_remote = lower.contains(" vm")
+            || lower.contains(" vms")
+            || lower.contains("virtual machine")
+            || lower.contains("remote")
+            || lower.contains("server")
+            || lower.contains("ssh")
+            || lower.contains("fleet")
+            || lower.contains("enrolled");
+
+        if is_remote {
+            add_tool_if_available(allowed_tool_names, &mut selected, "execute_fleet_command");
+            add_tool_if_available(allowed_tool_names, &mut selected, "check_device_health");
+            add_tool_if_available(allowed_tool_names, &mut selected, "get_fleet_overview");
+        } else {
+            add_tool_if_available(allowed_tool_names, &mut selected, "execute_bash");
+            add_tool_if_available(allowed_tool_names, &mut selected, "execute_python");
+        }
+    }
+
+    // Git operations: expose git tools when git intent is detected.
+    let git_signals = [
+        "git ",
+        "branch",
+        "commit",
+        "merge",
+        "rebase",
+        "checkout",
+        "stash",
+        "repo",
+        "repository",
+    ];
+    if git_signals.iter().any(|s| lower.contains(s)) {
+        for tool in [
+            "git_status",
+            "git_log",
+            "git_diff",
+            "git_branch_list",
+            "git_commit",
+            "git_checkout",
+            "git_stash",
+            "git_push",
+            "git_pull",
+            "git_fetch",
+            "git_merge",
+            "git_remote",
         ] {
             add_tool_if_available(allowed_tool_names, &mut selected, tool);
         }
@@ -423,6 +1491,36 @@ fn score_tool_relevance(query_text: &str, schema: &ToolSchema) -> i32 {
         score += 10;
     }
 
+    // ── GUI-intent aware boosting ─────────────────────────────────────────
+    // Use the GuiIntentClassifier to boost browser_search for GUI-launch queries
+    // and suppress it for info-retrieval queries. This prevents the word "search"
+    // from incorrectly boosting web_search/searxng_search for GUI queries.
+    {
+        use crate::routing::gui_intent::{classify_gui_intent, GuiIntent};
+        let gui = classify_gui_intent(query_text);
+        match gui.intent {
+            GuiIntent::GuiLaunch => {
+                if schema.name == "browser_search" {
+                    score += 12; // Strong boost — GUI launch should always prefer browser_search
+                }
+                if schema.name == "web_search" || schema.name == "searxng_search" {
+                    score -= 6; // Suppress web search tools for GUI queries
+                }
+            }
+            GuiIntent::InfoRetrieval => {
+                if schema.name == "browser_search" {
+                    score -= 4; // Suppress browser_search for info queries
+                }
+                if schema.name == "web_search" || schema.name == "searxng_search" {
+                    score += 4; // Boost web search for info queries
+                }
+            }
+            GuiIntent::Ambiguous => {
+                // No adjustment — let other signals decide
+            }
+        }
+    }
+
     score
 }
 
@@ -484,12 +1582,45 @@ fn select_routed_tool_schemas(
     }
 
     // ── Phase C: Build filtered list with attention hack ────────────────
+    // When a web-search tool is forced (e.g. by the live-fact classifier),
+    // exclude GUI/browser-opening tools so the LLM doesn't get confused
+    // between information retrieval and browser automation.
+    let forced_is_search = forced_tool_name
+        .map(|t| matches!(t, "searxng_search" | "web_search" | "search_news"))
+        .unwrap_or(false);
+    // Symmetric exclusion: when a GUI-launch tool is forced (browser_search,
+    // open_application, etc.), exclude info-retrieval tools so the LLM doesn't
+    // tack on `web_search` / `search_news` after a successful launch and turn
+    // a GUI workflow into an info-retrieval ReAct loop.
+    let forced_is_gui_launch = forced_tool_name
+        .map(|t| {
+            matches!(
+                t,
+                "browser_search" | "open_application" | "open_url" | "open_application_with_file"
+            )
+        })
+        .unwrap_or(false);
+    let gui_tools_to_exclude: &[&str] = if forced_is_search {
+        &["browser_search", "open_application", "open_url"]
+    } else {
+        &[]
+    };
+    let search_tools_to_exclude: &[&str] = if forced_is_gui_launch {
+        &["web_search", "searxng_search", "search_news"]
+    } else {
+        &[]
+    };
+
     let filtered: Vec<ToolSchema> = if include_names.is_empty() {
         Vec::new()
     } else {
         all_tool_schemas
             .iter()
-            .filter(|schema| include_names.contains(&schema.name))
+            .filter(|schema| {
+                include_names.contains(&schema.name)
+                    && !gui_tools_to_exclude.contains(&schema.name.as_str())
+                    && !search_tools_to_exclude.contains(&schema.name.as_str())
+            })
             .map(|schema| {
                 // Attention hack: if this tool was NOT in the original ONNX
                 // domain set, prepend the override marker so the LLM's
@@ -1781,8 +2912,47 @@ impl PackageFlowState {
     }
 }
 
+/// A single recovery action the user can take from the UI.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RecoveryOption {
+    /// Short button label (e.g. "Connect VM", "Retry", "Install Docker")
+    pub label: String,
+    /// The message that will be sent to the agent when the user clicks this button
+    pub action_prompt: String,
+    /// Visual style hint for the UI: "primary" | "secondary" | "danger"
+    pub style: &'static str,
+}
+
+/// A step in a multi-step task execution plan.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TaskStep {
+    /// Step index (1-based)
+    pub index: u32,
+    /// Total steps in the plan (None if unknown)
+    pub total: Option<u32>,
+    /// Short description of this step
+    pub description: String,
+    /// Step status
+    pub status: TaskStepStatus,
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskStepStatus {
+    /// Step is about to start
+    Starting,
+    /// Step is in progress
+    Running,
+    /// Step completed successfully
+    Done,
+    /// Step failed
+    Failed,
+    /// Step was skipped
+    Skipped,
+}
+
 /// Events emitted during agent loop execution.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub enum StreamEvent {
     /// Marks the admitted turn identity for this stream.
     TurnAccepted { session_id: String, turn_id: String },
@@ -1798,7 +2968,31 @@ pub enum StreamEvent {
         name: String,
         result: serde_json::Value,
         success: bool,
+        /// Full human-readable markdown response (tables, lists, paragraphs)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        human_readable: Option<String>,
+        /// One-line conversational summary (for collapsed UI badge)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        conversational_summary: Option<String>,
+        /// Execution metadata (optional, for status/metrics display)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        execution_metadata: Option<serde_json::Value>,
     },
+    /// Structured recovery options emitted when a prerequisite check fails.
+    /// The UI renders these as clickable action buttons so the user can
+    /// resolve the issue without typing a follow-up message.
+    RecoveryOptions {
+        /// Short description of what failed (e.g. "VM not reachable")
+        context: String,
+        /// Diagnostic detail (e.g. "SSH Timeout connecting to vm1")
+        detail: String,
+        /// Ordered list of recovery actions the user can take
+        options: Vec<RecoveryOption>,
+    },
+    /// A step in a multi-step task execution plan.
+    /// Emitted before and after each significant step so the UI can show
+    /// live progress (e.g. "Step 1/3: Checking VM connectivity").
+    TaskStep(TaskStep),
     /// Mid-execution heartbeat / progress update from a long-running tool.
     /// `call_id` matches the `name` field of the surrounding `ToolStart`/`ToolEnd`.
     /// `percent` is `None` when progress is indeterminate.
@@ -1981,6 +3175,60 @@ pub struct AgentLoop {
     /// Optional execution verifier — when present, validates tool results after execution.
     /// When absent, tool results are accepted as-is (existing behavior).
     execution_verifier: Option<Arc<dyn crate::agent::execution_verifier::ExecutionVerifier>>,
+    /// Result synthesizer — transforms raw tool outputs into intelligent responses.
+    result_synthesizer: ResultSynthesizer,
+    /// PSDG handle — when present, injects semantic desktop context into system prompts
+    /// for automation/shell/IDE-relevant turns. Fire-and-forget writes only.
+    world_model: Option<crate::agent::psdg::PsdgHandle>,
+    /// Optional LLM-powered intent compiler for complex GUI intents.
+    ///
+    /// `RuleIntentCompiler` handles common patterns (<5ms, no LLM).
+    /// When set, this compiler is tried as a fallback for `Verb::Other` results
+    /// that the rule compiler cannot classify, enabling semantic normalization of
+    /// complex multi-step GUI automation intents.
+    intent_compiler: Option<Arc<dyn crate::agent::intent_compiler::IntentCompiler>>,
+    /// Optional session manager for ReAct workflow checkpoint persistence.
+    /// When set, each tool execution round is checkpointed to disk.
+    session_manager: Option<Arc<crate::agent::workflow_session::SessionManager>>,
+    /// Optional health registry for runtime observability event counting.
+    health_registry: Option<Arc<crate::infra::health::HealthRegistry>>,
+    /// Optional execution transparency layer for per-turn ReAct lineage tracing.
+    /// When set, each ReAct turn creates a trace and each tool execution is recorded.
+    transparency_layer: Option<crate::agent::execution_transparency::ExecutionTransparencyLayer>,
+    /// Optional observable completion engine — verifies human-visible outcomes after
+    /// the ReAct tool loop finishes. Infers outcomes from user intent; skipped for
+    /// Silent/Converse turns. PSDG fast-path keeps most checks under 10ms.
+    observable_completion:
+        Option<std::sync::Arc<crate::agent::observable_completion::ObservableCompletionEngine>>,
+    /// Optional workflow expectation engine — classifies workflow category at turn
+    /// start using keyword + operation heuristics for semantic context alignment.
+    workflow_expectation:
+        Option<std::sync::Arc<crate::agent::workflow_expectation::WorkflowExpectationEngine>>,
+    /// Optional collaborative autonomy engine — per-turn autonomy decision; surfaces
+    /// advisory notices for novel or low-confidence operations before tool loop starts.
+    collaborative_autonomy:
+        Option<std::sync::Arc<crate::agent::collaborative_autonomy::CollaborativeAutonomyEngine>>,
+    /// Optional workflow continuation runtime — classifies tool failures as interruptions
+    /// and plans bounded recovery. Records blockers in the transparency layer.
+    continuation_runtime:
+        Option<std::sync::Arc<crate::agent::workflow_continuation::WorkflowContinuationRuntime>>,
+    // ── Batch 3: Persistent Operational Desktop Cognition Runtime ────────────
+    /// Optional cognition event bus — emits typed operational events to subscribers.
+    cognition_bus: Option<std::sync::Arc<crate::agent::cognition_event_bus::CognitionEventBus>>,
+    /// Optional operational context tracker — maintains bounded workflow history.
+    operational_context:
+        Option<std::sync::Arc<crate::agent::operational_context::OperationalContextTracker>>,
+    /// Optional procedural workflow memory — extracts and stores skill patterns.
+    procedural_memory:
+        Option<std::sync::Arc<crate::agent::procedural_memory::ProceduralWorkflowMemory>>,
+    /// Optional persistent goal runtime — goals that survive restarts.
+    goal_runtime: Option<std::sync::Arc<crate::agent::goal_runtime::PersistentGoalRuntime>>,
+    /// Optional operational suggestions engine — rate-limited proactive suggestions.
+    suggestions_engine:
+        Option<std::sync::Arc<crate::agent::operational_suggestions::OperationalSuggestionsEngine>>,
+    /// Optional desktop awareness runtime — unified live operational state.
+    desktop_awareness:
+        Option<std::sync::Arc<crate::agent::desktop_awareness::DesktopAwarenessRuntime>>,
 }
 
 impl AgentLoop {
@@ -2013,6 +3261,22 @@ impl AgentLoop {
             turn_gate: Arc::new(TurnGate::new()),
             failover_router: None,
             execution_verifier: None,
+            result_synthesizer: ResultSynthesizer::default(),
+            world_model: None,
+            intent_compiler: None,
+            session_manager: None,
+            health_registry: None,
+            transparency_layer: None,
+            observable_completion: None,
+            workflow_expectation: None,
+            collaborative_autonomy: None,
+            continuation_runtime: None,
+            cognition_bus: None,
+            operational_context: None,
+            procedural_memory: None,
+            goal_runtime: None,
+            suggestions_engine: None,
+            desktop_awareness: None,
         }
     }
 
@@ -2132,6 +3396,188 @@ impl AgentLoop {
         verifier: Arc<dyn crate::agent::execution_verifier::ExecutionVerifier>,
     ) -> Self {
         self.execution_verifier = Some(verifier);
+        self
+    }
+
+    /// Attach an LLM-powered intent compiler for complex GUI automation intents.
+    ///
+    /// `RuleIntentCompiler` (always active) handles common verbs (<5ms, no LLM).
+    /// This compiler is invoked as a fallback ONLY when `RuleIntentCompiler` returns
+    /// `Verb::Other` — i.e., the rule-based path cannot classify the intent.
+    ///
+    /// Use `LlmIntentCompiler::new(backend)` from `agent::intent_compiler_llm`.
+    /// The LLM compiler uses a structured JSON prompt and is bounded to 512 tokens.
+    ///
+    /// When not set, only rule-based compilation is active — no behavioral change.
+    pub fn with_intent_compiler(
+        mut self,
+        compiler: Arc<dyn crate::agent::intent_compiler::IntentCompiler>,
+    ) -> Self {
+        self.intent_compiler = Some(compiler);
+        self
+    }
+
+    /// Attach a session manager for ReAct workflow checkpoint persistence.
+    ///
+    /// When set, the agent loop persists a `WorkflowSession` checkpoint after
+    /// each tool execution round, enabling recovery and continuation across
+    /// interruptions or crashes.
+    pub fn with_session_manager(
+        mut self,
+        manager: Arc<crate::agent::workflow_session::SessionManager>,
+    ) -> Self {
+        self.session_manager = Some(manager);
+        self
+    }
+
+    /// Attach a health registry for runtime observability event counting.
+    pub fn with_health_registry(
+        mut self,
+        health: Arc<crate::infra::health::HealthRegistry>,
+    ) -> Self {
+        self.health_registry = Some(health);
+        self
+    }
+
+    /// Attach an execution transparency layer for per-turn ReAct lineage tracing.
+    ///
+    /// When set, each turn begins a `WorkflowTrace` and each tool call is recorded
+    /// as a completed stage, providing observable execution lineage across all
+    /// ReAct tool rounds.
+    pub fn with_transparency_layer(
+        mut self,
+        layer: crate::agent::execution_transparency::ExecutionTransparencyLayer,
+    ) -> Self {
+        self.transparency_layer = Some(layer);
+        self
+    }
+
+    /// Attach an observable completion engine for human-visible workflow verification.
+    ///
+    /// When set, the agent loop verifies expected human-visible outcomes after all
+    /// tools have executed. Outcomes are inferred from user intent and verified via
+    /// PSDG fast-path + bounded live probes. Only active when non-Silent outcomes
+    /// are inferred. Use `ObservableCompletionEngine::new(psdg)` from
+    /// `agent::observable_completion`.
+    pub fn with_observable_completion(
+        mut self,
+        engine: std::sync::Arc<crate::agent::observable_completion::ObservableCompletionEngine>,
+    ) -> Self {
+        self.observable_completion = Some(engine);
+        self
+    }
+
+    /// Attach a workflow expectation engine for semantic workflow classification.
+    ///
+    /// When set, the agent loop classifies the workflow category at turn start
+    /// using keyword + operation heuristics from `WorkflowExpectationEngine::classify()`.
+    /// Category and expected outcomes are logged for transparency.
+    pub fn with_workflow_expectation(
+        mut self,
+        engine: std::sync::Arc<crate::agent::workflow_expectation::WorkflowExpectationEngine>,
+    ) -> Self {
+        self.workflow_expectation = Some(engine);
+        self
+    }
+
+    /// Attach a collaborative autonomy engine for per-turn autonomy decisions.
+    ///
+    /// When set, the agent loop consults the engine before the tool loop and
+    /// surfaces advisory notices (`ProceedWithNotice`) or clarification hints
+    /// (`Clarify`, `Escalate`) as `StreamEvent::Plan` events. Non-blocking —
+    /// does not gate tool execution (HITL + PolicyEngine handle safety gating).
+    pub fn with_collaborative_autonomy(
+        mut self,
+        engine: std::sync::Arc<crate::agent::collaborative_autonomy::CollaborativeAutonomyEngine>,
+    ) -> Self {
+        self.collaborative_autonomy = Some(engine);
+        self
+    }
+
+    /// Attach a workflow continuation runtime for interruption-aware recovery.
+    ///
+    /// When set, tool failures are classified as interruptions (`classify_interruption()`)
+    /// and bounded recovery plans are generated (`plan_recovery()`). Recovery plans
+    /// are logged via `log_pipeline_step` and recorded as blockers in the transparency
+    /// layer for full audit lineage. Bounded to `MAX_RECOVERY_DEPTH` retries.
+    pub fn with_continuation_runtime(
+        mut self,
+        runtime: std::sync::Arc<crate::agent::workflow_continuation::WorkflowContinuationRuntime>,
+    ) -> Self {
+        self.continuation_runtime = Some(runtime);
+        self
+    }
+
+    // ── Batch 3 builder methods ───────────────────────────────────────────────
+
+    /// Attach a cognition event bus for typed operational event fan-out.
+    pub fn with_cognition_bus(
+        mut self,
+        bus: std::sync::Arc<crate::agent::cognition_event_bus::CognitionEventBus>,
+    ) -> Self {
+        self.cognition_bus = Some(bus);
+        self
+    }
+
+    /// Attach an operational context tracker.
+    pub fn with_operational_context(
+        mut self,
+        tracker: std::sync::Arc<crate::agent::operational_context::OperationalContextTracker>,
+    ) -> Self {
+        self.operational_context = Some(tracker);
+        self
+    }
+
+    /// Attach a procedural workflow memory.
+    pub fn with_procedural_memory(
+        mut self,
+        memory: std::sync::Arc<crate::agent::procedural_memory::ProceduralWorkflowMemory>,
+    ) -> Self {
+        self.procedural_memory = Some(memory);
+        self
+    }
+
+    /// Attach a persistent goal runtime.
+    pub fn with_goal_runtime(
+        mut self,
+        runtime: std::sync::Arc<crate::agent::goal_runtime::PersistentGoalRuntime>,
+    ) -> Self {
+        self.goal_runtime = Some(runtime);
+        self
+    }
+
+    /// Attach an operational suggestions engine.
+    pub fn with_suggestions_engine(
+        mut self,
+        engine: std::sync::Arc<crate::agent::operational_suggestions::OperationalSuggestionsEngine>,
+    ) -> Self {
+        self.suggestions_engine = Some(engine);
+        self
+    }
+
+    /// Attach a desktop awareness runtime.
+    pub fn with_desktop_awareness(
+        mut self,
+        runtime: std::sync::Arc<crate::agent::desktop_awareness::DesktopAwarenessRuntime>,
+    ) -> Self {
+        self.desktop_awareness = Some(runtime);
+        self
+    }
+
+    /// Attach a PSDG handle for persistent semantic desktop context injection.
+    ///
+    /// When set, the agent loop injects a compact semantic desktop context block
+    /// (focused app, browser URL, IDE workspace, etc.) into system prompts for
+    /// automation/shell/IDE-relevant turns.
+    ///
+    /// Context injection is:
+    /// - **Bounded**: max `MAX_CONTEXT_FACTS` facts, confidence ≥ 0.5
+    /// - **Selective**: only injected for `Automate`, `ExecuteShell`, `Write`, `Clarify`
+    /// - **Non-blocking**: snapshot read takes < 1ms from Mutex<Connection>
+    ///
+    /// When not set (default), no context injection — no behavioral change.
+    pub fn with_world_model(mut self, psdg: crate::agent::psdg::PsdgHandle) -> Self {
+        self.world_model = Some(psdg);
         self
     }
 
@@ -2323,6 +3769,42 @@ impl AgentLoop {
             .unwrap_or_default();
         let explicit_queue_requested = user_requested_explicit_queue(&last_user_text);
 
+        // ── Per-turn ReAct session checkpoint (for recovery / continuation) ────
+        let mut react_session = self.session_manager.as_ref().map(|mgr| {
+            let s = crate::agent::workflow_session::WorkflowSession::new(
+                session_id.to_string(),
+                last_user_text.clone(),
+                "ReAct".to_string(),
+            );
+            // Save initial empty checkpoint so the session exists on disk immediately.
+            let _ = mgr.save(&s);
+            s
+        });
+
+        // ── Per-turn transparency trace ────────────────────────────────────────
+        // Creates a WorkflowTrace for this ReAct turn so execution lineage is
+        // observable via the transparency layer. Each tool round is recorded as
+        // a completed stage for audit and human oversight.
+        let react_trace_id = format!("react-{}", session_id);
+        if let Some(ref layer) = self.transparency_layer {
+            let react_tree = crate::agent::goal_tree::GoalTree {
+                workflow_id: react_trace_id.clone(),
+                description: last_user_text.chars().take(120).collect(),
+                stages: vec![],
+                completion: crate::agent::goal_tree::CompletionContract::AllStagesPassed,
+                global_abort: vec![],
+                max_total_duration_sec: 300,
+                preconditions: vec![],
+            };
+            layer.begin_trace(&react_tree);
+            tracing::debug!(
+                target: "execution_transparency",
+                session = session_id,
+                trace_id = %react_trace_id,
+                "ReAct transparency trace started"
+            );
+        }
+
         // ── Per-turn admission + cancellation tree ─────────────────────────────
         let turn_id = Uuid::new_v4().to_string();
         let turn_tree = match self.turn_admission.admit_or_enqueue_turn(
@@ -2491,7 +3973,8 @@ impl AgentLoop {
         }
 
         // Clarification path: ambiguous inputs ask for clarification
-        let gate_requires_clarification = gate_decision.clarification_required && !gate_decision.fast_path;
+        let gate_requires_clarification =
+            gate_decision.clarification_required && !gate_decision.fast_path;
 
         // Layer 2: Deterministic Tool Forcing for live-fact queries
         // MUST run BEFORE tool_lock prefix injection so the classifier sees clean user text
@@ -2512,6 +3995,28 @@ impl AgentLoop {
             );
         }
 
+        // Layer 2b: Deterministic Tool Forcing for GUI-launch queries
+        // When the user says "open chrome and search for X", "launch firefox", etc.,
+        // force browser_search directly — bypasses LLM tool selection which would
+        // otherwise pick web_search/searxng_search due to training priors.
+        // Uses the GuiIntentClassifier (structural signal scoring, not keyword lists).
+        // SKIP if already forced by live-fact or tool_lock.
+        if !gate_decision.fast_path && extract_forced_tool_directive(&routing_focus_text).is_none()
+        {
+            use crate::routing::gui_intent::{classify_gui_intent, GuiIntent};
+            let gui = classify_gui_intent(&routing_focus_text);
+            if gui.intent == GuiIntent::GuiLaunch
+                && should_force_browser_search_for_gui_launch_query(&routing_focus_text)
+            {
+                routing_focus_text = format!("#tool:browser_search {}", routing_focus_text);
+                tracing::info!(
+                    original_query = %routing_focus_text_from_user_content(&last_user_text),
+                    gui_score = gui.net_score,
+                    "GuiIntentClassifier: forced browser_search via #tool: directive"
+                );
+            }
+        }
+
         // Now apply tool_lock prefix (after live-fact check)
         if execution_profile.uses_direct_strategy() {
             if let Some(tool_lock) = execution_profile.tool_lock.as_deref() {
@@ -2526,16 +4031,41 @@ impl AgentLoop {
 
         // ═══════════════════════════════════════════════════════════════════════════
         // RFC v2 P1: Intent Compilation - Semantic normalization before routing
+        //
+        // Batch 1 wiring: RuleIntentCompiler is always the fast path (<5ms, no LLM).
+        // When RuleIntentCompiler returns Verb::Other and a LlmIntentCompiler is
+        // attached via `.with_intent_compiler()`, the LLM compiler is invoked as
+        // a fallback to handle complex multi-verb GUI intents.
         // ═══════════════════════════════════════════════════════════════════════════
         let compiled_spec = {
-            use crate::agent::intent_compiler::IntentCompiler;
+            use crate::agent::intent_compiler::{IntentCompiler, Verb};
             use crate::agent::intent_compiler_llm::RuleIntentCompiler;
 
             let rule_compiler = RuleIntentCompiler;
-            match rule_compiler
+            let rule_result = rule_compiler
                 .compile(&last_user_text, &turn_gate_plan.intent)
-                .await
-            {
+                .await;
+
+            // Try LLM fallback if rule compiler produced Verb::Other
+            let compile_result = match rule_result {
+                Ok(ref spec) if matches!(spec.primary_verb, Verb::Other(_)) => {
+                    if let Some(ref llm_compiler) = self.intent_compiler {
+                        tracing::debug!(
+                            target: "intent_compiler",
+                            session = session_id,
+                            "RuleIntentCompiler returned Verb::Other — trying LLM fallback"
+                        );
+                        llm_compiler
+                            .compile(&last_user_text, &turn_gate_plan.intent)
+                            .await
+                    } else {
+                        rule_result
+                    }
+                }
+                other => other,
+            };
+
+            match compile_result {
                 Ok(spec) => {
                     log_pipeline_step(
                         session_id,
@@ -2588,6 +4118,122 @@ impl AgentLoop {
                 }
             }
         };
+
+        if let Some(spec) = compiled_spec.as_ref() {
+            let semantic_analysis =
+                crate::agent::semantic_workflow::analyze_semantic_workflow(spec, &last_user_text);
+            let detail = serde_json::to_value(&semantic_analysis).unwrap_or_else(|err| {
+                serde_json::json!({
+                    "serialization_error": err.to_string(),
+                    "trace": "semantic workflow analysis produced non-serializable metadata",
+                })
+            });
+            log_pipeline_step(
+                session_id,
+                "semantic_workflow_analyzed",
+                "Semantic workflow frame and fidelity metadata generated",
+                Some(detail),
+            );
+
+            let execution_mode_decision =
+                crate::agent::execution_mode_reasoner::ExecutionModeReasoner.decide(
+                    spec,
+                    &semantic_analysis,
+                    &crate::agent::execution_mode_reasoner::EnvironmentCapabilities::unchecked_default(),
+                    &crate::agent::execution_mode_reasoner::PolicyContext::default(),
+                );
+            let detail = serde_json::to_value(&execution_mode_decision).unwrap_or_else(|err| {
+                serde_json::json!({
+                    "serialization_error": err.to_string(),
+                    "trace": "execution mode decision produced non-serializable metadata",
+                })
+            });
+            log_pipeline_step(
+                session_id,
+                "execution_mode_decided",
+                "Execution mode decision generated without changing execution behavior",
+                Some(detail),
+            );
+
+            let contract_check =
+                crate::agent::workflow_intent_contract::WorkflowIntentContractRegistry
+                    .evaluate(&execution_mode_decision, &semantic_analysis);
+            let detail = serde_json::to_value(&contract_check).unwrap_or_else(|err| {
+                serde_json::json!({
+                    "serialization_error": err.to_string(),
+                    "trace": "workflow contract check produced non-serializable metadata",
+                })
+            });
+            log_pipeline_step(
+                session_id,
+                "workflow_contract_evaluated",
+                "Workflow intent contract evaluated without changing execution behavior",
+                Some(detail),
+            );
+
+            let workflow_attempt_id = format!("{}:{}", session_id, turn_id_for_checks);
+            let verifier_authority_assessment =
+                crate::agent::verifier_authority::VerifierAuthorityEvaluator.assess(
+                    &contract_check,
+                    &execution_mode_decision,
+                    &semantic_analysis,
+                    workflow_attempt_id.clone(),
+                );
+            let detail =
+                serde_json::to_value(&verifier_authority_assessment).unwrap_or_else(|err| {
+                    serde_json::json!({
+                        "serialization_error": err.to_string(),
+                        "trace": "verifier authority assessment produced non-serializable metadata",
+                    })
+                });
+            log_pipeline_step(
+                session_id,
+                "verifier_authority_assessed",
+                "Verifier authority and freshness requirements generated without changing execution behavior",
+                Some(detail),
+            );
+
+            let hybrid_synchronization_assessment =
+                crate::agent::hybrid_synchronization::HybridSynchronizationEvaluator.assess(
+                    &execution_mode_decision,
+                    &semantic_analysis,
+                    &verifier_authority_assessment,
+                    workflow_attempt_id,
+                );
+            let detail =
+                serde_json::to_value(&hybrid_synchronization_assessment).unwrap_or_else(|err| {
+                    serde_json::json!({
+                        "serialization_error": err.to_string(),
+                        "trace": "hybrid synchronization assessment produced non-serializable metadata",
+                    })
+                });
+            log_pipeline_step(
+                session_id,
+                "hybrid_synchronization_assessed",
+                "Hybrid structural-visible synchronization checkpoints generated without changing execution behavior",
+                Some(detail),
+            );
+
+            let browser_media_governance_assessment =
+                crate::agent::browser_media_governance::BrowserMediaGovernanceEvaluator.assess(
+                    &semantic_analysis,
+                    &execution_mode_decision,
+                    &last_user_text,
+                );
+            let detail =
+                serde_json::to_value(&browser_media_governance_assessment).unwrap_or_else(|err| {
+                    serde_json::json!({
+                        "serialization_error": err.to_string(),
+                        "trace": "browser/media governance assessment produced non-serializable metadata",
+                    })
+                });
+            log_pipeline_step(
+                session_id,
+                "browser_media_governance_assessed",
+                "Browser/media account ambiguity and visible verifier governance generated without changing execution behavior",
+                Some(detail),
+            );
+        }
 
         let pure_image_analysis_turn =
             has_images && matches!(turn_gate_plan.intent.operation, Operation::AnalyzeImage);
@@ -2652,6 +4298,33 @@ impl AgentLoop {
         }
 
         // ═══════════════════════════════════════════════════════════════════════════
+        // Session Continuation Detection — check for resumable workflows
+        // ═══════════════════════════════════════════════════════════════════════════
+        // Before routing to GUI executor, check if the user's prompt matches
+        // an interrupted workflow that can be continued.
+        {
+            if let Some((context, detail, options)) =
+                detect_session_continuation_options(&last_user_text)
+            {
+                tracing::info!(
+                    target: "session_continuation",
+                    context = %context,
+                    "Resumable workflow detected — surfacing continuation options"
+                );
+                // Surface as RecoveryOptions so the UI renders clickable buttons
+                let _ = event_tx.send(StreamEvent::RecoveryOptions {
+                    context,
+                    detail,
+                    options,
+                });
+                let pause_text = "I found an interrupted workflow. Please choose Continue, Start fresh, or Dismiss before KRIA runs more automation.";
+                let _ = event_tx.send(StreamEvent::Token(pause_text.into()));
+                let _ = event_tx.send(StreamEvent::Done(pause_text.into()));
+                return;
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════════
         // RFC 007 Phase 4: GUI HTN Routing - BYPASS ReAct loop for GUI automation
         // ═══════════════════════════════════════════════════════════════════════════
         // Routing now requires BOTH TurnGate confidence gating AND a valid
@@ -2679,10 +4352,7 @@ impl AgentLoop {
             );
 
             // Create kill switch interceptor for this workflow
-            let socket_path = std::path::PathBuf::from(
-                std::env::var("KRIA_UINPUT_SOCKET")
-                    .unwrap_or_else(|_| "/tmp/kria-uinput.sock".to_string()),
-            );
+            let socket_path = crate::agent::gui_services::default_uinput_socket_path();
             let gui_backend = Arc::new(crate::tools::gui_automation::YdotoolBackend::new(
                 socket_path,
             ));
@@ -2692,17 +4362,285 @@ impl AgentLoop {
                 gui_backend,
             ));
 
+            // ── Batch 2: Workflow Expectation + Autonomy Pre-flight ────────────────────────────
+            //
+            // 1. Classify workflow category and infer expected visible outcomes.
+            // 2. Consult CollaborativeAutonomyEngine to decide proceed/clarify/confirm.
+            //    If the decision requires user interaction, emit a clarification and return.
+            let psdg_opt = self.world_model.clone();
+            let wf_category = {
+                use crate::agent::workflow_expectation::WorkflowExpectationEngine;
+                let wf_eng = WorkflowExpectationEngine::new(psdg_opt.clone());
+                wf_eng.classify(
+                    &last_user_text,
+                    &spec.primary_verb,
+                    &spec.targets,
+                    turn_gate_plan.intent.operation,
+                )
+            };
+            tracing::debug!(
+                target: "gui_htn_routing",
+                category = ?wf_category,
+                "Batch 2: WorkflowExpectationEngine classified workflow"
+            );
+
+            // Apply CollaborativeAutonomyEngine pre-execution gate.
+            {
+                use crate::agent::collaborative_autonomy::{
+                    AutonomyContext, CollaborativeAutonomyEngine,
+                };
+                let autonomy = CollaborativeAutonomyEngine::new(psdg_opt.clone());
+                let mut ctx = AutonomyContext::new(
+                    turn_gate_plan.intent.operation,
+                    turn_gate_plan.intent.hazard_hint,
+                    turn_gate_plan.intent.confidence,
+                    format!(
+                        "{:?} workflow: {}",
+                        wf_category,
+                        sanitize_text_for_logs(&last_user_text, 80)
+                    ),
+                );
+                if !spec.ambiguities.is_empty() {
+                    ctx = ctx.with_ambiguities();
+                }
+                let decision = autonomy.decide(&ctx);
+                tracing::debug!(
+                    target: "gui_htn_routing",
+                    decision = decision.label(),
+                    "Batch 2: CollaborativeAutonomyEngine decision"
+                );
+                // Confirm / Clarify decisions stop execution and ask the user.
+                if decision.requires_user_interaction() {
+                    use crate::agent::collaborative_autonomy::AutonomyDecision;
+                    let msg = match &decision {
+                        AutonomyDecision::Clarify {
+                            question, options, ..
+                        } => {
+                            let opts: Vec<String> =
+                                options.iter().map(|o| format!("- {}", o)).collect();
+                            format!("{}\n{}", question, opts.join("\n"))
+                        }
+                        AutonomyDecision::Confirm {
+                            question,
+                            consequence_summary,
+                            ..
+                        } => {
+                            format!(
+                                "Confirmation required: {}\n{}",
+                                question, consequence_summary
+                            )
+                        }
+                        AutonomyDecision::Escalate { reason, guidance } => {
+                            format!("Cannot proceed: {}\n{}", reason, guidance)
+                        }
+                        _ => "Please confirm before I proceed.".to_string(),
+                    };
+                    let _ = event_tx.send(StreamEvent::Token(msg.clone()));
+                    let _ = event_tx.send(StreamEvent::Done(msg));
+                    return;
+                }
+                // ProceedWithNotice: surface the notice but continue.
+                if let crate::agent::collaborative_autonomy::AutonomyDecision::ProceedWithNotice {
+                    ref summary,
+                } = decision
+                {
+                    let _ =
+                        event_tx.send(StreamEvent::Plan(format_autonomy_notice_for_user(summary)));
+                }
+            }
+
             // Create coordinator and generate workflow
-            let mut coordinator =
-                GuiExecutionCoordinator::new(Arc::clone(&self.tool_registry), kill_switch);
+            let mut coordinator = GuiExecutionCoordinator::new(
+                Arc::clone(&self.tool_registry),
+                kill_switch,
+                Arc::clone(&self.policy_engine),
+                Arc::clone(&self.hitl_gateway),
+                Arc::clone(&self.audit_logger),
+            );
+            // Wire EnvironmentStateTracker so grounding facts persist to PSDG.
+            if let Some(ref psdg) = self.world_model {
+                coordinator = coordinator.with_env_tracker(psdg.clone());
+                // Batch 2: also pass raw PsdgHandle to StageExecutor for stage persistence.
+                coordinator = coordinator.with_psdg(psdg.clone());
+            }
+            // Batch 2: wire continuation_runtime and transparency into GoalTree path.
+            if let Some(ref rt) = self.continuation_runtime {
+                coordinator = coordinator.with_continuation_runtime(std::sync::Arc::clone(rt));
+            }
+            if let Some(ref t) = self.transparency_layer {
+                coordinator = coordinator.with_transparency(t.clone());
+            }
+
+            // ── Batch 3 Wave 1: OpGraph multi-intent workflow path ───────────────────────────────
+            if let Some(tree) = coordinator
+                .generate_opgraph_workflow(&last_user_text, &turn_gate_plan.intent)
+                .await
+            {
+                let _ = event_tx.send(StreamEvent::Plan(format!(
+                    "Starting operational workflow: {} ({} stages)",
+                    tree.description,
+                    tree.stages.len()
+                )));
+
+                let result = coordinator
+                    .execute_goal_tree(
+                        &tree,
+                        workflow_cancellation.clone(),
+                        session_id,
+                        &last_user_text,
+                    )
+                    .await;
+
+                // ── Batch 2 Step 2: Transparency trace closure ────────────────────────
+                // Complete the GoalTree transparency trace so the per-workflow
+                // lineage record is closed before we return.
+                if let Some(ref t) = self.transparency_layer {
+                    t.complete_trace(&tree.workflow_id, result.success, result.error.clone());
+                }
+
+                // ── Batch 2 Step 2: ObservableCompletionEngine post-GoalTree check ─────
+                // Infer and verify human-visible outcomes after GoalTree execution.
+                // Non-blocking; failures surface as advisory narrative, not errors.
+                let observable_narrative = if result.success {
+                    use crate::agent::observable_completion::{
+                        infer_outcomes, CompletionVisibilityPolicy, ObservableCompletionEngine,
+                    };
+                    let oce = ObservableCompletionEngine::new(self.world_model.clone());
+                    let outcomes = infer_outcomes(
+                        &last_user_text,
+                        &spec.primary_verb,
+                        &spec.targets,
+                        turn_gate_plan.intent.operation,
+                    );
+                    let policies: Vec<CompletionVisibilityPolicy> = outcomes
+                        .into_iter()
+                        .map(|o| {
+                            CompletionVisibilityPolicy::for_outcome(
+                                o,
+                                turn_gate_plan.intent.operation,
+                            )
+                        })
+                        .collect();
+                    if !policies.is_empty() {
+                        let aggregate = oce.verify_all(&policies).await;
+                        let narrative =
+                            oce.completion_narrative(&aggregate, turn_gate_plan.intent.operation);
+                        if !narrative.is_empty() {
+                            log_pipeline_step(
+                                session_id,
+                                "b2_goal_tree_completion_verified",
+                                &narrative,
+                                None,
+                            );
+                            Some(narrative)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                if result.success {
+                    let base_summary = format!(
+                        "Completed: {} stage{} in {}ms.",
+                        result.stage_results.len(),
+                        if result.stage_results.len() == 1 {
+                            ""
+                        } else {
+                            "s"
+                        },
+                        result.duration_ms
+                    );
+                    let summary_with_narrative = if let Some(narrative) = observable_narrative {
+                        format!("{} {}", base_summary, narrative)
+                    } else {
+                        base_summary
+                    };
+                    // Bug 7: Append captured program output when execute_bash was used
+                    // for a "run and show output" stage so the result reaches the user.
+                    let summary = if let Some(ref output) = result.terminal_output {
+                        format!(
+                            "{}\n\nProgram output:\n```\n{}\n```",
+                            summary_with_narrative,
+                            output.trim()
+                        )
+                    } else {
+                        summary_with_narrative
+                    };
+                    let _ = event_tx.send(StreamEvent::Token(summary.clone()));
+                    let _ = event_tx.send(StreamEvent::Done(summary));
+                } else {
+                    let detail = result.error.as_deref().unwrap_or("unknown error");
+
+                    // Detect infrastructure-level failures (GLOBAL_SAFETY_HALT) and
+                    // surface a human-readable explanation with remediation guidance
+                    // instead of the raw internal error string.
+                    let is_infra_failure = detail.contains("GLOBAL_SAFETY_HALT")
+                        || detail.contains("service not ready")
+                        || detail.contains("uinput=stopped")
+                        || detail.contains("uinput=FAILED");
+
+                    let summary = if is_infra_failure {
+                        // Report which stages completed before the infrastructure failed
+                        let succeeded: Vec<&str> = result
+                            .stage_results
+                            .iter()
+                            .filter(|sr| {
+                                matches!(
+                                    &sr.outcome,
+                                    crate::agent::stage_executor::StageOutcome::Passed
+                                        | crate::agent::stage_executor::StageOutcome::PassedAfterRecovery
+                                )
+                            })
+                            .map(|sr| sr.label.as_str())
+                            .collect();
+                        let prefix = if succeeded.is_empty() {
+                            String::new()
+                        } else {
+                            format!("{} completed successfully. ", succeeded.join(", "))
+                        };
+                        format!(
+                            "{}Keyboard automation is unavailable because the GUI input service \
+                             (uinput daemon) is not running. KRIA is attempting to restart it \
+                             automatically (up to 3 attempts). \
+                             If this persists after restarting KRIA, verify that your sudoers file \
+                             grants passwordless access: \
+                             `<user> ALL=(ALL) NOPASSWD: /path/to/kria-uinput-daemon`",
+                            prefix
+                        )
+                    } else {
+                        format!(
+                            "Operational workflow failed after {} stage{} ({}).",
+                            result.stage_results.len(),
+                            if result.stage_results.len() == 1 {
+                                ""
+                            } else {
+                                "s"
+                            },
+                            detail
+                        )
+                    };
+                    let _ = event_tx.send(StreamEvent::Error(summary));
+                }
+
+                return;
+            }
 
             // First try the deterministic rule-based planner; if it cannot
             // build a concrete workflow, ask the LLM to emit an HTN JSON plan.
-            let mut planned_workflow = coordinator
-                .generate_workflow(session_id, &turn_gate_plan.intent, spec)
+            // generate_workflow now returns (workflow, artifacts) so we can
+            // populate WorkflowResult.created_artifacts correctly.
+            let mut planned_workflow_and_artifacts: Option<(
+                crate::agent::htn_executor::GuiWorkflow,
+                Vec<std::path::PathBuf>,
+            )> = coordinator
+                .generate_workflow(session_id, &turn_gate_plan.intent, spec, &last_user_text)
                 .await;
 
-            if planned_workflow.is_none() {
+            if planned_workflow_and_artifacts.is_none() {
                 if let Some(backend) = self.model_router.route("chat").await {
                     log_pipeline_step(
                         session_id,
@@ -2724,7 +4662,8 @@ impl AgentLoop {
                                 steps = wf.sub_goals.len(),
                                 "LLM HTN planner produced workflow"
                             );
-                            planned_workflow = Some(wf);
+                            // LLM planner doesn't track artifacts
+                            planned_workflow_and_artifacts = Some((wf, Vec::new()));
                         }
                         Err(e) => {
                             log_pipeline_step(
@@ -2745,40 +4684,107 @@ impl AgentLoop {
                 }
             }
 
-            if let Some(workflow) = planned_workflow {
+            if let Some((workflow, planned_artifacts)) = planned_workflow_and_artifacts {
                 // Emit workflow started event
-                let _ = event_tx.send(StreamEvent::Plan(format!(
-                    "Starting GUI workflow: {} ({} steps)",
-                    workflow.task_id,
-                    workflow.sub_goals.len()
+                let _ = event_tx.send(StreamEvent::Plan(format_gui_workflow_start_for_user(
+                    &workflow,
                 )));
+                emit_gui_workflow_initial_task_steps(&event_tx, &workflow);
 
-                // Execute via HTN executor (NOT ReAct loop)
+                // Execute via HTN executor (NOT ReAct loop).
+                // Pass planned_artifacts so WorkflowResult.created_artifacts is populated.
                 let result = coordinator
-                    .execute_workflow(&workflow, workflow_cancellation)
+                    .execute_workflow(
+                        &workflow,
+                        workflow_cancellation,
+                        planned_artifacts,
+                        session_id,
+                        &last_user_text,
+                    )
                     .await;
 
-                // Emit completion event
-                if result.success {
-                    let summary = format!(
-                        "Done! I completed the GUI automation task ({} steps in {}ms).",
-                        result.completed_steps, result.duration_ms
+                // Save session checkpoint with the actual user intent (not just task_id).
+                // This overwrites the checkpoint saved inside execute_workflow with
+                // a more informative one that includes the real user text.
+                crate::agent::gui_wiring::GuiExecutionCoordinator::save_session_checkpoint(
+                    &workflow,
+                    &result,
+                    Some(&last_user_text),
+                )
+                .await;
+                emit_gui_workflow_final_task_steps(&event_tx, &workflow, &result);
+
+                // ── Batch 2: ObservableCompletionEngine post-execution visibility check ───────
+                // Verify that the expected human-visible outcomes are actually observable.
+                // This check is non-blocking; failures do not fail the workflow.
+                let observable_narrative = {
+                    use crate::agent::observable_completion::{
+                        infer_outcomes, CompletionVisibilityPolicy, ObservableCompletionEngine,
+                    };
+                    let oce = ObservableCompletionEngine::new(psdg_opt.clone());
+                    let outcomes = infer_outcomes(
+                        &last_user_text,
+                        &spec.primary_verb,
+                        &spec.targets,
+                        turn_gate_plan.intent.operation,
                     );
+                    let policies: Vec<CompletionVisibilityPolicy> = outcomes
+                        .into_iter()
+                        .map(|o| {
+                            CompletionVisibilityPolicy::for_outcome(
+                                o,
+                                turn_gate_plan.intent.operation,
+                            )
+                        })
+                        .collect();
+                    if !policies.is_empty() {
+                        let aggregate = oce.verify_all(&policies).await;
+                        let narrative =
+                            oce.completion_narrative(&aggregate, turn_gate_plan.intent.operation);
+                        if !narrative.is_empty() {
+                            Some(narrative)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                };
+
+                // Emit completion event — only claim success when the executor
+                // verified every step. Partial completion is reported honestly.
+                if result.success {
+                    let visible_contract_incomplete =
+                        observable_narrative_requires_partial_completion(
+                            observable_narrative.as_deref(),
+                        );
+                    let summary = if visible_contract_incomplete {
+                        format_gui_workflow_partial_for_user(
+                            &result,
+                            observable_narrative.as_deref(),
+                        )
+                    } else {
+                        format_gui_workflow_success_for_user(
+                            &result,
+                            observable_narrative.as_deref(),
+                        )
+                    };
                     tracing::info!(
                         target: "gui_htn_routing",
-                        summary = %summary,
-                        "Emitting GUI workflow success token to UI"
+                        success = result.success,
+                        completed = result.completed_steps,
+                        total = result.total_steps,
+                        observable_verified = observable_narrative.is_some(),
+                        visible_contract_incomplete,
+                        "Emitting GUI workflow result token to UI"
                     );
                     // Emit token so the UI chat bubble displays the result
                     let _ = event_tx.send(StreamEvent::Token(summary.clone()));
                     let _ = event_tx.send(StreamEvent::Done(summary));
                 } else {
-                    let _ = event_tx.send(StreamEvent::Error(format!(
-                        "GUI workflow failed at step {}/{}: {}",
-                        result.completed_steps,
-                        result.total_steps,
-                        result.error.as_deref().unwrap_or("unknown error")
-                    )));
+                    let summary = format_gui_workflow_failure_for_user(&result);
+                    let _ = event_tx.send(StreamEvent::Error(summary.clone()));
+                    let _ = event_tx.send(StreamEvent::Done(summary));
                 }
 
                 // EARLY RETURN - completely bypass ReAct loop
@@ -3060,7 +5066,8 @@ impl AgentLoop {
         };
         let mut turn_modality = if let Some(router) = &self.semantic_router {
             let ctx = self.turn_gate.context();
-            let (route_decision, modality, _) = router.route_with_context(&routing_focus_text, ctx).await;
+            let (route_decision, modality, _) =
+                router.route_with_context(&routing_focus_text, ctx).await;
             // Re-evaluate IntentGate with semantic router result for better accuracy
             // This handles cases where the gate was uncertain but the router is confident
             if gate_decision.fast_path {
@@ -3082,6 +5089,40 @@ impl AgentLoop {
             .filter(|m| m.role.eq_ignore_ascii_case("system"))
             .map(|m| m.content.clone());
 
+        // ── PSDG Context Injection (Batch 1) ──────────────────────────────────
+        // Inject a compact semantic desktop context block into the system prompt
+        // for operations that benefit from desktop state awareness.
+        // Fire-and-forget: snapshot read is sync/bounded; never blocks the turn.
+        if let Some(ref psdg) = self.world_model {
+            let operation = turn_gate_plan.intent.operation;
+            if crate::agent::psdg::context_injector::should_inject_context(operation) {
+                let snapshot = psdg.get_context_snapshot();
+                if !snapshot.is_empty() {
+                    // Inject into the first system message
+                    if let Some(system_msg) = messages
+                        .first_mut()
+                        .filter(|m| m.role.eq_ignore_ascii_case("system"))
+                    {
+                        system_msg.content =
+                            crate::agent::psdg::context_injector::inject_into_system_prompt(
+                                &system_msg.content,
+                                &snapshot,
+                                operation,
+                            );
+                    }
+                    tracing::debug!(
+                        target: "psdg",
+                        session = session_id,
+                        operation = ?operation,
+                        has_app = snapshot.focused_app.is_some(),
+                        has_browser = snapshot.browser_url.is_some(),
+                        has_ide = snapshot.ide_workspace.is_some(),
+                        "PSDG context injected into system prompt"
+                    );
+                }
+            }
+        }
+
         log_pipeline_step(
             session_id,
             "intent_classified",
@@ -3097,9 +5138,220 @@ impl AgentLoop {
             })),
         );
 
+        // ── Batch 2 Phase 1: Workflow expectation classification + outcome inference ──
+        // Classifies the workflow category from user intent so expectations are
+        // established before execution begins. Outcome inference is used post-loop
+        // for observable completion verification (Phase 1 closure).
+        let b2_workflow_category = self.workflow_expectation.as_ref().map(|eng| {
+            let cat = eng.classify(
+                &last_user_text,
+                &crate::agent::intent_compiler::Verb::Other(String::new()),
+                &[],
+                turn_gate_plan.intent.operation,
+            );
+            tracing::debug!(
+                target: "workflow_expectation",
+                session = session_id,
+                category = ?cat,
+                operation = ?turn_gate_plan.intent.operation,
+                "Batch 2: workflow classified by expectation engine"
+            );
+            cat
+        });
+        let b2_inferred_outcomes: Vec<crate::agent::observable_completion::ObservableOutcome> =
+            if self.observable_completion.is_some() {
+                crate::agent::observable_completion::infer_outcomes(
+                    &last_user_text,
+                    &crate::agent::intent_compiler::Verb::Other(String::new()),
+                    &[],
+                    turn_gate_plan.intent.operation,
+                )
+            } else {
+                vec![]
+            };
+        if b2_workflow_category.is_some() || !b2_inferred_outcomes.is_empty() {
+            log_pipeline_step(
+                session_id,
+                "b2_workflow_expectation",
+                "Batch 2: workflow expectation and outcome inference complete",
+                Some(serde_json::json!({
+                    "category": format!("{:?}", b2_workflow_category),
+                    "inferred_outcome_count": b2_inferred_outcomes.len(),
+                    "operation": format!("{:?}", turn_gate_plan.intent.operation),
+                })),
+            );
+        }
+
+        // ── Batch 2 Phase 3: Per-turn collaborative autonomy decision ─────────────
+        // Consults the autonomy engine with operation + confidence context.
+        // Non-blocking: advisory only — HITL + PolicyEngine remain safety authority.
+        if let Some(ref eng) = self.collaborative_autonomy {
+            use crate::agent::collaborative_autonomy::{AutonomyContext, AutonomyDecision};
+            let ctx = AutonomyContext::new(
+                turn_gate_plan.intent.operation,
+                crate::agent::turn_gate::HazardHint::Green,
+                turn_gate_plan.intent.confidence as f32,
+                last_user_text.chars().take(80).collect::<String>(),
+            );
+            let decision = eng.decide(&ctx);
+            match &decision {
+                AutonomyDecision::ProceedWithNotice { summary } => {
+                    tracing::info!(
+                        target: "collaborative_autonomy",
+                        session = session_id,
+                    %summary,
+                    "Batch 2 autonomy: proceeding with notice"
+                    );
+                    log_pipeline_step(session_id, "b2_autonomy_notice", summary, None);
+                    let _ =
+                        event_tx.send(StreamEvent::Plan(format_autonomy_notice_for_user(summary)));
+                }
+                AutonomyDecision::Clarify { question, .. } => {
+                    tracing::info!(
+                        target: "collaborative_autonomy",
+                        session = session_id,
+                        %question,
+                        "Batch 2 autonomy: clarification advisory (non-blocking)"
+                    );
+                    log_pipeline_step(session_id, "b2_autonomy_clarify", question, None);
+                }
+                AutonomyDecision::Escalate { reason, .. } => {
+                    tracing::warn!(
+                        target: "collaborative_autonomy",
+                        session = session_id,
+                        %reason,
+                        "Batch 2 autonomy: escalation advisory (non-blocking)"
+                    );
+                    log_pipeline_step(session_id, "b2_autonomy_escalate", reason, None);
+                }
+                _ => {}
+            }
+        }
+
+        // ── Batch 2: Pre-turn resumable workflow advisory ─────────────────────────
+        // Check for paused workflows from previous sessions. Advisory-only —
+        // surfaces a structured notice to the user via log_pipeline_step.
+        if let Some(ref rt) = self.continuation_runtime {
+            let resumable = rt.find_resumable();
+            if !resumable.is_empty() {
+                let hints: Vec<String> = resumable
+                    .iter()
+                    .take(3)
+                    .map(|s| {
+                        format!(
+                            "'{}' ({})",
+                            s.session_id,
+                            s.user_intent.chars().take(60).collect::<String>()
+                        )
+                    })
+                    .collect();
+                tracing::info!(
+                    target: "workflow_continuation",
+                    session = session_id,
+                    count = resumable.len(),
+                    "Batch 2: found resumable workflows from previous sessions"
+                );
+                log_pipeline_step(
+                    session_id,
+                    "b2_resumable_found",
+                    &format!(
+                        "{} paused workflow(s) available for resumption: {}",
+                        resumable.len(),
+                        hints.join("; ")
+                    ),
+                    Some(serde_json::json!({ "count": resumable.len() })),
+                );
+            }
+        }
+
+        // ── Batch 2 Step 3: TurnGate fast-path for resume intent ─────────────────
+        // If the user says "resume", "continue paused", or similar, and there are
+        // resumable workflows, surface them immediately without entering the LLM loop.
+        // The LLM can still call the resume_workflow tool during the round loop —
+        // this fast-path is purely advisory and exits early only when unambiguous.
+        if let Some(ref rt) = self.continuation_runtime {
+            let text_lower = last_user_text.to_lowercase();
+            let is_resume_intent = text_lower.starts_with("resume")
+                || text_lower.starts_with("continue paused")
+                || text_lower.starts_with("pick up where")
+                || text_lower.starts_with("carry on with")
+                || text_lower.starts_with("restart paused");
+            if is_resume_intent {
+                let resumable = rt.find_resumable();
+                if !resumable.is_empty() {
+                    // Surface the most recent resumable session and emit a structured response.
+                    let top = &resumable[0];
+                    let result = rt.resume_workflow(&top.session_id);
+                    tracing::info!(
+                        target: "workflow_continuation",
+                        session = session_id,
+                        target_session = %top.session_id,
+                        success = result.success,
+                        "Batch 2: TurnGate fast-path triggered resume_workflow"
+                    );
+                    log_pipeline_step(
+                        session_id,
+                        "b2_resume_fast_path",
+                        &result.summary,
+                        Some(serde_json::json!({
+                            "session_id": top.session_id,
+                            "success": result.success,
+                            "next_action": format!("{:?}", result.next_action),
+                        })),
+                    );
+                    let response = if result.success {
+                        format!(
+                            "Resuming workflow '{}': {}\n\nContinuation hint: {}",
+                            top.session_id,
+                            result.summary,
+                            result
+                                .session
+                                .as_ref()
+                                .and_then(|s| s.continuation_hint.clone())
+                                .unwrap_or_else(|| "Continue from last checkpoint".into()),
+                        )
+                    } else {
+                        format!(
+                            "Could not resume workflow '{}': {}",
+                            top.session_id, result.summary
+                        )
+                    };
+                    let _ = event_tx.send(StreamEvent::Token(response.clone()));
+                    let _ = event_tx.send(StreamEvent::Done(response));
+                    return;
+                }
+            }
+        }
+
+        let mut terminated_by_satisfaction = false;
         for round in 0..self.max_tool_rounds {
             if return_if_stale() {
                 return;
+            }
+
+            // ── Round-level satisfaction guard ────────────────────────────
+            // If a prior round satisfied the user's goal, do not run another
+            // LLM round with tool schemas. Break out of the round loop and
+            // proceed to final response synthesis.
+            if turn_memory.is_satisfied() {
+                tracing::info!(
+                    session = session_id,
+                    round,
+                    reason = %turn_memory.satisfaction_reason().unwrap_or(""),
+                    "round_loop: turn satisfied, breaking before round start"
+                );
+                log_pipeline_step(
+                    session_id,
+                    "round_loop_satisfied",
+                    "Round loop terminating: goal satisfied",
+                    Some(serde_json::json!({
+                        "round": round,
+                        "reason": turn_memory.satisfaction_reason(),
+                        "memory": turn_memory.to_json(),
+                    })),
+                );
+                terminated_by_satisfaction = true;
+                break;
             }
 
             let round_user_text: String = messages
@@ -3124,37 +5376,54 @@ impl AgentLoop {
             let round_direct_tool_hint = self
                 .turn_gate
                 .direct_tool_hint(&turn_gate_plan, &allowed_tool_names);
-            let fallback_tool_names = fallback_routed_tool_candidates(
-                &round_focus_text,
-                round_direct_tool_hint.as_deref(),
-                &allowed_tool_names,
-            );
+
+            // ── AUTHORITATIVE FAST-PATH GUARD ──────────────────────────────
+            // If IntentGate classified this turn as conversational fast-path,
+            // hard-block ALL tool routing, retrieval, semantic injection, and
+            // schema selection. The LLM gets ZERO tool schemas and answers
+            // directly. This is the single source of authority for "no tools
+            // on conversational prompts."
+            //
+            // Also blocks if the turn goal is already satisfied — no need to
+            // re-route tools after the user's request has been fulfilled.
+            let suppress_all_tool_routing = gate_decision.fast_path || turn_memory.is_satisfied();
+
+            let fallback_tool_names = if suppress_all_tool_routing {
+                HashSet::new()
+            } else {
+                fallback_routed_tool_candidates(
+                    &round_focus_text,
+                    round_direct_tool_hint.as_deref(),
+                    &allowed_tool_names,
+                )
+            };
 
             // ── Cross-domain semantic tool injection (Hybrid Assembly) ──
             // Query the FastEmbed index for the Top-3 most semantically
             // relevant tools **regardless of ONNX domain boundaries**.
             // This runs unconditionally so the results are available for
             // the override instruction below.
-            let semantic_injections: Vec<SemanticInjection> =
-                if self.tool_index.is_some() && !pure_image_analysis_turn {
-                    if let Some(ref tool_index) = self.tool_index {
-                        let matches = tool_index
-                            .top_k_by_text(&round_focus_text, 3, &self.hardware_tier)
-                            .await;
-                        matches
-                            .into_iter()
-                            .filter(|m| m.confidence >= 0.35)
-                            .map(|m| SemanticInjection {
-                                name: m.name,
-                                cosine_similarity: m.confidence,
-                            })
-                            .collect()
-                    } else {
-                        Vec::new()
-                    }
+            let semantic_injections: Vec<SemanticInjection> = if suppress_all_tool_routing {
+                Vec::new()
+            } else if self.tool_index.is_some() && !pure_image_analysis_turn {
+                if let Some(ref tool_index) = self.tool_index {
+                    let matches = tool_index
+                        .top_k_by_text(&round_focus_text, 3, &self.hardware_tier)
+                        .await;
+                    matches
+                        .into_iter()
+                        .filter(|m| m.confidence >= 0.35)
+                        .map(|m| SemanticInjection {
+                            name: m.name,
+                            cosine_similarity: m.confidence,
+                        })
+                        .collect()
                 } else {
                     Vec::new()
-                };
+                }
+            } else {
+                Vec::new()
+            };
 
             if !semantic_injections.is_empty() {
                 tracing::debug!(
@@ -3163,7 +5432,7 @@ impl AgentLoop {
                 );
             }
 
-            let round_tool_schemas = if pure_image_analysis_turn {
+            let round_tool_schemas = if pure_image_analysis_turn || suppress_all_tool_routing {
                 Vec::new()
             } else {
                 // Phase 3: Try direct tool match first (skip LLM)
@@ -3187,6 +5456,19 @@ impl AgentLoop {
                     )
                 }
             };
+
+            if suppress_all_tool_routing {
+                log_pipeline_step(
+                    session_id,
+                    "tool_routing_suppressed",
+                    "Authoritative fast-path: tool routing fully suppressed",
+                    Some(serde_json::json!({
+                        "round": round,
+                        "reason": if gate_decision.fast_path { "intent_gate_fast_path" } else { "turn_satisfied" },
+                        "intent": gate_decision.intent.as_str(),
+                    })),
+                );
+            }
 
             // ── Cross-domain override instruction ──────────────────────────────
             // When semantic injection brings in tools that the ONNX domain
@@ -3266,11 +5548,13 @@ impl AgentLoop {
                 );
             }
 
-            let llm_tool_schemas: Option<&[ToolSchema]> = if pure_image_analysis_turn {
-                None
-            } else {
-                Some(round_tool_schemas.as_slice())
-            };
+            let llm_tool_schemas: Option<&[ToolSchema]> =
+                if pure_image_analysis_turn || suppress_all_tool_routing {
+                    // Fast-path or satisfied: send NO tool schemas to the LLM
+                    None
+                } else {
+                    Some(round_tool_schemas.as_slice())
+                };
 
             // ── Document RAG context injection ─────────────────────────────────
             // If the session has uploaded documents, retrieve the most relevant
@@ -3375,7 +5659,17 @@ impl AgentLoop {
                                 "error": sanitize_text_for_logs(&error_text, 260),
                             })),
                         );
-                        let _ = event_tx.send(StreamEvent::Error(format!("LLM error: {e}")));
+                        // Provide a more helpful error message when the LLM is unavailable.
+                        // If this is round 0 (first LLM call), the user gets a clear message
+                        // rather than a cryptic "LLM error: cloud LLM failed after 3 retries".
+                        let user_message = if round == 0 {
+                            "I couldn't complete this request — the AI model is currently unavailable. \
+                             For GUI automation tasks (opening apps, writing code, browser navigation), \
+                             try rephrasing as: \"open [app] and write [code]\" or \"open [browser] and search for [query]\".".to_string()
+                        } else {
+                            format!("LLM error: {e}")
+                        };
+                        let _ = event_tx.send(StreamEvent::Error(user_message));
                         return;
                     }
                 }
@@ -3456,6 +5750,41 @@ impl AgentLoop {
             let text_response_raw = extract_text_response(&response.content);
             let text_response = sanitize_assistant_text_response(&text_response_raw);
 
+            // ── GUI-launch tool call interception ─────────────────────────────
+            // When a #tool:browser_search directive is active and the LLM returned
+            // web_search / searxng_search / search_news instead, replace them with
+            // the correct browser_search call. This handles the case where the LLM's
+            // training prior overrides the system prompt instruction.
+            if forced_tool_name.as_deref() == Some("browser_search")
+                && !tool_calls.is_empty()
+                && tool_calls.iter().all(|tc| {
+                    matches!(
+                        tc.name.as_str(),
+                        "web_search" | "searxng_search" | "search_news"
+                    )
+                })
+                && allowed_tool_names.contains("browser_search")
+            {
+                let clean_query = forced_tool_directive
+                    .as_ref()
+                    .map(|(_, q)| q.as_str())
+                    .unwrap_or(&last_user_text);
+                let (search_query, site) = extract_browser_search_intent(clean_query);
+                let mut args = serde_json::json!({ "query": search_query });
+                if let Some(s) = site {
+                    args["site"] = serde_json::Value::String(s);
+                }
+                tracing::info!(
+                    session = session_id,
+                    original_calls = ?tool_calls.iter().map(|tc| tc.name.as_str()).collect::<Vec<_>>(),
+                    "GUI-launch interception: replacing LLM tool calls with browser_search"
+                );
+                tool_calls = vec![ParsedToolCall {
+                    name: "browser_search".into(),
+                    arguments: args,
+                }];
+            }
+
             log_pipeline_step(
                 session_id,
                 "tool_calls_parsed",
@@ -3532,94 +5861,97 @@ impl AgentLoop {
                         "IntentGate: suppressing intent fallback injection"
                     );
                 } else {
-                let intent_fallback_query =
-                    resolve_intent_fallback_query(&routing_focus_text, messages);
-                let fallback_plan = self.turn_gate.plan_turn(&intent_fallback_query, has_images);
-                let fallback_confidence = fallback_plan
-                    .intent
-                    .confidence
-                    .max(turn_gate_plan.intent.confidence);
-                let fallback_calls: Vec<ParsedToolCall> = self
-                    .turn_gate
-                    .fallback_tool_hints(&fallback_plan, &allowed_tool_names)
-                    .into_iter()
-                    .filter_map(|hint| {
-                        build_fallback_call_for_hint(
-                            &hint,
-                            &intent_fallback_query,
-                            &allowed_tool_names,
-                        )
-                    })
-                    .collect();
-
-                if !fallback_calls.is_empty() {
-                    if forced_tool_requested || fallback_confidence >= self.min_confidence_to_act {
-                        intent_fallback_used = true;
-                        synthetic_intent_calls = true;
-                        turn_gate_plan = fallback_plan;
-                        let names: Vec<&str> =
-                            fallback_calls.iter().map(|c| c.name.as_str()).collect();
-                        let plan_message = if intent_fallback_query == routing_focus_text {
-                            format!(
-                                "No tool call returned; applying turn_gate fallback via {}",
-                                names.join(", "),
+                    let intent_fallback_query =
+                        resolve_intent_fallback_query(&routing_focus_text, messages);
+                    let fallback_plan =
+                        self.turn_gate.plan_turn(&intent_fallback_query, has_images);
+                    let fallback_confidence = fallback_plan
+                        .intent
+                        .confidence
+                        .max(turn_gate_plan.intent.confidence);
+                    let fallback_calls: Vec<ParsedToolCall> = self
+                        .turn_gate
+                        .fallback_tool_hints(&fallback_plan, &allowed_tool_names)
+                        .into_iter()
+                        .filter_map(|hint| {
+                            build_fallback_call_for_hint(
+                                &hint,
+                                &intent_fallback_query,
+                                &allowed_tool_names,
                             )
-                        } else {
-                            format!(
+                        })
+                        .collect();
+
+                    if !fallback_calls.is_empty() {
+                        if forced_tool_requested
+                            || fallback_confidence >= self.min_confidence_to_act
+                        {
+                            intent_fallback_used = true;
+                            synthetic_intent_calls = true;
+                            turn_gate_plan = fallback_plan;
+                            let names: Vec<&str> =
+                                fallback_calls.iter().map(|c| c.name.as_str()).collect();
+                            let plan_message = if intent_fallback_query == routing_focus_text {
+                                format!(
+                                    "No tool call returned; applying turn_gate fallback via {}",
+                                    names.join(", "),
+                                )
+                            } else {
+                                format!(
                                 "No tool call returned; applying context-aware turn_gate fallback via {}",
                                 names.join(", "),
                             )
-                        };
-                        let _ = event_tx.send(StreamEvent::Plan(plan_message));
-                        tool_calls = fallback_calls;
-                        log_pipeline_step(
-                            session_id,
-                            "synthetic_intent_call",
-                            "Injected intent fallback tool call",
-                            Some(serde_json::json!({
-                                "round": round,
-                                "fallback_query": sanitize_text_for_logs(&intent_fallback_query, 220),
-                                "source": "turn_gate",
-                                "confidence": fallback_confidence,
-                                "tool_calls": build_tool_calls_preview(&tool_calls),
-                            })),
-                        );
-                    } else if fallback_confidence >= self.clarify_threshold {
-                        let fallback_primary_hint = self
-                            .turn_gate
-                            .direct_tool_hint(&fallback_plan, &allowed_tool_names);
-                        let candidates = build_tool_choice_candidates(
-                            &intent_fallback_query,
-                            &allowed_tool_names,
-                            fallback_primary_hint.as_deref(),
-                            fallback_confidence,
-                        );
-
-                        if !candidates.is_empty() {
+                            };
+                            let _ = event_tx.send(StreamEvent::Plan(plan_message));
+                            tool_calls = fallback_calls;
                             log_pipeline_step(
                                 session_id,
-                                "tool_choice_required",
-                                "Low-confidence route needs user tool choice",
+                                "synthetic_intent_call",
+                                "Injected intent fallback tool call",
                                 Some(serde_json::json!({
                                     "round": round,
                                     "fallback_query": sanitize_text_for_logs(&intent_fallback_query, 220),
+                                    "source": "turn_gate",
                                     "confidence": fallback_confidence,
-                                    "candidate_count": candidates.len(),
+                                    "tool_calls": build_tool_calls_preview(&tool_calls),
                                 })),
                             );
-                            let _ = event_tx.send(StreamEvent::ToolChoiceRequired {
-                                query: intent_fallback_query.clone(),
-                                confidence: fallback_confidence,
-                                min_confidence: self.min_confidence_to_act,
-                                candidates,
-                            });
-                            let _ = event_tx.send(StreamEvent::Done(
-                                "Please choose a tool so I can continue this request.".into(),
-                            ));
-                            return;
+                        } else if fallback_confidence >= self.clarify_threshold {
+                            let fallback_primary_hint = self
+                                .turn_gate
+                                .direct_tool_hint(&fallback_plan, &allowed_tool_names);
+                            let candidates = build_tool_choice_candidates(
+                                &intent_fallback_query,
+                                &allowed_tool_names,
+                                fallback_primary_hint.as_deref(),
+                                fallback_confidence,
+                            );
+
+                            if !candidates.is_empty() {
+                                log_pipeline_step(
+                                    session_id,
+                                    "tool_choice_required",
+                                    "Low-confidence route needs user tool choice",
+                                    Some(serde_json::json!({
+                                        "round": round,
+                                        "fallback_query": sanitize_text_for_logs(&intent_fallback_query, 220),
+                                        "confidence": fallback_confidence,
+                                        "candidate_count": candidates.len(),
+                                    })),
+                                );
+                                let _ = event_tx.send(StreamEvent::ToolChoiceRequired {
+                                    query: intent_fallback_query.clone(),
+                                    confidence: fallback_confidence,
+                                    min_confidence: self.min_confidence_to_act,
+                                    candidates,
+                                });
+                                let _ = event_tx.send(StreamEvent::Done(
+                                    "Please choose a tool so I can continue this request.".into(),
+                                ));
+                                return;
+                            }
                         }
                     }
-                }
                 } // end else (gate_suppresses_fallback)
             }
 
@@ -3818,13 +6150,112 @@ impl AgentLoop {
 
                 // ── Task satisfaction check: stop loop if goal already met ────
                 if turn_memory.is_satisfied() {
-                    tracing::info!(
+                    tracing::warn!(
                         session = session_id,
                         tool = %call.name,
                         reason = %turn_memory.satisfaction_reason().unwrap_or(""),
-                        "turn_memory: goal satisfied, skipping remaining tool calls"
+                        "🛑 SKIPPING TOOL - goal already satisfied, breaking tool loop"
+                    );
+                    log_pipeline_step(
+                        session_id,
+                        "tool_skipped_satisfied",
+                        "Skipping tool call because goal is already satisfied",
+                        Some(serde_json::json!({
+                            "round": round,
+                            "skipped_tool": call.name.clone(),
+                            "reason": turn_memory.satisfaction_reason(),
+                        })),
                     );
                     break;
+                }
+
+                // ── Search dedup guard: prevent redundant parallel search calls ─
+                // If a search tool already succeeded this turn, skip additional
+                // search tools for the same turn (web_search + search_news both
+                // firing for the same query is wasteful and confusing).
+                let is_search_tool = matches!(
+                    call.name.as_str(),
+                    "web_search" | "searxng_search" | "search_news"
+                );
+                if is_search_tool {
+                    if let Some(prior_search) = turn_memory.successful_search_this_turn() {
+                        if prior_search != call.name.as_str() {
+                            tracing::info!(
+                                session = session_id,
+                                tool = %call.name,
+                                prior_search = %prior_search,
+                                "search_dedup_guard: skipping redundant search — {} already succeeded this turn",
+                                prior_search
+                            );
+                            log_pipeline_step(
+                                session_id,
+                                "search_dedup_skipped",
+                                "Search dedup guard: skipping redundant search tool",
+                                Some(serde_json::json!({
+                                    "round": round,
+                                    "tool": call.name.clone(),
+                                    "prior_search": prior_search,
+                                    "reason": "a search tool already succeeded this turn",
+                                })),
+                            );
+                            messages.push(ChatMessage {
+                                role: "tool".into(),
+                                content: format!(
+                                    "SEARCH_DEDUP: '{}' skipped — '{}' already returned results this turn. Use those results.",
+                                    call.name, prior_search
+                                ),
+                                name: Some(call.name.clone()),
+                                images: None,
+                            });
+                            continue;
+                        }
+                    }
+                }
+
+                // ── GUI-last policy enforcement ────────────────────────────────
+                // If the LLM picked a GUI/Browser tool but a higher-priority
+                // alternative (API/MCP/CLI) is available in the catalog, redirect
+                // the LLM to use the better tool. This is the authoritative
+                // execution-mode preference: API > MCP > CLI > Browser > GUI.
+                let call_profile = crate::mcp::capability_registry::capability_profile(&call.name);
+                if call_profile.is_last_resort() {
+                    if let Some(better_alt) =
+                        crate::mcp::capability_registry::find_better_alternative(
+                            &call.name,
+                            &allowed_tool_names,
+                        )
+                    {
+                        tracing::info!(
+                            session = session_id,
+                            tool = %call.name,
+                            better_alternative = %better_alt,
+                            "gui_last_policy: blocking last-resort tool — better alternative available"
+                        );
+                        log_pipeline_step(
+                            session_id,
+                            "gui_last_policy_blocked",
+                            "GUI-last policy: blocking last-resort tool with better alternative",
+                            Some(serde_json::json!({
+                                "round": round,
+                                "tool": call.name.clone(),
+                                "execution_mode": format!("{:?}", call_profile.execution_mode),
+                                "alternative": better_alt,
+                                "policy": "API > MCP > CLI > Browser > GUI",
+                            })),
+                        );
+                        messages.push(ChatMessage {
+                            role: "tool".into(),
+                            content: format!(
+                                "EXECUTION_REDIRECT: '{}' is a last-resort tool. \
+                                Use '{}' instead — it accomplishes the same goal via a more \
+                                reliable execution path (API/MCP/CLI). Retry with the better tool.",
+                                call.name, better_alt
+                            ),
+                            name: Some(call.name.clone()),
+                            images: None,
+                        });
+                        continue;
+                    }
                 }
 
                 let mut execution_args = call.arguments.clone();
@@ -3889,6 +6320,9 @@ impl AgentLoop {
                         name: call.name.clone(),
                         result: serde_json::json!({ "error": unavailable_msg }),
                         success: false,
+                        human_readable: None,
+                        conversational_summary: None,
+                        execution_metadata: None,
                     });
                     if let Some(flow) = package_flow.as_mut() {
                         flow.observe_tool_result(call, false, &serde_json::Value::Null);
@@ -3909,6 +6343,151 @@ impl AgentLoop {
                     name: call.name.clone(),
                     params: execution_args.clone(),
                 });
+
+                // ── Fleet pre-flight: check VM connectivity before executing ──
+                // When the LLM wants to run a command on a remote target, first
+                // verify the target is reachable. If not, emit RecoveryOptions
+                // so the user gets clickable buttons instead of a raw error.
+                if call.name == "execute_fleet_command" {
+                    if let Some(health_handler) =
+                        self.tool_registry.get_handler("check_device_health")
+                    {
+                        let target_hint = execution_args
+                            .get("target")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+
+                        let health_args = serde_json::json!({
+                            "target": target_hint.clone().unwrap_or_default()
+                        });
+                        let health_handler = health_handler.clone();
+                        let health_cancel = turn_mcp_cancel.clone();
+                        let health_ctx =
+                            self.tool_registry.make_tool_context(health_cancel.clone());
+
+                        tracing::info!(
+                            session = session_id,
+                            target = ?target_hint,
+                            "fleet_preflight: checking VM connectivity before execute_fleet_command"
+                        );
+
+                        // Step 1: connectivity check
+                        let _ = event_tx.send(StreamEvent::TaskStep(TaskStep {
+                            index: 1,
+                            total: Some(2),
+                            description: format!(
+                                "Checking connectivity to {}",
+                                target_hint.as_deref().unwrap_or("VM")
+                            ),
+                            status: TaskStepStatus::Running,
+                        }));
+
+                        let health_result = run_isolated(
+                            "tool:check_device_health",
+                            std::time::Duration::from_secs(20),
+                            health_cancel,
+                            None,
+                            move || async move {
+                                health_handler
+                                    .execute_with_context(health_args, health_ctx)
+                                    .await
+                            },
+                        )
+                        .await;
+
+                        if !health_result.success {
+                            let error_raw = health_result.error.as_deref().unwrap_or("unreachable");
+                            let target_label = target_hint.as_deref().unwrap_or("VM");
+
+                            let _ = event_tx.send(StreamEvent::TaskStep(TaskStep {
+                                index: 1,
+                                total: Some(2),
+                                description: format!(
+                                    "Connectivity check failed for {target_label}"
+                                ),
+                                status: TaskStepStatus::Failed,
+                            }));
+
+                            // Classify the connectivity failure
+                            let (context, detail, options) = classify_fleet_connectivity_failure(
+                                target_label,
+                                error_raw,
+                                &call.name,
+                                &execution_args,
+                            );
+
+                            log_pipeline_step(
+                                session_id,
+                                "fleet_preflight_failed",
+                                "VM connectivity check failed; emitting RecoveryOptions",
+                                Some(serde_json::json!({
+                                    "target": target_label,
+                                    "error": error_raw,
+                                    "options_count": options.len(),
+                                })),
+                            );
+
+                            let _ = event_tx.send(StreamEvent::RecoveryOptions {
+                                context: context.clone(),
+                                detail: detail.clone(),
+                                options,
+                            });
+
+                            // Inject a structured message into LLM context so it
+                            // knows to explain the situation, not retry blindly.
+                            messages.push(ChatMessage {
+                                role: "tool".into(),
+                                content: format!(
+                                    "FLEET_PREFLIGHT_FAILED: {context}\nDetail: {detail}\n\
+                                    The user has been shown recovery options. \
+                                    Explain what happened and what they can do next. \
+                                    Do NOT retry the fleet command automatically."
+                                ),
+                                name: Some("check_device_health".into()),
+                                images: None,
+                            });
+
+                            // Skip the actual fleet command execution
+                            continue;
+                        }
+
+                        let _ = event_tx.send(StreamEvent::TaskStep(TaskStep {
+                            index: 1,
+                            total: Some(2),
+                            description: format!(
+                                "{} is reachable",
+                                target_hint.as_deref().unwrap_or("VM")
+                            ),
+                            status: TaskStepStatus::Done,
+                        }));
+
+                        // Step 2: executing command
+                        let command_preview = execution_args
+                            .get("command")
+                            .and_then(|v| v.as_str())
+                            .map(|c| {
+                                if c.len() > 60 {
+                                    format!("{}…", &c[..60])
+                                } else {
+                                    c.to_string()
+                                }
+                            })
+                            .unwrap_or_else(|| "command".to_string());
+
+                        let _ = event_tx.send(StreamEvent::TaskStep(TaskStep {
+                            index: 2,
+                            total: Some(2),
+                            description: format!("Running: {command_preview}"),
+                            status: TaskStepStatus::Running,
+                        }));
+
+                        tracing::info!(
+                            session = session_id,
+                            target = ?target_hint,
+                            "fleet_preflight: VM reachable, proceeding with execute_fleet_command"
+                        );
+                    }
+                }
 
                 // ── Colab browser-connection gate ────────────────────────────
                 // If the LLM emits an execute_cell call but the browser connection
@@ -3938,7 +6517,34 @@ impl AgentLoop {
                             name: bootstrap.name.clone(),
                             params: bootstrap.arguments.clone(),
                         });
-                        let gate_result = if let Some(gate_handler) =
+                        // AUTHORITY FIX: Colab bootstrap must pass through policy + audit,
+                        // same as every other tool. Green-tier (no HITL needed) but audit
+                        // visibility is mandatory — no silent execution bypasses allowed.
+                        let bootstrap_policy = self.policy_engine.evaluate_with_modality_hint(
+                            &bootstrap.name,
+                            &bootstrap.arguments,
+                            false, // non-destructive
+                        );
+                        self.audit_logger.log(
+                            session_id,
+                            &bootstrap.name,
+                            &bootstrap.arguments,
+                            bootstrap_policy.risk_level,
+                            crate::safety::audit::Decision::AutoExecuted,
+                            crate::safety::audit::DecidedBy::Policy,
+                        );
+                        let gate_result = if bootstrap_policy.blocked {
+                            tracing::warn!(
+                                target: "authority_trace",
+                                tool = %bootstrap.name,
+                                reason = %bootstrap_policy.reason,
+                                "Colab bootstrap blocked by policy"
+                            );
+                            crate::infra::isolation::ToolResult::err(format!(
+                                "POLICY_BLOCKED: {}",
+                                bootstrap_policy.reason
+                            ))
+                        } else if let Some(gate_handler) =
                             self.tool_registry.get_handler(&bootstrap.name)
                         {
                             let gate_handler = gate_handler.clone();
@@ -3974,6 +6580,9 @@ impl AgentLoop {
                             name: bootstrap.name.clone(),
                             result: gate_result.data.clone(),
                             success: gate_result.success,
+                            human_readable: None,
+                            conversational_summary: None,
+                            execution_metadata: None,
                         });
                         messages.push(ChatMessage {
                             role: "tool".into(),
@@ -3995,10 +6604,23 @@ impl AgentLoop {
                 }
 
                 // Policy check — pass destructive hint from semantic router modality
+                // INVARIANT: policy evaluation MUST run before any tool execution.
+                // This is the single authority gate — any bypass makes it past here
+                // only through an explicit exception (Colab bootstrap handles its own
+                // policy check above). Never remove this call.
                 let decision = self.policy_engine.evaluate_with_modality_hint(
                     &call.name,
                     &execution_args,
                     turn_modality.destructive,
+                );
+
+                // RUNTIME AUTHORITY ASSERTION: policy result must be structurally sound.
+                // In debug builds, panic immediately if the policy result is nonsensical
+                // (both blocked AND requires_approval is logically invalid).
+                debug_assert!(
+                    !(decision.blocked && decision.requires_approval),
+                    "policy invariant violated: tool='{}' cannot be both blocked and require approval",
+                    call.name
                 );
 
                 log_pipeline_step(
@@ -4029,6 +6651,9 @@ impl AgentLoop {
                         name: call.name.clone(),
                         result: serde_json::json!({ "error": "blocked by safety policy" }),
                         success: false,
+                        human_readable: None,
+                        conversational_summary: None,
+                        execution_metadata: None,
                     });
                     messages.push(ChatMessage {
                         role: "tool".into(),
@@ -4164,6 +6789,9 @@ impl AgentLoop {
                                 name: call.name.clone(),
                                 result: serde_json::json!({ "error": denial_reason }),
                                 success: false,
+                                human_readable: None,
+                                conversational_summary: None,
+                                execution_metadata: None,
                             });
                             messages.push(ChatMessage {
                                 role: "tool".into(),
@@ -4264,8 +6892,7 @@ impl AgentLoop {
                     let budget_msg = format!(
                         "TOOL_BUDGET_EXHAUSTED: turn tool-output token budget ({}) \
                          reached; skipping '{}'. Summarise what you have and answer the user.",
-                        context_budgets.turn_tool_budget,
-                        call.name
+                        context_budgets.turn_tool_budget, call.name
                     );
                     tracing::warn!(
                         session = session_id,
@@ -4314,7 +6941,8 @@ impl AgentLoop {
                 });
 
                 // Execute the tool
-                let tool_result = if let Some(handler) = self.tool_registry.get_handler(&call.name)
+                let mut tool_result = if let Some(handler) =
+                    self.tool_registry.get_handler(&call.name)
                 {
                     let handler = handler.clone();
                     let args = execution_args.clone();
@@ -4356,6 +6984,99 @@ impl AgentLoop {
                             );
                         }
 
+                        // ── Execution Authority: target validation ────────────
+                        // Validate that this tool is allowed to execute on the
+                        // resolved target. Blocks dangerous cross-target mismatches.
+                        let authority_result =
+                            crate::agent::execution_authority::check_execution_authority_with_params(
+                                &call.name,
+                                &routing_focus_text,
+                                turn_memory.primary_target,
+                                Some(&call.arguments),
+                            );
+
+                        match &authority_result {
+                            crate::agent::execution_authority::ValidationResult::Blocked { reason, suggested_clarification } => {
+                                let block_msg = format!("EXECUTION_BLOCKED: {reason}");
+                                tracing::warn!(
+                                    tool = %call.name,
+                                    reason = %reason,
+                                    "execution_authority: target mismatch blocked"
+                                );
+                                log_pipeline_step(
+                                    session_id,
+                                    "execution_authority_blocked",
+                                    "Execution authority blocked tool — target mismatch",
+                                    Some(serde_json::json!({
+                                        "round": round,
+                                        "tool": call.name.clone(),
+                                        "reason": reason,
+                                        "clarification": suggested_clarification,
+                                    })),
+                                );
+                                hb_cancel.cancel();
+                                // Inject clarification hint into messages so LLM can explain
+                                if let Some(clarification) = suggested_clarification {
+                                    messages.push(crate::llm::ChatMessage {
+                                        role: "system".into(),
+                                        content: format!(
+                                            "EXECUTION_BLOCKED: {}. Clarification: {}",
+                                            reason, clarification
+                                        ),
+                                        name: None,
+                                        images: None,
+                                    });
+                                }
+                                crate::infra::isolation::ToolResult::err(block_msg)
+                            }
+                            crate::agent::execution_authority::ValidationResult::NeedsClarification { question, options } => {
+                                tracing::info!(
+                                    tool = %call.name,
+                                    question = %question,
+                                    "execution_authority: clarification needed"
+                                );
+                                log_pipeline_step(
+                                    session_id,
+                                    "execution_authority_clarify",
+                                    "Execution authority needs clarification before proceeding",
+                                    Some(serde_json::json!({
+                                        "round": round,
+                                        "tool": call.name.clone(),
+                                        "question": question,
+                                        "options": options,
+                                    })),
+                                );
+                                hb_cancel.cancel();
+                                // Inject clarification question into messages
+                                messages.push(crate::llm::ChatMessage {
+                                    role: "system".into(),
+                                    content: format!(
+                                        "CLARIFICATION_NEEDED before executing '{}': {}",
+                                        call.name, question
+                                    ),
+                                    name: None,
+                                    images: None,
+                                });
+                                crate::infra::isolation::ToolResult::err(format!(
+                                    "CLARIFICATION_NEEDED: {question}"
+                                ))
+                            }
+                            crate::agent::execution_authority::ValidationResult::Authorized(binding) => {
+                                log_pipeline_step(
+                                    session_id,
+                                    "execution_authority_ok",
+                                    "Execution authority validated",
+                                    Some(serde_json::json!({
+                                        "round": round,
+                                        "tool": call.name.clone(),
+                                        "target": binding.target.as_str(),
+                                        "confidence": binding.confidence,
+                                        "source": binding.source.as_str(),
+                                        "is_destructive": binding.is_destructive,
+                                        "is_explicit": binding.is_explicit,
+                                    })),
+                                );
+
                         // Long-running tools get extended timeouts
                         let timeout_secs = match call.name.as_str() {
                             "install_application"
@@ -4393,7 +7114,9 @@ impl AgentLoop {
                             },
                         )
                         .await
-                    }
+                    } // end Authorized arm
+                    } // end authority match
+                    } // end preflight else
                 } else {
                     crate::infra::isolation::ToolResult::err(format!("unknown tool: {}", call.name))
                 };
@@ -4408,13 +7131,10 @@ impl AgentLoop {
                 // ── Phase 3: Post-execution verification ─────────────────────
                 // Validate tool results for non-trivial tools when a verifier is attached.
                 // The verifier NEVER retries, replans, or mutates state — it only logs.
-                if tool_result.success {
+                let verification_outcome = if tool_result.success {
                     if let Some(ref verifier) = self.execution_verifier {
-                        let verifiability = infer_verifiability_for_tool(
-                            &call.name,
-                            &execution_args,
-                            &tool_result,
-                        );
+                        let verifiability =
+                            infer_verifiability_for_tool(&call.name, &execution_args, &tool_result);
                         if let Some(leaf) = verifiability {
                             let outcome = verifier.verify(&leaf).await;
                             tracing::info!(
@@ -4438,25 +7158,163 @@ impl AgentLoop {
                                     "latency_ms": outcome.latency_ms,
                                 })),
                             );
+                            if !outcome.verified {
+                                // AUDIT FIX: verification failure must gate the result.
+                                // Downgrade the tool result so the LLM sees failure,
+                                // not a falsely-successful outcome.
+                                self.audit_logger.log(
+                                    session_id,
+                                    &call.name,
+                                    &execution_args,
+                                    decision.risk_level,
+                                    crate::safety::audit::Decision::Blocked,
+                                    crate::safety::audit::DecidedBy::Verification,
+                                );
+                                tracing::warn!(
+                                    target: "authority_trace",
+                                    tool = %call.name,
+                                    evidence = %outcome.evidence,
+                                    "execution verifier blocked: claimed success but verification failed"
+                                );
+                                tool_result = crate::infra::isolation::ToolResult::err(format!(
+                                    "VERIFICATION_FAILED: tool reported success but post-execution verification failed: {}",
+                                    outcome.evidence
+                                ));
+                                log_pipeline_step(
+                                    session_id,
+                                    "execution_verification_blocked",
+                                    "Tool result blocked by post-execution verification failure",
+                                    Some(serde_json::json!({
+                                        "round": round,
+                                        "tool": call.name.clone(),
+                                        "evidence": outcome.evidence,
+                                        "confidence": outcome.confidence,
+                                    })),
+                                );
+                            }
+                            Some(VerificationOutcome {
+                                verified: outcome.verified,
+                                confidence: outcome.confidence as f64,
+                                evidence: outcome.evidence,
+                            })
+                        } else {
+                            None
                         }
+                    } else {
+                        None
                     }
+                } else {
+                    None
+                };
+
+                // ── Phase 3.5: Result Synthesis ──────────────────────────────
+                // Transform raw tool output into intelligent user-facing response.
+                // This separates conversational summary from debug/raw payload.
+                let synthesized = self.result_synthesizer.synthesize(
+                    &call.name,
+                    &tool_result,
+                    verification_outcome,
+                );
+
+                tracing::debug!(
+                    tool = %call.name,
+                    outcome = ?synthesized.execution_metadata.outcome,
+                    item_count = ?synthesized.execution_metadata.item_count,
+                    summary_preview = %sanitize_text_for_logs(&synthesized.conversational_summary, 120),
+                    "result_synthesizer: generated conversational summary"
+                );
+
+                log_pipeline_step(
+                    session_id,
+                    "result_synthesized",
+                    "Tool result synthesized into conversational response",
+                    Some(serde_json::json!({
+                        "round": round,
+                        "tool": call.name.clone(),
+                        "outcome": synthesized.execution_metadata.outcome,
+                        "item_count": synthesized.execution_metadata.item_count,
+                        "summary_preview": sanitize_text_for_logs(&synthesized.conversational_summary, 200),
+                    })),
+                );
+
+                // ── Session Checkpoint + Observability ──────────────────────────
+                if let (Some(ref mut session), Some(ref mgr)) =
+                    (&mut react_session, &self.session_manager)
+                {
+                    session.add_step(crate::agent::workflow_session::SessionStep {
+                        step: round,
+                        action: call.name.clone(),
+                        params: execution_args.clone(),
+                        success: tool_result.success,
+                        evidence: tool_result.data.to_string().chars().take(500).collect(),
+                        timestamp: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_secs())
+                            .unwrap_or(0),
+                    });
+                    let _ = mgr.save(session);
+                }
+                // ── Transparency layer: record tool execution as completed stage ─
+                if let Some(ref layer) = self.transparency_layer {
+                    use crate::agent::stage_executor::StageOutcome;
+                    let stage_outcome = if tool_result.success {
+                        StageOutcome::Passed
+                    } else {
+                        StageOutcome::Failed {
+                            reason: tool_result
+                                .data
+                                .as_str()
+                                .unwrap_or("tool execution failed")
+                                .chars()
+                                .take(120)
+                                .collect(),
+                        }
+                    };
+                    layer.update_stage(
+                        &react_trace_id,
+                        round as u32,
+                        &call.name,
+                        &stage_outcome,
+                        1, // attempts
+                        0, // recovery_attempts
+                        0, // duration_ms (not tracked per-tool in ReAct)
+                        if tool_result.success { 0.9 } else { 0.0 },
+                    );
+                }
+                if let Some(ref health) = self.health_registry {
+                    health.inc_events(1);
                 }
 
                 // ── Turn Memory: record success + check satisfaction ───────────
                 if tool_result.success {
-                    let result_preview: String = tool_result
-                        .data
-                        .to_string()
-                        .chars()
-                        .take(200)
-                        .collect();
+                    let result_preview: String =
+                        tool_result.data.to_string().chars().take(200).collect();
                     let tool_target = ExecutionTarget::infer(&routing_focus_text, &call.name);
-                    turn_memory.record_success(&call.name, call_hash, &result_preview, tool_target);
+                    // Pass full result data so satisfaction summary can synthesize properly
+                    turn_memory.record_success_with_data(
+                        &call.name,
+                        call_hash,
+                        &result_preview,
+                        tool_result.data.clone(),
+                        tool_target,
+                    );
 
                     // Check if the user's goal is now satisfied
                     if !turn_memory.is_satisfied() {
+                        tracing::debug!(
+                            session = session_id,
+                            tool = %call.name,
+                            goal = %turn_memory.goal,
+                            "checking satisfaction for tool execution"
+                        );
                         if let Some(reason) = detect_satisfaction(&turn_memory, &call.name, true) {
                             turn_memory.mark_satisfied(reason.clone());
+                            tracing::warn!(
+                                session = session_id,
+                                tool = %call.name,
+                                reason = %reason,
+                                "🎯 SATISFACTION DETECTED - goal met, will skip remaining tools"
+                            );
                             log_pipeline_step(
                                 session_id,
                                 "goal_satisfied",
@@ -4467,6 +7325,12 @@ impl AgentLoop {
                                     "reason": reason,
                                     "memory": turn_memory.to_json(),
                                 })),
+                            );
+                        } else {
+                            tracing::debug!(
+                                session = session_id,
+                                tool = %call.name,
+                                "satisfaction not detected for this tool"
                             );
                         }
                     }
@@ -4585,6 +7449,15 @@ impl AgentLoop {
 
                 if let Some(flow) = package_flow.as_mut() {
                     flow.observe_tool_result(call, tool_result.success, &tool_result.data);
+
+                    // ── Package flow step progress ─────────────────────────
+                    // Emit TaskStep events so the UI shows live progress for
+                    // multi-step package operations (search→check→install→verify).
+                    // Steps are deterministic based on the flow's current state.
+                    let pkg_step = package_flow_step_event(flow, &call.name, tool_result.success);
+                    if let Some(step) = pkg_step {
+                        let _ = event_tx.send(StreamEvent::TaskStep(step));
+                    }
                 }
 
                 if let Some(flow) = colab_flow.as_mut() {
@@ -4804,6 +7677,11 @@ impl AgentLoop {
                     name: call.name.clone(),
                     result: tool_result.data.clone(),
                     success: tool_result.success,
+                    human_readable: Some(synthesized.human_readable.clone()),
+                    conversational_summary: Some(synthesized.conversational_summary.clone()),
+                    execution_metadata: Some(
+                        serde_json::to_value(&synthesized.execution_metadata).unwrap_or_default(),
+                    ),
                 });
 
                 let tool_msg = if let Some(enrichment) = auto_enrichment {
@@ -4843,12 +7721,162 @@ impl AgentLoop {
                         tool_msg
                     };
 
+                // ── Hallucination guard: failed extraction ────────────────────
+                // If fetch_webpage or ingest_document failed, or returned an
+                // EXTRACTION_FAILED marker, inject an explicit anti-hallucination
+                // instruction so the LLM does NOT fabricate content.
+                let tool_msg = if !tool_result.success
+                    && matches!(
+                        call.name.as_str(),
+                        "fetch_webpage" | "fetch_article" | "ingest_document"
+                    ) {
+                    format!(
+                        "{tool_msg}\n\nEXTRACTION_FAILED: The content of this URL/document could \
+                        not be retrieved or extracted. You MUST NOT fabricate, invent, or guess \
+                        the content. Tell the user the extraction failed and ask them to provide \
+                        the content directly, or try a different URL."
+                    )
+                } else if tool_result.success
+                    && call.name == "fetch_webpage"
+                    && tool_result
+                        .data
+                        .get("content")
+                        .and_then(|v| v.as_str())
+                        .map(|c| c.starts_with("EXTRACTION_FAILED"))
+                        .unwrap_or(false)
+                {
+                    format!(
+                        "{tool_msg}\n\nEXTRACTION_FAILED: No readable article content could be \
+                        extracted from this page (likely a JavaScript-heavy SPA, paywall, or \
+                        bot-detection page). You MUST NOT fabricate the content. \
+                        Tell the user the page could not be read and suggest alternatives."
+                    )
+                } else {
+                    tool_msg
+                };
+
                 messages.push(ChatMessage {
                     role: "tool".into(),
                     content: tool_msg,
                     name: Some(call.name.clone()),
                     images: extracted_tool_images,
                 });
+
+                // ── Gap 1 & 4: Command-level failure diagnosis ────────────────
+                // When a tool fails, classify the failure deterministically and
+                // emit structured RecoveryOptions so the UI shows clickable buttons.
+                // This is model-agnostic — no LLM calls, pure pattern matching.
+                if !tool_result.success {
+                    let error_text = tool_result.error.as_deref().unwrap_or("");
+                    if let Some(recovery) =
+                        classify_tool_failure(&call.name, error_text, &execution_args)
+                    {
+                        tracing::info!(
+                            session = session_id,
+                            tool = %call.name,
+                            context = %recovery.0,
+                            "tool_failure_recovery: emitting structured recovery options"
+                        );
+                        let _ = event_tx.send(StreamEvent::RecoveryOptions {
+                            context: recovery.0,
+                            detail: recovery.1,
+                            options: recovery.2,
+                        });
+                    }
+                    // ── Batch 2 Phase 4: Interruption classification + recovery planning ─
+                    // Classifies the tool failure as a known interruption class and
+                    // plans a bounded recovery action (depth ≤ MAX_RECOVERY_DEPTH).
+                    // Plans are logged for audit and recorded as transparency blockers.
+                    if let Some(ref rt) = self.continuation_runtime {
+                        use crate::agent::workflow_continuation::InterruptionContext;
+                        let interruption_ctx = InterruptionContext {
+                            current_stage_label: Some(call.name.clone()),
+                            ..Default::default()
+                        };
+                        let interruption = rt.classify_interruption(&interruption_ctx);
+                        if !matches!(
+                            interruption,
+                            crate::agent::workflow_continuation::InterruptionClass::Unknown
+                        ) {
+                            let plan = rt.plan_recovery(&interruption, consecutive_failures);
+                            tracing::info!(
+                                target: "workflow_continuation",
+                                session = session_id,
+                                tool = %call.name,
+                                interruption = %interruption.user_message(),
+                                "Batch 2: interruption classified; recovery plan ready"
+                            );
+                            log_pipeline_step(
+                                session_id,
+                                "b2_recovery_planned",
+                                &plan.explanation,
+                                Some(serde_json::json!({
+                                    "tool": call.name.clone(),
+                                    "interruption": interruption.user_message(),
+                                    "primary_action": format!("{:?}", plan.primary_action),
+                                    "consecutive_failures": consecutive_failures,
+                                })),
+                            );
+                            if let Some(ref layer) = self.transparency_layer {
+                                layer.record_blocker(
+                                    &react_trace_id,
+                                    round as u32,
+                                    interruption.user_message(),
+                                    plan.explanation.clone(),
+                                );
+                            }
+                            // ── Batch 2: Pause workflow on human-intervention / escalation ─
+                            // Writes a crash-safe pause checkpoint to disk so the workflow
+                            // can be resumed after the user resolves the blocker.
+                            let needs_pause = matches!(
+                                plan.primary_action,
+                                crate::agent::workflow_continuation::RecoveryAction::RequestHumanIntervention { .. }
+                                | crate::agent::workflow_continuation::RecoveryAction::Escalate { .. }
+                            );
+                            if needs_pause {
+                                use crate::agent::workflow_session::WorkflowSession;
+                                let react_session = WorkflowSession::new(
+                                    session_id.to_string(),
+                                    last_user_text.chars().take(200).collect::<String>(),
+                                    "ReAct".to_string(),
+                                );
+                                let wf_cat_str = format!(
+                                    "{:?}",
+                                    b2_workflow_category
+                                        .as_ref()
+                                        .map(|c| format!("{:?}", c))
+                                        .unwrap_or_else(|| "Unknown".into())
+                                );
+                                let _ = rt.pause_workflow(
+                                    session_id,
+                                    &react_session,
+                                    interruption.clone(),
+                                    &wf_cat_str,
+                                );
+                                tracing::warn!(
+                                    target: "workflow_continuation",
+                                    session = session_id,
+                                    tool = %call.name,
+                                    "Batch 2: ReAct workflow paused — awaiting human intervention"
+                                );
+                                log_pipeline_step(
+                                    session_id,
+                                    "b2_workflow_paused",
+                                    &format!("Workflow paused: {}", plan.explanation),
+                                    None,
+                                );
+                            }
+                        }
+                    }
+                } else if call.name == "execute_fleet_command" {
+                    // Mark step 2 done after successful fleet command
+                    let _ = event_tx.send(StreamEvent::TaskStep(TaskStep {
+                        index: 2,
+                        total: Some(2),
+                        description: "Command completed successfully".into(),
+                        status: TaskStepStatus::Done,
+                    }));
+                }
             }
 
             // ── Image-generation early exit ────────────────────────────────────────
@@ -4884,6 +7912,107 @@ impl AgentLoop {
                     "history_message_count": messages.len(),
                 })),
             );
+        }
+
+        // ── Batch 2 Phase 5: Complete transparency trace ──────────────────────────
+        // Closes the per-turn WorkflowTrace opened in begin_trace() at turn start.
+        // Records overall success/failure for PSDG audit persistence.
+        {
+            let react_turn_succeeded = failed_calls.is_empty();
+            if let Some(ref layer) = self.transparency_layer {
+                layer.complete_trace(
+                    &react_trace_id,
+                    react_turn_succeeded,
+                    if react_turn_succeeded {
+                        None
+                    } else {
+                        Some(format!(
+                            "{} tool(s) had failures during this turn",
+                            failed_calls.len()
+                        ))
+                    },
+                );
+                tracing::debug!(
+                    target: "execution_transparency",
+                    session = session_id,
+                    trace_id = %react_trace_id,
+                    success = react_turn_succeeded,
+                    "Batch 2: ReAct transparency trace completed"
+                );
+            }
+        }
+
+        // ── Batch 2 Phase 1 (closure): Observable completion verification ─────────
+        // Verifies that expected human-visible outcomes are observable after the
+        // full tool loop. Only runs when non-Silent outcomes were inferred at turn
+        // start and the observable_completion engine is wired. PSDG fast-path
+        // ensures browser/IDE/file checks are < 10ms. Surfaces a notice to the
+        // user when expected outcomes are not yet visible.
+        if !b2_inferred_outcomes.is_empty() {
+            if let Some(ref eng) = self.observable_completion {
+                use crate::agent::observable_completion::CompletionVisibilityPolicy;
+                let policies: Vec<CompletionVisibilityPolicy> = b2_inferred_outcomes
+                    .iter()
+                    .map(|o| {
+                        CompletionVisibilityPolicy::for_outcome(
+                            o.clone(),
+                            turn_gate_plan.intent.operation,
+                        )
+                    })
+                    .collect();
+                let agg = eng.verify_all(&policies).await;
+                tracing::info!(
+                    target: "observable_completion",
+                    session = session_id,
+                    all_visible = agg.all_required_visible,
+                    confidence = agg.overall_confidence,
+                    surfacing_needed = agg.surfacing_needed,
+                    "Batch 2: observable completion check after ReAct loop"
+                );
+                log_pipeline_step(
+                    session_id,
+                    "b2_observable_completion",
+                    "Batch 2: observable completion verification after ReAct loop",
+                    Some(serde_json::json!({
+                        "all_required_visible": agg.all_required_visible,
+                        "overall_confidence": agg.overall_confidence,
+                        "surfacing_needed": agg.surfacing_needed,
+                        "outcome_count": agg.per_outcome.len(),
+                    })),
+                );
+                if agg.surfacing_needed && !agg.all_required_visible {
+                    let narrative = eng.completion_narrative(&agg, turn_gate_plan.intent.operation);
+                    if !narrative.is_empty() {
+                        tracing::warn!(
+                            target: "observable_completion",
+                            session = session_id,
+                            %narrative,
+                            "Batch 2: expected outcome not yet visible — surfacing to user"
+                        );
+                        let _ = event_tx.send(StreamEvent::Plan(narrative));
+                    }
+                }
+            }
+        }
+
+        if terminated_by_satisfaction {
+            log_pipeline_step(
+                session_id,
+                "loop_terminated_satisfied",
+                "Agent loop terminated early: goal satisfied",
+                Some(serde_json::json!({
+                    "reason": turn_memory.satisfaction_reason(),
+                })),
+            );
+
+            if !is_turn_active() {
+                return;
+            }
+
+            // Build a summary from completed actions instead of generic message
+            let summary = format_tool_satisfaction_summary(&turn_memory);
+            let _ = event_tx.send(StreamEvent::Done(summary));
+            return;
         }
 
         log_pipeline_step(
@@ -4968,6 +8097,103 @@ impl AgentLoop {
             None
         }
     }
+}
+
+/// Detect if the current user prompt matches an interrupted workflow that can be continued.
+///
+/// Returns `Some((context, detail, options))` if a resumable session is found.
+/// The options are rendered as clickable buttons in the UI via `StreamEvent::RecoveryOptions`.
+fn detect_session_continuation_options(
+    user_text: &str,
+) -> Option<(String, String, Vec<RecoveryOption>)> {
+    use crate::agent::workflow_session::SessionManager;
+
+    let manager = SessionManager::new();
+    let continuable = manager.find_continuable();
+
+    if continuable.is_empty() {
+        return None;
+    }
+
+    let user_lower = user_text.to_ascii_lowercase();
+    let trimmed_lower = user_lower.trim();
+    if trimmed_lower.starts_with("start over:")
+        || trimmed_lower.starts_with("start fresh:")
+        || trimmed_lower.starts_with("continue previous workflow:")
+        || trimmed_lower == "start fresh"
+        || trimmed_lower == "dismiss"
+    {
+        return None;
+    }
+
+    // Keywords that suggest the user wants to continue something
+    let continuation_keywords = [
+        "continue",
+        "resume",
+        "retry",
+        "again",
+        "finish",
+        "complete",
+        "where did",
+        "what happened",
+        "last time",
+        "previous",
+    ];
+    let wants_continuation = continuation_keywords
+        .iter()
+        .any(|kw| user_lower.contains(kw));
+
+    // Find the most recent continuable session with a real user intent
+    let most_recent = continuable.into_iter().find(|s| {
+        let intent = s.user_intent.to_ascii_lowercase();
+        !intent.starts_with("substrate-") && !intent.starts_with("rule-") && intent.len() > 20
+    })?;
+
+    let intent_lower = most_recent.user_intent.to_ascii_lowercase();
+    let prompt_overlap = user_lower
+        .split_whitespace()
+        .filter(|w| w.len() > 4)
+        .any(|w| intent_lower.contains(w));
+
+    if !wants_continuation && !prompt_overlap {
+        return None;
+    }
+
+    let steps_done = most_recent.completed_steps.len();
+    let error_summary = most_recent
+        .error
+        .as_deref()
+        .map(|e| &e[..e.len().min(80)])
+        .unwrap_or("unknown error");
+
+    let context = format!(
+        "Interrupted workflow found: \"{}\"",
+        &most_recent.user_intent[..most_recent.user_intent.len().min(60)]
+    );
+    let detail = format!(
+        "Completed {} step(s) before stopping. Last error: {}",
+        steps_done, error_summary
+    );
+
+    let options = vec![
+        RecoveryOption {
+            label: "Continue from where it stopped".into(),
+            action_prompt: format!("Continue previous workflow: {}", most_recent.user_intent),
+            style: "primary",
+        },
+        RecoveryOption {
+            label: "Start fresh".into(),
+            action_prompt: format!("Start over: {}", most_recent.user_intent),
+            style: "secondary",
+        },
+        RecoveryOption {
+            label: "Dismiss".into(),
+            action_prompt: String::new(),
+            style: "ghost",
+        },
+    ];
+
+    Some((context, detail, options))
 }
 
 #[cfg(test)]

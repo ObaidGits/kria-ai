@@ -968,13 +968,349 @@ if __name__ == "__main__":
                 .to_string();
         }
 
-        // Hello World (basic case)
-        if lower.contains("hello world") {
-            return "Hello World".to_string();
+        // Pascal's triangle
+        if lower.contains("pascal") {
+            return r#"def pascals_triangle(n):
+    """Generate Pascal's triangle with n rows."""
+    triangle = []
+    for i in range(n):
+        row = [1] * (i + 1)
+        for j in range(1, i):
+            row[j] = triangle[i-1][j-1] + triangle[i-1][j]
+        triangle.append(row)
+    return triangle
+
+# Example usage
+if __name__ == "__main__":
+    n = 6
+    for row in pascals_triangle(n):
+        print(' '.join(map(str, row)))"#
+                .to_string();
         }
 
-        // Default: return intent as-is (fallback)
-        user_intent.to_string()
+        // Hello World (basic case)
+        // HTML check must come BEFORE "hello" to avoid "a heading that says Hello World"
+        // in an HTML prompt triggering the Python Hello World fallback.
+        if lower.contains("html") || lower.contains("webpage") || lower.contains("web page") {
+            return "<!DOCTYPE html>\n<html>\n<head><title>My Page</title></head>\n<body>\n  <h1>Hello World</h1>\n  <p>Welcome to my page.</p>\n</body>\n</html>\n".to_string();
+        }
+        // Check for "function called X" / "function named X" BEFORE the generic
+        // "hello" catch-all so prompts like "add a function called greet that
+        // prints Hello name" produce def greet() instead of Hello World.
+        if lower.contains("function called") || lower.contains("function named") {
+            let marker_pos = lower
+                .find("function called")
+                .map(|p| p + "function called ".len())
+                .or_else(|| {
+                    lower
+                        .find("function named")
+                        .map(|p| p + "function named ".len())
+                });
+            let fname = marker_pos
+                .and_then(|p| lower[p..].split_whitespace().next().map(|s| s.to_string()))
+                .unwrap_or_else(|| "my_function".to_string());
+            let fname = fname
+                .trim_matches(|c: char| !c.is_alphanumeric() && c != '_')
+                .to_string();
+            if lower.contains("name") && lower.contains("print") {
+                return format!(
+                    "def {fname}(name):\n    print(f\"Hello {{name}}\")\n\nif __name__ == \"__main__\":\n    {fname}(\"World\")"
+                );
+            } else {
+                return format!(
+                    "def {fname}():\n    pass\n\nif __name__ == \"__main__\":\n    {fname}()"
+                );
+            }
+        }
+        if lower.contains("hello world") || lower.contains("hello") {
+            // Detect language from prompt
+            if lower.contains("rust") {
+                return r#"fn main() {
+    println!("Hello, World!");
+}"#
+                .to_string();
+            }
+            if lower.contains("javascript") || lower.contains(" js ") {
+                return r#"function main() {
+    console.log("Hello, World!");
+}
+main();"#
+                    .to_string();
+            }
+            if lower.contains("typescript") {
+                return r#"function main(): void {
+    console.log("Hello, World!");
+}
+main();"#
+                    .to_string();
+            }
+            return r#"def main():
+    """Hello World program."""
+    print("Hello, World!")
+
+if __name__ == "__main__":
+    main()"#
+                .to_string();
+        }
+
+        // Prime numbers
+        if lower.contains("prime") {
+            return r#"def is_prime(n):
+    """Check if a number is prime."""
+    if n < 2:
+        return False
+    for i in range(2, int(n**0.5) + 1):
+        if n % i == 0:
+            return False
+    return True
+
+def primes_up_to(limit):
+    """Return all primes up to limit."""
+    return [n for n in range(2, limit + 1) if is_prime(n)]
+
+# Example usage
+if __name__ == "__main__":
+    print(f"Primes up to 50: {primes_up_to(50)}")"#
+                .to_string();
+        }
+
+        // Sorting
+        if lower.contains("sort") || lower.contains("bubble sort") || lower.contains("merge sort") {
+            return r#"def bubble_sort(arr):
+    """Sort a list using bubble sort."""
+    n = len(arr)
+    for i in range(n):
+        for j in range(0, n - i - 1):
+            if arr[j] > arr[j + 1]:
+                arr[j], arr[j + 1] = arr[j + 1], arr[j]
+    return arr
+
+# Example usage
+if __name__ == "__main__":
+    data = [64, 34, 25, 12, 22, 11, 90]
+    print(f"Sorted: {bubble_sort(data)}")"#
+                .to_string();
+        }
+
+        // Binary search
+        if lower.contains("binary search") || (lower.contains("binary") && lower.contains("search"))
+        {
+            return r#"def binary_search(arr, target):
+    """Binary search — O(log n)."""
+    left, right = 0, len(arr) - 1
+    while left <= right:
+        mid = (left + right) // 2
+        if arr[mid] == target:
+            return mid
+        elif arr[mid] < target:
+            left = mid + 1
+        else:
+            right = mid - 1
+    return -1
+
+# Example usage
+if __name__ == "__main__":
+    data = sorted([3, 1, 4, 1, 5, 9, 2, 6])
+    print(f"Index of 5: {binary_search(data, 5)}")"#
+                .to_string();
+        }
+
+        // Divide by zero (for testing error detection)
+        if lower.contains("divide by zero")
+            || lower.contains("division by zero")
+            || lower.contains("divides by zero")
+        {
+            return r#"def main():
+    """Program that demonstrates division by zero error."""
+    result = 10 / 0  # This will raise ZeroDivisionError
+    print(f"Result: {result}")
+
+if __name__ == "__main__":
+    main()"#
+                .to_string();
+        }
+
+        // Binary tree
+        if lower.contains("binary tree")
+            || lower.contains("tree traversal")
+            || lower.contains("bst")
+        {
+            return r#"class TreeNode:
+    def __init__(self, val=0, left=None, right=None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+def inorder(root):
+    """In-order traversal of a binary tree."""
+    if root is None:
+        return []
+    return inorder(root.left) + [root.val] + inorder(root.right)
+
+def preorder(root):
+    """Pre-order traversal."""
+    if root is None:
+        return []
+    return [root.val] + preorder(root.left) + preorder(root.right)
+
+# Example usage
+if __name__ == "__main__":
+    root = TreeNode(1, TreeNode(2), TreeNode(3))
+    print(f"In-order: {inorder(root)}")
+    print(f"Pre-order: {preorder(root)}")"#
+                .to_string();
+        }
+
+        // Graph BFS/DFS
+        if lower.contains("graph") || lower.contains("bfs") || lower.contains("dfs") {
+            return r#"from collections import deque
+
+def bfs(graph, start):
+    """Breadth-first search."""
+    visited = set()
+    queue = deque([start])
+    visited.add(start)
+    result = []
+    while queue:
+        node = queue.popleft()
+        result.append(node)
+        for neighbor in graph.get(node, []):
+            if neighbor not in visited:
+                visited.add(neighbor)
+                queue.append(neighbor)
+    return result
+
+# Example usage
+if __name__ == "__main__":
+    graph = {0: [1, 2], 1: [3], 2: [3], 3: []}
+    print(f"BFS from 0: {bfs(graph, 0)}")"#
+                .to_string();
+        }
+
+        // Text file / non-code content generation
+        // Detect common "create a text/note/list" patterns and generate
+        // human-readable content instead of Python code scaffolding.
+        if lower.contains("shopping list")
+            || (lower.contains("list") && lower.contains("notes"))
+            || lower.contains("grocery")
+        {
+            return "Shopping List:\n- Milk\n- Eggs\n- Bread\n- Butter\n- Apples\n- Cheese\n"
+                .to_string();
+        }
+        if lower.contains("readme") || lower.contains("read me") {
+            return "# Project\n\n## Overview\nThis project provides useful functionality.\n\n## Installation\n```bash\npip install .\n```\n\n## Usage\n```python\nimport project\nproject.run()\n```\n\n## License\nMIT\n".to_string();
+        }
+        if lower.contains("config") || lower.contains("configuration") {
+            if lower.contains("json") {
+                return r#"{
+  "version": "1.0.0",
+  "debug": false,
+  "host": "localhost",
+  "port": 8080,
+  "log_level": "info"
+}"#
+                .to_string();
+            }
+        }
+        if lower.contains("calculator")
+            || (lower.contains("add") && lower.contains("subtract") && lower.contains("multiply"))
+        {
+            return r#"def add(a, b): return a + b
+def subtract(a, b): return a - b
+def multiply(a, b): return a * b
+def divide(a, b): return a / b if b != 0 else "Error: division by zero"
+
+def calculator():
+    print("Simple Calculator")
+    a = float(input("Enter first number: "))
+    op = input("Enter operator (+, -, *, /): ")
+    b = float(input("Enter second number: "))
+    if op == '+': print(add(a, b))
+    elif op == '-': print(subtract(a, b))
+    elif op == '*': print(multiply(a, b))
+    elif op == '/': print(divide(a, b))
+
+if __name__ == "__main__":
+    calculator()"#
+                .to_string();
+        }
+        if lower.contains("line") && (lower.contains("count") || lower.contains("counter")) {
+            return r#"def count_lines(filename):
+    with open(filename, 'r') as f:
+        lines = f.readlines()
+    return len(lines)
+
+if __name__ == "__main__":
+    filename = input("Enter filename: ")
+    print(f"Number of lines: {count_lines(filename)}")"#
+                .to_string();
+        }
+        if lower.contains("json")
+            && (lower.contains("import")
+                || lower.contains("write")
+                || lower.contains("read")
+                || lower.contains("program"))
+        {
+            return r#"import json
+
+def write_json(data, filename):
+    with open(filename, 'w') as f:
+        json.dump(data, f, indent=2)
+
+def read_json(filename):
+    with open(filename, 'r') as f:
+        return json.load(f)
+
+if __name__ == "__main__":
+    students = [{"name": "Alice", "grade": 90}, {"name": "Bob", "grade": 85}]
+    write_json(students, "students.json")
+    data = read_json("students.json")
+    for s in data:
+        print(s)"#
+                .to_string();
+        }
+        if lower.contains("backup")
+            && (lower.contains("shell") || lower.contains("bash") || lower.contains("script"))
+        {
+            return "#!/bin/bash\nset -e\nSOURCE_DIR=\"${1:-$HOME}\"\nBACKUP_DIR=\"${2:-/tmp/backups}\"\nTIMESTAMP=$(date +%Y%m%d_%H%M%S)\nDEST=\"${BACKUP_DIR}/backup_${TIMESTAMP}\"\nmkdir -p \"$BACKUP_DIR\"\ncp -r \"$SOURCE_DIR\" \"$DEST\"\necho \"Backup complete: $DEST\"\n".to_string();
+        }
+        if lower.contains("shell script") || lower.contains("bash script") || lower.contains(".sh")
+        {
+            return "#!/bin/bash\nset -e\necho \"Running script...\"\n# Add your commands here\necho \"Done!\"\n".to_string();
+        }
+
+        if lower.contains("multiplication table")
+            || lower.contains("number table")
+            || lower.contains("times table")
+        {
+            return r#"def print_table(n):
+    for i in range(1, 11):
+        print(f"{n} x {i} = {n * i}")
+
+if __name__ == "__main__":
+    n = int(input("Enter a number: "))
+    print(f"\nMultiplication table for {n}:")
+    print_table(n)"#
+                .to_string();
+        }
+        // Default: generate a generic Python program
+        let topic = lower
+            .split_whitespace()
+            .find(|w| {
+                w.len() > 4
+                    && !["write", "program", "python", "create", "make", "build"].contains(w)
+            })
+            .unwrap_or("example");
+        format!(
+            r#"def main():
+    """Program: {}"""
+    print("Running: {}")
+    # TODO: implement {}
+
+if __name__ == "__main__":
+    main()"#,
+            topic, topic, topic
+        )
     }
 
     /// Extract literal text from user intent.

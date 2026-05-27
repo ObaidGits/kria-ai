@@ -10,6 +10,7 @@
 
 import { Component, createSignal, createEffect, onCleanup, Show, For } from "solid-js";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 import type {
   GuiWorkflow,
   GuiExecutionProgress,
@@ -25,9 +26,11 @@ import type {
 const STATUS_COLORS: Record<string, string> = {
   pending: "bg-gray-200 text-gray-700",
   running: "bg-blue-500 text-white animate-pulse",
-  completed: "bg-green-500 text-white",
-  verified: "bg-green-600 text-white",
-  failed: "bg-red-500 text-white",
+  completed: "bg-blue-600 text-white", // generic success fallback
+  verified: "bg-green-600 text-white shadow-[0_0_8px_rgba(22,163,74,0.5)]", // FullSemantic
+  partially_verified: "bg-yellow-500 text-white shadow-[0_0_8px_rgba(234,179,8,0.5)]", // PartialObservable / StructuralOnly
+  unverified: "bg-orange-400 text-white", // Executed but Unobservable
+  failed: "bg-red-500 text-white shadow-[0_0_8px_rgba(239,68,68,0.5)]",
   aborted: "bg-orange-500 text-white",
 };
 
@@ -35,7 +38,9 @@ const STATUS_ICONS: Record<string, string> = {
   pending: "⏳",
   running: "▶",
   completed: "✓",
-  verified: "✓✓",
+  verified: "✨", // high confidence
+  partially_verified: "✓", // lower confidence
+  unverified: "👁‍🗨", // unobservable
   failed: "✗",
   aborted: "⚠",
 };
@@ -56,6 +61,7 @@ export const GuiWorkflowViewer: Component<GuiWorkflowViewerProps> = (props) => {
   const [abortTriggered, setAbortTriggered] = createSignal(false);
   const [completedSteps, setCompletedSteps] = createSignal<Set<number>>(new Set<number>());
   const [failedSteps, setFailedSteps] = createSignal<Set<number>>(new Set<number>());
+  const [stepStates, setStepStates] = createSignal<Map<number, string>>(new Map<number, string>());
   const [retryCount, setRetryCount] = createSignal<Record<number, number>>({});
   
   // Event listeners cleanup
@@ -83,6 +89,7 @@ export const GuiWorkflowViewer: Component<GuiWorkflowViewerProps> = (props) => {
           });
           setCompletedSteps(new Set<number>());
           setFailedSteps(new Set<number>());
+          setStepStates(new Map<number, string>());
           setAbortTriggered(false);
         }
       );
@@ -105,15 +112,19 @@ export const GuiWorkflowViewer: Component<GuiWorkflowViewerProps> = (props) => {
               : null
           );
 
-          if (status === "completed") {
-            setCompletedSteps((prev) => new Set([...prev, step]));
-          } else if (status === "failed") {
+          if (status === "failed") {
             setFailedSteps((prev) => new Set([...prev, step]));
-            // Increment retry count for this step
             setRetryCount((prev) => ({
               ...prev,
               [step]: (prev[step] || 0) + 1,
             }));
+          } else if (status === "completed" || status === "verified" || status === "partially_verified" || status === "unverified") {
+            setCompletedSteps((prev) => new Set([...prev, step]));
+            setStepStates((prev) => {
+              const next = new Map(prev);
+              next.set(step, status);
+              return next;
+            });
           }
         }
       );
@@ -187,7 +198,6 @@ export const GuiWorkflowViewer: Component<GuiWorkflowViewerProps> = (props) => {
     } else {
       // Emit kill switch event via Tauri command
       try {
-        const { invoke } = await import("@tauri-apps/api/core");
         await invoke("trigger_kill_switch", { taskId: workflow()?.task_id });
       } catch (err) {
         console.error("[GuiWorkflowViewer] Failed to trigger kill switch:", err);
@@ -268,18 +278,21 @@ export const GuiWorkflowViewer: Component<GuiWorkflowViewerProps> = (props) => {
                 const isCompleted = () => completedSteps().has(goal.step);
                 const isFailed = () => failedSteps().has(goal.step);
                 const isRunning = () => progress()?.current_step === goal.step && !isCompleted() && !isFailed();
+                const stepState = () => stepStates().get(goal.step);
+                
+                const statusClass = () => {
+                    if (isFailed()) return "failed";
+                    if (isRunning()) return "running";
+                    if (isCompleted()) return stepState() || "completed";
+                    return "pending";
+                };
+
                 const retryNum = () => retryCount()[goal.step] || 0;
                 
                 return (
                   <div
                     class={`sub-goal-item p-3 rounded-lg border transition-all ${
-                      isCompleted()
-                        ? "bg-green-900/30 border-green-700"
-                        : isFailed()
-                        ? "bg-red-900/30 border-red-700"
-                        : isRunning()
-                        ? "bg-blue-900/30 border-blue-700"
-                        : "bg-slate-800 border-slate-700"
+                      STATUS_COLORS[statusClass()] || "bg-slate-800 border-slate-700"
                     }`}
                   >
                     <div class="flex items-start gap-3">
@@ -308,10 +321,13 @@ export const GuiWorkflowViewer: Component<GuiWorkflowViewerProps> = (props) => {
                             <span class="animate-spin">⏳</span>
                           </Show>
                           <Show when={isCompleted()}>
-                            <span class="text-green-400">{STATUS_ICONS.verified}</span>
+                            {statusClass() === 'verified' && <span class="ml-2 text-xs opacity-75">Verified</span>}
+                            {statusClass() === 'partially_verified' && <span class="ml-2 text-xs opacity-75">Partially Verified</span>}
+                            {statusClass() === 'unverified' && <span class="ml-2 text-xs opacity-75">Executed (Unverified)</span>}
+                            <span class="text-white ml-2">{STATUS_ICONS[statusClass()] || STATUS_ICONS.completed}</span>
                           </Show>
                           <Show when={isFailed()}>
-                            <span class="text-red-400">{STATUS_ICONS.failed}</span>
+                            <span class="text-white">{STATUS_ICONS.failed}</span>
                           </Show>
                         </div>
                         

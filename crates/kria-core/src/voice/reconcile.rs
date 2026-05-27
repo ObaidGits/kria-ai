@@ -211,9 +211,9 @@ mod tests {
         // The char delta check only applies to ReplaceBounded path
         assert_eq!(o.kind, ReconcileKind::PrefixExtend);
     }
-    
+
     // ─── §7 Edge Case Coverage ────────────────────────────────────────────
-    
+
     #[test]
     fn unicode_nfkc_normalization_applied() {
         // NFKC should normalize composed/decomposed forms
@@ -222,7 +222,7 @@ mod tests {
         let o = reconcile_ts_whisper(ts, w);
         assert_eq!(o.kind, ReconcileKind::Identical);
     }
-    
+
     #[test]
     fn whitespace_collapse_multiple_spaces() {
         let ts = "hello    world";
@@ -231,7 +231,7 @@ mod tests {
         assert_eq!(o.kind, ReconcileKind::Identical);
         assert_eq!(o.user_visible, "hello world");
     }
-    
+
     #[test]
     fn whitespace_collapse_tabs_and_newlines() {
         let ts = "hello\t\nworld";
@@ -239,7 +239,7 @@ mod tests {
         let o = reconcile_ts_whisper(ts, w);
         assert_eq!(o.kind, ReconcileKind::Identical);
     }
-    
+
     #[test]
     fn whitespace_trim_leading_trailing() {
         let ts = "  hello world  ";
@@ -247,16 +247,22 @@ mod tests {
         let o = reconcile_ts_whisper(ts, w);
         assert_eq!(o.kind, ReconcileKind::Identical);
     }
-    
+
     #[test]
     fn token_truncation_at_64_words() {
-        let ts: String = (0..70).map(|i| format!("word{}", i)).collect::<Vec<_>>().join(" ");
-        let w: String = (0..70).map(|i| format!("word{}", i)).collect::<Vec<_>>().join(" ");
+        let ts: String = (0..70)
+            .map(|i| format!("word{}", i))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let w: String = (0..70)
+            .map(|i| format!("word{}", i))
+            .collect::<Vec<_>>()
+            .join(" ");
         let o = reconcile_ts_whisper(&ts, &w);
         // Should be identical despite >64 tokens (truncation happens in tokenise_bounded)
         assert_eq!(o.kind, ReconcileKind::Identical);
     }
-    
+
     #[test]
     fn token_truncation_affects_distance_calculation() {
         // First 64 words identical, then diverge
@@ -276,21 +282,21 @@ mod tests {
         // So should be ReplaceBounded (tokens identical after truncation, small char delta)
         assert_eq!(o.kind, ReconcileKind::ReplaceBounded);
     }
-    
+
     #[test]
     fn levenshtein_boundary_empty_strings() {
         let o = reconcile_ts_whisper("", "");
         assert_eq!(o.kind, ReconcileKind::Identical);
         assert_eq!(o.user_visible, "");
     }
-    
+
     #[test]
     fn levenshtein_boundary_one_empty() {
         let o = reconcile_ts_whisper("hello", "");
         assert_eq!(o.kind, ReconcileKind::Reject);
         assert_eq!(o.user_visible, "hello");
     }
-    
+
     #[test]
     fn levenshtein_boundary_other_empty() {
         let o = reconcile_ts_whisper("", "hello");
@@ -302,7 +308,7 @@ mod tests {
         assert!(o.user_visible.ends_with('…'));
         assert!(o.user_visible.starts_with('h'));
     }
-    
+
     #[test]
     fn atomic_swap_cap_enforced_on_prefix_extend() {
         // §7.1: max visible character change = min(40, ceil(0.15 × max(len(Ts),len(W))))
@@ -316,7 +322,7 @@ mod tests {
         assert!(o.user_visible.ends_with('…'));
         assert!(o.user_visible.chars().count() <= 20); // 19 + ellipsis
     }
-    
+
     #[test]
     fn atomic_swap_cap_minimum_1_char() {
         let ts = "a";
@@ -326,7 +332,7 @@ mod tests {
         // Should allow at least 1 char extension
         assert_eq!(o.user_visible, "ab");
     }
-    
+
     #[test]
     fn replace_bounded_exactly_25_percent_distance() {
         // 4 tokens, 1 different = 25% distance (boundary case)
@@ -335,7 +341,7 @@ mod tests {
         let o = reconcile_ts_whisper(ts, w);
         assert_eq!(o.kind, ReconcileKind::ReplaceBounded);
     }
-    
+
     #[test]
     fn replace_bounded_just_over_25_percent_rejects() {
         // 4 tokens, 2 different = 50% distance (should reject)
@@ -344,7 +350,7 @@ mod tests {
         let o = reconcile_ts_whisper(ts, w);
         assert_eq!(o.kind, ReconcileKind::Reject);
     }
-    
+
     #[test]
     fn replace_bounded_char_delta_exactly_40() {
         let ts = "a".repeat(20);
@@ -353,7 +359,7 @@ mod tests {
         // Single token each, distance = 1, r = 1.0 > 0.25, should reject
         assert_eq!(o.kind, ReconcileKind::Reject);
     }
-    
+
     #[test]
     fn replace_bounded_char_delta_41_rejects() {
         let ts = "a".repeat(20);
@@ -362,7 +368,7 @@ mod tests {
         // Char delta > 40, should reject
         assert_eq!(o.kind, ReconcileKind::Reject);
     }
-    
+
     #[test]
     fn very_long_string_handling() {
         let ts = "word ".repeat(200); // 1000 chars
@@ -371,7 +377,7 @@ mod tests {
         // Should handle without panic, identical after normalization
         assert_eq!(o.kind, ReconcileKind::Identical);
     }
-    
+
     #[test]
     fn very_long_string_with_small_diff() {
         let ts = "word ".repeat(200);
@@ -385,22 +391,22 @@ mod tests {
         // r = 0 / 64 = 0 ≤ 0.25, char_delta ≤ 40, so ReplaceBounded
         assert_eq!(o.kind, ReconcileKind::ReplaceBounded);
     }
-    
+
     #[test]
     fn prefix_extend_suffix_budget_120_chars() {
         // To test the 120-char suffix budget without hitting atomic swap cap,
         // we need a large ts so atomic_swap_cap is large enough
         let ts = "a".repeat(300); // 300 chars
-        // atomic_swap_cap(300, 420) = min(40, ceil(0.15 * 420)) = min(40, 63) = 40
-        // suffix_budget = min(120, 40) = 40
-        // So we can add up to 40 chars
+                                  // atomic_swap_cap(300, 420) = min(40, ceil(0.15 * 420)) = min(40, 63) = 40
+                                  // suffix_budget = min(120, 40) = 40
+                                  // So we can add up to 40 chars
         let w = format!("{}{}", ts, "b".repeat(39)); // +39 chars
         let o = reconcile_ts_whisper(&ts, &w);
         assert_eq!(o.kind, ReconcileKind::PrefixExtend);
         // Should not truncate because within both budgets
         assert!(!o.user_visible.ends_with('…'));
     }
-    
+
     #[test]
     fn prefix_extend_suffix_budget_121_chars_truncates() {
         let ts = "hello";
@@ -410,59 +416,65 @@ mod tests {
         // Should truncate because exceeds 120 char budget
         assert!(o.user_visible.ends_with('…'));
     }
-    
+
     #[test]
     fn normalise_preserves_non_ascii() {
         let s = "hello мир 世界";
         let norm = normalise(s);
         assert_eq!(norm, "hello мир 世界");
     }
-    
+
     #[test]
     fn normalise_empty_string() {
         assert_eq!(normalise(""), "");
     }
-    
+
     #[test]
     fn normalise_only_whitespace() {
         assert_eq!(normalise("   \t\n  "), "");
     }
-    
+
     #[test]
     fn tokenise_bounded_empty_string() {
         let toks = tokenise_bounded("");
         assert_eq!(toks.len(), 0);
     }
-    
+
     #[test]
     fn tokenise_bounded_exactly_64_words() {
-        let s: String = (0..64).map(|i| format!("w{}", i)).collect::<Vec<_>>().join(" ");
+        let s: String = (0..64)
+            .map(|i| format!("w{}", i))
+            .collect::<Vec<_>>()
+            .join(" ");
         let toks = tokenise_bounded(&s);
         assert_eq!(toks.len(), 64);
         assert_ne!(toks[63], "#TRUNC");
     }
-    
+
     #[test]
     fn tokenise_bounded_65_words_adds_trunc_marker() {
-        let s: String = (0..65).map(|i| format!("w{}", i)).collect::<Vec<_>>().join(" ");
+        let s: String = (0..65)
+            .map(|i| format!("w{}", i))
+            .collect::<Vec<_>>()
+            .join(" ");
         let toks = tokenise_bounded(&s);
         assert_eq!(toks.len(), 65);
         assert_eq!(toks[64], "#TRUNC");
     }
-    
+
     #[test]
     fn word_levenshtein_empty_arrays() {
         let d = word_levenshtein(&[], &[]);
         assert_eq!(d, 0);
     }
-    
+
     #[test]
     fn word_levenshtein_one_empty() {
         let a = vec!["hello".to_string()];
         let d = word_levenshtein(&a, &[]);
         assert_eq!(d, 1);
     }
-    
+
     #[test]
     fn word_levenshtein_identical() {
         let a = vec!["hello".to_string(), "world".to_string()];
@@ -470,7 +482,7 @@ mod tests {
         let d = word_levenshtein(&a, &b);
         assert_eq!(d, 0);
     }
-    
+
     #[test]
     fn word_levenshtein_one_substitution() {
         let a = vec!["hello".to_string(), "world".to_string()];
@@ -478,7 +490,7 @@ mod tests {
         let d = word_levenshtein(&a, &b);
         assert_eq!(d, 1);
     }
-    
+
     #[test]
     fn word_levenshtein_one_insertion() {
         let a = vec!["hello".to_string()];
@@ -486,7 +498,7 @@ mod tests {
         let d = word_levenshtein(&a, &b);
         assert_eq!(d, 1);
     }
-    
+
     #[test]
     fn word_levenshtein_one_deletion() {
         let a = vec!["hello".to_string(), "world".to_string()];
@@ -494,21 +506,21 @@ mod tests {
         let d = word_levenshtein(&a, &b);
         assert_eq!(d, 1);
     }
-    
+
     #[test]
     fn atomic_swap_cap_calculation_small_strings() {
         let cap = atomic_swap_cap(10, 15);
         // max = 15, cap = ceil(0.15 * 15) = 3, min(3, 40) = 3, max(3, 1) = 3
         assert_eq!(cap, 3);
     }
-    
+
     #[test]
     fn atomic_swap_cap_calculation_large_strings() {
         let cap = atomic_swap_cap(300, 350);
         // max = 350, cap = ceil(0.15 * 350) = 53, min(53, 40) = 40
         assert_eq!(cap, 40);
     }
-    
+
     #[test]
     fn atomic_swap_cap_calculation_zero_length() {
         let cap = atomic_swap_cap(0, 0);

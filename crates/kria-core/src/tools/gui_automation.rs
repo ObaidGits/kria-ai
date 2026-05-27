@@ -247,6 +247,14 @@ impl YdotoolBackend {
             .map_err(|_| GuiError::IpcError("Flush timeout".to_string()))?
             .map_err(|e| GuiError::IpcError(format!("Failed to flush: {}", e)))?;
 
+        // FIX #32: Shut down the write half before reading the response.
+        // Without this, daemons that use read_to_end() will block waiting for EOF
+        // because the write half is still open. Shutting down signals EOF to the daemon.
+        tokio::time::timeout(connect_timeout, writer.shutdown())
+            .await
+            .map_err(|_| GuiError::IpcError("Shutdown timeout".to_string()))?
+            .map_err(|e| GuiError::IpcError(format!("Failed to shutdown write half: {}", e)))?;
+
         // Read response line - uses DYNAMIC timeout for slow Type operations
         let mut buf_reader = tokio::io::BufReader::new(reader);
         let mut response_line = String::new();
@@ -415,25 +423,222 @@ impl GuiBackend for YdotoolBackend {
     async fn get_active_window(&self) -> Result<WindowInfo, GuiError> {
         let request = IpcRequest::GetActiveWindow;
 
-        match self.send_ipc_request(&request).await? {
-            IpcResponse::Ok { data } => {
+        match self.send_ipc_request(&request).await {
+            Ok(IpcResponse::Ok { data }) => {
                 if let Some(data) = data {
                     // Parse WindowInfo from response
                     let title = data["title"].as_str().unwrap_or("Unknown").to_string();
                     let class = data["class"].as_str().unwrap_or("Unknown").to_string();
                     let pid = data["pid"].as_u64().unwrap_or(0) as u32;
-
-                    Ok(WindowInfo { title, class, pid })
-                } else {
-                    Err(GuiError::IpcError("No window data in response".to_string()))
+                    return Ok(WindowInfo { title, class, pid });
                 }
+                Err(GuiError::IpcError("No window data in response".to_string()))
             }
-            IpcResponse::Error { message, code } => Err(GuiError::IpcError(format!(
+            Ok(IpcResponse::Error { message, code }) => Err(GuiError::IpcError(format!(
                 "{}: {}",
                 code.unwrap_or_else(|| "WINDOW_ERROR".to_string()),
                 message
             ))),
+            Err(e) => {
+                // IPC failed (WINDOW_ID_FAILED on Wayland, daemon not running, etc.)
+                // Try Wayland-native fallback: AT-SPI via /proc + xdg-activation heuristic.
+                // This gives us the focused app's process name even without a window server.
+                tracing::debug!(
+                    target: "gui_automation",
+                    ipc_error = %e,
+                    "IPC get_active_window failed — trying Wayland-native fallback"
+                );
+                Self::get_active_window_wayland_fallback()
+                    .await
+                    .map_err(|fallback_err| {
+                        // Both paths failed — return the original IPC error with fallback note
+                        GuiError::IpcError(format!(
+                            "{} (Wayland fallback also failed: {})",
+                            e, fallback_err
+                        ))
+                    })
+            }
         }
+    }
+}
+
+/// Wayland-native fallback methods for `YdotoolBackend`.
+/// These are not part of the `GuiBackend` trait — they are internal helpers
+/// used when the uinput daemon IPC fails on Wayland.
+impl YdotoolBackend {
+    /// Wayland-native fallback for active window detection.
+    ///
+    /// When the uinput daemon IPC fails (WINDOW_ID_FAILED on Wayland), this
+    /// method tries to determine the focused application using:
+    /// 1. AT-SPI D-Bus: query the accessibility bus for the focused application
+    /// 2. /proc heuristic: find the most recently started GUI process
+    ///
+    /// This is best-effort — it may return stale or approximate data.
+    /// The result is used for the safety guard (runaway prevention), not for
+    /// user-visible output, so approximate data is acceptable.
+    async fn get_active_window_wayland_fallback() -> Result<WindowInfo, String> {
+        // Strategy 1: AT-SPI via D-Bus
+        // The AT-SPI bus address is available via org.a11y.Bus on the session bus.
+        if let Ok(info) = Self::get_window_via_atspi().await {
+            return Ok(info);
+        }
+
+        // Strategy 2: /proc heuristic — find the most recently started GUI process
+        // by scanning /proc for processes with a DISPLAY or WAYLAND_DISPLAY env var.
+        // This is a last resort and may be inaccurate.
+        if let Some(info) = Self::get_window_via_proc_heuristic() {
+            return Ok(info);
+        }
+
+        Err("All Wayland fallback strategies exhausted".to_string())
+    }
+
+    /// Try to get the focused application via AT-SPI D-Bus.
+    async fn get_window_via_atspi() -> Result<WindowInfo, String> {
+        // Get the AT-SPI bus address from the session bus
+        let session_bus = zbus::Connection::session()
+            .await
+            .map_err(|e| format!("Cannot connect to session bus: {}", e))?;
+
+        let atspi_address: String = session_bus
+            .call_method(
+                Some("org.a11y.Bus"),
+                "/org/a11y/bus",
+                Some("org.a11y.Bus"),
+                "GetAddress",
+                &(),
+            )
+            .await
+            .map_err(|e| format!("Cannot get AT-SPI bus address: {}", e))?
+            .body()
+            .deserialize()
+            .map_err(|e| format!("Cannot deserialize AT-SPI address: {}", e))?;
+
+        // Connect to the AT-SPI bus
+        let atspi_bus = zbus::ConnectionBuilder::address(atspi_address.as_str())
+            .map_err(|e| format!("Invalid AT-SPI address: {}", e))?
+            .build()
+            .await
+            .map_err(|e| format!("Cannot connect to AT-SPI bus: {}", e))?;
+
+        // Query the focused application from the AT-SPI registry
+        // The focused object is available via org.a11y.atspi.Registry.GetFocusedObject
+        // (not always available) or by iterating applications.
+        // We use a simpler approach: query the desktop's children for the focused app.
+        let focused_app: (String, zbus::zvariant::OwnedObjectPath) = atspi_bus
+            .call_method(
+                Some("org.a11y.atspi.Registry"),
+                "/org/a11y/atspi/registry",
+                Some("org.a11y.atspi.Registry"),
+                "GetFocusedObject",
+                &(),
+            )
+            .await
+            .map_err(|e| format!("GetFocusedObject failed: {}", e))?
+            .body()
+            .deserialize()
+            .map_err(|e| format!("Cannot deserialize focused object: {}", e))?;
+
+        let (app_bus, app_path) = focused_app;
+
+        // Get the application name from the focused object's parent application
+        let app_name: String = atspi_bus
+            .call_method(
+                Some(app_bus.as_str()),
+                app_path.as_str(),
+                Some("org.a11y.atspi.Accessible"),
+                "GetApplication",
+                &(),
+            )
+            .await
+            .ok()
+            .and_then(|msg| msg.body().deserialize::<String>().ok())
+            .unwrap_or_else(|| app_bus.clone());
+
+        tracing::debug!(
+            target: "gui_automation",
+            app_name = %app_name,
+            "AT-SPI: got focused application"
+        );
+
+        Ok(WindowInfo {
+            title: app_name.clone(),
+            class: app_name,
+            pid: 0, // AT-SPI doesn't easily give us PID without more queries
+        })
+    }
+
+    /// Last-resort heuristic: scan /proc for the most recently started GUI process.
+    fn get_window_via_proc_heuristic() -> Option<WindowInfo> {
+        // Find processes that have WAYLAND_DISPLAY or DISPLAY in their environment,
+        // are not system processes, and were started most recently.
+        // This is approximate but better than nothing for the safety guard.
+        let mut candidates: Vec<(u64, String)> = Vec::new(); // (start_time, name)
+
+        if let Ok(entries) = std::fs::read_dir("/proc") {
+            for entry in entries.flatten() {
+                let pid_dir = entry.path();
+                if !pid_dir.is_dir() {
+                    continue;
+                }
+                let Some(name) = pid_dir.file_name().and_then(|n| n.to_str()) else {
+                    continue;
+                };
+                if name.parse::<u32>().is_err() {
+                    continue;
+                }
+
+                // Check if this process has a GUI environment
+                let environ_path = pid_dir.join("environ");
+                let Ok(environ) = std::fs::read(&environ_path) else {
+                    continue;
+                };
+                let has_display = environ.windows(8).any(|w| w == b"DISPLAY=")
+                    || environ.windows(17).any(|w| w == b"WAYLAND_DISPLAY=");
+                if !has_display {
+                    continue;
+                }
+
+                // Get process name and start time
+                let comm_path = pid_dir.join("comm");
+                let Ok(comm) = std::fs::read_to_string(&comm_path) else {
+                    continue;
+                };
+                let comm = comm.trim().to_string();
+
+                // Skip kernel threads and common system processes
+                if comm.starts_with('[')
+                    || matches!(
+                        comm.as_str(),
+                        "systemd" | "dbus-daemon" | "pulseaudio" | "pipewire" | "Xwayland"
+                    )
+                {
+                    continue;
+                }
+
+                // Use inode of /proc/<pid> as a proxy for start time
+                if let Ok(meta) = std::fs::metadata(&pid_dir) {
+                    use std::os::unix::fs::MetadataExt;
+                    candidates.push((meta.ino(), comm));
+                }
+            }
+        }
+
+        // Sort by inode descending (higher inode = more recently created)
+        candidates.sort_by(|a, b| b.0.cmp(&a.0));
+
+        candidates.first().map(|(_, name)| {
+            tracing::debug!(
+                target: "gui_automation",
+                process = %name,
+                "Wayland fallback: using most recent GUI process as active window heuristic"
+            );
+            WindowInfo {
+                title: name.clone(),
+                class: name.clone(),
+                pid: 0,
+            }
+        })
     }
 }
 
@@ -673,7 +878,7 @@ impl KillSwitchInterceptor {
         } else if *count >= self.max_rate {
             // Rate exceeded - wait for next window
             let wait = Duration::from_secs(1) - now.duration_since(*window_start);
-            tracing::warn!(target: "rate_limit", "Rate limit exceeded, waiting {}ms for next window", 
+            tracing::debug!(target: "rate_limit", "Rate limit exceeded, waiting {}ms for next window",
                 wait.as_millis());
             drop(count);
             drop(window_start);
@@ -742,14 +947,31 @@ impl Drop for KillSwitchInterceptor {
         {
             return;
         }
-        // Best-effort teardown on drop
-        // Note: async drop not available in stable Rust, so we spawn
+        // FIX #4: Guard against spawning into a dead/shutdown runtime.
+        // tokio::spawn panics if called outside a Tokio runtime context
+        // (e.g., during test teardown or after runtime shutdown).
+        // Use Handle::try_current() to check before spawning.
         let backend = Arc::clone(&self.backend);
-        tokio::spawn(async move {
-            if let Err(e) = backend.release_all_modifiers().await {
-                tracing::error!(target: "kill_switch", "Drop teardown failed: {}", e);
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                // Runtime is alive — spawn the cleanup task.
+                handle.spawn(async move {
+                    if let Err(e) = backend.release_all_modifiers().await {
+                        tracing::error!(target: "kill_switch", "Drop teardown failed: {}", e);
+                    }
+                });
             }
-        });
+            Err(_) => {
+                // No runtime available (shutdown, test teardown, non-Tokio thread).
+                // Log and skip — modifier keys may remain stuck but we cannot
+                // safely spawn async work here.
+                tracing::warn!(
+                    target: "kill_switch",
+                    "Drop teardown skipped: no Tokio runtime available. \
+                     Modifier keys may be stuck if a workflow was interrupted."
+                );
+            }
+        }
     }
 }
 
@@ -1173,6 +1395,9 @@ struct SystemSleep;
 impl ToolHandler for SystemSleep {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
         let duration_ms = params["duration_ms"].as_u64().unwrap_or(1000);
+        // AUDIT FIX #31: Cap sleep at 30 seconds to prevent LLM-generated
+        // workflows from sleeping indefinitely (e.g., {"duration_ms": 86400000}).
+        let duration_ms = duration_ms.min(30_000);
         tokio::time::sleep(Duration::from_millis(duration_ms)).await;
         ToolResult::ok(serde_json::json!({
             "slept": true,
@@ -1227,9 +1452,7 @@ fn parse_key_string(s: &str) -> Result<Key, String> {
 
 pub fn register(reg: &ToolRegistry) {
     // Initialize GUI backend with socket path matching the kria-uinput-daemon
-    let socket_path = std::path::PathBuf::from(
-        std::env::var("KRIA_UINPUT_SOCKET").unwrap_or_else(|_| "/tmp/kria-uinput.sock".to_string()),
-    );
+    let socket_path = crate::agent::gui_services::default_uinput_socket_path();
     let backend: Arc<dyn GuiBackend> = Arc::new(YdotoolBackend::new(socket_path));
 
     let state = Arc::new(GuiToolState {

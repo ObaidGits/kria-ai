@@ -138,14 +138,39 @@ pub enum VerificationCheckpoint {
         class: Option<String>,
         pid: Option<u32>,
     },
+    /// Verify the process exists. Does not imply UI readiness.
+    ProcessRunning { binary: String },
+    /// Verify a matching window is visible/listed.
+    WindowVisible {
+        title_contains: Option<String>,
+        class: Option<String>,
+        pid: Option<u32>,
+    },
+    /// Verify the target window is active enough for interaction.
+    WindowInteractive {
+        title_contains: Option<String>,
+        class: Option<String>,
+        pid: Option<u32>,
+    },
+    /// Verify KRIA owns the GUI foreground lease for this workflow.
+    ForegroundLeaseAcquired { workflow_id: String },
+    /// Verify the intended window is the current keyboard target.
+    KeyboardTargetConfirmed {
+        title_contains: Option<String>,
+        class: Option<String>,
+        pid: Option<u32>,
+    },
+    /// Verify a semantic target by structural evidence supplied by a substrate.
+    SemanticTargetConfirmed {
+        description: String,
+        evidence_hint: Option<String>,
+    },
     /// Verify text appears in a target (terminal output, file, etc.)
     OutputContains {
         expected: String,
         target: VerifyTarget,
         case_insensitive: bool,
     },
-    /// Verify process is running
-    ProcessRunning { binary: String },
     /// Verify filesystem effect
     FileEffect { path: PathBuf, effect: FsEffect },
     /// No checkpoint — proceed unconditionally.
@@ -460,6 +485,45 @@ impl VerificationCheckpoint {
             } => Verifiability::WindowState {
                 title_contains: title_contains.clone(),
                 class: class.clone(),
+            },
+            VerificationCheckpoint::WindowVisible {
+                title_contains,
+                class,
+                pid,
+            } => Verifiability::WindowVisible {
+                title_contains: title_contains.clone(),
+                class: class.clone(),
+                pid: *pid,
+            },
+            VerificationCheckpoint::WindowInteractive {
+                title_contains,
+                class,
+                pid,
+            } => Verifiability::WindowInteractive {
+                title_contains: title_contains.clone(),
+                class: class.clone(),
+                pid: *pid,
+            },
+            VerificationCheckpoint::ForegroundLeaseAcquired { workflow_id } => {
+                Verifiability::ForegroundLeaseAcquired {
+                    workflow_id: workflow_id.clone(),
+                }
+            }
+            VerificationCheckpoint::KeyboardTargetConfirmed {
+                title_contains,
+                class,
+                pid,
+            } => Verifiability::KeyboardTargetConfirmed {
+                title_contains: title_contains.clone(),
+                class: class.clone(),
+                pid: *pid,
+            },
+            VerificationCheckpoint::SemanticTargetConfirmed {
+                description,
+                evidence_hint,
+            } => Verifiability::SemanticTargetConfirmed {
+                description: description.clone(),
+                evidence_hint: evidence_hint.clone(),
             },
             VerificationCheckpoint::OutputContains {
                 expected, target, ..

@@ -4,6 +4,8 @@
 //! The executor processes rigid, pre-approved JSON sub-goals with strict
 //! immutability, verification, and bounded micro-retries.
 
+use crate::agent::workflow_continuation::{InterruptionContext, WorkflowContinuationRuntime};
+use crate::agent::workflow_session::WorkflowSession;
 use crate::infra::ToolResult;
 use crate::tools::gui_automation::KillSwitchInterceptor;
 use crate::tools::vision_automation::WindowContext;
@@ -597,26 +599,34 @@ impl PrerequisiteChecker {
     }
 
     /// Find element in OmniParser cache.
-    #[allow(dead_code)] // Scaffolding - full implementation needs cache iteration
+    ///
+    /// SAFETY: Returns `Ok(false)` (fail-safe) until the OmniParser cache
+    /// integration is fully implemented. Returning `Ok(true)` here would
+    /// allow workflows to proceed past sense prerequisites without any real
+    /// verification — a critical false-success path.
+    ///
+    /// TODO (Phase E+1): Implement real cache iteration:
+    ///   1. Get all elements from OMNI_CACHE
+    ///   2. Filter by element_type
+    ///   3. If label_contains provided, filter by label match
+    ///   4. Filter by confidence >= min_confidence
+    ///   5. Return true if any element matches
     async fn find_element_in_cache(
         &self,
-        _element_type: &str,
-        _label_contains: Option<&str>,
+        element_type: &str,
+        label_contains: Option<&str>,
         _min_confidence: f32,
     ) -> Result<bool, String> {
-        // Check all cached states for matching element
-        // Note: This is a simplified version - in production would need cache iteration
-        // For now, return true to allow workflow progression (scaffolding)
-
-        // In full implementation:
-        // 1. Get all elements from cache
-        // 2. Filter by element_type
-        // 3. If label_contains provided, filter by label match
-        // 4. Filter by confidence >= min_confidence
-        // 5. Return true if any element matches
-
-        // Scaffolding: return true to allow testing
-        Ok(true)
+        tracing::debug!(
+            target: "prerequisite",
+            element_type = %element_type,
+            label_contains = ?label_contains,
+            "find_element_in_cache: OmniParser integration pending — returning false (fail-safe)"
+        );
+        // Fail-safe: return false until real implementation is available.
+        // This causes sense prerequisites to fail, which triggers recovery
+        // subtrees rather than silently proceeding with unverified state.
+        Ok(false)
     }
 
     /// Check focus prerequisite against window context.
@@ -878,10 +888,14 @@ pub struct SelfCorrection;
 impl SelfCorrection {
     /// Attempt self-correction for failed prerequisite.
     /// Per RFC 008 Section 2.3: "Self-correction triggered on verification failure"
+    ///
+    /// `target_app`: the app the workflow was targeting (used in recovery subtrees
+    /// to avoid hardcoding "gedit" for all editor workflows).
     pub fn attempt_recovery(
         prereq_id: &str,
         failure_reason: &str,
         spiral_check: SpiralCheckResult,
+        target_app: Option<&str>,
     ) -> PraResult {
         // Check for spiral (same failure repeated)
         if spiral_check == SpiralCheckResult::SpiralDetected {
@@ -890,6 +904,9 @@ impl SelfCorrection {
                 reason: format!("Recursive spiral detected for {}", prereq_id),
             };
         }
+
+        // Use the actual target app, falling back to "gedit" only as a last resort
+        let app = target_app.unwrap_or("gedit");
 
         // Map common failures to recovery actions
         match prereq_id {
@@ -910,17 +927,17 @@ impl SelfCorrection {
                 }
             }
             "application_running" | "gedit_open" => {
-                // Inject application launch recovery
+                // Inject application launch recovery using the actual target app
                 PraResult::InjectRecovery {
                     prereq_id: prereq_id.to_string(),
                     subtree: vec![
                         SubGoal {
                             step: 1,
                             action: "open_application".to_string(),
-                            params: serde_json::json!({"app": "gedit"}),
-                            verify: VerificationType::WindowState {
-                                title_contains: Some("gedit".to_string()),
-                                class: Some("gedit".to_string()),
+                            params: serde_json::json!({"name": app}),
+                            verify: VerificationType::ProcessLaunched {
+                                binary: app.to_string(),
+                                max_wait_ms: 6000,
                             },
                             timeout_ms: Some(10000),
                         },
@@ -938,7 +955,7 @@ impl SelfCorrection {
                 // Unknown failure: escalate to HITL
                 PraResult::HITLEscalation {
                     reason: format!(
-                        "No recovery strategy for: {} - {}",
+                        "Unknown prerequisite failure '{}': {}",
                         prereq_id, failure_reason
                     ),
                 }
@@ -1034,6 +1051,79 @@ pub enum VerificationType {
         #[serde(default)]
         min_chars_typed: usize,
     },
+    /// Verify a filesystem effect — file existence and a content substring match.
+    ///
+    /// Substrate-aware verification (works on X11 AND Wayland) for tasks where
+    /// success means "a file with expected content was created".
+    FileSystemEffect {
+        /// Absolute path of the file to verify.
+        path: std::path::PathBuf,
+        /// Substring that must be present in the file content. Empty = existence-only.
+        #[serde(default)]
+        expected_substring: String,
+    },
+    /// Verify that a process with the given binary name is running.
+    ///
+    /// Polls /proc (Linux) for up to `max_wait_ms` milliseconds.
+    /// Works on both X11 and Wayland — no display server dependency.
+    ProcessLaunched {
+        /// Binary name as it appears in /proc/<pid>/comm (e.g., "gedit", "code").
+        binary: String,
+        /// Maximum time to wait for the process to appear (milliseconds).
+        #[serde(default = "default_process_wait_ms")]
+        max_wait_ms: u32,
+    },
+    /// Verify that a file contains expected output from program execution.
+    ///
+    /// Used by the TerminalExecution substrate to verify that a program
+    /// ran successfully and produced the expected output.
+    DeterministicOutput {
+        /// Substring that must appear in the output file.
+        expected_substring: String,
+        /// Path to the output file to read.
+        output_file: std::path::PathBuf,
+    },
+    /// Verify that an accessible UI element exists with the given role and name.
+    ///
+    /// Uses AT-SPI accessibility tree — works on X11 and Wayland.
+    /// Provides semantic verification that a UI element is actually present,
+    /// not just that a tool was called.
+    AccessibilityElement {
+        /// AT-SPI role to search for (e.g., "push button", "dialog", "text")
+        role: String,
+        /// Name the element must contain (partial match)
+        name_contains: Option<String>,
+        /// Whether the element must be visible (default: true)
+        #[serde(default = "default_true")]
+        must_be_visible: bool,
+    },
+    /// Verify an interaction outcome
+    InteractionOutcome {
+        expected_role: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        expected_name_contains: Option<String>,
+        action_type: String,
+    },
+    /// Verify that a browser page has loaded using CDP.
+    BrowserPageLoaded {
+        /// Expected URL substring
+        #[serde(skip_serializing_if = "Option::is_none")]
+        url_contains: Option<String>,
+        /// Expected title substring
+        #[serde(skip_serializing_if = "Option::is_none")]
+        title_contains: Option<String>,
+    },
+    /// Verify that specific text is visible on screen via OCR.
+    ///
+    /// Uses tesseract OCR on a screenshot — works on X11 and Wayland
+    /// (via xdg-desktop-portal). Provides visual verification.
+    OcrTextOnScreen {
+        /// Text that must be visible on screen
+        text: String,
+        /// Case insensitive match
+        #[serde(default = "default_true")]
+        case_insensitive: bool,
+    },
     /// No verification required
     None,
 }
@@ -1048,6 +1138,10 @@ fn default_min_count() -> usize {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_process_wait_ms() -> u32 {
+    5000
 }
 
 /// Safe abort step for graceful halt.
@@ -1096,6 +1190,78 @@ fn verification_type_to_verifiability(
         },
         VerificationType::CompletionFlag { .. } => Verifiability::Unverifiable {
             reason: "CompletionFlag is executor-side skip, not a verifier check".into(),
+        },
+        VerificationType::FileSystemEffect {
+            path,
+            expected_substring,
+        } => {
+            use crate::agent::execution_verifier::FsEffect;
+            let kind = if expected_substring.is_empty() {
+                FsEffect::Exists
+            } else {
+                FsEffect::ContainsBytes(expected_substring.as_bytes().to_vec())
+            };
+            Verifiability::FileSystemEffect {
+                path: path.clone(),
+                kind,
+            }
+        }
+        VerificationType::ProcessLaunched {
+            binary,
+            max_wait_ms,
+        } => Verifiability::ProcessLaunched {
+            binary: binary.clone(),
+            max_wait_ms: *max_wait_ms,
+        },
+        VerificationType::DeterministicOutput {
+            expected_substring,
+            output_file,
+        } => {
+            use crate::agent::execution_verifier::VerifyTarget;
+            Verifiability::DeterministicOutput {
+                expected_substring: expected_substring.clone(),
+                in_target: VerifyTarget::FilePath(output_file.clone()),
+            }
+        }
+        VerificationType::AccessibilityElement {
+            role,
+            name_contains,
+            must_be_visible,
+        } => {
+            // Wire to the real AccessibilityElement verifier in BoundedExecutionVerifier.
+            // This performs an actual AT-SPI tree query, not just a D-Bus success check.
+            Verifiability::AccessibilityElement {
+                role: role.clone(),
+                name_contains: name_contains.clone(),
+                must_be_visible: *must_be_visible,
+            }
+        }
+        VerificationType::OcrTextOnScreen {
+            text,
+            case_insensitive,
+        } => {
+            // Wire to live OCR verification — takes a screenshot and runs tesseract.
+            // This is real visual verification, not a cache lookup.
+            Verifiability::OcrTextPresent {
+                text: text.clone(),
+                case_insensitive: *case_insensitive,
+            }
+        }
+        VerificationType::InteractionOutcome {
+            expected_role,
+            expected_name_contains,
+            action_type,
+        } => Verifiability::InteractionOutcome {
+            expected_role: expected_role.clone(),
+            expected_name_contains: expected_name_contains.clone(),
+            action_type: action_type.clone(),
+        },
+        VerificationType::BrowserPageLoaded {
+            url_contains,
+            title_contains,
+        } => Verifiability::BrowserPageLoaded {
+            url_contains: url_contains.clone(),
+            title_contains: title_contains.clone(),
         },
         VerificationType::None => Verifiability::Unverifiable {
             reason: "None".into(),
@@ -1302,10 +1468,14 @@ pub struct GuiExecutor {
     /// RFC 008 Phase 5: Stable anchor checkpoint stack
     #[allow(dead_code)]
     anchor_stack: Vec<StableAnchorCheckpoint>,
+    /// Batch 2: optional WorkflowContinuationRuntime for interruption classification
+    /// and pause checkpoint on verification failure. Advisory-only — never blocks
+    /// execution or changes the authority model.
+    continuation_runtime: Option<Arc<WorkflowContinuationRuntime>>,
 }
 
 /// Execution result for a workflow.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct WorkflowResult {
     pub task_id: String,
     pub success: bool,
@@ -1314,6 +1484,9 @@ pub struct WorkflowResult {
     pub error: Option<String>,
     pub aborted: bool,
     pub duration_ms: u128,
+    /// Artifacts created during execution (e.g., generated files).
+    /// Populated even on partial failure so the user knows what was created.
+    pub created_artifacts: Vec<std::path::PathBuf>,
 }
 
 impl GuiExecutor {
@@ -1324,7 +1497,7 @@ impl GuiExecutor {
     ) -> Self {
         Self {
             verifier: Arc::new(
-                crate::agent::execution_verifier_impl::BoundedExecutionVerifier::new(),
+                crate::agent::execution_verifier_bounded::BoundedExecutionVerifier::new(),
             ),
             retries: BoundedMicroRetries::new(),
             abort_executor,
@@ -1334,6 +1507,7 @@ impl GuiExecutor {
             prereq_checker: None,
             dismissal_handler: GenericUiDismissal::new(),
             anchor_stack: Vec::new(),
+            continuation_runtime: None,
         }
     }
 
@@ -1354,7 +1528,17 @@ impl GuiExecutor {
             prereq_checker: None,
             dismissal_handler: GenericUiDismissal::new(),
             anchor_stack: Vec::new(),
+            continuation_runtime: None,
         }
+    }
+
+    /// Attach a `WorkflowContinuationRuntime` for interruption classification on
+    /// sub-goal verification failure. When set, failed sub-goals are classified as
+    /// interruptions, bounded recovery plans are logged, and pause checkpoints are
+    /// written when `RequestHumanIntervention` or `Escalate` is the recovery action.
+    pub fn with_continuation_runtime(mut self, rt: Arc<WorkflowContinuationRuntime>) -> Self {
+        self.continuation_runtime = Some(rt);
+        self
     }
 
     /// RFC 008 Phase 5: Initialize PRA loop components.
@@ -1395,19 +1579,78 @@ impl GuiExecutor {
     }
 
     /// RFC 008 Phase 5: Verify return to anchor after recovery.
+    ///
+    /// Compares the current active window against the saved anchor state.
+    /// Returns `Verified` only if the window title/class match within tolerance.
+    /// Returns `Failed` if the window context cannot be obtained (daemon not running).
     pub fn verify_return_to_anchor(
         &self,
-        _checkpoint: &StableAnchorCheckpoint,
+        checkpoint: &StableAnchorCheckpoint,
     ) -> AnchorVerification {
-        // Scaffolding: In production, would compare current state with anchor
-        // For now, assume success
+        // Use the kill switch backend to get the current window.
+        // We use spawn_blocking to avoid blocking the async runtime.
+        // block_in_place would deadlock on single-threaded runtimes.
+        let backend = self.kill_switch.get_backend();
+        let anchor = &checkpoint.anchor;
 
-        let deviations = Vec::new();
+        // Try to get current window state via spawn_blocking
+        let current_window: Result<_, String> = std::thread::scope(|_| {
+            // Use a new single-threaded runtime for this synchronous check
+            // to avoid blocking the caller's async runtime.
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build();
+            match rt {
+                Ok(rt) => rt
+                    .block_on(async { backend.get_active_window().await })
+                    .map_err(|e| e.to_string()),
+                Err(e) => Err(format!("Failed to create runtime: {}", e)),
+            }
+        });
 
-        if deviations.is_empty() {
-            AnchorVerification::Verified
-        } else {
-            AnchorVerification::PartialMatch { deviations }
+        match current_window {
+            Ok(w) => {
+                let mut deviations = Vec::new();
+
+                // Check title match (if anchor had a non-empty title)
+                if !anchor.expected_window.title.is_empty()
+                    && !w
+                        .title
+                        .to_lowercase()
+                        .contains(&anchor.expected_window.title.to_lowercase())
+                {
+                    deviations.push(format!(
+                        "window title mismatch: expected contains '{}', got '{}'",
+                        anchor.expected_window.title, w.title
+                    ));
+                }
+
+                // Check class match (if anchor had a non-empty class)
+                if !anchor.expected_window.class.is_empty()
+                    && w.class.to_lowercase() != anchor.expected_window.class.to_lowercase()
+                {
+                    deviations.push(format!(
+                        "window class mismatch: expected '{}', got '{}'",
+                        anchor.expected_window.class, w.class
+                    ));
+                }
+
+                if deviations.is_empty() {
+                    AnchorVerification::Verified
+                } else {
+                    match anchor.tolerance {
+                        AnchorTolerance::Strict => AnchorVerification::Failed {
+                            reason: deviations.join("; "),
+                        },
+                        AnchorTolerance::Permissive | AnchorTolerance::Restored => {
+                            AnchorVerification::PartialMatch { deviations }
+                        }
+                    }
+                }
+            }
+            Err(e) => AnchorVerification::Failed {
+                reason: format!("Cannot verify anchor: window context unavailable: {}", e),
+            },
         }
     }
 
@@ -1546,6 +1789,12 @@ impl GuiExecutor {
         // Track executed steps for immutability validation
         let mut completed_steps = 0;
 
+        // FIX #2: Track artifacts incrementally so partial-success paths
+        // (early returns) still report files that were successfully created.
+        // Previously all early-return paths had created_artifacts: Vec::new(),
+        // losing the artifact even when Step 1 (write_file) succeeded.
+        let mut incremental_artifacts: Vec<std::path::PathBuf> = Vec::new();
+
         // RFC 008: Track target window for physical anchor
         let mut target_window_lock: Option<WindowContext> = None;
         let mut consecutive_window_mismatches = 0;
@@ -1576,6 +1825,7 @@ impl GuiExecutor {
                     error: Some(error),
                     aborted: abort_result.success,
                     duration_ms: start_time.elapsed().as_millis(),
+                    created_artifacts: Vec::new(),
                 };
             }
 
@@ -1602,6 +1852,7 @@ impl GuiExecutor {
                             error: Some(error),
                             aborted: abort_result.success,
                             duration_ms: start_time.elapsed().as_millis(),
+                            created_artifacts: Vec::new(),
                         };
                     }
                     CapCheckResult::Continue => {}
@@ -1627,6 +1878,7 @@ impl GuiExecutor {
                     error: Some(error),
                     aborted: abort_result.success,
                     duration_ms: start_time.elapsed().as_millis(),
+                    created_artifacts: Vec::new(),
                 };
             }
 
@@ -1648,6 +1900,7 @@ impl GuiExecutor {
                     error: Some(error),
                     aborted: abort_result.success,
                     duration_ms: start_time.elapsed().as_millis(),
+                    created_artifacts: Vec::new(),
                 };
             }
 
@@ -1669,6 +1922,7 @@ impl GuiExecutor {
                     error: Some(error),
                     aborted: abort_result.success,
                     duration_ms: start_time.elapsed().as_millis(),
+                    created_artifacts: Vec::new(),
                 };
             }
 
@@ -1680,8 +1934,40 @@ impl GuiExecutor {
                     pid: w.pid,
                 },
                 Err(e) => {
-                    tracing::warn!(target: "gui_executor", task_id = %task_id, error = %e, 
-                        "Failed to get active window for target lock check");
+                    // If the action requires input injection (type/click/shortcut),
+                    // a missing window context is a safety failure — abort immediately.
+                    // For non-input actions (write_file, open_application, etc.),
+                    // we can proceed without window context.
+                    let is_input_action = matches!(
+                        sub_goal.action.as_str(),
+                        "type_text" | "click_mouse" | "click_element" | "press_shortcut"
+                    );
+                    if is_input_action {
+                        let error = format!(
+                            "Cannot perform input action '{}' without window context: {}. \
+                             Ensure the uinput daemon is running.",
+                            sub_goal.action, e
+                        );
+                        tracing::error!(target: "gui_executor", task_id = %task_id, %error);
+                        let abort_result = self
+                            .abort_executor
+                            .execute_abort(&workflow.safe_abort_steps)
+                            .await;
+                        return WorkflowResult {
+                            task_id,
+                            success: false,
+                            completed_steps,
+                            total_steps: workflow.sub_goals.len(),
+                            error: Some(error),
+                            aborted: abort_result.success,
+                            duration_ms: start_time.elapsed().as_millis(),
+                            created_artifacts: Vec::new(),
+                        };
+                    }
+                    // Non-input action: proceed with empty context (no window lock needed)
+                    tracing::debug!(target: "gui_executor", task_id = %task_id, error = %e,
+                        action = %sub_goal.action,
+                        "Window context unavailable for non-input action — proceeding");
                     WindowContext {
                         title: String::new(),
                         class: String::new(),
@@ -1694,10 +1980,14 @@ impl GuiExecutor {
             match &target_window_lock {
                 None => {
                     // First action - establish target lock
-                    if sub_goal.action == "open_application" {
-                        // Wait for app to open before establishing lock
+                    if sub_goal.action == "open_application"
+                        || sub_goal.action == "open_application_with_file"
+                    {
+                        // Defer target lock until after the app launch completes.
+                        // The app window won't be focused until after the launch step.
                         tracing::info!(target: "gui_executor", task_id = %task_id,
-                            "Target lock: Will establish after open_application completes");
+                            action = %sub_goal.action,
+                            "Target lock: Will establish after app launch completes");
                     } else {
                         target_window_lock = Some(current_window.clone());
                         tracing::info!(target: "gui_executor", task_id = %task_id,
@@ -1740,7 +2030,7 @@ impl GuiExecutor {
                         if should_halt {
                             let error = format!(
                                 "TARGET LOCK BROKEN: Agent attempted '{}' in unexpected window '{}' (class: {}, pid: {}, expected pid: {}). HALTING IMMEDIATELY to prevent runaway.",
-                                sub_goal.action, current_window.title, current_window.class, 
+                                sub_goal.action, current_window.title, current_window.class,
                                 current_window.pid, expected.pid
                             );
                             tracing::error!(target: "gui_executor", task_id = %task_id, %error);
@@ -1758,6 +2048,7 @@ impl GuiExecutor {
                                 error: Some(error),
                                 aborted: abort_result.success,
                                 duration_ms: start_time.elapsed().as_millis(),
+                                created_artifacts: Vec::new(),
                             };
                         }
                     } else {
@@ -1807,11 +2098,40 @@ impl GuiExecutor {
                 self.kill_switch.mark_modifier_pressed();
             }
 
-            // Execute the action
-            let action_result = self
-                .tool_registry
-                .execute(&sub_goal.action, &sub_goal.params)
-                .await;
+            // Execute the action with per-step timeout enforcement.
+            // sub_goal.timeout_ms was previously defined but never enforced —
+            // a hanging step would block until the global 300s workflow timeout.
+            let step_timeout_ms = sub_goal.timeout_ms.unwrap_or(10_000);
+            let action_result = match tokio::time::timeout(
+                Duration::from_millis(step_timeout_ms),
+                self.tool_registry
+                    .execute(&sub_goal.action, &sub_goal.params),
+            )
+            .await
+            {
+                Ok(result) => result,
+                Err(_) => {
+                    let error = format!(
+                        "Step {} timed out after {}ms (action: '{}')",
+                        sub_goal.step, step_timeout_ms, sub_goal.action
+                    );
+                    tracing::error!(target: "gui_executor", task_id = %task_id, %error);
+                    let abort_result = self
+                        .abort_executor
+                        .execute_abort(&workflow.safe_abort_steps)
+                        .await;
+                    return WorkflowResult {
+                        task_id,
+                        success: false,
+                        completed_steps,
+                        total_steps: workflow.sub_goals.len(),
+                        error: Some(error),
+                        aborted: abort_result.success,
+                        duration_ms: start_time.elapsed().as_millis(),
+                        created_artifacts: Vec::new(),
+                    };
+                }
+            };
 
             if !action_result.success {
                 let error = format!(
@@ -1836,13 +2156,56 @@ impl GuiExecutor {
                     error: Some(error),
                     aborted: abort_result.success,
                     duration_ms: start_time.elapsed().as_millis(),
+                    // FIX #2: include artifacts from steps that already succeeded
+                    created_artifacts: incremental_artifacts,
                 };
             }
 
             // For app-launch steps, give the OS time to spawn the process and
             // for the window manager to focus it before we start verifying.
-            if sub_goal.action == "open_application" {
+            // FIX #17: Apply the same grace period to open_application_with_file —
+            // it is the primary substrate for FileWriteThenOpen but was missing the delay,
+            // causing ProcessLaunched to waste up to 8s polling before the app appeared.
+            if sub_goal.action == "open_application"
+                || sub_goal.action == "open_application_with_file"
+            {
                 tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
+
+                // FIX #8: Establish target window lock AFTER the app launch grace period.
+                // Previously the lock was deferred ("Will establish after app launch completes")
+                // but never actually set, leaving the runaway-prevention guard permanently blind.
+                // Now we re-query the active window after the grace period and lock to it.
+                if target_window_lock.is_none() {
+                    match self.kill_switch.get_backend().get_active_window().await {
+                        Ok(w) => {
+                            let launched_window = WindowContext {
+                                title: w.title.clone(),
+                                class: w.class.clone(),
+                                pid: w.pid,
+                            };
+                            tracing::info!(
+                                target: "gui_executor",
+                                task_id = %task_id,
+                                window_title = %launched_window.title,
+                                window_class = %launched_window.class,
+                                pid = launched_window.pid,
+                                "TARGET LOCK ESTABLISHED after app launch grace period"
+                            );
+                            target_window_lock = Some(launched_window);
+                        }
+                        Err(e) => {
+                            // IPC unavailable (Wayland without AT-SPI) — log and continue.
+                            // The safety guard remains blind but we don't abort the workflow.
+                            tracing::warn!(
+                                target: "gui_executor",
+                                task_id = %task_id,
+                                error = %e,
+                                "Cannot establish target lock after app launch (IPC unavailable) — \
+                                 runaway prevention guard is inactive for this workflow"
+                            );
+                        }
+                    }
+                }
             }
 
             // Focus grace period: after click_element, give the OS time to shift
@@ -1865,10 +2228,20 @@ impl GuiExecutor {
                 }
             }
 
-            // Verify outcome with bounded micro-retries.
-            // Re-fetch window context on EACH retry so stale data isn't used.
-            // Apps like gedit take 1-3s to launch; retry delays add 250ms + 500ms.
-            if !matches!(sub_goal.verify, VerificationType::None) {
+            // FIX #3: VerificationType::None must emit explicit telemetry.
+            // Previously this block was silently skipped — steps with None
+            // verification reported success with zero evidence. Now we emit
+            // a structured warning so the audit trail is complete.
+            if matches!(sub_goal.verify, VerificationType::None) {
+                tracing::warn!(
+                    target: "gui_executor",
+                    task_id = %task_id,
+                    step = sub_goal.step,
+                    action = %sub_goal.action,
+                    "Step completed with VerificationType::None — outcome is UNVERIFIED. \
+                     This step is counted as successful but no verification evidence exists."
+                );
+            } else {
                 let verify_result = self
                     .retries
                     .retry(|| async {
@@ -1889,6 +2262,50 @@ impl GuiExecutor {
                     );
                     tracing::error!(target: "gui_executor", task_id = %task_id, %error);
 
+                    // ── Batch 2: Interruption classification + recovery planning ────────
+                    // Classify the sub-goal failure and plan bounded recovery.
+                    // Writes a pause checkpoint if human intervention is required.
+                    if let Some(ref rt) = self.continuation_runtime {
+                        let interruption_ctx = InterruptionContext {
+                            current_stage_label: Some(sub_goal.action.clone()),
+                            ..Default::default()
+                        };
+                        let interruption = rt.classify_interruption(&interruption_ctx);
+                        let retry_depth = self
+                            .runtime_state
+                            .as_ref()
+                            .map(|s| s.retry_count.min(255) as u8)
+                            .unwrap_or(0);
+                        let plan = rt.plan_recovery(&interruption, retry_depth);
+                        tracing::warn!(
+                            target: "workflow_continuation",
+                            task_id = %task_id,
+                            step = sub_goal.step,
+                            action = %sub_goal.action,
+                            interruption = %interruption.user_message(),
+                            explanation = %plan.explanation,
+                            "HTN sub-goal failed — interruption classified; recovery plan ready"
+                        );
+                        let needs_pause = matches!(
+                            plan.primary_action,
+                            crate::agent::workflow_continuation::RecoveryAction::RequestHumanIntervention { .. }
+                            | crate::agent::workflow_continuation::RecoveryAction::Escalate { .. }
+                        );
+                        if needs_pause {
+                            let session = WorkflowSession::new(
+                                task_id.clone(),
+                                workflow.task_id.clone(),
+                                "HTN".to_string(),
+                            );
+                            let _ = rt.pause_workflow(&task_id, &session, interruption, "HTN");
+                            tracing::warn!(
+                                target: "workflow_continuation",
+                                task_id = %task_id,
+                                "HTN workflow paused — awaiting human intervention"
+                            );
+                        }
+                    }
+
                     // Execute safe abort sequence
                     let abort_result = self
                         .abort_executor
@@ -1903,12 +2320,24 @@ impl GuiExecutor {
                         error: Some(error),
                         aborted: abort_result.success,
                         duration_ms: start_time.elapsed().as_millis(),
+                        // FIX #2: include artifacts from steps that already succeeded
+                        created_artifacts: incremental_artifacts,
                     };
                 }
             }
 
             // Step completed successfully
             completed_steps += 1;
+
+            // FIX #2: Track artifacts from FileSystemEffect steps incrementally.
+            // If this step wrote a file, record it so partial-success returns
+            // can still report what was created.
+            if let VerificationType::FileSystemEffect { ref path, .. } = sub_goal.verify {
+                if path.exists() {
+                    incremental_artifacts.push(path.clone());
+                }
+            }
+
             tracing::info!(
                 target: "gui_executor",
                 task_id = %task_id,
@@ -1942,6 +2371,7 @@ impl GuiExecutor {
             error: None,
             aborted: false,
             duration_ms,
+            created_artifacts: incremental_artifacts, // FIX #2: populated from step loop
         }
     }
 
@@ -2466,6 +2896,7 @@ mod tests {
             "gedit_open",
             "Application not running",
             SpiralCheckResult::NewFailure,
+            Some("gedit"),
         );
 
         match result {
@@ -2486,6 +2917,7 @@ mod tests {
             "gedit_open",
             "Application not running",
             SpiralCheckResult::SpiralDetected,
+            Some("gedit"),
         );
 
         match result {
@@ -2559,6 +2991,7 @@ mod tests {
                     &prereq_id,
                     &reason,
                     SpiralCheckResult::NewFailure,
+                    Some("gedit"),
                 );
 
                 match recovery {
@@ -2731,6 +3164,7 @@ mod tests {
             "gedit_open",
             "Application not running",
             SpiralCheckResult::NewFailure,
+            Some("gedit"),
         );
 
         // Verify recovery subtree injected
@@ -2944,6 +3378,7 @@ mod tests {
             prereq_id,
             "Application not running",
             second_check, // SpiralDetected
+            Some("gedit"),
         );
 
         match recovery_result {
@@ -3163,7 +3598,7 @@ mod tests {
         // Create executor WITHOUT kill switch (we just want to test budget, not window checks)
         let mut executor = GuiExecutor {
             verifier: Arc::new(
-                crate::agent::execution_verifier_impl::BoundedExecutionVerifier::new(),
+                crate::agent::execution_verifier_bounded::BoundedExecutionVerifier::new(),
             ),
             retries: BoundedMicroRetries::new(),
             abort_executor,
@@ -3178,6 +3613,7 @@ mod tests {
             prereq_checker: None,
             dismissal_handler: GenericUiDismissal::new(),
             anchor_stack: Vec::new(),
+            continuation_runtime: None,
         };
 
         // Initialize runtime state with small budget
@@ -3411,6 +3847,8 @@ mod tests {
         let tool_executor: Arc<dyn ToolExecutor> = Arc::new(PassThroughExecutor);
         let abort_executor = SafeAbortExecutor::new(Arc::clone(&tool_executor));
 
+        // Test uses legacy GUI-backend-injected verifier to drive mock AT-SPI assertions.
+        #[allow(deprecated)]
         let verifier = Arc::new(
             crate::agent::execution_verifier_impl::BoundedExecutionVerifier::with_gui_backend(
                 backend,

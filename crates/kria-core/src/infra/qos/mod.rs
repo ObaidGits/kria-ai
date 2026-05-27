@@ -681,7 +681,7 @@ fn now_unix_ms() -> u64 {
 fn emit_telemetry(packet: QosTelemetryPacket) {
     let payload =
         serde_json::to_string(&packet).unwrap_or_else(|error| format!("telemetry_error:{error}"));
-    tracing::info!(target: "kria_qos", packet = %payload, "qos_telemetry");
+    tracing::debug!(target: "kria_qos", packet = %payload, "qos_telemetry");
 }
 
 fn emit_adaptation(packet: QosAdaptationPacket) {

@@ -18,6 +18,61 @@ fn param(name: &str, ty: &str, desc: &str, required: bool) -> ParamDef {
     }
 }
 
+/// Check if a process with the given binary name hint is currently running.
+/// Uses /proc scanning — works on Linux without any external tools.
+/// This is a best-effort check; false negatives are possible for Flatpak/Snap apps.
+///
+/// Uses exact matching or prefix matching only in the safe direction:
+/// - `comm == hint_lower`: exact match
+/// - `comm.starts_with(&hint_lower)`: comm is a longer version of the hint (e.g., "gedit-3" matches "gedit")
+/// Does NOT use `hint_lower.starts_with(&comm)` to avoid false positives
+/// where a short truncated comm (e.g., "co") matches unrelated processes.
+fn is_process_running_by_name(binary_hint: &str) -> bool {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return false;
+    };
+    let hint_lower = binary_hint.to_ascii_lowercase();
+    // Minimum meaningful length to avoid false positives from short comm names
+    if hint_lower.len() < 3 {
+        return false;
+    }
+    for entry in entries.flatten() {
+        let pid_dir = entry.path();
+        if !pid_dir.is_dir() {
+            continue;
+        }
+        let Some(name) = pid_dir.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if name.parse::<u32>().is_err() {
+            continue;
+        }
+        // Check comm (fast, truncated to 15 chars by kernel)
+        let comm_path = pid_dir.join("comm");
+        if let Ok(comm) = std::fs::read_to_string(&comm_path) {
+            let comm = comm.trim().to_ascii_lowercase();
+            // Exact match or comm is a longer version of hint (e.g., "gedit-3" matches "gedit")
+            if comm == hint_lower || comm.starts_with(&hint_lower) {
+                return true;
+            }
+        }
+        // Check cmdline basename (handles long names and Flatpak)
+        let cmdline_path = pid_dir.join("cmdline");
+        if let Ok(cmdline) = std::fs::read_to_string(&cmdline_path) {
+            let first_arg = cmdline.split('\0').next().unwrap_or("");
+            let basename = first_arg
+                .rsplit('/')
+                .next()
+                .unwrap_or(first_arg)
+                .to_ascii_lowercase();
+            if basename == hint_lower || basename.starts_with(&hint_lower) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 // ─── OpenApplication ─────────────────────────────────────────────────────────
 //
 // Delegates to `IntentDispatcher` instead of raw `tokio::process::Command`.
@@ -53,6 +108,63 @@ impl ToolHandler for OpenApplication {
             }
         };
 
+        // Check if the app is already running before launching a new instance.
+        // This prevents duplicate windows and respects single-instance apps.
+        // We use a best-effort /proc scan — if it fails, we proceed with launch.
+        // Use the canonical binary name (not the user-facing alias) for accurate matching.
+        let binary_hint = crate::agent::gui_substrate_planner::app_alias_to_binary_pub(name);
+        let already_running = is_process_running_by_name(&binary_hint);
+        if already_running {
+            tracing::info!(
+                target: "app_lifecycle",
+                app = name,
+                binary = %binary_hint,
+                "App already running — attempting to focus existing window instead of launching new instance"
+            );
+            // Best-effort focus:
+            // X11: wmctrl -a <name> (brings window to foreground)
+            // Wayland: no reliable cross-compositor focus API; log and continue
+            let session = std::env::var("XDG_SESSION_TYPE").unwrap_or_default();
+            if session != "wayland" {
+                let _ = tokio::process::Command::new("wmctrl")
+                    .args(["-a", name])
+                    .output()
+                    .await;
+                // Post-focus delay: X11 WM focus commits are async (EWMH round-trip).
+                // Without this sleep the WindowFocused verifier polls immediately and
+                // still sees the old focused window (KRIA chat), causing a false failure.
+                tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+            } else {
+                // Wayland: try XWayland path (works for Electron/VSCode and other
+                // XWayland-backed apps). xdotool --sync waits for WM to process the event.
+                let xdotool_ok = tokio::process::Command::new("xdotool")
+                    .args(["search", "--name", name, "windowactivate", "--sync"])
+                    .output()
+                    .await
+                    .map(|o| o.status.success())
+                    .unwrap_or(false);
+                if xdotool_ok {
+                    tracing::info!(
+                        target: "app_lifecycle",
+                        app = name,
+                        "Wayland+XWayland: focused existing window via xdotool"
+                    );
+                    tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+                } else {
+                    tracing::debug!(
+                        target: "app_lifecycle",
+                        app = name,
+                        "Wayland session: xdotool focus unsuccessful (pure Wayland or app not on XWayland display)"
+                    );
+                }
+            }
+            return ToolResult::ok(serde_json::json!({
+                "application": name,
+                "already_running": true,
+                "action": "focused_existing_window",
+            }));
+        }
+
         // Build SafeArg list from the params "args" array.
         let mut safe_args: Vec<SafeArg> = Vec::new();
         if let Some(arr) = params["args"].as_array() {
@@ -86,6 +198,104 @@ impl ToolHandler for OpenApplication {
                 "rate limit exceeded for '{action}', retry after {retry}s"
             )),
             Err(e) => ToolResult::err(format!("dispatch error: {e}")),
+        }
+    }
+}
+
+// ─── OpenApplicationWithFile ─────────────────────────────────────────────────
+//
+// Same as `open_application` but appends a single file path as a launch
+// argument. Used by the substrate-aware planner to open editors with a
+// generated file in one step (works on X11 AND Wayland because the OS launcher
+// handles both).
+
+struct OpenApplicationWithFile {
+    dispatcher: Arc<IntentDispatcher>,
+    registry: Arc<InstalledAppRegistry>,
+}
+
+#[async_trait]
+impl ToolHandler for OpenApplicationWithFile {
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let name = params["name"].as_str().unwrap_or("").trim();
+        if name.is_empty() {
+            return ToolResult::err("application name is required");
+        }
+        let file = params["file"].as_str().unwrap_or("").trim();
+        if file.is_empty() {
+            return ToolResult::err("file path is required");
+        }
+
+        let session_id = params["session_id"]
+            .as_str()
+            .unwrap_or("no-session")
+            .to_string();
+
+        let app_id = match self.registry.resolve_alias(name) {
+            Some(id) => id,
+            None => {
+                return ToolResult::err(format!(
+                    "application '{}' is not found in the installed app registry",
+                    name
+                ))
+            }
+        };
+
+        let safe_file = match SafeArg::new(file) {
+            Ok(a) => a,
+            Err(e) => return ToolResult::err(format!("invalid file argument '{file}': {e}")),
+        };
+
+        let cap = Capability::LaunchApp {
+            app_id,
+            args: vec![safe_file],
+        };
+
+        let dispatch = tokio::time::timeout(
+            std::time::Duration::from_secs(8),
+            self.dispatcher.dispatch(&cap, &session_id, false),
+        )
+        .await;
+
+        match dispatch {
+            Err(_) => ToolResult::err(format!(
+                "launch timeout: application '{name}' did not accept file '{file}' within 8s"
+            )),
+            Ok(Ok(result)) => {
+                if result.success {
+                    ToolResult::ok(result.detail)
+                } else {
+                    ToolResult::err(result.message)
+                }
+            }
+            Ok(Err(DispatchError::PolicyBlocked(reason))) => {
+                ToolResult::err(format!("blocked by policy: {reason}"))
+            }
+            Ok(Err(DispatchError::RateLimitExceeded(action, retry))) => ToolResult::err(format!(
+                "rate limit exceeded for '{action}', retry after {retry}s"
+            )),
+            Ok(Err(e)) => ToolResult::err(format!("dispatch error: {e}")),
+        }
+    }
+}
+
+struct LegacyOpenApplicationWithFile;
+#[async_trait]
+impl ToolHandler for LegacyOpenApplicationWithFile {
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let app = params["name"].as_str().unwrap_or("");
+        let file = params["file"].as_str().unwrap_or("");
+        if app.is_empty() || file.is_empty() {
+            return ToolResult::err("name and file are required");
+        }
+        match tokio::process::Command::new(app).arg(file).spawn() {
+            Ok(result) => ToolResult::ok(serde_json::json!({
+            "application": app,
+            "file": file,
+            "pid": result.id(),
+            "launched": true
+            })),
+            Err(e) => ToolResult::err(format!("failed to open {app} with {file}: {e}")),
         }
     }
 }
@@ -147,9 +357,6 @@ struct WebBrowserSearch {
 impl ToolHandler for WebBrowserSearch {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
         let query = params["query"].as_str().unwrap_or("").trim();
-        if query.is_empty() {
-            return ToolResult::err("query is required");
-        }
 
         let session_id = params["session_id"]
             .as_str()
@@ -159,17 +366,77 @@ impl ToolHandler for WebBrowserSearch {
         // Check if a specific site is requested.
         let site = params["site"].as_str().unwrap_or("google");
 
-        let url = match site.to_lowercase().as_str() {
-            "youtube" | "yt" => match build_youtube_search_url(query) {
+        // When query is empty, navigate directly to the site homepage
+        // (e.g. "open chrome and search for youtube" → open youtube.com).
+        let url = if query.is_empty() {
+            let homepage = match site.to_lowercase().as_str() {
+                "youtube" | "yt" => "https://www.youtube.com",
+                _ => "https://www.google.com",
+            };
+            match url::Url::parse(homepage) {
                 Ok(u) => u,
-                Err(e) => return ToolResult::err(format!("failed to build YouTube URL: {e}")),
-            },
-            _ => match build_search_url(query) {
-                Ok(u) => u,
-                Err(e) => return ToolResult::err(format!("failed to build search URL: {e}")),
-            },
+                Err(e) => return ToolResult::err(format!("failed to build site URL: {e}")),
+            }
+        } else {
+            match site.to_lowercase().as_str() {
+                "youtube" | "yt" => match build_youtube_search_url(query) {
+                    Ok(u) => u,
+                    Err(e) => return ToolResult::err(format!("failed to build YouTube URL: {e}")),
+                },
+                _ => match build_search_url(query) {
+                    Ok(u) => u,
+                    Err(e) => return ToolResult::err(format!("failed to build search URL: {e}")),
+                },
+            }
         };
 
+        let url_str = url.to_string();
+
+        // RFC Browser Ownership: Attempt to use managed Chrome with CDP so that
+        // MANAGED_BROWSER_PID is recorded and all verification layers have evidence:
+        //   Layer 1 (CDP FullSemantic)     — URL/title visible via DevTools
+        //   Layer 2 (AT-SPI StructuralOnly) — window title visible after browser opens
+        //   Layer 3 (Process Unobservable)  — /proc/<pid> exists
+        // Without this, browser_search via xdg-open leaves no PID trace and CDP is
+        // never opened, causing all three layers to fail → false verification error.
+        if cfg!(target_os = "linux") {
+            match crate::agent::browser_cognition::BrowserCognitionEngine::launch_with_debugging()
+                .await
+            {
+                Ok(pid) => {
+                    tracing::info!(
+                        target: "app_lifecycle",
+                        pid = pid,
+                        url = %url_str,
+                        "browser_search: managed Chrome launched with CDP, navigating"
+                    );
+                    let engine = crate::agent::browser_cognition::BrowserCognitionEngine::new();
+                    let nav = engine.navigate(&url_str).await;
+                    if nav.success {
+                        return ToolResult::ok(serde_json::json!({
+                            "url": url_str,
+                            "query": query,
+                            "managed": true,
+                            "pid": pid,
+                        }));
+                    }
+                    tracing::warn!(
+                        target: "app_lifecycle",
+                        err = %nav.evidence,
+                        "browser_search: CDP navigation failed, falling back to IntentDispatcher"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        target: "app_lifecycle",
+                        err = %e,
+                        "browser_search: managed Chrome launch failed, falling back to IntentDispatcher"
+                    );
+                }
+            }
+        }
+
+        // Fallback: dispatch via IntentDispatcher (xdg-open / system default browser).
         let cap = Capability::OpenUrl { url };
         match self.dispatcher.dispatch(&cap, &session_id, false).await {
             Ok(result) => {
@@ -385,17 +652,21 @@ struct CloseApplication;
 #[async_trait]
 impl ToolHandler for CloseApplication {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let name = params["name"].as_str().unwrap_or("");
+        let name = params["name"].as_str().unwrap_or("").trim();
+        if name.is_empty() {
+            return ToolResult::err("application name is required");
+        }
+        let name_lower = name.to_lowercase();
         let mut sys = sysinfo::System::new();
         sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
         let mut killed = 0;
         for proc_ in sys.processes().values() {
-            if proc_
-                .name()
-                .to_string_lossy()
-                .to_lowercase()
-                .contains(&name.to_lowercase())
-            {
+            let proc_name = proc_.name().to_string_lossy().to_lowercase();
+            // FIX #33: Use exact match or starts_with, NOT contains.
+            // "close_application("code")" must not kill "decode", "vscode-server", etc.
+            // We match: exact name, or name is a prefix of the process name
+            // (e.g., "gedit" matches "gedit-3"), but NOT substring matches.
+            if proc_name == name_lower || proc_name.starts_with(&format!("{}-", name_lower)) {
                 proc_.kill();
                 killed += 1;
             }
@@ -450,6 +721,16 @@ pub fn register_with_dispatcher(
             Arc::new(LegacyOpenApplication)
         };
 
+    let open_app_with_file_handler: Arc<dyn ToolHandler> =
+        if let (Some(d), Some(r)) = (dispatcher.clone(), registry.clone()) {
+            Arc::new(OpenApplicationWithFile {
+                dispatcher: d,
+                registry: r,
+            })
+        } else {
+            Arc::new(LegacyOpenApplicationWithFile)
+        };
+
     let open_url_handler: Arc<dyn ToolHandler> = if let Some(d) = dispatcher.clone() {
         Arc::new(OpenUrl {
             dispatcher: Arc::clone(&d),
@@ -496,6 +777,39 @@ pub fn register_with_dispatcher(
                 ],
             },
             open_app_handler,
+        ),
+        (
+            ToolDef {
+                name: "open_application_with_file".into(),
+                description: "Open/launch an installed application and pass a single file path as \
+                              its launch argument. Use this when you have already generated content \
+                              and want the editor to open with that file (works on X11 and Wayland)."
+                    .into(),
+                category: "app_lifecycle".into(),
+                default_tier: RiskLevel::Green,
+                min_tier: "lite",
+                parameters: vec![
+                    param(
+                        "name",
+                        "string",
+                        "Application name (e.g., 'gedit', 'code', 'kate')",
+                        true,
+                    ),
+                    param(
+                        "file",
+                        "string",
+                        "Absolute path to the file to open in the application",
+                        true,
+                    ),
+                    param(
+                        "session_id",
+                        "string",
+                        "Session identifier for audit logging",
+                        false,
+                    ),
+                ],
+            },
+            open_app_with_file_handler,
         ),
         (
             ToolDef {

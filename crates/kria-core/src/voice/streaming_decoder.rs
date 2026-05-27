@@ -104,14 +104,14 @@ pub struct SchedulerConfig {
 impl Default for SchedulerConfig {
     fn default() -> Self {
         Self {
-            min_first_decode_samples: 4_800,  // 300ms @ 16kHz
+            min_first_decode_samples: 4_800, // 300ms @ 16kHz
             aggressive_cadence_ms: 150,
             growing_cadence_ms: 200,
             stable_cadence_ms: 300,
             aggressive_to_growing_ms: 500,
             growing_to_stable_ms: 2_000,
-            context_overlap_samples: 4_800,   // 300ms overlap for context
-            max_window_samples: 48_000,       // 3s max window
+            context_overlap_samples: 4_800, // 300ms overlap for context
+            max_window_samples: 48_000,     // 3s max window
         }
     }
 }
@@ -120,7 +120,7 @@ impl SchedulerConfig {
     /// Fast config for CUDA hardware.
     pub fn cuda() -> Self {
         Self {
-            min_first_decode_samples: 3_200,  // 200ms
+            min_first_decode_samples: 3_200, // 200ms
             aggressive_cadence_ms: 120,
             growing_cadence_ms: 150,
             stable_cadence_ms: 250,
@@ -131,7 +131,7 @@ impl SchedulerConfig {
     /// Conservative config for CPU-only.
     pub fn cpu() -> Self {
         Self {
-            min_first_decode_samples: 8_000,  // 500ms
+            min_first_decode_samples: 8_000, // 500ms
             aggressive_cadence_ms: 300,
             growing_cadence_ms: 400,
             stable_cadence_ms: 500,
@@ -322,7 +322,12 @@ mod tests {
         let mut s = StreamingDecodeScheduler::new(16_000, config);
         s.record_audio(5_000); // 312ms — enough
         match s.should_decode() {
-            DecodeDecision::Decode { window_start, window_end, phase, .. } => {
+            DecodeDecision::Decode {
+                window_start,
+                window_end,
+                phase,
+                ..
+            } => {
                 assert_eq!(window_start, 0);
                 assert_eq!(window_end, 5_000);
                 assert_eq!(phase, DecodePhase::Aggressive);
@@ -378,7 +383,11 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(350));
 
         match s.should_decode() {
-            DecodeDecision::Decode { window_start, window_end, .. } => {
+            DecodeDecision::Decode {
+                window_start,
+                window_end,
+                ..
+            } => {
                 // Window should slide: end - max_window
                 assert_eq!(window_end, 56_000);
                 assert_eq!(window_start, 56_000 - 16_000);

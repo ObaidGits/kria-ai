@@ -132,20 +132,21 @@ pub async fn delete_macro(name: String, state: State<'_, AppStateCell>) -> Resul
 
 #[tauri::command]
 pub async fn list_workflows(state: State<'_, AppStateCell>) -> Result<serde_json::Value, String> {
-    let state = state
+    let _state = state
         .get()
         .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
-    let engine = state.workflow_engine.read().await;
-    let workflows: Vec<serde_json::Value> = engine
-        .list()
+    let mgr = kria_core::agent::workflow_session::SessionManager::new();
+    let sessions = mgr.list_sessions();
+    let workflows: Vec<serde_json::Value> = sessions
         .iter()
-        .map(|w| {
+        .map(|s| {
             serde_json::json!({
-                "id": w.id,
-                "name": w.name,
-                "description": w.description,
-                "step_count": w.steps.len(),
-                "created_at": w.created_at,
+                "id": s.session_id,
+                "name": s.user_intent,
+                "substrate": s.substrate,
+                "step_count": s.completed_steps.len(),
+                "created_at": s.created_at,
+                "complete": s.complete,
             })
         })
         .collect();
@@ -157,13 +158,14 @@ pub async fn delete_workflow(
     workflow_id: String,
     state: State<'_, AppStateCell>,
 ) -> Result<(), String> {
-    let state = state
+    let _state = state
         .get()
         .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
-    let mut engine = state.workflow_engine.write().await;
-    if engine.delete(&workflow_id) {
-        Ok(())
-    } else {
-        Err(format!("Workflow '{}' not found", workflow_id))
+    let mgr = kria_core::agent::workflow_session::SessionManager::new();
+    let path = mgr.session_path(&workflow_id);
+    if !path.exists() {
+        return Err(format!("Workflow session '{}' not found", workflow_id));
     }
+    mgr.delete(&workflow_id);
+    Ok(())
 }

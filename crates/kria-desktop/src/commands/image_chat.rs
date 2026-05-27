@@ -547,6 +547,7 @@ pub async fn send_image_message(
                     name,
                     result,
                     success,
+                    ..
                 } => {
                     emit_agent_stage(
                         &app_handle,
@@ -765,6 +766,12 @@ pub async fn send_image_message(
                             "response_chars": full_response.chars().count(),
                         })),
                     );
+                }
+                StreamEvent::RecoveryOptions { .. } => {
+                    // image_chat does not use fleet tools; ignore
+                }
+                StreamEvent::TaskStep(_) => {
+                    // image_chat does not emit task steps; ignore
                 }
             }
         }

@@ -28,6 +28,12 @@ impl RiskLevel {
     }
 }
 
+impl Default for RiskLevel {
+    fn default() -> Self {
+        Self::Yellow
+    }
+}
+
 impl std::fmt::Display for RiskLevel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
@@ -43,6 +49,103 @@ pub struct PolicyDecision {
     pub blocked: bool,
     pub reason: String,
     pub escalated_from: Option<RiskLevel>,
+}
+
+impl PolicyDecision {
+    /// Convert an approval-required policy decision into a collaborative
+    /// decision candidate. This preserves the existing policy API while giving
+    /// HITL/action-center flows structured risk, resource, rollback, and rule
+    /// metadata.
+    pub fn to_decision_candidate(
+        &self,
+        params: &serde_json::Value,
+    ) -> Option<crate::agent::collaborative_decision::DecisionCandidate> {
+        if !self.requires_approval || self.blocked {
+            return None;
+        }
+
+        let affected_resources = extract_affected_resources(params);
+        let rollbackability = infer_rollbackability(&self.action, params, self.risk_level);
+        Some(
+            crate::agent::collaborative_decision::DecisionCandidate::approval(
+                self.action.clone(),
+                self.reason.clone(),
+                self.risk_level,
+                rollbackability,
+                affected_resources,
+                Some(policy_rule_id(&self.action, self.escalated_from)),
+            ),
+        )
+    }
+}
+
+fn extract_affected_resources(params: &serde_json::Value) -> Vec<String> {
+    let mut out = Vec::new();
+    for key in [
+        "path",
+        "target",
+        "destination",
+        "file",
+        "directory",
+        "source",
+        "url",
+        "command",
+    ] {
+        if let Some(value) = params.get(key).and_then(|v| v.as_str()) {
+            out.push(format!("{key}:{value}"));
+        }
+    }
+    if out.is_empty() {
+        out.push("unknown_resource".to_string());
+    }
+    out
+}
+
+fn infer_rollbackability(
+    action: &str,
+    params: &serde_json::Value,
+    risk_level: RiskLevel,
+) -> crate::agent::collaborative_decision::Rollbackability {
+    use crate::agent::collaborative_decision::Rollbackability;
+
+    let lower_action = action.to_ascii_lowercase();
+    let params_str = params.to_string().to_ascii_lowercase();
+    if risk_level == RiskLevel::Black {
+        return Rollbackability::Irreversible;
+    }
+    if lower_action.contains("delete")
+        || params_str.contains(" rm ")
+        || params_str.contains("rm -")
+        || params_str.contains("remove")
+        || params_str.contains("shutdown")
+        || params_str.contains("reboot")
+    {
+        return Rollbackability::Irreversible;
+    }
+    if lower_action.contains("send") || lower_action.contains("payment") {
+        return Rollbackability::PartiallyIrreversible;
+    }
+    if lower_action.contains("write")
+        || lower_action.contains("rename")
+        || lower_action.contains("copy")
+        || lower_action.contains("move")
+    {
+        return Rollbackability::Compensatable;
+    }
+    if risk_level == RiskLevel::Red {
+        return Rollbackability::Unknown;
+    }
+    Rollbackability::Reversible
+}
+
+fn policy_rule_id(action: &str, escalated_from: Option<RiskLevel>) -> String {
+    if escalated_from.is_some() {
+        "policy.path_escalation".to_string()
+    } else if matches!(action, "execute_bash" | "execute_powershell") {
+        "policy.command_classifier".to_string()
+    } else {
+        format!("policy.action_tier.{action}")
+    }
 }
 
 // ─── Tier 0: GREEN (auto-execute) ───
@@ -383,7 +486,10 @@ impl PolicyEngine {
     pub fn evaluate(&self, action: &str, params: &serde_json::Value) -> PolicyDecision {
         // 1. Check blacklist first (hardcoded deny, cannot be overridden)
         let param_str = params.to_string();
-        if self.blacklist.is_blocked(&param_str) || self.blacklist.is_blocked(action) {
+        if self.blacklist.is_blocked(&param_str)
+            || self.blacklist.is_blocked(action)
+            || params_contain_blacklisted_string(params, &self.blacklist)
+        {
             return PolicyDecision {
                 risk_level: RiskLevel::Black,
                 action: action.to_string(),
@@ -399,6 +505,18 @@ impl PolicyEngine {
         //    command string to apply granular Green/Yellow/Red tiering.
         if matches!(action, "execute_bash" | "execute_powershell") {
             if let Some(cmd) = params.get("command").and_then(|v| v.as_str()) {
+                if is_kria_generated_code_execution_command(action, cmd) {
+                    return PolicyDecision {
+                        risk_level: RiskLevel::Green,
+                        action: action.to_string(),
+                        requires_approval: false,
+                        blocked: false,
+                        reason: "auto-execute: KRIA-generated code run with bounded output capture"
+                            .into(),
+                        escalated_from: None,
+                    };
+                }
+
                 let classification = crate::safety::command_classifier::classify(cmd);
                 let mut reason = if classification.had_sudo {
                     format!(
@@ -710,6 +828,77 @@ impl PolicyEngine {
     }
 }
 
+fn params_contain_blacklisted_string(
+    value: &serde_json::Value,
+    checker: &BlacklistChecker,
+) -> bool {
+    match value {
+        serde_json::Value::String(value) => checker.is_blocked(value),
+        serde_json::Value::Array(values) => values
+            .iter()
+            .any(|value| params_contain_blacklisted_string(value, checker)),
+        serde_json::Value::Object(values) => values
+            .values()
+            .any(|value| params_contain_blacklisted_string(value, checker)),
+        serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => {
+            false
+        }
+    }
+}
+
+fn is_kria_generated_code_execution_command(action: &str, command: &str) -> bool {
+    if action != "execute_bash" {
+        return false;
+    }
+
+    let lower = command.to_ascii_lowercase();
+    let has_generated_path =
+        lower.contains("/.kria/generated/") || lower.contains("/kria/generated/");
+    let has_stdin_guard = lower.contains("< /dev/null");
+    let has_output_cap = lower.contains("head -c 1048576");
+    let has_output_redirect = lower.contains(" > ");
+    let starts_like_known_runner = [
+        "python3 ",
+        "node ",
+        "ts-node ",
+        "(ts-node ",
+        "rustc ",
+        "goflags=-mod=mod go run ",
+        "bash ",
+        "ruby ",
+        "php ",
+        "kotlinc-jvm -script ",
+        "mkdir -p ",
+        "g++ ",
+        "(dotnet-script ",
+        "swift ",
+    ]
+    .iter()
+    .any(|prefix| lower.trim_start().starts_with(prefix));
+    let has_dangerous_token = [
+        " sudo ",
+        " rm ",
+        " rm -",
+        " shutdown",
+        " reboot",
+        " mkfs",
+        " dd if=",
+        " chmod -r",
+        " chown -r",
+        " curl ",
+        " wget ",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle));
+
+    has_generated_path
+        && has_stdin_guard
+        && has_output_cap
+        && has_output_redirect
+        && starts_like_known_runner
+        && !has_dangerous_token
+}
+
 impl Default for PolicyEngine {
     fn default() -> Self {
         Self::new()
@@ -913,6 +1102,32 @@ mod tests {
     }
 
     #[test]
+    fn execute_bash_generated_code_capture_is_green() {
+        let policy = PolicyEngine::new();
+        let decision = policy.evaluate(
+            "execute_bash",
+            &serde_json::json!({
+                "command": "python3 '/home/obaid/.kria/generated/pascal_test.py' < /dev/null 2>&1 | head -c 1048576 > '/home/obaid/.kria/generated/output_test.txt'",
+            }),
+        );
+        assert_eq!(decision.risk_level, RiskLevel::Green);
+        assert!(!decision.requires_approval);
+    }
+
+    #[test]
+    fn generated_code_capture_with_dangerous_token_is_red() {
+        let policy = PolicyEngine::new();
+        let decision = policy.evaluate(
+            "execute_bash",
+            &serde_json::json!({
+                "command": "python3 '/home/obaid/.kria/generated/pascal_test.py' < /dev/null 2>&1 | head -c 1048576 > '/home/obaid/.kria/generated/output_test.txt'; rm -rf /tmp/x",
+            }),
+        );
+        assert_eq!(decision.risk_level, RiskLevel::Red);
+        assert!(decision.requires_approval);
+    }
+
+    #[test]
     fn execute_bash_sudo_systemctl_status_is_green() {
         let policy = PolicyEngine::new();
         let decision = policy.evaluate(
@@ -943,6 +1158,47 @@ mod tests {
         );
         assert_eq!(decision.risk_level, RiskLevel::Red);
         assert!(decision.requires_approval);
+    }
+
+    #[test]
+    fn execute_bash_root_rm_rf_is_black_inside_json_params() {
+        let policy = PolicyEngine::new();
+        let decision = policy.evaluate(
+            "execute_bash",
+            &serde_json::json!({ "command": "rm -rf /" }),
+        );
+
+        assert_eq!(decision.risk_level, RiskLevel::Black);
+        assert!(decision.blocked);
+        assert!(!decision.requires_approval);
+    }
+
+    #[test]
+    fn approval_decision_exports_collaborative_metadata() {
+        let policy = PolicyEngine::new();
+        let params = serde_json::json!({ "command": "rm -rf /tmp/test" });
+        let decision = policy.evaluate("execute_bash", &params);
+        let candidate = decision
+            .to_decision_candidate(&params)
+            .expect("red policy decision should create approval candidate");
+
+        assert_eq!(
+            candidate.decision_type,
+            crate::agent::collaborative_decision::DecisionType::Approval
+        );
+        assert_eq!(candidate.risk_level, RiskLevel::Red);
+        assert!(candidate
+            .affected_resources
+            .iter()
+            .any(|resource| resource.starts_with("command:")));
+        assert_eq!(
+            candidate.rollbackability,
+            crate::agent::collaborative_decision::Rollbackability::Irreversible
+        );
+        assert_eq!(
+            candidate.rule_id.as_deref(),
+            Some("policy.command_classifier")
+        );
     }
 
     #[test]

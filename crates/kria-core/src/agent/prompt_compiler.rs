@@ -216,7 +216,10 @@ pub struct SectionOmission {
 #[derive(Debug, Clone)]
 pub enum OmissionReason {
     /// Section was too large for remaining budget; truncated to fit.
-    Truncated { original_len: usize, kept_len: usize },
+    Truncated {
+        original_len: usize,
+        kept_len: usize,
+    },
     /// Budget exhausted before this section could be included.
     BudgetExceeded { needed: usize, available: usize },
     /// Remaining budget below minimum threshold (500 chars) for priority-2 sections.
@@ -246,12 +249,13 @@ You are K.R.I.A., a desktop AI assistant.\n\
 }
 
 /// Build the tools catalog section from routed tool schemas.
-/// Matches the legacy `build_filtered_tool_schema_catalog` output.
+/// Matches the legacy `build_filtered_tool_schema_catalog` output, augmented
+/// with execution-mode tags so the LLM can prefer API/MCP/CLI over GUI.
 pub fn build_tools_catalog_section(tool_schemas: &[ToolSchema]) -> PromptSection {
     let content = if tool_schemas.is_empty() {
         "## Enabled Tools\nNo tools are enabled for this turn. Reply conversationally unless a tool-enabled follow-up is required.".to_string()
     } else {
-        let mut lines = Vec::with_capacity(tool_schemas.len() + 3);
+        let mut lines = Vec::with_capacity(tool_schemas.len() + 5);
         lines.push("## Enabled Tools".to_string());
         lines.push(format!(
             "Only the following {} routed tool(s) are enabled for this turn.",
@@ -261,9 +265,30 @@ pub fn build_tools_catalog_section(tool_schemas: &[ToolSchema]) -> PromptSection
             "Use exact tool names. Function schemas are provided separately by the runtime."
                 .to_string(),
         );
+        lines.push(
+            "Execution preference: API > MCP > CLI > Browser > GUI. \
+             GUI/Browser tools are LAST RESORT — never use them when an API or MCP \
+             alternative is available in the list below."
+                .to_string(),
+        );
         for schema in tool_schemas {
+            let profile = crate::mcp::capability_registry::capability_profile(&schema.name);
+            let mode_tag = match profile.execution_mode {
+                crate::mcp::capability_registry::ExecutionMode::Api => "[API]",
+                crate::mcp::capability_registry::ExecutionMode::Local => "[LOCAL]",
+                crate::mcp::capability_registry::ExecutionMode::Mcp => "[MCP]",
+                crate::mcp::capability_registry::ExecutionMode::Cli => "[CLI]",
+                crate::mcp::capability_registry::ExecutionMode::Ssh => "[SSH]",
+                crate::mcp::capability_registry::ExecutionMode::BrowserAutomation => {
+                    "[BROWSER:LAST-RESORT]"
+                }
+                crate::mcp::capability_registry::ExecutionMode::GuiAutomation => {
+                    "[GUI:LAST-RESORT]"
+                }
+            };
             lines.push(format!(
-                "- {}: {}",
+                "- {} {}: {}",
+                mode_tag,
                 schema.name,
                 sanitize_text_for_logs(&schema.description, 120)
             ));
@@ -280,14 +305,16 @@ pub fn build_tools_catalog_section(tool_schemas: &[ToolSchema]) -> PromptSection
 
 /// Build the system state section (date, operational guidance).
 /// Matches the legacy "## System State" block.
+/// Uses local timezone (KRIA_USER_TZ override > system local > UTC fallback).
 pub fn build_system_state_section() -> PromptSection {
+    let local_now = crate::time::kria_now_local();
     PromptSection {
         id: "system_state",
         content: format!(
-            "## System State\nCurrent date: {}. \
+            "## System State\nCurrent date: {} (local time). \
             Verify time-sensitive facts (political offices, prices, scores, recent events) \
             using the enabled search tools before synthesizing an answer.",
-            chrono::Local::now().format("%A, %B %d, %Y")
+            local_now.format("%A, %B %d, %Y at %H:%M")
         ),
         priority: 1,
     }
@@ -417,7 +444,11 @@ pub fn compile_system_prompt(
 
     let prompt = build_system_prompt(user_context.as_deref(), tool_schemas, is_live_fact);
 
-    let budget = if budget_chars == 0 { 8192 } else { budget_chars };
+    let budget = if budget_chars == 0 {
+        8192
+    } else {
+        budget_chars
+    };
     prompt.assemble(budget)
 }
 
@@ -590,7 +621,9 @@ mod tests {
     fn session_summary_is_priority_2() {
         let mut prompt = StructuredPrompt::default();
         prompt.identity = Some(build_identity_section());
-        prompt.session_summary = Some(build_session_summary_section("User discussed Rust projects."));
+        prompt.session_summary = Some(build_session_summary_section(
+            "User discussed Rust projects.",
+        ));
 
         // With plenty of budget, summary is included
         let result = prompt.assemble(8192);
@@ -609,7 +642,7 @@ mod tests {
     fn assembled_prompt_total_chars_accurate() {
         let result = compile_system_prompt("", &[], false, 8192);
         assert_eq!(result.total_chars, result.text.len() + 2); // +2 for trailing \n\n that gets trimmed
-        // More precisely: total_chars tracks consumption, text is trimmed
+                                                               // More precisely: total_chars tracks consumption, text is trimmed
         assert!(result.total_chars >= result.text.len());
     }
 
@@ -630,7 +663,8 @@ mod tests {
             make_tool_schema("web_search", "Search the web for information"),
             make_tool_schema("list_files", "List files in a directory"),
         ];
-        let template = "Old prompt\n## User Context\nUser prefers concise answers.\nRespond naturally.\nEnd";
+        let template =
+            "Old prompt\n## User Context\nUser prefers concise answers.\nRespond naturally.\nEnd";
 
         let result = compile_system_prompt(template, &tools, true, 8192);
         let text = &result.text;
@@ -642,7 +676,10 @@ mod tests {
         assert!(text.contains("list_files"), "tool missing");
         assert!(text.contains("Current date:"), "system state missing");
         assert!(text.contains("LIVE FACT MODE ACTIVE"), "live fact missing");
-        assert!(text.contains("User prefers concise answers"), "user context missing");
+        assert!(
+            text.contains("User prefers concise answers"),
+            "user context missing"
+        );
         assert!(text.contains("<tool_call>"), "tool call format missing");
     }
 }

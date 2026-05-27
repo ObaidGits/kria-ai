@@ -417,6 +417,46 @@ impl WorldModelStore {
         conn.execute("DELETE FROM world_facts_fts WHERE rowid = ?1", params![id])?;
         Ok(())
     }
+
+    /// Prune archived facts older than `max_age_days`.
+    ///
+    /// Returns the number of rows deleted.
+    pub fn prune_archive(&self, max_age_days: u64) -> anyhow::Result<i64> {
+        let conn = self.conn.lock().unwrap();
+        let cutoff = chrono::Utc::now() - chrono::Duration::days(max_age_days as i64);
+        let cutoff_str = cutoff.to_rfc3339();
+        let deleted = conn.execute(
+            "DELETE FROM world_facts_archive WHERE created_at < ?1",
+            params![cutoff_str],
+        )?;
+        Ok(deleted as i64)
+    }
+
+    /// Resolve contradictions by cleaning up redundant archived entries.
+    ///
+    /// The active `world_facts` table enforces UNIQUE(subject, predicate), so
+    /// true active contradictions are resolved at upsert time. This method
+    /// removes duplicate archived entries for the same (subject, predicate),
+    /// keeping only the most recent. Returns the number of redundant entries
+    /// removed.
+    pub fn resolve_contradictions(&self) -> anyhow::Result<i64> {
+        let conn = self.conn.lock().unwrap();
+        // Find duplicate archived (subject, predicate) pairs and keep the newest.
+        // This uses SQLite's rowid as a proxy for recency since the archive
+        // table is append-only.
+        let deleted = conn.execute(
+            "DELETE FROM world_facts_archive
+             WHERE id IN (
+                 SELECT id FROM world_facts_archive wfa
+                 WHERE wfa.id < (
+                     SELECT MAX(id) FROM world_facts_archive wfa2
+                     WHERE wfa2.subject = wfa.subject AND wfa2.predicate = wfa.predicate
+                 )
+             )",
+            [],
+        )?;
+        Ok(deleted as i64)
+    }
 }
 
 #[cfg(test)]
@@ -590,5 +630,63 @@ mod tests {
 
         let facts = store.query_subject("VM1").unwrap();
         assert_eq!(facts.len(), 3);
+    }
+
+    #[test]
+    fn prune_archive_removes_old_entries() {
+        let store = test_store();
+        // Insert a very low-confidence fact so it gets archived by decay
+        store
+            .upsert("old", "pred", "val", 0.05, FactSource::Detected, "t")
+            .unwrap();
+        let archived = store.decay_and_archive(0.1).unwrap();
+        assert_eq!(archived, 1);
+
+        // Set archived created_at to 48 hours ago so it qualifies for pruning
+        {
+            let conn = store.conn.lock().unwrap();
+            let old = (Utc::now() - chrono::Duration::hours(48)).to_rfc3339();
+            conn.execute(
+                "UPDATE world_facts_archive SET created_at = ?1",
+                params![old],
+            )
+            .unwrap();
+        }
+
+        let pruned = store.prune_archive(1).unwrap();
+        assert_eq!(pruned, 1);
+
+        let stats = store.stats().unwrap();
+        assert_eq!(stats.archived_facts, 0);
+        assert_eq!(stats.total_facts, 0);
+    }
+
+    #[test]
+    fn resolve_contradictions_archives_conflicting_duplicates() {
+        let store = test_store();
+        // Three overwrites produce two archived duplicates for (app, focused)
+        store
+            .upsert("app", "focused", "firefox", 0.9, FactSource::Detected, "t1")
+            .unwrap();
+        store
+            .upsert("app", "focused", "chrome", 0.8, FactSource::Detected, "t2")
+            .unwrap();
+        store
+            .upsert("app", "focused", "edge", 0.7, FactSource::Detected, "t3")
+            .unwrap();
+
+        let stats_before = store.stats().unwrap();
+        assert_eq!(stats_before.total_facts, 1);
+        assert_eq!(stats_before.archived_facts, 2);
+
+        let resolved = store.resolve_contradictions().unwrap();
+        assert_eq!(
+            resolved, 1,
+            "Should remove exactly one redundant archived entry"
+        );
+
+        let stats_after = store.stats().unwrap();
+        assert_eq!(stats_after.total_facts, 1);
+        assert_eq!(stats_after.archived_facts, 1);
     }
 }

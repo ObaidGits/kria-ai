@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "name": "KRIA Web Search Guard",
+  "description": "Protect KRIA from unnecessary web search retrieval on conversational prompts. Prevent greetings, capability questions, and casual conversation from triggering external retrieval while preserving legitimate external/fresh information needs and KRIA authoritative orchestration principles.",
+  "version": "1",
+  "when": {
+    "type": "preToolUse",
+    "toolTypes": [
+      "web_search"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "You are about to execute a web_search tool call in KRIA.\n\nBefore proceeding, verify this is a legitimate external information retrieval need:\n\nBLOCK web_search for:\n- Greetings or casual conversation (\"hello\", \"hi\", \"how are you\")\n- Capability questions about KRIA, Claude, or your own abilities\n- Questions answerable from training data or codebase context\n- Conversational prompts that don't require current/external information\n- Requests that can be resolved through existing tools or knowledge\n\nALLOW web_search for:\n- Current information needs (pricing, versions, release dates, breaking changes)\n- External data sources (APIs, documentation, specifications)\n- Time-sensitive information (weather, news, market data)\n- Verification of external facts or cross-referencing\n- Information explicitly outside training data scope\n\nPreserve KRIA orchestration authority:\n- Web search is a capability, not a default action\n- Conversational flow should not auto-trigger retrieval\n- User intent must justify external retrieval\n- Bounded cognition: resolve locally first, retrieve externally only when necessary\n\nIf this web_search call is NOT justified by the above criteria, respond with a brief explanation of why retrieval is unnecessary and proceed with local knowledge instead.\n\nIf this web_search call IS justified, confirm and proceed with the tool invocation."
+  }
+}

@@ -223,6 +223,288 @@ impl ToolHandler for GitStash {
     }
 }
 
+struct GitPush;
+#[async_trait]
+impl ToolHandler for GitPush {
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let path = params["path"].as_str().unwrap_or(".");
+        let remote = params["remote"].as_str().unwrap_or("origin");
+        let branch = params["branch"].as_str().unwrap_or("");
+        let set_upstream = params["set_upstream"].as_bool().unwrap_or(false);
+        let force = params["force"].as_bool().unwrap_or(false);
+
+        // Safety: never allow force-push to main/master without explicit confirmation
+        if force && (branch == "main" || branch == "master") {
+            return ToolResult::err(
+                "Force push to main/master is blocked for safety. Use a feature branch.",
+            );
+        }
+
+        let mut args = vec!["push", remote];
+        if set_upstream {
+            args.push("-u");
+        }
+        if force {
+            args.push("--force-with-lease"); // safer than --force
+        }
+        if !branch.is_empty() {
+            args.push(branch);
+        }
+
+        match run_git(&args, Some(path)).await {
+            Ok(output) => ToolResult::ok(serde_json::json!({
+                "pushed": true,
+                "remote": remote,
+                "branch": branch,
+                "output": output.trim(),
+            })),
+            Err(e) => ToolResult::err(e),
+        }
+    }
+}
+
+struct GitPull;
+#[async_trait]
+impl ToolHandler for GitPull {
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let path = params["path"].as_str().unwrap_or(".");
+        let remote = params["remote"].as_str().unwrap_or("origin");
+        let branch = params["branch"].as_str().unwrap_or("");
+        let rebase = params["rebase"].as_bool().unwrap_or(false);
+
+        let mut args = vec!["pull"];
+        if rebase {
+            args.push("--rebase");
+        }
+        args.push(remote);
+        if !branch.is_empty() {
+            args.push(branch);
+        }
+
+        match run_git(&args, Some(path)).await {
+            Ok(output) => ToolResult::ok(serde_json::json!({
+                "pulled": true,
+                "remote": remote,
+                "output": output.trim(),
+            })),
+            Err(e) => ToolResult::err(e),
+        }
+    }
+}
+
+struct GitFetch;
+#[async_trait]
+impl ToolHandler for GitFetch {
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let path = params["path"].as_str().unwrap_or(".");
+        let remote = params["remote"].as_str().unwrap_or("origin");
+        let prune = params["prune"].as_bool().unwrap_or(false);
+
+        let mut args = vec!["fetch", remote];
+        if prune {
+            args.push("--prune");
+        }
+
+        match run_git(&args, Some(path)).await {
+            Ok(output) => ToolResult::ok(serde_json::json!({
+                "fetched": true,
+                "remote": remote,
+                "output": output.trim(),
+            })),
+            Err(e) => ToolResult::err(e),
+        }
+    }
+}
+
+struct GitMerge;
+#[async_trait]
+impl ToolHandler for GitMerge {
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let path = params["path"].as_str().unwrap_or(".");
+        let branch = params["branch"].as_str().unwrap_or("");
+        if branch.is_empty() {
+            return ToolResult::err("branch is required for git merge");
+        }
+        let no_ff = params["no_ff"].as_bool().unwrap_or(false);
+
+        let mut args = vec!["merge"];
+        if no_ff {
+            args.push("--no-ff");
+        }
+        args.push(branch);
+
+        match run_git(&args, Some(path)).await {
+            Ok(output) => ToolResult::ok(serde_json::json!({
+                "merged": true,
+                "branch": branch,
+                "output": output.trim(),
+            })),
+            Err(e) => {
+                // Check for merge conflict
+                if e.contains("CONFLICT") || e.contains("Automatic merge failed") {
+                    ToolResult::ok(serde_json::json!({
+                        "merged": false,
+                        "conflict": true,
+                        "branch": branch,
+                        "output": e,
+                        "resolution": "Run git_status to see conflicting files, resolve them, then git_commit.",
+                    }))
+                } else {
+                    ToolResult::err(e)
+                }
+            }
+        }
+    }
+}
+
+struct GitReset;
+#[async_trait]
+impl ToolHandler for GitReset {
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let path = params["path"].as_str().unwrap_or(".");
+        let mode = params["mode"].as_str().unwrap_or("mixed"); // soft, mixed, hard
+        let target = params["target"].as_str().unwrap_or("HEAD");
+
+        // Safety: block hard reset to arbitrary commits without explicit confirmation
+        if mode == "hard" && target != "HEAD" && !target.starts_with("HEAD~") {
+            return ToolResult::err(
+                "Hard reset to non-HEAD target requires explicit confirmation. \
+                 Use mode=mixed or mode=soft for safer resets.",
+            );
+        }
+
+        let flag = match mode {
+            "soft" => "--soft",
+            "hard" => "--hard",
+            _ => "--mixed",
+        };
+
+        match run_git(&["reset", flag, target], Some(path)).await {
+            Ok(output) => ToolResult::ok(serde_json::json!({
+                "reset": true,
+                "mode": mode,
+                "target": target,
+                "output": output.trim(),
+            })),
+            Err(e) => ToolResult::err(e),
+        }
+    }
+}
+
+struct GitRemote;
+#[async_trait]
+impl ToolHandler for GitRemote {
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let path = params["path"].as_str().unwrap_or(".");
+        match run_git(&["remote", "-v"], Some(path)).await {
+            Ok(output) => {
+                let remotes: Vec<serde_json::Value> = output
+                    .lines()
+                    .filter(|l| !l.is_empty())
+                    .map(|l| {
+                        let parts: Vec<&str> = l.splitn(3, '\t').collect();
+                        let name = parts.first().unwrap_or(&"").to_string();
+                        let rest = parts.get(1).unwrap_or(&"").to_string();
+                        let (url, kind) = rest
+                            .rsplit_once(' ')
+                            .map(|(u, k)| {
+                                (
+                                    u.to_string(),
+                                    k.trim_matches(|c| c == '(' || c == ')').to_string(),
+                                )
+                            })
+                            .unwrap_or((rest, String::new()));
+                        serde_json::json!({ "name": name, "url": url, "type": kind })
+                    })
+                    .collect();
+                ToolResult::ok(serde_json::json!({ "remotes": remotes }))
+            }
+            Err(e) => ToolResult::err(e),
+        }
+    }
+}
+
+struct GitTag;
+#[async_trait]
+impl ToolHandler for GitTag {
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let path = params["path"].as_str().unwrap_or(".");
+        let name = params["name"].as_str().unwrap_or("");
+        let message = params["message"].as_str().unwrap_or("");
+        let list_only = params["list"].as_bool().unwrap_or(name.is_empty());
+
+        if list_only {
+            match run_git(&["tag", "--list", "--sort=-version:refname"], Some(path)).await {
+                Ok(output) => {
+                    let tags: Vec<&str> = output.lines().filter(|l| !l.is_empty()).collect();
+                    return ToolResult::ok(serde_json::json!({ "tags": tags }));
+                }
+                Err(e) => return ToolResult::err(e),
+            }
+        }
+
+        if name.is_empty() {
+            return ToolResult::err("tag name is required");
+        }
+
+        let args = if message.is_empty() {
+            vec!["tag", name]
+        } else {
+            vec!["tag", "-a", name, "-m", message]
+        };
+
+        match run_git(&args, Some(path)).await {
+            Ok(output) => ToolResult::ok(serde_json::json!({
+                "tagged": true,
+                "name": name,
+                "output": output.trim(),
+            })),
+            Err(e) => ToolResult::err(e),
+        }
+    }
+}
+
+struct GitClone;
+#[async_trait]
+impl ToolHandler for GitClone {
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let url = params["url"].as_str().unwrap_or("");
+        let destination = params["destination"].as_str().unwrap_or("");
+        let depth = params["depth"].as_u64();
+
+        if url.is_empty() {
+            return ToolResult::err("url is required for git clone");
+        }
+
+        // Safety: only allow https/ssh URLs
+        if !url.starts_with("https://") && !url.starts_with("git@") && !url.starts_with("ssh://") {
+            return ToolResult::err("Only https:// and git@/ssh:// URLs are allowed for git clone");
+        }
+
+        let mut args = vec!["clone"];
+        let depth_str;
+        if let Some(d) = depth {
+            depth_str = d.to_string();
+            args.push("--depth");
+            args.push(&depth_str);
+        }
+        args.push(url);
+        if !destination.is_empty() {
+            args.push(destination);
+        }
+
+        match run_git(&args, None).await {
+            Ok(output) => ToolResult::ok(serde_json::json!({
+                "cloned": true,
+                "url": url,
+                "destination": destination,
+                "output": output.trim(),
+            })),
+            Err(e) => ToolResult::err(e),
+        }
+    }
+}
+
 // ── Project Analysis ──
 
 struct AnalyzeProject;
@@ -605,7 +887,129 @@ pub fn register(reg: &ToolRegistry) {
             },
             Arc::new(GitStash),
         ),
-        // Project analysis
+        // ── New Git tools ──
+        (
+            ToolDef {
+                name: "git_push".into(),
+                description: "Push commits to a remote repository. Blocks force-push to main/master.".into(),
+                category: "developer".into(),
+                default_tier: RiskLevel::Red,
+                min_tier: "standard",
+                parameters: vec![
+                    param("path", "string", "Repository path", false),
+                    param("remote", "string", "Remote name (default: origin)", false),
+                    param("branch", "string", "Branch to push (default: current branch)", false),
+                    param("set_upstream", "boolean", "Set upstream tracking (-u)", false),
+                    param("force", "boolean", "Force push with lease (safer than --force)", false),
+                ],
+            },
+            Arc::new(GitPush),
+        ),
+        (
+            ToolDef {
+                name: "git_pull".into(),
+                description: "Pull changes from a remote repository.".into(),
+                category: "developer".into(),
+                default_tier: RiskLevel::Yellow,
+                min_tier: "standard",
+                parameters: vec![
+                    param("path", "string", "Repository path", false),
+                    param("remote", "string", "Remote name (default: origin)", false),
+                    param("branch", "string", "Branch to pull (default: current)", false),
+                    param("rebase", "boolean", "Use rebase instead of merge", false),
+                ],
+            },
+            Arc::new(GitPull),
+        ),
+        (
+            ToolDef {
+                name: "git_fetch".into(),
+                description: "Fetch changes from a remote without merging.".into(),
+                category: "developer".into(),
+                default_tier: RiskLevel::Green,
+                min_tier: "standard",
+                parameters: vec![
+                    param("path", "string", "Repository path", false),
+                    param("remote", "string", "Remote name (default: origin)", false),
+                    param("prune", "boolean", "Remove deleted remote branches", false),
+                ],
+            },
+            Arc::new(GitFetch),
+        ),
+        (
+            ToolDef {
+                name: "git_merge".into(),
+                description: "Merge a branch into the current branch. Reports conflicts if they occur.".into(),
+                category: "developer".into(),
+                default_tier: RiskLevel::Red,
+                min_tier: "standard",
+                parameters: vec![
+                    param("path", "string", "Repository path", false),
+                    param("branch", "string", "Branch to merge", true),
+                    param("no_ff", "boolean", "Create a merge commit even for fast-forward", false),
+                ],
+            },
+            Arc::new(GitMerge),
+        ),
+        (
+            ToolDef {
+                name: "git_reset".into(),
+                description: "Reset HEAD to a target commit. Blocks hard reset to non-HEAD targets for safety.".into(),
+                category: "developer".into(),
+                default_tier: RiskLevel::Red,
+                min_tier: "standard",
+                parameters: vec![
+                    param("path", "string", "Repository path", false),
+                    param("mode", "string", "Reset mode: soft, mixed (default), or hard", false),
+                    param("target", "string", "Target commit/ref (default: HEAD)", false),
+                ],
+            },
+            Arc::new(GitReset),
+        ),
+        (
+            ToolDef {
+                name: "git_remote".into(),
+                description: "List configured git remotes with their URLs.".into(),
+                category: "developer".into(),
+                default_tier: RiskLevel::Green,
+                min_tier: "standard",
+                parameters: vec![
+                    param("path", "string", "Repository path", false),
+                ],
+            },
+            Arc::new(GitRemote),
+        ),
+        (
+            ToolDef {
+                name: "git_tag".into(),
+                description: "List tags or create a new tag (annotated if message provided).".into(),
+                category: "developer".into(),
+                default_tier: RiskLevel::Yellow,
+                min_tier: "standard",
+                parameters: vec![
+                    param("path", "string", "Repository path", false),
+                    param("name", "string", "Tag name (omit to list tags)", false),
+                    param("message", "string", "Annotated tag message (optional)", false),
+                    param("list", "boolean", "List all tags (default if name omitted)", false),
+                ],
+            },
+            Arc::new(GitTag),
+        ),
+        (
+            ToolDef {
+                name: "git_clone".into(),
+                description: "Clone a git repository. Only https:// and git@/ssh:// URLs allowed.".into(),
+                category: "developer".into(),
+                default_tier: RiskLevel::Yellow,
+                min_tier: "standard",
+                parameters: vec![
+                    param("url", "string", "Repository URL (https:// or git@)", true),
+                    param("destination", "string", "Local destination path (optional)", false),
+                    param("depth", "integer", "Shallow clone depth (optional)", false),
+                ],
+            },
+            Arc::new(GitClone),
+        ),
         (
             ToolDef {
                 name: "analyze_project".into(),

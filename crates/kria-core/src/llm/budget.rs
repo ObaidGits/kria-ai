@@ -302,7 +302,10 @@ impl TurnTokenLedger {
 
     /// Current estimation method.
     pub fn estimation_method(&self) -> EstimationMethod {
-        *self.estimation_method.lock().unwrap_or_else(|e| e.into_inner())
+        *self
+            .estimation_method
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
     }
 
     /// Snapshot for logging/observability.
@@ -348,10 +351,7 @@ pub struct LedgerSnapshot {
 impl LedgerSnapshot {
     /// Total estimated tokens (all categories).
     pub fn total_estimated(&self) -> usize {
-        self.system_tokens
-            + self.history_tokens
-            + self.tool_result_tokens
-            + self.retrieval_tokens
+        self.system_tokens + self.history_tokens + self.tool_result_tokens + self.retrieval_tokens
     }
 
     /// Serialize to JSON for pipeline trace logging.
@@ -409,10 +409,7 @@ pub fn check_inter_tool_budget(
 }
 
 /// Check whether the cumulative tool result tokens exceed the turn budget.
-pub fn check_tool_result_budget(
-    cumulative_tool_tokens: usize,
-    budgets: &ContextBudgets,
-) -> bool {
+pub fn check_tool_result_budget(cumulative_tool_tokens: usize, budgets: &ContextBudgets) -> bool {
     cumulative_tool_tokens >= budgets.turn_tool_budget
 }
 
@@ -623,9 +620,15 @@ mod tests {
     #[test]
     fn tool_result_budget_check_triggers_at_limit() {
         let budgets = ContextBudgets::local_4k();
-        assert!(!check_tool_result_budget(budgets.turn_tool_budget - 1, &budgets));
+        assert!(!check_tool_result_budget(
+            budgets.turn_tool_budget - 1,
+            &budgets
+        ));
         assert!(check_tool_result_budget(budgets.turn_tool_budget, &budgets));
-        assert!(check_tool_result_budget(budgets.turn_tool_budget + 100, &budgets));
+        assert!(check_tool_result_budget(
+            budgets.turn_tool_budget + 100,
+            &budgets
+        ));
     }
 
     // ── Estimation ───────────────────────────────────────────────────────────

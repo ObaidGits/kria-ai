@@ -135,10 +135,17 @@ impl InstalledAppRegistry {
         aliases.clear();
         schemes.clear();
 
+        // Seed with built-in aliases first so .desktop entries can override them.
+        // This ensures "chrome", "vscode", "terminal" etc. resolve even on systems
+        // where the .desktop Name= field doesn't match the common user-facing name.
+        for (alias, id) in builtin_alias_map() {
+            aliases.insert(alias, id);
+        }
+
         for manifest in manifests {
             let id_str = manifest.app_id.as_str().to_lowercase();
 
-            // Register aliases (case-insensitive).
+            // Register aliases (case-insensitive). .desktop entries override builtins.
             aliases.insert(id_str.clone(), id_str.clone());
             aliases.insert(manifest.display_name.to_lowercase(), id_str.clone());
             for alias in &manifest.name_aliases {
@@ -152,6 +159,12 @@ impl InstalledAppRegistry {
 
             apps.insert(id_str, manifest);
         }
+
+        debug!(
+            apps = apps.len(),
+            aliases = aliases.len(),
+            "InstalledAppRegistry: loaded manifests with built-in aliases"
+        );
     }
 
     /// Spawn a background task that watches scan directories for changes and
@@ -175,9 +188,17 @@ impl InstalledAppRegistry {
         if let Ok(apps) = self.apps.try_read() {
             apps.contains_key(&app_id.as_str().to_lowercase())
         } else {
-            // Lock contention — fail safe by allowing the dispatch to proceed;
-            // the backend will return an error if the app truly isn't installed.
-            true
+            // FIX #14: Fail CLOSED on lock contention, not open.
+            // The previous behavior (return true) allowed any app name to pass
+            // the installed check during the 5-minute periodic rescan, which
+            // could allow an LLM to launch arbitrary binaries.
+            // Failing closed means the dispatch will be rejected with "not found"
+            // which is safer than silently allowing an unverified launch.
+            warn!(
+                app_id = %app_id.as_str(),
+                "InstalledAppRegistry: lock contention in is_installed — failing closed"
+            );
+            false
         }
     }
 
@@ -190,10 +211,36 @@ impl InstalledAppRegistry {
 
     /// Resolve a user-supplied app name (e.g., "chrome", "Google Chrome") to a
     /// `CanonicalAppId`. Returns `None` if no match.
+    ///
+    /// Uses `try_read()` to avoid blocking the caller. On lock contention (rare,
+    /// only during the 5-minute periodic rescan), logs a warning and returns `None`
+    /// rather than silently failing. Callers should treat `None` as "not found"
+    /// and surface an appropriate error.
     pub fn resolve_alias(&self, name: &str) -> Option<CanonicalAppId> {
-        let aliases = self.aliases.try_read().ok()?;
-        let id_str = aliases.get(&name.to_lowercase())?;
-        Some(CanonicalAppId::from_registry(id_str.clone()))
+        match self.aliases.try_read() {
+            Ok(aliases) => {
+                let normalized = normalize_alias(name);
+                if let Some(id_str) = aliases.get(&normalized) {
+                    return Some(CanonicalAppId::from_registry(id_str.clone()));
+                }
+
+                if let Ok(apps) = self.apps.try_read() {
+                    if let Some(id_str) = resolve_class_alias(&normalized, &aliases, &apps) {
+                        return Some(CanonicalAppId::from_registry(id_str));
+                    }
+                }
+
+                None
+            }
+            Err(_) => {
+                warn!(
+                    app_name = name,
+                    "InstalledAppRegistry: alias lock contention during resolve — \
+                     registry is being rescanned. Retry the request."
+                );
+                None
+            }
+        }
     }
 
     /// Return all URI schemes registered by installed applications.
@@ -228,6 +275,102 @@ impl InstalledAppRegistry {
                 current_hash == manifest.exec_fingerprint
             }
         }
+    }
+}
+
+fn normalize_alias(name: &str) -> String {
+    name.trim()
+        .to_ascii_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn resolve_class_alias(
+    normalized: &str,
+    aliases: &HashMap<String, String>,
+    apps: &HashMap<String, AppManifest>,
+) -> Option<String> {
+    let candidates = class_alias_candidates(normalized)?;
+    for candidate in candidates {
+        let candidate = normalize_alias(candidate);
+        if let Some(id) = aliases.get(&candidate) {
+            if apps.contains_key(&id.to_ascii_lowercase()) {
+                return Some(id.clone());
+            }
+        }
+        if apps.contains_key(&candidate) {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+fn class_alias_candidates(normalized: &str) -> Option<&'static [&'static str]> {
+    const SPREADSHEET: &[&str] = &[
+        "libreoffice calc",
+        "libreoffice-calc",
+        "calc",
+        "gnumeric",
+        "onlyoffice desktop editors",
+        "wps spreadsheets",
+    ];
+    const TEXT_EDITOR: &[&str] = &[
+        "text editor",
+        "gnome text editor",
+        "gedit",
+        "kate",
+        "xed",
+        "mousepad",
+    ];
+    const FILE_MANAGER: &[&str] = &[
+        "files",
+        "file manager",
+        "nautilus",
+        "dolphin",
+        "thunar",
+        "nemo",
+    ];
+    const IDE: &[&str] = &[
+        "code",
+        "visual studio code",
+        "vscode",
+        "vscodium",
+        "cursor",
+        "windsurf",
+        "zed",
+    ];
+
+    if matches!(
+        normalized,
+        "excel"
+            | "microsoft excel"
+            | "excel or calc"
+            | "calc or excel"
+            | "spreadsheet"
+            | "spreadsheet app"
+            | "sheet app"
+            | "libreoffice calc"
+            | "calc"
+    ) {
+        Some(SPREADSHEET)
+    } else if matches!(
+        normalized,
+        "text editor" | "editor" | "plain text editor" | "document editor"
+    ) {
+        Some(TEXT_EDITOR)
+    } else if matches!(
+        normalized,
+        "file manager" | "files" | "home folder" | "folder viewer"
+    ) {
+        Some(FILE_MANAGER)
+    } else if matches!(
+        normalized,
+        "code" | "code editor" | "ide" | "editor for code"
+    ) {
+        Some(IDE)
+    } else {
+        None
     }
 }
 
@@ -269,9 +412,13 @@ fn parse_desktop_file(path: &Path) -> Option<AppManifest> {
     let mut startup_wm_class = String::new();
     let mut mime_types: Vec<String> = Vec::new();
     let mut hidden = false;
-    let mut no_display = false;
 
     for line in content.lines() {
+        // FIX #13: Trim \r to handle Windows-formatted .desktop files (CRLF line endings).
+        // Without this, "[Desktop Entry]\r" != "[Desktop Entry]" and the parser breaks
+        // immediately, silently skipping the entire manifest.
+        let line = line.trim_end_matches('\r');
+
         // Only parse the [Desktop Entry] section.
         if line.starts_with('[') && line != "[Desktop Entry]" {
             break;
@@ -299,13 +446,15 @@ fn parse_desktop_file(path: &Path) -> Option<AppManifest> {
         } else if line == "Hidden=true" || line == "NoDisplay=true" {
             if line == "Hidden=true" {
                 hidden = true;
-            } else {
-                no_display = true;
             }
+            // NoDisplay=true: still index the app (it's launchable by name)
+            // but don't add it to the visible launcher list.
         }
     }
 
-    if name.is_empty() || hidden || no_display {
+    // Index NoDisplay=true apps (they're still launchable by name, just hidden
+    // from application launchers). Only skip truly Hidden=true entries.
+    if name.is_empty() || hidden {
         return None;
     }
 
@@ -327,6 +476,36 @@ fn parse_desktop_file(path: &Path) -> Option<AppManifest> {
     let mut aliases = vec![name.to_lowercase()];
     if !generic_name.is_empty() {
         aliases.push(generic_name.to_lowercase());
+    }
+
+    // Auto-extract Flatpak/reverse-DNS aliases.
+    // For IDs like "org.gnome.gedit", "com.visualstudio.code", etc.,
+    // add the last segment as an alias so users can say "gedit", "code", etc.
+    // This handles Flatpak-only installs where the .desktop stem is the full
+    // reverse-DNS ID rather than the short binary name.
+    if canonical_id.contains('.') {
+        let segments: Vec<&str> = canonical_id.split('.').collect();
+        if segments.len() >= 2 {
+            let last = segments.last().unwrap_or(&"").to_lowercase();
+            if !last.is_empty() && last.len() > 1 {
+                aliases.push(last.clone());
+                // Also add hyphenated variant (e.g., "TextEditor" → "text-editor")
+                let hyphenated = last
+                    .chars()
+                    .enumerate()
+                    .flat_map(|(i, c)| {
+                        if i > 0 && c.is_uppercase() {
+                            vec!['-', c.to_ascii_lowercase()]
+                        } else {
+                            vec![c.to_ascii_lowercase()]
+                        }
+                    })
+                    .collect::<String>();
+                if hyphenated != last {
+                    aliases.push(hyphenated);
+                }
+            }
+        }
     }
 
     Some(AppManifest {
@@ -366,25 +545,78 @@ fn sha256_bytes(data: &[u8]) -> [u8; 32] {
 pub fn builtin_alias_map() -> HashMap<String, String> {
     let mut m = HashMap::new();
     let pairs: &[(&str, &str)] = &[
-        ("chrome", "chromium"),
-        ("google chrome", "chromium"),
-        ("google-chrome", "chromium"),
+        // Chrome: map to google-chrome-stable (the canonical installed name on most systems).
+        // On Chromium-only systems the .desktop scanner adds "chromium" from its .desktop file.
+        ("chrome", "google-chrome-stable"),
+        ("google chrome", "google-chrome-stable"),
+        ("google-chrome", "google-chrome-stable"),
         ("google-chrome-stable", "google-chrome-stable"),
-        ("chrome browser", "chromium"),
-        ("google chrome browser", "chromium"),
+        ("chromium", "chromium"),
+        ("chromium-browser", "chromium"),
+        ("chrome browser", "google-chrome-stable"),
+        ("google chrome browser", "google-chrome-stable"),
+        // Firefox
         ("firefox", "firefox"),
         ("ff", "firefox"),
+        ("mozilla firefox", "firefox"),
+        // VS Code
         ("vscode", "code"),
         ("visual studio code", "code"),
         ("vs code", "code"),
+        ("code-oss", "code-oss"),
+        ("vscodium", "vscodium"),
+        // Editors
+        ("gedit", "gedit"),
+        ("kate", "kate"),
+        ("mousepad", "mousepad"),
+        ("xed", "xed"),
+        ("gnome text editor", "org.gnome.TextEditor"),
+        ("text editor", "org.gnome.TextEditor"),
+        ("plain text editor", "org.gnome.TextEditor"),
+        // Terminals
+        ("terminal", "org.gnome.Terminal"),
+        ("gnome terminal", "org.gnome.Terminal"),
+        ("gnome-terminal", "org.gnome.Terminal"),
+        ("konsole", "org.kde.konsole"),
+        ("xfce terminal", "xfce4-terminal"),
+        ("alacritty", "Alacritty"),
+        ("kitty", "kitty"),
+        // Messaging
         ("whatsapp", "whatsapp-linux-amd64"),
         ("telegram", "telegramdesktop"),
-        ("files", "org.gnome.nautilus"),
-        ("file manager", "org.gnome.nautilus"),
-        ("calculator", "org.gnome.calculator"),
-        ("text editor", "org.gnome.texeditor"),
-        ("terminal", "org.gnome.terminal"),
+        ("signal", "signal-desktop"),
+        // Files
+        ("files", "org.gnome.Nautilus"),
+        ("file manager", "org.gnome.Nautilus"),
+        ("nautilus", "org.gnome.Nautilus"),
+        ("thunar", "thunar"),
+        ("dolphin", "org.kde.dolphin"),
+        // Spreadsheets. Class aliases are resolved against installed apps first;
+        // these direct aliases keep common user names deterministic when Calc is installed.
+        ("spreadsheet", "libreoffice-calc"),
+        ("spreadsheet app", "libreoffice-calc"),
+        ("excel", "libreoffice-calc"),
+        ("microsoft excel", "libreoffice-calc"),
+        ("excel or calc", "libreoffice-calc"),
+        ("calc or excel", "libreoffice-calc"),
+        ("libreoffice calc", "libreoffice-calc"),
+        // System
+        ("calculator", "org.gnome.Calculator"),
         ("settings", "gnome-control-center"),
+        ("system settings", "systemsettings"),
+        // Brave
+        ("brave", "brave-browser"),
+        ("brave browser", "brave-browser"),
+        // Edge
+        ("edge", "microsoft-edge"),
+        ("microsoft edge", "microsoft-edge"),
+        // Flatpak common reverse-DNS aliases
+        ("org.gnome.gedit", "org.gnome.gedit"),
+        ("org.gnome.nautilus", "org.gnome.Nautilus"),
+        ("org.kde.kate", "org.kde.kate"),
+        ("com.visualstudio.code", "code"),
+        ("com.google.chrome", "google-chrome-stable"),
+        ("org.mozilla.firefox", "firefox"),
     ];
     for (alias, id) in pairs {
         m.insert(alias.to_string(), id.to_string());
@@ -399,9 +631,40 @@ mod tests {
     #[test]
     fn builtin_aliases_contain_chrome_variants() {
         let map = builtin_alias_map();
-        assert_eq!(map.get("chrome").unwrap(), "chromium");
-        assert_eq!(map.get("google chrome").unwrap(), "chromium");
-        assert_eq!(map.get("google-chrome").unwrap(), "chromium");
+        // "chrome" maps to "google-chrome-stable" (not "chromium")
+        // so it works on systems with Google Chrome installed.
+        // On Chromium-only systems, the .desktop scanner will add "chromium"
+        // as an alias from the Chromium .desktop file.
+        assert_eq!(map.get("chrome").unwrap(), "google-chrome-stable");
+        assert_eq!(map.get("google chrome").unwrap(), "google-chrome-stable");
+        assert_eq!(map.get("google-chrome").unwrap(), "google-chrome-stable");
+        // Chromium is also directly aliased
+        assert_eq!(map.get("chromium").unwrap(), "chromium");
+    }
+
+    #[tokio::test]
+    async fn class_alias_resolves_excel_or_calc_to_installed_spreadsheet() {
+        let registry = Arc::new(InstalledAppRegistry {
+            apps: Arc::new(RwLock::new(HashMap::new())),
+            aliases: Arc::new(RwLock::new(HashMap::new())),
+            schemes: Arc::new(RwLock::new(HashMap::new())),
+        });
+        registry
+            .load_manifests(vec![AppManifest {
+                app_id: CanonicalAppId::from_registry("libreoffice-calc".to_string()),
+                display_name: "LibreOffice Calc".to_string(),
+                desktop_path: PathBuf::from("/tmp/libreoffice-calc.desktop"),
+                exec_line: "libreoffice --calc %U".to_string(),
+                exec_fingerprint: sha256_bytes(b"libreoffice --calc %U"),
+                registered_schemes: Vec::new(),
+                name_aliases: vec!["calc".to_string()],
+            }])
+            .await;
+
+        let resolved = registry
+            .resolve_alias("Excel or Calc")
+            .expect("spreadsheet class alias should resolve");
+        assert_eq!(resolved.as_str(), "libreoffice-calc");
     }
 
     #[test]

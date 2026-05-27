@@ -31,6 +31,8 @@ pub struct KriaConfig {
     pub browser_agent: BrowserAgentConfig,
     // ─── OpenClaw Skill Substrate ───
     pub openclaw: crate::openclaw::OpenClawConfig,
+    // ─── n8n workflow substrate ───
+    pub n8n: crate::n8n::N8nConfig,
     // ─── Universal Model Provider System ───
     pub providers: crate::llm::provider::config::ProvidersConfig,
 }
@@ -44,6 +46,7 @@ pub struct LlmConfig {
     pub cloud_api_key: String,
     pub cloud_model_id: String,
     pub cloud_endpoint: String,
+    #[serde(alias = "mode")]
     pub routing_mode: String,
     pub context_window: usize,
     pub max_tokens: usize,
@@ -1133,6 +1136,9 @@ pub fn load_config(
     if let Ok(v) = std::env::var("KRIA_CLOUD_API_KEY") {
         config.llm.cloud_api_key = v;
     }
+    let explicit_legacy_llm_mode = std::env::var("KRIA_LLM_MODE").is_ok();
+    let explicit_active_provider = std::env::var("KRIA_ACTIVE_PROVIDER").is_ok();
+    apply_provider_env_overrides(&mut config);
     if let Ok(v) = std::env::var("KRIA_TIER") {
         if !v.trim().is_empty() {
             config.hardware.tier = v;
@@ -1178,7 +1184,132 @@ pub fn load_config(
         }
     }
 
+    if !explicit_legacy_llm_mode || explicit_active_provider {
+        sync_legacy_llm_from_active_provider(&mut config);
+    }
+
     Ok(config)
+}
+
+fn apply_provider_env_overrides(config: &mut KriaConfig) {
+    if let Ok(provider_id) = std::env::var("KRIA_ACTIVE_PROVIDER") {
+        if !provider_id.trim().is_empty() && config.providers.get(provider_id.trim()).is_some() {
+            config.providers.active_provider = provider_id.trim().to_string();
+        }
+    }
+
+    let active_provider = config.providers.active_provider.clone();
+    for provider in &mut config.providers.providers {
+        if provider.id == active_provider {
+            if let Ok(model_id) = std::env::var("KRIA_ACTIVE_MODEL") {
+                if !model_id.trim().is_empty() {
+                    provider.active_model = model_id.trim().to_string();
+                }
+            }
+            if let Ok(api_key) = std::env::var("KRIA_PROVIDER_API_KEY") {
+                if !api_key.trim().is_empty() {
+                    provider.endpoint.api_key = api_key;
+                }
+            }
+        }
+
+        for env_name in provider_api_key_env_names(&provider.id, provider.provider_type) {
+            if let Ok(api_key) = std::env::var(env_name) {
+                if !api_key.trim().is_empty() {
+                    provider.endpoint.api_key = api_key;
+                    break;
+                }
+            }
+        }
+    }
+}
+
+fn provider_api_key_env_names(
+    provider_id: &str,
+    provider_type: crate::llm::provider::config::ProviderType,
+) -> Vec<String> {
+    let mut names = vec![format!(
+        "KRIA_PROVIDER_{}_API_KEY",
+        provider_id
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() {
+                c.to_ascii_uppercase()
+            } else {
+                '_'
+            })
+            .collect::<String>()
+    )];
+
+    match provider_type {
+        crate::llm::provider::config::ProviderType::OpenAI => {
+            names.extend(["KRIA_OPENAI_API_KEY".into(), "OPENAI_API_KEY".into()]);
+        }
+        crate::llm::provider::config::ProviderType::Gemini => {
+            names.extend([
+                "KRIA_GEMINI_API_KEY".into(),
+                "GEMINI_API_KEY".into(),
+                "GOOGLE_API_KEY".into(),
+            ]);
+        }
+        crate::llm::provider::config::ProviderType::Anthropic => {
+            names.extend(["KRIA_ANTHROPIC_API_KEY".into(), "ANTHROPIC_API_KEY".into()]);
+        }
+        crate::llm::provider::config::ProviderType::OpenRouter => {
+            names.extend([
+                "KRIA_OPENROUTER_API_KEY".into(),
+                "OPENROUTER_API_KEY".into(),
+            ]);
+        }
+        crate::llm::provider::config::ProviderType::OpenAICompatible => {
+            if provider_id.eq_ignore_ascii_case("opencode") {
+                names.push("KRIA_OPENCODE_API_KEY".into());
+            }
+        }
+        crate::llm::provider::config::ProviderType::Ollama
+        | crate::llm::provider::config::ProviderType::LlamaCpp => {}
+    }
+
+    names
+}
+
+fn sync_legacy_llm_from_active_provider(config: &mut KriaConfig) {
+    let Some(provider) = config.providers.active().cloned() else {
+        return;
+    };
+
+    match provider.provider_type {
+        crate::llm::provider::config::ProviderType::LlamaCpp => {
+            config.llm.routing_mode = "local".to_string();
+            if !provider.endpoint.base_url.trim().is_empty() {
+                config.llm.local_api_url = provider.endpoint.base_url;
+            }
+            if !provider.active_model.trim().is_empty() {
+                config.llm.active_model = provider.active_model;
+            }
+        }
+        crate::llm::provider::config::ProviderType::Gemini => {
+            config.llm.routing_mode = "gemini".to_string();
+            config.llm.cloud_provider = provider.id;
+            config.llm.cloud_endpoint = provider.endpoint.base_url;
+            if !provider.active_model.trim().is_empty() {
+                config.llm.cloud_model_id = provider.active_model;
+            }
+            if !provider.endpoint.api_key.trim().is_empty() && config.llm.cloud_api_key.is_empty() {
+                config.llm.cloud_api_key = provider.endpoint.api_key;
+            }
+        }
+        _ => {
+            config.llm.routing_mode = "external".to_string();
+            config.llm.cloud_provider = provider.id;
+            config.llm.cloud_endpoint = provider.endpoint.base_url;
+            if !provider.active_model.trim().is_empty() {
+                config.llm.cloud_model_id = provider.active_model;
+            }
+            if !provider.endpoint.api_key.trim().is_empty() && config.llm.cloud_api_key.is_empty() {
+                config.llm.cloud_api_key = provider.endpoint.api_key;
+            }
+        }
+    }
 }
 
 fn merge_config(base: &mut KriaConfig, user: &KriaConfig) {

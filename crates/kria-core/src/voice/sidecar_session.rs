@@ -28,9 +28,8 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use super::sidecar_ipc::{
-    read_frame, unlink_stale_socket, write_frame, IpcMessage,
-    HEARTBEAT_PING_INTERVAL_MS, HEARTBEAT_PONG_TIMEOUT_MS, MAX_AUDIO_BUFFER_BYTES,
-    MAX_PENDING_MESSAGES,
+    read_frame, unlink_stale_socket, write_frame, IpcMessage, HEARTBEAT_PING_INTERVAL_MS,
+    HEARTBEAT_PONG_TIMEOUT_MS, MAX_AUDIO_BUFFER_BYTES, MAX_PENDING_MESSAGES,
 };
 
 // ─── Supervision Constants (§10) ──────────────────────────────────────────
@@ -255,10 +254,7 @@ pub async fn create_listener(socket_path: &PathBuf) -> Result<UnixListener> {
 }
 
 /// Connect to a Unix socket with timeout.
-pub async fn connect_with_timeout(
-    socket_path: &PathBuf,
-    timeout: Duration,
-) -> Result<UnixStream> {
+pub async fn connect_with_timeout(socket_path: &PathBuf, timeout: Duration) -> Result<UnixStream> {
     tokio::time::timeout(timeout, UnixStream::connect(socket_path))
         .await
         .context("connection timeout")?
@@ -268,10 +264,7 @@ pub async fn connect_with_timeout(
 // ─── Session Handshake ────────────────────────────────────────────────────
 
 /// Perform hello handshake (§5.3).
-pub async fn handshake_hello<S>(
-    stream: &mut S,
-    state: &SessionState,
-) -> Result<IpcMessage>
+pub async fn handshake_hello<S>(stream: &mut S, state: &SessionState) -> Result<IpcMessage>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
@@ -312,10 +305,7 @@ where
 }
 
 /// Perform bye shutdown (§5.3).
-pub async fn handshake_bye<S>(
-    stream: &mut S,
-    state: &SessionState,
-) -> Result<()>
+pub async fn handshake_bye<S>(stream: &mut S, state: &SessionState) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {

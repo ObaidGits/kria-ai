@@ -758,15 +758,62 @@ pub(super) fn infer_verifiability_for_tool(
             })
         }
 
+        // File removal: verify the file no longer exists
+        "delete_file" | "remove_file" | "rm_file" => {
+            let path = params.get("path").and_then(|v| v.as_str())?;
+            Some(Verifiability::FileSystemEffect {
+                path: PathBuf::from(path),
+                kind: FsEffect::NotExists,
+            })
+        }
+
+        // File move/rename: verify destination exists
+        "move_file" | "rename_file" => {
+            let dest = params
+                .get("destination")
+                .or_else(|| params.get("dest"))
+                .or_else(|| params.get("to"))
+                .and_then(|v| v.as_str())?;
+            Some(Verifiability::FileSystemEffect {
+                path: PathBuf::from(dest),
+                kind: FsEffect::Exists,
+            })
+        }
+
+        // File copy: verify destination exists
+        "copy_file" | "cp_file" => {
+            let dest = params
+                .get("destination")
+                .or_else(|| params.get("dest"))
+                .and_then(|v| v.as_str())?;
+            Some(Verifiability::FileSystemEffect {
+                path: PathBuf::from(dest),
+                kind: FsEffect::Exists,
+            })
+        }
+
+        // Process close: verify the process is no longer running
+        "close_application" | "close_window" | "kill_process" => {
+            let app = params
+                .get("name")
+                .or_else(|| params.get("app"))
+                .or_else(|| params.get("application"))
+                .or_else(|| params.get("process"))
+                .and_then(|v| v.as_str())?;
+            let binary = app.split_whitespace().next()?.to_ascii_lowercase();
+            Some(Verifiability::ProcessNotRunning {
+                binary,
+                max_wait_ms: 2000,
+            })
+        }
+
         // Shell execution: if the result contains a file path, verify it exists
-        "execute_bash" | "execute_python" => {
+        "execute_bash" | "execute_python" | "execute_fleet_command" => {
             // Look for a file path in the result data
-            let output = result.data.as_str().or_else(|| {
-                result
-                    .data
-                    .get("stdout")
-                    .and_then(|v| v.as_str())
-            })?;
+            let output = result
+                .data
+                .as_str()
+                .or_else(|| result.data.get("stdout").and_then(|v| v.as_str()))?;
 
             // Simple heuristic: if output contains an absolute path that looks like
             // a created file, verify it exists

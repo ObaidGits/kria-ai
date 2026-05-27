@@ -59,6 +59,9 @@
   word-break: break-word;
   line-height: 1.65;
   font-size: 14px;
+  /* Don't clip scrollable children (wide tables) */
+  overflow: visible;
+  min-width: 0;
 }
 
 /* ── Per-role bubble styles ─────────────────────────────────── */
@@ -75,6 +78,12 @@
   border: 1px solid var(--assistant-bubble-border);
   border-bottom-left-radius: 4px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+/* When the assistant bubble contains tool calls, allow it to grow wider
+   so tables have room to breathe before the horizontal scroll kicks in */
+.msg-bubble-assistant:has(.tool-call) {
+  max-width: min(90%, 1100px);
 }
 
 .msg-bubble-system {
@@ -263,6 +272,8 @@
   flex-direction: column;
   gap: 4px;
   margin-bottom: 6px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 /* ── Attached image (user upload) ───────────────────────────── */

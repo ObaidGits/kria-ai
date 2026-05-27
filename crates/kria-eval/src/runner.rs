@@ -706,6 +706,7 @@ pub async fn run_eval_case(case: EvalCase) -> (EvalObservation, EvalVerdict) {
                 name,
                 result,
                 success,
+                ..
             } => {
                 tool_calls.push(serde_json::json!({
                     "phase": "end",
@@ -804,6 +805,7 @@ fn stream_event_to_json(event: &StreamEvent) -> serde_json::Value {
             name,
             result,
             success,
+            ..
         } => serde_json::json!({
             "type": "tool_end",
             "name": name,
@@ -873,6 +875,27 @@ fn stream_event_to_json(event: &StreamEvent) -> serde_json::Value {
         StreamEvent::Error(error) => serde_json::json!({
             "type": "error",
             "value": error,
+        }),
+        StreamEvent::RecoveryOptions {
+            context,
+            detail,
+            options,
+        } => serde_json::json!({
+            "type": "recovery_options",
+            "context": context,
+            "detail": detail,
+            "options": options.iter().map(|o| serde_json::json!({
+                "label": o.label,
+                "action_prompt": o.action_prompt,
+                "style": o.style,
+            })).collect::<Vec<_>>(),
+        }),
+        StreamEvent::TaskStep(step) => serde_json::json!({
+            "type": "task_step",
+            "index": step.index,
+            "total": step.total,
+            "description": step.description,
+            "status": step.status,
         }),
         StreamEvent::Done(text) => serde_json::json!({
             "type": "done",

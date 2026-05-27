@@ -1,0 +1,13 @@
+{
+  "version": "1.0.0",
+  "enabled": true,
+  "name": "KRIA Architecture Guard",
+  "description": "Protect KRIA runtime architecture and prevent orchestration regressions, tool chaos, unsafe execution patterns, and violations of authoritative orchestration principles.",
+  "when": {
+    "type": "preTaskExecution"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "You are modifying KRIA.\n\nBefore generating implementation or architecture changes, enforce ALL KRIA runtime authority invariants.\n\nKRIA is:\n- authoritative orchestrator\n- bounded execution intelligence platform\n- capability-first runtime system\n\nKRIA is NOT:\n- autonomous recursive AGI\n- uncontrolled tool mesh\n- tool-first execution system\n- self-spawning autonomous agent framework\n\nBefore implementation verify:\n\n1. KRIA remains orchestration authority.\n2. OpenClaw/MCP/n8n/providers remain execution substrates.\n3. Execution flow remains:\n   Intent → Capability → Policy → Substrate → Tool → Verification\n4. Avoid direct Prompt → Tool execution shortcuts.\n5. Avoid orchestration leakage into tools/substrates.\n6. Avoid recursive autonomous execution loops.\n7. Preserve verifier-aware execution.\n8. Preserve confirmation/safety policies.\n9. Preserve bounded cognition.\n10. Preserve deterministic orchestration.\n\nDetect and warn against:\n- direct tool-first execution\n- recursive agent loops\n- uncontrolled retries\n- GUI-first automation\n- provider-specific orchestration chaos\n- substrate self-authority\n- unsafe destructive execution\n- bypassing verification\n- bypassing cancellation propagation\n\nAlways prefer:\n- capability-first orchestration\n- execution authority discipline\n- fallback cognition\n- provider-aware routing\n- bounded execution intelligence\n- production-grade maintainability\n\nWhen proposing implementations:\n- preserve subsystem boundaries\n- avoid overengineering\n- avoid AGI-style architectures\n- keep implementation grounded in current KRIA runtime\n\nBefore finalizing implementation:\nbriefly self-check architecture consistency against KRIA runtime authority principles."
+  }
+}

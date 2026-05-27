@@ -11,7 +11,7 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
@@ -364,66 +364,88 @@ async fn handle_request(request: DaemonRequest) -> DaemonResponse {
         }
 
         DaemonRequest::GetActiveWindow => {
-            // Get active window ID
+            // Try xdotool first (works on X11 and XWayland with DISPLAY set).
+            // If that fails, try AT-SPI via gdbus (Wayland-native).
+            // If both fail, return WINDOW_ID_FAILED.
+
+            // Strategy 1: xdotool (X11/XWayland)
             let window_id_result = tokio::process::Command::new("xdotool")
                 .args(["getactivewindow"])
                 .output()
                 .await;
 
-            let window_id = match window_id_result {
-                Ok(output) if output.status.success() => {
-                    String::from_utf8_lossy(&output.stdout).trim().to_string()
-                }
-                _ => {
-                    return DaemonResponse::Error {
-                        message: "Failed to get active window ID".to_string(),
-                        code: Some("WINDOW_ID_FAILED".to_string()),
-                    };
-                }
-            };
+            if let Ok(output) = window_id_result {
+                if output.status.success() {
+                    let window_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    if !window_id.is_empty() {
+                        // Get window title
+                        let title = tokio::process::Command::new("xdotool")
+                            .args(["getwindowname", &window_id])
+                            .output()
+                            .await
+                            .ok()
+                            .filter(|o| o.status.success())
+                            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                            .unwrap_or_else(|| "Unknown".to_string());
 
-            // Get window title
-            let title_result = tokio::process::Command::new("xdotool")
-                .args(["getwindowname", &window_id])
-                .output()
-                .await;
+                        // Get window class using xprop
+                        let class = tokio::process::Command::new("xprop")
+                            .args(["-id", &window_id, "WM_CLASS"])
+                            .output()
+                            .await
+                            .ok()
+                            .filter(|o| o.status.success())
+                            .map(|o| {
+                                let s = String::from_utf8_lossy(&o.stdout);
+                                let parts: Vec<&str> = s.split('"').collect();
+                                if parts.len() >= 4 {
+                                    parts[3].to_string()
+                                } else {
+                                    "Unknown".to_string()
+                                }
+                            })
+                            .unwrap_or_else(|| "Unknown".to_string());
 
-            let title = match title_result {
-                Ok(output) if output.status.success() => {
-                    String::from_utf8_lossy(&output.stdout).trim().to_string()
-                }
-                _ => "Unknown".to_string(),
-            };
-
-            // Get window class using xprop (xdotool doesn't have getwindowclassname)
-            let class_result = tokio::process::Command::new("xprop")
-                .args(["-id", &window_id, "WM_CLASS"])
-                .output()
-                .await;
-
-            let class = match class_result {
-                Ok(output) if output.status.success() => {
-                    // Parse WM_CLASS(STRING) = "instance", "class"
-                    let output_str = String::from_utf8_lossy(&output.stdout);
-                    // Extract the class name (second quoted string)
-                    let parts: Vec<&str> = output_str.split('"').collect();
-                    if parts.len() >= 4 {
-                        parts[3].to_string() // Second quoted value is the class
-                    } else {
-                        "Unknown".to_string()
+                        let window_info = WindowInfo {
+                            title,
+                            class,
+                            pid: 0,
+                        };
+                        return DaemonResponse::Ok {
+                            data: Some(
+                                serde_json::to_value(window_info)
+                                    .unwrap_or(serde_json::Value::Null),
+                            ),
+                        };
                     }
                 }
-                _ => "Unknown".to_string(),
-            };
+            }
 
-            let window_info = WindowInfo {
-                title,
-                class,
-                pid: 0, // Could add PID query if needed
-            };
+            // Strategy 2: AT-SPI via gdbus (Wayland-native).
+            // Query the AT-SPI registry for the focused application.
+            // This works on GNOME Wayland sessions where xdotool fails.
+            if let Some(window_info) = get_active_window_via_atspi().await {
+                return DaemonResponse::Ok {
+                    data: Some(
+                        serde_json::to_value(window_info).unwrap_or(serde_json::Value::Null),
+                    ),
+                };
+            }
 
-            DaemonResponse::Ok {
-                data: Some(serde_json::to_value(window_info).unwrap_or(serde_json::Value::Null)),
+            // Strategy 3: /proc heuristic — find the most recently started GUI process.
+            // This is a last resort for non-GNOME Wayland compositors.
+            if let Some(window_info) = get_active_window_via_proc() {
+                return DaemonResponse::Ok {
+                    data: Some(
+                        serde_json::to_value(window_info).unwrap_or(serde_json::Value::Null),
+                    ),
+                };
+            }
+
+            // All strategies failed
+            DaemonResponse::Error {
+                message: "Failed to get active window ID".to_string(),
+                code: Some("WINDOW_ID_FAILED".to_string()),
             }
         }
 
@@ -440,6 +462,165 @@ async fn handle_request(request: DaemonRequest) -> DaemonResponse {
             DaemonResponse::Ok { data: None }
         }
     }
+}
+
+// ============================================================================
+// Wayland-Native Window Detection
+// ============================================================================
+
+/// Try to get the active window via AT-SPI D-Bus (Wayland-native).
+///
+/// Uses `gdbus` to query the AT-SPI accessibility bus for the focused
+/// application. This works on GNOME Wayland sessions where xdotool fails.
+///
+/// Returns `None` if AT-SPI is unavailable or the query fails.
+async fn get_active_window_via_atspi() -> Option<WindowInfo> {
+    // Step 1: Get the AT-SPI bus address from the session bus
+    let addr_output = tokio::process::Command::new("gdbus")
+        .args([
+            "call",
+            "--session",
+            "--dest",
+            "org.a11y.Bus",
+            "--object-path",
+            "/org/a11y/bus",
+            "--method",
+            "org.a11y.Bus.GetAddress",
+        ])
+        .output()
+        .await
+        .ok()?;
+
+    if !addr_output.status.success() {
+        return None;
+    }
+
+    // Parse the address from gdbus output: ('unix:path=...',)
+    let addr_str = String::from_utf8_lossy(&addr_output.stdout);
+    let atspi_address = addr_str
+        .trim()
+        .trim_start_matches('(')
+        .trim_end_matches(')')
+        .trim()
+        .trim_matches('\'')
+        .to_string();
+
+    if atspi_address.is_empty() || !atspi_address.starts_with("unix:") {
+        return None;
+    }
+
+    // Step 2: Query the focused application via AT-SPI registry
+    // We use atspi-get-focused-app if available, otherwise fall back to
+    // querying the desktop's children via gdbus on the AT-SPI bus.
+    //
+    // Try atspi-get-focused-app first (simple, direct)
+    if let Ok(output) = tokio::process::Command::new("atspi-get-focused-app")
+        .output()
+        .await
+    {
+        if output.status.success() {
+            let app_name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !app_name.is_empty() {
+                return Some(WindowInfo {
+                    title: app_name.clone(),
+                    class: app_name,
+                    pid: 0,
+                });
+            }
+        }
+    }
+
+    // Step 3: Use gdbus to query AT-SPI registry for registered applications
+    // This gives us the list of accessible applications on the AT-SPI bus.
+    let apps_output = tokio::process::Command::new("gdbus")
+        .args([
+            "call",
+            "--address",
+            &atspi_address,
+            "--dest",
+            "org.a11y.atspi.Registry",
+            "--object-path",
+            "/org/a11y/atspi/registry",
+            "--method",
+            "org.a11y.atspi.Registry.GetRegisteredEvents",
+        ])
+        .output()
+        .await
+        .ok()?;
+
+    // AT-SPI is available but we couldn't identify the focused application.
+    // Do NOT return a generic "Wayland Session" title — it will never match any
+    // WindowFocused checkpoint and causes all focus verifications to fail.
+    // Fall through to the /proc heuristic instead.
+    let _ = apps_output;
+    None
+}
+
+/// Last-resort heuristic: scan /proc for the most recently started GUI process.
+///
+/// Finds processes that have WAYLAND_DISPLAY or DISPLAY in their environment,
+/// sorted by inode (proxy for start time). Returns the most recently started
+/// non-system GUI process.
+fn get_active_window_via_proc() -> Option<WindowInfo> {
+    let mut candidates: Vec<(u64, String)> = Vec::new();
+
+    let entries = std::fs::read_dir("/proc").ok()?;
+    for entry in entries.flatten() {
+        let pid_dir = entry.path();
+        if !pid_dir.is_dir() {
+            continue;
+        }
+        let name = pid_dir.file_name()?.to_str()?.to_string();
+        if name.parse::<u32>().is_err() {
+            continue;
+        }
+
+        // Check if this process has a GUI environment
+        let environ = std::fs::read(pid_dir.join("environ")).ok()?;
+        let has_display = environ.windows(8).any(|w| w == b"DISPLAY=")
+            || environ.windows(17).any(|w| w == b"WAYLAND_DISPLAY=");
+        if !has_display {
+            continue;
+        }
+
+        // Get process name
+        let comm = std::fs::read_to_string(pid_dir.join("comm")).ok()?;
+        let comm = comm.trim().to_string();
+
+        // Skip kernel threads and common system processes
+        if comm.starts_with('[')
+            || matches!(
+                comm.as_str(),
+                "systemd"
+                    | "dbus-daemon"
+                    | "pulseaudio"
+                    | "pipewire"
+                    | "Xwayland"
+                    | "gnome-shell"
+                    | "kwin_wayland"
+            )
+        {
+            continue;
+        }
+
+        // Use inode as proxy for start time (higher = more recent)
+        if let Ok(meta) = std::fs::metadata(&pid_dir) {
+            use std::os::unix::fs::MetadataExt;
+            candidates.push((meta.ino(), comm));
+        }
+    }
+
+    // Sort by inode descending (most recently created first)
+    candidates.sort_by(|a, b| b.0.cmp(&a.0));
+
+    candidates.first().map(|(_, name)| {
+        info!(process = %name, "Wayland fallback: using most recent GUI process");
+        WindowInfo {
+            title: name.clone(),
+            class: name.clone(),
+            pid: 0,
+        }
+    })
 }
 
 // ============================================================================
@@ -651,6 +832,43 @@ async fn handle_client(stream: UnixStream) -> Result<()> {
     Ok(())
 }
 
+async fn monitor_parent_process(parent_pid: u32, parent_start_time: Option<u64>) {
+    let mut interval = tokio::time::interval(TokioDuration::from_secs(2));
+    interval.tick().await;
+
+    loop {
+        interval.tick().await;
+        if parent_process_matches(parent_pid, parent_start_time) {
+            continue;
+        }
+
+        warn!(
+            parent_pid,
+            "KRIA parent process disappeared; uinput daemon exiting to avoid stale automation service"
+        );
+        let _ = execute_emergency_release().await;
+        std::process::exit(0);
+    }
+}
+
+fn parent_process_matches(parent_pid: u32, parent_start_time: Option<u64>) -> bool {
+    if !Path::new(&format!("/proc/{parent_pid}")).exists() {
+        return false;
+    }
+
+    match parent_start_time {
+        Some(expected) => process_start_time_ticks(parent_pid) == Some(expected),
+        None => true,
+    }
+}
+
+fn process_start_time_ticks(pid: u32) -> Option<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let close = stat.rfind(')')?;
+    let rest = stat.get(close + 2..)?;
+    rest.split_whitespace().nth(19)?.parse().ok()
+}
+
 // ============================================================================
 // Main
 // ============================================================================
@@ -675,6 +893,8 @@ async fn main() -> Result<()> {
     let socket_path = {
         let args: Vec<String> = std::env::args().collect();
         let mut cli_path: Option<PathBuf> = None;
+        let mut parent_pid: Option<u32> = None;
+        let mut parent_start_time: Option<u64> = None;
         let mut i = 1;
         while i < args.len() {
             match args[i].as_str() {
@@ -688,9 +908,40 @@ async fn main() -> Result<()> {
                 arg if arg.starts_with("--socket=") => {
                     cli_path = Some(PathBuf::from(&arg["--socket=".len()..]));
                 }
+                "--parent-pid" => {
+                    if let Some(next) = args.get(i + 1) {
+                        parent_pid = next.parse().ok();
+                        i += 2;
+                        continue;
+                    }
+                }
+                arg if arg.starts_with("--parent-pid=") => {
+                    parent_pid = arg["--parent-pid=".len()..].parse().ok();
+                }
+                "--parent-start-time" => {
+                    if let Some(next) = args.get(i + 1) {
+                        parent_start_time = next.parse().ok();
+                        i += 2;
+                        continue;
+                    }
+                }
+                arg if arg.starts_with("--parent-start-time=") => {
+                    parent_start_time = arg["--parent-start-time=".len()..].parse().ok();
+                }
                 _ => {}
             }
             i += 1;
+        }
+
+        if let Some(pid) = parent_pid {
+            tokio::spawn(monitor_parent_process(pid, parent_start_time));
+            info!(
+                parent_pid = pid,
+                parent_start_time = ?parent_start_time,
+                "Parent-process watchdog enabled"
+            );
+        } else {
+            warn!("Parent-process watchdog disabled; daemon may survive an unclean KRIA shutdown");
         }
 
         cli_path

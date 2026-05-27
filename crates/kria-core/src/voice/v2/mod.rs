@@ -147,12 +147,20 @@ pub fn build_v2_with_cli_engines(
     let aec = AecProcessor::passthrough(AecSettings::default());
     let post_editor =
         HinglishPostEditor::from_config(&voice_cfg.post_edit, profile.post_edit_timeout_ms);
-    
+
     // P1.3: Optional Whisper refiner for post-commit transcript improvement
     let refiner = None; // TODO: Wire from config when voice-whisper-rs feature is enabled
-    
-    let (pipeline, state_rx, telemetry_rx) =
-        VoicePipelineV2::new(profile, stt_v2, tts_v2, playback, wake, aec, post_editor, refiner);
+
+    let (pipeline, state_rx, telemetry_rx) = VoicePipelineV2::new(
+        profile,
+        stt_v2,
+        tts_v2,
+        playback,
+        wake,
+        aec,
+        post_editor,
+        refiner,
+    );
     (Arc::new(pipeline), state_rx, telemetry_rx)
 }
 

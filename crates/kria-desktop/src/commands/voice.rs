@@ -380,6 +380,7 @@ pub async fn start_voice(state: State<'_, AppStateCell>, app: AppHandle) -> Resu
                                 name,
                                 result,
                                 success,
+                                ..
                             } => {
                                 let args = pending_tool_params
                                     .remove(&name)
@@ -560,6 +561,12 @@ pub async fn start_voice(state: State<'_, AppStateCell>, app: AppHandle) -> Resu
                                 if !final_text.is_empty() && full_response.is_empty() {
                                     full_response = final_text;
                                 }
+                            }
+                            StreamEvent::RecoveryOptions { .. } => {
+                                // voice pipeline does not render recovery UI; ignore
+                            }
+                            StreamEvent::TaskStep(_) => {
+                                // voice pipeline does not render task steps; ignore
                             }
                         }
                     }

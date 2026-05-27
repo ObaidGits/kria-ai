@@ -1,8 +1,0 @@
-{
-  "target_id": "192.168.122.240",
-  "suite_name": "Destructive OS (VM)",
-  "zone": "os_level",
-  "status": "fail",
-  "timestamp_unix_ms": 1778341103534,
-  "report_path": "tests-logs/KRIA_TEST_REPORT_20260509_153822.md"
-}

@@ -89,7 +89,11 @@ impl CloudBackend {
 #[async_trait]
 impl LlmBackend for CloudBackend {
     fn model_label(&self) -> &str {
-        &self.display_name
+        if self.model_id.trim().is_empty() {
+            &self.display_name
+        } else {
+            &self.model_id
+        }
     }
 
     fn capabilities(&self) -> &[String] {
@@ -124,8 +128,9 @@ impl LlmBackend for CloudBackend {
         // Fix: convert `role: "tool"` messages to `role: "user"` messages with
         // the tool result embedded as text. This is safe — the LLM still sees
         // the tool output, just formatted as a user turn.
-        let build_messages = |msgs: &[ChatMessage]| {
-            msgs.iter().map(|m| {
+        let build_messages =
+            |msgs: &[ChatMessage]| {
+                msgs.iter().map(|m| {
                 if m.role.eq_ignore_ascii_case("tool") {
                     // Wrap tool result as a user message so providers without
                     // native tool-result support don't reject the conversation.
@@ -145,17 +150,21 @@ impl LlmBackend for CloudBackend {
                     msg
                 }
             }).collect::<Vec<_>>()
-        };
+            };
 
         let build_tools = |t: &[ToolSchema]| -> Vec<serde_json::Value> {
-            t.iter().map(|ts| serde_json::json!({
-                "type": "function",
-                "function": {
-                    "name": ts.name,
-                    "description": ts.description,
-                    "parameters": ts.parameters,
-                }
-            })).collect()
+            t.iter()
+                .map(|ts| {
+                    serde_json::json!({
+                        "type": "function",
+                        "function": {
+                            "name": ts.name,
+                            "description": ts.description,
+                            "parameters": ts.parameters,
+                        }
+                    })
+                })
+                .collect()
         };
 
         let url = format!("{}/chat/completions", self.endpoint);
@@ -199,7 +208,11 @@ impl LlmBackend for CloudBackend {
             match status {
                 429 => {
                     let wait = 2u64.pow(attempt);
-                    tracing::warn!(attempt, wait_secs = wait, "cloud LLM rate limited, retrying");
+                    tracing::warn!(
+                        attempt,
+                        wait_secs = wait,
+                        "cloud LLM rate limited, retrying"
+                    );
                     tokio::time::sleep(Duration::from_secs(wait)).await;
                     continue;
                 }
@@ -236,14 +249,10 @@ impl LlmBackend for CloudBackend {
                             .json(&payload_no_tools)
                             .send()
                             .await?;
-                        let body2: serde_json::Value =
-                            resp2.error_for_status()?.json().await?;
+                        let body2: serde_json::Value = resp2.error_for_status()?.json().await?;
                         return Ok(Self::parse_response(body2, &self.model_id));
                     }
-                    anyhow::bail!(
-                        "Bad request (400) to '{}': {body}",
-                        self.endpoint
-                    );
+                    anyhow::bail!("Bad request (400) to '{}': {body}", self.endpoint);
                 }
                 200..=299 => {
                     let body: serde_json::Value = resp.json().await?;
@@ -279,24 +288,27 @@ impl LlmBackend for CloudBackend {
             && tools.map(|t| !t.is_empty()).unwrap_or(false);
 
         // Build wire-format messages with tool→user conversion (same as chat())
-        let wire_messages: Vec<serde_json::Value> = messages.iter().map(|m| {
-            if m.role.eq_ignore_ascii_case("tool") {
-                let tool_name = m.name.as_deref().unwrap_or("tool");
-                serde_json::json!({
-                    "role": "user",
-                    "content": format!("[Tool result from '{}']\n{}", tool_name, m.content),
-                })
-            } else {
-                let mut msg = serde_json::json!({
-                    "role": m.role,
-                    "content": m.content,
-                });
-                if let Some(ref name) = m.name {
-                    msg["name"] = serde_json::json!(name);
+        let wire_messages: Vec<serde_json::Value> = messages
+            .iter()
+            .map(|m| {
+                if m.role.eq_ignore_ascii_case("tool") {
+                    let tool_name = m.name.as_deref().unwrap_or("tool");
+                    serde_json::json!({
+                        "role": "user",
+                        "content": format!("[Tool result from '{}']\n{}", tool_name, m.content),
+                    })
+                } else {
+                    let mut msg = serde_json::json!({
+                        "role": m.role,
+                        "content": m.content,
+                    });
+                    if let Some(ref name) = m.name {
+                        msg["name"] = serde_json::json!(name);
+                    }
+                    msg
                 }
-                msg
-            }
-        }).collect();
+            })
+            .collect();
 
         let mut payload = serde_json::json!({
             "model": self.model_id,
@@ -311,14 +323,16 @@ impl LlmBackend for CloudBackend {
                 if !t.is_empty() {
                     let tool_defs: Vec<serde_json::Value> = t
                         .iter()
-                        .map(|ts| serde_json::json!({
-                            "type": "function",
-                            "function": {
-                                "name": ts.name,
-                                "description": ts.description,
-                                "parameters": ts.parameters,
-                            }
-                        }))
+                        .map(|ts| {
+                            serde_json::json!({
+                                "type": "function",
+                                "function": {
+                                    "name": ts.name,
+                                    "description": ts.description,
+                                    "parameters": ts.parameters,
+                                }
+                            })
+                        })
                         .collect();
                     payload["tools"] = serde_json::Value::Array(tool_defs);
                 }

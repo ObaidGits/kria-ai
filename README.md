@@ -262,27 +262,27 @@ cargo run --release
 
 | Document | Purpose |
 |----------|---------|
-| [Architecture](docs/ARCHITECTURE.md) | Detailed system architecture |
-| [Tools Guide](docs/TOOLS.md) | All 60+ tools documentation |
-| [OpenClaw](docs/OPENCLAW.md) | Skill substrate integration |
-| [Safety Model](docs/SAFETY.md) | Risk classification & HITL |
-| [Development](docs/DEVELOPMENT.md) | Build, test, contribute |
-| [FAQ](docs/FAQ.md) | Frequently asked questions |
-| [Voice](docs/VOICE.md) | Voice pipeline details |
-| [Memory](docs/MEMORY.md) | Memory & RAG system |
-| [Hardware](docs/HARDWARE.md) | GPU orchestration |
-| [Deployment](docs/DEPLOYMENT.md) | Packaging & distribution |
+| [Docs Index](docs/index.md) | Canonical documentation map |
+| [Architecture Overview](docs/architecture/overview.md) | Platform structure and boundaries |
+| [Core Runtime](docs/architecture/core-runtime.md) | Agent runtime, memory, verification, recovery, result synthesis |
+| [GUI Cognition Runtime](docs/architecture/gui-cognition-runtime.md) | GUI automation cognition architecture |
+| [Safety + HITL](docs/architecture/safety-hitl-runtime.md) | Risk classification, policy, audit, HITL |
+| [Development](docs/operations/development.md) | Build, test, contribute |
+| [Voice](docs/voice/overview.md) | Voice pipeline and runtime invariants |
+| [Hardware](docs/operations/hardware.md) | Hardware orchestration |
+| [Deployment](docs/operations/deployment.md) | Packaging and distribution |
 
-### AI Context Files
+### AI/LLM Development Context
 
 For AI assistants working on this codebase:
 
 | File | Purpose |
 |------|---------|
-| [PROJECT_CONTEXT.md](ai-context/PROJECT_CONTEXT.md) | Tech stack, subsystems, constraints |
-| [CODE_GRAPH_INDEX.md](ai-context/CODE_GRAPH_INDEX.md) | Entry points, dependencies, types |
-| [CORE_CONTEXT.md](ai-context/CORE_CONTEXT.md) | Authoritative runtime behavior |
-| [AI_RULES.md](ai-context/AI_RULES.md) | Rules for AI working on KRIA |
+| [LLM Context Index](docs/llm-context/index.md) | AI-facing orientation pack |
+| [Entry Points](docs/llm-context/entry-points.md) | Main source entry points and ownership |
+| [Query Guide](docs/llm-context/query-guide.md) | How to trace dependencies and blast radius |
+| [Project Graph Summary](docs/llm-context/project-graph-summary.md) | Compact graph and flow summary |
+| [Project Graph JSON](docs/llm-context/project-graph.json) | Machine-readable project graph |
 
 ---
 

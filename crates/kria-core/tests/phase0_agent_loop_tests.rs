@@ -422,6 +422,7 @@ async fn agent_loop_blocks_tool_above_hardware_tier() {
             name,
             result,
             success,
+            ..
         } if name == "install_package" => Some((result.clone(), *success)),
         _ => None,
     });
@@ -522,6 +523,7 @@ async fn agent_loop_blocks_unmounted_tool_even_if_tier_allows_it() {
             name,
             result,
             success,
+            ..
         } if name == "get_cpu_usage" => Some((result.clone(), *success)),
         _ => None,
     });

@@ -158,7 +158,8 @@ export interface GuiWorkflowStepEvent {
   task_id: string;
   step: number;
   action: string;
-  status: 'started' | 'completed' | 'failed';
+  status: 'started' | 'completed' | 'failed' | 'verified' | 'partially_verified' | 'unverified';
+  confidence_tier?: string;
   timestamp: number;
 }
 

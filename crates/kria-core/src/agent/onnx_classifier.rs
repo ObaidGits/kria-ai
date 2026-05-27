@@ -19,7 +19,7 @@ const DEFAULT_MODEL_PATH: &str = "~/.kria/models/classifier/model.onnx";
 const TOKENIZER_FILENAME: &str = "tokenizer.json";
 const WORKSPACE_MODEL_RELATIVE: &str = "../../models/classifier/model.onnx";
 const WORKSPACE_TOKENIZER_RELATIVE: &str = "../../models/classifier/tokenizer.json";
-const WORKSPACE_CORPUS_RELATIVE: &str = "../../ai-context/onnx_l0_corpus.jsonl";
+const WORKSPACE_CORPUS_RELATIVE: &str = "../../docs/llm-context/routing-corpus.jsonl";
 
 const MIN_SIMILARITY_FOR_HINT: f32 = 0.20;
 const SOFTMAX_TEMPERATURE: f32 = 8.0;

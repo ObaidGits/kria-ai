@@ -1,5 +1,6 @@
 use super::*;
 use crate::commands::colab::migrate_legacy_colab_server_command;
+use std::collections::HashMap;
 
 pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     // Initialize logging first so startup diagnostics are filterable.
@@ -89,28 +90,42 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
             )
         };
 
-    // Boot the ContainerPool asynchronously — Docker may not be available.
-    // If unavailable, OpenClaw tools are registered but return a clear error
-    // on invocation rather than crashing the app.
-    let openclaw_config = kria_core::openclaw::OpenClawConfig::default();
-    let openclaw_pool: Option<Arc<kria_core::openclaw::ContainerPool>> =
-        match kria_core::openclaw::ContainerPool::new(openclaw_config).await {
+    // Boot the ContainerPool only when explicitly enabled in user config.
+    // Docker and the substrate image are optional; missing prerequisites should
+    // disable OpenClaw cleanly instead of creating repeated background warnings.
+    let openclaw_config = config.openclaw.clone();
+    let openclaw_pool: Option<Arc<kria_core::openclaw::ContainerPool>> = if !openclaw_config.enabled
+    {
+        tracing::info!("[OpenClaw] container pool disabled by configuration");
+        None
+    } else {
+        match kria_core::openclaw::ContainerPool::new(openclaw_config.clone()).await {
             Ok(pool) => {
                 let pool = Arc::new(pool);
-                // Pre-warm initial containers (non-fatal if it fails).
-                if let Err(e) = pool.initialize().await {
-                    tracing::warn!("[OpenClaw] pool pre-warm failed: {e}");
+                if let Err(e) = pool.verify_image_available().await {
+                    tracing::warn!(
+                        image = %openclaw_config.image,
+                        "[OpenClaw] container pool disabled: {e}"
+                    );
+                    None
+                } else if let Err(e) = pool.initialize().await {
+                    tracing::warn!(
+                        "[OpenClaw] container pool disabled after pre-warm failure: {e}"
+                    );
+                    None
+                } else {
+                    // Spawn background loop that maintains warm Light containers.
+                    kria_core::openclaw::ContainerPool::spawn_prewarm_loop(pool.clone());
+                    tracing::info!("[OpenClaw] container pool ready");
+                    Some(pool)
                 }
-                // Spawn background loop that maintains warm Light containers.
-                kria_core::openclaw::ContainerPool::spawn_prewarm_loop(pool.clone());
-                tracing::info!("[OpenClaw] container pool ready");
-                Some(pool)
             }
             Err(e) => {
                 tracing::info!("[OpenClaw] container pool unavailable (Docker not running?): {e}");
                 None
             }
-        };
+        }
+    };
 
     // Initialize model router from config
     let model_router = Arc::new(ModelRouter::from_config(&config));
@@ -123,10 +138,28 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     health.register("sidecar");
     health.update("sidecar", ServiceStatus::Starting, None);
     health.register("ocr_dependency");
+    health.register("gui_uinput_daemon");
+    health.register("gui_atspi_bus");
+    health.register("gui_vision_ocr");
     health.update(
         "ocr_dependency",
         ServiceStatus::Starting,
         Some("Probing OCR dependency readiness".into()),
+    );
+    health.update(
+        "gui_uinput_daemon",
+        ServiceStatus::Starting,
+        Some("Probing GUI input sidecar readiness".into()),
+    );
+    health.update(
+        "gui_atspi_bus",
+        ServiceStatus::Starting,
+        Some("Probing AT-SPI accessibility bus readiness".into()),
+    );
+    health.update(
+        "gui_vision_ocr",
+        ServiceStatus::Starting,
+        Some("Probing OCR/vision fallback readiness".into()),
     );
 
     // Python sidecar bridge (created early so tools can reference it)
@@ -161,18 +194,45 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     // Helper: resolve a model filename against multiple candidate directories.
     // Checks ~/.kria/models/llm/ first, then the workspace models/llm/ (for dev).
     let resolve_model_file = |filename: &str| -> String {
+        let filename = filename.trim();
+        if filename.is_empty() {
+            return filename.to_string();
+        }
+        let candidates = if filename.to_ascii_lowercase().ends_with(".gguf") {
+            vec![filename.to_string()]
+        } else {
+            vec![filename.to_string(), format!("{filename}.gguf")]
+        };
+
+        let direct = std::path::PathBuf::from(filename);
+        if direct.is_absolute() {
+            if direct.exists() {
+                return direct.to_string_lossy().to_string();
+            }
+            if direct.extension().is_none() {
+                let with_gguf = direct.with_extension("gguf");
+                if with_gguf.exists() {
+                    return with_gguf.to_string_lossy().to_string();
+                }
+            }
+        }
+
         // 1. ~/.kria/models/llm/
-        let p = paths.llm_models.join(filename);
-        if p.exists() {
-            return p.to_string_lossy().to_string();
+        for candidate in &candidates {
+            let p = paths.llm_models.join(candidate);
+            if p.exists() {
+                return p.to_string_lossy().to_string();
+            }
         }
         // 2. Walk up from CWD to find workspace models/llm/ (Tauri dev runs from a sub-crate)
         if let Ok(cwd) = std::env::current_dir() {
             let mut dir = Some(cwd.as_path());
             while let Some(d) = dir {
-                let candidate = d.join("models").join("llm").join(filename);
-                if candidate.exists() {
-                    return candidate.to_string_lossy().to_string();
+                for candidate in &candidates {
+                    let path = d.join("models").join("llm").join(candidate);
+                    if path.exists() {
+                        return path.to_string_lossy().to_string();
+                    }
                 }
                 dir = d.parent();
             }
@@ -207,7 +267,11 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     // instant. The orchestrator is only meaningful for local inference.
     let routing_mode_is_cloud = {
         use kria_core::llm::model_router::RoutingMode;
-        let mode: RoutingMode = config.llm.routing_mode.parse().unwrap_or(RoutingMode::Local);
+        let mode: RoutingMode = config
+            .llm
+            .routing_mode
+            .parse()
+            .unwrap_or(RoutingMode::Local);
         mode != RoutingMode::Local
     };
 
@@ -241,13 +305,67 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
                 let resolved = resolve_model_file(file);
                 std::path::Path::new(&resolved).exists()
             };
+            let configured_active_provider = config.providers.active().cloned();
+            let selected_local_model = configured_active_provider
+                .as_ref()
+                .filter(|provider| {
+                    provider.provider_type
+                        == kria_core::llm::provider::config::ProviderType::LlamaCpp
+                })
+                .and_then(|provider| {
+                    let model = provider.active_model.trim();
+                    (!model.is_empty()).then(|| model.to_string())
+                })
+                .unwrap_or_else(|| config.llm.active_model.clone());
+            let mut startup_models = config.llm.models.clone();
+
+            if !selected_local_model.trim().is_empty()
+                && !startup_models.iter().any(|model| {
+                    model.name.eq_ignore_ascii_case(&selected_local_model)
+                        || model.file.eq_ignore_ascii_case(&selected_local_model)
+                        || std::path::Path::new(&model.file)
+                            .file_stem()
+                            .and_then(|stem| stem.to_str())
+                            .map(|stem| stem.eq_ignore_ascii_case(&selected_local_model))
+                            .unwrap_or(false)
+                })
+            {
+                let selected_path = resolve_model_file(&selected_local_model);
+                let selected_path_ref = std::path::Path::new(&selected_path);
+                if selected_path_ref.exists() {
+                    let file = selected_path_ref
+                        .file_name()
+                        .and_then(|value| value.to_str())
+                        .unwrap_or(selected_local_model.as_str())
+                        .to_string();
+                    let name = selected_path_ref
+                        .file_stem()
+                        .and_then(|value| value.to_str())
+                        .unwrap_or(selected_local_model.as_str())
+                        .to_string();
+                    let size_bytes = std::fs::metadata(selected_path_ref)
+                        .map(|metadata| metadata.len())
+                        .unwrap_or(0);
+                    let size_gb = (size_bytes as f32 / 1024.0 / 1024.0 / 1024.0).max(1.0);
+                    startup_models.push(kria_core::config::LocalModelDef {
+                        name: name.clone(),
+                        file,
+                        display_name: name,
+                        context_window: config.llm.context_window.max(2048),
+                        max_tokens: config.llm.max_tokens.max(512),
+                        vram_estimate_gb: size_gb,
+                        capabilities: vec!["chat".to_string()],
+                        mmproj_file: None,
+                    });
+                }
+            }
 
             let choice = select_model_for_tier(
                 hardware_info.tier,
                 hardware_info.total_ram_mb,
                 hardware_info.vram_mb,
-                &config.llm.active_model,
-                &config.llm.models,
+                &selected_local_model,
+                &startup_models,
                 model_exists,
             );
 
@@ -401,7 +519,26 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
             )
         };
 
-    let _ = selected_model_name; // currently used only for logging above
+    if !selected_model_name.trim().is_empty() {
+        model_router_bg_ref
+            .set_active_local_model_label(selected_model_name.clone())
+            .await;
+    }
+
+    // ── Batch 1: PSDG — Initialize WorldModelStore EARLY ─────────────────────
+    // Must happen before AgentLoop construction so PsdgHandle can be wired in.
+    // Opens WorldModelStore against the same db_path as MemoryStore (WAL-safe).
+    let world_model_early: Option<kria_core::agent::PsdgHandle> =
+        match kria_core::agent::PsdgHandle::open(&paths.db_path) {
+            Ok(handle) => {
+                tracing::info!("[INIT] PSDG: WorldModelStore opened (WAL, same db as MemoryStore)");
+                Some(handle)
+            }
+            Err(e) => {
+                tracing::warn!("[INIT] PSDG: WorldModelStore open failed (degraded): {}", e);
+                None
+            }
+        };
 
     // Initialize embedding model and vector index for fact extraction
     let embeddings = Arc::new(EmbeddingModel::load(384).unwrap_or_else(|e| {
@@ -422,10 +559,11 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     let proactive_engine = Arc::new(kria_core::automation::ProactiveEngine::new(
         kria_core::automation::proactive::HealthThresholds::default(),
     ));
-    let tool_registry_inner = registry::build_registry_full(
+    let tool_registry_inner = registry::build_registry_full_with_psdg(
         Some(memory_store.clone()),
         Some(rag_engine.clone()),
         Some(proactive_engine.clone()),
+        world_model_early.clone(),
     );
     kria_core::tools::precognitive::register(&tool_registry_inner, sidecar.clone());
     kria_core::tools::news::register(&tool_registry_inner, sidecar.clone());
@@ -507,6 +645,45 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     tracing::info!("[GW] created lazy GwClientRef — registering Google Workspace tools now");
     gw::register(&tool_registry_inner, gw_client_ref.clone(), sidecar.clone());
 
+    match kria_core::n8n::register_into_tool_registry(&tool_registry_inner, config.n8n.clone()) {
+        Ok(Some(_client)) => {
+            tracing::info!("[n8n] registered n8n_invoke_workflow tool from configured catalog");
+        }
+        Ok(None) => {
+            tracing::debug!("[n8n] integration disabled; n8n tools not registered");
+        }
+        Err(error) => {
+            tracing::warn!(error = %error, "[n8n] integration configuration invalid; n8n tools not registered");
+        }
+    }
+    let n8n_catalog = Arc::new(RwLock::new(if config.n8n.enabled {
+        match kria_core::n8n::N8nCatalog::new(config.n8n.clone()) {
+            Ok(catalog) => Some(Arc::new(catalog)),
+            Err(error) => {
+                tracing::warn!(error = %error, "[n8n] callback catalog unavailable");
+                None
+            }
+        }
+    } else {
+        None
+    }));
+    let n8n_state_store = Arc::new(kria_core::n8n::N8nWorkflowStateStore::default());
+    let n8n_inbox_path = paths.data_dir.join("n8n").join("callback_inbox.jsonl");
+    let n8n_audit_path = paths.data_dir.join("n8n").join("governance_audit.jsonl");
+    let n8n_governance_log = Arc::new(RwLock::new(
+        Vec::<kria_core::n8n::N8nGovernanceDecision>::new(),
+    ));
+    let n8n_hitl_responses = Arc::new(RwLock::new(HashMap::<String, serde_json::Value>::new()));
+    match replay_n8n_inbox(n8n_inbox_path.as_path(), &n8n_state_store).await {
+        Ok(count) if count > 0 => {
+            tracing::info!(count, "[n8n] replayed durable callback inbox");
+        }
+        Ok(_) => {}
+        Err(error) => {
+            tracing::warn!(error = %error, path = %n8n_inbox_path.display(), "[n8n] failed to replay callback inbox");
+        }
+    }
+
     let fleet_control_runtime = match DesktopFleetControlRuntime::initialize(
         paths.data_dir.as_path(),
     )
@@ -548,6 +725,110 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     let hitl = Arc::new(HitlGateway::new(30));
 
     let policy_engine = Arc::new(PolicyEngine::new());
+
+    // ── Intent Dispatcher + App Lifecycle tools (full dispatcher path) ────────
+    // Wire the IntentDispatcher so browser_search, open_application, open_url,
+    // and send_message use the full policy/rate-limit/schema-validation pipeline
+    // instead of the legacy fallback handlers registered by build_registry_full.
+    // This also ensures correct X11/Wayland handling via LinuxBackend.
+    {
+        use kria_core::platform::app_registry::InstalledAppRegistry;
+        use kria_core::platform::intent::dispatcher::IntentDispatcher;
+        use kria_core::platform::intent::linux::LinuxBackend;
+
+        // build_async uses spawn_blocking for the filesystem scan — safe inside async context.
+        // build_sync would block_on inside an async context causing a deadlock.
+        let app_registry = InstalledAppRegistry::build_async().await;
+        let linux_backend = Arc::new(LinuxBackend::new(app_registry.clone()));
+        let intent_dispatcher = Arc::new(IntentDispatcher::new(
+            linux_backend,
+            app_registry.clone(),
+            policy_engine.clone(),
+        ));
+
+        // Re-register app lifecycle tools with the full dispatcher.
+        // This overrides the legacy handlers registered by build_registry_full.
+        // tool_registry is already wrapped in Arc at this point — deref to get &ToolRegistry.
+        kria_core::tools::app_lifecycle::register_with_dispatcher(
+            &*tool_registry,
+            Some(intent_dispatcher),
+            Some(app_registry),
+        );
+
+        tracing::info!("[INIT] app lifecycle tools re-registered with full IntentDispatcher (X11/Wayland aware)");
+
+        // Run startup validation to detect stale binary / missing tool registrations.
+        // This catches the production/eval divergence where tools return
+        // "tool does not implement execute" instead of working correctly.
+        let failed_tools =
+            kria_core::agent::gui_wiring::validate_gui_tool_registry(&tool_registry).await;
+        if !failed_tools.is_empty() {
+            tracing::error!(
+                "[INIT] GUI tool registry validation FAILED for: {:?}. \
+                 GUI automation will not work. Rebuild the production binary.",
+                failed_tools
+            );
+        }
+
+        // Run accessibility capability detection at startup.
+        // This detects whether AT-SPI is enabled and surfaces remediation if not.
+        // Also attempts automatic enablement if toolkit-accessibility is disabled.
+        {
+            let caps = kria_core::agent::atspi_engine::detect_capabilities().await;
+            if caps.accessibility_operational {
+                tracing::info!("[INIT] Accessibility: OPERATIONAL — AT-SPI interaction enabled");
+            } else {
+                tracing::warn!(
+                    "[INIT] Accessibility: NOT OPERATIONAL — semantic UI interaction disabled. \
+                     toolkit_accessibility_enabled={}, atspi_bus_available={}, accessible_apps_detected={}. \
+                     Fix: {}",
+                    caps.toolkit_accessibility_enabled,
+                    caps.atspi_bus_available,
+                    caps.accessible_apps_detected,
+                    caps.remediation.first().map(|s| s.as_str()).unwrap_or("see accessibility_doctor tool")
+                );
+
+                // Attempt automatic enablement if toolkit-accessibility is the only issue
+                if !caps.toolkit_accessibility_enabled && caps.atspi_bus_available {
+                    tracing::info!(
+                        "[INIT] Attempting automatic accessibility enablement via gsettings..."
+                    );
+                    let enable_result = tokio::process::Command::new("gsettings")
+                        .args([
+                            "set",
+                            "org.gnome.desktop.interface",
+                            "toolkit-accessibility",
+                            "true",
+                        ])
+                        .output()
+                        .await;
+                    match enable_result {
+                        Ok(out) if out.status.success() => {
+                            tracing::info!(
+                                "[INIT] Accessibility auto-enabled successfully. \
+                                 AT-SPI interaction will be available for new app launches."
+                            );
+                        }
+                        Ok(out) => {
+                            let stderr = String::from_utf8_lossy(&out.stderr);
+                            tracing::warn!(
+                                "[INIT] Accessibility auto-enable failed: {}. \
+                                 Run manually: gsettings set org.gnome.desktop.interface toolkit-accessibility true",
+                                stderr.trim()
+                            );
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "[INIT] gsettings not available: {}. \
+                                 Run manually: gsettings set org.gnome.desktop.interface toolkit-accessibility true",
+                                e
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     let audit_db = rusqlite::Connection::open(&paths.db_path)?;
     let audit_logger = Arc::new(AuditLogger::new(audit_db));
@@ -604,24 +885,115 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         5,
     ));
 
-    let agent_loop = Arc::new(
-        AgentLoop::new(
-            model_router.clone(),
-            tool_registry.clone(),
-            mount_mgr,
-            policy_engine,
-            hitl.clone(),
-            audit_logger,
-            rollback_mgr,
-        )
-        .with_semantic_router(semantic_router)
-        .with_tool_index(tool_index)
-        .with_feedback_collector(feedback_collector)
-        .with_doc_store(doc_store)
-        .with_max_tool_rounds(max_tool_rounds)
-        .with_confidence_thresholds(min_confidence_to_act, clarify_threshold)
-        .with_hardware_tier(hardware_info.tier.as_str()),
+    // Wire BoundedExecutionVerifier (Batch 1 Phase 1.5)
+    let execution_verifier: Arc<dyn kria_core::agent::execution_verifier::ExecutionVerifier> =
+        Arc::new(kria_core::agent::execution_verifier_bounded::BoundedExecutionVerifier::new());
+
+    let mut agent_loop_builder = AgentLoop::new(
+        model_router.clone(),
+        tool_registry.clone(),
+        mount_mgr,
+        policy_engine.clone(),
+        hitl.clone(),
+        audit_logger.clone(),
+        rollback_mgr,
+    )
+    .with_semantic_router(semantic_router)
+    .with_tool_index(tool_index)
+    .with_feedback_collector(feedback_collector)
+    .with_doc_store(doc_store)
+    .with_max_tool_rounds(max_tool_rounds)
+    .with_confidence_thresholds(min_confidence_to_act, clarify_threshold)
+    .with_hardware_tier(hardware_info.tier.as_str())
+    .with_execution_verifier(execution_verifier);
+
+    // Wire PSDG handle into AgentLoop (Batch 1 Phase 1.1 + 3.12)
+    if let Some(ref psdg) = world_model_early {
+        agent_loop_builder = agent_loop_builder.with_world_model(psdg.clone());
+        tracing::info!("[INIT] PSDG: PsdgHandle wired into AgentLoop (context injection active)");
+    }
+
+    // Wire RuleIntentCompiler (Batch 1 Finalization: replaces NoopIntentCompiler).
+    // RuleIntentCompiler uses deterministic pattern matching — no LLM calls, no I/O.
+    // Falls back to Verb::Other for unrecognised patterns, which routes to LLM HTN planner.
+    {
+        let rule_compiler =
+            std::sync::Arc::new(kria_core::agent::intent_compiler_rule::RuleIntentCompiler);
+        agent_loop_builder = agent_loop_builder.with_intent_compiler(rule_compiler);
+        tracing::info!(
+            "[INIT] IntentCompiler: RuleIntentCompiler wired (NoopIntentCompiler retired)"
+        );
+    }
+
+    // Wire SessionManager for ReAct checkpoint persistence (Batch 1 Phase 3)
+    {
+        let session_mgr = Arc::new(kria_core::agent::workflow_session::SessionManager::new());
+        agent_loop_builder = agent_loop_builder.with_session_manager(session_mgr);
+        tracing::info!("[INIT] SessionManager: ReAct checkpoint persistence wired");
+    }
+
+    // Wire HealthRegistry for runtime observability event counting (Batch 1 Phase 5)
+    agent_loop_builder = agent_loop_builder.with_health_registry(health.clone());
+
+    // Wire ExecutionTransparencyLayer for ReAct lineage tracing (Batch 1 Phase 5 hardening)
+    {
+        let transparency =
+            kria_core::agent::execution_transparency::ExecutionTransparencyLayer::new(
+                world_model_early.clone(),
+            );
+        agent_loop_builder = agent_loop_builder.with_transparency_layer(transparency);
+        tracing::info!("[INIT] ExecutionTransparencyLayer: ReAct lineage tracing wired");
+    }
+
+    // ── Batch 2: Human-Aligned Cognition Runtime engines ─────────────────────────
+    // Phase 1: ObservableCompletionEngine — verifies human-visible outcomes post-turn.
+    {
+        let oce = std::sync::Arc::new(
+            kria_core::agent::observable_completion::ObservableCompletionEngine::new(
+                world_model_early.clone(),
+            ),
+        );
+        agent_loop_builder = agent_loop_builder.with_observable_completion(oce);
+        tracing::info!(
+            "[INIT] Batch2 ObservableCompletionEngine: human-visible outcome verification wired"
+        );
+    }
+    // Phase 2: WorkflowExpectationEngine — workflow category classification + expectation.
+    {
+        let wee = std::sync::Arc::new(
+            kria_core::agent::workflow_expectation::WorkflowExpectationEngine::new(
+                world_model_early.clone(),
+            ),
+        );
+        agent_loop_builder = agent_loop_builder.with_workflow_expectation(wee);
+        tracing::info!(
+            "[INIT] Batch2 WorkflowExpectationEngine: semantic workflow classification wired"
+        );
+    }
+    // Phase 3: CollaborativeAutonomyEngine — per-turn autonomy advisory notices.
+    {
+        let cae = std::sync::Arc::new(
+            kria_core::agent::collaborative_autonomy::CollaborativeAutonomyEngine::new(
+                world_model_early.clone(),
+            ),
+        );
+        agent_loop_builder = agent_loop_builder.with_collaborative_autonomy(cae);
+        tracing::info!("[INIT] Batch2 CollaborativeAutonomyEngine: autonomy advisory wired");
+    }
+    // Phase 4: WorkflowContinuationRuntime — interruption classification + recovery planning.
+    let workflow_continuation_runtime = std::sync::Arc::new(
+        kria_core::agent::workflow_continuation::WorkflowContinuationRuntime::new(
+            world_model_early.clone(),
+        ),
     );
+    agent_loop_builder =
+        agent_loop_builder.with_continuation_runtime(workflow_continuation_runtime.clone());
+    tracing::info!("[INIT] Batch2 WorkflowContinuationRuntime: interruption-aware recovery wired");
+
+    let agent_loop = Arc::new(agent_loop_builder);
+
+    // Spawn periodic runtime health reporter (Batch 1 Phase 5)
+    kria_core::infra::health::RuntimeHealthReporter::spawn(health.clone(), 30);
 
     tracing::info!("KRIA runtime initialized — agent loop active");
 
@@ -699,7 +1071,8 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
             // Use active_healthy: true when the *current routing mode's* backend
             // is reachable. For cloud/external modes this checks the cloud API,
             // not the local llama-server (which won't be running).
-            let healthy = status["active_healthy"].as_bool()
+            let healthy = status["active_healthy"]
+                .as_bool()
                 .or_else(|| status["local_healthy"].as_bool())
                 .unwrap_or(false);
             let mode = status["mode"].as_str().unwrap_or("local");
@@ -719,7 +1092,11 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
                     }
                 } else {
                     let cfg = config_for_probe.read().await;
-                    let model = cfg.llm.cloud_model_id.clone();
+                    let model = status["active_model"]
+                        .as_str()
+                        .filter(|value| !value.trim().is_empty() && *value != "unknown")
+                        .map(str::to_string)
+                        .unwrap_or_else(|| cfg.llm.cloud_model_id.clone());
                     let provider = cfg.llm.cloud_provider.clone();
                     drop(cfg);
                     if model.is_empty() {
@@ -731,7 +1108,7 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
                 health_mr.update(
                     "model_router",
                     ServiceStatus::Healthy,
-                    Some(format!("model: {}", model_name)),
+                    Some(format!("{}: {}", mode, model_name)),
                 );
             } else {
                 health_mr.update(
@@ -742,26 +1119,15 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
             }
         });
     }
-    // Sidecar/OCR dependency start as "starting" — updated when probes complete.
-    health.update("sidecar", ServiceStatus::Starting, None);
-    health.update(
-        "ocr_dependency",
-        ServiceStatus::Starting,
-        Some("Waiting for sidecar OCR capability probe".into()),
-    );
-
     // Automation subsystems
     let automation_dir = paths.data_dir.join("automation");
     let _ = std::fs::create_dir_all(&automation_dir);
     // Load persisted macros and workflows
     let mut macro_rec_inner = MacroRecorder::new();
     let _ = macro_rec_inner.load_from_file(&automation_dir.join("macros.json"));
-    let mut workflow_engine = WorkflowEngine::new();
-    let _ = workflow_engine.load_from_file(&automation_dir.join("workflows.json"));
 
     let scheduler_arc = Arc::new(RwLock::new(AutomationScheduler::new()));
     let macro_recorder_arc = Arc::new(RwLock::new(macro_rec_inner));
-    let workflow_engine_arc = Arc::new(RwLock::new(workflow_engine));
 
     tracing::info!("Automation subsystems initialized");
 
@@ -879,6 +1245,65 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
 
     let fleet_control_runtime_for_bridge = fleet_control_runtime.clone();
 
+    // ── Batch 1: PSDG — Wire PerceptionLoop + PsdgCoordinator ────────────────
+    //
+    // The WorldModelStore was opened earlier (world_model_early). Here we:
+    // 1. Register PSDG health
+    // 2. Start PerceptionLoop (inotify + D-Bus perception events)
+    // 3. Subscribe PsdgCoordinator to PerceptionBus
+    // 4. Schedule periodic fact decay
+    let world_model = world_model_early;
+
+    if let Some(ref psdg) = world_model {
+        use kria_core::agent::perception::{PerceptionConfig, PerceptionLoop};
+        use kria_core::agent::psdg::coordinator::{PsdgCoordinator, PsdgCoordinatorConfig};
+
+        // Register PSDG health indicator
+        health.register("psdg");
+        health.update(
+            "psdg",
+            ServiceStatus::Healthy,
+            Some("WorldModelStore + PerceptionLoop ready".into()),
+        );
+
+        // Create PerceptionLoop with default config (watches home dir + project dirs)
+        let perception_loop = PerceptionLoop::new(PerceptionConfig::default());
+
+        // Subscribe coordinator BEFORE starting the loop (order matters for broadcast)
+        let perception_rx = perception_loop.bus().subscribe();
+        let coordinator_cancel = tokio_util::sync::CancellationToken::new();
+
+        // Spawn PsdgCoordinator
+        let coordinator = PsdgCoordinator::new(psdg.clone(), PsdgCoordinatorConfig::default());
+        let coord_handle = coordinator.spawn(perception_rx, coordinator_cancel.clone());
+        tokio::spawn(async move {
+            match coord_handle.await {
+                Ok(()) => tracing::debug!("[PSDG] PsdgCoordinator exited"),
+                Err(e) => tracing::warn!("[PSDG] PsdgCoordinator panicked: {}", e),
+            }
+        });
+
+        // Spawn PerceptionLoop (drives desktop/fs/dbus events into PsdgCoordinator)
+        let perception_cancel = tokio_util::sync::CancellationToken::new();
+        let perception_cancel_clone = perception_cancel.clone();
+        tokio::spawn(async move {
+            perception_loop.run(perception_cancel_clone).await;
+        });
+
+        tracing::info!("[INIT] PSDG: PerceptionLoop + PsdgCoordinator started");
+
+        // Schedule periodic PSDG fact decay (once per hour, background)
+        let psdg_for_decay = psdg.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(3600));
+            interval.tick().await; // skip first tick (run at t=1h, not t=0)
+            loop {
+                interval.tick().await;
+                psdg_for_decay.run_decay();
+            }
+        });
+    }
+
     // RFC 008: Spawn the unified GUI service orchestrator (vision sidecar + uinput daemon).
     // Best-effort: if binaries are missing or sudo isn't configured, we set the field to
     // None and rely on the GlobalSafetyHalt (engaged by the orchestrator on failure) to
@@ -886,26 +1311,39 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     let gui_orchestrator = match kria_core::orchestrator::OrchestratorConfig::auto_detect() {
         Ok(cfg) => {
             let orch = Arc::new(kria_core::orchestrator::ServiceOrchestrator::new(cfg));
-            match orch.start().await {
-                Ok(()) => {
-                    tracing::info!("[INIT] GUI service orchestrator started");
-                    Some(orch)
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        "[INIT] GUI service orchestrator failed to start: {e} — automation disabled"
-                    );
-                    kria_core::safety::engage_halt("orchestrator startup failure");
-                    None
-                }
+            // start() is best-effort: individual service spawn failures are logged
+            // and retried by the health monitor. We always store the orchestrator
+            // so the health monitor can run and auto-restart failed services.
+            if let Err(e) = orch.start().await {
+                tracing::warn!(
+                    "[INIT] GUI service orchestrator start warning: {e} — health monitor will retry"
+                );
+            } else {
+                tracing::info!("[INIT] GUI service orchestrator started");
             }
+            Some(orch)
         }
         Err(e) => {
             tracing::warn!("[INIT] GUI orchestrator auto-detect failed: {e} — automation disabled");
-            kria_core::safety::engage_halt("orchestrator auto-detect failure");
+            kria_core::safety::engage_halt("orchestrator unavailable");
             None
         }
     };
+
+    let decision_store =
+        Arc::new(kria_core::agent::collaborative_decision::DecisionStore::default_persistent());
+    let resume_executor = Arc::new(kria_core::agent::resume_executor::ResumeExecutor::new(
+        tool_registry.clone(),
+        policy_engine.clone(),
+        decision_store.clone(),
+        audit_logger.clone(),
+    ));
+    let continuation_reentry = Arc::new(
+        kria_core::agent::continuation_reentry::ContinuationReentryService::new(
+            decision_store.clone(),
+            workflow_continuation_runtime.clone(),
+        ),
+    );
 
     let state = AppState {
         config,
@@ -913,7 +1351,12 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         agent_loop,
         tool_registry: tool_registry.clone(),
         memory_store,
-        hitl,
+        hitl: hitl.clone(),
+        decision_store: decision_store.clone(),
+        policy_engine,
+        resume_executor,
+        continuation_reentry,
+        workflow_continuation: workflow_continuation_runtime.clone(),
         event_bus: event_bus.clone(),
         sidecar,
         embeddings,
@@ -926,7 +1369,6 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         health: health.clone(),
         scheduler: scheduler_arc,
         macro_recorder: macro_recorder_arc,
-        workflow_engine: workflow_engine_arc,
         started_at: std::time::Instant::now(),
         hardware_info,
         proactive: proactive_engine,
@@ -940,12 +1382,21 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         fleet_runtime: fleet_runtime.clone(),
         fleet_control_runtime,
         orchestrator: orch_cell.clone(),
+        llm_runtime_apply_lock: Arc::new(tokio::sync::Mutex::new(())),
+        llm_runtime_apply_status: Arc::new(RwLock::new(LlmRuntimeApplySnapshot::default())),
         orchestrator_active_turns: orchestrator_active_turns.clone(),
         orchestrator_last_activity_at: orchestrator_last_activity_at.clone(),
         image_orchestrator,
         skill_registry: openclaw_registry,
         container_pool: openclaw_pool,
+        n8n_catalog: n8n_catalog.clone(),
+        n8n_state_store: n8n_state_store.clone(),
+        n8n_inbox_path: n8n_inbox_path.clone(),
+        n8n_audit_path: n8n_audit_path.clone(),
+        n8n_governance_log: n8n_governance_log.clone(),
+        n8n_hitl_responses: n8n_hitl_responses.clone(),
         gui_orchestrator,
+        world_model,
     };
 
     if handle.state::<AppStateCell>().set(state).is_err() {
@@ -953,6 +1404,36 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     }
 
     tracing::info!("[INIT] AppState set — frontend is now unblocked");
+
+    {
+        let handle_status = handle.clone();
+        let health_status = health.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+            loop {
+                interval.tick().await;
+                let health_snapshot = health_status.snapshot();
+                let diagnostics_summary = kria_core::infra::diagnostics::diagnostics_summary();
+                let recent_diagnostics =
+                    kria_core::infra::diagnostics::recent_diagnostics(25, Some("warn"));
+
+                let payload = serde_json::json!({
+                    "emitted_at": chrono::Utc::now(),
+                    "health": health_snapshot,
+                    "diagnostics": {
+                        "summary": diagnostics_summary,
+                        "recent": recent_diagnostics,
+                    },
+                });
+
+                if let Err(err) = handle_status.emit("runtime:status", payload) {
+                    tracing::debug!(error = %err, "runtime status emit failed");
+                }
+            }
+        });
+    }
 
     // Restore previously enrolled targets into live TargetPool runtime.
     let handle_restore = handle.clone();
@@ -1287,6 +1768,15 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         local_api_port,
         local_api_responder,
         fleet_control_runtime_for_bridge,
+        n8n_catalog.clone(),
+        n8n_state_store.clone(),
+        n8n_inbox_path.clone(),
+        n8n_audit_path.clone(),
+        n8n_governance_log.clone(),
+        n8n_hitl_responses.clone(),
+        hitl.clone(),
+        decision_store.clone(),
+        handle.clone(),
         health.clone(),
     );
 
@@ -1470,4 +1960,28 @@ pub async fn shutdown_runtime(handle: &AppHandle) {
     }
 
     tracing::info!("runtime shutdown completed");
+}
+
+async fn replay_n8n_inbox(
+    path: &Path,
+    store: &kria_core::n8n::N8nWorkflowStateStore,
+) -> anyhow::Result<usize> {
+    if !path.exists() {
+        return Ok(0);
+    }
+
+    let contents = tokio::fs::read_to_string(path).await?;
+    let mut count = 0usize;
+    for line in contents.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let record: kria_core::n8n::N8nInboxRecord = serde_json::from_str(trimmed)?;
+        let _ = store.ingest(record.envelope);
+        count += 1;
+    }
+
+    Ok(count)
 }

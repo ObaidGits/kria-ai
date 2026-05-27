@@ -51,9 +51,7 @@ use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use super::sidecar_ipc::{
-    resolve_socket_path, unlink_stale_socket, IpcMessage, MAX_CHUNK_SAMPLES,
-};
+use super::sidecar_ipc::{resolve_socket_path, unlink_stale_socket, IpcMessage, MAX_CHUNK_SAMPLES};
 use super::sidecar_session::{RestartTracker, SessionState};
 
 // ─── Sidecar Configuration ───────────────────────────────────────────────
@@ -117,7 +115,10 @@ pub enum SidecarEvent {
     /// Sidecar connected via socket.
     Connected { session_id: String, generation: u64 },
     /// Sidecar process crashed.
-    Crashed { exit_code: Option<i32>, stderr: String },
+    Crashed {
+        exit_code: Option<i32>,
+        stderr: String,
+    },
     /// Sidecar restarting with backoff.
     Restarting { attempt: usize, backoff_ms: u64 },
     /// Sidecar disabled after max restarts.
@@ -166,9 +167,7 @@ impl SidecarSupervisor {
     /// Create a new sidecar supervisor.
     ///
     /// Returns the supervisor and a receiver for sidecar events.
-    pub fn new(
-        config: SidecarConfig,
-    ) -> (Self, mpsc::UnboundedReceiver<SidecarEvent>) {
+    pub fn new(config: SidecarConfig) -> (Self, mpsc::UnboundedReceiver<SidecarEvent>) {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let (audio_tx, _audio_rx) = mpsc::channel(64); // bounded audio queue
         let (partial_tx, partial_rx) = mpsc::channel(64); // bounded partial queue

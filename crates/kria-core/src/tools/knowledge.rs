@@ -206,31 +206,87 @@ impl ToolHandler for IngestDocument {
         // Read the file and store as a fact
         match std::fs::read_to_string(path) {
             Ok(content) => {
-                let truncated = if content.len() > 10_000 {
-                    &content[..10_000]
+                // Increased from 10K to 50K chars — covers most documents without
+                // losing critical content. Very large documents are chunked.
+                const CHUNK_SIZE: usize = 50_000;
+                let total_len = content.len();
+
+                if total_len <= CHUNK_SIZE {
+                    // Single-chunk ingest
+                    let fact = MemoryFact {
+                        id: None,
+                        text: format!("[document:{}] {}", path, content),
+                        category: "document".into(),
+                        source: format!("ingested:{}", path),
+                        created_at: Utc::now(),
+                        last_accessed: Utc::now(),
+                        access_count: 0,
+                        decay_score: 1.0,
+                    };
+                    match self.0.runtime.store_fact(&fact) {
+                        Ok(id) => ToolResult::ok(serde_json::json!({
+                            "ingested": true,
+                            "path": path,
+                            "fact_id": id,
+                            "size_bytes": total_len,
+                            "chunks": 1,
+                            "truncated": false,
+                        })),
+                        Err(e) => ToolResult {
+                            success: false,
+                            data: serde_json::Value::Null,
+                            error: Some(e.to_string()),
+                        },
+                    }
                 } else {
-                    &content
-                };
-                let fact = MemoryFact {
-                    id: None,
-                    text: format!("[document:{}] {}", path, truncated),
-                    category: "document".into(),
-                    source: format!("ingested:{}", path),
-                    created_at: Utc::now(),
-                    last_accessed: Utc::now(),
-                    access_count: 0,
-                    decay_score: 1.0,
-                };
-                match self.0.runtime.store_fact(&fact) {
-                    Ok(id) => ToolResult::ok(serde_json::json!({
-                        "ingested": true, "path": path, "fact_id": id,
-                        "size_bytes": content.len(), "truncated": content.len() > 10_000,
-                    })),
-                    Err(e) => ToolResult {
-                        success: false,
-                        data: serde_json::Value::Null,
-                        error: Some(e.to_string()),
-                    },
+                    // Multi-chunk ingest: split at word boundaries
+                    let chunks = split_into_chunks(&content, CHUNK_SIZE);
+                    let chunk_count = chunks.len();
+                    let mut stored_ids = Vec::new();
+                    let mut last_error: Option<String> = None;
+
+                    for (i, chunk) in chunks.iter().enumerate() {
+                        let fact = MemoryFact {
+                            id: None,
+                            text: format!(
+                                "[document:{} chunk:{}/{}] {}",
+                                path,
+                                i + 1,
+                                chunk_count,
+                                chunk
+                            ),
+                            category: "document".into(),
+                            source: format!("ingested:{}:chunk:{}", path, i + 1),
+                            created_at: Utc::now(),
+                            last_accessed: Utc::now(),
+                            access_count: 0,
+                            decay_score: 1.0,
+                        };
+                        match self.0.runtime.store_fact(&fact) {
+                            Ok(id) => stored_ids.push(id),
+                            Err(e) => {
+                                last_error = Some(e.to_string());
+                                break;
+                            }
+                        }
+                    }
+
+                    if let Some(err) = last_error {
+                        ToolResult {
+                            success: false,
+                            data: serde_json::Value::Null,
+                            error: Some(format!("partial ingest failed: {err}")),
+                        }
+                    } else {
+                        ToolResult::ok(serde_json::json!({
+                            "ingested": true,
+                            "path": path,
+                            "fact_ids": stored_ids,
+                            "size_bytes": total_len,
+                            "chunks": chunk_count,
+                            "truncated": false,
+                        }))
+                    }
                 }
             }
             Err(e) => ToolResult {
@@ -240,6 +296,37 @@ impl ToolHandler for IngestDocument {
             },
         }
     }
+}
+
+/// Split text into chunks of approximately `chunk_size` chars, breaking at word boundaries.
+fn split_into_chunks(text: &str, chunk_size: usize) -> Vec<String> {
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    let chars: Vec<char> = text.chars().collect();
+    let total = chars.len();
+
+    while start < total {
+        let end = (start + chunk_size).min(total);
+
+        // Find the last whitespace before `end` to avoid splitting mid-word
+        let split_at = if end < total {
+            chars[start..end]
+                .iter()
+                .rposition(|c| c.is_whitespace())
+                .map(|pos| start + pos + 1)
+                .unwrap_or(end)
+        } else {
+            end
+        };
+
+        let chunk: String = chars[start..split_at].iter().collect();
+        if !chunk.trim().is_empty() {
+            chunks.push(chunk);
+        }
+        start = split_at;
+    }
+
+    chunks
 }
 
 pub fn register(reg: &ToolRegistry, store: Arc<dyn MemoryRuntime>) {

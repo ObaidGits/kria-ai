@@ -24,6 +24,7 @@ pub mod decide;
 pub mod domain;
 pub mod embed;
 pub mod feedback;
+pub mod gui_intent;
 pub mod intent_classifier;
 pub mod live_fact;
 pub mod ood;

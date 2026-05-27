@@ -1323,10 +1323,8 @@ pub fn register(reg: &ToolRegistry) {
     let omni_client = OmniParserClient::new(omni_endpoint);
 
     // Create GUI backend for click execution
-    // Socket path must match the daemon's --socket argument (/tmp/kria-uinput.sock).
-    let socket_path = std::path::PathBuf::from(
-        std::env::var("KRIA_UINPUT_SOCKET").unwrap_or_else(|_| "/tmp/kria-uinput.sock".to_string()),
-    );
+    // Socket path must match the daemon's configured socket.
+    let socket_path = crate::agent::gui_services::default_uinput_socket_path();
     let gui_backend: Arc<dyn GuiBackend> = Arc::new(YdotoolBackend::new(socket_path));
 
     let state = Arc::new(VisionToolState {

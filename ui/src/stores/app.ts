@@ -77,12 +77,17 @@ const resolveInitialTheme = (): "dark" | "light" => {
 const [theme, setTheme] = createSignal<"dark" | "light">(resolveInitialTheme());
 const [mcpServers, setMcpServers] = createSignal<McpServer[]>([]);
 const [healthInfo, setHealthInfo] = createSignal<Record<string, any> | null>(null);
+const [runtimeStatus, setRuntimeStatus] = createSignal<RuntimeStatusPayload | null>(null);
+const [runtimeDiagnostics, setRuntimeDiagnostics] = createSignal<RuntimeDiagnosticsPayload | null>(null);
 const [scheduledTasks, setScheduledTasks] = createSignal<ScheduledTask[]>([]);
 const [macros, setMacros] = createSignal<MacroInfo[]>([]);
 const [workflows, setWorkflows] = createSignal<WorkflowInfo[]>([]);
 const [hardwareInfo, setHardwareInfo] = createSignal<HardwareInfoData | null>(null);
 const [knowledgeBase, setKnowledgeBase] = createSignal<KnowledgeDoc[]>([]);
 const [alerts, setAlerts] = createSignal<ProactiveAlert[]>([]);
+const [interactionDecisions, setInteractionDecisions] = createSignal<InteractionDecision[]>([]);
+const [interactionDecisionMetrics, setInteractionDecisionMetrics] =
+  createSignal<DecisionMetrics | null>(null);
 
 const resolveInitialTelegramBotInfo = (): TelegramBotInfo | null => {
   const raw = readStorageValue(STORAGE_KEYS.telegramBotInfo);
@@ -609,6 +614,10 @@ export interface Message {
   imageUrl?: string;
   /** Attached document files (for document chat messages) */
   attachedFiles?: AttachedFileInfo[];
+  /** Structured recovery options emitted when a prerequisite check fails */
+  recoveryOptions?: RecoveryOptionsPayload;
+  /** Live task step progress for multi-step operations */
+  taskSteps?: TaskStepPayload[];
 }
 
 export interface AttachedFileInfo {
@@ -631,6 +640,37 @@ export interface ToolCall {
   result?: unknown;
   metadata?: ToolResultMetadata;
   status: "pending" | "running" | "done" | "error" | "denied";
+  conversational_summary?: string;
+  human_readable?: string;
+  execution_metadata?: ExecutionMetadata;
+}
+
+export interface ExecutionMetadata {
+  tool: string;
+  outcome: "success" | "success_empty" | "partial_success" | "failure" | "cancelled";
+  item_count?: number;
+  duration_ms?: number;
+  exit_code?: number;
+  truncated?: boolean;
+}
+
+export interface RecoveryOption {
+  label: string;
+  action_prompt: string;
+  style: "primary" | "secondary" | "danger";
+}
+
+export interface RecoveryOptionsPayload {
+  context: string;
+  detail: string;
+  options: RecoveryOption[];
+}
+
+export interface TaskStepPayload {
+  index: number;
+  total?: number;
+  description: string;
+  status: "starting" | "running" | "done" | "failed" | "skipped";
 }
 
 export interface ToolResultMetadata {
@@ -655,6 +695,138 @@ export interface HitlRequest {
   reason: string;
 }
 
+export interface DecisionOption {
+  id: string;
+  label: string;
+  impact: string;
+  risk: string;
+}
+
+export interface EvidenceSummary {
+  source: string;
+  confidence: string;
+  freshness: string;
+  reliability: string;
+  summary: string;
+}
+
+export interface InteractionDecision {
+  id: string;
+  workflow_id: string;
+  attempt_id?: string;
+  stage_id?: string | null;
+  action_hash?: string;
+  target_hash?: string;
+  action_proposal?: unknown | null;
+  execution?: DecisionExecutionRecord | null;
+  continuation?: ContinuationClaim | null;
+  verification?: PostDecisionVerification | null;
+  checkpoint_summary?: CheckpointSummary | null;
+  decision_type: string;
+  status: string;
+  version: number;
+  reason: string;
+  risk_level: string;
+  options: DecisionOption[];
+  recommended_option?: string | null;
+  rollbackability: string;
+  confidence: string;
+  affected_resources: string[];
+  rule_id?: string | null;
+  evidence: EvidenceSummary[];
+  invalidation_rules: string[];
+  created_at: string;
+  updated_at: string;
+  expires_at?: string | null;
+  resolution?: string | null;
+}
+
+export interface DecisionExecutionRecord {
+  execution_id: string;
+  decision_id: string;
+  workflow_id: string;
+  action_hash: string;
+  target_hash: string;
+  state: string;
+  sequence: number;
+  execution_actor: string;
+  source_command: string;
+  session_id?: string | null;
+  workspace_id?: string | null;
+  tool_name: string;
+  tool_schema_version: string;
+  tool_registry_version: string;
+  policy_version: string;
+  started_at: string;
+  side_effect_started_at?: string | null;
+  completed_at?: string | null;
+  gate_summary?: unknown;
+  grounding_summary?: unknown;
+  lease_refs: unknown[];
+  redacted_tool_result?: unknown;
+  error_class?: string | null;
+  error_message?: string | null;
+}
+
+export interface ContinuationClaim {
+  claim_id: string;
+  decision_id: string;
+  execution_id: string;
+  workflow_id: string;
+  checkpoint_id: string;
+  action_hash: string;
+  target_hash: string;
+  state: string;
+  sequence: number;
+  actor: string;
+  started_at: string;
+  side_effect_started_at?: string | null;
+  completed_at?: string | null;
+  verification_id?: string | null;
+  error_class?: string | null;
+  error_message?: string | null;
+}
+
+export interface PostDecisionVerification {
+  verification_id: string;
+  decision_id: string;
+  execution_id: string;
+  workflow_id: string;
+  action_hash: string;
+  target_hash: string;
+  verifier_kind: string;
+  evidence: EvidenceSummary[];
+  confidence: string;
+  deterministic: boolean;
+  passed: boolean;
+  failure_reason?: string | null;
+  sensitivity_tags: string[];
+  created_at: string;
+  expires_at?: string | null;
+}
+
+export interface CheckpointSummary {
+  completed_action_ids: string[];
+  blocked_action_id: string;
+  expected_artifacts: string[];
+  active_assumptions: string[];
+  next_safe_action_preview?: unknown;
+  verifier_requirements: string[];
+  rollbackability: string;
+  invalidation_rules: string[];
+}
+
+export interface DecisionMetrics {
+  total_events: number;
+  pending_decisions: number;
+  resolved_decisions: number;
+  expired_decisions: number;
+  invalidated_decisions: number;
+  approval_decisions: number;
+  target_selection_decisions: number;
+  unsafe_abstentions: number;
+}
+
 export interface ToolChoiceCandidate {
   name: string;
   label: string;
@@ -667,6 +839,38 @@ export interface ToolChoiceRequest {
   confidence: number;
   minConfidence: number;
   candidates: ToolChoiceCandidate[];
+}
+
+export interface DiagnosticEvent {
+  timestamp: string;
+  level: string;
+  target: string;
+  message?: string | null;
+  fields?: Record<string, unknown>;
+  file?: string | null;
+  line?: number | null;
+}
+
+export interface DiagnosticsSummary {
+  capacity: number;
+  captured_events: number;
+  by_level: Record<string, number>;
+  last_event_at?: string | null;
+}
+
+export interface RuntimeDiagnosticsPayload {
+  summary: DiagnosticsSummary;
+  events?: DiagnosticEvent[];
+  recent?: DiagnosticEvent[];
+}
+
+export interface RuntimeStatusPayload {
+  emitted_at: string;
+  health: Record<string, unknown>;
+  diagnostics: {
+    summary: DiagnosticsSummary;
+    recent: DiagnosticEvent[];
+  };
 }
 
 export interface PromptLabProfile {
@@ -1194,6 +1398,118 @@ async function denyAction(requestId: string, reason?: string) {
   setScopedHitl("prompt_lab", null, false);
 }
 
+async function loadInteractionDecisions() {
+  try {
+    const payload = await invoke<{ decisions: InteractionDecision[]; metrics: DecisionMetrics }>(
+      "list_interaction_decisions"
+    );
+    setInteractionDecisions(payload.decisions ?? []);
+    setInteractionDecisionMetrics(payload.metrics ?? null);
+  } catch (error) {
+    console.warn("Failed to load interaction decisions:", error);
+  }
+}
+
+async function resolveInteractionDecision(
+  decisionId: string,
+  optionId: string,
+  decisionVersion?: number,
+  expectedActionHash?: string,
+  expectedTargetHash?: string
+) {
+  await invoke("resolve_interaction_decision", {
+    decisionId,
+    optionId,
+    decisionVersion,
+    expectedActionHash,
+    expectedTargetHash,
+  });
+  await loadInteractionDecisions();
+}
+
+async function resumeInteractionDecision(
+  decisionId: string,
+  decisionVersion?: number,
+  expectedActionHash?: string,
+  expectedTargetHash?: string
+) {
+  const payload = await invoke("resume_interaction_decision", {
+    decisionId,
+    decisionVersion,
+    expectedActionHash,
+    expectedTargetHash,
+  });
+  await loadInteractionDecisions();
+  return payload;
+}
+
+async function executeResolvedInteractionDecision(
+  decisionId: string,
+  decisionVersion?: number,
+  expectedActionHash?: string,
+  expectedTargetHash?: string
+) {
+  const payload = await invoke("execute_resolved_interaction_decision", {
+    decisionId,
+    decisionVersion,
+    expectedActionHash,
+    expectedTargetHash,
+  });
+  await loadInteractionDecisions();
+  return payload;
+}
+
+async function cancelInteractionExecution(decisionId: string) {
+  const payload = await invoke("cancel_interaction_execution", { decisionId });
+  await loadInteractionDecisions();
+  return payload;
+}
+
+async function checkContinuationAfterDecision(
+  decisionId: string,
+  expectedActionHash?: string,
+  expectedTargetHash?: string
+) {
+  const payload = await invoke("check_continuation_after_decision", {
+    decisionId,
+    expectedActionHash,
+    expectedTargetHash,
+    allowStaleUserIntent: false,
+  });
+  await loadInteractionDecisions();
+  return payload;
+}
+
+async function continueAfterDecisionExecution(
+  decisionId: string,
+  expectedActionHash?: string,
+  expectedTargetHash?: string
+) {
+  const payload = await invoke("continue_after_decision_execution", {
+    decisionId,
+    expectedActionHash,
+    expectedTargetHash,
+    allowStaleUserIntent: false,
+  });
+  await loadInteractionDecisions();
+  return payload;
+}
+
+async function cancelContinuation(decisionId: string) {
+  const payload = await invoke("cancel_continuation", { decisionId });
+  await loadInteractionDecisions();
+  return payload;
+}
+
+async function cancelInteractionDecision(decisionId: string) {
+  await invoke("cancel_interaction_decision", { decisionId });
+  await loadInteractionDecisions();
+}
+
+async function replayInteractionDecisions() {
+  return invoke<{ events: unknown[]; metrics: DecisionMetrics }>("replay_interaction_decisions");
+}
+
 async function toggleVoice() {
   if (voiceActive()) {
     suppressVoiceErrorUntil = Date.now() + 2500;
@@ -1285,6 +1601,20 @@ async function loadHealth() {
       healthLoadQueued = false;
       void loadHealth();
     }
+  }
+}
+
+async function loadRuntimeDiagnostics(limit = 128, minLevel = "info") {
+  try {
+    const result = await invoke<RuntimeDiagnosticsPayload>("get_runtime_diagnostics", {
+      limit,
+      minLevel,
+    });
+    setRuntimeDiagnostics(result);
+    return result;
+  } catch (e) {
+    console.error("Failed to load runtime diagnostics:", e);
+    return null;
   }
 }
 
@@ -2394,8 +2724,11 @@ function initListeners() {
         freshness_age_hours?: number | null;
         region_match?: boolean | null;
       } | null;
+      conversational_summary?: string;
+      human_readable?: string;
+      execution_metadata?: ExecutionMetadata;
     }>(`${eventPrefix}:tool_result`, (event) => {
-      const { name, result, success, metadata } = event.payload;
+      const { name, result, success, metadata, conversational_summary, human_readable, execution_metadata } = event.payload;
       const completedToolCall: ToolCall = {
         name,
         args: {},
@@ -2409,6 +2742,9 @@ function initListeners() {
               regionMatch: metadata.region_match,
             }
           : undefined,
+        conversational_summary: conversational_summary ?? undefined,
+        human_readable: human_readable ?? undefined,
+        execution_metadata: execution_metadata ?? undefined,
       };
 
       updateScopedMessages(scope, (prev) => {
@@ -2425,6 +2761,9 @@ function initListeners() {
                 status: completedToolCall.status,
                 result: completedToolCall.result,
                 metadata: completedToolCall.metadata ?? tc.metadata,
+                conversational_summary: completedToolCall.conversational_summary,
+                human_readable: completedToolCall.human_readable,
+                execution_metadata: completedToolCall.execution_metadata,
               };
             }
             return tc;
@@ -2507,10 +2846,87 @@ function initListeners() {
         });
       }
     });
+
+    listen<RecoveryOptionsPayload>(`${eventPrefix}:recovery_options`, (event) => {
+      const payload = event.payload;
+      updateScopedMessages(scope, (prev) => {
+        // Attach recovery options to the last assistant message
+        const last = prev[prev.length - 1];
+        if (last?.role === "assistant") {
+          return [...prev.slice(0, -1), { ...last, recoveryOptions: payload }];
+        }
+        // Or create a new assistant message to hold them
+        return [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            role: "assistant" as const,
+            content: "",
+            timestamp: Date.now(),
+            recoveryOptions: payload,
+          },
+        ];
+      });
+    });
+
+    listen<TaskStepPayload>(`${eventPrefix}:task_step`, (event) => {
+      const step = event.payload;
+      updateScopedMessages(scope, (prev) => {
+        const last = prev[prev.length - 1];
+        if (last?.role === "assistant") {
+          const existing = last.taskSteps ?? [];
+          // Update existing step if same index, otherwise append
+          const idx = existing.findIndex((s) => s.index === step.index);
+          const updated = idx >= 0
+            ? existing.map((s, i) => (i === idx ? step : s))
+            : [...existing, step];
+          return [...prev.slice(0, -1), { ...last, taskSteps: updated }];
+        }
+        return [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            role: "assistant" as const,
+            content: "",
+            timestamp: Date.now(),
+            taskSteps: [step],
+          },
+        ];
+      });
+    });
   };
 
   registerStreamListeners("agent", "assistant");
   registerStreamListeners("prompt_lab", "prompt_lab");
+
+  listen<InteractionDecision>("interaction_decision:created", (event) => {
+    setInteractionDecisions((prev) => {
+      const filtered = prev.filter((decision) => decision.id !== event.payload.id);
+      return [event.payload, ...filtered];
+    });
+    void loadInteractionDecisions();
+  });
+
+  listen<RuntimeStatusPayload>("runtime:status", (event) => {
+    const payload = event.payload;
+    if (!payload || typeof payload !== "object") return;
+    setRuntimeStatus(payload);
+    setRuntimeDiagnostics({
+      summary: payload.diagnostics.summary,
+      recent: payload.diagnostics.recent,
+    });
+    if (payload.health && typeof payload.health === "object") {
+      const health = payload.health as Record<string, unknown>;
+      setHealthInfo((prev) => ({
+        ...(prev ?? {}),
+        status: typeof health.status === "string" ? health.status : prev?.status,
+        event_count:
+          typeof health.event_count === "number" ? health.event_count : prev?.event_count,
+        health_snapshot: health,
+        services: Array.isArray(health.services) ? health.services : prev?.services,
+      }));
+    }
+  });
 
   listen<AgentStageEvent>("agent:stage", (event) => {
     const stage = event.payload;
@@ -2910,6 +3326,8 @@ function initListeners() {
   listen<SelfModelSnapshot>("intelligence:self_model", (event) => {
     enqueueEvent({ kind: "intelligence:self_model", payload: event.payload });
   });
+
+  void loadInteractionDecisions();
 }
 
 async function initializeSessionPersistence() {
@@ -2977,6 +3395,7 @@ void loadIroncladStatus();
 void loadIroncladForensics();
 // Prime and refresh system health for UI status indicators.
 loadHealth();
+void loadRuntimeDiagnostics(128, "info");
 setInterval(() => {
   loadHealth();
 }, 12000);
@@ -3037,6 +3456,18 @@ export const appStore = {
   cancelTurn,
   approveAction,
   denyAction,
+  interactionDecisions,
+  interactionDecisionMetrics,
+  loadInteractionDecisions,
+  resolveInteractionDecision,
+  resumeInteractionDecision,
+  executeResolvedInteractionDecision,
+  cancelInteractionExecution,
+  checkContinuationAfterDecision,
+  continueAfterDecisionExecution,
+  cancelContinuation,
+  cancelInteractionDecision,
+  replayInteractionDecisions,
   toggleVoice,
   loadSessions,
   createSession,
@@ -3054,7 +3485,10 @@ export const appStore = {
   removeMcpServer,
   toggleMcpServer,
   healthInfo,
+  runtimeStatus,
+  runtimeDiagnostics,
   loadHealth,
+  loadRuntimeDiagnostics,
   assistantStatus,
   scheduledTasks,
   loadScheduledTasks,

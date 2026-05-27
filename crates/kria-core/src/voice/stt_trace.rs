@@ -52,11 +52,7 @@ fn append_value(row: Value) {
     let cell = TRACE_FILE.get_or_init(|| Mutex::new(None));
     let mut guard = cell.lock().unwrap_or_else(|e| e.into_inner());
     if guard.is_none() {
-        *guard = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .ok();
+        *guard = OpenOptions::new().create(true).append(true).open(path).ok();
     }
     if let Some(f) = guard.as_mut() {
         if let Ok(line) = serde_json::to_string(&row) {
@@ -207,7 +203,7 @@ mod tests {
         let turn = 7u64;
         let session_id = "test-session-123";
         let generation = 0u64;
-        
+
         emit_stt_session_start(turn, session_id, generation, "stub-engine", "normal");
         emit_stt_partial(turn, session_id, generation, 1, 12, "stub");
         emit_stt_commit(turn, session_id, generation, 40);

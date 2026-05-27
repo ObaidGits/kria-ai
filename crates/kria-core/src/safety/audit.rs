@@ -33,6 +33,7 @@ pub enum DecidedBy {
     UserGui,
     Timeout,
     Hardcoded,
+    Verification,
 }
 
 impl DecidedBy {
@@ -43,6 +44,7 @@ impl DecidedBy {
             Self::UserGui => "USER_GUI",
             Self::Timeout => "TIMEOUT",
             Self::Hardcoded => "HARDCODED",
+            Self::Verification => "VERIFICATION",
         }
     }
 }
@@ -81,7 +83,7 @@ impl AuditLogger {
                 parameters  TEXT    NOT NULL,
                 risk_level  TEXT    NOT NULL CHECK (risk_level IN ('GREEN', 'YELLOW', 'RED', 'BLACK')),
                 decision    TEXT    NOT NULL CHECK (decision IN ('AUTO_EXECUTED', 'APPROVED', 'DENIED', 'BLOCKED', 'TIMEOUT')),
-                decided_by  TEXT    NOT NULL CHECK (decided_by IN ('POLICY', 'USER_VOICE', 'USER_GUI', 'TIMEOUT', 'HARDCODED')),
+                decided_by  TEXT    NOT NULL CHECK (decided_by IN ('POLICY', 'USER_VOICE', 'USER_GUI', 'TIMEOUT', 'HARDCODED', 'VERIFICATION')),
                 result      TEXT             CHECK (result IN ('SUCCESS', 'FAILED', 'ROLLED_BACK', NULL)),
                 error_msg   TEXT,
                 rollback_id TEXT,

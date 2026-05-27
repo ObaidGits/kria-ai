@@ -1100,7 +1100,7 @@ impl TargetPool {
 
         let payload = serde_json::to_string(&packet)
             .unwrap_or_else(|error| format!("telemetry_error:{error}"));
-        tracing::info!(target: "kria_pool", packet = %payload, "target_pool_telemetry");
+        tracing::debug!(target: "kria_pool", packet = %payload, "target_pool_telemetry");
 
         {
             let mut latest = self

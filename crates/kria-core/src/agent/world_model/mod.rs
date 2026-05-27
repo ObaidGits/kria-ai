@@ -26,8 +26,10 @@
 //! - `world_facts` — active facts
 //! - `world_facts_archive` — deprecated facts (for audit trail)
 
+mod desktop_graph;
 mod store;
 mod types;
 
+pub use desktop_graph::DesktopGraph;
 pub use store::WorldModelStore;
 pub use types::{ConflictResolution, FactSource, WorldFact, WorldModelStats};

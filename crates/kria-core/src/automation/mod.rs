@@ -8,4 +8,5 @@ pub use event_bus::EventBus;
 pub use macros::MacroRecorder;
 pub use proactive::ProactiveEngine;
 pub use scheduler::AutomationScheduler;
+#[allow(deprecated)]
 pub use workflows::WorkflowEngine;

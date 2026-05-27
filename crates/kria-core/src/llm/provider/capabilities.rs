@@ -105,12 +105,7 @@ impl ModelCapabilities {
             max_output_tokens: max_output,
             parallel_tool_calls: true,
             max_images: 10,
-            supported_image_formats: vec![
-                "png".into(),
-                "jpeg".into(),
-                "webp".into(),
-                "gif".into(),
-            ],
+            supported_image_formats: vec!["png".into(), "jpeg".into(), "webp".into(), "gif".into()],
             max_reasoning_tokens: 0,
         }
     }

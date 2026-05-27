@@ -367,24 +367,51 @@ impl DependencyLiveness {
         }
     }
 
-    /// Probe window focus state.
+    /// Probe window focus state via xdotool (X11/XWayland).
+    /// Falls back to Unfocused on Wayland where xdotool is unavailable.
     async fn probe_window_focus(window_class: &str) -> LivenessResult {
-        // Scaffolding: Would query X11/Wayland for active window
-        // For now, return unfocused (conservative)
+        let result = tokio::process::Command::new("xdotool")
+            .args(["getactivewindow", "getwindowname"])
+            .output()
+            .await;
 
-        LivenessResult {
-            state: LivenessState::Unfocused,
-            pid: None,
-            window_id: None,
-            metadata: [
-                ("window_class".to_string(), window_class.to_string()),
-                (
-                    "note".to_string(),
-                    "scaffolding - always unfocused".to_string(),
-                ),
-            ]
-            .into_iter()
-            .collect(),
+        match result {
+            Ok(o) if o.status.success() => {
+                let active_title = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                let focused = active_title
+                    .to_lowercase()
+                    .contains(&window_class.to_lowercase());
+                LivenessResult {
+                    state: if focused {
+                        LivenessState::Healthy
+                    } else {
+                        LivenessState::Unfocused
+                    },
+                    pid: None,
+                    window_id: None,
+                    metadata: [
+                        ("window_class".to_string(), window_class.to_string()),
+                        ("active_title".to_string(), active_title),
+                        ("focused".to_string(), focused.to_string()),
+                    ]
+                    .into_iter()
+                    .collect(),
+                }
+            }
+            _ => LivenessResult {
+                state: LivenessState::Unfocused,
+                pid: None,
+                window_id: None,
+                metadata: [
+                    ("window_class".to_string(), window_class.to_string()),
+                    (
+                        "note".to_string(),
+                        "xdotool unavailable (Wayland?)".to_string(),
+                    ),
+                ]
+                .into_iter()
+                .collect(),
+            },
         }
     }
 
@@ -443,26 +470,35 @@ impl DependencyLiveness {
         }
     }
 
-    /// Find process PID by name (scaffolding).
+    /// Find process PID by name via /proc scan.
     async fn find_process_pid(process_name: &str) -> Option<u32> {
-        // Scaffolding: In production, parse /proc or use pgrep
-        // For common processes, return mock PIDs
-
-        match process_name {
-            "omniparser" => Some(1234),
-            "gnome-terminal" => Some(5678),
-            "Xorg" => Some(999),
-            _ => None,
+        let name_lower = process_name.to_lowercase();
+        let mut read_dir = match tokio::fs::read_dir("/proc").await {
+            Ok(d) => d,
+            Err(_) => return None,
+        };
+        while let Ok(Some(entry)) = read_dir.next_entry().await {
+            let fname = entry.file_name();
+            let fname_str = fname.to_string_lossy();
+            if !fname_str.chars().all(|c| c.is_ascii_digit()) {
+                continue;
+            }
+            let comm_path = format!("/proc/{}/comm", fname_str);
+            if let Ok(comm) = tokio::fs::read_to_string(&comm_path).await {
+                if comm.trim().to_lowercase().contains(&name_lower) {
+                    if let Ok(pid) = fname_str.parse::<u32>() {
+                        return Some(pid);
+                    }
+                }
+            }
         }
+        None
     }
 
-    /// Check if process is responsive (scaffolding).
+    /// Check if process is responsive by verifying /proc/{pid}/stat is readable.
     async fn check_process_responsive(pid: u32) -> bool {
-        // Scaffolding: In production, check /proc/{pid}/stat
-        // or send SIGNULL to verify process can receive signals
-
-        // Known mock PIDs are responsive
-        matches!(pid, 1234 | 5678 | 999)
+        let stat_path = format!("/proc/{}/stat", pid);
+        tokio::fs::metadata(&stat_path).await.is_ok()
     }
 }
 

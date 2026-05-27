@@ -121,8 +121,7 @@ impl PrefixHoldTracker {
         let has_prefix = if words_old.is_empty() {
             false
         } else {
-            words_new.len() >= words_old.len()
-                && words_new[..words_old.len()] == words_old[..]
+            words_new.len() >= words_old.len() && words_new[..words_old.len()] == words_old[..]
         };
 
         if has_prefix {
@@ -289,12 +288,7 @@ impl TranscriptAuthorityFsm {
     }
 
     /// S1 partial update: check for prefix hold → S2.
-    fn handle_partial_update(
-        &mut self,
-        text: &str,
-        generation: u64,
-        stable: bool,
-    ) -> bool {
+    fn handle_partial_update(&mut self, text: &str, generation: u64, stable: bool) -> bool {
         // Generation check (§4 R2)
         if generation != self.generation {
             tracing::debug!(
@@ -334,8 +328,7 @@ impl TranscriptAuthorityFsm {
             TranscriptState::S2Stabilizing => {
                 // Update volatile tail only; frozen prefix stays
                 if text.starts_with(&self.frozen_prefix) {
-                    self.volatile_tail =
-                        text[self.frozen_prefix.len()..].to_string();
+                    self.volatile_tail = text[self.frozen_prefix.len()..].to_string();
                 } else {
                     // Prefix changed — this shouldn't happen in S2
                     // but handle gracefully

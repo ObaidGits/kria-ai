@@ -59,7 +59,12 @@ impl OllamaBackend {
     pub async fn pull_model(&self, model: &str) -> anyhow::Result<()> {
         let url = format!("{}/api/pull", self.base_url);
         let payload = serde_json::json!({ "name": model, "stream": false });
-        self.client.post(&url).json(&payload).send().await?.error_for_status()?;
+        self.client
+            .post(&url)
+            .json(&payload)
+            .send()
+            .await?
+            .error_for_status()?;
         Ok(())
     }
 
@@ -86,7 +91,11 @@ impl OllamaBackend {
 #[async_trait]
 impl LlmBackend for OllamaBackend {
     fn model_label(&self) -> &str {
-        &self.display_name
+        if self.model_id.trim().is_empty() {
+            &self.display_name
+        } else {
+            &self.model_id
+        }
     }
 
     fn capabilities(&self) -> &[String] {
@@ -192,7 +201,13 @@ impl LlmBackend for OllamaBackend {
             }
         }
 
-        let resp = self.client.post(&url).json(&payload).send().await?.error_for_status()?;
+        let resp = self
+            .client
+            .post(&url)
+            .json(&payload)
+            .send()
+            .await?
+            .error_for_status()?;
 
         let stream = futures::stream::unfold(resp, |mut resp| async move {
             match resp.chunk().await {

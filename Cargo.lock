@@ -4141,7 +4141,9 @@ dependencies = [
 name = "kria-eval"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "dotenvy",
+ "glob",
  "kria-core",
  "reqwest 0.12.28",
  "rusqlite",
@@ -4149,6 +4151,8 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "tokio-util",
+ "which 6.0.3",
 ]
 
 [[package]]

@@ -799,6 +799,75 @@ impl ToolHandler for OpenUrl {
     }
 }
 
+struct ManagedBrowserNavigate;
+
+#[async_trait]
+impl ToolHandler for ManagedBrowserNavigate {
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let input: OpenUrlInput = match parse_input(params) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        let url = input.url.trim();
+        if url.is_empty() {
+            return ToolResult::err("url parameter is required");
+        }
+
+        if !url.starts_with("http://") && !url.starts_with("https://") {
+            return ToolResult::err("url must start with http:// or https://");
+        }
+
+        if cfg!(target_os = "linux") {
+            // First, launch the managed browser
+            match crate::agent::browser_cognition::BrowserCognitionEngine::launch_with_debugging()
+                .await
+            {
+                Ok(_) => {
+                    let engine = crate::agent::browser_cognition::BrowserCognitionEngine::new();
+                    match engine.navigate(url).await {
+                        res if res.success => {
+                            return ToolResult::ok(serde_json::json!({ "managed_opened": url }))
+                        }
+                        res => {
+                            return ToolResult::err(format!(
+                                "Managed navigation failed: {}",
+                                res.evidence
+                            ))
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to launch managed browser, falling back to xdg-open: {}",
+                        e
+                    );
+                }
+            }
+        }
+
+        // Fallback for non-Linux or if managed launch fails
+        let open_result = if cfg!(target_os = "linux") {
+            run_apply_owned("xdg-open", vec![url.to_string()]).await
+        } else if cfg!(target_os = "macos") {
+            run_apply_owned("open", vec![url.to_string()]).await
+        } else if cfg!(target_os = "windows") {
+            run_apply_owned(
+                "cmd",
+                vec!["/C".into(), "start".into(), "".into(), url.to_string()],
+            )
+            .await
+        } else {
+            Err("managed_browser_navigate fallback not implemented for this OS".to_string())
+        };
+
+        match open_result {
+            Ok(_) => ToolResult::ok(serde_json::json!({ "opened_fallback": url })),
+            Err(error) => ToolResult::err(format!("failed to open URL fallback: {error}")),
+        }
+    }
+}
+
 struct ListWindows;
 
 #[async_trait]
@@ -959,6 +1028,22 @@ pub fn register(reg: &ToolRegistry) {
                 )],
             },
             Arc::new(OpenUrl),
+        ),
+        (
+            ToolDef {
+                name: "managed_browser_navigate".into(),
+                description: "Open a URL in a managed web browser session with CDP tracking".into(),
+                category: "desktop".into(),
+                default_tier: RiskLevel::Green,
+                min_tier: "lite",
+                parameters: vec![param(
+                    "url",
+                    "string",
+                    "URL to open (must start with http:// or https://)",
+                    true,
+                )],
+            },
+            Arc::new(ManagedBrowserNavigate),
         ),
     ];
 

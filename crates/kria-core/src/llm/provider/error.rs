@@ -100,7 +100,11 @@ pub struct ProviderError {
 }
 
 impl ProviderError {
-    pub fn new(kind: ProviderErrorKind, message: impl Into<String>, provider: impl Into<String>) -> Self {
+    pub fn new(
+        kind: ProviderErrorKind,
+        message: impl Into<String>,
+        provider: impl Into<String>,
+    ) -> Self {
         let retryable = kind.is_retryable();
         let retry_after_ms = if retryable {
             Some(kind.suggested_retry_delay_ms())
@@ -144,11 +148,7 @@ impl ProviderError {
 
     /// Create a timeout error.
     pub fn timeout(provider: &str) -> Self {
-        Self::new(
-            ProviderErrorKind::Timeout,
-            "Request timed out",
-            provider,
-        )
+        Self::new(ProviderErrorKind::Timeout, "Request timed out", provider)
     }
 
     /// Create a network error.
@@ -168,7 +168,13 @@ impl ProviderError {
 
 impl fmt::Display for ProviderError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "[{}] {}: {}", self.provider, self.kind.user_category(), self.message)
+        write!(
+            f,
+            "[{}] {}: {}",
+            self.provider,
+            self.kind.user_category(),
+            self.message
+        )
     }
 }
 

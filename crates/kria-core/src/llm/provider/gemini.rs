@@ -33,7 +33,11 @@ impl GeminiBackend {
             model_id: if config.active_model.is_empty() {
                 "gemini-2.0-flash".to_string()
             } else {
-                config.active_model.clone()
+                config
+                    .active_model
+                    .strip_prefix("models/")
+                    .unwrap_or(&config.active_model)
+                    .to_string()
             },
             display_name: config.display_name.clone(),
             capabilities: vec![
@@ -116,7 +120,11 @@ impl GeminiBackend {
 #[async_trait]
 impl LlmBackend for GeminiBackend {
     fn model_label(&self) -> &str {
-        &self.display_name
+        if self.model_id.trim().is_empty() {
+            &self.display_name
+        } else {
+            &self.model_id
+        }
     }
 
     fn capabilities(&self) -> &[String] {
@@ -255,7 +263,13 @@ impl LlmBackend for GeminiBackend {
             payload["tools"] = tools_val;
         }
 
-        let resp = self.client.post(&url).json(&payload).send().await?.error_for_status()?;
+        let resp = self
+            .client
+            .post(&url)
+            .json(&payload)
+            .send()
+            .await?
+            .error_for_status()?;
 
         let stream = futures::stream::unfold(resp, |mut resp| async move {
             match resp.chunk().await {

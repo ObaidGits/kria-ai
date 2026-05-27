@@ -29,7 +29,10 @@ impl OpenRouterBackend {
             .unwrap_or("KRIA")
             .to_string();
 
-        Self { inner, _app_name: app_name }
+        Self {
+            inner,
+            _app_name: app_name,
+        }
     }
 }
 
@@ -55,7 +58,9 @@ impl LlmBackend for OpenRouterBackend {
         max_tokens: u32,
     ) -> anyhow::Result<LlmResponse> {
         // OpenRouter uses the same format as OpenAI
-        self.inner.chat(messages, tools, temperature, max_tokens).await
+        self.inner
+            .chat(messages, tools, temperature, max_tokens)
+            .await
     }
 
     async fn chat_stream(

@@ -553,15 +553,40 @@ pub struct PerceptionConfig {
 impl Default for PerceptionConfig {
     fn default() -> Self {
         Self {
-            watch_paths: vec![
-                std::path::PathBuf::from("/tmp"),
-                dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/home")),
-            ],
+            watch_paths: default_kria_watch_paths(),
             debounce_window: Duration::from_secs(2),
-            bus_capacity: 1024,
+            bus_capacity: 4096,
             tick_interval: Duration::from_millis(500),
         }
     }
+}
+
+fn default_kria_watch_paths() -> Vec<std::path::PathBuf> {
+    let mut paths = Vec::new();
+
+    if let Some(home) = dirs::home_dir() {
+        let kria_root = home.join(".kria");
+        paths.push(kria_root.join("generated"));
+        paths.push(kria_root.join("workflows"));
+        paths.push(kria_root.join("rollback"));
+    } else {
+        paths.push(std::env::temp_dir().join("kria").join("generated"));
+    }
+
+    paths
+        .into_iter()
+        .filter_map(|path| {
+            if std::fs::create_dir_all(&path).is_ok() {
+                Some(path)
+            } else {
+                tracing::debug!(
+                    path = %path.display(),
+                    "PerceptionConfig skipped unwritable KRIA watch path"
+                );
+                None
+            }
+        })
+        .collect()
 }
 
 /// The main perception loop — orchestrates event sources and debouncing.

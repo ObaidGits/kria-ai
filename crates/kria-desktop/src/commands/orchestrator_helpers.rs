@@ -29,5 +29,3 @@ pub(super) async fn ensure_orchestrator_ready_for_turn(
     }
     Ok(())
 }
-
-

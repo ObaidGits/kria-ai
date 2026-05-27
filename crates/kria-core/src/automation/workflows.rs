@@ -1,7 +1,29 @@
+#![allow(deprecated)]
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Workflow engine for multi-step automated sequences with conditions.
+///
+/// # Deprecation Notice (Batch 1)
+///
+/// `WorkflowEngine` is **deprecated** in favor of the RFC 007/008 GoalTree
+/// workflow runtime:
+/// - `WorkflowCompiler` + `GoalTree` for workflow definition
+/// - `StageExecutor` for bounded sequential execution
+/// - `SessionManager` for file-based checkpoint persistence
+///
+/// `WorkflowEngine` is preserved only for backward compatibility with
+/// `AppState.workflow_engine` (macros/automation sidebar). It will NOT
+/// receive new workflow logic.
+///
+/// Migrate new workflows to:
+/// `crate::agent::{WorkflowCompiler, GoalTree, StageExecutor, SessionManager}`
+#[deprecated(
+    since = "batch-1",
+    note = "Use GoalTree + WorkflowCompiler + StageExecutor instead (RFC 007/008). \
+            WorkflowEngine will be removed in Batch 2."
+)]
 pub struct WorkflowEngine {
     workflows: HashMap<String, Workflow>,
 }

@@ -518,6 +518,24 @@ const ToolCallBlock: Component<{
         <Show when={props.tc.metadata?.regionMatch === true}>
           <span class="tool-metric-badge">region match</span>
         </Show>
+        <Show when={props.tc.execution_metadata?.exit_code != null && props.tc.execution_metadata!.exit_code !== 0}>
+          <span class="tool-metric-badge tool-metric-exit-error">
+            exit {props.tc.execution_metadata!.exit_code}
+          </span>
+        </Show>
+        <Show when={props.tc.execution_metadata?.item_count != null}>
+          <span class="tool-metric-badge">
+            {props.tc.execution_metadata!.item_count} items
+          </span>
+        </Show>
+        <Show when={props.tc.execution_metadata?.duration_ms != null}>
+          <span class="tool-metric-badge">
+            {props.tc.execution_metadata!.duration_ms}ms
+          </span>
+        </Show>
+        <Show when={props.tc.execution_metadata?.truncated === true}>
+          <span class="tool-metric-badge tool-metric-truncated">truncated</span>
+        </Show>
         <span class="tool-expand">{expanded() ? "▼" : "▶"}</span>
       </div>
       <Show when={expanded()}>
@@ -780,16 +798,78 @@ const ToolCallBlock: Component<{
           </Show>
 
           <Show when={props.tc.result && !hasStructuredCards()}>
-            <div class={`tool-call-result tool-result-${props.tc.status}`}>
-              <strong>Result:</strong>
-              <pre>{resultText()}</pre>
-            </div>
+            <Show when={props.tc.human_readable} fallback={
+              <Show when={props.tc.conversational_summary}>
+                <div class="tool-conversational-response">
+                  <strong>Summary:</strong>
+                  <p>{props.tc.conversational_summary}</p>
+                </div>
+              </Show>
+            }>
+              <div
+                class="tool-human-readable"
+                innerHTML={renderMarkdown(props.tc.human_readable!)}
+              />
+            </Show>
+            <details class="tool-raw-details">
+              <summary class="tool-raw-summary">Raw output</summary>
+              <div class={`tool-call-result tool-result-${props.tc.status}`}>
+                <pre>{resultText()}</pre>
+              </div>
+            </details>
           </Show>
         </div>
       </Show>
       <Show when={!expanded() && props.tc.result}>
         <div class="tool-call-preview">
-          <span class="tool-result-preview">{truncatedResult()}</span>
+          <Show when={props.tc.conversational_summary} fallback={
+            <span class="tool-result-preview">{truncatedResult()}</span>
+          }>
+            <span class="tool-conversational-summary">{props.tc.conversational_summary}</span>
+          </Show>
+        </div>
+      </Show>
+
+      {/* Gap 6: Retry button on error tool calls */}
+      <Show when={props.tc.status === "error"}>
+        <div class="tool-error-actions">
+          <button
+            class="recovery-action-btn recovery-action-primary"
+            style={{ "font-size": "11px", padding: "4px 10px" }}
+            onClick={() => {
+              // Build a natural-language retry prompt the LLM can act on
+              const args = props.tc.args as Record<string, unknown>;
+              let retryPrompt: string;
+
+              // Tool-specific natural language retry prompts
+              if (props.tc.name === "execute_bash" || props.tc.name === "execute_fleet_command") {
+                const cmd = String(args.command ?? "");
+                const target = args.target ? ` on ${String(args.target)}` : "";
+                retryPrompt = cmd
+                  ? `Run this command again${target}: ${cmd}`
+                  : `Retry the last shell command${target}`;
+              } else if (props.tc.name === "install_package" || props.tc.name === "uninstall_package") {
+                const pkg = String(args.name ?? args.query ?? "");
+                const action = props.tc.name === "install_package" ? "Install" : "Uninstall";
+                retryPrompt = pkg ? `${action} ${pkg}` : `Retry the last package operation`;
+              } else if (props.tc.name === "read_file" || props.tc.name === "write_file") {
+                const path = String(args.path ?? "");
+                retryPrompt = path ? `Try ${props.tc.name.replace("_", " ")} again: ${path}` : `Retry the last file operation`;
+              } else if (props.tc.name.startsWith("fetch_") || props.tc.name.includes("search")) {
+                const url = String(args.url ?? args.query ?? "");
+                retryPrompt = url ? `Try again: ${url}` : `Retry the last search or fetch`;
+              } else {
+                // Generic: describe what was attempted
+                const firstArg = Object.values(args)[0];
+                const hint = firstArg != null ? ` (${String(firstArg).slice(0, 60)})` : "";
+                retryPrompt = `Retry ${props.tc.name}${hint}`;
+              }
+
+              void appStore.sendMessage(retryPrompt);
+            }}
+          >
+            ↺ Retry
+          </button>
         </div>
       </Show>
     </div>
@@ -1066,6 +1146,64 @@ const MessageBubble: Component<Props> = (props) => {
           </div>
         </Show>
 
+        {/* Task step progress — shown for multi-step operations (e.g. VM connectivity + command) */}
+        <Show when={(props.message.taskSteps?.length ?? 0) > 0}>
+          <div class="task-steps">
+            <For each={props.message.taskSteps}>
+              {(step) => {
+                const icon = () => {
+                  switch (step.status) {
+                    case "running": return "⏳";
+                    case "done": return "✅";
+                    case "failed": return "❌";
+                    case "skipped": return "⏭";
+                    default: return "○";
+                  }
+                };
+                const total = step.total ? `/${step.total}` : "";
+                return (
+                  <div class={`task-step task-step-${step.status}`}>
+                    <span class="task-step-icon">{icon()}</span>
+                    <span class="task-step-label">
+                      <span class="task-step-index">Step {step.index}{total}</span>
+                      {" "}{step.description}
+                    </span>
+                  </div>
+                );
+              }}
+            </For>
+          </div>
+        </Show>
+
+        {/* Recovery options — shown when a prerequisite check fails (e.g. VM not reachable) */}
+        <Show when={props.message.recoveryOptions}>
+          {(() => {
+            const ro = props.message.recoveryOptions!;
+            return (
+              <div class="recovery-options">
+                <div class="recovery-options-header">
+                  <span class="recovery-options-icon">⚠️</span>
+                  <span class="recovery-options-context">{ro.context}</span>
+                </div>
+                <Show when={ro.detail}>
+                  <p class="recovery-options-detail">{ro.detail}</p>
+                </Show>
+                <div class="recovery-options-actions">
+                  <For each={ro.options}>
+                    {(opt) => (
+                      <button
+                        class={`recovery-action-btn recovery-action-${opt.style}`}
+                        onClick={() => void appStore.sendMessage(opt.action_prompt)}
+                      >
+                        {opt.label}
+                      </button>
+                    )}
+                  </For>
+                </div>
+              </div>
+            );
+          })()}
+        </Show>
         {/* Message text */}
         <Show when={props.message.content}>
           <Show when={(props.message.toolCalls?.length ?? 0) > 0}>

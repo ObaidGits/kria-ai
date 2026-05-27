@@ -77,19 +77,29 @@ data/logs/
 .kria/logs/
 
 # ── Temp & generated files ───────────────────────────────────────
+/tmp/
+/scratch/
 *.tmp
 *.temp
 *.bak
+*.backup
 *.orig
 *~
 test.png
 *.snap.new
+.cache/
+*.pid
+/kria_*.md
+/kria_*.txt
 
 # ── Graphify artifacts (generated) ───────────────────────────────
 /.graphify-cache/
 /.graphify-tmp/
-/.graphify-out/cache/
-/.graphify-out/cache/*
+/graphify-out/
+
+# ── Rendered diagram artifacts (generated) ───────────────────────
+/diagrams/png/
+/diagrams/svg/
 
 # ── Test sandboxes & eval reports (generated) ────────────────────
 /target/test-sandbox/
@@ -142,30 +152,12 @@ docker-compose.override.yml
 *.profdata
 lcov.info
 cobertura.xml
-*.bin
 *.pt
 *.safetensors
-
-# Logs
-*.log
-*.log.*
-*.log*
-logs/
-data/logs/
 
 # Databases (local)
 *.db
 *.db-journal
 *.db-wal
 *.db-shm
-
-# Temporary files
-*.tmp
-*.temp
-.cache/
-*.pid
-
-# Backup files
-*.bak
-*.backup
 .aider*

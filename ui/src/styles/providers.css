@@ -280,6 +280,17 @@
   border-color: var(--accent-primary, #6366f1);
 }
 
+.model-chip:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.model-chip:disabled:hover {
+  background: transparent;
+  color: var(--text-secondary, #aaa);
+  border-color: var(--border-default, #3a3a5c);
+}
+
 /* Add Provider Form */
 .provider-add-section {
   margin-top: 1rem;
@@ -303,4 +314,516 @@
   display: flex;
   gap: 0.5rem;
   margin-top: 1rem;
+}
+
+.provider-settings-header,
+.provider-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.provider-settings-header h3,
+.provider-panel-header h4 {
+  margin: 0;
+}
+
+.provider-panel-subtitle {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.provider-count-badge {
+  flex-shrink: 0;
+  padding: 0.22rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 500;
+}
+
+.provider-warning {
+  padding: 0.65rem 0.8rem;
+  border-radius: 6px;
+  border: 1px solid rgba(210, 153, 34, 0.35);
+  background: rgba(210, 153, 34, 0.12);
+  color: var(--warning, #d29922);
+  font-size: 0.82rem;
+}
+
+.provider-runtime-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--border-default, var(--border, #30363d));
+  border-radius: 8px;
+  background: var(--surface-elevated, var(--bg-secondary, #161b22));
+}
+
+.provider-apply-status {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-default, var(--border, #30363d));
+  background: var(--surface-elevated, var(--bg-secondary, #161b22));
+}
+
+.provider-apply-status.switching {
+  border-color: rgba(88, 166, 255, 0.38);
+  background: rgba(88, 166, 255, 0.08);
+}
+
+.provider-apply-status.ready {
+  border-color: rgba(63, 185, 80, 0.35);
+  background: rgba(63, 185, 80, 0.08);
+}
+
+.provider-apply-status.failed,
+.provider-apply-status.rollback_required {
+  border-color: rgba(248, 81, 73, 0.38);
+  background: rgba(248, 81, 73, 0.08);
+}
+
+.provider-apply-status strong {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.92rem;
+}
+
+.provider-apply-error {
+  max-width: 48%;
+  color: var(--danger, #f85149);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.provider-runtime-card strong {
+  display: block;
+  margin-top: 0.15rem;
+}
+
+.provider-runtime-subtitle {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--text-secondary, #8b949e);
+  font-size: 0.82rem;
+}
+
+.provider-runtime-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.provider-status-pill {
+  padding: 0.24rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  border: 1px solid var(--border-default, var(--border, #30363d));
+  color: var(--text-secondary, #8b949e);
+}
+
+.provider-status-pill.active {
+  border-color: rgba(63, 185, 80, 0.35);
+  color: var(--success, #3fb950);
+  background: rgba(63, 185, 80, 0.12);
+}
+
+.provider-status-pill.unconfigured {
+  border-color: rgba(248, 81, 73, 0.35);
+  color: var(--danger, #f85149);
+  background: rgba(248, 81, 73, 0.1);
+}
+
+.provider-config-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.provider-panel {
+  padding: 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-default, var(--border, #30363d));
+  background: var(--surface-default, var(--bg-secondary, #161b22));
+}
+
+.local-model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.8rem;
+}
+
+.local-model-row {
+  width: 100%;
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border-default, var(--border, #30363d));
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary, #e6edf3);
+  text-align: left;
+  cursor: pointer;
+}
+
+.local-model-row:hover:not(:disabled),
+.local-model-row.active {
+  border-color: var(--accent, #58a6ff);
+  background: rgba(88, 166, 255, 0.08);
+}
+
+.local-model-row:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.local-model-row.missing {
+  border-style: dashed;
+}
+
+.local-model-row.missing:disabled {
+  cursor: not-allowed;
+}
+
+.local-model-details {
+  min-width: 0;
+}
+
+.local-model-row small {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--text-secondary, #8b949e);
+  font-size: 0.72rem;
+}
+
+.local-model-path {
+  overflow-wrap: anywhere;
+}
+
+.local-model-side {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.2rem;
+  text-align: right;
+}
+
+.local-model-source {
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-default, var(--border, #30363d));
+  background: var(--surface-subtle, rgba(255, 255, 255, 0.04));
+  color: var(--text-secondary, #8b949e);
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+.local-model-source.configured {
+  border-color: color-mix(in srgb, var(--accent, #58a6ff) 45%, var(--border-default, #30363d));
+  color: var(--accent, #58a6ff);
+}
+
+.local-model-source.missing {
+  border-color: rgba(239, 83, 80, 0.35);
+  color: #ef5350;
+}
+
+.local-model-size {
+  color: var(--text-secondary, #8b949e);
+  font-size: 0.72rem;
+}
+
+.local-model-use {
+  flex-shrink: 0;
+  color: var(--accent, #58a6ff);
+  font-size: 0.78rem;
+}
+
+.provider-status-dot.disabled {
+  background: #484f58;
+}
+
+.provider-supported-panel {
+  margin-top: 1rem;
+}
+
+.provider-type-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.65rem;
+  margin-top: 0.8rem;
+}
+
+.provider-type-card {
+  min-height: 108px;
+  padding: 0.8rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-default, var(--border, #30363d));
+  background: transparent;
+  color: var(--text-primary, #e6edf3);
+  text-align: left;
+  cursor: pointer;
+}
+
+.provider-type-card:hover {
+  border-color: var(--accent, #58a6ff);
+  background: rgba(88, 166, 255, 0.08);
+}
+
+.provider-type-card.custom {
+  border-style: dashed;
+}
+
+.provider-type-card strong,
+.provider-type-card span,
+.provider-type-card small {
+  display: block;
+}
+
+.provider-type-card span {
+  margin-top: 0.35rem;
+  color: var(--text-secondary, #8b949e);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.provider-type-card small {
+  margin-top: 0.5rem;
+  color: var(--text-muted, #6e7681);
+  font-size: 0.72rem;
+}
+
+.provider-custom-api-card {
+  margin-top: 0.85rem;
+  padding: 0.9rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-default, var(--border, #30363d));
+  background: var(--surface-default, var(--bg-secondary, #161b22));
+}
+
+.provider-custom-api-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.85rem;
+}
+
+.provider-custom-api-header strong,
+.provider-custom-api-header span {
+  display: block;
+}
+
+.provider-custom-api-header strong {
+  font-size: 0.92rem;
+}
+
+.provider-custom-api-header span:not(.provider-type-badge) {
+  margin-top: 0.25rem;
+  color: var(--text-secondary, #8b949e);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.provider-custom-api-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.provider-custom-api-grid .settings-field {
+  margin: 0;
+}
+
+.settings-advanced-details summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text-primary, #e6edf3);
+}
+
+.settings-advanced-details[open] summary {
+  margin-bottom: 0.75rem;
+}
+
+@media (max-width: 960px) {
+  .provider-config-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .provider-runtime-card {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .provider-apply-status {
+    flex-direction: column;
+  }
+
+  .provider-apply-error {
+    max-width: 100%;
+    text-align: left;
+  }
+
+  .provider-runtime-meta {
+    justify-content: flex-start;
+  }
+
+  .provider-custom-api-header {
+    flex-direction: column;
+  }
+
+  .provider-custom-api-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Theme-aligned overrides for Settings → Models. Keep these scoped so the
+   provider surface follows KRIA's light/dark modal palette without affecting
+   buttons elsewhere. */
+.provider-settings {
+  color: var(--text-primary);
+}
+
+.provider-settings .provider-runtime-card,
+.provider-settings .provider-apply-status,
+.provider-settings .provider-panel,
+.provider-settings .provider-card,
+.provider-settings .provider-add-form,
+.provider-settings .provider-custom-api-card,
+.provider-settings .provider-models-list {
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--bg-secondary) 88%, transparent);
+  color: var(--text-primary);
+}
+
+.provider-settings .provider-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
+  background: color-mix(in srgb, var(--bg-hover) 42%, var(--bg-secondary));
+}
+
+.provider-settings .provider-card.active {
+  border-color: color-mix(in srgb, var(--accent) 68%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 36%, transparent);
+}
+
+.provider-settings .provider-card.disabled {
+  opacity: 0.72;
+}
+
+.provider-settings .provider-type-badge,
+.provider-settings .provider-active-model,
+.provider-settings .provider-status-pill {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text-secondary);
+}
+
+.provider-settings .provider-endpoint,
+.provider-settings .provider-model,
+.provider-settings .provider-runtime-subtitle,
+.provider-settings .provider-status-label,
+.provider-settings .provider-type-card span,
+.provider-settings .provider-type-card small,
+.provider-settings .local-model-row small,
+.provider-settings .models-label {
+  color: var(--text-secondary);
+  opacity: 1;
+}
+
+.provider-settings .settings-field input[type="text"],
+.provider-settings .settings-field input[type="password"],
+.provider-settings .settings-field input[type="number"],
+.provider-settings .settings-field input:not([type]),
+.provider-settings .settings-field select {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--field-input-border, var(--border));
+  border-radius: 8px;
+  background: var(--field-input-bg, var(--bg-primary));
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.provider-settings .settings-field input:focus,
+.provider-settings .settings-field select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.provider-settings .local-model-row,
+.provider-settings .provider-type-card,
+.provider-settings .model-chip {
+  border-color: var(--border);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.provider-settings .local-model-row:hover:not(:disabled),
+.provider-settings .local-model-row.active,
+.provider-settings .provider-type-card:hover,
+.provider-settings .model-chip:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-secondary));
+  color: var(--text-primary);
+}
+
+.provider-settings .btn-sm,
+.provider-settings .btn-primary,
+.provider-settings .btn-secondary,
+.provider-settings .btn-danger {
+  min-height: 32px;
+  border-radius: 6px;
+  font-weight: 500;
+}
+
+.provider-settings .btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.provider-settings .btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.provider-settings .btn-secondary {
+  background: var(--surface-1);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+
+.provider-settings .btn-secondary:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.provider-settings .btn-danger {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--danger) 36%, var(--border));
+  color: var(--danger);
 }

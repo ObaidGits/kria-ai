@@ -12,10 +12,11 @@
 //! See `docs/GUI_INTELLIGENCE_REVIEW.md` §4.2 for the contract and rationale.
 
 use crate::agent::turn_gate::IntentEnvelope;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// High-level verb the user wants the GUI agent to perform.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Verb {
     Open,
     Type,
@@ -28,7 +29,7 @@ pub enum Verb {
 }
 
 /// Reference to a target object named in the user's request.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TargetRef {
     App(String),
     File(PathBuf),
@@ -42,7 +43,7 @@ pub enum TargetRef {
 /// ("write a fibonacci program"). The executor uses this to choose between
 /// `TextPresent` verification (literal) and `CompletionFlag` verification
 /// (generated, to avoid false-positive re-execution on perceptual diff).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ContentClass {
     Literal(String),
     Generated {
@@ -54,7 +55,7 @@ pub enum ContentClass {
 /// A precondition the user has *implicitly or explicitly declared* in the
 /// request. The Grounder checks these; the Planner uses them to seed
 /// prerequisite-sense Goal Tree leaves.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PrereqHint {
     AppOpen(String),
     FileExists(PathBuf),
@@ -63,7 +64,7 @@ pub enum PrereqHint {
 
 /// The user's stated or strongly-implied success criterion. The Verifier
 /// turns these into [`crate::agent::execution_verifier::Verifiability`] leaves.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SuccessHint {
     TextInFile { path: PathBuf, substring: String },
     ProcessExited(u32),
@@ -72,7 +73,7 @@ pub enum SuccessHint {
 }
 
 /// Surfaced ambiguity. Drives the clarify path; the compiler refuses to guess.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Ambiguity {
     AppNotSpecified,
     FileNotSpecified,

@@ -50,8 +50,8 @@ impl PartialCoalescer {
     /// Create with default §8 bounds (4-15 Hz).
     pub fn new() -> Self {
         Self {
-            min_interval: Duration::from_millis(67),  // 15 Hz ceiling
-            max_interval: Duration::from_millis(250), // 4 Hz floor
+            min_interval: Duration::from_millis(67),      // 15 Hz ceiling
+            max_interval: Duration::from_millis(250),     // 4 Hz floor
             current_interval: Duration::from_millis(100), // start at 10 Hz
             last_emit: None,
             last_text: String::new(),
@@ -231,8 +231,12 @@ fn char_edit_distance(a: &str, b: &str) -> usize {
     let n = a_chars.len();
     let m = b_chars.len();
 
-    if n == 0 { return m; }
-    if m == 0 { return n; }
+    if n == 0 {
+        return m;
+    }
+    if m == 0 {
+        return n;
+    }
 
     // Early exit for large differences (bounded computation)
     if n.abs_diff(m) > 40 {
@@ -242,15 +246,19 @@ fn char_edit_distance(a: &str, b: &str) -> usize {
     let mut prev = vec![0usize; m + 1];
     let mut curr = vec![0usize; m + 1];
 
-    for j in 0..=m { prev[j] = j; }
+    for j in 0..=m {
+        prev[j] = j;
+    }
 
     for i in 1..=n {
         curr[0] = i;
         for j in 1..=m {
-            let cost = if a_chars[i - 1] == b_chars[j - 1] { 0 } else { 1 };
-            curr[j] = (prev[j] + 1)
-                .min(curr[j - 1] + 1)
-                .min(prev[j - 1] + cost);
+            let cost = if a_chars[i - 1] == b_chars[j - 1] {
+                0
+            } else {
+                1
+            };
+            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
         }
         std::mem::swap(&mut prev, &mut curr);
     }
@@ -347,7 +355,7 @@ impl SessionStabilizer {
             queue_depth_samples: Vec::with_capacity(64),
             latency_samples: Vec::with_capacity(64),
             max_samples: 64,
-            queue_drift_threshold: 2.0,   // >2 items/min growth = drifting
+            queue_drift_threshold: 2.0, // >2 items/min growth = drifting
             latency_drift_threshold: 50.0, // >50ms/min growth = drifting
         }
     }
@@ -381,8 +389,7 @@ impl SessionStabilizer {
             return SessionHealth::Degrading;
         }
 
-        if queue_drift > self.queue_drift_threshold
-            || latency_drift > self.latency_drift_threshold
+        if queue_drift > self.queue_drift_threshold || latency_drift > self.latency_drift_threshold
         {
             return SessionHealth::Drifting;
         }
@@ -504,7 +511,7 @@ mod tests {
         c.should_emit("hello world"); // prefix stable
         sleep(Duration::from_millis(110));
         c.should_emit("hello world how"); // prefix stable again
-        // Interval should have increased
+                                          // Interval should have increased
         assert!(c.current_interval > Duration::from_millis(100));
     }
 
@@ -543,7 +550,7 @@ mod tests {
         g.should_show("hello");
         g.should_show("hello world"); // pass (prefix)
         g.should_show("completely different"); // suppress
-        // 1 suppressed out of 3 total = 0.333
+                                               // 1 suppressed out of 3 total = 0.333
         assert!((g.flicker_rate() - 0.333).abs() < 0.01);
     }
 

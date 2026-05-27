@@ -172,7 +172,11 @@ impl AnthropicBackend {
 #[async_trait]
 impl LlmBackend for AnthropicBackend {
     fn model_label(&self) -> &str {
-        &self.display_name
+        if self.model_id.trim().is_empty() {
+            &self.display_name
+        } else {
+            &self.model_id
+        }
     }
 
     fn capabilities(&self) -> &[String] {
@@ -222,7 +226,11 @@ impl LlmBackend for AnthropicBackend {
             let status = resp.status();
             if status.as_u16() == 429 {
                 let wait = 2u64.pow(attempt);
-                tracing::warn!(attempt, wait_secs = wait, "Anthropic rate limited, retrying");
+                tracing::warn!(
+                    attempt,
+                    wait_secs = wait,
+                    "Anthropic rate limited, retrying"
+                );
                 tokio::time::sleep(Duration::from_secs(wait)).await;
                 continue;
             }
@@ -234,10 +242,7 @@ impl LlmBackend for AnthropicBackend {
 
             let body: serde_json::Value = resp.json().await?;
 
-            let content_blocks = body["content"]
-                .as_array()
-                .cloned()
-                .unwrap_or_default();
+            let content_blocks = body["content"].as_array().cloned().unwrap_or_default();
 
             let (content, tool_calls) = Self::extract_response(&content_blocks);
 
@@ -245,7 +250,8 @@ impl LlmBackend for AnthropicBackend {
                 prompt_tokens: u["input_tokens"].as_u64().unwrap_or(0) as u32,
                 completion_tokens: u["output_tokens"].as_u64().unwrap_or(0) as u32,
                 total_tokens: (u["input_tokens"].as_u64().unwrap_or(0)
-                    + u["output_tokens"].as_u64().unwrap_or(0)) as u32,
+                    + u["output_tokens"].as_u64().unwrap_or(0))
+                    as u32,
             });
 
             return Ok(LlmResponse {
@@ -307,9 +313,7 @@ impl LlmBackend for AnthropicBackend {
                                 let event_type = v["type"].as_str().unwrap_or("");
                                 match event_type {
                                     "content_block_delta" => {
-                                        if let Some(delta_text) =
-                                            v["delta"]["text"].as_str()
-                                        {
+                                        if let Some(delta_text) = v["delta"]["text"].as_str() {
                                             tokens.push_str(delta_text);
                                         }
                                     }

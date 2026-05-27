@@ -138,7 +138,10 @@ async fn test_ollama(
     client: &reqwest::Client,
     config: &ProviderConfig,
 ) -> Result<ConnectionTestResult, ProviderError> {
-    let url = format!("{}/api/tags", config.endpoint.base_url.trim_end_matches('/'));
+    let url = format!(
+        "{}/api/tags",
+        config.endpoint.base_url.trim_end_matches('/')
+    );
 
     let resp = client.get(&url).send().await.map_err(|e| {
         if e.is_timeout() {
@@ -157,10 +160,9 @@ async fn test_ollama(
         ));
     }
 
-    let body: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| ProviderError::new(ProviderErrorKind::InvalidResponse, e.to_string(), "ollama"))?;
+    let body: serde_json::Value = resp.json().await.map_err(|e| {
+        ProviderError::new(ProviderErrorKind::InvalidResponse, e.to_string(), "ollama")
+    })?;
 
     let models: Vec<String> = body["models"]
         .as_array()
@@ -201,9 +203,11 @@ async fn test_llama_cpp(
     if status != 200 {
         // Try /health as fallback
         let health_url = format!("{base}/health");
-        let health_resp = client.get(&health_url).send().await.map_err(|e| {
-            ProviderError::network("llama_cpp", &e.to_string())
-        })?;
+        let health_resp = client
+            .get(&health_url)
+            .send()
+            .await
+            .map_err(|e| ProviderError::network("llama_cpp", &e.to_string()))?;
         if health_resp.status().is_success() {
             return Ok(ConnectionTestResult::success(
                 "Connected to llama.cpp server (health OK)",
@@ -231,11 +235,10 @@ async fn test_llama_cpp(
         format!("model: {}", models.join(", "))
     };
 
-    Ok(ConnectionTestResult::success(
-        format!("Connected to llama.cpp ({model_info})"),
-        0,
+    Ok(
+        ConnectionTestResult::success(format!("Connected to llama.cpp ({model_info})"), 0)
+            .with_models(models),
     )
-    .with_models(models))
 }
 
 async fn test_openai_compatible(
@@ -265,7 +268,11 @@ async fn test_openai_compatible(
     let status = resp.status().as_u16();
     if status != 200 {
         let body = resp.text().await.unwrap_or_default();
-        return Err(ProviderError::from_http_status(status, &body, provider_name));
+        return Err(ProviderError::from_http_status(
+            status,
+            &body,
+            provider_name,
+        ));
     }
 
     let body: serde_json::Value = resp.json().await.unwrap_or_default();
@@ -277,11 +284,81 @@ async fn test_openai_compatible(
         .collect();
 
     let model_count = models.len();
-    Ok(ConnectionTestResult::success(
-        format!("Connected ({model_count} models available)"),
-        0,
+    let completion_checked =
+        validate_openai_compatible_completion(client, config, provider_name).await?;
+    Ok(
+        ConnectionTestResult::success(format!("Connected ({model_count} models available)"), 0)
+            .with_models(models)
+            .with_diagnostics(serde_json::json!({
+                "completion_test": completion_checked,
+                "streaming_declared": config.prefer_streaming,
+                "tool_test": "not_executed",
+            })),
     )
-    .with_models(models))
+}
+
+async fn validate_openai_compatible_completion(
+    client: &reqwest::Client,
+    config: &ProviderConfig,
+    provider_name: &str,
+) -> Result<bool, ProviderError> {
+    let model = config.active_model.trim();
+    if model.is_empty() {
+        return Ok(false);
+    }
+
+    let base = config.endpoint.base_url.trim_end_matches('/');
+    let url = format!("{base}/chat/completions");
+    let payload = serde_json::json!({
+        "model": model,
+        "messages": [{"role": "user", "content": "Reply with ok."}],
+        "temperature": 0.0,
+        "max_tokens": 1,
+        "stream": false,
+    });
+
+    let mut req = client.post(&url).json(&payload);
+    if !config.endpoint.api_key.is_empty() {
+        req = req.bearer_auth(&config.endpoint.api_key);
+    }
+    for (k, v) in &config.endpoint.custom_headers {
+        req = req.header(k.as_str(), v.as_str());
+    }
+
+    let resp = req.send().await.map_err(|e| {
+        if e.is_timeout() {
+            ProviderError::timeout(provider_name)
+        } else {
+            ProviderError::network(provider_name, &e.to_string())
+        }
+    })?;
+
+    let status = resp.status().as_u16();
+    if status != 200 {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(ProviderError::from_http_status(
+            status,
+            &format!("completion validation failed: {body}"),
+            provider_name,
+        ));
+    }
+
+    let body: serde_json::Value = resp.json().await.map_err(|e| {
+        ProviderError::new(
+            ProviderErrorKind::InvalidResponse,
+            format!("completion validation returned invalid JSON: {e}"),
+            provider_name,
+        )
+    })?;
+    if body["choices"].as_array().map(|arr| arr.is_empty()) == Some(false) {
+        Ok(true)
+    } else {
+        Err(ProviderError::new(
+            ProviderErrorKind::InvalidResponse,
+            "completion validation returned no choices",
+            provider_name,
+        ))
+    }
 }
 
 async fn test_gemini(
@@ -310,18 +387,85 @@ async fn test_gemini(
         .as_array()
         .unwrap_or(&vec![])
         .iter()
-        .filter_map(|m| m["name"].as_str().map(|s| {
-            // Strip "models/" prefix
-            s.strip_prefix("models/").unwrap_or(s).to_string()
-        }))
+        .filter_map(|m| {
+            m["name"].as_str().map(|s| {
+                // Strip "models/" prefix
+                s.strip_prefix("models/").unwrap_or(s).to_string()
+            })
+        })
         .collect();
 
     let model_count = models.len();
+    let completion_checked = validate_gemini_completion(client, config).await?;
     Ok(ConnectionTestResult::success(
         format!("Connected to Gemini ({model_count} models available)"),
         0,
     )
-    .with_models(models))
+    .with_models(models)
+    .with_diagnostics(serde_json::json!({
+        "completion_test": completion_checked,
+        "streaming_declared": config.prefer_streaming,
+        "tool_test": "not_executed",
+    })))
+}
+
+async fn validate_gemini_completion(
+    client: &reqwest::Client,
+    config: &ProviderConfig,
+) -> Result<bool, ProviderError> {
+    let raw_model = config.active_model.trim();
+    if raw_model.is_empty() {
+        return Ok(false);
+    }
+    let model = raw_model.strip_prefix("models/").unwrap_or(raw_model);
+
+    let base = config.endpoint.base_url.trim_end_matches('/');
+    let url = format!(
+        "{base}/models/{model}:generateContent?key={}",
+        config.endpoint.api_key
+    );
+    let payload = serde_json::json!({
+        "contents": [{"role": "user", "parts": [{"text": "Reply with ok."}]}],
+        "generationConfig": {
+            "temperature": 0.0,
+            "maxOutputTokens": 1
+        }
+    });
+
+    let resp = client.post(&url).json(&payload).send().await.map_err(|e| {
+        if e.is_timeout() {
+            ProviderError::timeout("gemini")
+        } else {
+            ProviderError::network("gemini", &e.to_string())
+        }
+    })?;
+
+    let status = resp.status().as_u16();
+    if status != 200 {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(ProviderError::from_http_status(
+            status,
+            &format!("completion validation failed: {body}"),
+            "gemini",
+        ));
+    }
+
+    let body: serde_json::Value = resp.json().await.map_err(|e| {
+        ProviderError::new(
+            ProviderErrorKind::InvalidResponse,
+            format!("completion validation returned invalid JSON: {e}"),
+            "gemini",
+        )
+    })?;
+    if body["candidates"].as_array().map(|arr| arr.is_empty()) == Some(false) {
+        Ok(true)
+    } else {
+        Err(ProviderError::new(
+            ProviderErrorKind::InvalidResponse,
+            "completion validation returned no candidates",
+            "gemini",
+        ))
+    }
 }
 
 async fn test_anthropic(
@@ -375,8 +519,9 @@ async fn test_anthropic(
             "claude-opus-4-20250514".to_string(),
             "claude-3-5-haiku-20241022".to_string(),
         ];
-        return Ok(ConnectionTestResult::success("Connected to Anthropic API", 0)
-            .with_models(models));
+        return Ok(
+            ConnectionTestResult::success("Connected to Anthropic API", 0).with_models(models),
+        );
     }
 
     let body = resp.text().await.unwrap_or_default();

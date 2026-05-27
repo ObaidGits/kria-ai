@@ -176,6 +176,64 @@ struct DeleteEmailInput {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+struct ReplyEmailInput {
+    message_id: String,
+    body: String,
+    #[serde(default)]
+    reply_all: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct MarkEmailInput {
+    message_id: String,
+    #[serde(default)]
+    read: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct LabelEmailInput {
+    message_id: String,
+    label: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DriveCreateFileInput {
+    name: String,
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    folder_id: Option<String>,
+    #[serde(default)]
+    mime_type: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DriveCreateFolderInput {
+    name: String,
+    #[serde(default)]
+    parent_folder_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DriveMoveInput {
+    file_id: String,
+    target_folder_id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DriveRenameInput {
+    file_id: String,
+    new_name: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct CalendarSearchInput {
     #[serde(default)]
     query: Option<String>,
@@ -1297,6 +1355,266 @@ impl ToolHandler for GwGmailDelete {
     }
 }
 
+// ── New Gmail tools ────────────────────────────────────────────────────────────
+
+struct GwGmailReply(GwBridge);
+#[async_trait]
+impl ToolHandler for GwGmailReply {
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let input: ReplyEmailInput = match parse_input(params) {
+            Ok(value) => value,
+            Err(err) => return err,
+        };
+        if let Err(err) = require_non_empty(&input.message_id, "message_id") {
+            return err;
+        }
+        if let Err(err) = require_non_empty(&input.body, "body") {
+            return err;
+        }
+
+        // Step 1: Read the original message to get thread/reply metadata
+        let read_result = self
+            .0
+            .mcp_call_raw(
+                "readGmailMessage",
+                serde_json::json!({ "messageId": input.message_id }),
+            )
+            .await;
+
+        if !read_result.success {
+            return ToolResult {
+                success: false,
+                data: read_result.data,
+                error: Some(format!(
+                    "Could not read original message to reply: {}",
+                    read_result.error.unwrap_or_default()
+                )),
+            };
+        }
+
+        let raw_text = read_result.data.as_str().unwrap_or("").to_string();
+        let parsed = parse_json_or_text(&raw_text);
+
+        // Extract thread ID and original sender for reply
+        let thread_id = find_string_field_recursive(&parsed, "threadId")
+            .or_else(|| find_string_field_recursive(&parsed, "thread_id"));
+        let from = find_string_field_recursive(&parsed, "from")
+            .or_else(|| find_string_field_recursive(&parsed, "sender"));
+        let subject = find_string_field_recursive(&parsed, "subject")
+            .unwrap_or_else(|| "Re: (no subject)".to_string());
+
+        let reply_subject = if subject.to_ascii_lowercase().starts_with("re:") {
+            subject
+        } else {
+            format!("Re: {}", subject)
+        };
+
+        // Build reply draft
+        let mut draft_args = serde_json::json!({
+            "subject": reply_subject,
+            "body": input.body,
+            "replyToMessageId": input.message_id,
+        });
+
+        if let Some(to) = from {
+            draft_args["to"] = serde_json::json!(to);
+        }
+        if let Some(tid) = thread_id {
+            draft_args["threadId"] = serde_json::json!(tid);
+        }
+        if input.reply_all {
+            draft_args["replyAll"] = serde_json::json!(true);
+        }
+
+        // Step 2: Create draft reply
+        let draft_result = self.0.mcp_call("createGmailDraft", draft_args).await;
+        if !draft_result.success {
+            return draft_result;
+        }
+
+        // Step 3: Send the draft
+        if let Some(draft_id) = extract_gmail_draft_id(&draft_result.data) {
+            return self
+                .0
+                .mcp_call("sendGmailDraft", serde_json::json!({ "draftId": draft_id }))
+                .await;
+        }
+
+        ToolResult {
+            success: false,
+            data: draft_result.data,
+            error: Some("Reply draft created but could not auto-send: draftId not found.".into()),
+        }
+    }
+}
+
+struct GwGmailMarkRead(GwBridge);
+#[async_trait]
+impl ToolHandler for GwGmailMarkRead {
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let input: MarkEmailInput = match parse_input(params) {
+            Ok(value) => value,
+            Err(err) => return err,
+        };
+        if let Err(err) = require_non_empty(&input.message_id, "message_id") {
+            return err;
+        }
+
+        // Use modifyGmailMessage to add/remove UNREAD label
+        let (add_labels, remove_labels): (Vec<&str>, Vec<&str>) = if input.read {
+            (vec![], vec!["UNREAD"])
+        } else {
+            (vec!["UNREAD"], vec![])
+        };
+
+        self.0
+            .mcp_call(
+                "modifyGmailMessage",
+                serde_json::json!({
+                    "messageId": input.message_id,
+                    "addLabelIds": add_labels,
+                    "removeLabelIds": remove_labels,
+                }),
+            )
+            .await
+    }
+}
+
+struct GwGmailLabel(GwBridge);
+#[async_trait]
+impl ToolHandler for GwGmailLabel {
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let input: LabelEmailInput = match parse_input(params) {
+            Ok(value) => value,
+            Err(err) => return err,
+        };
+        if let Err(err) = require_non_empty(&input.message_id, "message_id") {
+            return err;
+        }
+        if let Err(err) = require_non_empty(&input.label, "label") {
+            return err;
+        }
+
+        self.0
+            .mcp_call(
+                "modifyGmailMessage",
+                serde_json::json!({
+                    "messageId": input.message_id,
+                    "addLabelIds": [input.label.to_uppercase()],
+                    "removeLabelIds": [],
+                }),
+            )
+            .await
+    }
+}
+
+// ── New Drive tools ────────────────────────────────────────────────────────────
+
+struct GwDriveCreateFile(GwBridge);
+#[async_trait]
+impl ToolHandler for GwDriveCreateFile {
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let input: DriveCreateFileInput = match parse_input(params) {
+            Ok(value) => value,
+            Err(err) => return err,
+        };
+        if let Err(err) = require_non_empty(&input.name, "name") {
+            return err;
+        }
+
+        let mut args = serde_json::json!({ "name": input.name });
+        if let Some(content) = input.content.filter(|c| !c.is_empty()) {
+            args["content"] = serde_json::json!(content);
+        }
+        if let Some(folder_id) = input.folder_id.filter(|f| !f.is_empty()) {
+            args["folderId"] = serde_json::json!(folder_id);
+        }
+        if let Some(mime_type) = input.mime_type.filter(|m| !m.is_empty()) {
+            args["mimeType"] = serde_json::json!(mime_type);
+        }
+
+        self.0.mcp_call("createDriveFile", args).await
+    }
+}
+
+struct GwDriveCreateFolder(GwBridge);
+#[async_trait]
+impl ToolHandler for GwDriveCreateFolder {
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let input: DriveCreateFolderInput = match parse_input(params) {
+            Ok(value) => value,
+            Err(err) => return err,
+        };
+        if let Err(err) = require_non_empty(&input.name, "name") {
+            return err;
+        }
+
+        let mut args = serde_json::json!({
+            "name": input.name,
+            "mimeType": "application/vnd.google-apps.folder",
+        });
+        if let Some(parent_id) = input.parent_folder_id.filter(|p| !p.is_empty()) {
+            args["folderId"] = serde_json::json!(parent_id);
+        }
+
+        self.0.mcp_call("createDriveFile", args).await
+    }
+}
+
+struct GwDriveMove(GwBridge);
+#[async_trait]
+impl ToolHandler for GwDriveMove {
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let input: DriveMoveInput = match parse_input(params) {
+            Ok(value) => value,
+            Err(err) => return err,
+        };
+        if let Err(err) = require_non_empty(&input.file_id, "file_id") {
+            return err;
+        }
+        if let Err(err) = require_non_empty(&input.target_folder_id, "target_folder_id") {
+            return err;
+        }
+
+        self.0
+            .mcp_call(
+                "moveDriveFile",
+                serde_json::json!({
+                    "fileId": input.file_id,
+                    "targetFolderId": input.target_folder_id,
+                }),
+            )
+            .await
+    }
+}
+
+struct GwDriveRename(GwBridge);
+#[async_trait]
+impl ToolHandler for GwDriveRename {
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let input: DriveRenameInput = match parse_input(params) {
+            Ok(value) => value,
+            Err(err) => return err,
+        };
+        if let Err(err) = require_non_empty(&input.file_id, "file_id") {
+            return err;
+        }
+        if let Err(err) = require_non_empty(&input.new_name, "new_name") {
+            return err;
+        }
+
+        self.0
+            .mcp_call(
+                "renameDriveFile",
+                serde_json::json!({
+                    "fileId": input.file_id,
+                    "newName": input.new_name,
+                }),
+            )
+            .await
+    }
+}
+
 struct GwCalendarToday(GwBridge);
 #[async_trait]
 impl ToolHandler for GwCalendarToday {
@@ -2261,6 +2579,109 @@ pub fn register(reg: &ToolRegistry, mcp_ref: GwClientRef, sidecar: Arc<SidecarBr
                 ],
             },
             Arc::new(GwCalendarDelete(gw.clone())),
+        ),
+        // ── New Gmail tools ──────────────────────────────
+        (
+            ToolDef {
+                name: "gw_gmail_reply".into(),
+                description: "Reply to a Gmail message. Reads the original, creates a reply draft, and sends it. Requires HITL approval.".into(),
+                category: "google_workspace".into(),
+                default_tier: RiskLevel::Red,
+                min_tier: "lite",
+                parameters: vec![
+                    param("message_id", "string", "Gmail message ID to reply to", true),
+                    param("body", "string", "Reply body text", true),
+                    param("reply_all", "boolean", "Reply to all recipients (default: false)", false),
+                ],
+            },
+            Arc::new(GwGmailReply(gw.clone())),
+        ),
+        (
+            ToolDef {
+                name: "gw_gmail_mark_read".into(),
+                description: "Mark a Gmail message as read or unread.".into(),
+                category: "google_workspace".into(),
+                default_tier: RiskLevel::Yellow,
+                min_tier: "lite",
+                parameters: vec![
+                    param("message_id", "string", "Gmail message ID", true),
+                    param("read", "boolean", "true = mark as read, false = mark as unread", true),
+                ],
+            },
+            Arc::new(GwGmailMarkRead(gw.clone())),
+        ),
+        (
+            ToolDef {
+                name: "gw_gmail_label".into(),
+                description: "Add a label to a Gmail message (e.g. STARRED, IMPORTANT, or custom label ID).".into(),
+                category: "google_workspace".into(),
+                default_tier: RiskLevel::Yellow,
+                min_tier: "lite",
+                parameters: vec![
+                    param("message_id", "string", "Gmail message ID", true),
+                    param("label", "string", "Label to add (e.g. STARRED, IMPORTANT)", true),
+                ],
+            },
+            Arc::new(GwGmailLabel(gw.clone())),
+        ),
+        // ── New Drive tools ──────────────────────────────
+        (
+            ToolDef {
+                name: "gw_drive_create_file".into(),
+                description: "Create a new file in Google Drive with optional content and folder placement.".into(),
+                category: "google_workspace".into(),
+                default_tier: RiskLevel::Yellow,
+                min_tier: "lite",
+                parameters: vec![
+                    param("name", "string", "File name", true),
+                    param("content", "string", "File content (optional)", false),
+                    param("folder_id", "string", "Parent folder ID (optional, defaults to root)", false),
+                    param("mime_type", "string", "MIME type (optional, e.g. text/plain)", false),
+                ],
+            },
+            Arc::new(GwDriveCreateFile(gw.clone())),
+        ),
+        (
+            ToolDef {
+                name: "gw_drive_create_folder".into(),
+                description: "Create a new folder in Google Drive.".into(),
+                category: "google_workspace".into(),
+                default_tier: RiskLevel::Yellow,
+                min_tier: "lite",
+                parameters: vec![
+                    param("name", "string", "Folder name", true),
+                    param("parent_folder_id", "string", "Parent folder ID (optional, defaults to root)", false),
+                ],
+            },
+            Arc::new(GwDriveCreateFolder(gw.clone())),
+        ),
+        (
+            ToolDef {
+                name: "gw_drive_move".into(),
+                description: "Move a Google Drive file to a different folder.".into(),
+                category: "google_workspace".into(),
+                default_tier: RiskLevel::Yellow,
+                min_tier: "lite",
+                parameters: vec![
+                    param("file_id", "string", "File ID to move", true),
+                    param("target_folder_id", "string", "Target folder ID", true),
+                ],
+            },
+            Arc::new(GwDriveMove(gw.clone())),
+        ),
+        (
+            ToolDef {
+                name: "gw_drive_rename".into(),
+                description: "Rename a Google Drive file or folder.".into(),
+                category: "google_workspace".into(),
+                default_tier: RiskLevel::Yellow,
+                min_tier: "lite",
+                parameters: vec![
+                    param("file_id", "string", "File or folder ID to rename", true),
+                    param("new_name", "string", "New name", true),
+                ],
+            },
+            Arc::new(GwDriveRename(gw.clone())),
         ),
     ];
 

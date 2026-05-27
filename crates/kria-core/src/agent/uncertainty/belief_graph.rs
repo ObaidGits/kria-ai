@@ -1,5 +1,19 @@
 //! BeliefGraph — Tracks current system state assumptions.
 //!
+//! # Deprecation Notice (Batch 1)
+//!
+//! `BeliefGraph` is **deprecated** in favor of `WorldModelStore` (accessed via
+//! `PsdgHandle`). `WorldModelStore` provides the same Bayesian (s,p,o) triple
+//! semantics with persistence, FTS5, archive, and decay — all backed by SQLite.
+//!
+//! `BeliefGraph` is retained as an **in-memory fallback** only:
+//! - Used by `UncertaintyEngine` when no `PsdgHandle` is attached.
+//! - Should NOT receive new callers.
+//! - Will be removed in Batch 2.
+//!
+//! Migrate: `BeliefGraph::update(prop, conf, ev, src)` →
+//! `PsdgHandle::record_fact(subject, predicate, object, conf, src, ev)`
+//!
 //! # Design: Bayesian Belief Updates
 //!
 //! Each fact has a confidence score, evidence chain, and source.

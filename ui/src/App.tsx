@@ -9,12 +9,14 @@ import PromptLabView from "./components/PromptLabView";
 import SessionSidebar from "./components/SessionSidebar";
 import SettingsModal from "./components/SettingsModal";
 import HitlModal from "./components/HitlModal";
+import DecisionActionCenter from "./components/DecisionActionCenter";
 import VoiceOverlay from "./components/VoiceOverlay";
 import SetupWizard from "./components/SetupWizard";
 import { DeviceTargetView, useDeviceStatus } from "./hooks/useDeviceStatus";
 const DeviceMatrix = lazy(() => import("./components/DeviceMatrix"));
 const TestRunnerDashboard = lazy(() => import("./components/TestRunnerDashboard"));
 const AnalyticsDashboard = lazy(() => import("./components/AnalyticsDashboard"));
+const N8nDashboard = lazy(() => import("./components/N8nDashboard"));
 
 interface Toast {
   id: number;
@@ -64,7 +66,7 @@ const App: Component = () => {
   const [showShortcuts, setShowShortcuts] = createSignal(false);
   const [showWizard, setShowWizard] = createSignal(false);
   const [wizardLoading, setWizardLoading] = createSignal(true);
-  const [dashboardView, setDashboardView] = createSignal<"overview" | "operations" | "forensics">("overview");
+  const [dashboardView, setDashboardView] = createSignal<"overview" | "operations" | "forensics" | "n8n">("overview");
   const [route, setRoute] = createSignal<AppRoute>(routeFromHash(typeof window !== "undefined" ? window.location.hash : "#/"));
   const initialControlPanelExpanded =
     typeof window === "undefined"
@@ -628,6 +630,7 @@ const App: Component = () => {
             <div class="modern-dashboard-tabs">
               <button class={`modern-nav-btn ${dashboardView() === "overview" ? "active" : ""}`} onClick={() => setDashboardView("overview")}>Overview</button>
               <button class={`modern-nav-btn ${dashboardView() === "operations" ? "active" : ""}`} onClick={() => setDashboardView("operations")}>Operations</button>
+              <button class={`modern-nav-btn ${dashboardView() === "n8n" ? "active" : ""}`} onClick={() => setDashboardView("n8n")}>n8n</button>
               <button class={`modern-nav-btn ${dashboardView() === "forensics" ? "active" : ""}`} onClick={() => setDashboardView("forensics")}>Forensics</button>
             </div>
 
@@ -741,6 +744,12 @@ const App: Component = () => {
                     Last reset start: {formatUnixMs(resetSnapshot()?.started_unix_ms)} | Last completion: {formatUnixMs(resetSnapshot()?.completed_unix_ms)}
                   </div>
                 </div>
+            </Show>
+
+            <Show when={dashboardView() === "n8n" && controlPanelExpanded()}>
+              <Suspense fallback={<div class="status-pill subtle">Loading n8n…</div>}>
+                <N8nDashboard />
+              </Suspense>
             </Show>
           </section>
           </Show>
@@ -899,6 +908,8 @@ const App: Component = () => {
       <Show when={showHitl()}>
         <HitlModal />
       </Show>
+
+      <DecisionActionCenter />
 
       <Show when={voiceActive()}>
         <VoiceOverlay />

@@ -99,3 +99,15 @@ pub struct WorldModelStats {
 }
 
 use std::collections::HashMap;
+
+impl Default for WorldModelStats {
+    fn default() -> Self {
+        Self {
+            total_facts: 0,
+            archived_facts: 0,
+            facts_by_source: HashMap::new(),
+            avg_confidence: 0.0,
+            stale_facts: 0,
+        }
+    }
+}

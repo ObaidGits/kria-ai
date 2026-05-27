@@ -173,6 +173,9 @@ pub fn list_input_devices() -> anyhow::Result<Vec<String>> {
     if let Ok(devices) = host.input_devices() {
         for device in devices {
             if let Ok(name) = device.name() {
+                if is_noisy_or_wrong_direction_alsa_device(&name) {
+                    continue;
+                }
                 names.push(name);
             }
         }
@@ -181,6 +184,11 @@ pub fn list_input_devices() -> anyhow::Result<Vec<String>> {
     names.sort();
     names.dedup();
     Ok(names)
+}
+
+fn is_noisy_or_wrong_direction_alsa_device(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.contains("dmix") || lower.contains("monitor of null output")
 }
 
 /// Return current system default input device name.

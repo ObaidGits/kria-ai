@@ -35,6 +35,14 @@ pub struct ToolDef {
     pub min_tier: &'static str,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ToolResumeCapability {
+    DeterministicLocal,
+    RequiresLiveGui,
+    ExternalDelegated,
+    Unsupported,
+}
+
 impl ToolDef {
     /// Convert to OpenAI-compatible function schema for LLM.
     pub fn to_function_schema(&self) -> serde_json::Value {
@@ -91,6 +99,7 @@ pub trait ToolHandler: Send + Sync {
 pub struct ToolRegistry {
     defs: RwLock<HashMap<String, ToolDef>>,
     handlers: RwLock<HashMap<String, Arc<dyn ToolHandler>>>,
+    resume_capabilities: RwLock<HashMap<String, ToolResumeCapability>>,
     env_provider: RwLock<Arc<dyn EnvironmentProvider>>,
     shell_state: SharedShellState,
 }
@@ -109,6 +118,7 @@ impl ToolRegistry {
         Self {
             defs: RwLock::new(HashMap::new()),
             handlers: RwLock::new(HashMap::new()),
+            resume_capabilities: RwLock::new(HashMap::new()),
             env_provider: RwLock::new(env_provider),
             shell_state: Arc::new(Mutex::new(default_shell_state())),
         }
@@ -152,6 +162,52 @@ impl ToolRegistry {
             .write()
             .expect("tool registry handlers lock poisoned")
             .insert(name, handler);
+    }
+
+    pub fn register_resume_capability(
+        &self,
+        name: impl Into<String>,
+        capability: ToolResumeCapability,
+    ) {
+        self.resume_capabilities
+            .write()
+            .expect("tool registry resume capability lock poisoned")
+            .insert(name.into(), capability);
+    }
+
+    pub fn resume_capability(&self, name: &str) -> ToolResumeCapability {
+        if let Some(capability) = self
+            .resume_capabilities
+            .read()
+            .expect("tool registry resume capability lock poisoned")
+            .get(name)
+            .copied()
+        {
+            return capability;
+        }
+
+        let Some(def) = self.get_def(name) else {
+            return ToolResumeCapability::Unsupported;
+        };
+
+        // Compatibility shim while older tool registrations lack explicit
+        // resume metadata. New tools should call `register_resume_capability`.
+        match (def.category.as_str(), name) {
+            ("file_ops", "write_file")
+            | ("file_ops", "create_directory")
+            | ("file_ops", "copy_file")
+            | ("shell", "execute_bash")
+            | ("shell", "execute_python") => ToolResumeCapability::DeterministicLocal,
+            ("gui_automation", _)
+            | ("vision_automation", _)
+            | ("desktop", _)
+            | ("internet", "browser_search")
+            | ("internet", "open_url") => ToolResumeCapability::RequiresLiveGui,
+            ("fleet", _) | ("google_workspace", _) | ("mcp", _) | ("n8n", _) | ("openclaw", _) => {
+                ToolResumeCapability::ExternalDelegated
+            }
+            _ => ToolResumeCapability::Unsupported,
+        }
     }
 
     /// Get a tool definition by name.
@@ -301,10 +357,38 @@ pub fn build_registry_with_store(
 }
 
 /// Build the full tool registry with a MemoryStore, optional RagEngine, and optional ProactiveEngine.
+///
+/// Pass `psdg` to enable persistent browser/IDE cognition. All browser and IDE tools
+/// will write state to WorldModelStore after each operation when this is `Some`.
 pub fn build_registry_full(
     store: Option<std::sync::Arc<dyn crate::memory::MemoryRuntime>>,
     rag: Option<std::sync::Arc<crate::memory::rag::RagEngine>>,
     proactive: Option<std::sync::Arc<crate::automation::proactive::ProactiveEngine>>,
+) -> ToolRegistry {
+    build_registry_full_with_psdg(store, rag, proactive, None)
+}
+
+/// Build the full tool registry with all optional components including PSDG.
+/// For WorkflowContinuationRuntime support, use `build_registry_full_with_psdg_wcr`.
+pub fn build_registry_full_with_psdg(
+    store: Option<std::sync::Arc<dyn crate::memory::MemoryRuntime>>,
+    rag: Option<std::sync::Arc<crate::memory::rag::RagEngine>>,
+    proactive: Option<std::sync::Arc<crate::automation::proactive::ProactiveEngine>>,
+    psdg: Option<crate::agent::psdg::PsdgHandle>,
+) -> ToolRegistry {
+    build_registry_full_with_psdg_wcr(store, rag, proactive, psdg, None)
+}
+
+/// Build the full tool registry with all optional components including PSDG and
+/// `WorkflowContinuationRuntime` (enables the `resume_workflow` tool).
+pub fn build_registry_full_with_psdg_wcr(
+    store: Option<std::sync::Arc<dyn crate::memory::MemoryRuntime>>,
+    rag: Option<std::sync::Arc<crate::memory::rag::RagEngine>>,
+    proactive: Option<std::sync::Arc<crate::automation::proactive::ProactiveEngine>>,
+    psdg: Option<crate::agent::psdg::PsdgHandle>,
+    continuation_runtime: Option<
+        std::sync::Arc<crate::agent::workflow_continuation::WorkflowContinuationRuntime>,
+    >,
 ) -> ToolRegistry {
     let reg = ToolRegistry::new();
 
@@ -332,6 +416,8 @@ pub fn build_registry_full(
     super::desktop::register(&reg);
     super::developer::register(&reg);
     super::gui_automation::register(&reg);
+    super::atspi_tools::register(&reg);
+    super::cognition_tools::register(&reg, psdg, continuation_runtime);
     super::vision_automation::register(&reg);
     super::i18n::register(&reg);
 

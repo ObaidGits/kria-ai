@@ -86,30 +86,17 @@ pub enum IpcMessage {
         stable: bool,
     },
     /// Host → Sidecar: Heartbeat ping
-    Ping {
-        ts_ms: u64,
-    },
+    Ping { ts_ms: u64 },
     /// Sidecar → Host: Heartbeat pong
-    Pong {
-        ts_ms: u64,
-    },
+    Pong { ts_ms: u64 },
     /// Host → Sidecar: Session close
-    Bye {
-        session_id: String,
-        generation: u64,
-    },
+    Bye { session_id: String, generation: u64 },
     /// Sidecar → Host: Session close acknowledged
     ByeAck,
     /// Sidecar → Host: Error
-    Error {
-        code: String,
-        fatal: bool,
-    },
+    Error { code: String, fatal: bool },
     /// Host → Sidecar: Cancel current generation (optional per §11)
-    Cancel {
-        session_id: String,
-        generation: u64,
-    },
+    Cancel { session_id: String, generation: u64 },
 }
 
 impl IpcMessage {
@@ -359,10 +346,7 @@ mod tests {
         let result = write_frame(&mut buf, &msg).await;
 
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("exceeds 256 KiB"));
+        assert!(result.unwrap_err().to_string().contains("exceeds 256 KiB"));
     }
 
     #[tokio::test]
@@ -376,10 +360,7 @@ mod tests {
         let result = read_frame(&mut cursor).await;
 
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("exceeds 256 KiB"));
+        assert!(result.unwrap_err().to_string().contains("exceeds 256 KiB"));
     }
 
     #[test]

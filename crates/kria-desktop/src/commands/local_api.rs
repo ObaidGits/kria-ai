@@ -1,4 +1,21 @@
 use super::*;
+use std::collections::HashMap;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct LocalApiN8nCallbackResponse {
+    status: String,
+    decision: kria_core::n8n::N8nIngestDecision,
+    governance: Option<kria_core::n8n::N8nGovernanceDecision>,
+    correlation_id: String,
+    event_id: String,
+    workflow_id: String,
+    run_status: kria_core::n8n::N8nRunStatus,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct LocalApiN8nHitlQuery {
+    request_id: String,
+}
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub(super) struct LocalApiChatRequest {
@@ -50,6 +67,15 @@ pub(super) trait LocalApiResponder: Send + Sync {
 pub(super) struct LocalApiBridgeState {
     pub(super) responder: Arc<dyn LocalApiResponder>,
     pub(super) fleet_control_runtime: Arc<DesktopFleetControlRuntime>,
+    pub(super) n8n_catalog: Arc<RwLock<Option<Arc<kria_core::n8n::N8nCatalog>>>>,
+    pub(super) n8n_state_store: Arc<kria_core::n8n::N8nWorkflowStateStore>,
+    pub(super) n8n_inbox_path: PathBuf,
+    pub(super) n8n_audit_path: PathBuf,
+    pub(super) n8n_governance_log: Arc<RwLock<Vec<kria_core::n8n::N8nGovernanceDecision>>>,
+    pub(super) n8n_hitl_responses: Arc<RwLock<HashMap<String, serde_json::Value>>>,
+    pub(super) hitl: Arc<HitlGateway>,
+    pub(super) decision_store: Arc<kria_core::agent::collaborative_decision::DecisionStore>,
+    pub(super) app_handle: Option<AppHandle>,
 }
 
 #[derive(Clone)]
@@ -130,6 +156,92 @@ pub(super) async fn local_api_chat(
 
     let response = state.responder.respond(&request).await;
     (StatusCode::OK, Json(response))
+}
+
+async fn local_api_n8n_callback(
+    AxumState(state): AxumState<LocalApiBridgeState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Json<LocalApiN8nCallbackResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let signature = headers
+        .get("x-kria-signature")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+
+    let catalog = state.n8n_catalog.read().await.clone().ok_or_else(|| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "status": "error",
+                "message": "n8n integration is not enabled in KRIA",
+            })),
+        )
+    })?;
+
+    let envelope =
+        kria_core::n8n::parse_and_verify_callback(&catalog, &body, signature).map_err(|error| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "status": "error",
+                    "message": error.to_string(),
+                })),
+            )
+        })?;
+
+    let decision = state.n8n_state_store.ingest(envelope.clone());
+    let governance = state
+        .n8n_state_store
+        .get(&envelope.correlation_id)
+        .map(|run| {
+            let workflow = catalog.get(&run.workflow_id);
+            kria_core::n8n::evaluate_run(workflow, &run)
+        });
+    let record = kria_core::n8n::N8nInboxRecord {
+        received_at_ms: local_api_now_unix_ms().max(0) as u128,
+        decision: decision.clone(),
+        envelope: envelope.clone(),
+    };
+    if let Err(error) = append_n8n_inbox_record(&state.n8n_inbox_path, &record).await {
+        tracing::warn!(error = %error, "failed to persist n8n callback inbox record");
+    }
+    if let Some(governance) = governance.clone() {
+        record_n8n_governance(&state, governance.clone()).await;
+        maybe_start_n8n_hitl_bridge(&state, &envelope, &governance);
+    }
+
+    let response = LocalApiN8nCallbackResponse {
+        status: "received".into(),
+        decision,
+        governance,
+        correlation_id: envelope.correlation_id,
+        event_id: envelope.event_id,
+        workflow_id: envelope.workflow_id,
+        run_status: envelope.status,
+    };
+
+    if let Some(app_handle) = state.app_handle.as_ref() {
+        let _ = app_handle.emit("n8n:callback", &response);
+    }
+    Ok(Json(response))
+}
+
+async fn local_api_n8n_hitl_response(
+    AxumState(state): AxumState<LocalApiBridgeState>,
+    Query(query): Query<LocalApiN8nHitlQuery>,
+) -> Json<serde_json::Value> {
+    let response = state
+        .n8n_hitl_responses
+        .read()
+        .await
+        .get(&query.request_id)
+        .cloned();
+
+    Json(serde_json::json!({
+        "status": if response.is_some() { "ready" } else { "pending" },
+        "request_id": query.request_id,
+        "response": response,
+    }))
 }
 
 async fn local_api_fleet_events(
@@ -582,6 +694,195 @@ fn local_api_now_unix_ms() -> i64 {
     Utc::now().timestamp_millis()
 }
 
+async fn append_n8n_inbox_record(
+    path: &Path,
+    record: &kria_core::n8n::N8nInboxRecord,
+) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+
+    let mut line = serde_json::to_vec(record)?;
+    line.push(b'\n');
+    use tokio::io::AsyncWriteExt;
+    let mut file = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .await?;
+    file.write_all(&line).await?;
+    Ok(())
+}
+
+async fn append_n8n_audit_record(
+    path: &Path,
+    decision: &kria_core::n8n::N8nGovernanceDecision,
+) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+
+    let record = serde_json::json!({
+        "ts_unix_ms": local_api_now_unix_ms(),
+        "type": "n8n_governance_decision",
+        "decision": decision,
+    });
+    let mut line = serde_json::to_vec(&record)?;
+    line.push(b'\n');
+    use tokio::io::AsyncWriteExt;
+    let mut file = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .await?;
+    file.write_all(&line).await?;
+    Ok(())
+}
+
+async fn record_n8n_governance(
+    state: &LocalApiBridgeState,
+    decision: kria_core::n8n::N8nGovernanceDecision,
+) {
+    {
+        let mut log = state.n8n_governance_log.write().await;
+        log.push(decision.clone());
+        let overflow = log.len().saturating_sub(100);
+        if overflow > 0 {
+            log.drain(0..overflow);
+        }
+    }
+
+    if let Err(error) = append_n8n_audit_record(&state.n8n_audit_path, &decision).await {
+        tracing::warn!(error = %error, "failed to persist n8n governance audit record");
+    }
+
+    if let Some(app_handle) = state.app_handle.as_ref() {
+        let _ = app_handle.emit("n8n:governance", &decision);
+        if decision.continuation_action == kria_core::n8n::N8nContinuationAction::ContinueWorkflow {
+            let _ = app_handle.emit("n8n:continuation", &decision);
+        }
+    }
+}
+
+fn maybe_start_n8n_hitl_bridge(
+    state: &LocalApiBridgeState,
+    envelope: &kria_core::n8n::N8nCallbackEnvelope,
+    decision: &kria_core::n8n::N8nGovernanceDecision,
+) {
+    if decision.continuation_action != kria_core::n8n::N8nContinuationAction::PauseForHitl {
+        return;
+    }
+
+    let evidence = envelope.evidence.clone();
+    let request_id = evidence
+        .get("hitl_request_id")
+        .or_else(|| evidence.get("request_id"))
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(kria_core::safety::hitl::HitlGateway::generate_request_id);
+    let description = evidence
+        .get("question")
+        .or_else(|| evidence.get("description"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("n8n workflow needs human approval before it can continue")
+        .to_string();
+    let workflow_id = envelope.workflow_id.clone();
+    let correlation_id = envelope.correlation_id.clone();
+
+    let hitl = state.hitl.clone();
+    let decision_store = state.decision_store.clone();
+    let responses = state.n8n_hitl_responses.clone();
+    let app_handle = state.app_handle.clone();
+    let params = serde_json::json!({
+        "source": "n8n",
+        "workflow_id": envelope.workflow_id,
+        "workflow_version": envelope.workflow_version,
+        "correlation_id": envelope.correlation_id,
+        "n8n_run_id": envelope.n8n_run_id,
+        "evidence": evidence,
+    });
+
+    tokio::spawn(async move {
+        let collaborative_decision_id = {
+            use kria_core::agent::collaborative_decision::{DecisionCandidate, Rollbackability};
+
+            let affected_resources = vec![
+                format!("n8n:workflow:{workflow_id}"),
+                format!("n8n:correlation:{correlation_id}"),
+            ];
+            let candidate = DecisionCandidate::approval(
+                "n8n workflow continuation",
+                description.clone(),
+                RiskLevel::Red,
+                Rollbackability::Unknown,
+                affected_resources,
+                Some("n8n.pause_for_hitl".to_string()),
+            );
+
+            match decision_store.create_decision(
+                workflow_id.clone(),
+                Some(correlation_id.clone()),
+                candidate,
+            ) {
+                Ok(decision) => {
+                    if let Some(app_handle) = app_handle.as_ref() {
+                        let _ = app_handle.emit("interaction_decision:created", &decision);
+                    }
+                    Some(decision.id)
+                }
+                Err(error) => {
+                    tracing::warn!(error = %error, "failed to persist n8n collaborative decision");
+                    None
+                }
+            }
+        };
+
+        let response = hitl
+            .request_approval_with_id(
+                &request_id,
+                "n8n_workflow_approval",
+                params,
+                RiskLevel::Red,
+                &description,
+                false,
+            )
+            .await;
+
+        let response_payload = serde_json::json!({
+            "request_id": request_id,
+            "approved": matches!(response, ApprovalResponse::Approved),
+            "response": match response {
+                ApprovalResponse::Approved => "approved",
+                ApprovalResponse::Denied => "denied",
+                ApprovalResponse::Timeout => "timeout",
+            },
+            "interaction_decision_id": collaborative_decision_id,
+            "decided_at_unix_ms": local_api_now_unix_ms(),
+        });
+        if let Some(decision_id) = collaborative_decision_id.as_deref() {
+            let result = match response {
+                ApprovalResponse::Approved => {
+                    decision_store.resolve(decision_id, "approve", "hitl_gateway")
+                }
+                ApprovalResponse::Denied => {
+                    decision_store.resolve(decision_id, "deny", "hitl_gateway")
+                }
+                ApprovalResponse::Timeout => decision_store.expire(decision_id, "hitl_gateway"),
+            };
+            if let Err(error) = result {
+                tracing::warn!(error = %error, decision_id, "failed to update n8n collaborative decision");
+            }
+        }
+        responses
+            .write()
+            .await
+            .insert(request_id.clone(), response_payload.clone());
+        if let Some(app_handle) = app_handle.as_ref() {
+            let _ = app_handle.emit("n8n:hitl_response", response_payload);
+        }
+    });
+}
+
 async fn probe_existing_local_api_bridge(health_url: &str) -> bool {
     match reqwest::Client::new()
         .get(health_url)
@@ -599,6 +900,15 @@ pub(super) fn start_local_api_bridge(
     port: u16,
     responder: Arc<dyn LocalApiResponder>,
     fleet_control_runtime: Arc<DesktopFleetControlRuntime>,
+    n8n_catalog: Arc<RwLock<Option<Arc<kria_core::n8n::N8nCatalog>>>>,
+    n8n_state_store: Arc<kria_core::n8n::N8nWorkflowStateStore>,
+    n8n_inbox_path: PathBuf,
+    n8n_audit_path: PathBuf,
+    n8n_governance_log: Arc<RwLock<Vec<kria_core::n8n::N8nGovernanceDecision>>>,
+    n8n_hitl_responses: Arc<RwLock<HashMap<String, serde_json::Value>>>,
+    hitl: Arc<HitlGateway>,
+    decision_store: Arc<kria_core::agent::collaborative_decision::DecisionStore>,
+    app_handle: AppHandle,
     health: Arc<HealthRegistry>,
 ) {
     let bind_addr = format!("{host}:{port}");
@@ -616,6 +926,8 @@ pub(super) fn start_local_api_bridge(
                 let router = Router::new()
                     .route("/api/health", get(local_api_health))
                     .route("/api/chat", post(local_api_chat))
+                    .route("/api/n8n/callback", post(local_api_n8n_callback))
+                    .route("/api/n8n/hitl-response", get(local_api_n8n_hitl_response))
                     .route("/api/fleet/events", get(local_api_fleet_events))
                     .route("/api/fleet/terminal", get(local_api_fleet_terminal_ws))
                     .route(
@@ -630,6 +942,15 @@ pub(super) fn start_local_api_bridge(
                     .with_state(LocalApiBridgeState {
                         responder,
                         fleet_control_runtime,
+                        n8n_catalog,
+                        n8n_state_store,
+                        n8n_inbox_path,
+                        n8n_audit_path,
+                        n8n_governance_log,
+                        n8n_hitl_responses,
+                        hitl,
+                        decision_store,
+                        app_handle: Some(app_handle),
                     });
 
                 health.update(

@@ -51,6 +51,8 @@ pub enum IntentClass {
     ExecutionRequest,
     /// System control: cancel, stop, quit, settings
     SystemControl,
+    /// User asking about KRIA's own capabilities, identity, or features
+    CapabilityQuestion,
     /// Cannot be classified with sufficient confidence
     Ambiguous,
 }
@@ -83,6 +85,8 @@ impl IntentClass {
     }
 
     /// Whether this is a pure conversational intent (fast-path).
+    /// Capability questions are also fast-path: KRIA answers from its own knowledge,
+    /// never via retrieval.
     pub fn is_conversational_fastpath(self) -> bool {
         matches!(
             self,
@@ -91,6 +95,7 @@ impl IntentClass {
                 | Self::Thanks
                 | Self::Conversational
                 | Self::Emotional
+                | Self::CapabilityQuestion
         )
     }
 
@@ -107,6 +112,7 @@ impl IntentClass {
             Self::DirectToolRequest => "direct_tool_request",
             Self::ExecutionRequest => "execution_request",
             Self::SystemControl => "system_control",
+            Self::CapabilityQuestion => "capability_question",
             Self::Ambiguous => "ambiguous",
         }
     }
@@ -313,10 +319,51 @@ fn compute_signals(normalized: &str, char_count: usize) -> SignalScores {
         // "how are you" pattern: question word + "are/is/was" + pronoun = conversational
         let is_social_question = word_count <= 4
             && words.iter().any(|w| is_question_word(w))
-            && words.iter().any(|w| matches!(*w, "you" | "i" | "we" | "they" | "it"))
-            && words.iter().any(|w| matches!(*w, "are" | "is" | "was" | "were" | "up" | "going"));
+            && words
+                .iter()
+                .any(|w| matches!(*w, "you" | "i" | "we" | "they" | "it"))
+            && words
+                .iter()
+                .any(|w| matches!(*w, "are" | "is" | "was" | "were" | "up" | "going"));
         if is_social_question {
             s.conversational += 0.50;
+        }
+
+        // Compound social phrases: "i am fine how are you", "im good thanks", etc.
+        // These contain self-state declarations (I am X) plus optional social questions.
+        let has_self_state = words.windows(2).any(|w| {
+            matches!(w[0], "i" | "im" | "i'm")
+                && matches!(
+                    w[1],
+                    "am" | "fine"
+                        | "good"
+                        | "great"
+                        | "ok"
+                        | "okay"
+                        | "well"
+                        | "alright"
+                        | "tired"
+                        | "happy"
+                        | "sad"
+                )
+        }) || words
+            .iter()
+            .any(|w| matches!(*w, "fine" | "alright" | "okay"));
+        let has_self_pronoun = words
+            .iter()
+            .any(|w| matches!(*w, "i" | "im" | "i'm" | "me" | "my"));
+        let has_no_action_verb = !words.iter().any(|w| is_action_verb(w));
+        if has_self_state && has_self_pronoun && has_no_action_verb && word_count <= 8 {
+            s.conversational += 0.55;
+        }
+        // Extra boost for compound conversational: self-state + social question ("i am fine how are you")
+        let compound_social = has_self_state
+            && has_self_pronoun
+            && words.iter().any(|w| is_question_word(w))
+            && words.iter().any(|w| matches!(*w, "you" | "u"))
+            && has_no_action_verb;
+        if compound_social {
+            s.conversational += 0.20;
         }
     }
 
@@ -343,10 +390,19 @@ fn compute_signals(normalized: &str, char_count: usize) -> SignalScores {
     // ── Retrieval signals ─────────────────────────────────────────────────
     let retrieval_verb_count = words.iter().filter(|w| is_retrieval_verb(w)).count();
     // Only count retrieval verbs that aren't also social question words
-    let effective_retrieval_verbs = if words.iter().any(|w| is_question_word(w))
-        && words.iter().any(|w| matches!(*w, "you" | "i" | "we" | "they"))
-    {
-        // Social question — don't count question words as retrieval
+    let is_social_context = words.iter().any(|w| is_question_word(w))
+        && words
+            .iter()
+            .any(|w| matches!(*w, "you" | "i" | "we" | "they"));
+    let has_self_state_phrase = words.windows(2).any(|w| {
+        matches!(w[0], "i" | "im" | "i'm")
+            && matches!(
+                w[1],
+                "am" | "fine" | "good" | "great" | "ok" | "okay" | "well" | "alright"
+            )
+    });
+    let effective_retrieval_verbs = if is_social_context || has_self_state_phrase {
+        // Social/self-state context — don't count question words as retrieval
         0
     } else {
         retrieval_verb_count
@@ -355,17 +411,18 @@ fn compute_signals(normalized: &str, char_count: usize) -> SignalScores {
 
     // Question words in non-social context indicate retrieval/factual
     let question_word_count = words.iter().filter(|w| is_question_word(w)).count();
-    if question_word_count > 0 && s.conversational < 0.50 {
+    if question_word_count > 0
+        && s.conversational < 0.50
+        && !is_social_context
+        && !has_self_state_phrase
+    {
         s.retrieval += (question_word_count as f32 * 0.25).min(0.50);
     }
 
     // ── Ambiguity signals ─────────────────────────────────────────────────
     // Very short queries with pronouns are ambiguous ("check this", "find it")
     // But only if execution signal is present (otherwise it's just conversational)
-    if word_count <= 3
-        && words.iter().any(|w| is_vague_pronoun(w))
-        && action_verb_count >= 1
-    {
+    if word_count <= 3 && words.iter().any(|w| is_vague_pronoun(w)) && action_verb_count >= 1 {
         s.ambiguity += 0.65;
         // Ambiguity suppresses execution
         s.execution = s.execution * 0.5;
@@ -401,13 +458,53 @@ fn is_action_verb(word: &str) -> bool {
     let action_endings = ["ate", "ify", "ize", "ise", "ect", "end", "ite", "ute"];
     // Common action verb prefixes
     let action_prefixes = [
-        "open", "close", "run", "exec", "send", "write", "create", "delete",
-        "move", "copy", "install", "uninstall", "start", "stop", "kill",
-        "launch", "download", "upload", "set", "get", "list", "show",
-        "find", "search", "fetch", "read", "edit", "update", "make",
-        "build", "compile", "deploy", "restart", "reboot", "shutdown",
-        "generate", "draw", "play", "pause", "record", "capture",
-        "schedule", "remind", "book", "order", "buy", "check",
+        "open",
+        "close",
+        "run",
+        "exec",
+        "send",
+        "write",
+        "create",
+        "delete",
+        "move",
+        "copy",
+        "install",
+        "uninstall",
+        "start",
+        "stop",
+        "kill",
+        "launch",
+        "download",
+        "upload",
+        "set",
+        "get",
+        "list",
+        "show",
+        "find",
+        "search",
+        "fetch",
+        "read",
+        "edit",
+        "update",
+        "make",
+        "build",
+        "compile",
+        "deploy",
+        "restart",
+        "reboot",
+        "shutdown",
+        "generate",
+        "draw",
+        "play",
+        "pause",
+        "record",
+        "capture",
+        "schedule",
+        "remind",
+        "book",
+        "order",
+        "buy",
+        "check",
     ];
 
     let w = word.trim_end_matches(|c: char| !c.is_alphabetic());
@@ -431,20 +528,52 @@ fn is_action_verb(word: &str) -> bool {
 /// Whether a word is a retrieval/search verb.
 fn is_retrieval_verb(word: &str) -> bool {
     let retrieval_prefixes = [
-        "search", "find", "look", "fetch", "get", "retrieve", "query",
-        "browse", "check", "what", "who", "when", "where", "how", "why",
-        "tell", "show", "explain", "describe", "summarize", "summarise",
+        "search",
+        "find",
+        "look",
+        "fetch",
+        "get",
+        "retrieve",
+        "query",
+        "browse",
+        "check",
+        "what",
+        "who",
+        "when",
+        "where",
+        "how",
+        "why",
+        "tell",
+        "show",
+        "explain",
+        "describe",
+        "summarize",
+        "summarise",
     ];
     let w = word.trim_end_matches(|c: char| !c.is_alphabetic());
-    retrieval_prefixes.iter().any(|p| w == *p || w.starts_with(p))
+    retrieval_prefixes
+        .iter()
+        .any(|p| w == *p || w.starts_with(p))
 }
 
 /// Whether a word is a question word.
 fn is_question_word(word: &str) -> bool {
     matches!(
         word,
-        "what" | "who" | "when" | "where" | "why" | "how" | "which" | "whose" | "whom"
-            | "whats" | "whos" | "hows" | "whens" | "wheres"
+        "what"
+            | "who"
+            | "when"
+            | "where"
+            | "why"
+            | "how"
+            | "which"
+            | "whose"
+            | "whom"
+            | "whats"
+            | "whos"
+            | "hows"
+            | "whens"
+            | "wheres"
     )
 }
 
@@ -460,8 +589,18 @@ fn is_vague_pronoun(word: &str) -> bool {
 fn is_system_control_verb(word: &str) -> bool {
     matches!(
         word,
-        "cancel" | "stop" | "quit" | "exit" | "abort" | "pause" | "resume"
-            | "settings" | "config" | "configure" | "preferences" | "reset"
+        "cancel"
+            | "stop"
+            | "quit"
+            | "exit"
+            | "abort"
+            | "pause"
+            | "resume"
+            | "settings"
+            | "config"
+            | "configure"
+            | "preferences"
+            | "reset"
     )
 }
 
@@ -474,9 +613,8 @@ fn is_greeting_token(word: &str) -> bool {
     }
     // Common greeting stems (not full words — handles typos via prefix)
     let greeting_stems = [
-        "hi", "hey", "hel", "hye", "helo", "helo", "hola", "ola",
-        "good", "morn", "after", "even", "night", "bye", "ciao",
-        "namaste", "salam", "salut", "bonjour", "guten",
+        "hi", "hey", "hel", "hye", "helo", "helo", "hola", "ola", "good", "morn", "after", "even",
+        "night", "bye", "ciao", "namaste", "salam", "salut", "bonjour", "guten",
     ];
     greeting_stems.iter().any(|stem| w.starts_with(stem))
 }
@@ -485,13 +623,46 @@ fn is_greeting_token(word: &str) -> bool {
 fn is_ack_token(word: &str) -> bool {
     let w = word.trim_end_matches(|c: char| !c.is_alphabetic());
     let ack_stems = [
-        "ok", "okay", "sure", "yep", "yes", "yeah", "yup", "nope", "no",
-        "cool", "nice", "great", "awesome", "perfect", "got", "noted",
-        "understood", "alright", "right", "fine", "good", "thanks",
-        "thank", "thx", "ty", "np", "yw", "welcome", "wow", "oh",
-        "ah", "hmm", "hm", "lol", "haha", "hehe",
+        "ok",
+        "okay",
+        "sure",
+        "yep",
+        "yes",
+        "yeah",
+        "yup",
+        "nope",
+        "no",
+        "cool",
+        "nice",
+        "great",
+        "awesome",
+        "perfect",
+        "got",
+        "noted",
+        "understood",
+        "alright",
+        "right",
+        "fine",
+        "good",
+        "thanks",
+        "thank",
+        "thx",
+        "ty",
+        "np",
+        "yw",
+        "welcome",
+        "wow",
+        "oh",
+        "ah",
+        "hmm",
+        "hm",
+        "lol",
+        "haha",
+        "hehe",
     ];
-    ack_stems.iter().any(|stem| w == *stem || w.starts_with(stem))
+    ack_stems
+        .iter()
+        .any(|stem| w == *stem || w.starts_with(stem))
 }
 
 // ─── Query Normalization ──────────────────────────────────────────────────────
@@ -542,11 +713,79 @@ pub fn detect_greeting_type(normalized: &str) -> Option<GreetingType> {
     None
 }
 
+/// Detect a self-referential capability/identity question.
+/// These prompts are answered from KRIA's own knowledge — never via retrieval.
+///
+/// Examples that match:
+/// - "what can you do"
+/// - "who are you"
+/// - "tell me about yourself"
+/// - "what are your features"
+/// - "how can you help me"
+/// - "are you online"
+/// - "what is kria"
+fn is_capability_question(normalized: &str) -> bool {
+    let words: Vec<&str> = normalized.split_whitespace().collect();
+    if words.is_empty() {
+        return false;
+    }
+
+    // Must reference self
+    let has_self_ref = words.iter().any(|w| {
+        matches!(
+            *w,
+            "you" | "your" | "yourself" | "u" | "ur" | "kria" | "k.r.i.a." | "k.r.i.a"
+        )
+    });
+    if !has_self_ref {
+        return false;
+    }
+
+    // Must contain capability/identity verb or noun
+    let has_capability_word = words.iter().any(|w| {
+        matches!(
+            *w,
+            "can"
+                | "could"
+                | "able"
+                | "capable"
+                | "capability"
+                | "capabilities"
+                | "ability"
+                | "abilities"
+                | "feature"
+                | "features"
+                | "do"
+                | "does"
+                | "doing"
+                | "help"
+                | "assist"
+                | "support"
+                | "name"
+                | "identity"
+                | "model"
+                | "version"
+                | "who"
+                | "what"
+                | "tell"
+                | "introduce"
+                | "describe"
+                | "online"
+                | "live"
+                | "ready"
+                | "alive"
+                | "awake"
+        )
+    });
+
+    has_capability_word
+}
+
 /// Get a time-aware greeting response suggestion.
 /// Uses actual local time to avoid hallucinating time-of-day.
+/// Honors KRIA_USER_TZ override via the central time helper.
 pub fn time_aware_greeting() -> &'static str {
-    use chrono::Timelike;
-    let hour = chrono::Local::now().hour();
+    let hour = crate::time::kria_local_hour();
     match hour {
         5..=11 => "Good morning! 👋",
         12..=16 => "Good afternoon! 👋",
@@ -557,6 +796,67 @@ pub fn time_aware_greeting() -> &'static str {
 }
 
 // ─── Main Gate ────────────────────────────────────────────────────────────────
+
+/// Detect if a query is asking for knowledge/instructions about a remote system
+/// rather than requesting execution on it.
+///
+/// Examples that match (knowledge):
+/// - "how do I check docker on my VM"
+/// - "how to install docker on remote machine"
+/// - "what command shows containers on VM"
+/// - "explain how to list processes on my server"
+///
+/// Examples that do NOT match (action):
+/// - "show docker containers on my VM"
+/// - "check docker on my VM"
+/// - "list processes on my server"
+fn is_knowledge_query_about_remote(normalized: &str) -> bool {
+    let words: Vec<&str> = normalized.split_whitespace().collect();
+    if words.is_empty() {
+        return false;
+    }
+
+    // Must reference a remote system
+    let has_remote_ref = normalized.contains("vm")
+        || normalized.contains("virtual machine")
+        || normalized.contains("remote")
+        || normalized.contains("server")
+        || normalized.contains("ssh")
+        || normalized.contains("fleet");
+
+    if !has_remote_ref {
+        return false;
+    }
+
+    // Must have a knowledge-seeking prefix pattern
+    // "how do i", "how to", "what command", "explain how", "tell me how", etc.
+    let knowledge_prefixes = [
+        "how do i",
+        "how do you",
+        "how to",
+        "how can i",
+        "how can you",
+        "what command",
+        "what is the command",
+        "what commands",
+        "explain how",
+        "tell me how",
+        "show me how",
+        "what is the way",
+        "what's the way",
+        "what are the steps",
+        "guide me",
+        "help me understand",
+        "can you explain",
+        "what should i",
+        "what do i need",
+    ];
+
+    knowledge_prefixes
+        .iter()
+        .any(|prefix| normalized.starts_with(prefix))
+        || (words.first().copied() == Some("how") && words.get(1).copied() != Some("many"))
+}
 
 /// Classify a user query and return a gate decision.
 ///
@@ -588,6 +888,37 @@ pub fn classify(
         };
     }
 
+    // ── Authoritative pre-filter: capability/identity question ────────────
+    // "What can you do", "who are you", "tell me about yourself", etc.
+    // These are NEVER answered via retrieval — they're conversational fast-path.
+    if is_capability_question(&normalized) {
+        return GateDecision {
+            intent: IntentClass::CapabilityQuestion,
+            confidence: 0.95,
+            fast_path: true,
+            execution_permitted: false,
+            clarification_required: false,
+            reason: "self_referential_capability_question",
+            normalized_query: normalized,
+        };
+    }
+
+    // ── Gap 3: Action vs Knowledge guard for VM/remote queries ────────────
+    // "how do I check docker on my VM" → FactualQuery (knowledge, no execution)
+    // "show docker containers on my VM" → ExecutionRequest (action, execute)
+    // This is deterministic — no LLM needed.
+    if is_knowledge_query_about_remote(&normalized) {
+        return GateDecision {
+            intent: IntentClass::FactualQuery,
+            confidence: 0.88,
+            fast_path: false,
+            execution_permitted: false,
+            clarification_required: false,
+            reason: "knowledge_query_about_remote_system",
+            normalized_query: normalized,
+        };
+    }
+
     // ── Compute signals ───────────────────────────────────────────────────
     let signals = compute_signals(&normalized, char_count);
 
@@ -609,7 +940,7 @@ pub fn classify(
     let (intent, confidence) = if effective_conversational >= 0.70 {
         // Strong conversational signal — classify by sub-type
         let words: Vec<&str> = normalized.split_whitespace().collect();
-        let first = words.first().copied().unwrap_or("");
+        let _first = words.first().copied().unwrap_or("");
 
         if words.iter().any(|w| is_greeting_token(w)) {
             (IntentClass::Greeting, effective_conversational)
@@ -927,10 +1258,7 @@ mod tests {
     #[test]
     fn semantic_conversation_route_boosts_fastpath() {
         // Even a borderline query should fast-path when semantic router says Conversation
-        let d = gate_with_route(
-            "good mornibg",
-            crate::routing::RouteDecision::Conversation,
-        );
+        let d = gate_with_route("good mornibg", crate::routing::RouteDecision::Conversation);
         assert!(d.fast_path);
     }
 
@@ -993,6 +1321,84 @@ mod tests {
         assert!(g.contains("👋"));
     }
 
+    // ── Capability questions: NEVER trigger retrieval ─────────────────
+
+    #[test]
+    fn capability_question_what_can_you_do() {
+        let d = gate("what can you do");
+        assert_eq!(d.intent, IntentClass::CapabilityQuestion);
+        assert!(d.fast_path);
+        assert!(!d.execution_permitted);
+    }
+
+    #[test]
+    fn capability_question_who_are_you() {
+        let d = gate("who are you");
+        assert_eq!(d.intent, IntentClass::CapabilityQuestion);
+        assert!(d.fast_path);
+        assert!(!d.execution_permitted);
+    }
+
+    #[test]
+    fn capability_question_tell_me_about_yourself() {
+        let d = gate("tell me about yourself");
+        assert_eq!(d.intent, IntentClass::CapabilityQuestion);
+        assert!(d.fast_path);
+    }
+
+    #[test]
+    fn capability_question_what_are_your_features() {
+        let d = gate("what are your features");
+        assert_eq!(d.intent, IntentClass::CapabilityQuestion);
+        assert!(d.fast_path);
+    }
+
+    #[test]
+    fn capability_question_how_can_you_help_me() {
+        let d = gate("how can you help me");
+        assert_eq!(d.intent, IntentClass::CapabilityQuestion);
+        assert!(d.fast_path);
+    }
+
+    #[test]
+    fn capability_question_are_you_online() {
+        let d = gate("are you online");
+        assert_eq!(d.intent, IntentClass::CapabilityQuestion);
+        assert!(d.fast_path);
+    }
+
+    #[test]
+    fn capability_question_what_is_kria() {
+        let d = gate("what is kria");
+        assert_eq!(d.intent, IntentClass::CapabilityQuestion);
+        assert!(d.fast_path);
+    }
+
+    #[test]
+    fn capability_question_what_can_you_currently_do_no_retrieval() {
+        // Even with temporal trigger word "currently", capability question wins
+        let d = gate("what can you currently do");
+        assert_eq!(d.intent, IntentClass::CapabilityQuestion);
+        assert!(d.fast_path);
+        assert!(!d.execution_permitted);
+    }
+
+    // ── Conversational regression prompts ────────────────────────────
+
+    #[test]
+    fn conversational_im_fine_how_are_you() {
+        let d = gate("I am fine how are you");
+        assert!(d.fast_path);
+        assert!(!d.execution_permitted);
+    }
+
+    #[test]
+    fn conversational_im_fine_typo() {
+        let d = gate("im fine");
+        assert!(d.fast_path);
+        assert!(!d.execution_permitted);
+    }
+
     // ── Normalization ────────────────────────────────────────────────────────
 
     #[test]
@@ -1022,18 +1428,36 @@ mod tests {
     #[test]
     fn fastpath_never_permits_execution() {
         let conversational_inputs = [
-            "hi", "hello", "hey", "good morning", "good mornibg", "Hye",
-            "ok", "okay", "cool", "thanks", "thank you", "thx",
-            "how are you", "what's up", "nice", "awesome", "wow",
-            "gm", "helo", "hye", "ty", "sure", "got it",
+            "hi",
+            "hello",
+            "hey",
+            "good morning",
+            "good mornibg",
+            "Hye",
+            "ok",
+            "okay",
+            "cool",
+            "thanks",
+            "thank you",
+            "thx",
+            "how are you",
+            "what's up",
+            "nice",
+            "awesome",
+            "wow",
+            "gm",
+            "helo",
+            "hye",
+            "ty",
+            "sure",
+            "got it",
         ];
         for input in &conversational_inputs {
             let d = gate(input);
             assert!(
                 !d.execution_permitted,
                 "'{input}' should not permit execution, got intent={:?} fast_path={}",
-                d.intent,
-                d.fast_path
+                d.intent, d.fast_path
             );
         }
     }

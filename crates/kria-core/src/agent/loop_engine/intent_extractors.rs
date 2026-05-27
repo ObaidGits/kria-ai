@@ -37,6 +37,20 @@ pub(super) fn extract_url_from_query(text: &str) -> Option<String> {
 /// - "search YouTube for relaxing music"
 /// - "play Shape of You on YouTube"
 pub(super) fn extract_browser_search_intent(text: &str) -> (String, Option<String>) {
+    // Strip any #tool: directive prefix before processing — prevents the
+    // live-fact classifier's rewrite from leaking into the query argument.
+    let text = {
+        use once_cell::sync::Lazy;
+        use regex::Regex;
+        static TOOL_PREFIX_RE: Lazy<Regex> =
+            Lazy::new(|| Regex::new(r"(?i)^#tool:\s*\S+\s*").unwrap());
+        if let Some(mat) = TOOL_PREFIX_RE.find(text) {
+            &text[mat.end()..]
+        } else {
+            text
+        }
+    };
+
     let lower = text.to_lowercase();
 
     // Detect site preference.
@@ -80,16 +94,23 @@ pub(super) fn extract_browser_search_intent(text: &str) -> (String, Option<Strin
         " in browser",
         " on youtube.com",
         " in youtube",
+        " youtube",
     ];
     let clean_query = suffixes.iter().fold(query.to_lowercase(), |q, suf| {
         q.trim_end_matches(suf.trim()).trim().to_string()
     });
 
-    let final_query = if clean_query.is_empty() {
-        text.trim().to_string()
-    } else {
-        clean_query
-    };
+    // If the cleaned query is empty or equals just the site name, the user
+    // wants to navigate to the site directly — return empty query so the tool
+    // opens the site homepage rather than searching for the site name itself.
+    let site_names = ["youtube", "yt", "google", "chrome", "firefox", "browser"];
+    let final_query =
+        if clean_query.is_empty() || site_names.iter().any(|s| clean_query.trim() == *s) {
+            String::new()
+        } else {
+            clean_query
+        };
+
     (final_query, site)
 }
 

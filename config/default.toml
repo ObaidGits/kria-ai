@@ -10,11 +10,11 @@
 # local_port = 8080
 # max_context_tokens = 4096
 
-mode = "external"
-cloud_api_key = "sk-RVBbuAiF3smncocODOARvipPIwueBV2J2DY8EFdXh7E8iyzO5C5jDUw5UPYaCWp3"
-cloud_provider = "opencode"
-cloud_model_id = "minimax-m2.5-free"
-cloud_endpoint = "https://opencode.ai/zen/v1"
+mode = "local"
+cloud_api_key = ""
+cloud_provider = ""
+cloud_model_id = ""
+cloud_endpoint = ""
 
 [[llm.models]]
 name = "qwen2.5-vl-7b"
@@ -278,6 +278,35 @@ prompt_enhance_mode = "auto"
 image_mode = "local_only"
 
 # ==========================================
+# n8n Workflow Substrate (disabled by default)
+# ==========================================
+# KRIA treats n8n as an external workflow substrate, not as cognition authority.
+# Enable only after adding approved workflow catalog entries below.
+[n8n]
+enabled = false
+base_url = "http://127.0.0.1:5678"
+api_key = ""
+signing_secret = ""
+request_timeout_secs = 30
+max_payload_bytes = 65536
+default_requested_by = "local-user"
+
+# Example only. Keep status="approved" only for reviewed workflows.
+# [[n8n.workflows]]
+# workflow_id = "jira_fetch_open_tickets"
+# workflow_version = "v1"
+# display_name = "Fetch Jira Open Tickets"
+# endpoint_path = "/webhook/kria/jira-fetch-open-tickets"
+# status = "approved"
+# environment = "dev"
+# risk_tier = "Green"
+# irreversibility_class = "read_only"
+# timeout_class = "background"
+# allowed_actions = ["jira.read"]
+# data_scope = ["jira.project_key", "jira.filter"]
+# expected_evidence = ["tickets"]
+
+# ==========================================
 # Universal Model Provider System
 # ==========================================
 # Configure multiple LLM providers. KRIA can switch between them dynamically.
@@ -329,7 +358,7 @@ rate_limit_rpm = 0
 id = "opencode"
 provider_type = "openai_compatible"
 display_name = "OpenCode (MiniMax M2.5 Free)"
-enabled = true
+enabled = false
 active_model = "minimax-m2.5-free"
 default_temperature = 0.7
 default_max_tokens = 4096
@@ -337,7 +366,7 @@ prefer_streaming = true
 
 [providers.providers.endpoint]
 base_url = "https://opencode.ai/zen/v1"
-api_key = "sk-RVBbuAiF3smncocODOARvipPIwueBV2J2DY8EFdXh7E8iyzO5C5jDUw5UPYaCWp3"
+api_key = ""
 timeout_secs = 60
 max_retries = 3
 rate_limit_rpm = 0

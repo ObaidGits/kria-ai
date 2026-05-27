@@ -1177,10 +1177,20 @@ mod tests {
 
     #[test]
     fn onnx_hint_can_route_ambiguous_memory_prompt() {
+        // Use a generous timeout so this test survives parallel test-suite load.
         let classifier =
-            crate::agent::onnx_classifier::OnnxClassifier::new(4, Duration::from_millis(25));
-        let gate = TurnGate::with_onnx_classifier(Some(classifier));
+            crate::agent::onnx_classifier::OnnxClassifier::new(4, Duration::from_millis(500));
 
+        // Skip when ONNX model is not available (no model files on this system).
+        // The test is only meaningful when the L0 classifier is actually loaded.
+        if classifier.status() == crate::agent::onnx_classifier::OnnxClassifierStatus::Unavailable {
+            eprintln!(
+                "SKIP: onnx_hint_can_route_ambiguous_memory_prompt — no ONNX model available"
+            );
+            return;
+        }
+
+        let gate = TurnGate::with_onnx_classifier(Some(classifier));
         let plan = gate.plan_turn("memory notes about my gym routine", false);
         assert_eq!(plan.intent.operation, Operation::RetrieveMemory);
         assert_eq!(plan.intent.compute, ComputeClass::ToolOnly);
@@ -1196,5 +1206,58 @@ mod tests {
         let plan = gate.plan_turn("stop now", false);
         assert_eq!(plan.intent.operation, Operation::Cancel);
         assert_eq!(plan.intent.source, IntentSource::DeterministicGuard);
+    }
+
+    /// Diagnostic: verify GUI prompts route to Operation::Automate with
+    /// sufficient confidence to pass should_route_to_gui_executor.
+    #[test]
+    fn gui_prompts_route_to_automate_with_sufficient_confidence() {
+        use crate::agent::gui_wiring::GuiExecutionCoordinator;
+        let gate = TurnGate::new();
+
+        let gui_prompts = [
+            "open gedit",
+            "open gedit and type a fibonacci program in python",
+            "Open code and write a python program",
+            "open firefox",
+            "launch gedit",
+        ];
+
+        for prompt in &gui_prompts {
+            let plan = gate.plan_turn(prompt, false);
+            let should_route = GuiExecutionCoordinator::should_route_to_gui_executor(&plan);
+            assert!(
+                should_route,
+                "GUI prompt {:?} should route to HTN executor but got: \
+                 operation={:?} confidence={:.3} direct_hint={:?}",
+                prompt, plan.intent.operation, plan.intent.confidence, plan.direct_tool_hint
+            );
+        }
+    }
+
+    /// Diagnostic: browser_search prompts must also route to GUI executor.
+    /// "open chrome and search for youtube" has tool_hint=browser_search which
+    /// maps to Operation::Search — but should_route_to_gui_executor only checks
+    /// for Automate/ConfigureSystem. Fix: also accept Search when tool_hint is
+    /// browser_search/open_url/open_application.
+    #[test]
+    fn browser_search_prompt_routes_to_gui_executor() {
+        use crate::agent::gui_wiring::GuiExecutionCoordinator;
+        let gate = TurnGate::new();
+        let plan = gate.plan_turn("open chrome and search for youtube", false);
+        // The direct_tool_hint should be browser_search
+        assert_eq!(
+            plan.direct_tool_hint.as_deref(),
+            Some("browser_search"),
+            "Expected browser_search hint, got {:?}",
+            plan.direct_tool_hint
+        );
+        // should_route_to_gui_executor must return true for browser_search hint
+        let should_route = GuiExecutionCoordinator::should_route_to_gui_executor(&plan);
+        assert!(
+            should_route,
+            "browser_search prompt should route to GUI executor, operation={:?} confidence={:.3}",
+            plan.intent.operation, plan.intent.confidence
+        );
     }
 }

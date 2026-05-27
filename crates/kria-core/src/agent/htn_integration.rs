@@ -410,6 +410,7 @@ mod tests {
         use crate::agent::gui_wiring::GuiExecutionCoordinator;
         use crate::agent::intent_compiler::IntentCompiler;
         use crate::agent::intent_compiler_llm::RuleIntentCompiler;
+        use crate::safety::{AuditLogger, HitlGateway, PolicyEngine};
         use crate::tools::gui_automation::{KillSwitchInterceptor, YdotoolBackend};
         use crate::tools::registry::ToolRegistry;
 
@@ -440,11 +441,22 @@ mod tests {
             let cancellation = CancellationToken::new();
             let kill_switch = Arc::new(KillSwitchInterceptor::new(cancellation.clone(), backend));
 
-            let coordinator = GuiExecutionCoordinator::new(registry, kill_switch);
+            let policy_engine = Arc::new(PolicyEngine::new());
+            let hitl_gateway = Arc::new(HitlGateway::new(0));
+            let audit_logger = Arc::new(AuditLogger::new(
+                rusqlite::Connection::open_in_memory().expect("open in-memory audit db"),
+            ));
+            let coordinator = GuiExecutionCoordinator::new(
+                registry,
+                kill_switch,
+                policy_engine,
+                hitl_gateway,
+                audit_logger,
+            );
 
             // Generate workflow from compiled spec
             let workflow = coordinator
-                .generate_workflow("test-001", &plan.intent, &spec)
+                .generate_workflow("test-001", &plan.intent, &spec, "open gedit")
                 .await;
 
             // Verify workflow was generated (not None)
@@ -453,7 +465,7 @@ mod tests {
                 "GUI workflow should be generated for 'open gedit' intent"
             );
 
-            let wf = workflow.unwrap();
+            let (wf, _artifacts) = workflow.unwrap();
 
             // Verify it's NOT a ReAct-style plan (no tool call sequence)
             assert!(!wf.sub_goals.is_empty(), "HTN workflow must have sub-goals");

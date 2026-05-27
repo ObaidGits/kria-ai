@@ -89,6 +89,7 @@ impl ExecutionTarget {
             || lower.contains("chrome")
             || lower.contains("firefox")
             || tool_lower == "browser_search"
+            || tool_lower == "managed_browser_navigate"
             || tool_lower == "open_url"
         {
             return Self::Browser;
@@ -119,7 +120,8 @@ impl ExecutionTarget {
 pub struct CompletedAction {
     pub tool_name: String,
     pub args_hash: u64,
-    pub result_summary: String, // First 200 chars of result
+    pub result_summary: String, // First 200 chars of result (for logging)
+    pub result_data: serde_json::Value, // Full result data (for synthesis)
     pub target: ExecutionTarget,
     pub completed_at: Instant,
 }
@@ -171,6 +173,24 @@ impl TurnMemory {
         result_summary: &str,
         target: ExecutionTarget,
     ) {
+        self.record_success_with_data(
+            tool_name,
+            args_hash,
+            result_summary,
+            serde_json::Value::Null,
+            target,
+        );
+    }
+
+    /// Record a successful tool execution with full result data for synthesis.
+    pub fn record_success_with_data(
+        &mut self,
+        tool_name: &str,
+        args_hash: u64,
+        result_summary: &str,
+        result_data: serde_json::Value,
+        target: ExecutionTarget,
+    ) {
         self.called_tools.insert(tool_name.to_string());
         self.memo_cache
             .insert(args_hash, result_summary.to_string());
@@ -178,6 +198,7 @@ impl TurnMemory {
             tool_name: tool_name.to_string(),
             args_hash,
             result_summary: result_summary.chars().take(200).collect(),
+            result_data,
             target,
             completed_at: Instant::now(),
         });
@@ -225,6 +246,41 @@ impl TurnMemory {
         self.active_resources.push(resource.into());
     }
 
+    // ─── Search Dedup Guard ───────────────────────────────────────────────────
+
+    /// Whether any search tool has been called this turn.
+    /// Used to prevent redundant parallel search calls (web_search + search_news
+    /// both firing for the same query).
+    pub fn search_called_this_turn(&self) -> bool {
+        self.called_tools.contains("web_search")
+            || self.called_tools.contains("searxng_search")
+            || self.called_tools.contains("search_news")
+    }
+
+    /// Whether a specific search tool has been called this turn.
+    pub fn search_tool_called(&self, tool_name: &str) -> bool {
+        self.called_tools.contains(tool_name)
+    }
+
+    /// Whether a successful search result is already available this turn.
+    /// Returns the tool name that produced the result, if any.
+    pub fn successful_search_this_turn(&self) -> Option<&str> {
+        for action in &self.completed_actions {
+            if matches!(
+                action.tool_name.as_str(),
+                "web_search" | "searxng_search" | "search_news"
+            ) {
+                return Some(&action.tool_name);
+            }
+        }
+        None
+    }
+
+    /// Get completed actions for summary formatting.
+    pub fn get_completed_actions(&self) -> &[CompletedAction] {
+        &self.completed_actions
+    }
+
     /// Snapshot for logging.
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::json!({
@@ -245,7 +301,11 @@ impl TurnMemory {
 ///
 /// This is a lightweight heuristic detector — it does NOT call the LLM.
 /// It uses structural signals from the tool results and goal text.
-pub fn detect_satisfaction(memory: &TurnMemory, tool_name: &str, result_success: bool) -> Option<String> {
+pub fn detect_satisfaction(
+    memory: &TurnMemory,
+    tool_name: &str,
+    result_success: bool,
+) -> Option<String> {
     if !result_success {
         return None;
     }
@@ -253,7 +313,7 @@ pub fn detect_satisfaction(memory: &TurnMemory, tool_name: &str, result_success:
     let goal_lower = memory.goal.to_ascii_lowercase();
     let tool_lower = tool_name.to_ascii_lowercase();
 
-    // Single-tool goals: if the goal maps to exactly one tool and it succeeded
+    // ── Single-tool satisfaction: tool matches the obvious goal ──
     let single_tool_goals = [
         // System info queries
         ("cpu", "get_cpu_usage"),
@@ -283,7 +343,8 @@ pub fn detect_satisfaction(memory: &TurnMemory, tool_name: &str, result_success:
         }
     }
 
-    // Multi-tool goals: check if all required tools have been called
+    // ── Multi-tool goals: check if all required tools have been called ──
+
     // System stats: CPU + memory + disk
     if (goal_lower.contains("system stat")
         || goal_lower.contains("system status")
@@ -306,10 +367,118 @@ pub fn detect_satisfaction(memory: &TurnMemory, tool_name: &str, result_success:
     }
 
     // Search + save: if search succeeded and file was written
-    if memory.was_called("web_search") || memory.was_called("search_news") || memory.was_called("searxng_search") {
+    if memory.was_called("web_search")
+        || memory.was_called("search_news")
+        || memory.was_called("searxng_search")
+    {
         if memory.was_called("write_file") || memory.was_called("save_snippet") {
             return Some("search_and_save_complete".into());
         }
+    }
+
+    // ── Gmail goals: inbox/search satisfaction ──
+    // "check inbox", "unread emails", "latest emails", "show emails" → done after inbox/search
+    let gmail_intent_signals = [
+        "inbox", "email", "emails", "mail", "gmail", "unread", "messages",
+    ];
+    let gmail_read_tools = ["gw_gmail_inbox", "gw_gmail_search", "gw_gmail_read"];
+    let gmail_send_tools = ["gw_gmail_send", "gw_gmail_reply"];
+    if gmail_intent_signals.iter().any(|s| goal_lower.contains(s))
+        && gmail_read_tools.contains(&tool_lower.as_str())
+        && !goal_lower.contains("send")
+        && !goal_lower.contains("reply")
+        && !goal_lower.contains("delete")
+    {
+        return Some(format!("gmail_read_complete: {}", tool_name));
+    }
+    if (goal_lower.contains("send") || goal_lower.contains("reply"))
+        && gmail_send_tools.contains(&tool_lower.as_str())
+    {
+        return Some(format!("gmail_send_complete: {}", tool_name));
+    }
+
+    // ── Drive goals ──
+    let drive_signals = ["drive", "files", "folders", "documents"];
+    let drive_read_tools = ["gw_drive_list", "gw_drive_search", "gw_drive_read"];
+    if drive_signals.iter().any(|s| goal_lower.contains(s))
+        && drive_read_tools.contains(&tool_lower.as_str())
+        && !goal_lower.contains("create")
+        && !goal_lower.contains("delete")
+        && !goal_lower.contains("upload")
+    {
+        return Some(format!("drive_read_complete: {}", tool_name));
+    }
+
+    // ── Filesystem goals: list/find files ──
+    if (goal_lower.contains("list") || goal_lower.contains("find") || goal_lower.contains("show"))
+        && (goal_lower.contains("file")
+            || goal_lower.contains("folder")
+            || goal_lower.contains("directory"))
+        && matches!(
+            tool_lower.as_str(),
+            "list_directory"
+                | "list_files"
+                | "search_files"
+                | "find_files_by_pattern"
+                | "mcp_fs_search_files"
+                | "mcp_fs_list_directory"
+        )
+    {
+        return Some(format!("filesystem_read_complete: {}", tool_name));
+    }
+
+    // ── Webpage analysis ──
+    if (goal_lower.contains("webpage")
+        || goal_lower.contains("url")
+        || goal_lower.contains("article")
+        || goal_lower.contains("link")
+        || goal_lower.contains("analyze")
+        || goal_lower.contains("summarize"))
+        && matches!(tool_lower.as_str(), "fetch_webpage" | "fetch_article")
+    {
+        return Some(format!("webpage_analysis_complete: {}", tool_name));
+    }
+
+    // ── GUI launch goals: opening apps / browsing to URLs ──
+    // "open chrome and search youtube", "open firefox", "open gedit", etc.
+    // Once the launch tool succeeds, the user-visible action is done; the LLM
+    // should not invent additional retrieval calls (search_news, web_search, …).
+    if matches!(
+        tool_lower.as_str(),
+        "browser_search" | "open_application" | "open_url" | "open_application_with_file"
+    ) && (goal_lower.starts_with("open ")
+        || goal_lower.starts_with("launch ")
+        || goal_lower.starts_with("start ")
+        || goal_lower.contains("open chrome")
+        || goal_lower.contains("open firefox")
+        || goal_lower.contains("open brave"))
+    {
+        return Some(format!("gui_launch_complete: {}", tool_name));
+    }
+
+    // ── Docker inspection ──
+    // Match: "show docker containers", "list containers", "docker ps", etc.
+    if (goal_lower.contains("docker") || goal_lower.contains("container"))
+        && tool_lower == "execute_bash"
+        && memory.completed_count() >= 1
+    {
+        return Some("docker_inspection_complete: execute_bash succeeded for docker query".into());
+    }
+
+    // ── Git inspection (read-only) ──
+    if matches!(
+        tool_lower.as_str(),
+        "git_status" | "git_log" | "git_diff" | "git_branch_list" | "git_remote"
+    ) && (goal_lower.contains("git")
+        || goal_lower.contains("status")
+        || goal_lower.contains("commit")
+        || goal_lower.contains("branch"))
+        && !goal_lower.contains("create")
+        && !goal_lower.contains("push")
+        && !goal_lower.contains("pull")
+        && !goal_lower.contains("commit ")
+    {
+        return Some(format!("git_read_complete: {}", tool_name));
     }
 
     None
@@ -346,6 +515,17 @@ mod tests {
         assert_eq!(
             ExecutionTarget::infer("check my cpu", "get_cpu_usage"),
             ExecutionTarget::Host
+        );
+    }
+
+    #[test]
+    fn managed_browser_navigation_infers_browser_target() {
+        assert_eq!(
+            ExecutionTarget::infer(
+                "Open the browser and go to https://outbro.net",
+                "managed_browser_navigate",
+            ),
+            ExecutionTarget::Browser
         );
     }
 
@@ -388,6 +568,37 @@ mod tests {
         assert!(reason.is_none());
     }
 
+    /// Regression: after a successful `browser_search`, the loop must mark
+    /// the goal as satisfied so the LLM doesn't keep chaining `web_search`,
+    /// `search_news`, etc. (the failure observed for "open chrome and search
+    /// for youtube").
+    #[test]
+    fn satisfaction_detected_for_browser_search_after_open_chrome() {
+        let mut mem = TurnMemory::new("Open chrome and search for youtube", ExecutionTarget::Host);
+        mem.record_success(
+            "browser_search",
+            1,
+            "{\"url\":\"https://www.youtube.com/\"}",
+            ExecutionTarget::Host,
+        );
+        let reason = detect_satisfaction(&mem, "browser_search", true);
+        assert!(reason.is_some(), "GUI launch should satisfy");
+        assert!(reason.unwrap().contains("gui_launch_complete"));
+    }
+
+    #[test]
+    fn satisfaction_detected_for_open_application_with_file() {
+        let mut mem = TurnMemory::new("Open gedit and type a program", ExecutionTarget::Host);
+        mem.record_success(
+            "open_application_with_file",
+            1,
+            "{\"launched\":true}",
+            ExecutionTarget::Host,
+        );
+        let reason = detect_satisfaction(&mem, "open_application_with_file", true);
+        assert!(reason.is_some());
+    }
+
     #[test]
     fn goal_satisfied_flag_stops_loop() {
         let mut mem = TurnMemory::new("lock screen", ExecutionTarget::Host);
@@ -402,5 +613,134 @@ mod tests {
         assert!(!mem.was_called("web_search"));
         mem.record_success("web_search", 1, "results", ExecutionTarget::Host);
         assert!(mem.was_called("web_search"));
+    }
+
+    #[test]
+    fn search_dedup_guard_detects_any_search_tool() {
+        let mut mem = TurnMemory::new("search for rust news", ExecutionTarget::Host);
+        assert!(!mem.search_called_this_turn());
+        assert!(mem.successful_search_this_turn().is_none());
+
+        mem.record_success("web_search", 1, "results", ExecutionTarget::Host);
+        assert!(mem.search_called_this_turn());
+        assert_eq!(mem.successful_search_this_turn(), Some("web_search"));
+    }
+
+    #[test]
+    fn search_dedup_guard_detects_searxng() {
+        let mut mem = TurnMemory::new("search for news", ExecutionTarget::Host);
+        mem.record_success("searxng_search", 1, "results", ExecutionTarget::Host);
+        assert!(mem.search_called_this_turn());
+        assert!(mem.search_tool_called("searxng_search"));
+        assert!(!mem.search_tool_called("web_search"));
+    }
+
+    #[test]
+    fn search_dedup_guard_detects_news_search() {
+        let mut mem = TurnMemory::new("latest news", ExecutionTarget::Host);
+        mem.record_success("search_news", 1, "articles", ExecutionTarget::Host);
+        assert!(mem.search_called_this_turn());
+        assert_eq!(mem.successful_search_this_turn(), Some("search_news"));
+    }
+
+    #[test]
+    fn satisfaction_detects_gmail_inbox() {
+        let mut mem = TurnMemory::new("show me unread emails", ExecutionTarget::CloudProvider);
+        mem.record_success(
+            "gw_gmail_inbox",
+            1,
+            "5 messages",
+            ExecutionTarget::CloudProvider,
+        );
+        let reason = detect_satisfaction(&mem, "gw_gmail_inbox", true);
+        assert!(reason.is_some());
+        assert!(reason.unwrap().contains("gmail_read_complete"));
+    }
+
+    #[test]
+    fn satisfaction_detects_drive_list() {
+        let mut mem = TurnMemory::new("list my drive folders", ExecutionTarget::CloudProvider);
+        mem.record_success(
+            "gw_drive_list",
+            1,
+            "folders",
+            ExecutionTarget::CloudProvider,
+        );
+        let reason = detect_satisfaction(&mem, "gw_drive_list", true);
+        assert!(reason.is_some());
+        assert!(reason.unwrap().contains("drive_read_complete"));
+    }
+
+    #[test]
+    fn satisfaction_detects_filesystem_list() {
+        let mut mem = TurnMemory::new("list txt files in Downloads", ExecutionTarget::Host);
+        mem.record_success("list_directory", 1, "files", ExecutionTarget::Host);
+        let reason = detect_satisfaction(&mem, "list_directory", true);
+        assert!(reason.is_some());
+        assert!(reason.unwrap().contains("filesystem_read_complete"));
+    }
+
+    #[test]
+    fn satisfaction_detects_webpage_analysis() {
+        let mut mem = TurnMemory::new(
+            "analyze this webpage https://example.com",
+            ExecutionTarget::Host,
+        );
+        mem.record_success("fetch_webpage", 1, "content", ExecutionTarget::Host);
+        let reason = detect_satisfaction(&mem, "fetch_webpage", true);
+        assert!(reason.is_some());
+        assert!(reason.unwrap().contains("webpage_analysis_complete"));
+    }
+
+    #[test]
+    fn satisfaction_detects_git_read() {
+        let mut mem = TurnMemory::new("show git status", ExecutionTarget::Host);
+        mem.record_success("git_status", 1, "clean", ExecutionTarget::Host);
+        let reason = detect_satisfaction(&mem, "git_status", true);
+        assert!(reason.is_some());
+        assert!(reason.unwrap().contains("git_read_complete"));
+    }
+
+    #[test]
+    fn satisfaction_detects_docker_inspection() {
+        let mut mem = TurnMemory::new(
+            "Show all docker containers running on my host machine",
+            ExecutionTarget::Host,
+        );
+        mem.record_success(
+            "execute_bash",
+            1,
+            "CONTAINER ID IMAGE...",
+            ExecutionTarget::Host,
+        );
+        let reason = detect_satisfaction(&mem, "execute_bash", true);
+        assert!(reason.is_some());
+        assert!(reason.unwrap().contains("docker_inspection_complete"));
+    }
+
+    #[test]
+    fn satisfaction_detects_container_list() {
+        let mut mem = TurnMemory::new("list containers", ExecutionTarget::Host);
+        mem.record_success("execute_bash", 1, "containers", ExecutionTarget::Host);
+        let reason = detect_satisfaction(&mem, "execute_bash", true);
+        assert!(reason.is_some());
+        assert!(reason.unwrap().contains("docker_inspection_complete"));
+    }
+
+    #[test]
+    fn satisfaction_does_not_fire_when_send_intent_uses_read_tool() {
+        // User asked to send an email but only the inbox was read — not satisfied
+        let mut mem = TurnMemory::new("send email to alice", ExecutionTarget::CloudProvider);
+        mem.record_success(
+            "gw_gmail_inbox",
+            1,
+            "messages",
+            ExecutionTarget::CloudProvider,
+        );
+        let reason = detect_satisfaction(&mem, "gw_gmail_inbox", true);
+        assert!(
+            reason.is_none(),
+            "send intent must not be satisfied by inbox read"
+        );
     }
 }

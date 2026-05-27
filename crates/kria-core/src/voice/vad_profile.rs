@@ -23,7 +23,7 @@ impl VadProfileConfig {
             active_profile: normalize_label(profile),
         }
     }
-    
+
     pub fn profile(&self) -> &str {
         &self.active_profile
     }
@@ -116,7 +116,7 @@ mod tests {
     fn vad_profile_config_new_normalizes() {
         let config = VadProfileConfig::new("QUIET");
         assert_eq!(config.active_profile, "quiet");
-        
+
         let config = VadProfileConfig::new("unknown");
         assert_eq!(config.active_profile, "normal");
     }
@@ -132,7 +132,7 @@ mod tests {
         let config = VadProfileConfig::new("quiet");
         let json = serde_json::to_string(&config).unwrap();
         assert!(json.contains("\"active_profile\":\"quiet\""));
-        
+
         let deserialized: VadProfileConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, config);
     }

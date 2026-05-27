@@ -431,6 +431,9 @@ async fn send_message_with_profile(
                     name,
                     result,
                     success,
+                    conversational_summary,
+                    execution_metadata,
+                    human_readable,
                 } => {
                     if success {
                         successful_tool_count = successful_tool_count.saturating_add(1);
@@ -443,6 +446,7 @@ async fn send_message_with_profile(
                             tool = %name,
                             success,
                             result = ?kria_core::infra::pipeline_trace::sanitize_json_for_logs(&result, 280, 8),
+                            conversational_summary = ?conversational_summary.as_ref().map(|s| kria_core::infra::pipeline_trace::sanitize_text_for_logs(s, 120)),
                             "tool result event"
                         );
                     }
@@ -458,7 +462,28 @@ async fn send_message_with_profile(
                     let args = pending_tool_params
                         .remove(&name)
                         .unwrap_or_else(|| serde_json::json!({}));
-                    let payload = build_tool_result_event_payload(&name, &result, success);
+                    let mut payload = build_tool_result_event_payload(&name, &result, success);
+
+                    // Add synthesized fields to payload
+                    if let Some(summary) = conversational_summary {
+                        if let Some(obj) = payload.as_object_mut() {
+                            obj.insert(
+                                "conversational_summary".to_string(),
+                                serde_json::Value::String(summary),
+                            );
+                        }
+                    }
+                    if let Some(hr) = human_readable {
+                        if let Some(obj) = payload.as_object_mut() {
+                            obj.insert("human_readable".to_string(), serde_json::Value::String(hr));
+                        }
+                    }
+                    if let Some(metadata) = execution_metadata {
+                        if let Some(obj) = payload.as_object_mut() {
+                            obj.insert("execution_metadata".to_string(), metadata);
+                        }
+                    }
+
                     let metadata = payload
                         .get("metadata")
                         .cloned()
@@ -615,6 +640,41 @@ async fn send_message_with_profile(
                         serde_json::json!({
                             "status": "planning",
                             "plan": plan,
+                        }),
+                    );
+                }
+                StreamEvent::RecoveryOptions {
+                    context,
+                    detail,
+                    options,
+                } => {
+                    tracing::info!(
+                        session_id = %session_id_clone,
+                        context = %context,
+                        options_count = options.len(),
+                        "recovery_options: emitting to UI"
+                    );
+                    let _ = app_handle.emit(
+                        &format!("{session_id_clone}:recovery_options"),
+                        serde_json::json!({
+                            "context": context,
+                            "detail": detail,
+                            "options": options.iter().map(|o| serde_json::json!({
+                                "label": o.label,
+                                "action_prompt": o.action_prompt,
+                                "style": o.style,
+                            })).collect::<Vec<_>>(),
+                        }),
+                    );
+                }
+                StreamEvent::TaskStep(step) => {
+                    let _ = app_handle.emit(
+                        &format!("{session_id_clone}:task_step"),
+                        serde_json::json!({
+                            "index": step.index,
+                            "total": step.total,
+                            "description": step.description,
+                            "status": step.status,
                         }),
                     );
                 }
@@ -818,7 +878,15 @@ async fn send_message_with_profile(
                 }
                 StreamEvent::Done(final_text) => {
                     if !final_text.is_empty() && full_response.is_empty() {
-                        full_response = final_text;
+                        full_response = final_text.clone();
+                        // Ensure terminal-only responses (Done without prior Token events)
+                        // still render as an assistant message in the UI.
+                        let _ = app_handle.emit(
+                            &ev_token,
+                            serde_json::json!({
+                                "text": final_text,
+                            }),
+                        );
                     }
                     emit_agent_stage(
                         &app_handle,

@@ -274,9 +274,7 @@ impl TurnOwnershipFsm {
             (TurnOwner::Listening, TurnEvent::SystemAbort) => {
                 self.handle_cancel(from, InterruptionCause::SystemAbort)
             }
-            (TurnOwner::Listening, TurnEvent::SidecarCrash) => {
-                self.handle_sidecar_crash(from)
-            }
+            (TurnOwner::Listening, TurnEvent::SidecarCrash) => self.handle_sidecar_crash(from),
 
             // ─── Processing transitions ───────────────────────────────
             (TurnOwner::Processing, TurnEvent::TtsStarting) => {
@@ -307,9 +305,7 @@ impl TurnOwnershipFsm {
                     cause: None,
                 }
             }
-            (TurnOwner::Speaking, TurnEvent::BargeIn) => {
-                self.handle_barge_in(from)
-            }
+            (TurnOwner::Speaking, TurnEvent::BargeIn) => self.handle_barge_in(from),
             (TurnOwner::Speaking, TurnEvent::UserCancel) => {
                 self.handle_cancel(from, InterruptionCause::UserCancel)
             }
@@ -358,14 +354,10 @@ impl TurnOwnershipFsm {
             }
 
             // ─── Session end from any state ───────────────────────────
-            (_, TurnEvent::SessionEnd) => {
-                self.handle_cancel(from, InterruptionCause::SessionEnd)
-            }
+            (_, TurnEvent::SessionEnd) => self.handle_cancel(from, InterruptionCause::SessionEnd),
 
             // ─── Sidecar crash from any active state ──────────────────
-            (_, TurnEvent::SidecarCrash) => {
-                self.handle_sidecar_crash(from)
-            }
+            (_, TurnEvent::SidecarCrash) => self.handle_sidecar_crash(from),
 
             // ─── Invalid/no-op transitions ────────────────────────────
             _ => TurnTransitionResult {
@@ -403,11 +395,7 @@ impl TurnOwnershipFsm {
         }
     }
 
-    fn handle_cancel(
-        &mut self,
-        from: TurnOwner,
-        cause: InterruptionCause,
-    ) -> TurnTransitionResult {
+    fn handle_cancel(&mut self, from: TurnOwner, cause: InterruptionCause) -> TurnTransitionResult {
         self.transition_to(TurnOwner::Cancelling);
         self.interruption_count += 1;
         self.generation = self.generation.wrapping_add(1);
@@ -556,11 +544,17 @@ mod tests {
         assert_eq!(result.cause, Some(InterruptionCause::BargeIn));
 
         // Must emit invalidation actions
-        assert!(result.actions.contains(&InvalidationAction::CancelTurnToken));
-        assert!(result.actions.contains(&InvalidationAction::IncrementGeneration));
+        assert!(result
+            .actions
+            .contains(&InvalidationAction::CancelTurnToken));
+        assert!(result
+            .actions
+            .contains(&InvalidationAction::IncrementGeneration));
         assert!(result.actions.contains(&InvalidationAction::StopTts));
         assert!(result.actions.contains(&InvalidationAction::StopLlm));
-        assert!(result.actions.contains(&InvalidationAction::CancelPendingRefinement));
+        assert!(result
+            .actions
+            .contains(&InvalidationAction::CancelPendingRefinement));
 
         // Generation incremented
         assert_eq!(fsm.generation(), 1);
@@ -589,7 +583,9 @@ mod tests {
         assert!(result.transitioned);
         assert_eq!(result.to, TurnOwner::Cancelling);
         assert_eq!(result.cause, Some(InterruptionCause::UserCancel));
-        assert!(result.actions.contains(&InvalidationAction::ResetTranscriptAuthority));
+        assert!(result
+            .actions
+            .contains(&InvalidationAction::ResetTranscriptAuthority));
     }
 
     #[test]
@@ -625,8 +621,12 @@ mod tests {
         assert!(result.transitioned);
         assert_eq!(result.to, TurnOwner::Restarting);
         assert_eq!(result.cause, Some(InterruptionCause::SidecarCrash));
-        assert!(result.actions.contains(&InvalidationAction::FlushAudioQueue));
-        assert!(result.actions.contains(&InvalidationAction::FlushPartialQueue));
+        assert!(result
+            .actions
+            .contains(&InvalidationAction::FlushAudioQueue));
+        assert!(result
+            .actions
+            .contains(&InvalidationAction::FlushPartialQueue));
     }
 
     #[test]

@@ -292,6 +292,7 @@ fn extract_tool_end(events: &[StreamEvent], tool_name: &str) -> Option<(serde_js
             name,
             result,
             success,
+            ..
         } if name == tool_name => Some((result.clone(), *success)),
         _ => None,
     })

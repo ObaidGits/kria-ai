@@ -819,8 +819,22 @@ pub(super) fn resolve_intent_fallback_query(
     last_user_text: &str,
     messages: &[ChatMessage],
 ) -> String {
-    let mut resolved = infer_confirmation_send_query_from_history(last_user_text, messages)
-        .unwrap_or_else(|| last_user_text.trim().to_string());
+    // Strip any #tool: directive prefix so it never leaks into tool argument builders.
+    // The live-fact classifier rewrites routing_focus_text to "#tool:searxng_search <query>"
+    // but the fallback query must be the clean user text, not the directive-prefixed string.
+    let clean_user_text = if let Some((_, cleaned)) = extract_forced_tool_directive(last_user_text)
+    {
+        if !cleaned.is_empty() {
+            cleaned
+        } else {
+            last_user_text.trim().to_string()
+        }
+    } else {
+        last_user_text.trim().to_string()
+    };
+
+    let mut resolved = infer_confirmation_send_query_from_history(&clean_user_text, messages)
+        .unwrap_or_else(|| clean_user_text.clone());
 
     let lower = resolved.to_ascii_lowercase();
     let looks_like_image_query = looks_like_pure_image_analysis_request(&lower)

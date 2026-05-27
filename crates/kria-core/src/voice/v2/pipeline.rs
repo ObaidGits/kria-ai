@@ -596,7 +596,12 @@ impl VoicePipelineV2 {
                     }
                 }
             }
-            tracing::info!(frame_count, speech_started, utterance_ms, "v2 capture task exiting");
+            tracing::info!(
+                frame_count,
+                speech_started,
+                utterance_ms,
+                "v2 capture task exiting"
+            );
         });
 
         // Forward partials to telemetry while we wait for the final.
@@ -706,13 +711,13 @@ impl VoicePipelineV2 {
         // - Decode window ≤ 30s audio (bounded in accumulation)
         // - Stale generation refinements rejected
         // - Refinement only after UtteranceCommitted
-        
+
         let current_generation = {
             let mut gen = self.generation.lock().await;
             *gen = gen.wrapping_add(1);
             *gen
         };
-        
+
         let post_edited = if let Some(refiner) = &self.refiner {
             // Attempt refinement
             let audio_samples = {
@@ -723,7 +728,7 @@ impl VoicePipelineV2 {
                 let sr = captured_sample_rate.lock().await;
                 *sr
             };
-            
+
             if audio_samples.is_empty() {
                 tracing::warn!(
                     generation = current_generation,
@@ -743,13 +748,11 @@ impl VoicePipelineV2 {
                     sample_rate = sample_rate,
                     "voice v2: starting Whisper refinement"
                 );
-                
-                match refiner.refine(
-                    &audio_samples,
-                    sample_rate,
-                    current_generation,
-                    &turn,
-                ).await {
+
+                match refiner
+                    .refine(&audio_samples, sample_rate, current_generation, &turn)
+                    .await
+                {
                     Ok(refinement_result) => {
                         // Check generation staleness
                         if refinement_result.generation != current_generation {
@@ -783,7 +786,7 @@ impl VoicePipelineV2 {
                             let ts = &final_transcript.text;
                             let whisper = &refinement_result.text;
                             let reconcile_outcome = reconcile_ts_whisper(ts, whisper);
-                            
+
                             tracing::info!(
                                 generation = current_generation,
                                 reconcile_kind = reconcile_outcome.kind.as_trace_str(),
@@ -793,7 +796,7 @@ impl VoicePipelineV2 {
                                 duration_ms = refinement_result.duration_ms,
                                 "voice v2: refinement complete, reconciliation applied"
                             );
-                            
+
                             {
                                 let mut cur = self.current_turn.lock().await;
                                 if let Some(builder) = cur.as_mut() {
@@ -801,7 +804,7 @@ impl VoicePipelineV2 {
                                     builder.record_reconcile(reconcile_outcome.kind);
                                 }
                             }
-                            
+
                             // Emit observability event (stt_reconcile_result)
                             // This is part of §17 structured events
                             tracing::debug!(
@@ -811,7 +814,7 @@ impl VoicePipelineV2 {
                                 user_visible = %reconcile_outcome.user_visible,
                                 "stt_reconcile_result"
                             );
-                            
+
                             reconcile_outcome.user_visible
                         }
                     }
@@ -842,7 +845,7 @@ impl VoicePipelineV2 {
             }
             final_transcript.text.clone()
         };
-        
+
         let _ = &self.post_editor; // keep the field reachable for future wiring
         {
             let mut cur = self.current_turn.lock().await;

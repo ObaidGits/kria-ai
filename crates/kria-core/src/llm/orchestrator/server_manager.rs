@@ -733,7 +733,7 @@ impl LlamaServerManager {
         let model_id = self.router_model_id();
         let payload = serde_json::json!({ "model": model_id });
 
-        tracing::info!(
+        tracing::debug!(
             url = %models_url,
             model = %self.router_model_id(),
             request_timeout_secs,
@@ -775,7 +775,7 @@ impl LlamaServerManager {
             self.state.store(STATE_READY, Ordering::Release);
             let first_unsupported = self.mark_router_mode_unsupported();
             if first_unsupported {
-                tracing::info!(
+                tracing::debug!(
                     status = status.as_u16(),
                     elapsed_ms,
                     url = %models_url,
@@ -864,7 +864,7 @@ impl LlamaServerManager {
         let model_id = self.router_model_id();
         let payload = serde_json::json!({ "model": model_id });
 
-        tracing::info!(
+        tracing::debug!(
             url = %models_url,
             model = %self.router_model_id(),
             "server_manager: API-level model load requested"
@@ -883,7 +883,7 @@ impl LlamaServerManager {
             self.state.store(STATE_READY, Ordering::Release);
             let first_unsupported = self.mark_router_mode_unsupported();
             if first_unsupported {
-                tracing::info!(
+                tracing::debug!(
                     status = status.as_u16(),
                     url = %models_url,
                     body = %body,

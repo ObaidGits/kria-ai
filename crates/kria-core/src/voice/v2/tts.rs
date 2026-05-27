@@ -12,9 +12,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use tokio::sync::mpsc;
 #[cfg(feature = "voice-piper-rs")]
 use tokio::sync::Mutex;
-use tokio::sync::mpsc;
 
 /// Output sample-rate of a TTS backend. Voiced models are 22.05 kHz; we let
 /// playback resample if the output device disagrees.
@@ -145,11 +145,7 @@ mod piper_rs_impl {
                 return;
             }
             #[cfg(unix)]
-            for base in [
-                "/usr/share",
-                "/usr/local/share",
-                "/opt/homebrew/share",
-            ] {
+            for base in ["/usr/share", "/usr/local/share", "/opt/homebrew/share"] {
                 if Path::new(base).join(SUB).is_dir() {
                     std::env::set_var(VAR, base);
                     tracing::info!(

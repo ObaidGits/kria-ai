@@ -1,5 +1,6 @@
 use crate::config::KriaConfig;
 use crate::llm::orchestrator::server_manager::LlamaServerManager;
+use crate::llm::provider::{config::ProviderType, ProviderConfig};
 use crate::llm::{cloud::CloudBackend, local::LocalBackend, LlmBackend};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -51,6 +52,13 @@ pub struct ModelRouter {
     /// attachment after construction.
     vision_local_concrete: Option<Arc<LocalBackend>>,
     cloud_clients: RwLock<HashMap<String, Arc<dyn LlmBackend>>>,
+    /// Provider selected by Settings/config. This is intentionally separate
+    /// from the routing mode so UI/status can show `llama_cpp` instead of the
+    /// generic `local` mode after runtime swaps.
+    active_provider_id: RwLock<String>,
+    /// Local model selected by Settings/config. LocalBackend's model_label is
+    /// constructed once, so runtime swaps must update status through this field.
+    active_local_model: RwLock<String>,
     /// Local API URL (stored for server probing).
     local_api_url: String,
 }
@@ -124,6 +132,24 @@ impl ModelRouter {
             );
         }
 
+        for provider_config in &config.providers.providers {
+            if !provider_config.enabled || !provider_config.is_configured() {
+                continue;
+            }
+            if provider_config.provider_type == ProviderType::LlamaCpp {
+                continue;
+            }
+            if let Some(backend) = create_provider_backend(provider_config) {
+                cloud_clients.insert(provider_config.id.clone(), backend.clone());
+                if provider_config.id == config.providers.active_provider {
+                    cloud_clients.insert("external".to_string(), backend.clone());
+                    if provider_config.provider_type == ProviderType::Gemini {
+                        cloud_clients.insert("gemini".to_string(), backend);
+                    }
+                }
+            }
+        }
+
         let mode = config
             .llm
             .routing_mode
@@ -137,6 +163,8 @@ impl ModelRouter {
             vision_local,
             vision_local_concrete,
             cloud_clients: RwLock::new(cloud_clients),
+            active_provider_id: RwLock::new(config.providers.active_provider.clone()),
+            active_local_model: RwLock::new(config.llm.active_model.clone()),
             local_api_url: config.llm.local_api_url.clone(),
         }
     }
@@ -172,6 +200,47 @@ impl ModelRouter {
     /// Set the routing mode.
     pub async fn set_mode(&self, mode: RoutingMode) {
         *self.mode.write().await = mode;
+    }
+
+    /// Update the selected local model used for status/reporting. The concrete
+    /// LocalBackend label is immutable after construction, while llama.cpp can
+    /// be restarted with a different GGUF at runtime.
+    pub async fn set_active_local_model_label(&self, model_id: impl Into<String>) {
+        let model_id = model_id.into();
+        if !model_id.trim().is_empty() {
+            *self.active_local_model.write().await = model_id;
+        }
+    }
+
+    /// Sync the live router to a provider selected from Settings.
+    ///
+    /// Local llama.cpp keeps using the orchestrator-backed local backend.
+    /// Every other provider is registered as the current external backend so
+    /// the existing route path sees the same runtime the UI shows.
+    pub async fn sync_active_provider(&self, provider_config: &ProviderConfig) {
+        *self.active_provider_id.write().await = provider_config.id.clone();
+
+        if provider_config.provider_type == ProviderType::LlamaCpp {
+            if !provider_config.active_model.trim().is_empty() {
+                *self.active_local_model.write().await = provider_config.active_model.clone();
+            }
+            self.set_mode(RoutingMode::Local).await;
+            return;
+        }
+
+        if let Some(backend) = create_provider_backend(provider_config) {
+            let mut clients = self.cloud_clients.write().await;
+            clients.insert(provider_config.id.clone(), backend.clone());
+            clients.insert("external".to_string(), backend.clone());
+            if provider_config.provider_type == ProviderType::Gemini {
+                clients.insert("gemini".to_string(), backend);
+                drop(clients);
+                self.set_mode(RoutingMode::Gemini).await;
+            } else {
+                drop(clients);
+                self.set_mode(RoutingMode::External).await;
+            }
+        }
     }
 
     /// Route a request to the appropriate backend.
@@ -299,37 +368,54 @@ impl ModelRouter {
             Some(l) => l.health_check().await,
             None => false,
         };
+        let selected_provider = self.active_provider_id.read().await.clone();
+        let selected_local_model = self.active_local_model.read().await.clone();
+        let local_model = if selected_local_model.trim().is_empty() {
+            self.local
+                .as_ref()
+                .map(|l| l.model_label().to_string())
+                .unwrap_or_else(|| "unknown".to_string())
+        } else {
+            selected_local_model
+        };
 
         // For cloud/external modes, check the active cloud backend instead.
         // For non-local modes: any configured cloud client counts as healthy
         // (CloudBackend::health_check returns is_configured(), no network call).
-        let cloud_healthy = match mode {
-            RoutingMode::Local => false,
+        let (cloud_healthy, active_provider, active_model) = match mode {
+            RoutingMode::Local => (
+                false,
+                if selected_provider.trim().is_empty() {
+                    "local".to_string()
+                } else {
+                    selected_provider.clone()
+                },
+                local_model.clone(),
+            ),
             _ => {
                 let clients = self.cloud_clients.read().await;
-                if clients.is_empty() {
-                    false
-                } else {
-                    // Check by conventional name first, fall back to any client
-                    let key = match mode {
-                        RoutingMode::Colab => "colab",
-                        RoutingMode::Gemini => "gemini",
-                        _ => "external",
-                    };
-                    if let Some(client) = clients.get(key) {
-                        client.health_check().await
-                    } else {
-                        // Provider may be registered under a custom name (e.g. "opencode")
-                        // — accept any configured cloud client
-                        let mut any_healthy = false;
-                        for client in clients.values() {
-                            if client.health_check().await {
-                                any_healthy = true;
-                                break;
-                            }
-                        }
-                        any_healthy
-                    }
+                let key = match mode {
+                    RoutingMode::Colab => "colab",
+                    RoutingMode::Gemini => "gemini",
+                    _ => "external",
+                };
+                let selected = clients
+                    .get(key)
+                    .map(|client| (key.to_string(), client.clone()))
+                    .or_else(|| {
+                        clients
+                            .iter()
+                            .next()
+                            .map(|(provider, client)| (provider.clone(), client.clone()))
+                    });
+
+                match selected {
+                    Some((provider, client)) => (
+                        client.health_check().await,
+                        provider,
+                        client.model_label().to_string(),
+                    ),
+                    None => (false, mode.as_str().to_string(), "unknown".to_string()),
                 }
             }
         };
@@ -346,8 +432,27 @@ impl ModelRouter {
             "mode": mode.as_str(),
             "local_healthy": local_healthy,
             "active_healthy": active_healthy,
-            "local_model": self.local.as_ref().map(|l| l.model_label().to_string()),
+            "local_model": local_model,
+            "active_provider": active_provider,
+            "active_model": active_model,
             "cloud_backends": cloud_count,
         })
     }
+}
+
+fn create_provider_backend(config: &ProviderConfig) -> Option<Arc<dyn LlmBackend>> {
+    use crate::llm::provider::{anthropic, gemini, ollama, openai, openrouter};
+
+    let backend: Arc<dyn LlmBackend> = match config.provider_type {
+        ProviderType::Ollama => Arc::new(ollama::OllamaBackend::from_config(config)),
+        ProviderType::LlamaCpp | ProviderType::OpenAICompatible => {
+            Arc::new(openai::OpenAIBackend::from_config(config))
+        }
+        ProviderType::OpenAI => Arc::new(openai::OpenAIBackend::from_config(config)),
+        ProviderType::Gemini => Arc::new(gemini::GeminiBackend::from_config(config)),
+        ProviderType::Anthropic => Arc::new(anthropic::AnthropicBackend::from_config(config)),
+        ProviderType::OpenRouter => Arc::new(openrouter::OpenRouterBackend::from_config(config)),
+    };
+
+    Some(backend)
 }

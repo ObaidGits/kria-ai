@@ -85,8 +85,7 @@ impl SpectralGate {
         if rms < self.noise_floor * 1.5 {
             self.quiet_frame_count += 1;
             // Slowly adapt noise floor
-            self.noise_floor = self.noise_floor * (1.0 - self.floor_alpha)
-                + rms * self.floor_alpha;
+            self.noise_floor = self.noise_floor * (1.0 - self.floor_alpha) + rms * self.floor_alpha;
             // Clamp noise floor to reasonable range
             self.noise_floor = self.noise_floor.clamp(0.001, 0.05);
         }
@@ -104,8 +103,8 @@ impl SpectralGate {
         };
 
         // Smooth gain transitions (avoid clicks)
-        self.current_gain = self.current_gain * (1.0 - self.gate_smoothing)
-            + target_gain * self.gate_smoothing;
+        self.current_gain =
+            self.current_gain * (1.0 - self.gate_smoothing) + target_gain * self.gate_smoothing;
 
         // Apply gain
         if self.current_gain < 0.99 {
@@ -405,9 +404,7 @@ mod tests {
     fn spectral_gate_passes_speech() {
         let mut gate = SpectralGate::new();
         // Simulate speech-level signal
-        let mut samples: Vec<f32> = (0..1600)
-            .map(|i| 0.1 * (i as f32 * 0.1).sin())
-            .collect();
+        let mut samples: Vec<f32> = (0..1600).map(|i| 0.1 * (i as f32 * 0.1).sin()).collect();
         gate.process(&mut samples);
         // Speech should pass through (gain near 1.0)
         let rms: f32 = (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt();

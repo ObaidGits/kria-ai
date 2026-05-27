@@ -134,7 +134,7 @@ async fn wait_for_lease_reclaim(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "live GPU collision harness: requires local llama-server + ComfyUI + NVIDIA GPU"]
+#[ignore = "live GPU collision harness: requires X11 + uinput daemon + llama-server + ComfyUI + NVIDIA GPU. Run via: ./scripts/run_live_stress.sh"]
 async fn live_collision_stress_preempts_image_turn_and_completes_text_turn() {
     if !llm_available() {
         eprintln!("SKIP: live collision stress requires local LLM server at 127.0.0.1:8080");
@@ -288,6 +288,7 @@ async fn live_collision_stress_preempts_image_turn_and_completes_text_turn() {
             name,
             result,
             success,
+            ..
         } if name == "generate_image" && !*success => result["error"]
             .as_str()
             .map(text_indicates_cancel_or_abort)

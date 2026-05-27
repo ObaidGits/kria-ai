@@ -163,19 +163,17 @@ pub fn preflight_shell(command: &str) -> PreflightResult {
 
     // ── Block: recursive deletion of root or critical system paths ──────────
     if first_cmd == "rm" || tokens.contains(&"rm".to_string()) {
-        let has_recursive = tokens
-            .iter()
-            .any(|t| t.starts_with('-') && t.contains('r'));
-        let has_force = tokens
-            .iter()
-            .any(|t| t.starts_with('-') && t.contains('f'));
+        let has_recursive = tokens.iter().any(|t| t.starts_with('-') && t.contains('r'));
+        let has_force = tokens.iter().any(|t| t.starts_with('-') && t.contains('f'));
         let targets_root = tokens
             .iter()
             .any(|t| *t == "/" || *t == "/*" || t.starts_with("/*"));
         let targets_critical = tokens.iter().any(|t| {
-            ["/boot", "/usr", "/bin", "/sbin", "/lib", "/proc", "/sys", "/etc"]
-                .iter()
-                .any(|critical| t.starts_with(critical) && t.len() <= critical.len() + 1)
+            [
+                "/boot", "/usr", "/bin", "/sbin", "/lib", "/proc", "/sys", "/etc",
+            ]
+            .iter()
+            .any(|critical| t.starts_with(critical) && t.len() <= critical.len() + 1)
         });
 
         if has_recursive && (targets_root || targets_critical) {
@@ -213,9 +211,7 @@ pub fn preflight_shell(command: &str) -> PreflightResult {
     if first_cmd.starts_with("mkfs") || (first_cmd == "format" || first_cmd == "mkformat") {
         let targets_device = tokens.iter().any(|t| t.starts_with("/dev/"));
         if targets_device {
-            return PreflightResult::block(
-                "Filesystem format command blocked by preflight.",
-            );
+            return PreflightResult::block("Filesystem format command blocked by preflight.");
         }
     }
 
@@ -293,14 +289,10 @@ pub fn preflight_file_op(operation: &str, path: &str) -> PreflightResult {
     // Warn on dotfiles in home directory
     if is_destructive {
         let path_str = p.to_string_lossy();
-        if (path_str.contains("/.") || path_str.starts_with("~/.")
-            || path_str.starts_with("."))
+        if (path_str.contains("/.") || path_str.starts_with("~/.") || path_str.starts_with("."))
             && !path_str.contains("/.kria/")
         {
-            return PreflightResult::warn(format!(
-                "Modifying dotfile or hidden path: {}",
-                path
-            ));
+            return PreflightResult::warn(format!("Modifying dotfile or hidden path: {}", path));
         }
     }
 
@@ -334,9 +326,7 @@ pub fn preflight_network(url: &str) -> PreflightResult {
 
     // Block file:// protocol in network operations
     if lower.starts_with("file://") {
-        return PreflightResult::block(
-            "file:// protocol not allowed in network operations",
-        );
+        return PreflightResult::block("file:// protocol not allowed in network operations");
     }
 
     // Block javascript: and data: URIs
@@ -365,8 +355,7 @@ pub fn preflight_required_params(
         None => {
             return PreflightResult::block(format!(
                 "Tool '{}': parameters must be a JSON object, got {}",
-                tool_name,
-                params
+                tool_name, params
             ));
         }
     };
@@ -410,10 +399,7 @@ pub fn run_preflight(tool_name: &str, params: &serde_json::Value) -> PreflightRe
     match tool_name {
         // Shell execution tools
         "execute_bash" | "run_shell_command" | "execute_command" => {
-            let command = params
-                .get("command")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let command = params.get("command").and_then(|v| v.as_str()).unwrap_or("");
             let required = preflight_required_params(tool_name, params, &["command"]);
             if !required.allowed {
                 return required;
@@ -421,15 +407,10 @@ pub fn run_preflight(tool_name: &str, params: &serde_json::Value) -> PreflightRe
             preflight_shell(command)
         }
 
-        "execute_python" => {
-            preflight_required_params(tool_name, params, &["code"])
-        }
+        "execute_python" => preflight_required_params(tool_name, params, &["code"]),
 
         "execute_powershell" => {
-            let command = params
-                .get("command")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let command = params.get("command").and_then(|v| v.as_str()).unwrap_or("");
             let required = preflight_required_params(tool_name, params, &["command"]);
             if !required.allowed {
                 return required;
@@ -482,10 +463,7 @@ pub fn run_preflight(tool_name: &str, params: &serde_json::Value) -> PreflightRe
 
         // Network tools
         "fetch_url" | "fetch_article" | "download_file" => {
-            let url = params
-                .get("url")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let url = params.get("url").and_then(|v| v.as_str()).unwrap_or("");
             let required = preflight_required_params(tool_name, params, &["url"]);
             if !required.allowed {
                 return required;
@@ -493,9 +471,7 @@ pub fn run_preflight(tool_name: &str, params: &serde_json::Value) -> PreflightRe
             preflight_network(url)
         }
 
-        "web_search" | "searxng_search" => {
-            preflight_required_params(tool_name, params, &["query"])
-        }
+        "web_search" | "searxng_search" => preflight_required_params(tool_name, params, &["query"]),
 
         // All other tools: no specific preflight
         _ => PreflightResult::ok(),

@@ -127,12 +127,6 @@ coverage/
 *.dylib
 *.so
 
-# AI context - only ignore generated/cache files (keep .md files for AI context)
-ai-context/.cache.json
-ai-context/onnx_l0_corpus.jsonl
-ai-context/__pycache__/
-ai-context/update.log
-
 # UI build
 ui/dist/
 ui/.vite/

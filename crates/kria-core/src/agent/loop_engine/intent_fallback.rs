@@ -1692,7 +1692,7 @@ pub(super) fn build_intent_fallback_tool_call(
     None
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct ToolChoiceCandidate {
     pub name: String,
     pub label: String,

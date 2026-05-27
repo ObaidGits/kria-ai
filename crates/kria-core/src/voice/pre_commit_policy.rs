@@ -29,7 +29,7 @@ impl PreCommitAction {
         PreCommitAction::MicMute,
         PreCommitAction::VolumeDown,
     ];
-    
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::StopTts => "StopTts",
@@ -45,16 +45,16 @@ impl PreCommitAction {
 pub enum PolicyViolation {
     #[error("Action '{action}' forbidden before UtteranceCommitted (§14)")]
     ForbiddenBeforeCommit { action: String },
-    
+
     #[error("LLM generation forbidden before UtteranceCommitted (§14)")]
     LlmGenerationBlocked,
-    
+
     #[error("Tool execution '{tool}' forbidden before UtteranceCommitted (§14)")]
     ToolExecutionBlocked { tool: String },
-    
+
     #[error("Filesystem write forbidden before UtteranceCommitted (§14)")]
     FilesystemWriteBlocked,
-    
+
     #[error("Network action forbidden before UtteranceCommitted (§14)")]
     NetworkActionBlocked,
 }

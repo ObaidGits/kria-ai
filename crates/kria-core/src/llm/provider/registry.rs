@@ -20,8 +20,11 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// Callback for hardware orchestrator notifications.
-pub type OrchestratorNotifyFn =
-    Arc<dyn Fn(ExecutionLocation) -> Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + Sync>;
+pub type OrchestratorNotifyFn = Arc<
+    dyn Fn(ExecutionLocation) -> Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+        + Send
+        + Sync,
+>;
 
 /// The provider registry manages all configured providers and routes requests.
 pub struct ProviderRegistry {
@@ -81,7 +84,9 @@ impl ProviderRegistry {
             ProviderType::OpenAI => Arc::new(openai::OpenAIBackend::from_config(config)),
             ProviderType::Gemini => Arc::new(gemini::GeminiBackend::from_config(config)),
             ProviderType::Anthropic => Arc::new(anthropic::AnthropicBackend::from_config(config)),
-            ProviderType::OpenRouter => Arc::new(openrouter::OpenRouterBackend::from_config(config)),
+            ProviderType::OpenRouter => {
+                Arc::new(openrouter::OpenRouterBackend::from_config(config))
+            }
         };
 
         Some(backend)
@@ -121,7 +126,9 @@ impl ProviderRegistry {
         if !is_configured {
             return Err(ProviderError::new(
                 ProviderErrorKind::AuthFailure,
-                format!("Provider '{provider_id}' is not configured (missing credentials or endpoint)"),
+                format!(
+                    "Provider '{provider_id}' is not configured (missing credentials or endpoint)"
+                ),
                 "registry",
             ));
         }
@@ -135,7 +142,10 @@ impl ProviderRegistry {
                 let config = self.config.read().await;
                 if let Some(provider_config) = config.get(provider_id) {
                     if let Some(backend) = self.create_backend(provider_config) {
-                        self.backends.write().await.insert(provider_id.to_string(), backend);
+                        self.backends
+                            .write()
+                            .await
+                            .insert(provider_id.to_string(), backend);
                     }
                 }
             }
@@ -188,7 +198,10 @@ impl ProviderRegistry {
     ///
     /// If the provider already exists, it will be updated. The backend will be
     /// re-created with the new configuration.
-    pub async fn upsert_provider(&self, provider_config: ProviderConfig) -> Result<(), ProviderError> {
+    pub async fn upsert_provider(
+        &self,
+        provider_config: ProviderConfig,
+    ) -> Result<(), ProviderError> {
         let id = provider_config.id.clone();
 
         // Update config
@@ -248,7 +261,10 @@ impl ProviderRegistry {
     }
 
     /// Discover models available from a provider.
-    pub async fn discover_models(&self, provider_id: &str) -> Result<Vec<ModelInfo>, ProviderError> {
+    pub async fn discover_models(
+        &self,
+        provider_id: &str,
+    ) -> Result<Vec<ModelInfo>, ProviderError> {
         let config = self.config.read().await;
         let provider_config = config.get(provider_id).ok_or_else(|| {
             ProviderError::new(
@@ -374,6 +390,9 @@ impl ProviderRegistry {
             execution_location: location,
         };
 
-        self.health.write().await.insert(provider_id.to_string(), snapshot);
+        self.health
+            .write()
+            .await
+            .insert(provider_id.to_string(), snapshot);
     }
 }

@@ -19,7 +19,7 @@ pub struct ApprovalRequest {
 }
 
 /// User response to an approval request.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, serde::Deserialize)]
 pub enum ApprovalResponse {
     Approved,
     Denied,

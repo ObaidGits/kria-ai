@@ -395,11 +395,6 @@ const SettingsModal: Component = () => {
     }
   };
 
-  const maskKey = (key: string) => {
-    if (!key || key.length < 8) return key ? "••••" : "";
-    return "••••••••" + key.slice(-4);
-  };
-
   const formatUptime = (secs: number): string => {
     const h = Math.floor(secs / 3600);
     const m = Math.floor((secs % 3600) / 60);
@@ -432,16 +427,6 @@ const SettingsModal: Component = () => {
     if (normalized === "running") return "running";
     if (normalized === "error") return "error";
     return "stopped";
-  };
-
-  const normalizedRoutingMode = (): string => {
-    const raw = String(draft()?.llm?.routing_mode ?? "local").toLowerCase();
-    if (raw === "cloud") return "gemini";
-    if (raw === "hybrid") return "local";
-    if (["local", "colab", "gemini", "external"].includes(raw)) {
-      return raw;
-    }
-    return "local";
   };
 
   const googleStatusMessage = (): string => {
@@ -703,9 +688,9 @@ const SettingsModal: Component = () => {
       tabs: [
         {
           id: "llm",
-          label: "Model",
+          label: "Models",
           icon: "M",
-          description: "Choose local or cloud model routing, providers, and generation controls.",
+          description: "Choose the active local/cloud runtime, manage providers, and tune generation defaults.",
         },
         {
           id: "voice",
@@ -890,90 +875,16 @@ const SettingsModal: Component = () => {
 
           {/* LLM Tab */}
           <Show when={activeTab() === "llm"}>
-            <section class="settings-section">
-              {/* Universal Model Provider System */}
+            <>
               <ProviderSettings />
 
-              <h3>Legacy Routing Mode</h3>
-              <div class="settings-field">
-                <label>Mode</label>
-                <select
-                  value={normalizedRoutingMode()}
-                  onChange={(e) => updateField("llm", "routing_mode", e.currentTarget.value)}
-                >
-                  <option value="local">Local</option>
-                  <option value="colab">Google Colab</option>
-                  <option value="gemini">Google Gemini</option>
-                  <option value="external">External API</option>
-                </select>
-                <span class="field-hint">Use Colab mode for notebook-driven prompt-to-code execution via Colab MCP tools.</span>
-              </div>
-
-              <h3>Local LLM</h3>
-              <div class="settings-field">
-                <label>Active Model</label>
-                <select
-                  value={draft()?.llm?.active_model ?? ""}
-                  onChange={(e) => updateField("llm", "active_model", e.currentTarget.value)}
-                >
-                  <option value={draft()?.llm?.active_model}>{draft()?.llm?.active_model}</option>
-                  {models().map((m: any) => (
-                    <Show when={m.name !== draft()?.llm?.active_model}>
-                      <option value={m.name}>{m.display_name || m.name}</option>
-                    </Show>
-                  ))}
-                </select>
-              </div>
-              <div class="settings-field">
-                <label>API URL</label>
-                <input
-                  type="text"
-                  value={draft()?.llm?.local_api_url ?? ""}
-                  onInput={(e) => updateField("llm", "local_api_url", e.currentTarget.value)}
-                />
-              </div>
-              <div class="settings-field">
-                <label>GPU Layers</label>
-                <input
-                  type="number"
-                  value={draft()?.llm?.gpu_layers ?? -1}
-                  onInput={(e) => updateField("llm", "gpu_layers", parseInt(e.currentTarget.value) || 0)}
-                />
-                <span class="field-hint">-1 = auto, 0 = CPU only</span>
-              </div>
-
-              <h3>Cloud Provider</h3>
-              <div class="settings-field">
-                <label>Provider</label>
-                <select
-                  value={draft()?.llm?.cloud_provider ?? ""}
-                  onChange={(e) => updateField("llm", "cloud_provider", e.currentTarget.value)}
-                >
-                  <option value="">None</option>
-                  <option value="gemini">Google Gemini</option>
-                  <option value="openai">OpenAI</option>
-                  <option value="anthropic">Anthropic</option>
-                </select>
-              </div>
-              <div class="settings-field">
-                <label>API Key</label>
-                <input
-                  type="password"
-                  placeholder={maskKey(settings()?.llm?.cloud_api_key ?? "")}
-                  value={draft()?.llm?.cloud_api_key ?? ""}
-                  onInput={(e) => updateField("llm", "cloud_api_key", e.currentTarget.value)}
-                />
-              </div>
-              <div class="settings-field">
-                <label>Cloud Model ID</label>
-                <input
-                  type="text"
-                  value={draft()?.llm?.cloud_model_id ?? ""}
-                  onInput={(e) => updateField("llm", "cloud_model_id", e.currentTarget.value)}
-                />
-              </div>
-
-              <h3>Generation</h3>
+              <section class="settings-section settings-advanced-details">
+                <div class="settings-section-heading">
+                  <div>
+                    <h3>Generation Defaults</h3>
+                    <p class="settings-hint">Runtime/provider changes above apply immediately. These defaults use the modal Save button.</p>
+                  </div>
+                </div>
               <div class="settings-row">
                 <div class="settings-field">
                   <label>Temperature</label>
@@ -1004,7 +915,8 @@ const SettingsModal: Component = () => {
                   />
                 </div>
               </div>
-            </section>
+              </section>
+            </>
           </Show>
 
           {/* Voice Tab */}
@@ -2946,7 +2858,7 @@ const SettingsModal: Component = () => {
         <div class="modal-footer">
           <button class="btn-secondary" onClick={() => setShowSettings(false)}>Cancel</button>
           <button class="btn-primary" onClick={handleSave} disabled={saving()}>
-            {saving() ? "Saving..." : "Save"}
+            {saving() ? "Saving..." : activeTab() === "llm" ? "Save Defaults" : "Save"}
           </button>
         </div>
       </div>

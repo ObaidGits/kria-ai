@@ -728,6 +728,19 @@ async fn local_api_chat_rejects_empty_messages() {
         fleet_control_runtime: std::sync::Arc::new(
             crate::device_control::DesktopFleetControlRuntime::empty(),
         ),
+        n8n_catalog: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        n8n_state_store: std::sync::Arc::new(kria_core::n8n::N8nWorkflowStateStore::default()),
+        n8n_inbox_path: std::path::PathBuf::from("/tmp/kria-test-n8n-inbox.jsonl"),
+        n8n_audit_path: std::path::PathBuf::from("/tmp/kria-test-n8n-audit.jsonl"),
+        n8n_governance_log: std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new())),
+        n8n_hitl_responses: std::sync::Arc::new(tokio::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
+        hitl: std::sync::Arc::new(kria_core::safety::hitl::HitlGateway::new(1)),
+        decision_store: std::sync::Arc::new(
+            kria_core::agent::collaborative_decision::DecisionStore::in_memory(),
+        ),
+        app_handle: None,
     };
 
     let (status, body) = local_api_chat(
@@ -753,6 +766,19 @@ async fn local_api_chat_uses_responder_payload() {
         fleet_control_runtime: std::sync::Arc::new(
             crate::device_control::DesktopFleetControlRuntime::empty(),
         ),
+        n8n_catalog: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        n8n_state_store: std::sync::Arc::new(kria_core::n8n::N8nWorkflowStateStore::default()),
+        n8n_inbox_path: std::path::PathBuf::from("/tmp/kria-test-n8n-inbox.jsonl"),
+        n8n_audit_path: std::path::PathBuf::from("/tmp/kria-test-n8n-audit.jsonl"),
+        n8n_governance_log: std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new())),
+        n8n_hitl_responses: std::sync::Arc::new(tokio::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
+        hitl: std::sync::Arc::new(kria_core::safety::hitl::HitlGateway::new(1)),
+        decision_store: std::sync::Arc::new(
+            kria_core::agent::collaborative_decision::DecisionStore::in_memory(),
+        ),
+        app_handle: None,
     };
 
     let (status, body) = local_api_chat(

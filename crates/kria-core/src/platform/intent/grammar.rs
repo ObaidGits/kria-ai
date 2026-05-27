@@ -61,7 +61,7 @@ fn open_url_variant() -> Value {
         "required": ["intent", "url"],
         "additionalProperties": false,
         "properties": {
-            "intent": { "type": "string", "const": "OpenUrl" },
+            "intent": { "type": "string", "const": "open_url" },
             "url": {
                 "type": "string",
                 "format": "uri",
@@ -78,7 +78,7 @@ fn launch_app_variant() -> Value {
         "required": ["intent", "app_id"],
         "additionalProperties": false,
         "properties": {
-            "intent": { "type": "string", "const": "LaunchApp" },
+            "intent": { "type": "string", "const": "launch_app" },
             "app_id": {
                 "type": "string",
                 "description": "Canonical application ID from the installed-app registry (e.g. 'chromium', 'code', 'spotify')."
@@ -101,7 +101,7 @@ fn send_message_variant() -> Value {
         "required": ["intent", "app", "contact", "body"],
         "additionalProperties": false,
         "properties": {
-            "intent": { "type": "string", "const": "SendMessage" },
+            "intent": { "type": "string", "const": "send_message" },
             "app": {
                 "type": "string",
                 "enum": ["WhatsApp", "Gmail", "Telegram", "Signal"],
@@ -139,7 +139,7 @@ fn file_write_variant() -> Value {
         "required": ["intent", "path", "content"],
         "additionalProperties": false,
         "properties": {
-            "intent": { "type": "string", "const": "FileWrite" },
+            "intent": { "type": "string", "const": "file_write" },
             "path": {
                 "type": "string",
                 "description": "Absolute path within the user's allowed write roots (~/, /tmp). \
@@ -159,7 +159,7 @@ fn ax_invoke_variant() -> Value {
         "required": ["intent", "app_id", "action"],
         "additionalProperties": false,
         "properties": {
-            "intent": { "type": "string", "const": "AxInvoke" },
+            "intent": { "type": "string", "const": "ax_invoke" },
             "app_id": {
                 "type": "string",
                 "description": "Canonical ID of the target application."
@@ -170,16 +170,16 @@ fn ax_invoke_variant() -> Value {
                 "properties": {
                     "type": {
                         "type": "string",
-                        "enum": ["Click", "TypeText", "Focus", "SelectItem"],
+                        "enum": ["click", "type_text", "focus", "select_item"],
                         "description": "Accessibility action to perform."
                     },
                     "text": {
                         "type": "string",
-                        "description": "Required when type is TypeText."
+                        "description": "Required when type is type_text."
                     },
                     "item": {
                         "type": "string",
-                        "description": "Required when type is SelectItem."
+                        "description": "Required when type is select_item."
                     }
                 }
             }
@@ -213,7 +213,7 @@ pub fn validate_capability_json(raw: &str) -> Result<(), CapabilitySchemaError> 
         .ok_or_else(|| CapabilitySchemaError::MissingField("intent".into()))?;
 
     match intent {
-        "OpenUrl" => {
+        "open_url" => {
             let url = v["url"]
                 .as_str()
                 .ok_or_else(|| CapabilitySchemaError::MissingField("url".into()))?
@@ -250,7 +250,7 @@ pub fn validate_capability_json(raw: &str) -> Result<(), CapabilitySchemaError> 
                 }
             }
         }
-        "LaunchApp" => {
+        "launch_app" => {
             if v["app_id"].as_str().is_none() {
                 return Err(CapabilitySchemaError::MissingField("app_id".into()));
             }
@@ -269,7 +269,7 @@ pub fn validate_capability_json(raw: &str) -> Result<(), CapabilitySchemaError> 
                 }
             }
         }
-        "SendMessage" => {
+        "send_message" => {
             if v["app"].as_str().is_none() {
                 return Err(CapabilitySchemaError::MissingField("app".into()));
             }
@@ -282,7 +282,7 @@ pub fn validate_capability_json(raw: &str) -> Result<(), CapabilitySchemaError> 
                 return Err(CapabilitySchemaError::MissingField("body".into()));
             }
         }
-        "FileWrite" => {
+        "file_write" => {
             let path = v["path"]
                 .as_str()
                 .ok_or_else(|| CapabilitySchemaError::MissingField("path".into()))?;
@@ -302,7 +302,7 @@ pub fn validate_capability_json(raw: &str) -> Result<(), CapabilitySchemaError> 
                 ));
             }
         }
-        "AxInvoke" => {
+        "ax_invoke" => {
             if v["app_id"].as_str().is_none() {
                 return Err(CapabilitySchemaError::MissingField("app_id".into()));
             }
@@ -342,26 +342,27 @@ mod tests {
     #[test]
     fn validate_open_url_https_ok() {
         assert!(
-            validate_capability_json(r#"{"intent":"OpenUrl","url":"https://example.com"}"#).is_ok()
+            validate_capability_json(r#"{"intent":"open_url","url":"https://example.com"}"#)
+                .is_ok()
         );
     }
 
     #[test]
     fn validate_open_url_file_blocked() {
-        let err = validate_capability_json(r#"{"intent":"OpenUrl","url":"file:///etc/passwd"}"#);
+        let err = validate_capability_json(r#"{"intent":"open_url","url":"file:///etc/passwd"}"#);
         assert!(matches!(err, Err(CapabilitySchemaError::BlockedValue(_))));
     }
 
     #[test]
     fn validate_open_url_javascript_blocked() {
-        let err = validate_capability_json(r#"{"intent":"OpenUrl","url":"javascript:alert(1)"}"#);
+        let err = validate_capability_json(r#"{"intent":"open_url","url":"javascript:alert(1)"}"#);
         assert!(matches!(err, Err(CapabilitySchemaError::BlockedValue(_))));
     }
 
     #[test]
     fn validate_launch_app_shell_metachar_blocked() {
         let err = validate_capability_json(
-            r#"{"intent":"LaunchApp","app_id":"bash","args":["--rcfile","evil; rm -rf /"]}"#,
+            r#"{"intent":"launch_app","app_id":"bash","args":["--rcfile","evil; rm -rf /"]}"#,
         );
         assert!(matches!(err, Err(CapabilitySchemaError::BlockedValue(_))));
     }
@@ -369,7 +370,7 @@ mod tests {
     #[test]
     fn validate_file_write_etc_blocked() {
         let err = validate_capability_json(
-            r#"{"intent":"FileWrite","path":"/etc/crontab","content":"evil"}"#,
+            r#"{"intent":"file_write","path":"/etc/crontab","content":"evil"}"#,
         );
         assert!(matches!(err, Err(CapabilitySchemaError::BlockedValue(_))));
     }
@@ -377,7 +378,7 @@ mod tests {
     #[test]
     fn validate_file_write_traversal_blocked() {
         let err = validate_capability_json(
-            r#"{"intent":"FileWrite","path":"/home/user/../../../etc/hosts","content":"evil"}"#,
+            r#"{"intent":"file_write","path":"/home/user/../../../etc/hosts","content":"evil"}"#,
         );
         assert!(matches!(err, Err(CapabilitySchemaError::BlockedValue(_))));
     }
@@ -385,14 +386,14 @@ mod tests {
     #[test]
     fn validate_send_message_ok() {
         let ok = validate_capability_json(
-            r#"{"intent":"SendMessage","app":"WhatsApp","contact":{"display_name":"Anjali","identifier":"+919876543210","app":"WhatsApp"},"body":"hey!"}"#,
+            r#"{"intent":"send_message","app":"WhatsApp","contact":{"display_name":"Anjali","identifier":"+919876543210","app":"WhatsApp"},"body":"hey!"}"#,
         );
         assert!(ok.is_ok());
     }
 
     #[test]
     fn validate_unknown_intent_rejected() {
-        let err = validate_capability_json(r#"{"intent":"ShellExec","cmd":"rm -rf /"}"#);
+        let err = validate_capability_json(r#"{"intent":"shell_exec","cmd":"rm -rf /"}"#);
         assert!(matches!(err, Err(CapabilitySchemaError::UnknownIntent(_))));
     }
 
@@ -400,5 +401,33 @@ mod tests {
     fn validate_missing_intent_field() {
         let err = validate_capability_json(r#"{"url":"https://example.com"}"#);
         assert!(matches!(err, Err(CapabilitySchemaError::MissingField(_))));
+    }
+
+    /// Round-trip test: serialize an actual Capability and validate it.
+    /// This catches drift between the serde tag format and the schema.
+    #[test]
+    fn validate_real_open_url_capability_roundtrip() {
+        use crate::platform::intent::capability::Capability;
+        use url::Url;
+        let cap = Capability::OpenUrl {
+            url: Url::parse("https://www.youtube.com").unwrap(),
+        };
+        let json = serde_json::to_string(&cap).unwrap();
+        // Should validate cleanly
+        validate_capability_json(&json).expect("real Capability::OpenUrl must validate");
+    }
+
+    #[test]
+    fn validate_real_launch_app_capability_roundtrip() {
+        use crate::platform::intent::capability::{CanonicalAppId, Capability};
+        let cap = Capability::LaunchApp {
+            app_id: serde_json::from_value(serde_json::json!("chromium")).unwrap_or_else(|_| {
+                // Construct via the registry in tests; for unit test use a manual one
+                serde_json::from_str::<CanonicalAppId>(r#""chromium""#).unwrap()
+            }),
+            args: vec![],
+        };
+        let json = serde_json::to_string(&cap).unwrap();
+        validate_capability_json(&json).expect("real Capability::LaunchApp must validate");
     }
 }

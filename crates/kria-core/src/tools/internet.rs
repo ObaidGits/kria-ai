@@ -493,7 +493,7 @@ async fn run_command(
 async fn search_duckduckgo_lite(
     query: &str,
     max_results: usize,
-) -> Result<Vec<String>, ToolExecutionError> {
+) -> Result<Vec<serde_json::Value>, ToolExecutionError> {
     let operation = "web_search";
     if std::env::var("KRIA_EVAL_MODE").is_ok() {
         return Err(ToolExecutionError::Operation {
@@ -541,14 +541,61 @@ async fn search_duckduckgo_lite(
                         .map_err(|error| map_http_request_error(operation, &endpoint, error))?;
 
                     let document = scraper::Html::parse_document(&text);
-                    let selector = scraper::Selector::parse("a.result-link, .result-snippet").ok();
-                    let mut results = Vec::new();
 
-                    if let Some(selector) = selector {
-                        for element in document.select(&selector).take(max_results) {
-                            let row = element.text().collect::<String>().trim().to_string();
-                            if !row.is_empty() {
-                                results.push(row);
+                    // DuckDuckGo Lite HTML structure:
+                    // <a class="result-link"> — the result URL/title
+                    // <td class="result-snippet"> — the snippet text
+                    // Results are in table rows; we pair links with their snippets.
+                    let link_selector = scraper::Selector::parse("a.result-link").ok();
+                    let snippet_selector = scraper::Selector::parse(".result-snippet").ok();
+
+                    let mut results: Vec<serde_json::Value> = Vec::new();
+
+                    if let (Some(link_sel), Some(snippet_sel)) = (link_selector, snippet_selector) {
+                        let links: Vec<_> =
+                            document.select(&link_sel).take(max_results * 2).collect();
+                        let snippets: Vec<_> = document
+                            .select(&snippet_sel)
+                            .take(max_results * 2)
+                            .collect();
+
+                        for (i, link_el) in links.iter().enumerate().take(max_results) {
+                            let title = link_el.text().collect::<String>().trim().to_string();
+                            let href = link_el.value().attr("href").unwrap_or("").to_string();
+
+                            // DuckDuckGo Lite wraps URLs in a redirect; extract the real URL
+                            let url = extract_real_url_from_ddg_redirect(&href)
+                                .unwrap_or_else(|| href.clone());
+
+                            let snippet = snippets
+                                .get(i)
+                                .map(|el| el.text().collect::<String>().trim().to_string())
+                                .unwrap_or_default();
+
+                            if !title.is_empty() || !url.is_empty() {
+                                results.push(serde_json::json!({
+                                    "title": title,
+                                    "url": url,
+                                    "snippet": snippet,
+                                }));
+                            }
+                        }
+                    }
+
+                    // Fallback: if structured extraction yielded nothing, try plain text snippets
+                    if results.is_empty() {
+                        if let Ok(fallback_sel) =
+                            scraper::Selector::parse("a.result-link, .result-snippet")
+                        {
+                            for element in document.select(&fallback_sel).take(max_results) {
+                                let row = element.text().collect::<String>().trim().to_string();
+                                if !row.is_empty() {
+                                    results.push(serde_json::json!({
+                                        "title": row,
+                                        "url": serde_json::Value::Null,
+                                        "snippet": serde_json::Value::Null,
+                                    }));
+                                }
                             }
                         }
                     }
@@ -572,6 +619,31 @@ async fn search_duckduckgo_lite(
     }))
 }
 
+/// Extract the real destination URL from a DuckDuckGo Lite redirect URL.
+/// DDG Lite wraps results in `/lite/?uddg=<encoded_url>` or similar patterns.
+fn extract_real_url_from_ddg_redirect(href: &str) -> Option<String> {
+    if href.is_empty() {
+        return None;
+    }
+    // Direct URL (already a real URL)
+    if href.starts_with("http://") || href.starts_with("https://") {
+        return Some(href.to_string());
+    }
+    // DDG redirect pattern: /lite/?uddg=<url-encoded-url>
+    if let Ok(parsed) = reqwest::Url::parse(&format!("https://lite.duckduckgo.com{}", href)) {
+        if let Some(uddg) = parsed
+            .query_pairs()
+            .find(|(k, _)| k == "uddg")
+            .map(|(_, v)| v.into_owned())
+        {
+            if uddg.starts_with("http") {
+                return Some(uddg);
+            }
+        }
+    }
+    None
+}
+
 struct WebSearch;
 #[async_trait]
 impl ToolHandler for WebSearch {
@@ -591,6 +663,8 @@ impl ToolHandler for WebSearch {
             Ok(results) => ToolResult::ok(serde_json::json!({
                 "query": query,
                 "results": results,
+                "count": results.len(),
+                "backend": "duckduckgo-lite",
             })),
             Err(error) => tool_error(error),
         }
@@ -685,27 +759,18 @@ impl ToolHandler for FetchWebpage {
                             }
                         };
 
-                        let document = scraper::Html::parse_document(&text);
-                        let body_selector = scraper::Selector::parse("body").ok();
-                        let body_text = body_selector
-                            .and_then(|selector| {
-                                document
-                                    .select(&selector)
-                                    .next()
-                                    .map(|element| element.text().collect::<String>())
-                            })
-                            .unwrap_or(text);
-
-                        let content = if body_text.len() > max_chars {
-                            body_text[..max_chars].to_string()
-                        } else {
-                            body_text.clone()
-                        };
+                        // ── Readability-style article extraction ──────────────────
+                        // Attempt to extract the main article content, stripping
+                        // navigation, footers, ads, and boilerplate.
+                        let extracted = extract_article_content(&text, max_chars);
 
                         return ToolResult::ok(serde_json::json!({
                             "url": raw_url,
-                            "content": content.trim(),
-                            "truncated": body_text.len() > max_chars,
+                            "title": extracted.title,
+                            "content": extracted.content,
+                            "truncated": extracted.truncated,
+                            "extraction_method": extracted.method,
+                            "word_count": extracted.word_count,
                         }));
                     }
                 }
@@ -724,6 +789,288 @@ impl ToolHandler for FetchWebpage {
             reason: "request failed after retries".to_string(),
         }))
     }
+}
+
+/// Result of article content extraction.
+struct ArticleExtraction {
+    title: String,
+    content: String,
+    truncated: bool,
+    method: &'static str,
+    word_count: usize,
+}
+
+/// Extract the main article content from HTML using a readability-style algorithm.
+///
+/// Strategy (in order of preference):
+/// 1. Look for semantic article containers: `<article>`, `<main>`, `[role=main]`
+/// 2. Look for common content div IDs/classes: `#content`, `.post-content`, `.entry-content`, etc.
+/// 3. Score all `<div>` and `<section>` elements by text density (text/tag ratio)
+/// 4. Fall back to `<body>` text with noise removal (nav, footer, aside, script, style stripped)
+///
+/// This is a deterministic, zero-dependency implementation — no external readability crate needed.
+fn extract_article_content(html: &str, max_chars: usize) -> ArticleExtraction {
+    let document = scraper::Html::parse_document(html);
+
+    // ── Step 0: Extract page title ────────────────────────────────────────
+    let title = extract_page_title(&document);
+
+    // ── Step 1: Remove noise elements from consideration ─────────────────
+    // We do this by scoring elements, not by mutating the DOM.
+
+    // ── Step 2: Try semantic article containers ───────────────────────────
+    let semantic_selectors = [
+        "article",
+        "main",
+        "[role=\"main\"]",
+        "#main-content",
+        "#content",
+        ".post-content",
+        ".entry-content",
+        ".article-content",
+        ".article-body",
+        ".story-body",
+        ".post-body",
+        ".content-body",
+        ".page-content",
+        ".main-content",
+        ".blog-post",
+        ".news-article",
+    ];
+
+    for selector_str in &semantic_selectors {
+        if let Ok(selector) = scraper::Selector::parse(selector_str) {
+            if let Some(element) = document.select(&selector).next() {
+                let text = extract_clean_text_from_element(element);
+                if text.chars().count() >= 200 {
+                    let (content, truncated) = truncate_to_chars(&text, max_chars);
+                    let word_count = content.split_whitespace().count();
+                    return ArticleExtraction {
+                        title,
+                        content,
+                        truncated,
+                        method: "semantic_container",
+                        word_count,
+                    };
+                }
+            }
+        }
+    }
+
+    // ── Step 3: Score div/section elements by text density ───────────────
+    // Text density = text_length / (text_length + tag_count * 20)
+    // High density = likely article content, low density = navigation/boilerplate
+    if let Ok(block_selector) = scraper::Selector::parse("div, section, td") {
+        let mut best_text = String::new();
+        let mut best_score = 0.0f32;
+
+        for element in document.select(&block_selector) {
+            // Skip known noise containers
+            let class = element.value().attr("class").unwrap_or("");
+            let id = element.value().attr("id").unwrap_or("");
+            let combined = format!("{} {}", class, id).to_ascii_lowercase();
+
+            if is_noise_container(&combined) {
+                continue;
+            }
+
+            let text = extract_clean_text_from_element(element);
+            let text_len = text.chars().count();
+
+            if text_len < 150 {
+                continue;
+            }
+
+            // Count child tags as a proxy for tag density
+            let tag_count = element.children().count().max(1);
+            let score = text_len as f32 / (text_len as f32 + tag_count as f32 * 15.0);
+
+            // Bonus for content-like class/id names
+            let content_bonus = if combined.contains("content")
+                || combined.contains("article")
+                || combined.contains("post")
+                || combined.contains("story")
+                || combined.contains("body")
+            {
+                0.15
+            } else {
+                0.0
+            };
+
+            let final_score = score + content_bonus;
+
+            if final_score > best_score && text_len > best_text.chars().count() {
+                best_score = final_score;
+                best_text = text;
+            }
+        }
+
+        if best_score > 0.3 && best_text.chars().count() >= 200 {
+            let (content, truncated) = truncate_to_chars(&best_text, max_chars);
+            let word_count = content.split_whitespace().count();
+            return ArticleExtraction {
+                title,
+                content,
+                truncated,
+                method: "density_scored",
+                word_count,
+            };
+        }
+    }
+
+    // ── Step 4: Fall back to body text with noise removal ─────────────────
+    let body_text = extract_body_text_clean(&document);
+    let (content, truncated) = truncate_to_chars(&body_text, max_chars);
+    let word_count = content.split_whitespace().count();
+
+    ArticleExtraction {
+        title,
+        content: if content.trim().is_empty() {
+            "EXTRACTION_FAILED: No readable content could be extracted from this page.".to_string()
+        } else {
+            content
+        },
+        truncated,
+        method: "body_fallback",
+        word_count,
+    }
+}
+
+/// Extract the page title from `<title>` or `<h1>`.
+fn extract_page_title(document: &scraper::Html) -> String {
+    if let Ok(sel) = scraper::Selector::parse("title") {
+        if let Some(el) = document.select(&sel).next() {
+            let t = el.text().collect::<String>().trim().to_string();
+            if !t.is_empty() {
+                return t;
+            }
+        }
+    }
+    if let Ok(sel) = scraper::Selector::parse("h1") {
+        if let Some(el) = document.select(&sel).next() {
+            let t = el.text().collect::<String>().trim().to_string();
+            if !t.is_empty() {
+                return t;
+            }
+        }
+    }
+    String::new()
+}
+
+/// Extract clean text from an element, skipping noise child elements.
+fn extract_clean_text_from_element(element: scraper::ElementRef) -> String {
+    // Tags to skip entirely when extracting text
+    let noise_tags = [
+        "nav",
+        "header",
+        "footer",
+        "aside",
+        "script",
+        "style",
+        "noscript",
+        "iframe",
+        "form",
+        "button",
+        "input",
+        "select",
+        "textarea",
+        "svg",
+        "canvas",
+        "figure",
+        "figcaption",
+        "advertisement",
+        "ads",
+        "cookie",
+        "popup",
+        "modal",
+    ];
+
+    let mut parts: Vec<String> = Vec::new();
+
+    for node in element.descendants() {
+        if let Some(text_node) = node.value().as_text() {
+            // Check if any ancestor is a noise tag
+            let is_noise = node.ancestors().any(|ancestor| {
+                ancestor
+                    .value()
+                    .as_element()
+                    .map(|el| noise_tags.contains(&el.name()))
+                    .unwrap_or(false)
+            });
+
+            if !is_noise {
+                let text = text_node.trim();
+                if !text.is_empty() {
+                    parts.push(text.to_string());
+                }
+            }
+        }
+    }
+
+    // Join with spaces, collapse multiple whitespace
+    let joined = parts.join(" ");
+    joined.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Extract body text with noise elements removed.
+fn extract_body_text_clean(document: &scraper::Html) -> String {
+    if let Ok(body_sel) = scraper::Selector::parse("body") {
+        if let Some(body) = document.select(&body_sel).next() {
+            return extract_clean_text_from_element(body);
+        }
+    }
+    // No body — extract all text
+    document
+        .root_element()
+        .text()
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Whether a class/id combination indicates a noise container.
+fn is_noise_container(combined: &str) -> bool {
+    let noise_patterns = [
+        "nav",
+        "menu",
+        "sidebar",
+        "footer",
+        "header",
+        "banner",
+        "advertisement",
+        "ads",
+        "ad-",
+        "-ad",
+        "cookie",
+        "popup",
+        "modal",
+        "overlay",
+        "social",
+        "share",
+        "comment",
+        "related",
+        "recommended",
+        "trending",
+        "widget",
+        "promo",
+        "sponsor",
+        "breadcrumb",
+        "pagination",
+        "tag-cloud",
+        "author-bio",
+    ];
+    noise_patterns.iter().any(|p| combined.contains(p))
+}
+
+/// Truncate text to max_chars, returning (truncated_text, was_truncated).
+fn truncate_to_chars(text: &str, max_chars: usize) -> (String, bool) {
+    let char_count = text.chars().count();
+    if char_count <= max_chars {
+        return (text.to_string(), false);
+    }
+    let truncated: String = text.chars().take(max_chars).collect();
+    (truncated, true)
 }
 
 struct CheckUrlStatus;

@@ -297,6 +297,16 @@ pub async fn openclaw_substrate_status(
     state: State<'_, AppStateCell>,
 ) -> Result<SubstrateStatusPayload, String> {
     let app = state.get().ok_or("runtime not ready")?;
+    let cfg = app.config.read().await.openclaw.clone();
+    if !cfg.enabled {
+        return Ok(SubstrateStatusPayload {
+            status: "disabled".into(),
+            details: "OpenClaw substrate is disabled in settings".into(),
+            active_invocations: 0,
+            warm_pool_count: 0,
+        });
+    }
+
     match &app.container_pool {
         Some(pool) => {
             let active = pool.active_count().await as u32;
@@ -315,7 +325,10 @@ pub async fn openclaw_substrate_status(
         }
         None => Ok(SubstrateStatusPayload {
             status: "unavailable".into(),
-            details: "Docker not detected — container substrate offline".into(),
+            details: format!(
+                "OpenClaw substrate unavailable. Check Docker and build the image with: docker build -f Dockerfile.openclaw-substrate -t {} .",
+                cfg.image
+            ),
             active_invocations: 0,
             warm_pool_count: 0,
         }),

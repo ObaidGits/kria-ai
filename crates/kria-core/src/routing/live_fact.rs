@@ -40,6 +40,25 @@ fn contains_temporal_signal(query: &str) -> bool {
     TEMPORAL_SIGNAL_RE.is_match(query)
 }
 
+/// Self-referential capability/identity check.
+///
+/// Detects prompts about KRIA's own capabilities ("what can you do",
+/// "tell me about yourself", "are you live", "what are your features").
+/// These must NEVER trigger live-fact retrieval — KRIA's capabilities are
+/// internal knowledge, not external facts.
+static SELF_REF_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)\b(?:you|your|yourself|kria)\b").expect("Invalid self-ref regex")
+});
+
+static CAPABILITY_VERB_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)\b(?:can|could|able|capable|capabilit(?:y|ies)|abilit(?:y|ies)|feature|features|do|help|assist|support|name|identity|model|live|alive|online|ready|awake|version|who|what)\b")
+        .expect("Invalid capability verb regex")
+});
+
+fn is_self_referential_capability_query(query: &str) -> bool {
+    SELF_REF_RE.is_match(query) && CAPABILITY_VERB_RE.is_match(query)
+}
+
 // ─── Gate 2: Semantic Anchor Embeddings ───────────────────────────────────────
 // Expanded anchor phrases covering the full space of volatile queries.
 // Pre-embedded at first call via OnceLock — zero per-turn overhead after warmup.
@@ -176,6 +195,31 @@ fn get_threshold() -> f32 {
 ///
 /// Returns true if (Gate 1 OR Gate 2) passes AND Gate 3 does not reject.
 pub fn is_live_fact_query(query: &str) -> bool {
+    // ── Pre-filter: self-referential capability/identity prompts ──
+    // Questions about KRIA's own abilities, features, or identity must
+    // NEVER trigger live-fact retrieval. They are answered from internal
+    // knowledge, not external search.
+    if is_self_referential_capability_query(query) {
+        tracing::info!(
+            query = %query,
+            "LiveFactClassifier: self-referential capability prompt — not a live fact"
+        );
+        return false;
+    }
+
+    // ── Pre-filter: GUI / app-launch queries ──────────────────────────────
+    // "Open Chrome and search for X", "launch Firefox", "open YouTube" etc.
+    // are GUI automation requests, never live-fact queries. The live-fact
+    // classifier must not hijack these and force searxng_search.
+    // Uses the GuiIntentClassifier (structural signal scoring, not keyword lists).
+    if crate::routing::gui_intent::is_gui_launch_query(query) {
+        tracing::info!(
+            query = %query,
+            "LiveFactClassifier: GUI/app-launch query — not a live fact"
+        );
+        return false;
+    }
+
     // Gate 1: Temporal-signal lexical gate (open-world, catches unseen prompts)
     let gate1_temporal = contains_temporal_signal(query);
 
@@ -387,5 +431,58 @@ mod tests {
         assert!(!is_live_fact_query("hey"));
         assert!(!is_live_fact_query("yo"));
         assert!(!is_live_fact_query("test"));
+    }
+
+    // ── Self-referential capability prompts: NEVER live-fact ──
+
+    #[test]
+    fn test_live_fact_self_referential_capability_rejected() {
+        // Self-referential capability/identity prompts must NEVER trigger live-fact,
+        // even if they contain temporal trigger words like "currently", "now", "today".
+        assert!(!is_live_fact_query("what can you do"));
+        assert!(!is_live_fact_query("what can you currently do"));
+        assert!(!is_live_fact_query("what are your latest features"));
+        assert!(!is_live_fact_query("are you live now"));
+        assert!(!is_live_fact_query("what is your current model"));
+        assert!(!is_live_fact_query("tell me about yourself"));
+        assert!(!is_live_fact_query("who are you"));
+        assert!(!is_live_fact_query("what's your current version"));
+        assert!(!is_live_fact_query("what is kria"));
+    }
+
+    #[test]
+    fn test_live_fact_real_temporal_questions_still_pass() {
+        // External temporal questions WITHOUT self-reference must still trigger
+        assert!(is_live_fact_query("what is the current bitcoin price"));
+        assert!(is_live_fact_query("latest news about elections"));
+        assert!(is_live_fact_query("how old is the president"));
+    }
+
+    // ── GUI / app-launch queries: NEVER live-fact ──
+
+    #[test]
+    fn test_live_fact_gui_launch_queries_rejected() {
+        // These are GUI automation requests — must never trigger live-fact rewrite
+        assert!(!is_live_fact_query("Open chrome and search for youtube"));
+        assert!(!is_live_fact_query(
+            "open chrome and search for youtube live"
+        ));
+        assert!(!is_live_fact_query("launch Firefox and go to google.com"));
+        assert!(!is_live_fact_query("open YouTube"));
+        assert!(!is_live_fact_query("start chrome"));
+        assert!(!is_live_fact_query(
+            "open chrome and search for today's news"
+        ));
+        assert!(!is_live_fact_query("launch browser and find latest scores"));
+        // Text editor / IDE launches with action verbs
+        assert!(!is_live_fact_query(
+            "Open gedit and type a program to print fibonacci series in python"
+        ));
+        assert!(!is_live_fact_query(
+            "Open code and type a program to print fibonacci series and run it"
+        ));
+        assert!(!is_live_fact_query(
+            "launch vscode and open the project folder"
+        ));
     }
 }

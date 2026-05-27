@@ -38,19 +38,35 @@ use crate::tools::subprocess_executor::StructuredCommand;
 
 /// The Uncertainty Engine — evaluates confidence and decides action.
 pub struct UncertaintyEngine {
-    /// Current belief graph.
+    /// In-memory belief graph (fallback when WorldModelStore is unavailable).
+    /// Deprecated: use WorldModelStore via PsdgHandle for persistent facts.
     belief_graph: BeliefGraph,
     /// Adaptive threshold calibrator.
     calibrator: ConfidenceCalibrator,
+    /// PSDG handle for querying persistent WorldModelStore facts.
+    /// When present, WorldModelStore is the primary confidence source.
+    /// When absent, falls back to in-memory BeliefGraph.
+    psdg: Option<crate::agent::psdg::PsdgHandle>,
 }
 
 impl UncertaintyEngine {
-    /// Create a new uncertainty engine.
+    /// Create a new uncertainty engine without persistent world model.
     pub fn new() -> Self {
         Self {
             belief_graph: BeliefGraph::new(),
             calibrator: ConfidenceCalibrator::new(),
+            psdg: None,
         }
+    }
+
+    /// Attach a PSDG handle for persistent fact-based confidence scoring.
+    ///
+    /// When set, `score_confidence()` queries WorldModelStore for relevant
+    /// facts matching goal keywords, replacing the in-memory BeliefGraph
+    /// as the primary coverage source. The BeliefGraph remains as fallback.
+    pub fn with_world_model(mut self, psdg: crate::agent::psdg::PsdgHandle) -> Self {
+        self.psdg = Some(psdg);
+        self
     }
 
     /// Evaluate confidence for a goal and return the action.
@@ -70,11 +86,29 @@ impl UncertaintyEngine {
     fn score_confidence(&self, goal: &str) -> f64 {
         let goal_lower = goal.to_lowercase();
 
-        // Factor 1: Belief graph coverage
-        // Check if we have relevant beliefs for this goal
+        // Factor 1: World Model / Belief graph coverage
+        // Prefer WorldModelStore (persistent) over in-memory BeliefGraph.
         let relevant_keywords: Vec<&str> = goal_lower.split_whitespace().collect();
         let keyword_refs: Vec<&str> = relevant_keywords.to_vec();
-        let belief_confidence = self.belief_graph.confidence_for(&keyword_refs);
+        let belief_confidence = if let Some(ref psdg) = self.psdg {
+            // Query WorldModelStore for relevant facts and derive coverage score.
+            // Take up to 5 keywords and check confidence of matching facts.
+            let keyword_scores: Vec<f64> = relevant_keywords
+                .iter()
+                .take(5)
+                .flat_map(|kw| psdg.query_subject_bounded(kw))
+                .map(|f| f.confidence)
+                .collect();
+            if keyword_scores.is_empty() {
+                // No matching world facts — fall back to BeliefGraph coverage
+                self.belief_graph.confidence_for(&keyword_refs)
+            } else {
+                // Average confidence of matching world facts
+                keyword_scores.iter().sum::<f64>() / keyword_scores.len() as f64
+            }
+        } else {
+            self.belief_graph.confidence_for(&keyword_refs)
+        };
 
         // Factor 2: Goal specificity (more words = more specific = higher base confidence)
         let word_count = goal.split_whitespace().count();

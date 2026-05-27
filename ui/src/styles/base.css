@@ -279,6 +279,9 @@ body {
   font-size: 12px;
   border-left: 3px solid var(--text-muted);
   transition: border-color 0.2s;
+  /* Allow wide tables to scroll without breaking the bubble */
+  min-width: 0;
+  overflow: hidden;
 }
 
 .tool-call-running {
@@ -328,6 +331,18 @@ body {
   white-space: nowrap;
 }
 
+.tool-metric-exit-error {
+  color: #f44336;
+  background: color-mix(in oklab, #f44336 12%, transparent);
+  border-color: color-mix(in oklab, #f44336 35%, transparent);
+}
+
+.tool-metric-truncated {
+  color: var(--warning);
+  background: color-mix(in oklab, var(--warning) 12%, transparent);
+  border-color: color-mix(in oklab, var(--warning) 35%, transparent);
+}
+
 .tool-expand {
   margin-left: auto;
   font-size: 10px;
@@ -365,6 +380,337 @@ body {
 .tool-result-preview {
   color: var(--text-muted);
   font-size: 11px;
+}
+
+.tool-conversational-summary {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.tool-conversational-response {
+  margin-bottom: 8px;
+  padding: 8px;
+  background: color-mix(in oklab, var(--accent) 8%, transparent);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+}
+
+.tool-conversational-response strong {
+  display: block;
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.tool-conversational-response p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+
+/* Human-readable markdown output from synthesis */
+.tool-human-readable {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+  /* Prevent content from overflowing the tool-call container */
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Scroll wrapper — lets wide tables scroll horizontally
+   without breaking the bubble layout */
+.tool-human-readable table {
+  display: block;           /* enables overflow-x on the element itself */
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+  border-collapse: collapse;
+  width: max-content;       /* shrink to content, grow as needed */
+  max-width: 100%;          /* never wider than the container */
+  font-size: 12px;
+  margin: 6px 0;
+  table-layout: auto;       /* browser sizes columns to content */
+}
+
+.tool-human-readable th {
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
+  color: var(--text-primary);
+  font-weight: 600;
+  padding: 5px 12px;
+  text-align: left;
+  border: 1px solid var(--border);
+  white-space: nowrap;      /* header labels never wrap */
+  font-size: 11px;
+  letter-spacing: 0.3px;
+}
+
+.tool-human-readable td {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: nowrap;      /* data cells stay on one line — scroll instead of wrap */
+  max-width: 320px;         /* very long cells get truncated with ellipsis */
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Allow wrapping only for cells that are clearly prose (long text) */
+.tool-human-readable td.prose-cell {
+  white-space: normal;
+  word-break: break-word;
+  max-width: 280px;
+}
+
+.tool-human-readable tr:nth-child(even) td {
+  background: color-mix(in oklab, var(--bg-secondary) 60%, transparent);
+}
+
+.tool-human-readable tr:hover td {
+  background: color-mix(in oklab, var(--accent) 6%, transparent);
+}
+
+.tool-human-readable ul,
+.tool-human-readable ol {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+
+.tool-human-readable li {
+  margin: 2px 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.tool-human-readable code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.tool-human-readable pre {
+  background: rgba(0, 0, 0, 0.18);
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  white-space: pre;         /* preserve exact spacing, scroll horizontally */
+  word-break: normal;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.tool-human-readable blockquote {
+  border-left: 3px solid var(--warning);
+  margin: 6px 0;
+  padding: 4px 10px;
+  background: color-mix(in oklab, var(--warning) 8%, transparent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.tool-human-readable strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.tool-human-readable p {
+  margin: 4px 0;
+}
+
+/* ── Task Step Progress ──────────────────────────────────────── */
+.task-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0;
+  padding: 8px 10px;
+  background: color-mix(in oklab, var(--bg-secondary) 70%, transparent);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+.task-step {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 2px 0;
+}
+
+.task-step-icon {
+  font-size: 13px;
+  flex-shrink: 0;
+  width: 18px;
+  text-align: center;
+}
+
+.task-step-label {
+  color: var(--text-secondary);
+}
+
+.task-step-index {
+  font-weight: 600;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-family: var(--font-mono);
+}
+
+.task-step-running .task-step-label {
+  color: var(--accent);
+}
+
+.task-step-done .task-step-label {
+  color: #4caf50;
+}
+
+.task-step-failed .task-step-label {
+  color: #f44336;
+}
+
+.task-step-skipped .task-step-label {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+/* Error actions row on failed tool calls */
+.tool-error-actions {
+  margin-top: 6px;
+  display: flex;
+  gap: 6px;
+}
+
+/* ── Recovery Options ────────────────────────────────────────── */
+/* Shown when a prerequisite check fails (e.g. VM not reachable) */
+.recovery-options {
+  margin: 8px 0;
+  padding: 10px 12px;
+  background: color-mix(in oklab, var(--warning) 8%, var(--bg-tertiary));
+  border: 1px solid color-mix(in oklab, var(--warning) 35%, transparent);
+  border-left: 3px solid var(--warning);
+  border-radius: var(--radius-sm);
+}
+
+.recovery-options-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.recovery-options-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.recovery-options-context {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+.recovery-options-detail {
+  margin: 4px 0 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  line-height: 1.4;
+}
+
+.recovery-options-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.recovery-action-btn {
+  appearance: none;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  line-height: 1.4;
+}
+
+.recovery-action-primary {
+  background: var(--accent);
+  color: #fff;
+}
+
+.recovery-action-primary:hover {
+  filter: brightness(1.12);
+  transform: translateY(-1px);
+}
+
+.recovery-action-secondary {
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
+  color: var(--accent);
+  border: 1px solid color-mix(in oklab, var(--accent) 35%, transparent);
+}
+
+.recovery-action-secondary:hover {
+  background: color-mix(in oklab, var(--accent) 22%, transparent);
+  transform: translateY(-1px);
+}
+
+.recovery-action-danger {
+  background: color-mix(in oklab, #f44336 14%, transparent);
+  color: #f44336;
+  border: 1px solid color-mix(in oklab, #f44336 35%, transparent);
+}
+
+.recovery-action-danger:hover {
+  background: color-mix(in oklab, #f44336 22%, transparent);
+  transform: translateY(-1px);
+}
+
+/* Collapsible raw output */
+.tool-raw-details {  margin-top: 6px;
+}
+
+.tool-raw-summary {
+  font-size: 10px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  padding: 2px 0;
+  list-style: none;
+}
+
+.tool-raw-summary::-webkit-details-marker {
+  display: none;
+}
+
+.tool-raw-summary::before {
+  content: "▶ ";
+  font-size: 9px;
+}
+
+details[open] .tool-raw-summary::before {
+  content: "▼ ";
+}
+
+.tool-raw-details .tool-call-result pre {
+  margin-top: 4px;
+  max-height: 180px;
 }
 
 .tool-structured-list {

@@ -104,7 +104,7 @@ impl WhisperRefiner {
             initial_prompt: REFINEMENT_PROMPT.to_string(),
             n_threads: n_threads.clamp(1, 16),
             language,
-            timeout_ms: 5_000, // 5s hard timeout
+            timeout_ms: 5_000,          // 5s hard timeout
             max_audio_samples: 480_000, // 30s @ 16kHz
             #[cfg(feature = "voice-whisper-rs")]
             context: OnceCell::new(),

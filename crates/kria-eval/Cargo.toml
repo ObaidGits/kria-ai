@@ -11,4 +11,8 @@ tempfile = "3"
 dotenvy = "0.15"
 reqwest = { workspace = true }
 rusqlite = { workspace = true }
+which = "6"
+tokio-util = { workspace = true }
+glob = "0.3"
+async-trait = { workspace = true }
 kria-core = { path = "../kria-core" }

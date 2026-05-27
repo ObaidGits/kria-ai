@@ -6,7 +6,7 @@
 //!
 //! # Lifecycle
 //!
-//! 1. On startup: pre-warm `config.warm_per_class` containers per resource class.
+//! 1. On startup: adopt existing warm containers, then pre-warm missing capacity.
 //! 2. On `checkout()`: pop a warm container (or create one if pool empty).
 //! 3. On `checkin()`: destroy the container, pre-warm a replacement.
 //!
@@ -18,7 +18,7 @@ use super::config::OpenClawConfig;
 use super::types::ResourceClass;
 use bollard::container::{
     Config as ContainerConfig, CreateContainerOptions, InspectContainerOptions,
-    RemoveContainerOptions, StartContainerOptions,
+    ListContainersOptions, RemoveContainerOptions, StartContainerOptions,
 };
 use bollard::models::HostConfig;
 use bollard::Docker;
@@ -49,6 +49,8 @@ pub enum PoolError {
     CreationFailed(String),
     #[error("container start failed: {0}")]
     StartFailed(String),
+    #[error("substrate image unavailable: {0}")]
+    ImageUnavailable(String),
     #[error("docker API error: {0}")]
     Docker(#[from] bollard::errors::Error),
     #[error("pool not initialized")]
@@ -120,12 +122,22 @@ impl ContainerPool {
 
     /// Pre-warm containers for all resource classes.
     pub async fn initialize(&self) -> Result<(), PoolError> {
+        self.verify_image_available().await?;
+        self.adopt_existing_containers().await?;
+
         for class in &[
             ResourceClass::Light,
             ResourceClass::Medium,
             ResourceClass::Heavy,
         ] {
-            for _ in 0..self.config.warm_per_class {
+            let current = self
+                .pools
+                .lock()
+                .await
+                .get(class)
+                .map(|pool| pool.len())
+                .unwrap_or(0);
+            for _ in current..self.config.warm_per_class {
                 let container = self.create_container(*class).await?;
                 self.pools
                     .lock()
@@ -136,8 +148,8 @@ impl ContainerPool {
             }
             tracing::info!(
                 resource_class = %class,
-                count = self.config.warm_per_class,
-                "Pre-warmed OpenClaw containers"
+                target = self.config.warm_per_class,
+                "OpenClaw warm container pool initialized"
             );
         }
         Ok(())
@@ -274,6 +286,91 @@ impl ContainerPool {
         create_container_static(&self.docker, &self.config, class).await
     }
 
+    /// Verify the configured substrate image exists locally before starting a
+    /// pre-warm loop. Missing image is treated as a bounded setup problem, not
+    /// as an endlessly retryable runtime fault.
+    pub async fn verify_image_available(&self) -> Result<(), PoolError> {
+        ensure_image_available_static(&self.docker, &self.config).await
+    }
+
+    async fn adopt_existing_containers(&self) -> Result<(), PoolError> {
+        let mut filters = HashMap::<String, Vec<String>>::new();
+        filters.insert("name".to_string(), vec![self.config.container_name.clone()]);
+        let containers = self
+            .docker
+            .list_containers(Some(ListContainersOptions {
+                all: true,
+                filters,
+                ..Default::default()
+            }))
+            .await?;
+
+        let mut adopted: HashMap<ResourceClass, usize> = HashMap::new();
+        for container in containers {
+            let id = match container.id {
+                Some(id) => id,
+                None => continue,
+            };
+            let names = container.names.unwrap_or_default();
+            let class = names.iter().find_map(|name| {
+                parse_resource_class_from_container_name(name, &self.config.container_name)
+            });
+            let Some(class) = class else {
+                continue;
+            };
+
+            let current = adopted.get(&class).copied().unwrap_or(0);
+            if current >= self.config.warm_per_class {
+                self.remove_container_best_effort(&id).await;
+                tracing::info!(
+                    container_id = %id,
+                    resource_class = %class,
+                    "Removed excess OpenClaw warm container"
+                );
+                continue;
+            }
+
+            if !self.is_container_healthy(&id).await {
+                match self
+                    .docker
+                    .start_container(&id, None::<StartContainerOptions<String>>)
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(error) => {
+                        tracing::warn!(
+                            container_id = %id,
+                            resource_class = %class,
+                            error = %error,
+                            "Failed to resume stale OpenClaw container; removing it"
+                        );
+                        self.remove_container_best_effort(&id).await;
+                        continue;
+                    }
+                }
+            }
+
+            self.pools
+                .lock()
+                .await
+                .entry(class)
+                .or_default()
+                .push_back(WarmContainer {
+                    container_id: id.clone(),
+                    created_at: Instant::now(),
+                    resource_class: class,
+                });
+            adopted.insert(class, current + 1);
+            tracing::info!(
+                container_id = %id,
+                resource_class = %class,
+                "Adopted existing OpenClaw warm container"
+            );
+        }
+
+        Ok(())
+    }
+
     /// Check if a container is still running and healthy.
     async fn is_container_healthy(&self, container_id: &str) -> bool {
         match self
@@ -318,22 +415,15 @@ impl ContainerPool {
     pub async fn shutdown(&self) -> Result<(), PoolError> {
         let _ = self.shutdown.send(());
 
-        // Destroy all warm containers
+        // Keep warm containers running across KRIA restarts. Startup adopts
+        // these containers and prunes stale/excess containers deterministically.
         let mut pools = self.pools.lock().await;
         for (class, pool) in pools.drain() {
-            for container in pool {
-                let _ = self
-                    .docker
-                    .remove_container(
-                        &container.container_id,
-                        Some(RemoveContainerOptions {
-                            force: true,
-                            ..Default::default()
-                        }),
-                    )
-                    .await;
-            }
-            tracing::info!(resource_class = %class, "Destroyed warm containers");
+            tracing::info!(
+                resource_class = %class,
+                count = pool.len(),
+                "Preserved warm OpenClaw containers for next KRIA start"
+            );
         }
 
         // Force-kill any active invocations
@@ -357,6 +447,19 @@ impl ContainerPool {
         }
 
         Ok(())
+    }
+
+    async fn remove_container_best_effort(&self, container_id: &str) {
+        let _ = self
+            .docker
+            .remove_container(
+                container_id,
+                Some(RemoveContainerOptions {
+                    force: true,
+                    ..Default::default()
+                }),
+            )
+            .await;
     }
 
     /// Get the number of active invocations.
@@ -385,7 +488,7 @@ impl ContainerPool {
         tokio::spawn(async move {
             let target = pool.config.warm_per_class;
             let interval = Duration::from_secs(5);
-            loop {
+            'prewarm: loop {
                 tokio::select! {
                     _ = tokio::time::sleep(interval) => {}
                     _ = shutdown_rx.recv() => { break; }
@@ -414,6 +517,14 @@ impl ContainerPool {
                                 .push_back(container);
                             pool.generation.fetch_add(1, Ordering::AcqRel);
                         }
+                        Err(PoolError::ImageUnavailable(message)) => {
+                            tracing::warn!(
+                                image = %pool.config.image,
+                                error = %message,
+                                "pre-warm loop disabled: OpenClaw substrate image is unavailable"
+                            );
+                            break 'prewarm;
+                        }
                         Err(e) => {
                             tracing::warn!(error = %e, "pre-warm loop: failed to create Light container");
                             break;
@@ -425,12 +536,39 @@ impl ContainerPool {
     }
 }
 
+async fn ensure_image_available_static(
+    docker: &Docker,
+    config: &OpenClawConfig,
+) -> Result<(), PoolError> {
+    docker
+        .inspect_image(&config.image)
+        .await
+        .map(|_| ())
+        .map_err(|error| {
+            if is_missing_image_error(&error) {
+                PoolError::ImageUnavailable(format!(
+                    "Docker image '{}' is not present locally. Build it with: docker build -f Dockerfile.openclaw-substrate -t {} .",
+                    config.image, config.image
+                ))
+            } else {
+                PoolError::Docker(error)
+            }
+        })
+}
+
+fn is_missing_image_error(error: &bollard::errors::Error) -> bool {
+    let message = error.to_string().to_lowercase();
+    message.contains("no such image") || message.contains("not found") || message.contains("404")
+}
+
 /// Create a container with the correct resource limits for a class.
 async fn create_container_static(
     docker: &Docker,
     config: &OpenClawConfig,
     class: ResourceClass,
 ) -> Result<WarmContainer, PoolError> {
+    ensure_image_available_static(docker, config).await?;
+
     let container_name = format!(
         "{}-{}-{}",
         config.container_name,
@@ -469,6 +607,11 @@ async fn create_container_static(
         ..Default::default()
     };
 
+    let mut labels = HashMap::new();
+    labels.insert("ai.kria.component".to_string(), "openclaw".to_string());
+    labels.insert("ai.kria.managed".to_string(), "true".to_string());
+    labels.insert("ai.kria.resource_class".to_string(), class.to_string());
+
     let container_config = ContainerConfig {
         image: Some(config.image.clone()),
         cmd: Some(vec![
@@ -478,6 +621,7 @@ async fn create_container_static(
         ]),
         open_stdin: Some(true), // MCP stdio transport
         host_config: Some(host_config),
+        labels: Some(labels),
         ..Default::default()
     };
 
@@ -508,4 +652,53 @@ async fn create_container_static(
         created_at: Instant::now(),
         resource_class: class,
     })
+}
+
+fn parse_resource_class_from_container_name(name: &str, prefix: &str) -> Option<ResourceClass> {
+    let normalized = name.trim_start_matches('/');
+    let rest = normalized.strip_prefix(prefix)?.strip_prefix('-')?;
+    let class = rest.split('-').next()?;
+    match class {
+        "light" => Some(ResourceClass::Light),
+        "medium" => Some(ResourceClass::Medium),
+        "heavy" => Some(ResourceClass::Heavy),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_image_detection_matches_docker_404_messages() {
+        let error = bollard::errors::Error::DockerResponseServerError {
+            status_code: 404,
+            message: "No such image: kria/openclaw-substrate:latest".to_string(),
+        };
+
+        assert!(is_missing_image_error(&error));
+    }
+
+    #[test]
+    fn parses_openclaw_container_class_from_name() {
+        assert_eq!(
+            parse_resource_class_from_container_name(
+                "/kria-openclaw-substrate-light-abc123",
+                "kria-openclaw-substrate",
+            ),
+            Some(ResourceClass::Light)
+        );
+        assert_eq!(
+            parse_resource_class_from_container_name(
+                "kria-openclaw-substrate-medium-def456",
+                "kria-openclaw-substrate",
+            ),
+            Some(ResourceClass::Medium)
+        );
+        assert_eq!(
+            parse_resource_class_from_container_name("other-container", "kria-openclaw-substrate"),
+            None
+        );
+    }
 }

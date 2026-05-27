@@ -97,7 +97,11 @@ impl OpenAIBackend {
 #[async_trait]
 impl LlmBackend for OpenAIBackend {
     fn model_label(&self) -> &str {
-        &self.display_name
+        if self.model_id.trim().is_empty() {
+            &self.display_name
+        } else {
+            &self.model_id
+        }
     }
 
     fn capabilities(&self) -> &[String] {

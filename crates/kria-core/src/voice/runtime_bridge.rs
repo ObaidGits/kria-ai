@@ -26,9 +26,7 @@ use super::runtime_telemetry::{
     TtfaTracker, WorkerBudget,
 };
 use super::transcript_authority::{TranscriptAuthorityFsm, TranscriptEvent, TranscriptState};
-use super::turn_ownership::{
-    TurnEvent, TurnOwner, TurnOwnershipFsm, TurnTransitionResult,
-};
+use super::turn_ownership::{TurnEvent, TurnOwner, TurnOwnershipFsm, TurnTransitionResult};
 
 // ─── Runtime Bridge ───────────────────────────────────────────────────────
 
@@ -187,8 +185,7 @@ impl RuntimeBridge {
             budget.utilization()
         };
 
-        let new_level =
-            DegradationLevel::from_signals(audio_pressure, ttfa_overrun, whisper_util);
+        let new_level = DegradationLevel::from_signals(audio_pressure, ttfa_overrun, whisper_util);
 
         let mut current = self.degradation.lock().await;
         if *current != new_level {

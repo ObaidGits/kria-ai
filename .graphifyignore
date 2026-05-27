@@ -97,13 +97,6 @@ test.png
 *.pid
 *.backup
 
-# --- AI context (keep .md files, ignore cache) ---
-ai-context/.cache.json
-ai-context/graph/
-ai-context/onnx_l0_corpus.jsonl
-ai-context/__pycache__/
-ai-context/update.log
-
 # --- Test sandboxes & eval reports (generated) ---
 /target/test-sandbox/
 /target/quality-report.json

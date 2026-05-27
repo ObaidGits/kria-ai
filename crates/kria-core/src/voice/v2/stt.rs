@@ -553,14 +553,14 @@ mod whisper_rs_impl {
                 } else {
                     ((buffer.len() as u64) * 1000) / (sample_rate as u64)
                 };
-                
+
                 tracing::info!(
                     buffer_len = buffer.len(),
                     sample_rate,
                     duration_ms,
                     "whisper-rs: final decode starting"
                 );
-                
+
                 let final_audio = buffer;
                 let mut final_result = stt
                     .decode_once(final_audio.clone(), false, abort_flag.clone())
@@ -595,7 +595,7 @@ mod whisper_rs_impl {
                         }
                     }
                 }
-                
+
                 match &final_result {
                     Ok((text, lang)) => {
                         tracing::info!(
@@ -608,7 +608,7 @@ mod whisper_rs_impl {
                         tracing::error!("whisper-rs: final decode error: {e}");
                     }
                 }
-                
+
                 let mapped = final_result.map(|(text, language)| FinalTranscript {
                     text,
                     language,

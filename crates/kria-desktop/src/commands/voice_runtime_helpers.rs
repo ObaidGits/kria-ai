@@ -380,7 +380,11 @@ pub(crate) async fn start_voice_v2_loop(
 
                 frame_count += 1;
                 if frame_count % 50 == 1 {
-                    tracing::debug!(frame_count, chunk_samples = chunk.samples.len(), "forwarder: received chunk");
+                    tracing::debug!(
+                        frame_count,
+                        chunk_samples = chunk.samples.len(),
+                        "forwarder: received chunk"
+                    );
                 }
 
                 // Tier 2: Echo gate — suppress mic during/after TTS playback
@@ -528,7 +532,10 @@ pub(crate) async fn start_voice_v2_loop(
                 {
                     Ok(Some(b)) => b,
                     Ok(None) => {
-                        tracing::warn!(turn = turn_for_llm, "voice v2: no backend routed for voice");
+                        tracing::warn!(
+                            turn = turn_for_llm,
+                            "voice v2: no backend routed for voice"
+                        );
                         let _ = app_for_llm.emit(
                             "voice:debug",
                             serde_json::json!({ "stage": "llm_route_none", "turn": turn_for_llm }),
@@ -639,7 +646,8 @@ pub(crate) async fn start_voice_v2_loop(
                                         if !seen_token {
                                             tracing::info!(
                                                 turn = turn_for_stream,
-                                                first_token_ms = stream_started.elapsed().as_millis() as u64,
+                                                first_token_ms =
+                                                    stream_started.elapsed().as_millis() as u64,
                                                 "voice v2: llm first token"
                                             );
                                             let _ = app_for_stream.emit(
@@ -688,7 +696,9 @@ pub(crate) async fn start_voice_v2_loop(
                                             }),
                                         );
                                         let _ = tx
-                                            .send("(LLM response timeout — please try again)".into())
+                                            .send(
+                                                "(LLM response timeout — please try again)".into(),
+                                            )
                                             .await;
                                         break;
                                     }
@@ -708,7 +718,10 @@ pub(crate) async fn start_voice_v2_loop(
                             let _ = tx.send(format!("(LLM error: {e})")).await;
                         }
                         Err(_) => {
-                            tracing::warn!(turn = turn_for_stream, "voice v2: chat_stream startup timeout");
+                            tracing::warn!(
+                                turn = turn_for_stream,
+                                "voice v2: chat_stream startup timeout"
+                            );
                             let _ = app_for_stream.emit(
                                 "voice:debug",
                                 serde_json::json!({ "stage": "llm_stream_start_timeout", "turn": turn_for_stream }),

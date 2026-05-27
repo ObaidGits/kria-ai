@@ -1,6 +1,170 @@
 use super::*;
 
 #[test]
+fn autonomy_notice_is_human_readable_and_not_truncated() {
+    let prompt =
+        "Coding workflow: open code and write a program to print pascal triangle and run it and show output";
+    let message = format_autonomy_notice_for_user(&format!("Proceeding with: {prompt}"));
+
+    assert!(message.starts_with("Starting coding workflow."));
+    assert!(message.contains("Task: open code and write a program"));
+    assert!(!message.contains("Note:"));
+    assert!(!message.contains("Proceeding with:"));
+    assert!(!message.contains("<truncated"));
+}
+
+#[test]
+fn editor_coding_prompt_does_not_force_browser_search() {
+    assert!(!should_force_browser_search_for_gui_launch_query(
+        "open code and write a program to print pascal triangle and run it and show output"
+    ));
+    assert!(!should_force_browser_search_for_gui_launch_query(
+        "launch vscode and write a python script"
+    ));
+}
+
+#[test]
+fn browser_launch_prompt_still_forces_browser_search() {
+    assert!(should_force_browser_search_for_gui_launch_query(
+        "open chrome and search for youtube"
+    ));
+    assert!(should_force_browser_search_for_gui_launch_query(
+        "open youtube and play lo fi music"
+    ));
+}
+
+#[test]
+fn gui_workflow_failure_summary_reports_partial_progress_and_output() {
+    let output_path = std::env::temp_dir().join(format!(
+        "output_{}_kria_loop_engine_test.txt",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::write(&output_path, "1\n1 1\n1 2 1\n").expect("write output fixture");
+
+    let result = crate::agent::htn_executor::WorkflowResult {
+        task_id: "test".to_string(),
+        success: false,
+        completed_steps: 2,
+        total_steps: 3,
+        error: Some(
+            "Step 3 timed out after 8000ms (action: 'open_application_with_file')".to_string(),
+        ),
+        aborted: false,
+        duration_ms: 9000,
+        created_artifacts: vec![output_path.clone()],
+    };
+
+    let summary = format_gui_workflow_failure_for_user(&result);
+    let _ = std::fs::remove_file(output_path);
+
+    assert!(summary.contains("Task did not fully complete."));
+    assert!(summary.contains("The code was written and executed"));
+    assert!(summary.contains("Failure: Step 3 timed out"));
+    assert!(summary.contains("Captured output"));
+    assert!(summary.contains("1 2 1"));
+}
+
+#[test]
+fn gui_workflow_visible_miss_is_partial_not_completed() {
+    let result = crate::agent::htn_executor::WorkflowResult {
+        task_id: "test".to_string(),
+        success: true,
+        completed_steps: 1,
+        total_steps: 1,
+        error: None,
+        aborted: false,
+        duration_ms: 1800,
+        created_artifacts: vec![],
+    };
+    let narrative =
+        "⚠ Expected outcome not yet visible: code is open (Visibility probe timed out after 2500ms)";
+
+    assert!(observable_narrative_requires_partial_completion(Some(
+        narrative
+    )));
+    let summary = format_gui_workflow_partial_for_user(&result, Some(narrative));
+
+    assert!(summary.contains("Task partially completed."));
+    assert!(summary.contains("required visible outcome was not verified"));
+    assert!(!summary.starts_with("Task completed."));
+}
+
+#[test]
+fn gui_workflow_step_events_report_final_failure_state() {
+    use crate::agent::htn_executor::{GuiWorkflow, SubGoal, VerificationType, WorkflowResult};
+
+    let output_path = std::env::temp_dir().join(format!(
+        "output_{}_kria_step_event_test.txt",
+        uuid::Uuid::new_v4()
+    ));
+    let workflow = GuiWorkflow {
+        task_id: "test".to_string(),
+        max_duration_sec: 60,
+        safe_abort_steps: vec![],
+        sub_goals: vec![
+            SubGoal {
+                step: 1,
+                action: "write_file".to_string(),
+                params: serde_json::json!({}),
+                verify: VerificationType::FileSystemEffect {
+                    path: output_path.clone(),
+                    expected_substring: "x".to_string(),
+                },
+                timeout_ms: Some(1000),
+            },
+            SubGoal {
+                step: 2,
+                action: "execute_bash".to_string(),
+                params: serde_json::json!({}),
+                verify: VerificationType::DeterministicOutput {
+                    expected_substring: "x".to_string(),
+                    output_file: output_path,
+                },
+                timeout_ms: Some(1000),
+            },
+            SubGoal {
+                step: 3,
+                action: "open_application_with_file".to_string(),
+                params: serde_json::json!({}),
+                verify: VerificationType::ProcessLaunched {
+                    binary: "code".to_string(),
+                    max_wait_ms: 1000,
+                },
+                timeout_ms: Some(1000),
+            },
+        ],
+    };
+    let result = WorkflowResult {
+        task_id: "test".to_string(),
+        success: false,
+        completed_steps: 2,
+        total_steps: 3,
+        error: Some("open failed".to_string()),
+        aborted: false,
+        duration_ms: 1000,
+        created_artifacts: vec![],
+    };
+    let (tx, mut rx) = mpsc::unbounded_channel();
+
+    emit_gui_workflow_final_task_steps(&tx, &workflow, &result);
+    let mut statuses = Vec::new();
+    while let Ok(event) = rx.try_recv() {
+        if let StreamEvent::TaskStep(step) = event {
+            statuses.push(step.status);
+        }
+    }
+
+    assert_eq!(
+        statuses,
+        vec![
+            TaskStepStatus::Done,
+            TaskStepStatus::Done,
+            TaskStepStatus::Failed
+        ]
+    );
+}
+
+#[test]
 fn package_flow_install_starts_with_search() {
     let flow = PackageFlowState::from_user_text("install chrome").unwrap();
     let calls = flow.next_required_calls();

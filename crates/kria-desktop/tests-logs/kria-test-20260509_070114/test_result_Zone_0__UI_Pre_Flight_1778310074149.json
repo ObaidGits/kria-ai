@@ -1,8 +1,0 @@
-{
-  "target_id": "192.168.122.240",
-  "suite_name": "Zone 0: UI Pre-Flight",
-  "zone": "ui_build",
-  "status": "fail",
-  "timestamp_unix_ms": 1778310074149,
-  "report_path": "tests-logs/KRIA_TEST_REPORT_20260509_070114.md"
-}

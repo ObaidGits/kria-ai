@@ -150,7 +150,7 @@ impl WorkflowCompiler for RuleBasedWorkflowCompiler {
 
         for (i, clause) in spec.clauses.iter().enumerate() {
             let is_last = i == total_clauses - 1;
-            let stage = self.compile_clause(i, clause, is_last, facts)?;
+            let stage = self.compile_clause(i, clause, is_last, facts, &spec.original_text)?;
             stages.push(stage);
         }
 
@@ -190,20 +190,22 @@ impl RuleBasedWorkflowCompiler {
         clause: &VerbClause,
         is_last: bool,
         facts: &OperationalFacts,
+        original_text: &str,
     ) -> Result<WorkflowStage, CompileError> {
         let (actions, checkpoint, label) = match &clause.verb {
             Verb::Open => {
                 let app = extract_app_target(&clause.targets, index)?;
+                let binary = crate::agent::gui_substrate_planner::app_alias_to_binary_pub(&app);
                 let actions = vec![StageAction {
                     action: "open_application".to_string(),
                     params: serde_json::json!({"name": app}),
-                    verify: VerificationType::WindowState {
-                        title_contains: Some(app.clone()),
-                        class: None,
+                    verify: VerificationType::ProcessLaunched {
+                        binary: binary.clone(),
+                        max_wait_ms: 6000,
                     },
-                    timeout_ms: Some(5000),
+                    timeout_ms: Some(8000),
                 }];
-                let checkpoint = VerificationCheckpoint::WindowFocused {
+                let checkpoint = VerificationCheckpoint::WindowVisible {
                     title_contains: Some(app.clone()),
                     class: None,
                     pid: None,
@@ -212,16 +214,17 @@ impl RuleBasedWorkflowCompiler {
             }
             Verb::Switch => {
                 let app = extract_app_target(&clause.targets, index)?;
+                let binary = crate::agent::gui_substrate_planner::app_alias_to_binary_pub(&app);
                 let actions = vec![StageAction {
                     action: "switch_to_window".to_string(),
                     params: serde_json::json!({"name": app}),
-                    verify: VerificationType::WindowState {
-                        title_contains: Some(app.clone()),
-                        class: None,
+                    verify: VerificationType::ProcessLaunched {
+                        binary,
+                        max_wait_ms: 3000,
                     },
-                    timeout_ms: Some(3000),
+                    timeout_ms: Some(5000),
                 }];
-                let checkpoint = VerificationCheckpoint::WindowFocused {
+                let checkpoint = VerificationCheckpoint::KeyboardTargetConfirmed {
                     title_contains: Some(app.clone()),
                     class: None,
                     pid: None,
@@ -258,22 +261,42 @@ impl RuleBasedWorkflowCompiler {
             }
             Verb::Run => {
                 let cmd = extract_run_command(clause, index)?;
-                let actions = vec![StageAction {
-                    action: "type_text".to_string(),
-                    params: serde_json::json!({"text": format!("{}\n", cmd)}),
-                    verify: VerificationType::None,
-                    timeout_ms: Some(5000),
-                }];
-                // Run commands: we can't know what output to expect in general.
-                // Use None on last stage, otherwise process-based check.
-                let checkpoint = if is_last {
-                    VerificationCheckpoint::None
+                // Bug 7: When the user wants to see output and this is the last stage,
+                // use execute_bash to capture stdout instead of type_text injection.
+                // This makes the output surfaceable in the response (terminal_output field).
+                let has_show_intent = is_last && {
+                    let t = original_text.to_lowercase();
+                    t.contains("show") || t.contains("output") || t.contains("print")
+                };
+                let (actions, checkpoint) = if has_show_intent {
+                    (
+                        vec![StageAction {
+                            action: "execute_bash".to_string(),
+                            params: serde_json::json!({"command": cmd}),
+                            verify: VerificationType::None,
+                            timeout_ms: Some(30_000),
+                        }],
+                        VerificationCheckpoint::None,
+                    )
                 } else {
-                    VerificationCheckpoint::OutputContains {
-                        expected: cmd.clone(),
-                        target: crate::agent::execution_verifier::VerifyTarget::TerminalOutput,
-                        case_insensitive: false,
-                    }
+                    let chk = if is_last {
+                        VerificationCheckpoint::None
+                    } else {
+                        VerificationCheckpoint::OutputContains {
+                            expected: cmd.clone(),
+                            target: crate::agent::execution_verifier::VerifyTarget::TerminalOutput,
+                            case_insensitive: false,
+                        }
+                    };
+                    (
+                        vec![StageAction {
+                            action: "type_text".to_string(),
+                            params: serde_json::json!({"text": format!("{}\n", cmd)}),
+                            verify: VerificationType::None,
+                            timeout_ms: Some(5000),
+                        }],
+                        chk,
+                    )
                 };
                 (
                     actions,
@@ -295,7 +318,7 @@ impl RuleBasedWorkflowCompiler {
                 let checkpoint = if is_last {
                     VerificationCheckpoint::None
                 } else {
-                    VerificationCheckpoint::WindowFocused {
+                    VerificationCheckpoint::KeyboardTargetConfirmed {
                         title_contains: None,
                         class: None,
                         pid: None,
@@ -316,7 +339,7 @@ impl RuleBasedWorkflowCompiler {
                 let checkpoint = if is_last {
                     VerificationCheckpoint::None
                 } else {
-                    VerificationCheckpoint::WindowFocused {
+                    VerificationCheckpoint::KeyboardTargetConfirmed {
                         title_contains: None,
                         class: None,
                         pid: None,
@@ -337,7 +360,7 @@ impl RuleBasedWorkflowCompiler {
                 let checkpoint = if is_last {
                     VerificationCheckpoint::None
                 } else {
-                    VerificationCheckpoint::WindowFocused {
+                    VerificationCheckpoint::KeyboardTargetConfirmed {
                         title_contains: None,
                         class: None,
                         pid: None,
@@ -376,7 +399,10 @@ impl RuleBasedWorkflowCompiler {
             recovery,
             context_hints,
             timeout_sec: crate::agent::goal_tree::MAX_STAGE_DURATION_SEC,
-            skippable: false,
+            // Open is skippable because structural downstream stages may still
+            // succeed after process launch even if window visibility is degraded.
+            // Switch is not skippable: keyboard-target ambiguity must fail closed.
+            skippable: matches!(&clause.verb, Verb::Open),
         })
     }
 }
@@ -555,7 +581,7 @@ mod tests {
         );
         assert!(matches!(
             tree.stages[0].checkpoint,
-            VerificationCheckpoint::WindowFocused { .. }
+            VerificationCheckpoint::WindowVisible { .. }
         ));
         // Non-terminal stage has recovery
         assert!(tree.stages[0].recovery.is_some());
@@ -858,6 +884,182 @@ mod tests {
         );
         assert_eq!(tree.stages[1].action_group.actions[0].action, "type_text");
         assert!(tree.validate().is_empty());
+    }
+
+    // ── Multi-step: Open code, write program, run (pascal triangle) ──
+
+    #[test]
+    fn compile_open_type_run_three_stage() {
+        let spec = MultiVerbSpec {
+            original_text:
+                "open code and write a program to print pascal triangle and run it".into(),
+            clauses: vec![
+                VerbClause {
+                    verb: Verb::Open,
+                    targets: vec![TargetRef::App("code".into())],
+                    content: None,
+                },
+                VerbClause {
+                    verb: Verb::Type,
+                    targets: vec![],
+                    content: Some(ContentClass::Literal(
+                        "def pascal(n):\n    for i in range(n):\n        print(' '.join(str(comb(i, j)) for j in range(i+1)))".into(),
+                    )),
+                },
+                VerbClause {
+                    verb: Verb::Run,
+                    targets: vec![TargetRef::App("python".into())],
+                    content: None,
+                },
+            ],
+        };
+        let compiler = RuleBasedWorkflowCompiler;
+        let tree = compiler.compile(&spec, &empty_facts()).unwrap();
+
+        // Exactly 3 stages
+        assert_eq!(tree.stages.len(), 3);
+
+        // Stage 0: open_application with WindowVisible checkpoint (non-terminal).
+        // The action itself verifies ProcessLaunched structurally; window visibility
+        // is only a GUI observation checkpoint and may be skipped if the display
+        // server cannot expose reliable window state.
+        assert_eq!(
+            tree.stages[0].action_group.actions[0].action,
+            "open_application"
+        );
+        assert!(matches!(
+            tree.stages[0].checkpoint,
+            VerificationCheckpoint::WindowVisible { .. }
+        ));
+        assert!(
+            tree.stages[0].recovery.is_some(),
+            "open stage must have recovery"
+        );
+
+        // Stage 1: type_text with non-None checkpoint (non-terminal)
+        assert_eq!(tree.stages[1].action_group.actions[0].action, "type_text");
+        assert!(
+            !matches!(tree.stages[1].checkpoint, VerificationCheckpoint::None),
+            "non-terminal type stage must have a real checkpoint"
+        );
+        assert!(
+            tree.stages[1].recovery.is_some(),
+            "type stage must have recovery"
+        );
+
+        // Stage 2 (terminal): None checkpoint, no recovery
+        assert!(matches!(
+            tree.stages[2].checkpoint,
+            VerificationCheckpoint::None
+        ));
+        assert!(
+            tree.stages[2].recovery.is_none(),
+            "terminal stage must not have recovery"
+        );
+
+        assert!(tree.validate().is_empty());
+    }
+
+    #[test]
+    fn compile_four_stage_open_type_save_run() {
+        let spec = MultiVerbSpec {
+            original_text: "open code, write a pascal triangle program, save, and run it".into(),
+            clauses: vec![
+                VerbClause {
+                    verb: Verb::Open,
+                    targets: vec![TargetRef::App("code".into())],
+                    content: None,
+                },
+                VerbClause {
+                    verb: Verb::Type,
+                    targets: vec![],
+                    content: Some(ContentClass::Literal("print('hello')".into())),
+                },
+                VerbClause {
+                    verb: Verb::Save,
+                    targets: vec![],
+                    content: None,
+                },
+                VerbClause {
+                    verb: Verb::Run,
+                    targets: vec![TargetRef::App("python".into())],
+                    content: None,
+                },
+            ],
+        };
+        let compiler = RuleBasedWorkflowCompiler;
+        let tree = compiler.compile(&spec, &empty_facts()).unwrap();
+
+        assert_eq!(tree.stages.len(), 4);
+
+        // All non-terminal stages have recovery
+        for stage in &tree.stages[..3] {
+            assert!(
+                stage.recovery.is_some(),
+                "stage '{}' must have recovery",
+                stage.label
+            );
+        }
+        // Terminal stage has no recovery and None checkpoint
+        assert!(tree.stages[3].recovery.is_none());
+        assert!(matches!(
+            tree.stages[3].checkpoint,
+            VerificationCheckpoint::None
+        ));
+
+        // Action types in order
+        assert_eq!(
+            tree.stages[0].action_group.actions[0].action,
+            "open_application"
+        );
+        assert_eq!(tree.stages[1].action_group.actions[0].action, "type_text");
+        assert_eq!(
+            tree.stages[2].action_group.actions[0].action,
+            "press_shortcut"
+        );
+
+        assert!(tree.validate().is_empty());
+    }
+
+    #[test]
+    fn multi_step_checkpoint_assignment_rule() {
+        // Verify the rule: terminal stage → None, non-terminal Open → WindowVisible,
+        // non-terminal Type → OutputContains.
+        let spec = MultiVerbSpec {
+            original_text: "open gedit and type hello and save".into(),
+            clauses: vec![
+                VerbClause {
+                    verb: Verb::Open,
+                    targets: vec![TargetRef::App("gedit".into())],
+                    content: None,
+                },
+                VerbClause {
+                    verb: Verb::Type,
+                    targets: vec![],
+                    content: Some(ContentClass::Literal("hello".into())),
+                },
+                VerbClause {
+                    verb: Verb::Save,
+                    targets: vec![],
+                    content: None,
+                },
+            ],
+        };
+        let compiler = RuleBasedWorkflowCompiler;
+        let tree = compiler.compile(&spec, &empty_facts()).unwrap();
+
+        assert!(matches!(
+            tree.stages[0].checkpoint,
+            VerificationCheckpoint::WindowVisible { .. }
+        ));
+        assert!(matches!(
+            tree.stages[1].checkpoint,
+            VerificationCheckpoint::OutputContains { .. }
+        ));
+        assert!(matches!(
+            tree.stages[2].checkpoint,
+            VerificationCheckpoint::None
+        ));
     }
 
     // ── Precondition: DisplayServerAvailable ───────────────────────

@@ -32,12 +32,29 @@ pub(super) fn preference_record(
 
 pub(super) fn is_likely_local_llm_transport_error(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();
+    let is_gui_workflow_failure = lower.contains("task did not fully complete")
+        || lower.contains("gui workflow could not complete")
+        || lower.contains("open_application_with_file")
+        || lower.contains("launch timeout:")
+        || (lower.contains("step ")
+            && lower.contains("timed out after")
+            && lower.contains("action:"));
+
+    if is_gui_workflow_failure {
+        return false;
+    }
+
+    let is_llm_scoped_timeout = lower.contains("local llm")
+        || lower.contains("llama")
+        || lower.contains("/v1/")
+        || lower.contains("error sending request");
+
     lower.contains("local llm transport error")
         || lower.contains("error sending request for url")
         || lower.contains("connection refused")
         || lower.contains("tcp connect")
         || lower.contains("dns error")
-        || lower.contains("timed out")
+        || (lower.contains("timed out") && is_llm_scoped_timeout)
         || lower.contains("connection reset")
         || lower.contains("broken pipe")
 }

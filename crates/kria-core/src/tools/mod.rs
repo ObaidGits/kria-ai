@@ -7,7 +7,9 @@ use crate::infra::environment::{
 };
 
 pub mod app_lifecycle;
+pub mod atspi_tools;
 pub mod browser_agent;
+pub mod cognition_tools;
 pub mod communication;
 pub mod desktop;
 pub mod developer;
@@ -25,6 +27,7 @@ pub mod interaction;
 pub mod internet;
 pub mod knowledge;
 pub mod mount_manager;
+pub mod n8n;
 pub mod news;
 pub mod packages;
 pub mod power;

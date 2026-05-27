@@ -52,7 +52,7 @@ pub struct MetricsBuilder {
     post_edit: Option<Duration>,
     first_audio_out: Option<Duration>,
     post_edit_skipped: bool,
-    
+
     // ─── §16 Evaluation Tracking ──────────────────────────────────────────
     /// Bounded history of partial updates for stability/flicker computation.
     /// Max 128 entries (8-32s @ 4-15 Hz).
@@ -90,7 +90,7 @@ impl MetricsBuilder {
             self.stt_first_token = self.first_partial;
         }
     }
-    
+
     /// Record a partial update for stability/flicker tracking (§16).
     /// Bounded to 128 entries; oldest dropped when full.
     pub fn record_partial(&mut self, text: String, seq: u64) {
@@ -99,9 +99,13 @@ impl MetricsBuilder {
             self.partial_history.remove(0);
         }
         let elapsed_ms = self.started.elapsed().as_millis() as u64;
-        self.partial_history.push(PartialRecord { text, seq, elapsed_ms });
+        self.partial_history.push(PartialRecord {
+            text,
+            seq,
+            elapsed_ms,
+        });
     }
-    
+
     /// Record reconciliation outcome for rollback rate tracking (§16).
     pub fn record_reconcile(&mut self, kind: crate::voice::reconcile::ReconcileKind) {
         self.reconcile_outcome = Some(kind);
@@ -150,7 +154,7 @@ impl MetricsBuilder {
             self.tts_first_chunk = Some(self.started.elapsed());
         }
     }
-    
+
     /// Compute partial stability: fraction of updates that are prefix
     /// extensions of the previous update (§16 target ≥ 0.85).
     fn compute_partial_stability(&self) -> Option<f32> {
@@ -172,7 +176,7 @@ impl MetricsBuilder {
         }
         Some(prefix_extends as f32 / total_transitions as f32)
     }
-    
+
     /// Compute flicker rate: fraction of updates with edit distance > 6
     /// chars vs previous (§16 target ≤ 0.05).
     fn compute_flicker_rate(&self) -> Option<f32> {
@@ -206,7 +210,7 @@ impl MetricsBuilder {
                 0.0
             }
         });
-        
+
         // Compute commit latency (§16): speech_end → UtteranceCommitted
         let commit_latency_ms = match (self.vad_trigger, self.final_transcript) {
             (Some(vad), Some(final_t)) => {
@@ -214,7 +218,7 @@ impl MetricsBuilder {
             }
             _ => None,
         };
-        
+
         // Compute refine latency (§16): commit → S4 (post-edit done)
         let refine_latency_ms = if self.post_edit_skipped {
             Some(0) // Skipped = 0 latency
@@ -226,7 +230,7 @@ impl MetricsBuilder {
                 _ => None,
             }
         };
-        
+
         VoiceMetrics {
             tier: self.tier,
             ttfa_budget_ms: self.tier.ttfa_budget_ms(),
@@ -261,14 +265,14 @@ fn edit_distance_chars(a: &str, b: &str) -> usize {
     let b_chars: Vec<char> = b.chars().collect();
     let n = a_chars.len();
     let m = b_chars.len();
-    
+
     if n == 0 {
         return m;
     }
     if m == 0 {
         return n;
     }
-    
+
     let mut dp = vec![vec![0usize; m + 1]; n + 1];
     for i in 0..=n {
         dp[i][0] = i;
@@ -276,16 +280,20 @@ fn edit_distance_chars(a: &str, b: &str) -> usize {
     for j in 0..=m {
         dp[0][j] = j;
     }
-    
+
     for i in 1..=n {
         for j in 1..=m {
-            let cost = if a_chars[i - 1] == b_chars[j - 1] { 0 } else { 1 };
+            let cost = if a_chars[i - 1] == b_chars[j - 1] {
+                0
+            } else {
+                1
+            };
             dp[i][j] = (dp[i - 1][j] + 1)
                 .min(dp[i][j - 1] + 1)
                 .min(dp[i - 1][j - 1] + cost);
         }
     }
-    
+
     dp[n][m]
 }
 
@@ -306,7 +314,7 @@ pub struct VoiceMetrics {
     pub t_post_edit_ms: Option<u64>,
     pub t_first_audio_out_ms: Option<u64>,
     pub post_edit_skipped: bool,
-    
+
     // ─── §16 Evaluation Metrics ───────────────────────────────────────────
     /// Fraction of partial updates that are prefix extensions of previous
     /// (target ≥ 0.85 on English subset). `None` if insufficient data.
@@ -320,7 +328,7 @@ pub struct VoiceMetrics {
     /// Word error rate vs reference transcript (eval/CI only, not runtime).
     /// `None` in production; populated by eval harness.
     pub wer: Option<f32>,
-    
+
     // ─── §16 Latency Metrics ──────────────────────────────────────────────
     /// `speech_end` → `UtteranceCommitted` p50/p95 (commit latency).
     /// Computed from t_final_ms - t_vad_trigger_ms.
@@ -466,7 +474,7 @@ mod tests {
         assert!(m.t_final_ms.is_some());
         assert!(m.t_first_audio_out_ms.is_some());
     }
-    
+
     #[test]
     fn partial_stability_computed_correctly() {
         let mut b = MetricsBuilder::begin_at_speech_end(VoiceTier::A);
@@ -477,7 +485,7 @@ mod tests {
         let m = b.finalise();
         assert_eq!(m.partial_stability, Some(1.0));
     }
-    
+
     #[test]
     fn partial_stability_with_non_prefix() {
         let mut b = MetricsBuilder::begin_at_speech_end(VoiceTier::A);
@@ -488,7 +496,7 @@ mod tests {
         // 1 prefix extend out of 2 transitions = 0.5
         assert_eq!(m.partial_stability, Some(0.5));
     }
-    
+
     #[test]
     fn partial_stability_none_when_insufficient_data() {
         let mut b = MetricsBuilder::begin_at_speech_end(VoiceTier::A);
@@ -496,7 +504,7 @@ mod tests {
         let m = b.finalise();
         assert_eq!(m.partial_stability, None);
     }
-    
+
     #[test]
     fn flicker_rate_computed_correctly() {
         let mut b = MetricsBuilder::begin_at_speech_end(VoiceTier::A);
@@ -508,7 +516,7 @@ mod tests {
         // 0 flickers out of 2 transitions
         assert_eq!(m.flicker_rate, Some(0.0));
     }
-    
+
     #[test]
     fn flicker_rate_detects_large_changes() {
         let mut b = MetricsBuilder::begin_at_speech_end(VoiceTier::A);
@@ -518,7 +526,7 @@ mod tests {
         // 1 flicker out of 1 transition
         assert_eq!(m.flicker_rate, Some(1.0));
     }
-    
+
     #[test]
     fn rollback_rate_tracks_rejection() {
         let mut b = MetricsBuilder::begin_at_speech_end(VoiceTier::A);
@@ -526,7 +534,7 @@ mod tests {
         let m = b.finalise();
         assert_eq!(m.rollback_rate, Some(1.0));
     }
-    
+
     #[test]
     fn rollback_rate_tracks_non_rejection() {
         let mut b = MetricsBuilder::begin_at_speech_end(VoiceTier::A);
@@ -534,14 +542,14 @@ mod tests {
         let m = b.finalise();
         assert_eq!(m.rollback_rate, Some(0.0));
     }
-    
+
     #[test]
     fn rollback_rate_none_when_no_reconciliation() {
         let b = MetricsBuilder::begin_at_speech_end(VoiceTier::A);
         let m = b.finalise();
         assert_eq!(m.rollback_rate, None);
     }
-    
+
     #[test]
     fn partial_history_bounded_to_128() {
         let mut b = MetricsBuilder::begin_at_speech_end(VoiceTier::A);
@@ -553,14 +561,14 @@ mod tests {
         assert_eq!(b.partial_history[0].seq, 72);
         assert_eq!(b.partial_history[127].seq, 199);
     }
-    
+
     #[test]
     fn wer_always_none_in_runtime() {
         let b = MetricsBuilder::begin_at_speech_end(VoiceTier::A);
         let m = b.finalise();
         assert_eq!(m.wer, None);
     }
-    
+
     #[test]
     fn edit_distance_basic_cases() {
         assert_eq!(edit_distance_chars("", ""), 0);
@@ -570,7 +578,7 @@ mod tests {
         assert_eq!(edit_distance_chars("", "world"), 5);
         assert_eq!(edit_distance_chars("hello", "world"), 4);
     }
-    
+
     #[test]
     fn commit_latency_computed_correctly() {
         let mut b = MetricsBuilder::begin_at_speech_end(VoiceTier::A);
@@ -584,7 +592,7 @@ mod tests {
         // Should be approximately 50ms (between vad_trigger and final)
         assert!(latency >= 40 && latency <= 100, "latency was {}", latency);
     }
-    
+
     #[test]
     fn refine_latency_computed_correctly() {
         let mut b = MetricsBuilder::begin_at_speech_end(VoiceTier::A);
@@ -597,7 +605,7 @@ mod tests {
         // Should be approximately 20ms (between final and post_edit)
         assert!(latency >= 10 && latency <= 50, "latency was {}", latency);
     }
-    
+
     #[test]
     fn refine_latency_zero_when_skipped() {
         let mut b = MetricsBuilder::begin_at_speech_end(VoiceTier::A);
@@ -606,14 +614,14 @@ mod tests {
         let m = b.finalise();
         assert_eq!(m.refine_latency_ms, Some(0));
     }
-    
+
     #[test]
     fn commit_latency_none_when_missing_timestamps() {
         let b = MetricsBuilder::begin_at_speech_end(VoiceTier::A);
         let m = b.finalise();
         assert_eq!(m.commit_latency_ms, None);
     }
-    
+
     #[test]
     fn refine_latency_none_when_not_run() {
         let mut b = MetricsBuilder::begin_at_speech_end(VoiceTier::A);

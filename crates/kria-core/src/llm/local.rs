@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use futures::Stream;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
@@ -28,9 +28,9 @@ pub struct LocalBackend {
     client: reqwest::Client,
     circuit: Arc<CircuitBreaker>,
     /// Optional server manager for orchestrator-managed mode.
-    /// Uses `OnceLock` so it can be attached after construction via `&self`
-    /// (required because `ModelRouter` stores backends behind `Arc<dyn LlmBackend>`).
-    server_manager: OnceLock<Arc<LlamaServerManager>>,
+    /// Replaceable so Settings-driven local model swaps can attach the new
+    /// server manager after a successful orchestrator restart.
+    server_manager: RwLock<Option<Arc<LlamaServerManager>>>,
 }
 
 impl LocalBackend {
@@ -52,25 +52,30 @@ impl LocalBackend {
             context_window: Arc::new(AtomicUsize::new(context_window)),
             client,
             circuit: Arc::new(CircuitBreaker::with_defaults("local-llm")),
-            server_manager: OnceLock::new(),
+            server_manager: RwLock::new(None),
         }
     }
 
     /// Attach a server manager from the orchestrator.
     /// Enables dynamic URL resolution and stream cancellation.
-    /// Safe to call on `&self` (uses `OnceLock`) — idempotent, first call wins.
+    /// Safe to call on `&self`; a later local model swap replaces the manager.
     pub fn attach_server_manager(&self, mgr: Arc<LlamaServerManager>) {
-        let _ = self.server_manager.set(mgr);
+        if let Ok(mut guard) = self.server_manager.write() {
+            *guard = Some(mgr);
+        }
     }
 
     /// Returns the attached orchestrator server manager, if any.
     pub fn server_manager(&self) -> Option<Arc<LlamaServerManager>> {
-        self.server_manager.get().cloned()
+        self.server_manager
+            .read()
+            .ok()
+            .and_then(|guard| guard.clone())
     }
 
     /// Resolve the current API URL — from server manager if attached, else fallback.
     fn resolve_api_url(&self) -> String {
-        if let Some(mgr) = self.server_manager.get() {
+        if let Some(mgr) = self.server_manager() {
             let url = mgr.api_url();
             if !url.is_empty() {
                 return url;
@@ -86,14 +91,16 @@ impl LocalBackend {
 
     /// Get a cancellation token if orchestrator is attached.
     fn cancel_token(&self) -> Option<CancellationToken> {
-        self.server_manager.get().map(|mgr| mgr.cancel_token())
+        self.server_manager().map(|mgr| mgr.cancel_token())
     }
 
     /// Check if the server is in a swapping state.
     #[allow(dead_code)]
     fn is_swapping(&self) -> bool {
         self.server_manager
-            .get()
+            .read()
+            .ok()
+            .and_then(|guard| guard.clone())
             .map(|mgr| mgr.is_swapping())
             .unwrap_or(false)
     }
@@ -101,7 +108,7 @@ impl LocalBackend {
     /// Wait for any in-progress swap to finish, returning `false` on timeout.
     /// Replaces the busy-poll loops used before the Notify refactor (Phase 5).
     async fn wait_for_swap(&self, timeout_secs: u64) -> bool {
-        let Some(mgr) = self.server_manager.get() else {
+        let Some(mgr) = self.server_manager() else {
             return true;
         };
         mgr.wait_for_swap_done(Duration::from_secs(timeout_secs))
@@ -222,7 +229,7 @@ impl LocalBackend {
         if !self.capabilities.iter().any(|cap| cap == "vision") {
             return false;
         }
-        if let Some(mgr) = self.server_manager.get() {
+        if let Some(mgr) = self.server_manager() {
             if mgr.state() == STATE_READY {
                 return mgr.current_vision_enabled();
             }
@@ -248,7 +255,7 @@ impl LocalBackend {
 
         // Without an orchestrator-backed server manager we have no swap lifecycle;
         // rely on the request path to surface errors directly.
-        if self.server_manager.get().is_none() {
+        if self.server_manager().is_none() {
             return true;
         }
 

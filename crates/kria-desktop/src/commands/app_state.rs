@@ -28,6 +28,31 @@ impl FleetRuntimeState {
     }
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct LlmRuntimeApplySnapshot {
+    pub state: String,
+    pub phase: String,
+    pub provider_id: Option<String>,
+    pub model_id: Option<String>,
+    pub message: String,
+    pub last_error: Option<String>,
+    pub updated_unix_ms: u64,
+}
+
+impl Default for LlmRuntimeApplySnapshot {
+    fn default() -> Self {
+        Self {
+            state: "idle".to_string(),
+            phase: "idle".to_string(),
+            provider_id: None,
+            model_id: None,
+            message: "No runtime change in progress".to_string(),
+            last_error: None,
+            updated_unix_ms: 0,
+        }
+    }
+}
+
 /// Shared application state managed by Tauri.
 pub struct AppState {
     pub config: Arc<RwLock<KriaConfig>>,
@@ -38,6 +63,13 @@ pub struct AppState {
     pub tool_registry: Arc<ToolRegistry>,
     pub memory_store: Arc<dyn MemoryRuntime>,
     pub hitl: Arc<HitlGateway>,
+    pub decision_store: Arc<kria_core::agent::collaborative_decision::DecisionStore>,
+    pub policy_engine: Arc<PolicyEngine>,
+    pub resume_executor: Arc<kria_core::agent::resume_executor::ResumeExecutor>,
+    pub continuation_reentry:
+        Arc<kria_core::agent::continuation_reentry::ContinuationReentryService>,
+    pub workflow_continuation:
+        Arc<kria_core::agent::workflow_continuation::WorkflowContinuationRuntime>,
     pub event_bus: Arc<EventBus>,
     /// Held to keep the sidecar process alive for the app's lifetime.
     #[allow(dead_code)]
@@ -63,7 +95,6 @@ pub struct AppState {
     pub health: Arc<HealthRegistry>,
     pub scheduler: Arc<RwLock<AutomationScheduler>>,
     pub macro_recorder: Arc<RwLock<MacroRecorder>>,
-    pub workflow_engine: Arc<RwLock<WorkflowEngine>>,
     pub started_at: std::time::Instant,
     pub hardware_info: Arc<HardwareInfo>,
     pub proactive: Arc<kria_core::automation::ProactiveEngine>,
@@ -90,6 +121,10 @@ pub struct AppState {
     /// is set, keeping the main init path non-blocking.
     #[allow(dead_code)]
     pub orchestrator: Arc<tokio::sync::RwLock<Option<Arc<Orchestrator>>>>,
+    /// Serializes Settings-driven LLM provider/model apply operations.
+    pub llm_runtime_apply_lock: Arc<tokio::sync::Mutex<()>>,
+    /// Last known runtime apply/swap state, mirrored to the UI via events.
+    pub llm_runtime_apply_status: Arc<RwLock<LlmRuntimeApplySnapshot>>,
     /// Number of active turn executions that currently depend on local runtime.
     pub orchestrator_active_turns: Arc<std::sync::atomic::AtomicUsize>,
     /// Last observed local-runtime activity timestamp for idle release decisions.
@@ -101,10 +136,31 @@ pub struct AppState {
     pub skill_registry: Arc<kria_core::openclaw::registry::SkillRegistry>,
     /// OpenClaw container pool — None if Docker is unavailable (graceful degradation).
     pub container_pool: Option<Arc<kria_core::openclaw::ContainerPool>>,
+    /// n8n workflow catalog for callback validation and UI status.
+    pub n8n_catalog: Arc<RwLock<Option<Arc<kria_core::n8n::N8nCatalog>>>>,
+    /// n8n callback/run state. Durable replay is backed by the JSONL inbox path below.
+    pub n8n_state_store: Arc<kria_core::n8n::N8nWorkflowStateStore>,
+    /// JSONL callback inbox path used to replay async workflow evidence after restart.
+    pub n8n_inbox_path: PathBuf,
+    /// JSONL governance/audit trail for n8n decisions and reconciliation.
+    pub n8n_audit_path: PathBuf,
+    /// Recent n8n governance decisions for UI/debugging.
+    pub n8n_governance_log: Arc<RwLock<Vec<kria_core::n8n::N8nGovernanceDecision>>>,
+    /// n8n HITL responses that external workflows can poll after KRIA user approval.
+    pub n8n_hitl_responses: Arc<RwLock<HashMap<String, serde_json::Value>>>,
     /// RFC 008 Service Orchestrator — manages vision sidecar + uinput daemon lifecycle.
     /// `None` if orchestrator failed to start (e.g. missing binaries); automation will
     /// be globally halted in that case.
     pub gui_orchestrator: Option<Arc<kria_core::orchestrator::ServiceOrchestrator>>,
+    /// Batch 1: PSDG handle — persistent semantic desktop cognition graph.
+    ///
+    /// Provides access to `WorldModelStore` (SQLite-backed Bayesian (s,p,o) triple store)
+    /// for all subsystems that need to read or write semantic desktop state.
+    ///
+    /// All writes are fire-and-forget (non-blocking). All reads are bounded.
+    /// `None` if WorldModelStore failed to open at startup (non-fatal degradation).
+    #[allow(dead_code)]
+    pub world_model: Option<kria_core::agent::PsdgHandle>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
