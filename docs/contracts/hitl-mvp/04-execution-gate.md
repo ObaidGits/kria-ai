@@ -1,97 +1,120 @@
-# KRIA Execution Gate Spec
+# KRIA Execution Gate Contract
 
-**Document status:** MVP gate logic  
-**Purpose:** Define deterministic pre-execution decision logic.
+**Document status:** Implementation-bound gate contract
+**Last updated:** 2026-05-27
+**Primary code:** `crates/kria-core/src/agent/execution_gate.rs`, `gui_wiring.rs`, `resume_executor.rs`
 
 ---
 
 ## 1. Gate Position
 
-The execution gate runs after planning and before any side effect:
+The live execution gate runs immediately before tool side effects:
 
 ```text
-ActionProposal
-  -> ExecutionGate
-  -> Proceed / Block / PauseForDecision / NeedReobserve / NeedLease
+tool action + params
+  -> readiness check
+  -> preflight
+  -> execution authority
+  -> ActionProposal
+  -> resource requirement declaration
+  -> policy
+  -> ExecutionGateOutcome
 ```
 
-The gate does not execute tools.
+The gate does not execute tools and does not acquire leases. It returns resource requirements for the caller to acquire before side effects.
 
 ---
 
 ## 2. Inputs
 
-- `ActionProposal`,
-- policy decision,
-- target authority result,
-- verifier evidence if required,
-- current workflow checkpoint,
-- current leases,
-- decision history for same workflow attempt.
+`ExecutionGateInput` currently includes:
+
+- `session_id`,
+- `user_text`,
+- tool `action`,
+- JSON `params`,
+- `destructive_hint`.
+
+The gate owns no LLM calls and no GUI actions.
 
 ---
 
-## 3. Deterministic Order
+## 3. Deterministic Live Order
+
+Current `ExecutionGate::evaluate` order:
 
 ```text
-1. validate action proposal
-2. apply hard policy
-3. classify risk
-4. bind/verify target
-5. check verifier requirements
-6. check rollbackability
-7. check required leases
-8. choose outcome
+1. check tool readiness through gui_services::check_action_readiness
+2. run tool preflight through preflight::run_preflight
+3. infer execution target from user text and action
+4. validate execution authority with params
+5. build ActionProposal
+6. declare ResourceRequirement values
+7. block or pause on execution-authority result
+8. evaluate policy for authorized actions
+9. block, require approval, or proceed
 ```
 
-No LLM call is allowed inside the gate.
+No model output may alter this order.
 
 ---
 
-## 4. Outcomes
+## 4. Live Outcomes
 
 | Outcome | Meaning |
 |---|---|
-| `Proceed` | Safe enough and all required leases can be acquired. |
-| `Block` | Hard policy or impossible safety condition. |
-| `PauseForDecision` | Human answer changes safety, meaning, or recovery. |
-| `NeedReobserve` | Read-only observation may resolve uncertainty. |
-| `NeedLease` | Action may proceed only after resource ownership. |
+| `Proceed` | Action is authorized by execution authority and policy. Caller still must acquire returned resource requirements before execution. |
+| `Block` | Readiness, preflight, authority, policy, or decision-store failure forbids execution. |
+| `PauseForDecision` | Execution authority needs bounded user clarification, usually target selection. |
+| `RequiresApproval` | Policy requires HITL approval before execution. |
+
+`NeedLease` is not a live gate outcome. Lease conflict is detected when the caller acquires `resource_requirements`.
 
 ---
 
-## 5. Pause Rules
+## 5. PolicyToolExecutor Behavior
 
-Create `PauseForDecision` only when:
+The GUI live tool path in `PolicyToolExecutor` must:
 
-- destructive approval is required,
-- target/scope ambiguity changes meaning,
-- verifier conflict blocks safe execution,
-- auth/user-only action is required,
-- recovery cannot proceed safely without user input.
-
-Do not pause for internal planner insecurity.
-
----
-
-## 6. Block Rules
-
-Block when:
-
-- hard policy says Black,
-- target identity is unknowable for side-effecting action,
-- action requires privilege KRIA does not have,
-- verifier proves action precondition false,
-- rollbackability is Unknown for forbidden destructive scope.
+- call `ExecutionGate::evaluate`,
+- log policy blocks through `AuditLogger`,
+- return `DECISION_PAUSED` with decision ID for `PauseForDecision`,
+- request HITL approval for `RequiresApproval`,
+- resolve or expire durable approval decisions,
+- log approval, denial, timeout, or auto-execution,
+- acquire `ResourceLeaseManager` requirements before side effects,
+- return `RESOURCE_LEASE_DENIED` on lease conflict,
+- execute the tool only after all gates pass.
 
 ---
 
-## 7. MVP Tests
+## 6. Resume Gate
 
-- Black policy always returns `Block`,
-- low-risk reversible action returns `Proceed`,
-- missing target for write returns `PauseForDecision` or `Block`,
-- verifier conflict returns `PauseForDecision`,
-- unavailable lease returns `NeedLease`,
-- LLM recommendation cannot affect gate outcome.
+`ExecutionGate::revalidate_resume` must run before action-center execution of a resolved decision.
 
+It returns `Ready` only if:
+
+- persisted action proposal exists,
+- target hash still matches,
+- action hash still matches,
+- tool readiness passes,
+- preflight passes,
+- policy does not block,
+- risk did not increase,
+- required approval is already valid.
+
+Any other resume outcome invalidates or blocks execution.
+
+---
+
+## 7. Required Tests
+
+- readiness failure returns `Block`,
+- preflight failure returns `Block`,
+- authority ambiguity returns `PauseForDecision`,
+- policy block returns `Block`,
+- policy approval returns `RequiresApproval`,
+- safe authorized action returns `Proceed`,
+- resource requirements are declared for GUI input, filesystem writes, browser profile actions, and VM operations,
+- resume rejects missing proposal, hash changes, risk increase, policy block, and missing approval,
+- LLM wording cannot affect gate outcome.

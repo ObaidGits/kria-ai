@@ -1,338 +1,488 @@
-# KRIA Source Navigation Guide
+# KRIA Source Navigation
 
-Human-readable map for finding your way around the KRIA codebase.
+## Purpose
 
-This guide answers the practical maintainer question:
+This is the practical maintainer map for the KRIA source tree. Use it when you
+know the subsystem or behavior you want to inspect and need the first file to
+open.
 
-> "I know the concept. Where is the code, what file should I open first, and what
-> path does runtime execution actually follow?"
+This guide is not an architecture handbook. It points to implementation entry
+points and current runtime paths. For subsystem reasoning, use the architecture
+and orchestration docs after you land in the right code.
 
-## Reader Contract
-
-This guide is intentionally practical:
-
-- **It is a map, not a replacement for architecture docs.** Use it to find the right files,
-  then use the deep handbooks for subsystem reasoning.
-- **Current implementation only:** file paths and entry points refer to the current KRIA
-  working tree.
-- **Mixed audience:** plain-language descriptions explain why a file matters; source-level
-  names help engineers jump directly into code.
-- **No roadmap content:** future improvements are intentionally left to the subsystem
-  architecture handbooks.
-- **Source truth:** if a path moves, update this guide immediately.
-
-It is a companion to:
-
+Related docs:
+- `docs/index.md`
+- `docs/architecture/overview.md`
 - `docs/architecture/core-runtime.md`
 - `docs/architecture/llm-orchestrator-runtime.md`
 - `docs/architecture/gui-cognition-runtime.md`
+- `docs/architecture/safety-hitl-runtime.md`
+- `docs/orchestration/runtime-authority.md`
+- `docs/orchestration/tool-system.md`
+- `docs/orchestration/gui-execution.md`
+- `docs/orchestration/opgraph-contract.md`
 
----
+## Mental Model
 
-## 1. How To Read The Codebase
-
-KRIA is easiest to understand as layered runtime code, not as a list of features.
+KRIA is easiest to read as a bounded execution runtime:
 
 ```text
-Desktop UI / Tauri commands
-        |
-        v
-AgentLoop orchestration
-        |
-        v
-Intent, routing, prompt, model, and tool planning
-        |
-        v
-Policy, HITL, audit, isolation
-        |
-        v
-Tools, MCP, GUI, browser, filesystem, shell, provider calls
-        |
-        v
-Verification, synthesis, memory, transparency
+desktop UI / API / eval harness
+  -> AgentLoop
+  -> intent gates and turn planning
+  -> model/provider routing
+  -> tool-call parsing and fallback
+  -> policy, HITL, audit, target authority, isolation
+  -> tools, GUI, shell, browser, MCP, integrations
+  -> verifier, synthesis, memory, transparency
 ```
 
-The three most important starting points are:
+The three fastest starting points are:
 
-| Question | Start Here |
-| -------- | ---------- |
-| "How does a chat prompt execute?" | `crates/kria-core/src/agent/loop_engine/mod.rs` |
-| "How does KRIA call LLMs/providers?" | `crates/kria-core/src/llm/mod.rs` and `crates/kria-core/src/llm/model_router.rs` |
-| "How does a tool become safe to run?" | `crates/kria-core/src/safety/policy.rs` and `crates/kria-core/src/agent/loop_engine/mod.rs` |
+| Question | Start here |
+|---|---|
+| How does a prompt execute? | `crates/kria-core/src/agent/loop_engine/mod.rs` |
+| How are model providers selected? | `crates/kria-core/src/llm/model_router.rs` and `crates/kria-core/src/llm/provider/registry.rs` |
+| How does a tool become safe to run? | `crates/kria-core/src/safety/policy.rs`, `crates/kria-core/src/agent/execution_authority.rs`, `crates/kria-core/src/tools/preflight.rs` |
 
----
-
-## 2. Repository Topology
+## Repository Topology
 
 ```text
 KRIA/
   crates/
-    kria-core/
-      src/
-        agent/          cognition, orchestration, GUI planning, verification
-        llm/            model/provider orchestration
-        tools/          local tool handlers and registry
-        safety/         policy, HITL, audit, rollback, halt
-        mcp/            MCP client/server/tool bridge
-        routing/        intent and tool routing
-        memory/         user memory, facts, RAG pieces
-        infra/          isolation, health, tracing, environment, QoS
-        platform/       OS intent dispatch and platform-specific capability layer
-        voice/          voice runtime
-        image/          image generation/runtime
-        orchestrator/   service orchestration
-    kria-desktop/
-      src/
-        main.rs         Tauri desktop entry
-        commands/       UI command bridge into core runtime
-        device_control.rs fleet/remote device UI runtime
+    kria-core/                 core runtime, agent loop, tools, safety, LLM, GUI
+    kria-desktop/              Tauri desktop app and command bridge
+    kria-server/               HTTP/WebSocket server surfaces
+    kria-eval/                 eval suites and report generation
+    kria-connection-control/   device orchestration and signed control plane
+    kria-uinput-daemon/        Linux input helper daemon
+    kria-test-app/             small runtime test app
   docs/
-    architecture/       architecture handbooks
-    orchestration/      execution contracts
-    evaluations/        eval and runbooks
-    contracts/          implementation-binding contracts
-    operations/         deployment, development, providers, hardware
-    decisions/          ADR and RFC records
+    architecture/              canonical architecture handbooks
+    orchestration/             execution authority and runtime contracts
+    contracts/hitl-mvp/        HITL MVP implementation contracts
+    operations/                dev, deployment, providers, hardware
+    evaluations/               eval/runbook docs
+    integrations/              external integration docs
+    llm-context/               AI-facing project context and graphs
+    decisions/                 ADR/RFC records
+    reference/                 navigation and source maps
+    voice/                     voice runtime docs
   tests/
-    e2e/                Playwright/Tauri-style e2e tests
-  tests-logs/           generated test reports and JSON outcomes when evals run
+    e2e/                       Playwright/API/Tauri-style tests
+  tests-logs/                  generated eval/test logs
+  eval_reports/                generated eval summaries
 ```
 
----
+## Main Crate Entry Points
 
-## 3. Fast Runtime Map
+| Crate | Entry point | What it owns |
+|---|---|---|
+| `kria-core` | `crates/kria-core/src/lib.rs` | Core modules exported to desktop/server/evals |
+| `kria-desktop` | `crates/kria-desktop/src/main.rs` | Tauri app startup and command registration |
+| `kria-server` | `crates/kria-server/src/main.rs` | Server startup |
+| `kria-eval` | `crates/kria-eval/src/main.rs` | Eval CLI runner |
+| `kria-connection-control` | `crates/kria-connection-control/src/lib.rs` | Device orchestration library |
+| `kria-uinput-daemon` | `crates/kria-uinput-daemon/src/main.rs` | Linux uinput daemon |
+| `kria-test-app` | `crates/kria-test-app/src/main.rs` | Test app harness |
 
-### Prompt-To-Execution Spine
+## Prompt-To-Execution Spine
 
 ```text
-UI command
-  |
-  v
-crates/kria-desktop/src/commands/chat.rs
-  |
-  v
-AgentLoop
-  crates/kria-core/src/agent/loop_engine/mod.rs
-  |
-  +-- TurnAdmission / TurnGate
-  +-- Prompt compiler
-  +-- ModelRouter / FailoverRouter
-  +-- Tool parser and fallback
-  +-- PolicyEngine / HITL / AuditLogger
-  +-- run_isolated tool handler
-  +-- verifier / synthesizer / final stream events
+desktop chat command
+  -> AgentLoop
+  -> TurnAdmission / cancellation tree
+  -> IntentGate
+  -> TurnGate
+  -> prompt/model routing
+  -> response parser
+  -> policy/HITL/preflight/target authority
+  -> ToolRegistry handler
+  -> run_isolated
+  -> optional verifier
+  -> result synthesis
+  -> stream events / final answer
 ```
 
-### LLM Runtime Spine
+Open these files first:
+
+| Runtime area | File |
+|---|---|
+| Desktop chat stream | `crates/kria-desktop/src/commands/chat.rs` |
+| Runtime construction | `crates/kria-desktop/src/commands/runtime.rs` |
+| Main agent loop | `crates/kria-core/src/agent/loop_engine/mod.rs` |
+| Turn admission/cancellation | `crates/kria-core/src/agent/turn_context.rs` |
+| Intent gate | `crates/kria-core/src/agent/intent_gate.rs` |
+| Turn gate | `crates/kria-core/src/agent/turn_gate.rs` |
+| Tool-call parsing | `crates/kria-core/src/agent/response_parser.rs` |
+| Result synthesis | `crates/kria-core/src/agent/result_synthesizer.rs` |
+
+## Tool Execution Spine
 
 ```text
-AgentLoop
-  |
-  v
-ModelRouter or FailoverRouter
-  |
-  v
-LlmBackend trait
-  |
-  +-- LocalBackend
-  +-- CloudBackend
-  +-- OpenAIBackend
-  +-- OpenRouterBackend
-  +-- AnthropicBackend
-  +-- GeminiBackend
-  +-- OllamaBackend
-```
-
-### Tool Runtime Spine
-
-```text
-Tool schema visible to model
-  |
-  v
 ParsedToolCall
-  |
-  v
-allowed_tool_names check
-  |
-  v
-PolicyEngine
-  |
-  v
-HITL if needed
-  |
-  v
-ToolRegistry handler
-  |
-  v
-run_isolated
-  |
-  v
-ToolResult + shaped payload + synthesis
+  -> allowed tool/schema checks
+  -> PolicyEngine
+  -> HITL when required
+  -> preflight
+  -> execution authority
+  -> ToolRegistry handler lookup
+  -> ToolContext
+  -> run_isolated
+  -> ToolResult
+  -> verifier
+  -> synthesizer
 ```
 
----
+Open these files first:
 
-## 4. Entry Points You Should Know
+| Area | File |
+|---|---|
+| Tool schemas and handlers | `crates/kria-core/src/tools/registry.rs` |
+| Tool execution loop | `crates/kria-core/src/agent/loop_engine/mod.rs` |
+| Deterministic preflight | `crates/kria-core/src/tools/preflight.rs` |
+| Target validation | `crates/kria-core/src/agent/execution_authority.rs` |
+| Policy risk tiers | `crates/kria-core/src/safety/policy.rs` |
+| Shell command classifier | `crates/kria-core/src/safety/command_classifier.rs` |
+| HITL approval gateway | `crates/kria-core/src/safety/hitl.rs` |
+| Audit log | `crates/kria-core/src/safety/audit.rs` |
+| Isolated execution | `crates/kria-core/src/infra/isolation.rs` |
 
-| Runtime Area | File | What To Look For |
-| ------------ | ---- | ---------------- |
-| Desktop app entry | `crates/kria-desktop/src/main.rs` | Tauri startup |
-| Tauri command wiring | `crates/kria-desktop/src/commands/mod.rs` | command modules and shared imports |
-| Chat command | `crates/kria-desktop/src/commands/chat.rs` | UI chat stream bridge |
-| Runtime construction | `crates/kria-desktop/src/commands/runtime.rs` | `PolicyEngine`, `HitlGateway`, `AgentLoop` setup |
-| Core library exports | `crates/kria-core/src/lib.rs` | module boundaries exported by core |
-| Main agent loop | `crates/kria-core/src/agent/loop_engine/mod.rs` | central prompt/tool orchestration |
-| Model routing | `crates/kria-core/src/llm/model_router.rs` | local/cloud/vision backend selection |
-| Provider registry | `crates/kria-core/src/llm/provider/registry.rs` | configured providers and model switching |
-| Tool registry | `crates/kria-core/src/tools/registry.rs` | registering and executing tools |
-| Policy gate | `crates/kria-core/src/safety/policy.rs` | risk tiers and approvals |
+## GUI Cognition And Desktop Automation
 
----
+Current GUI cognition is a semantic contract layer resolved before substrate
+planning. Concrete action steps are still owned by the GUI substrate planner and
+executor.
 
-## 5. If You Want To Change A Feature
+```text
+GuiTaskSpec
+  -> SemanticWorkflowAnalysis
+  -> ExecutionModeDecision
+  -> WorkflowIntentContract check
+  -> VerifierAuthorityAssessment
+  -> SubstratePlanner
+  -> GuiWorkflow / GoalTree / StageExecutor
+  -> GUI/browser/app tools
+```
+
+Open these files first:
+
+| Area | File |
+|---|---|
+| GUI runtime wiring | `crates/kria-core/src/agent/gui_wiring.rs` |
+| Semantic workflow frame/fidelity | `crates/kria-core/src/agent/semantic_workflow.rs` |
+| Execution mode reasoner | `crates/kria-core/src/agent/execution_mode_reasoner.rs` |
+| Workflow contracts | `crates/kria-core/src/agent/workflow_intent_contract.rs` |
+| Verifier authority metadata | `crates/kria-core/src/agent/verifier_authority.rs` |
+| Hybrid sync checkpoints | `crates/kria-core/src/agent/hybrid_synchronization.rs` |
+| GUI readiness checks | `crates/kria-core/src/agent/gui_production_readiness.rs` |
+| GUI substrate planner | `crates/kria-core/src/agent/gui_substrate_planner.rs` |
+| GUI planner traits | `crates/kria-core/src/agent/gui_planner.rs` |
+| HTN executor | `crates/kria-core/src/agent/htn_executor.rs` |
+| App lifecycle tools | `crates/kria-core/src/tools/app_lifecycle.rs` |
+| GUI automation tools | `crates/kria-core/src/tools/gui_automation.rs` |
+| AT-SPI tools | `crates/kria-core/src/tools/atspi_tools.rs` |
+| Vision automation | `crates/kria-core/src/tools/vision_automation.rs` |
+| Global GUI halt | `crates/kria-core/src/safety/global_halt.rs` |
+
+Related state/cognition files:
+
+| Area | Files |
+|---|---|
+| Browser cognition | `crates/kria-core/src/agent/browser_cognition.rs`, `crates/kria-core/src/tools/browser_agent.rs` |
+| Browser/media governance | `crates/kria-core/src/agent/browser_media_governance.rs` |
+| IDE cognition | `crates/kria-core/src/agent/ide_cognition.rs`, `crates/kria-core/src/tools/developer.rs` |
+| Desktop awareness | `crates/kria-core/src/agent/desktop_awareness/mod.rs` |
+| Observable completion | `crates/kria-core/src/agent/observable_completion/mod.rs` |
+| Bounded execution verifier | `crates/kria-core/src/agent/execution_verifier_bounded.rs` |
+| Window observation | `crates/kria-core/src/agent/window_observer.rs` |
+
+## OpGraph, GoalTree, And Workflow Execution
+
+```text
+OpGraph
+  -> validate graph
+  -> GoalTreeOpGraphCompiler
+  -> GoalTree validation
+  -> StageExecutor
+  -> tool actions and checkpoints
+```
+
+Open these files first:
+
+| Area | File |
+|---|---|
+| OpGraph model | `crates/kria-core/src/agent/opgraph.rs` |
+| OpGraph compiler | `crates/kria-core/src/agent/opgraph_compiler.rs` |
+| GoalTree model | `crates/kria-core/src/agent/goal_tree.rs` |
+| Workflow compiler | `crates/kria-core/src/agent/workflow_compiler.rs` |
+| Stage executor | `crates/kria-core/src/agent/stage_executor.rs` |
+| Workflow sessions | `crates/kria-core/src/agent/workflow_session.rs` |
+| Workflow continuation | `crates/kria-core/src/agent/workflow_continuation/mod.rs` |
+| Workflow expectations | `crates/kria-core/src/agent/workflow_expectation/mod.rs` |
+| Resume executor | `crates/kria-core/src/agent/resume_executor.rs` |
+
+## LLM And Provider Runtime
+
+```text
+AgentLoop
+  -> ModelRouter / FailoverRouter
+  -> LlmBackend
+  -> provider adapter
+  -> normalized response stream/tool calls
+```
+
+Open these files first:
+
+| Area | File |
+|---|---|
+| LLM traits and shared types | `crates/kria-core/src/llm/mod.rs` |
+| Model routing | `crates/kria-core/src/llm/model_router.rs` |
+| Failover state machine | `crates/kria-core/src/llm/failover.rs` |
+| Token budgets | `crates/kria-core/src/llm/budget.rs` |
+| Token counting | `crates/kria-core/src/llm/tokenize.rs` |
+| Local backend | `crates/kria-core/src/llm/local.rs` |
+| Generic cloud backend | `crates/kria-core/src/llm/cloud.rs` |
+| Provider registry | `crates/kria-core/src/llm/provider/registry.rs` |
+| Provider config | `crates/kria-core/src/llm/provider/config.rs` |
+| Provider capabilities | `crates/kria-core/src/llm/provider/capabilities.rs` |
+| Provider errors | `crates/kria-core/src/llm/provider/error.rs` |
+| Provider streaming | `crates/kria-core/src/llm/provider/streaming.rs` |
+| OpenAI adapter | `crates/kria-core/src/llm/provider/openai.rs` |
+| OpenRouter adapter | `crates/kria-core/src/llm/provider/openrouter.rs` |
+| Anthropic adapter | `crates/kria-core/src/llm/provider/anthropic.rs` |
+| Gemini adapter | `crates/kria-core/src/llm/provider/gemini.rs` |
+| Ollama adapter | `crates/kria-core/src/llm/provider/ollama.rs` |
+
+## Local Model Orchestrator
+
+Open these files first:
+
+| Area | File |
+|---|---|
+| llama-server lifecycle | `crates/kria-core/src/llm/orchestrator/server_manager.rs` |
+| Runtime control contract | `crates/kria-core/src/llm/orchestrator/runtime.rs` |
+| Strategy planning | `crates/kria-core/src/llm/orchestrator/strategy.rs` |
+| Tier strategy | `crates/kria-core/src/llm/orchestrator/tier_strategy.rs` |
+| VRAM budget | `crates/kria-core/src/llm/orchestrator/vram_budget.rs` |
+| Vision strategy | `crates/kria-core/src/llm/orchestrator/vision_strategy.rs` |
+| GPU watchdog | `crates/kria-core/src/llm/orchestrator/gpu_watchdog.rs` |
+| Child cleanup | `crates/kria-core/src/llm/orchestrator/child_guard.rs` |
+| Telemetry | `crates/kria-core/src/llm/orchestrator/telemetry.rs` |
+| Thresholds | `crates/kria-core/src/llm/orchestrator/threshold.rs` |
+
+## Tools And Integrations
+
+| Tool area | File |
+|---|---|
+| Registry and schema | `crates/kria-core/src/tools/registry.rs` |
+| File operations | `crates/kria-core/src/tools/file_ops.rs` |
+| Shell/process execution | `crates/kria-core/src/tools/exec.rs`, `crates/kria-core/src/tools/shell.rs` |
+| Subprocess helper | `crates/kria-core/src/tools/subprocess_executor.rs` |
+| Internet/search | `crates/kria-core/src/tools/internet.rs`, `crates/kria-core/src/tools/news.rs` |
+| Browser agent | `crates/kria-core/src/tools/browser_agent.rs` |
+| App lifecycle | `crates/kria-core/src/tools/app_lifecycle.rs` |
+| Desktop tools | `crates/kria-core/src/tools/desktop.rs` |
+| Developer tools | `crates/kria-core/src/tools/developer.rs` |
+| Documents | `crates/kria-core/src/tools/documents.rs` |
+| Google Workspace | `crates/kria-core/src/tools/google_workspace.rs`, `crates/kria-core/src/tools/google_workspace_contract.rs` |
+| n8n | `crates/kria-core/src/tools/n8n.rs` |
+| Image generation | `crates/kria-core/src/tools/image_generation.rs` |
+| Memory/knowledge | `crates/kria-core/src/tools/knowledge.rs` |
+| RAG | `crates/kria-core/src/tools/rag.rs` |
+| Proactive tools | `crates/kria-core/src/tools/proactive.rs` |
+| Package management | `crates/kria-core/src/tools/packages.rs` |
+| Power/system/process/disk | `crates/kria-core/src/tools/power.rs`, `crates/kria-core/src/tools/system_config.rs`, `crates/kria-core/src/tools/process.rs`, `crates/kria-core/src/tools/disk.rs` |
+| Tool mounting | `crates/kria-core/src/tools/mount_manager.rs` |
+| Quarantine | `crates/kria-core/src/tools/quarantine.rs` |
+
+## MCP
+
+| Area | File |
+|---|---|
+| MCP client | `crates/kria-core/src/mcp/client.rs` |
+| MCP server lifecycle | `crates/kria-core/src/mcp/server_manager.rs` |
+| MCP tool bridge | `crates/kria-core/src/mcp/tool_bridge.rs` |
+| Payload shaping | `crates/kria-core/src/mcp/payload_shaper.rs` |
+| Capability registry | `crates/kria-core/src/mcp/capability_registry.rs` |
+
+## Memory, Context, And World Model
+
+| Area | File |
+|---|---|
+| Memory subsystem | `crates/kria-core/src/memory/` |
+| PSDG coordinator | `crates/kria-core/src/agent/psdg/coordinator.rs` |
+| Context injection | `crates/kria-core/src/agent/psdg/context_injector.rs` |
+| Environment tracking | `crates/kria-core/src/agent/psdg/env_tracker.rs` |
+| World model store | `crates/kria-core/src/agent/world_model/store.rs` |
+| World model types | `crates/kria-core/src/agent/world_model/types.rs` |
+| Desktop graph | `crates/kria-core/src/agent/world_model/desktop_graph.rs` |
+| Working set extraction | `crates/kria-core/src/agent/working_set/extractor.rs` |
+| Workspace memory | `crates/kria-core/src/agent/workspace_memory.rs` |
+| Procedural memory | `crates/kria-core/src/agent/procedural_memory/mod.rs` |
+
+Rules:
+- inject compact facts, not raw memory dumps,
+- current tool evidence outranks old memory,
+- keep desktop context operation-scoped,
+- prefer structured facts over free-form text.
+
+## Safety And HITL
+
+| Area | File |
+|---|---|
+| Policy engine | `crates/kria-core/src/safety/policy.rs` |
+| Command classifier | `crates/kria-core/src/safety/command_classifier.rs` |
+| Policy gate | `crates/kria-core/src/safety/policy_gate.rs` |
+| HITL gateway | `crates/kria-core/src/safety/hitl.rs` |
+| Audit logger | `crates/kria-core/src/safety/audit.rs` |
+| Rollback snapshots | `crates/kria-core/src/safety/rollback.rs` |
+| Global GUI halt | `crates/kria-core/src/safety/global_halt.rs` |
+| Blacklist | `crates/kria-core/src/safety/blacklist.rs` |
+| PIN guard | `crates/kria-core/src/safety/pin_guard.rs` |
+| Action execution gate | `crates/kria-core/src/agent/execution_gate.rs` |
+| Collaborative decision | `crates/kria-core/src/agent/collaborative_decision.rs` |
+
+## Infrastructure
+
+| Area | File |
+|---|---|
+| Tool isolation | `crates/kria-core/src/infra/isolation.rs` |
+| Pipeline trace | `crates/kria-core/src/infra/pipeline_trace.rs` |
+| Execution trace | `crates/kria-core/src/infra/execution_trace.rs` |
+| Event bus | `crates/kria-core/src/infra/event_bus.rs` |
+| Health registry | `crates/kria-core/src/infra/health.rs` |
+| QoS | `crates/kria-core/src/infra/qos/mod.rs` |
+| Environment abstraction | `crates/kria-core/src/infra/environment/` |
+| Supervisor | `crates/kria-core/src/infra/supervisor.rs` |
+
+## Desktop Command Bridge
+
+| Command area | File |
+|---|---|
+| Command module root | `crates/kria-desktop/src/commands/mod.rs` |
+| Shared app state | `crates/kria-desktop/src/commands/app_state.rs` |
+| Chat | `crates/kria-desktop/src/commands/chat.rs` |
+| Runtime setup/status | `crates/kria-desktop/src/commands/runtime.rs`, `crates/kria-desktop/src/commands/runtime_status.rs` |
+| Providers | `crates/kria-desktop/src/commands/providers.rs` |
+| MCP | `crates/kria-desktop/src/commands/mcp.rs` |
+| GUI automation controls | `crates/kria-desktop/src/commands/gui_automation_control.rs` |
+| Image chat | `crates/kria-desktop/src/commands/image_chat.rs` |
+| Document chat | `crates/kria-desktop/src/commands/document_chat.rs` |
+| Voice | `crates/kria-desktop/src/commands/voice.rs`, `crates/kria-desktop/src/commands/voice_diagnostics.rs` |
+| Google Workspace | `crates/kria-desktop/src/commands/google_workspace.rs` |
+| n8n | `crates/kria-desktop/src/commands/n8n.rs` |
+| OpenClaw | `crates/kria-desktop/src/commands/openclaw.rs` |
+| Colab | `crates/kria-desktop/src/commands/colab.rs`, `crates/kria-desktop/src/commands/colab_dispatch.rs` |
+| Device enrollment/tools | `crates/kria-desktop/src/commands/device_enrollment.rs`, `crates/kria-desktop/src/commands/device_tools.rs` |
+| Test runner | `crates/kria-desktop/src/commands/test_runner.rs` |
+
+## Server And Connection Control
+
+| Area | File |
+|---|---|
+| Server startup | `crates/kria-server/src/main.rs` |
+| Server library | `crates/kria-server/src/lib.rs` |
+| HTTP routes | `crates/kria-server/src/routes.rs` |
+| Provider routes | `crates/kria-server/src/provider_routes.rs` |
+| Intelligence routes | `crates/kria-server/src/intelligence_routes.rs` |
+| WebSocket | `crates/kria-server/src/ws.rs` |
+| Auth | `crates/kria-server/src/auth.rs` |
+| Inventory | `crates/kria-server/src/inventory.rs` |
+| Device manager | `crates/kria-connection-control/src/manager.rs` |
+| Device signing | `crates/kria-connection-control/src/signer.rs` |
+| Device DB schema | `crates/kria-connection-control/sql/0001_device_orchestration.sql` |
+
+## Eval And Test Navigation
+
+| Need | Where to look |
+|---|---|
+| Playwright/API e2e tests | `tests/e2e/` |
+| General test notes | `tests/testing.md` |
+| Core test binary | `crates/kria-core/src/bin/kria-test.rs` |
+| GUI e2e test binary | `crates/kria-core/src/bin/test_gui_e2e.rs` |
+| Eval crate entry | `crates/kria-eval/src/main.rs` |
+| General eval runner | `crates/kria-eval/src/runner.rs` |
+| GUI eval runner | `crates/kria-eval/src/gui_eval/runner.rs` |
+| GUI eval suites | `crates/kria-eval/src/gui_eval/` |
+| Workflow eval suites | `crates/kria-eval/src/workflow_eval/` |
+| Integration eval suites | `crates/kria-eval/src/integration_eval/` |
+| Generated reports | `tests-logs/`, `eval_reports/` |
+
+Useful docs:
+- `docs/evaluations/overview.md`
+- `docs/evaluations/gui-e2e.md`
+- `docs/evaluations/voice-validation.md`
+- `docs/decisions/adr/001-e2e-eval-harness.md`
+- `docs/decisions/adr/002-tool-execution-overhaul.md`
+
+## Change Maps
 
 ### Add Or Modify A Tool
 
 Start here:
-
 1. `crates/kria-core/src/tools/registry.rs`
-2. The relevant tool module in `crates/kria-core/src/tools/`
+2. relevant file under `crates/kria-core/src/tools/`
 3. `crates/kria-core/src/safety/policy.rs`
-4. `crates/kria-core/src/mcp/capability_registry.rs`
-5. `crates/kria-core/src/agent/loop_engine/tests.rs`
+4. `crates/kria-core/src/tools/preflight.rs`
+5. `crates/kria-core/src/agent/execution_authority.rs`
+6. `crates/kria-core/src/agent/loop_engine/tests.rs`
 
-Flow:
+Checklist:
+- register schema and handler,
+- set or infer resume capability,
+- assign risk behavior,
+- add preflight if parameters can be unsafe,
+- add target authority if the tool is target-specific,
+- add verifier or result-synthesis handling if success can be misleading,
+- add routing/safety tests.
 
-```text
-Define handler and schema
-  |
-  v
-Register in ToolRegistry
-  |
-  v
-Assign safety tier
-  |
-  v
-Assign capability profile / execution mode
-  |
-  v
-Add routing/fallback tests
-```
-
-Important questions:
-
-- Is it read-only, user-state modifying, destructive, or system-dangerous?
-- Should it be preferred over GUI/browser automation?
-- Does it need preflight validation?
-- Should raw output be shaped before the LLM sees it?
-- Does final success need a verifier?
-
-### Add Or Modify An LLM Provider
+### Add Or Modify A Provider
 
 Start here:
+1. `crates/kria-core/src/llm/provider/config.rs`
+2. `crates/kria-core/src/llm/provider/registry.rs`
+3. provider adapter under `crates/kria-core/src/llm/provider/`
+4. `crates/kria-core/src/llm/provider/capabilities.rs`
+5. `crates/kria-core/src/llm/provider/streaming.rs`
+6. `crates/kria-core/src/llm/provider/tests.rs`
 
-1. `crates/kria-core/src/llm/mod.rs`
-2. `crates/kria-core/src/llm/provider/config.rs`
-3. `crates/kria-core/src/llm/provider/registry.rs`
-4. Existing adapter such as `llm/provider/openai.rs`
-5. `crates/kria-core/src/llm/provider/tests.rs`
-
-Flow:
-
-```text
-ProviderConfig / ProviderType
-  |
-  v
-Backend adapter implements LlmBackend
-  |
-  v
-ProviderRegistry creates backend
-  |
-  v
-Capabilities normalized
-  |
-  v
-Connection test + stream/tool parsing tests
-```
-
-Watch for:
-
-- message format differences,
-- system prompt support,
-- function/tool calling format,
-- streaming format,
-- image input format,
-- usage token fields,
-- error code normalization.
+Checklist:
+- add provider config/type,
+- implement backend adapter,
+- normalize capabilities,
+- normalize streaming and tool-call output,
+- normalize errors,
+- add connection tests.
 
 ### Change Prompt Construction
 
 Start here:
-
 1. `crates/kria-core/src/agent/prompt_compiler.rs`
 2. `crates/kria-core/src/agent/prompts.rs`
 3. `crates/kria-core/src/agent/psdg/context_injector.rs`
 4. `crates/kria-core/src/llm/budget.rs`
 
-Flow:
-
-```text
-Prompt section
-  |
-  v
-Priority and budget behavior
-  |
-  v
-Context injection policy
-  |
-  v
-Tool catalog effect
-  |
-  v
-LLM behavior and tests
-```
-
-Be careful:
-
-- Do not add unbounded context.
-- Do not put unsafe authority into prompt text.
-- Do not rely on prompt rules where runtime policy is needed.
-- Preserve deterministic assembly order where possible.
+Rules:
+- keep context bounded,
+- do not put runtime authority only in prompt text,
+- preserve deterministic section order,
+- verify tool-selection impact.
 
 ### Change Safety Or HITL
 
 Start here:
-
 1. `crates/kria-core/src/safety/policy.rs`
 2. `crates/kria-core/src/safety/command_classifier.rs`
 3. `crates/kria-core/src/safety/hitl.rs`
 4. `crates/kria-core/src/safety/audit.rs`
 5. `crates/kria-core/src/agent/loop_engine/mod.rs`
-6. `crates/kria-core/src/agent/gui_wiring.rs`
-
-Flow:
-
-```text
-Tool call
-  |
-  v
-PolicyEngine.evaluate_with_modality_hint()
-  |
-  +-- blocked
-  +-- approval required
-  +-- allowed
-  |
-  v
-AuditLogger
-  |
-  v
-HITL gateway if needed
-```
+6. `docs/contracts/hitl-mvp/`
 
 Never skip:
-
 - blacklist,
-- protected path escalation,
+- command classification,
+- protected-path escalation,
 - audit logging,
 - timeout auto-deny,
 - denial result injection back into the tool loop.
@@ -340,603 +490,172 @@ Never skip:
 ### Change GUI Automation
 
 Start here:
-
 1. `crates/kria-core/src/agent/gui_wiring.rs`
-2. `crates/kria-core/src/agent/gui_planner.rs`
-3. `crates/kria-core/src/agent/gui_substrate_planner.rs`
-4. `crates/kria-core/src/agent/htn_executor.rs`
-5. `crates/kria-core/src/tools/gui_automation.rs`
-6. `crates/kria-core/src/safety/global_halt.rs`
+2. `crates/kria-core/src/agent/semantic_workflow.rs`
+3. `crates/kria-core/src/agent/execution_mode_reasoner.rs`
+4. `crates/kria-core/src/agent/workflow_intent_contract.rs`
+5. `crates/kria-core/src/agent/gui_substrate_planner.rs`
+6. `crates/kria-core/src/agent/htn_executor.rs`
+7. `crates/kria-core/src/tools/gui_automation.rs`
 
-Flow:
-
-```text
-Intent
-  |
-  v
-GUI planner / substrate planner
-  |
-  v
-HTN executor or GUI tool
-  |
-  v
-global halt check
-  |
-  v
-focus/input/window actions
-  |
-  v
-verification / recovery
-```
-
-Debug hints:
-
-- If the tool fails with `GLOBAL_SAFETY_HALT`, inspect sidecar/uinput/vision service health.
-- If the app opens but does not act, inspect focus and window verification.
-- If Wayland is involved, expect input/focus limitations.
+Check:
+- semantic workflow frame,
+- execution mode,
+- contract check,
+- substrate selected,
+- app/window/focus state,
+- global halt,
+- readiness preflight,
+- verifier authority and partial-completion result.
 
 ### Change Browser Or IDE Cognition
 
 Start here:
+- browser: `crates/kria-core/src/agent/browser_cognition.rs`
+- browser governance: `crates/kria-core/src/agent/browser_media_governance.rs`
+- browser tools: `crates/kria-core/src/tools/browser_agent.rs`
+- IDE cognition: `crates/kria-core/src/agent/ide_cognition.rs`
+- developer tools: `crates/kria-core/src/tools/developer.rs`
+- world model: `crates/kria-core/src/agent/world_model/`
 
-| Area | Files |
-| ---- | ----- |
-| Browser cognition | `crates/kria-core/src/agent/browser_cognition.rs`, `crates/kria-core/src/tools/browser_agent.rs` |
-| IDE cognition | `crates/kria-core/src/agent/ide_cognition.rs`, `crates/kria-core/src/tools/developer.rs` |
-| Desktop context | `crates/kria-core/src/agent/psdg/context_injector.rs`, `crates/kria-core/src/agent/desktop_awareness/mod.rs` |
-| Verification | `crates/kria-core/src/agent/execution_verifier_bounded.rs`, `crates/kria-core/src/agent/observable_completion/mod.rs` |
-
-### Change Memory / PSDG
+### Change Evals
 
 Start here:
+1. `crates/kria-eval/src/main.rs`
+2. `crates/kria-eval/src/gui_eval/runner.rs`
+3. `crates/kria-eval/src/gui_eval/suites.rs`
+4. specific suite file under `crates/kria-eval/src/gui_eval/`
+5. `crates/kria-eval/src/report.rs`
 
-1. `crates/kria-core/src/agent/psdg/mod.rs`
-2. `crates/kria-core/src/agent/psdg/coordinator.rs`
-3. `crates/kria-core/src/agent/psdg/env_tracker.rs`
-4. `crates/kria-core/src/agent/world_model/*`
-5. `crates/kria-core/src/memory/*`
+For live GUI evals, verify environment gates and artifacts:
+- `KRIA_EVAL_GUI=1`,
+- display server,
+- AT-SPI,
+- uinput daemon,
+- OCR/vision support when required,
+- temp-only artifacts,
+- screenshot/log capture on failure.
 
-Rules of thumb:
+## Debugging Paths
 
-- Inject compact facts, not raw memory.
-- Keep desktop context operation-specific.
-- Do not let old memory outrank current tool evidence.
-- Prefer structured facts over free-form text blobs.
-
----
-
-## 6. Main Subsystems And Files
-
-### Agent Orchestration
-
-| File | Purpose |
-| ---- | ------- |
-| `agent/loop_engine/mod.rs` | Main ReAct/runtime loop, stream events, tool rounds, policy calls |
-| `agent/turn_context.rs` | Turn admission, queueing, cancellation, supersession |
-| `agent/turn_gate.rs` | Operation classification and fallback tool hints |
-| `agent/intent_gate.rs` | Intent gate confidence and execution permission logic |
-| `agent/router.rs` | Intent routing helpers and tests |
-| `agent/response_parser.rs` | Extracts text and tool calls from model output |
-| `agent/result_synthesizer.rs` | Grounded human-readable result generation |
-| `agent/execution_interpreter.rs` | Interprets tool result outcomes |
-| `agent/execution_transparency/mod.rs` | Workflow trace, blockers, explanations |
-
-### Planning And Workflow
-
-| File | Purpose |
-| ---- | ------- |
-| `agent/goal_tree.rs` | Goal tree, stages, checkpoints, recovery paths |
-| `agent/workflow_compiler.rs` | Workflow compilation |
-| `agent/opgraph.rs` | Operational graph model |
-| `agent/opgraph_compiler.rs` | Compiles operational graphs |
-| `agent/stage_executor.rs` | Stage execution support |
-| `agent/workflow_session.rs` | Persistent workflow checkpoints |
-| `agent/workflow_continuation/mod.rs` | Interruption classification and continuation |
-| `agent/workflow_expectation/mod.rs` | Expected visible outcomes for workflow categories |
-
-### GUI / Desktop Cognition
-
-| File | Purpose |
-| ---- | ------- |
-| `agent/gui_wiring.rs` | Connects GUI planner/executor to policy, HITL, audit |
-| `agent/gui_planner.rs` | GUI planning traits and implementations |
-| `agent/gui_substrate_planner.rs` | Selects GUI substrate path |
-| `agent/htn_executor.rs` | Hierarchical task execution for GUI workflows |
-| `agent/htn_integration.rs` | HTN workflow generation/integration |
-| `agent/atspi_engine.rs` | AT-SPI accessibility substrate |
-| `agent/ocr_engine.rs` | OCR screen/region text reading |
-| `agent/browser_cognition.rs` | Browser semantic state |
-| `agent/ide_cognition.rs` | IDE/workspace state |
-| `tools/gui_automation.rs` | GUI automation tool handlers |
-| `tools/atspi_tools.rs` | Accessibility tools |
-| `tools/vision_automation.rs` | Vision automation tools |
-
-### LLM And Provider Runtime
-
-| File | Purpose |
-| ---- | ------- |
-| `llm/mod.rs` | Core LLM types and `LlmBackend` trait |
-| `llm/model_router.rs` | Local/cloud/vision routing |
-| `llm/failover.rs` | Provider failover FSM |
-| `llm/budget.rs` | Token budgets and turn ledger |
-| `llm/tokenize.rs` | Token counting |
-| `llm/local.rs` | Local llama.cpp backend |
-| `llm/cloud.rs` | Generic OpenAI-compatible cloud backend |
-| `llm/provider/registry.rs` | Provider lifecycle and switching |
-| `llm/provider/config.rs` | Provider config model |
-| `llm/provider/capabilities.rs` | Normalized model capabilities |
-| `llm/provider/error.rs` | Provider error classification |
-| `llm/provider/openai.rs` | OpenAI-compatible adapter |
-| `llm/provider/openrouter.rs` | OpenRouter adapter |
-| `llm/provider/anthropic.rs` | Anthropic adapter |
-| `llm/provider/gemini.rs` | Gemini adapter |
-| `llm/provider/ollama.rs` | Ollama adapter |
-
-### Local Model Orchestrator
-
-| File | Purpose |
-| ---- | ------- |
-| `llm/orchestrator/server_manager.rs` | llama-server lifecycle and state |
-| `llm/orchestrator/runtime.rs` | L1 runtime control contract |
-| `llm/orchestrator/strategy.rs` | VRAM/layer/context planning |
-| `llm/orchestrator/vram_budget.rs` | Vision token/VRAM preflight |
-| `llm/orchestrator/vision_strategy.rs` | Vision runtime mode selection |
-| `llm/orchestrator/gpu_watchdog.rs` | GPU health/watchdog behavior |
-| `llm/orchestrator/child_guard.rs` | Child process cleanup guard |
-
-### Tools And MCP
-
-| File | Purpose |
-| ---- | ------- |
-| `tools/registry.rs` | Tool definitions, schemas, handlers |
-| `tools/preflight.rs` | Deterministic preflight validation |
-| `tools/file_ops.rs` | File operations |
-| `tools/exec.rs` | Shell/Python execution |
-| `tools/packages.rs` | Package operations |
-| `tools/google_workspace.rs` | Google Workspace tools |
-| `tools/browser_agent.rs` | Browser tools |
-| `tools/developer.rs` | Developer/project tools |
-| `mcp/client.rs` | MCP client protocol runtime |
-| `mcp/server_manager.rs` | MCP server lifecycle |
-| `mcp/tool_bridge.rs` | MCP tools exposed as KRIA tools |
-| `mcp/payload_shaper.rs` | Compact tool payloads for LLM context |
-| `mcp/capability_registry.rs` | Tool execution mode/reliability metadata |
-
-### Safety
-
-| File | Purpose |
-| ---- | ------- |
-| `safety/policy.rs` | Tool risk tiering and capability classification |
-| `safety/command_classifier.rs` | Command-level risk classifier |
-| `safety/policy_gate.rs` | Capability-based command safety gate |
-| `safety/hitl.rs` | Human approval gateway |
-| `safety/audit.rs` | Hash-chained audit logger |
-| `safety/rollback.rs` | File rollback snapshots |
-| `safety/global_halt.rs` | Global GUI automation kill switch |
-| `safety/blacklist.rs` | Hard blacklisted patterns |
-| `safety/pin_guard.rs` | PIN-based guard support |
-
-### Infrastructure
-
-| File | Purpose |
-| ---- | ------- |
-| `infra/isolation.rs` | Isolated tool execution with timeout/cancellation |
-| `infra/pipeline_trace.rs` | Runtime trace logging |
-| `infra/execution_trace.rs` | Causal tool execution trace |
-| `infra/event_bus.rs` | Event bus |
-| `infra/health.rs` | Health registry |
-| `infra/qos/mod.rs` | Adaptive QoS scheduler |
-| `infra/environment/*` | Local/Docker/remote environment abstractions |
-| `infra/supervisor.rs` | Supervised task helper |
-
-### Desktop Command Bridge
-
-| File | Purpose |
-| ---- | ------- |
-| `crates/kria-desktop/src/commands/chat.rs` | Chat stream command |
-| `crates/kria-desktop/src/commands/image_chat.rs` | Image chat stream |
-| `crates/kria-desktop/src/commands/providers.rs` | Provider UI commands |
-| `crates/kria-desktop/src/commands/runtime.rs` | Runtime initialization/status |
-| `crates/kria-desktop/src/commands/gui_automation_control.rs` | GUI automation controls |
-| `crates/kria-desktop/src/commands/mcp.rs` | MCP management commands |
-| `crates/kria-desktop/src/commands/test_runner.rs` | Test runner UI command |
-| `crates/kria-desktop/src/commands/voice.rs` | Voice runtime bridge |
-
----
-
-## 7. Common Debugging Paths
-
-### "The Model Is Unavailable"
+### Model Unavailable
 
 Open:
-
-1. `llm/model_router.rs`
-2. `llm/failover.rs`
-3. `llm/provider/registry.rs`
-4. `llm/local.rs`
-5. `llm/cloud.rs`
+1. `crates/kria-core/src/llm/model_router.rs`
+2. `crates/kria-core/src/llm/failover.rs`
+3. `crates/kria-core/src/llm/provider/registry.rs`
+4. `crates/kria-core/src/llm/local.rs`
+5. `crates/kria-core/src/llm/cloud.rs`
 6. `crates/kria-desktop/src/commands/providers.rs`
 
-Check:
+Check provider config, local server health, auth, context length, vision
+requirement, and fallback provider status.
 
-- active provider config,
-- fallback provider config,
-- local server health,
-- provider auth,
-- context-too-large errors,
-- whether vision was required.
-
-### "The Tool Did Not Run"
+### Tool Did Not Run
 
 Open:
+1. `crates/kria-core/src/agent/loop_engine/mod.rs`
+2. `crates/kria-core/src/tools/registry.rs`
+3. `crates/kria-core/src/safety/policy.rs`
+4. `crates/kria-core/src/tools/preflight.rs`
+5. `crates/kria-core/src/agent/execution_authority.rs`
+6. `crates/kria-core/src/safety/hitl.rs`
+7. `crates/kria-core/src/infra/isolation.rs`
 
-1. `agent/loop_engine/mod.rs`
-2. `tools/registry.rs`
-3. `safety/policy.rs`
-4. `safety/hitl.rs`
-5. `infra/isolation.rs`
+Check schema exposure, policy, HITL result, preflight, target authority,
+handler lookup, timeout, and tool result.
 
-Check:
-
-- Was the tool in `allowed_tool_names`?
-- Did policy block it?
-- Did HITL timeout or deny?
-- Did preflight fail?
-- Did `run_isolated` timeout?
-- Did the handler return `success: false`?
-
-### "The GUI Workflow Started But Failed"
+### GUI Workflow Started But Failed
 
 Open:
+1. `crates/kria-core/src/agent/gui_wiring.rs`
+2. `crates/kria-core/src/agent/gui_production_readiness.rs`
+3. `crates/kria-core/src/agent/gui_substrate_planner.rs`
+4. `crates/kria-core/src/agent/htn_executor.rs`
+5. `crates/kria-core/src/tools/gui_automation.rs`
+6. `crates/kria-core/src/agent/observable_completion/mod.rs`
+7. `crates/kria-core/src/agent/workflow_continuation/mod.rs`
 
-1. `agent/gui_wiring.rs`
-2. `agent/htn_executor.rs`
-3. `tools/gui_automation.rs`
-4. `safety/global_halt.rs`
-5. `agent/workflow_continuation/mod.rs`
-6. `agent/execution_verifier_bounded.rs`
+Check global halt, display readiness, AT-SPI/uinput/OCR availability, selected
+substrate, window identity, focus, visible evidence, and partial-completion
+status.
 
-Check:
-
-- global halt state,
-- uinput/sidecar health,
-- focus/window state,
-- Wayland/X11 compatibility,
-- observable completion result,
-- continuation blockers.
-
-### "The Final Answer Claimed Success Incorrectly"
+### Browser Navigation Failed
 
 Open:
+1. `crates/kria-core/src/tools/app_lifecycle.rs`
+2. `crates/kria-core/src/tools/browser_agent.rs`
+3. `crates/kria-core/src/agent/browser_cognition.rs`
+4. `crates/kria-core/src/agent/execution_authority.rs`
+5. `crates/kria-core/src/agent/verifier_authority.rs`
 
-1. `agent/result_synthesizer.rs`
-2. `agent/execution_interpreter.rs`
-3. `agent/loop_engine/response_helpers.rs`
-4. `agent/execution_verifier_bounded.rs`
-5. `mcp/payload_shaper.rs`
+Check target authority, URL normalization, managed browser/CDP fallback,
+visible page evidence, and freshness.
 
-Check:
+### Final Answer Claimed Success Incorrectly
 
-- Did the LLM see a shaped payload that hid the error?
-- Did the tool result include `TOOL_ERROR`?
-- Did the synthesizer override raw model text?
-- Was observable completion enabled?
+Open:
+1. `crates/kria-core/src/agent/result_synthesizer.rs`
+2. `crates/kria-core/src/agent/execution_interpreter.rs`
+3. `crates/kria-core/src/agent/loop_engine/response_helpers.rs`
+4. `crates/kria-core/src/agent/execution_verifier.rs`
+5. `crates/kria-core/src/agent/verifier_authority.rs`
+6. `crates/kria-core/src/mcp/payload_shaper.rs`
 
-### "A Dangerous Command Was Allowed"
+Check raw tool result, shaped payload, verifier result, authority level,
+partial-completion metadata, and synthesized summary.
+
+### Dangerous Command Was Allowed
 
 Open immediately:
+1. `crates/kria-core/src/safety/blacklist.rs`
+2. `crates/kria-core/src/safety/command_classifier.rs`
+3. `crates/kria-core/src/safety/policy.rs`
+4. `crates/kria-core/src/tools/preflight.rs`
+5. `crates/kria-core/src/agent/execution_authority.rs`
+6. `crates/kria-core/src/safety/audit.rs`
+7. `crates/kria-core/src/agent/loop_engine/mod.rs`
 
-1. `safety/blacklist.rs`
-2. `safety/command_classifier.rs`
-3. `safety/policy.rs`
-4. `safety/audit.rs`
-5. `agent/loop_engine/mod.rs`
+Check blacklist match, command tier, protected-path escalation, destructive
+modality hint, eval mode, audit record, and whether the path bypassed policy.
 
-Check:
+## Concept Index
 
-- command classification,
-- protected path escalation,
-- destructive modality hint,
-- eval mode (`KRIA_EVAL_MODE`),
-- audit decision,
-- whether the path bypassed `PolicyEngine`.
+| Concept | First file | Supporting files |
+|---|---|---|
+| Prompt lifecycle | `crates/kria-core/src/agent/loop_engine/mod.rs` | `crates/kria-core/src/agent/prompt_compiler.rs`, `crates/kria-core/src/llm/model_router.rs` |
+| Stream events | `crates/kria-core/src/agent/loop_engine/mod.rs` | `crates/kria-desktop/src/commands/chat.rs` |
+| Turn admission | `crates/kria-core/src/agent/turn_context.rs` | `crates/kria-core/src/agent/loop_engine/mod.rs` |
+| Intent routing | `crates/kria-core/src/agent/turn_gate.rs` | `crates/kria-core/src/agent/intent_gate.rs`, `crates/kria-core/src/agent/router.rs` |
+| Tool calls | `crates/kria-core/src/agent/response_parser.rs` | `crates/kria-core/src/tools/registry.rs` |
+| Tool safety | `crates/kria-core/src/safety/policy.rs` | `crates/kria-core/src/tools/preflight.rs`, `crates/kria-core/src/agent/execution_authority.rs` |
+| HITL | `crates/kria-core/src/safety/hitl.rs` | `docs/contracts/hitl-mvp/` |
+| Provider switching | `crates/kria-core/src/llm/provider/registry.rs` | `crates/kria-core/src/llm/model_router.rs` |
+| Local model process | `crates/kria-core/src/llm/orchestrator/server_manager.rs` | `crates/kria-core/src/llm/local.rs` |
+| Context budget | `crates/kria-core/src/llm/budget.rs` | `crates/kria-core/src/mcp/payload_shaper.rs` |
+| GUI cognition | `crates/kria-core/src/agent/gui_wiring.rs` | `crates/kria-core/src/agent/semantic_workflow.rs`, `crates/kria-core/src/agent/execution_mode_reasoner.rs` |
+| OpGraph | `crates/kria-core/src/agent/opgraph.rs` | `crates/kria-core/src/agent/opgraph_compiler.rs`, `crates/kria-core/src/agent/goal_tree.rs` |
+| Workflow continuation | `crates/kria-core/src/agent/workflow_continuation/mod.rs` | `crates/kria-core/src/agent/resume_executor.rs` |
+| MCP tools | `crates/kria-core/src/mcp/tool_bridge.rs` | `crates/kria-core/src/mcp/client.rs`, `crates/kria-core/src/mcp/server_manager.rs` |
+| Google Workspace | `crates/kria-core/src/tools/google_workspace.rs` | `crates/kria-core/src/tools/google_workspace_contract.rs` |
+| n8n | `crates/kria-core/src/tools/n8n.rs` | `docs/integrations/n8n.md` |
+| OpenClaw | `crates/kria-desktop/src/commands/openclaw.rs` | `docs/integrations/openclaw.md` |
+| Voice runtime | `crates/kria-core/src/voice/` | `crates/kria-desktop/src/commands/voice.rs` |
+| Image generation | `crates/kria-core/src/image/` | `crates/kria-core/src/tools/image_generation.rs` |
+| Server API | `crates/kria-server/src/routes.rs` | `crates/kria-server/src/ws.rs` |
+| Device control | `crates/kria-connection-control/src/manager.rs` | `crates/kria-desktop/src/commands/device_tools.rs` |
 
----
-
-## 8. Test And Eval Navigation
-
-| What You Need | Where To Look |
-| ------------- | ------------- |
-| General test notes | `tests/testing.md` |
-| E2E browser/Tauri tests | `tests/e2e/` |
-| KRIA test binary | `crates/kria-core/src/bin/kria-test.rs` |
-| GUI E2E test binary | `crates/kria-core/src/bin/test_gui_e2e.rs` |
-| Test runner core | `crates/kria-core/src/test_runner/mod.rs` |
-| Desktop test command | `crates/kria-desktop/src/commands/test_runner.rs` |
-| Generated reports | `tests-logs/` after running eval/test suites |
-| JSON test results | `tests-logs/**/test_result_*.json` after running eval/test suites |
-
-Useful eval docs:
-
-- `docs/evaluations/overview.md`
-- `docs/evaluations/gui-e2e.md`
-- `docs/decisions/adr/001-e2e-eval-harness.md`
-- `docs/decisions/adr/002-tool-execution-overhaul.md`
-
----
-
-## 9. Concept-To-File Index
-
-| Concept | First File To Open | Supporting Files |
-| ------- | ------------------ | ---------------- |
-| Prompt lifecycle | `agent/loop_engine/mod.rs` | `agent/prompt_compiler.rs`, `llm/model_router.rs` |
-| Streaming UI events | `agent/loop_engine/mod.rs` | `crates/kria-desktop/src/commands/chat.rs` |
-| Tool calls | `agent/response_parser.rs` | `tools/registry.rs`, `agent/loop_engine/mod.rs` |
-| Tool safety | `safety/policy.rs` | `safety/hitl.rs`, `safety/audit.rs` |
-| Shell command safety | `safety/command_classifier.rs` | `safety/policy_gate.rs` |
-| Provider switching | `llm/provider/registry.rs` | `llm/model_router.rs`, `llm/failover.rs` |
-| Local model process | `llm/orchestrator/server_manager.rs` | `llm/local.rs` |
-| Context budget | `llm/budget.rs` | `llm/mod.rs`, `mcp/payload_shaper.rs` |
-| PSDG context | `agent/psdg/context_injector.rs` | `agent/psdg/*`, `agent/world_model/*` |
-| GUI automation | `agent/gui_wiring.rs` | `agent/htn_executor.rs`, `tools/gui_automation.rs` |
-| Observable completion | `agent/observable_completion/mod.rs` | `agent/execution_verifier_bounded.rs` |
-| Recovery options | `agent/loop_engine/mod.rs` | `agent/workflow_continuation/mod.rs` |
-| Google Workspace | `tools/google_workspace.rs` | `tools/google_workspace_contract.rs` |
-| MCP tools | `mcp/server_manager.rs` | `mcp/client.rs`, `mcp/tool_bridge.rs` |
-| Voice runtime | `voice/*` | `crates/kria-desktop/src/commands/voice.rs` |
-| Image generation | `image/*` | `tools/image_generation.rs` |
-| Fleet/remote devices | `crates/kria-desktop/src/device_control.rs` | `tools/device_*` command modules |
-
----
-
-## 10. Maintainer Checklists
-
-### Adding A New Tool
-
-- Add handler and schema.
-- Register it in `ToolRegistry`.
-- Add risk tier in `PolicyEngine`.
-- Add capability profile if execution mode matters.
-- Add preflight validation if arguments can be unsafe or ambiguous.
-- Add tests for routing and safety.
-- Confirm final output is grounded in tool result.
-
-### Adding A New Provider
-
-- Add `ProviderType`.
-- Add `ProviderConfig` default behavior.
-- Implement `LlmBackend`.
-- Normalize capabilities.
-- Normalize errors.
-- Normalize streaming.
-- Normalize tool calls.
-- Wire into `ProviderRegistry`.
-- Add connection tests.
-
-### Adding A GUI Workflow
-
-- Decide whether GUI is truly needed.
-- Add/adjust intent classification.
-- Add GUI plan/substrate behavior.
-- Ensure policy/HITL is still applied.
-- Add observable completion checkpoint.
-- Test on X11/XWayland/Wayland where relevant.
-
-### Changing Safety Policy
-
-- Add or modify risk tier.
-- Add command classifier case if shell-related.
-- Add protected path or blacklist case if needed.
-- Add audit expectations.
-- Add HITL behavior tests.
-- Check eval mode does not mask production behavior.
-
-### Changing Prompt Behavior
-
-- Prefer typed prompt sections.
-- Define section priority.
-- Keep context bounded.
-- Add omission/truncation behavior.
-- Validate tool selection behavior.
-- Avoid putting policy authority in the prompt.
-
----
-
-## 11. Minimal Mental Model
-
-If you are lost, return to this:
+## Minimal Mental Model
 
 ```text
 AgentLoop owns the turn.
-ModelRouter chooses cognition.
-LlmBackend normalizes providers.
-ToolRegistry owns tools.
-PolicyEngine owns permission.
+TurnGate owns top-level operation planning.
+ModelRouter owns model/provider selection.
+ToolRegistry owns schemas, handlers, environment, and shell state.
+PolicyEngine owns risk.
 HitlGateway owns approval.
-AuditLogger records decisions.
-run_isolated executes handlers.
-Verifier/Synthesizer decide what can be truthfully reported.
+ExecutionAuthority owns target validity.
+run_isolated owns bounded execution.
+Verifier owns evidence truth.
+ResultSynthesizer owns user-facing result wording.
 ```
-
----
-
-## Vision Gap Navigation: Where To Fix Current Weaknesses
-
-This section is a practical repair map. It points from KRIA's desired coworker behavior
-to the files most likely responsible for current architecture, implementation, running,
-or data-flow issues.
-
-### Current Failing Signals
-
-From the latest full test report:
-
-| Failure | Symptom | Start Here |
-| ------- | ------- | ---------- |
-| MCP prompt-output tests | missing `ToolEnd` for `mcp_gworkspace_*` tools | `agent/loop_engine/mod.rs`, `mcp/tool_bridge.rs`, `mcp/client.rs`, `tests/mcp_prompt_output_integration_tests.rs` |
-| Smoke routing test | service-status prompt routed to `manage_service` instead of expected `execute_bash` | `agent/router.rs`, `routing/*`, `tools/system_config.rs`, `tests/test_smoke_system.rs` |
-
-### If KRIA Feels Like A Chatbot
-
-Open these first:
-
-1. `agent/loop_engine/mod.rs`
-2. `agent/goal_tree.rs`
-3. `agent/opgraph.rs`
-4. `agent/workflow_compiler.rs`
-5. `agent/stage_executor.rs`
-
-Likely issue:
-
-- multi-step tasks are not being promoted into explicit workflow graphs.
-
-Implementation target:
-
-- make complex prompts graph-first and use the LLM as planner/synthesizer, not as the
-  only step-by-step controller.
-
-Impact:
-
-- KRIA behaves more like an operational coworker with a plan and less like a chat loop.
-
-### If KRIA Chooses The Wrong Tool
-
-Open these first:
-
-1. `agent/turn_gate.rs`
-2. `agent/router.rs`
-3. `routing/intent_classifier.rs`
-4. `routing/tool_index.rs`
-5. `agent/loop_engine/intent_fallback.rs`
-6. `mcp/capability_registry.rs`
-
-Likely issue:
-
-- route semantics are unclear between inspect/manage, browser/search, GUI/API, or
-  local/remote variants.
-
-Implementation target:
-
-- add route contracts per operation class:
-  - inspect,
-  - create,
-  - modify,
-  - delete,
-  - execute,
-  - open/navigate,
-  - recover.
-
-Impact:
-
-- fewer surprising tool choices and easier tests.
-
-### If KRIA Opens Apps But Does Not Complete Work
-
-Open these first:
-
-1. `agent/gui_wiring.rs`
-2. `agent/htn_executor.rs`
-3. `agent/observable_completion/mod.rs`
-4. `agent/execution_verifier_bounded.rs`
-5. `agent/workflow_expectation/mod.rs`
-
-Likely issue:
-
-- app/window success is being confused with semantic completion.
-
-Implementation target:
-
-- add completion contracts per workflow class and require verifier evidence before final
-  "done" responses.
-
-Impact:
-
-- fewer hidden-output and false-success failures.
-
-### If External Systems / MCP Feel Unreliable
-
-Open these first:
-
-1. `mcp/client.rs`
-2. `mcp/server_manager.rs`
-3. `mcp/tool_bridge.rs`
-4. `mcp/payload_shaper.rs`
-5. `tools/mount_manager.rs`
-6. `agent/loop_engine/mod.rs`
-
-Likely issue:
-
-- MCP tool discovery/invocation may not produce complete stream lifecycle events.
-
-Implementation target:
-
-- enforce event contract:
-
-```text
-MCP tool selected
-  -> ToolStart
-  -> raw payload captured
-  -> shaped LLM payload
-  -> ToolPayloadChunk if needed
-  -> ToolEnd success/failure
-```
-
-Impact:
-
-- Jira/API/MCP workflows become visible, testable, and recoverable.
-
-### If Local Model Runtime Is Too Heavy Or Unstable
-
-Open these first:
-
-1. `llm/local.rs`
-2. `llm/orchestrator/server_manager.rs`
-3. `llm/orchestrator/strategy.rs`
-4. `llm/orchestrator/vram_budget.rs`
-5. `llm/model_router.rs`
-
-Likely issue:
-
-- routing does not fully account for task capability, VRAM pressure, context size, and
-  fallback requirements.
-
-Implementation target:
-
-- add task capability profiles and hardware-aware routing decisions.
-
-Impact:
-
-- better RTX 4050 6GB behavior, fewer local OOM/degraded surprises.
-
-### If Safety Feels Too Noisy Or Too Weak
-
-Open these first:
-
-1. `safety/policy.rs`
-2. `safety/command_classifier.rs`
-3. `safety/hitl.rs`
-4. `safety/audit.rs`
-5. `tools/registry.rs`
-
-Likely issue:
-
-- policy tier, reversibility, or destructive modality metadata is incomplete.
-
-Implementation target:
-
-- add `SafetyEnvelope`, per-tool reversibility, and full policy coverage tests.
-
-Impact:
-
-- KRIA asks for help at the right times and acts automatically when safe.
-
-### Best Next Engineering Order
-
-| Order | Work | Why First |
-| ----- | ---- | --------- |
-| 1 | Fix failing MCP and smoke tests | Stabilizes current runtime before new intelligence |
-| 2 | Add event lifecycle invariant tests | Prevents silent tool execution gaps |
-| 3 | Add unified `TurnFrame` / runtime ledger | Makes orchestration debuggable |
-| 4 | Make multi-step prompts graph-first | Moves KRIA toward coworker workflows |
-| 5 | Strengthen GUI/browser/IDE semantic substrates | Reduces keyboard-puppeteering behavior |
-| 6 | Add capability-aware model routing | Improves local-first intelligence and hardware fit |
-| 7 | Add richer HITL/recovery UX | Improves collaboration and trust |

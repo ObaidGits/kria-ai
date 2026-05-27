@@ -2,7 +2,7 @@
 
 Production architecture handbook for KRIA's desktop cognition runtime.
 
-Generated from the current KRIA working tree on 2026-05-24. Source references point to the files that define the runtime today.
+Updated from the current KRIA working tree on 2026-05-27. Source references point to the files that define the runtime today.
 
 ## Reader Contract
 
@@ -32,7 +32,7 @@ Simple automation tools usually map text to clicks or keystrokes. KRIA tries to 
 - "click the OK button" becomes AT-SPI semantic element lookup when available, not screenshot-only matching.
 - "delete all files in Downloads" becomes a destructive filesystem operation requiring policy/HITL, not an autonomous GUI sequence.
 
-This substrate-first design is the most important architectural idea in the current runtime.
+The current design is contract-before-substrate: KRIA first records what workflow form the user appears to expect, then selects the safest concrete substrate that can satisfy or honestly degrade that contract.
 
 ```text
 User prompt
@@ -42,6 +42,12 @@ TurnGate / intent routing
    |
    v
 IntentCompiler -> GuiTaskSpec
+   |
+   v
+SemanticWorkflowFrame -> ExecutionModeDecision -> WorkflowIntentContract
+   |
+   v
+VerifierAuthorityAssessment / HybridSynchronization metadata
    |
    v
 SubstratePlanner / GoalTree compilers
@@ -65,6 +71,9 @@ Result synthesis, PSDG memory, transparency trace, session checkpoint
 Natural language
   -> bounded intent envelope
   -> typed GUI task spec
+  -> semantic workflow frame
+  -> fidelity and execution-mode decision
+  -> declarative workflow contract
   -> substrate decision
   -> immutable workflow
   -> policy-gated execution
@@ -122,6 +131,12 @@ KRIA uses semantic cognition because GUI automation is unreliable when treated a
 | --- | --- | --- |
 | TurnGate | `crates/kria-core/src/agent/turn_gate.rs` | Produces `IntentEnvelope`, operation class, hazard hint, compute plan, and routing hints. |
 | IntentCompiler | `intent_compiler.rs`, `intent_compiler_rule.rs` | Normalizes user text into `GuiTaskSpec` without executing or reading environment state. |
+| SemanticWorkflowFrame | `semantic_workflow.rs` | Classifies task family, app anchors, visibility, observation, collaboration, ambiguity, safety class, and fidelity. |
+| ExecutionModeReasoner | `execution_mode_reasoner.rs` | Deterministically selects structural, visible, hybrid, human-collaborative, verification-visible, or silent mode. |
+| WorkflowIntentContractRegistry | `workflow_intent_contract.rs` | Holds declarative contracts for visible coding, browser, media, human review, silent execution, and visible verification. |
+| VerifierAuthorityEvaluator | `verifier_authority.rs` | Defines what authority and freshness each verifier must provide before a claim can be accepted. |
+| HybridSynchronizationEvaluator | `hybrid_synchronization.rs` | Defines structural-visible sync checkpoints for hybrid workflows. |
+| BrowserMediaGovernanceEvaluator | `browser_media_governance.rs` | Detects browser/media session risk and required HITL/visible-verifier metadata. |
 | GoalTree | `goal_tree.rs`, `stage_executor.rs` | Immutable multi-stage workflow representation and bounded executor. |
 | GuiPlanner | `gui_planner.rs` | Unified planner trait plus deterministic `RuleBasedPlanner`. |
 | SubstratePlanner | `gui_substrate_planner.rs` | Decides whether the task should use file, terminal, browser, app-open, keystroke, or interaction substrate. |
@@ -156,9 +171,26 @@ RuleIntentCompiler::compile()
   - Verb, TargetRef, ContentClass, ambiguity
   |
   v
+analyze_semantic_workflow()
+  - TaskFamily, AppAnchor, VisibilityExpectation, WorkflowFidelityResolution
+  |
+  v
+ExecutionModeReasoner::decide()
+  - ExecutionMode, WorkflowContractId, RequiredVerifier list
+  |
+  v
+WorkflowIntentContractRegistry::evaluate()
+  - missing requirements, forbidden degradations, fallback/HITL policy
+  |
+  v
+VerifierAuthorityEvaluator::assess()
+  - authority/freshness claim boundaries for required verifiers
+  |
+  v
 SubstratePlanner::plan()
   - FileWriteThenOpen
   - TerminalExecution
+  - IdeCodeRunWorkflow
   - BrowserNavigate
   - AppOpenOnly
   - Keystroke
@@ -185,29 +217,41 @@ Success, failure, recovery, HITL pause, or safe abort
 
 ### Example 1: "open code and write a program to print pascal triangle and run it and show output"
 
-This is the canonical regression prompt. GUI eval reports should show whether it passes through `TerminalExecution`, creates the Pascal source artifact, captures output, and preserves the expected visibility contract.
+This is the canonical regression prompt. The current runtime resolves it as a hybrid visible-coding workflow, then uses the IDE code-run substrate when the app anchor is IDE-class.
 
 ```text
 Prompt
   -> TurnGate: Automate / GUI-capable
   -> RuleIntentCompiler: Open + App("code") + Generated("pascal triangle", python)
+  -> SemanticWorkflowFrame: Coding + required IDE anchor + WorkflowVisible
+  -> WorkflowFidelityResolution: WorkflowStageFidelity
+  -> ExecutionModeDecision: HybridWorkflow / VisibleCodingWorkflow
+  -> ContractCheck:
+       - source artifact required
+       - IDE/app context required
+       - workflow/output surfacing required
+       - structural execution allowed only as an internal step
   -> Multi-intent guard: detects substrate can handle it, avoids fragile GoalTree path
-  -> SubstratePlanner: TerminalExecution
+  -> SubstratePlanner: IdeCodeRunWorkflow
   -> Workflow:
        1. write_file ~/.kria/generated/pascal_*.py
-       2. execute_bash python3 <file> > output_*.txt
+       2. write_file ~/.kria/generated/run_*.sh
        3. open_application_with_file code <file>
+       4. execute_bash terminal launcher
   -> Verifier:
        - FileSystemEffect(source exists/contains)
+       - FileSystemEffect(runner exists/contains)
+       - ProcessLaunched(IDE process best effort)
        - DeterministicOutput(output contains expected lines)
-       - ProcessLaunched or structural app evidence
-  -> Result synthesis must surface output, not only say "done"
+  -> Result synthesis must surface output and disclose structural fallback if visible terminal launch was unavailable
 ```
 
 Why this no longer relies on typing into VS Code:
 
 - `gui_substrate_planner.rs` recognizes generated code plus run intent.
-- It chooses `TerminalExecution`, avoiding Wayland focus races and keystroke injection.
+- `execution_mode_reasoner.rs` marks the request as `HybridWorkflow` with `VisibleCodingWorkflow`.
+- For IDE-class apps (`code`, VS Code, IntelliJ, PyCharm, etc.), the substrate is `IdeCodeRunWorkflow`.
+- The workflow writes the file structurally, opens the IDE with the file, attempts a visible terminal run, and falls back to structural execution with explicit output-marker disclosure if needed.
 - The output is captured as an artifact and must be surfaced to satisfy workflow eval contracts.
 
 Failure points and handling:
@@ -218,7 +262,8 @@ Failure points and handling:
 | Python/code generation missing expected content | File artifact verifier/eval judge | Fail closed; no semantic success. |
 | `execute_bash` fails | Tool result in `GuiExecutor`/`StageExecutor` | Abort workflow with error and partial artifacts. |
 | Output hidden or not surfaced | `crates/kria-core/tests/workflow_multistep_evals.rs`, `crates/kria-core/tests/real_world_workflow_evals.rs` | Eval fails even if tool execution succeeded. |
-| App visible but no semantic output | Bounded verifier + eval contract | Not accepted as complete. |
+| App visible but no semantic output | Contract metadata + bounded verifier + eval contract | Not accepted as complete. |
+| Visible terminal unavailable | Runner script fallback marker + captured output | Report degraded/hybrid fallback rather than pretending the visible terminal succeeded. |
 
 Execution chain:
 
@@ -226,10 +271,13 @@ Execution chain:
 RuleIntentCompiler
    |
    v
-SubstratePlanner::plan_terminal_execution()
+SemanticWorkflowFrame -> ExecutionModeDecision -> WorkflowIntentContract
    |
    v
-ToolRegistry: write_file -> execute_bash -> open_application_with_file
+SubstratePlanner::plan_ide_code_run_workflow()
+   |
+   v
+ToolRegistry: write_file -> write_file runner -> open_application_with_file -> execute_bash launcher
    |
    v
 BoundedExecutionVerifier: FileSystemEffect + DeterministicOutput
@@ -333,6 +381,8 @@ KRIA separates routing from planning:
 
 - `TurnGate` decides broad operation, hazard, compute class, and tool hints.
 - `IntentCompiler` normalizes natural language into `GuiTaskSpec`.
+- `SemanticWorkflowFrame` and `ExecutionModeDecision` record workflow expectations before physical planning.
+- `WorkflowIntentContract` declares what must be true for faithful completion.
 - `SubstratePlanner` decides how to physically satisfy the goal.
 - `GuiExecutor` and `StageExecutor` execute only the plan they receive.
 
@@ -357,7 +407,7 @@ Multi-verb prompts are decomposed by `multi_intent.rs`, `opgraph.rs`, and `opgra
   |
   +-- Substrate guard asks: can a concrete substrate handle this?
        |
-       +-- yes: TerminalExecution
+       +-- yes: IdeCodeRunWorkflow for IDE run/show prompts, TerminalExecution for structural run/show prompts
        +-- no: OpGraph -> GoalTree -> StageExecutor
 ```
 
@@ -381,7 +431,8 @@ The substrate decision is where KRIA becomes a desktop cognition system rather t
 | User Goal | Bad Substrate | Preferred KRIA Substrate |
 | --- | --- | --- |
 | Write a program in VS Code | Type thousands of characters into focused window | Write file directly, open editor with file |
-| Run code and show output | Open terminal, type command, OCR output | `execute_bash`, capture output artifact, surface response |
+| Open Code, run, and show output | Hidden backend-only execution or fragile terminal typing | `IdeCodeRunWorkflow` with source file, runner script, IDE open, captured output, and visible-terminal fallback disclosure |
+| Run code and show output without IDE anchor | Open terminal, type command, OCR output | `execute_bash`, capture output artifact, surface response |
 | Open YouTube | Search web and summarize | BrowserNavigate/CDP |
 | Click dialog button | Coordinate click | AT-SPI element action |
 | Type literal text into current field | File write | Keystroke, with focus lock and daemon safety |
@@ -398,6 +449,7 @@ The substrate decision is where KRIA becomes a desktop cognition system rather t
 | --- | --- | --- |
 | `FileWriteThenOpen` | Create content as file, then open in app | `write_file`, `open_application_with_file` |
 | `TerminalExecution` | Generate file, run command, capture output | `write_file`, `execute_bash`, `open_application_with_file` |
+| `IdeCodeRunWorkflow` | Hybrid IDE coding path with visible terminal attempt and structural fallback | `write_file`, `open_application_with_file`, terminal launcher via `execute_bash` |
 | `AppOpenOnly` | Launch app only | `open_application` |
 | `Keystroke` | Inject text/shortcut | `type_text`, `press_shortcut` |
 | `BrowserNavigate` | Browser URL/search | `browser_search`, `open_url`, CDP |
@@ -859,9 +911,12 @@ Event storms can repeatedly invalidate grounding/cache state. KRIA mitigates thi
 | Area | Status | Notes |
 | --- | --- | --- |
 | Substrate routing | Strong | Key reliability win; keep expanding deterministic coverage. |
-| File/terminal workflows | Strong | Best current production path for coding tasks. |
-| Browser CDP cognition | Good | Needs richer media/playback semantic verification. |
-| Verification architecture | Strong | Fail-closed and evidence-oriented. |
+| Semantic workflow metadata | Implemented | Frame, fidelity, mode, contract, verifier authority, and hybrid-sync metadata are generated before substrate planning. |
+| File/terminal workflows | Strong | Best current production path for non-IDE coding and terminal tasks. |
+| Hybrid IDE coding workflow | Implemented | Uses structural file write plus IDE surfacing plus visible terminal attempt and structural fallback. |
+| Browser/media governance | Implemented as metadata | Detects private/account/session risk and required HITL/visible verifier metadata; live media verification still needs hardening. |
+| Browser CDP cognition | Good | Managed browser navigation/search paths exist; richer media/playback semantic verification is still needed. |
+| Verification architecture | Strong foundation | Fail-closed and evidence-oriented; verifier-authority metadata still needs deeper live enforcement. |
 | Wayland raw input | Fragile | Avoid unless necessary; continue AT-SPI/CDP migration. |
 | HITL | Good foundation | Needs richer frontend lifecycle and resumable approvals. |
 | PSDG | Good foundation | Keep bounded; improve contradiction/decay visibility. |
@@ -872,7 +927,10 @@ Event storms can repeatedly invalidate grounding/cache state. KRIA mitigates thi
 
 | Priority | Work | Reason |
 | --- | --- | --- |
-| P0 | Keep file/terminal substrate as default for coding | Highest reliability, least GUI fragility. |
+| P0 | Keep semantic contract metadata ahead of substrate planning | Prevents visible/app anchors from being silently discarded. |
+| P0 | Enforce verifier-authority/hybrid-sync metadata in live completion gates | Turns metadata into hard success/partial-success decisions. |
+| P0 | Keep file/terminal substrate as default for structural coding | Highest reliability, least GUI fragility. |
+| P0 | Keep `IdeCodeRunWorkflow` for IDE-anchored run/show prompts | Preserves IDE visibility while retaining structural reliability. |
 | P0 | Harden destructive workflow HITL and rollback | Prevent data loss. |
 | P1 | Expand AT-SPI action tools | Needed for real app interaction on Wayland. |
 | P1 | Improve browser media verification | YouTube/media tasks need playback-state evidence. |
@@ -892,7 +950,7 @@ Event storms can repeatedly invalidate grounding/cache state. KRIA mitigates thi
 
 - Raw xdotool-dependent focus logic should continue being replaced by AT-SPI/CDP/process evidence.
 - Interaction-heavy workflows need fewer coordinate assumptions.
-- Browser tasks need richer semantic completion contracts beyond page load.
+- Browser/media tasks need richer live semantic verification beyond page load and metadata.
 - Recovery actions should become more concrete, not only classified.
 
 ---
@@ -905,7 +963,14 @@ Event storms can repeatedly invalidate grounding/cache state. KRIA mitigates thi
 | Intent model | `crates/kria-core/src/agent/intent_compiler.rs` | `GuiTaskSpec`, `Verb`, `TargetRef`, `ContentClass`, `IntentCompiler` | Typed semantic GUI task contract. |
 | Rule compiler | `crates/kria-core/src/agent/intent_compiler_rule.rs` | `RuleIntentCompiler::compile` | Deterministic NL-to-`GuiTaskSpec` normalization. |
 | GUI planning | `crates/kria-core/src/agent/gui_planner.rs` | `GuiPlanner`, `RuleBasedPlanner::plan` | Planner trait and simple deterministic workflow generation. |
-| Substrate planning | `crates/kria-core/src/agent/gui_substrate_planner.rs` | `SubstratePlanner::plan`, `ExecutionSubstrate`, `plan_terminal_execution`, `plan_browser_search`, `app_alias_to_binary_pub` | Chooses physical execution substrate. |
+| Semantic workflow | `crates/kria-core/src/agent/semantic_workflow.rs` | `analyze_semantic_workflow`, `SemanticWorkflowFrame`, `WorkflowFidelityResolution` | Extracts deterministic workflow expectation and fidelity metadata. |
+| Execution mode | `crates/kria-core/src/agent/execution_mode_reasoner.rs` | `ExecutionModeReasoner::decide`, `ExecutionModeDecision` | Selects structural/visible/hybrid/HITL workflow mode. |
+| Workflow contracts | `crates/kria-core/src/agent/workflow_intent_contract.rs` | `WorkflowIntentContractRegistry`, `ContractCheck` | Declarative GUI workflow invariant registry. |
+| Verifier authority | `crates/kria-core/src/agent/verifier_authority.rs` | `VerifierAuthorityEvaluator`, `ObservedVerifierEvidence` | Authority and freshness boundaries for verifier evidence. |
+| Hybrid sync | `crates/kria-core/src/agent/hybrid_synchronization.rs` | `HybridSynchronizationEvaluator`, checkpoint types | Structural-visible reconciliation metadata. |
+| Browser/media governance | `crates/kria-core/src/agent/browser_media_governance.rs` | `BrowserMediaGovernanceEvaluator` | Browser/media HITL and visible-verifier metadata. |
+| App registry | `crates/kria-core/src/platform/app_registry.rs` | `InstalledAppRegistry`, alias resolution | Installed-app and class-alias resolution for app names such as code, text editor, Excel/Calc. |
+| Substrate planning | `crates/kria-core/src/agent/gui_substrate_planner.rs` | `SubstratePlanner::plan`, `ExecutionSubstrate`, `plan_ide_code_run_workflow`, `plan_terminal_execution`, `plan_browser_search`, `app_alias_to_binary_pub` | Chooses physical execution substrate. |
 | GUI coordinator | `crates/kria-core/src/agent/gui_wiring.rs` | `GuiExecutionCoordinator`, `should_route_to_gui_executor`, `generate_workflow`, `execute_workflow`, `execute_goal_tree`, `PolicyToolExecutor` | Wires routing, planning, policy, execution, verification, heartbeat, session persistence. |
 | HTN executor | `crates/kria-core/src/agent/htn_executor.rs` | `GuiExecutor::execute_workflow`, `TaskRuntimeState`, `GuiWorkflow`, `SubGoal`, `WorkflowResult` | Executes linear GUI sub-goal workflows with kill switch, target lock, retries, and aborts. |
 | GoalTree data | `crates/kria-core/src/agent/goal_tree.rs` | `GoalTree`, `WorkflowStage`, `VerificationCheckpoint`, `RecoveryPath` | Immutable bounded multi-stage workflow representation. |
@@ -947,7 +1012,7 @@ Recovery authority decides whether to retry, pause, or abort.
 Human authority resolves unsafe, ambiguous, private, or destructive moments.
 ```
 
-The architecture is strongest where it treats the desktop as a semantic operating environment rather than a bitmap. Its most production-grade path today is substrate-aware automation with explicit artifacts and verifiable outcomes. Its most fragile path remains raw GUI input under Wayland-like constraints. The hardening direction is therefore clear: more semantic substrates, stronger verification, richer recovery, and careful HITL where autonomy should not guess.
+The architecture is strongest where it treats the desktop as a semantic operating environment rather than a bitmap. Its most production-grade path today is semantic-contract metadata plus substrate-aware automation with explicit artifacts and verifiable outcomes. Its most fragile path remains raw GUI input under Wayland-like constraints. The hardening direction is therefore clear: make the metadata hard runtime gates, expand semantic substrates, strengthen live verification, improve recovery, and keep HITL where autonomy should not guess.
 
 ---
 
@@ -955,7 +1020,7 @@ The architecture is strongest where it treats the desktop as a semantic operatin
 
 The expected GUI vision is "true desktop cognition, not keyboard puppeteering." The
 current architecture understands that principle and already contains AT-SPI, CDP,
-IDE cognition, substrate routing, verifiers, HITL, and global halt. The main issue is
+IDE cognition, semantic workflow contracts, substrate routing, verifiers, HITL, and global halt. The main issue is
 coverage and consistency: semantic substrates exist, but raw input/focus paths still
 remain fragile and some workflows still depend on whether the right app/window/substrate
 was inferred correctly.
@@ -968,7 +1033,7 @@ was inferred correctly.
 | Browser cognition is CDP-based but not universal | CDP requires managed Chrome/debug port | Browser workflows may fall back to GUI unnecessarily | Add browser session manager that can attach/launch/recover CDP reliably and expose tab/page state to PSDG | Browser tasks become semantic and recoverable |
 | IDE cognition is partial | VS Code state reading, diagnostics by file, tree-sitter/ruff/rust/js checks | "Fix compile errors" needs LSP-grade project understanding | Add stronger LSP session manager and workspace diagnostic cache; integrate with compiler runs | Coding workflows become operationally intelligent |
 | Wayland-native automation is not solved | Synthetic input/focus restrictions | Cross-platform desktop intelligence needs compositor-aware design | Create Wayland-native strategy: accessibility first, portal/ydotool/uinput guarded paths, compositor-specific capability matrix | More predictable Linux desktop support |
-| Verification coverage is uneven | Some workflows check window focus, fewer check semantic user-visible output | App opening can be mistaken for workflow success | Add completion contracts per workflow category: browser page loaded, output visible, file written, command result captured | Fewer hallucinated completions |
+| Contract metadata is not yet a hard live gate everywhere | Metadata exists for mode, verifier authority, and hybrid sync, but legacy completion paths can still rely on structural evidence | App opening can be mistaken for full visible workflow success | Make `WorkflowIntentContract`, `VerifierAuthorityAssessment`, and `HybridSynchronizationVerdict` mandatory for final GUI completion status | Fewer hallucinated completions |
 | Recovery actions are still broad | Classifies daemon/focus/popup failures, but recovery may be generic | A coworker should propose concrete next actions | Map interruption classes to executable recovery plans with verifier checkpoints | Recovery becomes useful, not just explanatory |
 
 ### GUI Data Flow Upgrade

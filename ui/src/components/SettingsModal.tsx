@@ -8,6 +8,23 @@ import SubstrateStatus from "./SubstrateStatus";
 import ProviderSettings from "./ProviderSettings";
 
 type Tab = "llm" | "voice" | "safety" | "ui" | "assistant" | "labs" | "search" | "services" | "telegram" | "automation" | "gui_automation" | "hardware" | "knowledge" | "google" | "colab" | "ironclad" | "marketplace";
+type SettingsLayer = "basic" | "workflow" | "integrations" | "advanced" | "developer";
+
+interface SettingsTabDefinition {
+  id: Tab;
+  label: string;
+  icon: string;
+  description: string;
+  layer: SettingsLayer;
+}
+
+const SETTINGS_LAYERS: { id: SettingsLayer; label: string; description: string }[] = [
+  { id: "basic", label: "Basic", description: "Everyday preferences and core assistant setup." },
+  { id: "workflow", label: "Workflow", description: "Automation, GUI control, and active task behavior." },
+  { id: "integrations", label: "Integrations", description: "Connected apps, providers, and skill surfaces." },
+  { id: "advanced", label: "Advanced", description: "Hardware, knowledge, and preview capabilities." },
+  { id: "developer", label: "Developer", description: "Diagnostics, fleet controls, and high-risk operations." },
+];
 
 interface AssistantFrontendPrefs {
   persona: "operator" | "coach" | "researcher" | "chief_of_staff";
@@ -58,10 +75,12 @@ const SettingsModal: Component = () => {
   const { setShowSettings, settings, loadSettings, saveSettings, models, loadModels, audioDevices, loadAudioDevices, theme, applyTheme, mcpServers, loadMcpServers, addMcpServer, removeMcpServer, toggleMcpServer, healthInfo, loadHealth, scheduledTasks, loadScheduledTasks, addScheduledTask, removeScheduledTask, macros, loadMacros, deleteMacro, workflows, loadWorkflows, deleteWorkflow, hardwareInfo, loadHardwareInfo, knowledgeBase, loadKnowledgeBase, telegramConfig, telegramBotInfo, loadTelegramConfig, saveTelegramConfig, testTelegramConnection, startTelegramMcp, stopTelegramMcp, googleStatus, loadGoogleStatus, setGoogleAccount, connectGoogle, disconnectGoogle, colabStatus, loadColabStatus, connectColab, disconnectColab, setColabNotebook, reconcileMcpRuntime, restartMcpServerRuntime, ironcladStatus, loadIroncladStatus, getIroncladConfig, updateIroncladConfig, requestIroncladSoftReset, requestIroncladHardReset, loadIroncladForensics, ironcladForensicsTotal } = appStore;
 
   const [activeTab, setActiveTab] = createSignal<Tab>("llm");
+  const [activeLayer, setActiveLayer] = createSignal<SettingsLayer>("basic");
   const [draft, setDraft] = createSignal<Record<string, any>>({});
   const [saving, setSaving] = createSignal(false);
   const [error, setError] = createSignal("");
   const [success, setSuccess] = createSignal("");
+  let dialogEl: HTMLDivElement | undefined;
 
   // MCP add server form
   const [newServerName, setNewServerName] = createSignal("");
@@ -208,11 +227,23 @@ const SettingsModal: Component = () => {
     },
   ]);
 
+  const closeSettings = () => setShowSettings(false);
+
   onMount(() => {
     let disposed = false;
     let unlistenConnected: (() => void) | null = null;
     let unlistenError: (() => void) | null = null;
     let unlistenNotice: (() => void) | null = null;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeSettings();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    queueMicrotask(() => {
+      dialogEl?.focus();
+    });
 
     const initialize = async () => {
       await loadSettings();
@@ -319,6 +350,7 @@ const SettingsModal: Component = () => {
 
     onCleanup(() => {
       disposed = true;
+      window.removeEventListener("keydown", handleKeyDown);
       unlistenConnected?.();
       unlistenError?.();
       unlistenNotice?.();
@@ -681,7 +713,7 @@ const SettingsModal: Component = () => {
 
   const tabGroups: {
     title: string;
-    tabs: { id: Tab; label: string; icon: string; description: string }[];
+    tabs: SettingsTabDefinition[];
   }[] = [
     {
       title: "General",
@@ -691,24 +723,28 @@ const SettingsModal: Component = () => {
           label: "Models",
           icon: "M",
           description: "Choose the active local/cloud runtime, manage providers, and tune generation defaults.",
+          layer: "basic",
         },
         {
           id: "voice",
           label: "Voice",
           icon: "V",
           description: "Configure microphone selection, VAD sensitivity, language, and TTS behavior.",
+          layer: "basic",
         },
         {
           id: "safety",
           label: "Safety",
           icon: "S",
           description: "Tune approval thresholds, rollback windows, and tool execution safety limits.",
+          layer: "basic",
         },
         {
           id: "search",
           label: "Search",
           icon: "Q",
           description: "Set the default search provider and endpoint for web retrieval.",
+          layer: "basic",
         },
       ],
     },
@@ -720,18 +756,21 @@ const SettingsModal: Component = () => {
           label: "Appearance",
           icon: "A",
           description: "Customize visual theme, language, contrast, motion, and text scale.",
+          layer: "basic",
         },
         {
           id: "assistant",
           label: "Assistant",
           icon: "H",
           description: "Select persona, response depth, and helper behavior preferences.",
+          layer: "basic",
         },
         {
           id: "labs",
           label: "Labs",
           icon: "L",
           description: "Toggle preview interfaces and prototype modules for advanced workflows.",
+          layer: "advanced",
         },
       ],
     },
@@ -743,24 +782,28 @@ const SettingsModal: Component = () => {
           label: "MCP Services",
           icon: "P",
           description: "Manage MCP servers, runtime status, trust levels, and command registration.",
+          layer: "integrations",
         },
         {
           id: "telegram",
           label: "Telegram",
           icon: "T",
           description: "Connect a Telegram bot for mobile chat and remote assistant access.",
+          layer: "integrations",
         },
         {
           id: "google",
           label: "Google",
           icon: "G",
           description: "Manage Google auth, runtime health, capabilities, and synchronization warnings.",
+          layer: "integrations",
         },
         {
           id: "colab",
           label: "Colab",
           icon: "C",
           description: "Manage Google Colab cloud-tier runtime, notebook selection, and tool capability readiness.",
+          layer: "integrations",
         },
       ],
     },
@@ -772,30 +815,35 @@ const SettingsModal: Component = () => {
           label: "Automation",
           icon: "U",
           description: "Inspect health, schedule jobs, and manage stored macros and workflow assets.",
+          layer: "workflow",
         },
         {
           id: "gui_automation",
           label: "GUI Automation",
           icon: "G",
           description: "Master switch for GUI automation, with live status of vision sidecar and uinput daemon.",
+          layer: "workflow",
         },
         {
           id: "hardware",
           label: "Hardware",
           icon: "R",
           description: "Review detected hardware and recommended runtime tiers and performance values.",
+          layer: "advanced",
         },
         {
           id: "ironclad",
           label: "Ironclad",
           icon: "I",
           description: "Fleet health telemetry, reset controls, forensic audit feed, and advanced runtime config.",
+          layer: "developer",
         },
         {
           id: "knowledge",
           label: "Knowledge",
           icon: "K",
           description: "Review indexed documents and retrieval corpus status for knowledge grounding.",
+          layer: "advanced",
         },
       ],
     },
@@ -807,6 +855,7 @@ const SettingsModal: Component = () => {
           label: "Skill Marketplace",
           icon: "M",
           description: "Browse and manage skills.",
+          layer: "integrations",
         },
       ],
     },
@@ -816,28 +865,90 @@ const SettingsModal: Component = () => {
     for (const group of tabGroups) {
       const tab = group.tabs.find((item) => item.id === activeTab());
       if (tab) {
-        return { group: group.title, tab };
+        const layer = SETTINGS_LAYERS.find((item) => item.id === tab.layer) ?? SETTINGS_LAYERS[0];
+        return { group: group.title, layer, tab };
       }
     }
-    return { group: tabGroups[0].title, tab: tabGroups[0].tabs[0] };
+    return { group: tabGroups[0].title, layer: SETTINGS_LAYERS[0], tab: tabGroups[0].tabs[0] };
   });
 
+  const visibleTabGroups = createMemo(() =>
+    tabGroups
+      .map((group) => ({
+        ...group,
+        tabs: group.tabs.filter((tab) => tab.layer === activeLayer()),
+      }))
+      .filter((group) => group.tabs.length > 0)
+  );
+
+  const layerOptions = createMemo(() =>
+    SETTINGS_LAYERS.map((layer) => ({
+      ...layer,
+      count: tabGroups.reduce(
+        (count, group) => count + group.tabs.filter((tab) => tab.layer === layer.id).length,
+        0
+      ),
+    }))
+  );
+
+  const firstTabForLayer = (layer: SettingsLayer): Tab =>
+    tabGroups.flatMap((group) => group.tabs).find((tab) => tab.layer === layer)?.id ?? "llm";
+
+  const selectLayer = (layer: SettingsLayer) => {
+    setActiveLayer(layer);
+    if (activeTabInfo().tab.layer !== layer) {
+      setActiveTab(firstTabForLayer(layer));
+    }
+  };
+
+  const selectTab = (tab: SettingsTabDefinition) => {
+    setActiveLayer(tab.layer);
+    setActiveTab(tab.id);
+  };
+
   return (
-    <div class="modal-overlay" onClick={() => setShowSettings(false)}>
-      <div class="modal settings-modal" onClick={(e) => e.stopPropagation()}>
+    <div class="modal-overlay" onClick={closeSettings}>
+      <div
+        ref={dialogEl}
+        class="modal settings-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-dialog-title"
+        tabIndex={-1}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div class="modal-header">
-          <h2>Settings</h2>
-          <button class="close-btn" onClick={() => setShowSettings(false)}>×</button>
+          <h2 id="settings-dialog-title">Settings</h2>
+          <button class="close-btn" aria-label="Close settings" onClick={closeSettings}>×</button>
         </div>
 
         <div class="modal-body settings-shell">
           <aside class="settings-sidebar-nav">
             <div class="settings-sidebar-head">
-              <h3>Preferences</h3>
-              <p>Select a category</p>
+              <h3>Settings Layers</h3>
+              <p>Choose a layer, then a focused section.</p>
             </div>
 
-            <For each={tabGroups}>
+            <div class="settings-layer-nav" aria-label="Settings navigation layers">
+              <For each={layerOptions()}>
+                {(layer) => (
+                  <button
+                    type="button"
+                    class={`settings-layer-btn ${activeLayer() === layer.id ? "active" : ""}`}
+                    aria-pressed={activeLayer() === layer.id}
+                    onClick={() => selectLayer(layer.id)}
+                  >
+                    <span class="settings-layer-main">
+                      <span class="settings-layer-label">{layer.label}</span>
+                      <span class="settings-layer-count">{layer.count}</span>
+                    </span>
+                    <span class="settings-layer-summary">{layer.description}</span>
+                  </button>
+                )}
+              </For>
+            </div>
+
+            <For each={visibleTabGroups()}>
               {(group) => (
                 <div class="settings-nav-group">
                   <div class="settings-nav-group-title">{group.title}</div>
@@ -845,7 +956,9 @@ const SettingsModal: Component = () => {
                     {(tab) => (
                       <button
                         class={`settings-nav-item ${activeTab() === tab.id ? "active" : ""}`}
-                        onClick={() => setActiveTab(tab.id)}
+                        type="button"
+                        aria-current={activeTab() === tab.id ? "page" : undefined}
+                        onClick={() => selectTab(tab)}
                         title={tab.description}
                       >
                         <span class="settings-nav-icon" aria-hidden="true">{tab.icon}</span>
@@ -860,7 +973,7 @@ const SettingsModal: Component = () => {
 
           <section class="settings-content">
             <div class="settings-content-header">
-              <span class="settings-content-group">{activeTabInfo().group}</span>
+              <span class="settings-content-group">{activeTabInfo().layer.label} / {activeTabInfo().group}</span>
               <h3>{activeTabInfo().tab.label}</h3>
               <p>{activeTabInfo().tab.description}</p>
             </div>
@@ -2856,7 +2969,7 @@ const SettingsModal: Component = () => {
         </div>
 
         <div class="modal-footer">
-          <button class="btn-secondary" onClick={() => setShowSettings(false)}>Cancel</button>
+          <button class="btn-secondary" onClick={closeSettings}>Cancel</button>
           <button class="btn-primary" onClick={handleSave} disabled={saving()}>
             {saving() ? "Saving..." : activeTab() === "llm" ? "Save Defaults" : "Save"}
           </button>

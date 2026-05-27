@@ -6,6 +6,8 @@ This document explains how KRIA decides what can run automatically, what must pa
 human approval, what must be blocked, how decisions are audited, and how GUI automation
 can be halted when the runtime is unsafe.
 
+Updated against the current KRIA working tree on 2026-05-27.
+
 ## Reader Contract
 
 This handbook is written for readers who need both intuition and implementation detail:
@@ -42,6 +44,15 @@ LLM / planner proposes action
 Tool availability gate
         |
         v
+ExecutionGate
+        |
+        +-- readiness check
+        +-- parameter preflight
+        +-- execution-authority target check
+        +-- durable ActionProposal with action/target hashes
+        +-- resource requirements
+        |
+        v
 PolicyEngine
         |
         +-- GREEN  -> execute automatically
@@ -53,7 +64,7 @@ PolicyEngine
 AuditLogger records decision
         |
         v
-HITL if required
+DecisionStore + HITL if required
         |
         v
 run_isolated tool execution
@@ -71,6 +82,7 @@ The safety subsystem enforces deterministic execution governance for all side-ef
 
 Responsibilities:
 - Evaluate risk for tool and command executions.
+- Validate tool readiness, parameters, target authority, action hashes, target hashes, and resource requirements before side effects.
 - Enforce deny, allow, or approve behavior through policy tiers.
 - Collect human approvals where required.
 - Record durable safety audit trails.
@@ -84,6 +96,7 @@ Authority boundaries:
 - Substrates such as OpenClaw, MCP, shell, n8n, GUI, browser, and voice cannot bypass safety.
 - Provider output cannot force unsafe execution.
 - HITL timeout defaults to denial.
+- Durable decisions are valid only for the exact action proposal and target hash they were created for.
 - Audit persistence failure must be surfaced for high-risk paths.
 
 Primary files:
@@ -93,6 +106,9 @@ Primary files:
 | Tool policy | `crates/kria-core/src/safety/policy.rs` |
 | Command classifier | `crates/kria-core/src/safety/command_classifier.rs` |
 | Capability policy gate | `crates/kria-core/src/safety/policy_gate.rs` |
+| Execution gate | `crates/kria-core/src/agent/execution_gate.rs` |
+| Durable decisions | `crates/kria-core/src/agent/collaborative_decision.rs` |
+| Resource leases | `crates/kria-core/src/agent/resource_lease.rs` |
 | Human approval | `crates/kria-core/src/safety/hitl.rs` |
 | Audit log | `crates/kria-core/src/safety/audit.rs` |
 | Rollback snapshots | `crates/kria-core/src/safety/rollback.rs` |
@@ -166,6 +182,20 @@ production.
            |
            v
 +----------------------+
+| ExecutionGate        |
+| agent/execution_gate |
++----------+-----------+
+           |
+   +-------+--------+-------------------+
+   |                |                   |
+   v                v                   v
+Preflight      ExecutionAuthority   ActionProposal
+tools/...      agent/...            DecisionStore
+   |                |                   |
+   +-------+--------+-------------------+
+           |
+           v
++----------------------+
 | PolicyEngine         |
 | safety/policy.rs     |
 +----------+-----------+
@@ -208,6 +238,20 @@ Important call sites:
 
 The GUI path has its own policy/HITL wiring because GUI workflows can issue lower-level
 automation actions, but the same safety principles apply.
+
+In the current GUI path, `PolicyToolExecutor` calls:
+
+```text
+ExecutionGate::evaluate(...)
+  -> readiness / preflight / execution authority
+  -> ActionProposal(action_hash, target_hash)
+  -> PolicyEngine.evaluate_with_modality_hint(...)
+  -> DecisionStore/HITL when approval or clarification is required
+  -> resource lease acquisition
+  -> ToolRegistry handler
+```
+
+This makes approval resumability and stale-decision rejection explicit instead of relying only on transient HITL prompts.
 
 ---
 
@@ -1022,11 +1066,14 @@ Priority improvements:
 | Priority | Improvement | Why |
 | -------- | ----------- | --- |
 | High | Prove every execution path calls policy | Prevent bypass regressions |
+| High | Prove every side-effect path calls `ExecutionGate` before policy/tool execution | Prevent preflight, authority, or decision-store bypass regressions |
 | High | Add audit assertions to integration tests | Ensure decisions are recorded |
 | High | Expand command classifier cases | Shell is the highest ambiguity surface |
 | High | Add policy tests for every new tool | Prevent unclassified behavior |
+| High | Wire workflow-contract HITL policy into live GUI completion gates | Prevent visible/account/destructive workflows from silently degrading |
 | Medium | Broaden rollback beyond local files | Improve recovery after risky actions |
 | Medium | Add UI explanations for escalations | Users should know why approval is needed |
+| Medium | Add frontend lifecycle for durable decisions and stale-decision rejection | Makes resumable approvals inspectable and recoverable |
 | Medium | Stronger provider/tool provenance in audit | Easier incident reconstruction |
 | Low | User-customizable policy profiles | Useful later, but risky before defaults are mature |
 
@@ -1049,6 +1096,11 @@ What should remain unchanged:
 | Command safety | `crates/kria-core/src/safety/command_classifier.rs` | `CommandClassification`, `classify`, `strip_sudo` | Granular shell command risk classification |
 | Capability gate | `crates/kria-core/src/safety/policy_gate.rs` | `CommandCapability`, `CapabilityPolicyGate`, `PolicyGate` | Capability-based command policy model |
 | HITL | `crates/kria-core/src/safety/hitl.rs` | `HitlGateway`, `ApprovalRequest`, `ApprovalResponse` | Human approval request/response runtime |
+| Execution gate | `crates/kria-core/src/agent/execution_gate.rs` | `ExecutionGate`, `ExecutionGateOutcome`, `ResumeGateOutcome` | Central readiness, preflight, authority, policy, decision, and lease gate before side effects |
+| Durable decisions | `crates/kria-core/src/agent/collaborative_decision.rs` | `ActionProposal`, `InteractionDecision`, `DecisionStore`, action/target hashes | Persisted approval/clarification/recovery decisions with stale-decision invalidation |
+| Resource leases | `crates/kria-core/src/agent/resource_lease.rs` | `ResourceLeaseManager`, `ResourceRequirement`, `ResourceLeaseGuard` | Workflow-bound ownership for filesystem, process, network, browser, and foreground resources |
+| Workflow contracts | `crates/kria-core/src/agent/workflow_intent_contract.rs` | `WorkflowIntentContract`, `ContractHitlPolicy`, `ForbiddenDegradation` | Declarative workflow safety and HITL requirements for GUI workflows |
+| Verifier authority | `crates/kria-core/src/agent/verifier_authority.rs` | authority and freshness requirement types | Prevents weak/stale evidence from satisfying safety-sensitive visible workflow claims |
 | Audit | `crates/kria-core/src/safety/audit.rs` | `AuditLogger`, `Decision`, `DecidedBy`, `verify_chain` | SQLite audit log with hash-chain integrity |
 | Rollback | `crates/kria-core/src/safety/rollback.rs` | `RollbackManager`, `RollbackManifest`, `create_snapshot`, `restore` | File rollback snapshots |
 | Global halt | `crates/kria-core/src/safety/global_halt.rs` | `engage_halt`, `release_halt`, `check_or_halt`, `halt_reason` | Process-wide GUI automation kill switch |

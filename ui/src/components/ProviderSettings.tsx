@@ -120,6 +120,21 @@ const ProviderSettings: Component = () => {
   const selectedProviderType = createMemo(() => providerTypes().find((type_) => type_.id === newProviderType()));
   const selectedProviderNeedsEndpoint = createMemo(() => selectedProviderType()?.default_endpoint === "");
   const customProviderIdPreview = createMemo(() => providerIdFromName(customProviderName()));
+  const cloudProviderCount = createMemo(() => configuredProviders().length);
+  const localModelCount = createMemo(() => localModels().filter((model) => model.exists !== false).length);
+  const runtimeClassLabel = createMemo(() => activeRuntime()?.is_local ? "Local/private" : "Cloud/API");
+  const runtimeHealthLabel = createMemo(() => {
+    if (runtimeBusy()) return "Switching";
+    if (activeHealthy()) return "Healthy";
+    if (activeRuntime()?.configured) return "Configured";
+    return "Needs setup";
+  });
+  const runtimeHealthClass = createMemo(() => {
+    if (runtimeBusy()) return "switching";
+    if (activeHealthy()) return "active";
+    if (activeRuntime()?.configured) return "configured";
+    return "unconfigured";
+  });
 
   async function refreshAll() {
     setLoading(true);
@@ -524,6 +539,29 @@ const ProviderSettings: Component = () => {
       </Show>
 
       <Show when={!loading()} fallback={<p class="field-hint">Loading AI runtime settings...</p>}>
+        <div class="provider-decision-strip" aria-label="AI runtime summary">
+          <div class="provider-decision-item primary">
+            <span>Active</span>
+            <strong>{activeRuntime()?.display_name || activeProvider()?.display_name || "Not configured"}</strong>
+            <small>{activeRuntime()?.active_model || "No model selected"}</small>
+          </div>
+          <div class="provider-decision-item">
+            <span>Mode</span>
+            <strong>{runtimeClassLabel()}</strong>
+            <small>{activeRuntime()?.routing_mode || "unknown routing"}</small>
+          </div>
+          <div class="provider-decision-item">
+            <span>Health</span>
+            <strong class={`provider-health-text ${runtimeHealthClass()}`}>{runtimeHealthLabel()}</strong>
+            <small>{runtimeBusy() ? "Applying selection" : activeHealthy() ? "Ready for prompts" : "Run test or configure"}</small>
+          </div>
+          <div class="provider-decision-item">
+            <span>Available</span>
+            <strong>{localModelCount()} local / {cloudProviderCount()} API</strong>
+            <small>{selectionEnvLocked() ? "Selection locked by env" : "UI selection enabled"}</small>
+          </div>
+        </div>
+
         <div class="provider-runtime-card">
           <div>
             <span class="provider-active-label">Current runtime</span>

@@ -8,9 +8,9 @@
     (function () {
       try {
         var saved = localStorage.getItem("kria_theme");
-        document.documentElement.setAttribute("data-theme", saved === "light" ? "light" : "dark");
+        document.documentElement.setAttribute("data-theme", saved === "dark" ? "dark" : "light");
       } catch (_) {
-        document.documentElement.setAttribute("data-theme", "dark");
+        document.documentElement.setAttribute("data-theme", "light");
       }
     })();
   </script>

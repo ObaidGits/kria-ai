@@ -1,94 +1,148 @@
-# KRIA State Transitions
+# KRIA HITL State Transitions
 
-**Document status:** MVP state machine  
-**Purpose:** Keep workflow and decision transitions deterministic and small.
+**Document status:** Implementation-bound state contract
+**Last updated:** 2026-05-27
+**Primary code:** `crates/kria-core/src/agent/collaborative_decision.rs`, `resume_executor.rs`, `continuation_reentry.rs`, `execution_transparency/mod.rs`
 
 ---
 
-## 1. Workflow States
+## 1. Decision States
 
-Only these workflow states are allowed in MVP:
+Persisted decisions use:
+
+```text
+Pending
+Resolved
+Deferred
+Expired
+Invalidated
+Denied
+Cancelled
+```
+
+Only `Pending` decisions may transition through resolution helpers. `Resolved` decisions may be considered for one-step resume. Expired or invalidated decisions cannot authorize execution.
+
+---
+
+## 2. Decision Transitions
+
+Allowed transition shape:
+
+```text
+Pending -> Resolved
+Pending -> Denied
+Pending -> Cancelled
+Pending -> Expired
+Pending -> Invalidated
+Resolved -> Invalidated
+Resolved -> execution claim
+```
+
+`Deferred` is a persisted status value, but it must not be treated as permission to execute.
+
+---
+
+## 3. Execution States
+
+Decision-bound execution records use:
+
+```text
+NotStarted
+Preparing
+BlockedByLease
+Executing
+Executed
+Failed
+Cancelled
+Invalidated
+UnknownAfterCrash
+```
+
+Terminal execution states are:
+
+```text
+Executed
+Failed
+Cancelled
+Invalidated
+UnknownAfterCrash
+```
+
+Duplicate execution claims are rejected unless the existing state is `BlockedByLease`.
+
+---
+
+## 4. Resume Execution Flow
+
+Current `ResumeExecutor` flow:
+
+```text
+refresh decision store
+  -> validate resolved decision context
+  -> load persisted ActionProposal
+  -> validate action/session/workspace context
+  -> claim execution
+  -> validate tool schema and registry version
+  -> require deterministic local resume support
+  -> collect grounding facts
+  -> run resume gate
+  -> acquire leases
+  -> run final resume gate
+  -> mark Executing
+  -> execute exactly one tool action
+  -> mark Executed / Failed / Cancelled
+```
+
+No whole-workflow replay is allowed in this path.
+
+---
+
+## 5. Continuation States
+
+Continuation records may use:
+
+```text
+NotStarted
+VerifyingPriorAction
+VerifiedPriorAction
+AdvancingActionState
+ReadyForNextSafeStep
+ExecutingNextSafeStep
+PausedAgain
+CompletedOneStep
+Failed
+Cancelled
+UnknownAfterCrash
+Invalidated
+```
+
+`ContinuationReentryService` may report a preview of the next safe step, but it must not execute that step automatically.
+
+---
+
+## 6. Trace-Level Workflow States
+
+Execution transparency may report:
 
 ```text
 Running
 PausedForDecision
-Resuming
 Completed
 Failed
 Aborted
 ```
 
-Do not add `Deferred`, `Expired`, `ReGrounding`, `ReVerifying`, or scheduler substates in MVP. Those are events or actions, not workflow states.
+These are trace/user-facing states. They do not replace persisted decision/execution/continuation state.
 
 ---
 
-## 2. Workflow Transitions
-
-```text
-Running -> PausedForDecision
-Running -> Completed
-Running -> Failed
-Running -> Aborted
-
-PausedForDecision -> Resuming
-PausedForDecision -> Aborted
-
-Resuming -> Running
-Resuming -> Failed
-Resuming -> Aborted
-
-Completed -> terminal
-Failed -> terminal unless explicit retry creates new attempt_id
-Aborted -> terminal
-```
-
-No automatic transition from `PausedForDecision` to `Running` is allowed.
-
----
-
-## 3. Decision States
-
-```text
-Pending
-Resolved
-Invalidated
-Denied
-Expired
-Cancelled
-```
-
-Only `Pending` decisions can be resolved.
-
----
-
-## 4. Resume Flow
-
-```text
-resolve decision
-  -> workflow enters Resuming
-  -> rebuild ActionProposal
-  -> revalidate hashes/risk/evidence/lease
-  -> Running or Failed/Aborted
-```
-
-If revalidation fails, workflow returns to `PausedForDecision` with a new or invalidated decision.
-
----
-
-## 5. Terminal Rules
-
-- `Completed` cannot resume.
-- `Aborted` cannot resume.
-- `Failed` can retry only by creating a new `attempt_id`.
-- Old decisions cannot move a terminal workflow.
-
----
-
-## 6. MVP Tests
+## 7. Required Tests
 
 - cannot resolve non-pending decision,
-- cannot resume terminal workflow,
-- failed retry creates new attempt ID,
-- pause never auto-runs after timeout,
-- invalidation returns to paused state with clear reason.
-
+- cannot execute unresolved decision,
+- duplicate execution claim is rejected,
+- blocked-by-lease execution can be retried through a new claim path,
+- execution cancellation records `Cancelled`,
+- crash-unknown state is terminal for resume,
+- continuation duplicate is rejected,
+- continuation does not auto-run the next safe step.

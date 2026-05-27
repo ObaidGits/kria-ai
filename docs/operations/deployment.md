@@ -1,116 +1,241 @@
-# KRIA Deployment Architecture
+# KRIA Deployment Operations
 
-## 1. Purpose
+Last updated: 2026-05-27
 
-This document defines production deployment architecture and operating boundaries for KRIA as an Execution Intelligence Platform.
+## Purpose
 
-Responsibilities:
-- Define deployment topology and runtime packaging.
-- Preserve orchestration authority and safety behavior across environments.
-- Standardize configuration, rollout, and recovery practices.
+This document defines how KRIA is packaged, configured, started, observed, and recovered in operational environments. It describes deployment behavior as implemented, not aspirational architecture.
 
-Non-goals:
-- This is not a step-by-step beginner install guide.
-- Deployment does not redefine subsystem logic contracts.
+KRIA's deployment rule is simple:
 
-## 2. Architecture Overview
+```text
+The host may run KRIA, but KRIA core remains the authority for tools, safety,
+providers, integrations, and completion claims.
+```
 
-Primary deployment surfaces:
-- Core runtime binaries (Rust crates/workspace outputs).
-- Containerized deployment artifacts (`Dockerfile*`, compose files).
-- Configuration files (`kria_config.toml`, env/config overlays).
+## Deployable Surfaces
 
-Deployment model:
-1. Build immutable runtime artifact.
-2. Inject environment-specific configuration/credentials.
-3. Start runtime with controlled integration endpoints.
-4. Monitor health, safety events, and orchestration behavior.
+Workspace crates:
 
-## 3. Runtime Execution Flow
+- `kria-core`: runtime logic, agent loop, tools, config, providers, memory, safety, integrations.
+- `kria-desktop`: Tauri desktop app and command surface.
+- `kria-server`: standalone server target.
+- `kria-eval`: evaluation harness.
+- `kria-connection-control`: remote target connection-control runtime.
+- `kria-uinput-daemon`: GUI input daemon.
+- `kria-test-app`: test application for GUI/E2E flows.
 
-1. Runtime boots and initializes core subsystems (providers, memory, safety, integrations).
-2. Integration adapters are mounted according to config.
-3. Requests/turns execute through orchestration loop with policy gates.
-4. Runtime exports logs/telemetry for operations and incident response.
-5. Graceful shutdown preserves durable state and in-flight safety semantics.
+Packaging surfaces:
 
-Authority boundaries:
-- Deployment platform hosts KRIA; it does not replace runtime orchestration authority.
-- External substrates remain controlled through KRIA execution gates.
+- `scripts/build-release.sh`: Linux/macOS Tauri release build.
+- `scripts/build-release.ps1`: Windows release build.
+- `Dockerfile`, `Dockerfile.cpu`, `docker-compose.yml`, `docker-compose.cpu.yml`: container deployment profiles.
+- `Dockerfile.openclaw-substrate`: OpenClaw sandbox image.
+- `justfile`: local/CI task entry points.
 
-## 4. Core Components
+## Runtime Startup
 
-| Component | Contract |
+Desktop startup begins in `crates/kria-desktop/src/main.rs`.
+
+Startup sequence:
+
+1. Install Linux seccomp filter when supported.
+2. Build Tauri app with desktop plugins.
+3. Register `AppStateCell` immediately so early commands fail cleanly instead of panicking.
+4. Create tray.
+5. Start `init_runtime` in the background.
+6. On exit, run `shutdown_runtime` once.
+
+`init_runtime` in `crates/kria-desktop/src/commands/runtime.rs` performs the operational boot:
+
+1. Resolve paths and initialize logging.
+2. Load config.
+3. Detect/cache hardware tier and clamp runtime limits.
+4. Open SQLite memory store.
+5. Boot OpenClaw registry/audit tables and optional Docker pool.
+6. Build model router and optional local llama-server orchestrator.
+7. Start Python sidecar non-blocking.
+8. Build tool registry, semantic router, tool index, and agent loop.
+9. Load MCP server config and register MCP-backed tools.
+10. Register Google Workspace, n8n, fleet, image, GUI, app lifecycle, and OpenClaw tools when available.
+11. Wire safety, HITL, audit, rollback, verifier, PSDG, transparency, and workflow cognition engines.
+
+Missing optional subsystems degrade. They should not block the entire desktop runtime unless the missing dependency is required by the selected workflow.
+
+## Configuration
+
+Config load order:
+
+1. Project default: discovered `config/default.toml`.
+2. User override: `~/.kria/config.toml`.
+3. Explicit override path when caller provides one.
+4. Environment variables.
+
+Important environment overrides:
+
+- `KRIA_MODELS_DIR`
+- `KRIA_TIER`
+- `KRIA_LLM_MODE`
+- `KRIA_ACTIVE_PROVIDER`
+- `KRIA_ACTIVE_MODEL`
+- `KRIA_PROVIDER_API_KEY`
+- `KRIA_OPENAI_API_KEY`
+- `KRIA_GEMINI_API_KEY`
+- `KRIA_ANTHROPIC_API_KEY`
+- `KRIA_OPENROUTER_API_KEY`
+- `KRIA_OPENCODE_API_KEY`
+- `KRIA_CLOUD_API_KEY`
+- `KRIA_AGENT_AUTONOMY_PROFILE`
+- `KRIA_AGENT_MAX_TOOL_ROUNDS`
+- `KRIA_AGENT_MIN_CONFIDENCE`
+- `KRIA_COLAB_ENABLED`
+- `KRIA_COLAB_MCP_SERVER`
+- `KRIA_ENABLE_ONNX_L0`
+- `KRIA_ONNX_L0_MODEL_PATH`
+
+Environment wins over user settings for provider/runtime selection.
+
+## Standard Data Paths
+
+`KriaPaths::resolve()` creates and uses:
+
+| Path | Purpose |
 |---|---|
-| Build/release scripts (`scripts/*`) | Produce consistent deployable artifacts |
-| Container definitions (`Dockerfile*`, compose) | Standardized runtime environment provisioning |
-| Runtime config (`kria_config.toml` + env) | Controlled feature/provider/integration wiring |
-| Persistent stores (memory/audit DB) | Durable state and governance data retention |
+| `~/.kria/config.toml` | User config override. |
+| `~/.kria/kria.db` | Memory, audit, PSDG/world-model, and related SQLite state. |
+| `~/.kria/skills.db` | OpenClaw skill registry and audit table. |
+| `~/.kria/models/llm` | GGUF local LLM files. |
+| `~/.kria/models/stt` | Speech-to-text models. |
+| `~/.kria/models/tts` | Text-to-speech voices/models. |
+| `~/.kria/models/embeddings` | Embedding models. |
+| `~/.kria/rollback` | Rollback snapshots. |
+| `~/.kria/workflows` | User/runtime workflow state. |
+| `~/.kria/plugins` | Plugin data. |
+| `~/.kria/logs` | Runtime logs. |
+| `~/.kria/n8n/callback_inbox.jsonl` | Durable n8n callback replay inbox. |
+| `~/.kria/n8n/governance_audit.jsonl` | n8n governance audit records. |
 
-Invariants:
-- Same safety and authority gates apply in all environments.
-- Deployments must avoid undocumented config drift.
-- Artifact provenance and config changes are traceable.
+`KRIA_MODELS_DIR` can relocate model storage.
 
-## 5. Integration Contracts
+## Release Build
 
-| Integration | Deployment contract |
+Primary desktop release command:
+
+```bash
+scripts/build-release.sh
+```
+
+The script:
+
+1. Verifies `cargo`, `node`, `npm`, and `cargo-tauri`.
+2. Builds the frontend in `ui`.
+3. Stages bundled resources under `crates/kria-desktop/resources`.
+4. Downloads/stages `llama-server` and `uv` if missing.
+5. Optionally stages a `kria-modules` wheel.
+6. Runs `cargo tauri build`.
+7. Reports bundles under `target/release/bundle`.
+
+General workspace release build:
+
+```bash
+cargo build --release --workspace
+```
+
+Release gate profile:
+
+```bash
+scripts/run_release_test_gate.sh
+```
+
+That script runs `cargo kria-test --mode RELEASE` with strict release-gate environment defaults.
+
+## Optional Runtime Dependencies
+
+| Dependency | Needed for |
 |---|---|
-| Orchestration | Runtime authority remains inside KRIA core |
-| Providers | Endpoint/credentials supplied by env config, not hardcoded |
-| Tools | Dangerous tool capabilities remain policy-gated |
-| Memory | Persistent storage availability and migration integrity required |
-| OpenClaw/n8n/MCP | External substrate endpoints configured explicitly and monitored |
-| Hardware | Device/runtime limits reflected in deployment resource settings |
-| Safety | HITL/audit/policy stores must be reachable and durable |
-| GUI/Browser/Voice | Optional surfaces enabled per environment capability |
+| Docker | OpenClaw sandbox execution. |
+| `kria/openclaw-substrate:latest` image | OpenClaw container pool. |
+| Python 3 | Sidecar and selected media/vision helpers. |
+| GGUF model files | Local llama.cpp runtime. |
+| `llama-server` | Managed local LLM runtime. |
+| AT-SPI and accessibility settings | Semantic GUI interaction on Linux. |
+| uinput daemon | Low-level GUI input where enabled. |
+| OCR dependency | Vision fallback and visible GUI verification. |
+| n8n endpoint/API key/signing secret | n8n workflow substrate. |
+| MCP server commands | MCP tools and integrations. |
 
-## 6. Failure Handling & Recovery
+OpenClaw image build:
 
-- Startup failure: fail fast with explicit subsystem readiness errors.
-- Integration outage: degrade to available substrates/providers under policy.
-- Resource exhaustion: trigger hardware/provider fallback pathways.
-- Data store issue: preserve safe degraded runtime where possible; block unsafe operations.
+```bash
+docker build -f Dockerfile.openclaw-substrate -t kria/openclaw-substrate:latest .
+```
 
-Recovery:
-- Use bounded restart/retry strategies and explicit health checks.
-- Prefer controlled rollback to unknown partial state.
+## Production Preflight
 
-## 7. Performance & Constraints
+Before shipping or starting a production profile:
 
-Constraints:
-- Provider latency and network stability affect turn SLOs.
-- Hardware capacity (CPU/GPU/VRAM) shapes local model viability.
-- Persistent storage performance affects memory/safety audit throughput.
+1. Run `cargo fmt --all`.
+2. Run `cargo clippy --workspace --all-features -- -D warnings`.
+3. Run `cargo test --workspace --lib`.
+4. Run targeted integration/eval suites for changed subsystems.
+5. Confirm `~/.kria/config.toml` does not contain unintended credentials or stale provider IDs.
+6. Confirm model files exist under the expected model path.
+7. Confirm OpenClaw Docker image exists if OpenClaw is enabled.
+8. Confirm n8n catalog workflows are approved before enabling execution.
+9. Confirm GUI prerequisites if GUI automation is part of the deployment.
+10. Confirm logs write under `~/.kria/logs`.
 
-Tradeoff:
-- Higher resilience and observability often increase infrastructure cost/complexity.
+## Health And Observability
 
-## 8. Security & Safety
+Operational signals are exposed through:
 
-Controls:
-- Principle of least privilege for runtime credentials and system access.
-- Protect integration secrets and rotate per operational policy.
-- Preserve policy/HITL/audit controls in production; no bypass modes.
+- Tauri commands such as `get_health`, `get_runtime_diagnostics`, `get_orchestrator_status`, provider commands, n8n status, OpenClaw status, and GUI automation status.
+- Logs under `~/.kria/logs`.
+- SQLite state in `kria.db`.
+- n8n JSONL callback and governance files.
+- OpenClaw `skills.db` audit entries.
+- UI events such as `orchestrator:selected`, `orchestrator:disabled`, `llm-runtime:apply`, `n8n:callback`, `n8n:governance`, and `n8n:hitl_response`.
 
-Trust boundaries:
-- External providers and substrates are untrusted networks/services.
-- Runtime control plane remains authoritative and isolated.
+Watch these in production:
 
-## 9. Observability
+- runtime boot failures,
+- provider connection failures,
+- local llama-server startup/swap failures,
+- OpenClaw pool unavailable status,
+- n8n dead letters,
+- HITL timeout/denial rates,
+- GUI accessibility readiness,
+- memory/audit DB write failures,
+- model file lookup failures.
 
-Required operations telemetry:
-- Service health/readiness/liveness.
-- Turn latency, tool failure, provider fallback, and safety decision metrics.
-- Audit-log integrity and write health.
-- Integration endpoint error rates and saturation signals.
+## Failure Handling
 
-Evaluation:
-- Deployment validation should include subsystem smoke checks and eval regressions from `docs/evaluations/overview.md`.
+| Failure | Expected behavior |
+|---|---|
+| Missing project default config | Use user config or defaults. |
+| Missing user config | Start from project/default config. |
+| Missing model files | Disable local orchestrator and emit actionable status. |
+| Cloud/external provider active | Skip local llama-server and avoid GPU allocation. |
+| OpenClaw disabled | Do not start container pool. |
+| Docker/image missing | Mark OpenClaw unavailable, keep runtime alive. |
+| n8n invalid config | Do not register `n8n_invoke_workflow`. |
+| Python sidecar failure | Mark sidecar/vision degraded, keep runtime alive. |
+| AT-SPI unavailable | Mark semantic GUI degraded and surface remediation. |
+| DB open failure | Fail startup for required persistent state. |
 
-## 10. Future Evolution
+Recovery rule:
 
-1. Strengthen environment profiles for local/dev/staging/production parity.
-2. Improve rollout safety with stricter automated health gates.
-3. Expand integration-specific SLO dashboards.
-4. Keep deployment architecture anchored to deterministic runtime governance.
+```text
+Restart or downgrade only through explicit runtime/config paths.
+Do not bypass safety, HITL, verifier, or tool authority to recover faster.
+```
+
+## Deployment Invariants
+
+- Runtime config changes must be traceable.
+- Credentials must come from config or environment, not source code.
+- Optional integrations must degrade cleanly.
+- Dangerous actions remain policy/HITL gated.
+- External substrates are execution targets, not authority layers.
+- Visible GUI workflows must still satisfy verifier/fidelity requirements.
+- Production success requires both code tests and relevant evals.

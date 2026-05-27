@@ -195,6 +195,22 @@ vi.mock("../stores/app", () => ({
     setColabNotebook: noopAsync,
     reconcileMcpRuntime: reconcileMcpRuntimeMock,
     restartMcpServerRuntime: restartMcpServerRuntimeMock,
+    ironcladStatus: () => null,
+    loadIroncladStatus: noopAsync,
+    getIroncladConfig: vi.fn(async () => ({
+      config: {
+        high_recovery_slo_ms: 500,
+        lease_ttl_ms: 120000,
+        heartbeat_grace_ms: 5000,
+        quarantine_cooldown_ms: 60000,
+        max_normalized_hash_distance: 0.2,
+      },
+    })),
+    updateIroncladConfig: noopAsync,
+    requestIroncladSoftReset: noopAsync,
+    requestIroncladHardReset: noopAsync,
+    loadIroncladForensics: noopAsync,
+    ironcladForensicsTotal: () => 0,
   },
 }));
 
@@ -212,10 +228,15 @@ describe("SettingsModal Google controls", () => {
     restartMcpServerRuntimeMock.mockClear();
   });
 
+  async function openGoogleSettings() {
+    await fireEvent.click(screen.getByRole("button", { name: /^Integrations\b/ }));
+    await fireEvent.click(screen.getByRole("button", { name: /^Google$/ }));
+  }
+
   it("persists account name on blur", async () => {
     render(() => <SettingsModal />);
 
-    await fireEvent.click(screen.getByRole("button", { name: /^Google$/ }));
+    await openGoogleSettings();
 
     const accountInput = await screen.findByPlaceholderText("personal");
     await fireEvent.input(accountInput, {
@@ -231,7 +252,7 @@ describe("SettingsModal Google controls", () => {
   it("runs runtime reconcile and restart controls", async () => {
     render(() => <SettingsModal />);
 
-    await fireEvent.click(screen.getByRole("button", { name: /^Google$/ }));
+    await openGoogleSettings();
 
     await fireEvent.click(await screen.findByRole("button", { name: "Reconcile runtime" }));
     await fireEvent.click(await screen.findByRole("button", { name: "Restart runtime" }));

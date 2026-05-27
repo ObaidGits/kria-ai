@@ -1,69 +1,99 @@
 {
+  "metadata": {
+    "schema_version": "2026-05-27",
+    "generated_for": "KRIA LLM context pack",
+    "authority": "orientation_only",
+    "source_of_truth": "source code and canonical docs"
+  },
   "nodes": [
     {
       "id": "system.kria",
       "type": "system",
-      "description": "Local-first desktop AI assistant with chat, voice, tools, memory, and OS integrations.",
-      "importance": "high"
-    },
-    {
-      "id": "module.desktop_runtime",
-      "type": "module",
-      "description": "Primary Tauri runtime host that wires core services and UI events.",
+      "description": "Local-first desktop AI assistant with chat, voice, tools, memory, GUI cognition, HITL, model orchestration, and OS integrations.",
       "importance": "high"
     },
     {
       "id": "module.kria_core",
-      "type": "module",
-      "description": "Main Rust library containing agent, tools, safety, LLM, memory, routing, sidecar, MCP, image, and voice logic.",
+      "type": "crate",
+      "description": "Main Rust library containing agent, tools, safety, memory, routing, sidecar, MCP, image, voice, GUI cognition, HITL decision runtime, N8N, OpenClaw, and infrastructure.",
+      "importance": "high"
+    },
+    {
+      "id": "module.desktop_runtime",
+      "type": "crate",
+      "description": "Primary Tauri runtime host that wires core services, state, commands, local API, tray, and UI events.",
       "importance": "high"
     },
     {
       "id": "module.ui",
-      "type": "module",
+      "type": "frontend",
       "description": "SolidJS frontend using Tauri invokes and event listeners.",
       "importance": "high"
     },
     {
+      "id": "module.kria_eval",
+      "type": "crate",
+      "description": "Evaluation harness for GUI, workflow, integration, sandbox, fixture, judge, and report flows.",
+      "importance": "high"
+    },
+    {
       "id": "module.server",
-      "type": "module",
-      "description": "Secondary Axum API/WebSocket surface; chat route is currently a stub.",
+      "type": "crate",
+      "description": "Secondary Axum API/WebSocket/provider/inventory surface.",
+      "importance": "medium"
+    },
+    {
+      "id": "module.connection_control",
+      "type": "crate",
+      "description": "Signed connection and lease primitives for remote/device orchestration.",
+      "importance": "medium"
+    },
+    {
+      "id": "module.uinput_daemon",
+      "type": "crate",
+      "description": "Separate uinput daemon for low-level GUI input automation.",
       "importance": "medium"
     },
     {
       "id": "module.python_sidecar",
-      "type": "module",
-      "description": "Python JSON-RPC processor process for image, document, code, web, audio, embeddings, news, and Google helpers.",
+      "type": "python",
+      "description": "Python JSON-RPC processors for image, document, code, web, audio, embeddings, news, Google helpers, and Telegram MCP.",
       "importance": "high"
     },
     {
       "id": "module.agent",
       "type": "module",
-      "description": "User-turn orchestration, routing, streaming, parsing, tool execution, and cancellation.",
+      "description": "User-turn orchestration, routing, streaming, parsing, GUI cognition, HITL decisions, tool execution, and cancellation.",
       "importance": "high"
     },
     {
-      "id": "module.routing",
+      "id": "module.gui_cognition",
       "type": "module",
-      "description": "Semantic and lexical router that narrows domains and tool schemas per turn.",
+      "description": "Semantic workflow frames, execution-mode decisions, workflow contracts, GUI substrate planning, visible verification, and hybrid synchronization.",
+      "importance": "high"
+    },
+    {
+      "id": "module.hitl_decision_runtime",
+      "type": "module",
+      "description": "Durable ActionProposal, InteractionDecision, execution gate, resume executor, continuation re-entry, and resource leases.",
       "importance": "high"
     },
     {
       "id": "module.tools",
       "type": "module",
-      "description": "Tool definitions, handlers, registry, sidecar tools, image tools, Google Workspace tools, and MCP-backed tools.",
+      "description": "Tool definitions, handlers, registry, execution context, resume capability metadata, sidecar tools, image tools, Google Workspace tools, N8N/OpenClaw tools, and MCP-backed tools.",
       "importance": "high"
     },
     {
       "id": "module.safety",
       "type": "module",
-      "description": "Risk policy, HITL approval, audit logging, rollback snapshots, blacklist, and PIN guard.",
+      "description": "Risk policy, HITL approval gateway, audit logging, rollback, blacklist, and PIN guard.",
       "importance": "high"
     },
     {
       "id": "module.llm",
       "type": "module",
-      "description": "Model router, local/cloud backend abstraction, token/context helpers, and local orchestration.",
+      "description": "Model router, local/cloud backend abstraction, token/context helpers, and local orchestration hooks.",
       "importance": "high"
     },
     {
@@ -103,16 +133,16 @@
       "importance": "medium"
     },
     {
-      "id": "module.config",
-      "type": "module",
-      "description": "Config schema, loading, saving, path resolution, hardware/model/orchestrator settings.",
-      "importance": "high"
-    },
-    {
       "id": "module.infra",
       "type": "module",
-      "description": "Health registry, logging, event bus, hardware profiling, supervisor, and pipeline tracing.",
+      "description": "Health registry, logging, event bus, hardware profiling, remote QEMU, pool, QoS, snapshot, supervisor, and pipeline tracing.",
       "importance": "medium"
+    },
+    {
+      "id": "module.eval_gui",
+      "type": "module",
+      "description": "GUI cognition/readiness/hardening/workflow eval suites under kria-eval.",
+      "importance": "high"
     },
     {
       "id": "file.desktop_commands",
@@ -123,7 +153,7 @@
     {
       "id": "file.ui_store",
       "type": "file",
-      "description": "Central UI state, Tauri invokes, and backend event listeners.",
+      "description": "Central UI state, Tauri invokes, backend event listeners, and frontend/backend contract layer.",
       "importance": "high"
     },
     {
@@ -135,25 +165,43 @@
     {
       "id": "file.tool_registry",
       "type": "file",
-      "description": "Central registry for tool schemas and handlers.",
+      "description": "Central registry for tool schemas, handlers, execution context, and resume capability metadata.",
       "importance": "high"
     },
     {
-      "id": "file.safety_policy",
+      "id": "file.execution_gate",
       "type": "file",
-      "description": "Risk tiers and approval/blocking decisions for tool actions.",
+      "description": "Deterministic readiness, preflight, execution-authority, policy, durable-decision, and resource-requirement gate.",
       "importance": "high"
     },
     {
-      "id": "file.sidecar_bridge_rs",
+      "id": "file.collaborative_decision",
       "type": "file",
-      "description": "Rust-side process manager and JSON-RPC client for Python sidecar.",
+      "description": "Durable HITL decision envelope, JSONL event log, action proposal hashes, execution records, continuation records, and evidence records.",
       "importance": "high"
     },
     {
-      "id": "file.sidecar_bridge_py",
+      "id": "file.resume_executor",
       "type": "file",
-      "description": "Python JSON-RPC stdio dispatcher and processor registry.",
+      "description": "Executes one resolved persisted ActionProposal after resume validation, grounding, gates, leases, and tool capability checks.",
+      "importance": "high"
+    },
+    {
+      "id": "file.semantic_workflow",
+      "type": "file",
+      "description": "Semantic workflow frame and fidelity metadata for GUI/workflow cognition.",
+      "importance": "high"
+    },
+    {
+      "id": "file.workflow_contracts",
+      "type": "file",
+      "description": "Declarative workflow intent contract registry and contract evaluation.",
+      "importance": "high"
+    },
+    {
+      "id": "file.gui_wiring",
+      "type": "file",
+      "description": "GUI execution coordinator integration, policy tool executor, and live GUI workflow wiring.",
       "importance": "high"
     },
     {
@@ -169,9 +217,15 @@
       "importance": "high"
     },
     {
+      "id": "file.decision_action_center",
+      "type": "file",
+      "description": "Frontend action-center surface for durable HITL decisions and resume actions.",
+      "importance": "medium"
+    },
+    {
       "id": "flow.desktop_startup",
       "type": "flow",
-      "description": "Tauri startup initializes runtime state, services, tools, sidecar, voice, MCP, and orchestrator.",
+      "description": "Tauri startup initializes runtime state, services, tools, sidecar, voice, MCP, orchestrator, local API, and device/fleet state.",
       "importance": "high"
     },
     {
@@ -181,15 +235,21 @@
       "importance": "high"
     },
     {
-      "id": "flow.routing_context",
+      "id": "flow.tool_execution",
       "type": "flow",
-      "description": "Agent narrows route/tool schema context and trims/shapes messages for token budgets.",
+      "description": "Agent parses tool calls, applies runtime authority, executes handlers, audits, and returns shaped results.",
       "importance": "high"
     },
     {
-      "id": "flow.tool_execution",
+      "id": "flow.hitl_resume",
       "type": "flow",
-      "description": "Agent parses tool calls, applies policy/HITL, executes handlers, audits, and returns shaped results.",
+      "description": "Durable decision is resolved by user and resumed through one-step gate/lease/tool execution.",
+      "importance": "high"
+    },
+    {
+      "id": "flow.gui_cognition",
+      "type": "flow",
+      "description": "Prompt semantics produce workflow mode/contracts, substrate plan, visible/structural execution, and verifier authority result.",
       "importance": "high"
     },
     {
@@ -217,16 +277,10 @@
       "importance": "medium"
     },
     {
-      "id": "flow.mcp_tool",
+      "id": "flow.evaluation",
       "type": "flow",
-      "description": "Configured MCP servers expose capabilities that are bridged into ToolRegistry.",
-      "importance": "medium"
-    },
-    {
-      "id": "flow.server_api",
-      "type": "flow",
-      "description": "Axum server exposes basic API/WebSocket routes; chat is not full AgentLoop runtime.",
-      "importance": "low"
+      "description": "kria-eval suites run sandboxed GUI/workflow/integration scenarios and produce reports.",
+      "importance": "high"
     }
   ],
   "edges": [
@@ -243,6 +297,12 @@
       "confidence": "high"
     },
     {
+      "from": "system.kria",
+      "to": "module.ui",
+      "type": "communicates_with",
+      "confidence": "high"
+    },
+    {
       "from": "module.desktop_runtime",
       "to": "module.kria_core",
       "type": "depends_on",
@@ -255,75 +315,27 @@
       "confidence": "high"
     },
     {
-      "from": "module.ui",
-      "to": "file.ui_store",
-      "type": "depends_on",
-      "confidence": "high"
-    },
-    {
       "from": "module.desktop_runtime",
       "to": "file.desktop_commands",
       "type": "depends_on",
       "confidence": "high"
     },
     {
-      "from": "file.desktop_commands",
-      "to": "module.config",
-      "type": "uses",
+      "from": "module.ui",
+      "to": "file.ui_store",
+      "type": "depends_on",
       "confidence": "high"
     },
     {
-      "from": "file.desktop_commands",
-      "to": "module.memory",
-      "type": "uses",
-      "confidence": "high"
-    },
-    {
-      "from": "file.desktop_commands",
-      "to": "module.tools",
-      "type": "uses",
-      "confidence": "high"
-    },
-    {
-      "from": "file.desktop_commands",
-      "to": "module.safety",
-      "type": "uses",
-      "confidence": "high"
-    },
-    {
-      "from": "file.desktop_commands",
-      "to": "module.llm_orchestrator",
-      "type": "uses",
-      "confidence": "high"
-    },
-    {
-      "from": "file.desktop_commands",
-      "to": "module.voice",
-      "type": "uses",
-      "confidence": "high"
-    },
-    {
-      "from": "file.desktop_commands",
-      "to": "module.mcp",
-      "type": "uses",
-      "confidence": "high"
-    },
-    {
-      "from": "file.desktop_commands",
-      "to": "module.infra",
-      "type": "uses",
-      "confidence": "high"
+      "from": "file.ui_store",
+      "to": "file.decision_action_center",
+      "type": "feeds",
+      "confidence": "medium"
     },
     {
       "from": "module.agent",
       "to": "file.agent_loop",
       "type": "depends_on",
-      "confidence": "high"
-    },
-    {
-      "from": "file.agent_loop",
-      "to": "module.routing",
-      "type": "uses",
       "confidence": "high"
     },
     {
@@ -357,9 +369,63 @@
       "confidence": "high"
     },
     {
-      "from": "module.safety",
-      "to": "file.safety_policy",
+      "from": "file.tool_registry",
+      "to": "file.execution_gate",
+      "type": "guarded_by",
+      "confidence": "high"
+    },
+    {
+      "from": "file.execution_gate",
+      "to": "file.collaborative_decision",
+      "type": "creates_decision",
+      "confidence": "high"
+    },
+    {
+      "from": "file.execution_gate",
+      "to": "module.safety",
+      "type": "uses_policy",
+      "confidence": "high"
+    },
+    {
+      "from": "module.hitl_decision_runtime",
+      "to": "file.collaborative_decision",
       "type": "depends_on",
+      "confidence": "high"
+    },
+    {
+      "from": "module.hitl_decision_runtime",
+      "to": "file.execution_gate",
+      "type": "depends_on",
+      "confidence": "high"
+    },
+    {
+      "from": "module.hitl_decision_runtime",
+      "to": "file.resume_executor",
+      "type": "depends_on",
+      "confidence": "high"
+    },
+    {
+      "from": "module.gui_cognition",
+      "to": "file.semantic_workflow",
+      "type": "depends_on",
+      "confidence": "high"
+    },
+    {
+      "from": "module.gui_cognition",
+      "to": "file.workflow_contracts",
+      "type": "depends_on",
+      "confidence": "high"
+    },
+    {
+      "from": "module.gui_cognition",
+      "to": "file.gui_wiring",
+      "type": "integrates_with",
+      "confidence": "high"
+    },
+    {
+      "from": "file.gui_wiring",
+      "to": "file.execution_gate",
+      "type": "uses",
       "confidence": "high"
     },
     {
@@ -379,12 +445,6 @@
       "to": "file.orchestrator_mod",
       "type": "depends_on",
       "confidence": "high"
-    },
-    {
-      "from": "module.llm_orchestrator",
-      "to": "file.model_router",
-      "type": "communicates_with",
-      "confidence": "medium"
     },
     {
       "from": "module.tools",
@@ -411,38 +471,26 @@
       "confidence": "medium"
     },
     {
-      "from": "module.python_sidecar",
-      "to": "file.sidecar_bridge_rs",
-      "type": "communicates_with",
-      "confidence": "high"
-    },
-    {
-      "from": "file.sidecar_bridge_rs",
-      "to": "file.sidecar_bridge_py",
-      "type": "communicates_with",
-      "confidence": "high"
-    },
-    {
       "from": "module.server",
       "to": "module.kria_core",
       "type": "depends_on",
       "confidence": "high"
     },
     {
-      "from": "module.server",
-      "to": "module.agent",
+      "from": "module.kria_eval",
+      "to": "module.kria_core",
       "type": "depends_on",
-      "confidence": "low"
+      "confidence": "high"
     },
     {
-      "from": "flow.desktop_startup",
-      "to": "module.desktop_runtime",
-      "type": "flows_to",
+      "from": "module.kria_eval",
+      "to": "module.eval_gui",
+      "type": "contains",
       "confidence": "high"
     },
     {
       "from": "flow.desktop_startup",
-      "to": "file.desktop_commands",
+      "to": "module.desktop_runtime",
       "type": "flows_to",
       "confidence": "high"
     },
@@ -465,18 +513,6 @@
       "confidence": "high"
     },
     {
-      "from": "flow.routing_context",
-      "to": "module.routing",
-      "type": "flows_to",
-      "confidence": "high"
-    },
-    {
-      "from": "flow.routing_context",
-      "to": "file.agent_loop",
-      "type": "flows_to",
-      "confidence": "high"
-    },
-    {
       "from": "flow.tool_execution",
       "to": "file.agent_loop",
       "type": "flows_to",
@@ -490,7 +526,31 @@
     },
     {
       "from": "flow.tool_execution",
-      "to": "file.safety_policy",
+      "to": "file.execution_gate",
+      "type": "flows_to",
+      "confidence": "high"
+    },
+    {
+      "from": "flow.hitl_resume",
+      "to": "file.collaborative_decision",
+      "type": "flows_to",
+      "confidence": "high"
+    },
+    {
+      "from": "flow.hitl_resume",
+      "to": "file.resume_executor",
+      "type": "flows_to",
+      "confidence": "high"
+    },
+    {
+      "from": "flow.gui_cognition",
+      "to": "module.gui_cognition",
+      "type": "flows_to",
+      "confidence": "high"
+    },
+    {
+      "from": "flow.gui_cognition",
+      "to": "file.gui_wiring",
       "type": "flows_to",
       "confidence": "high"
     },
@@ -501,20 +561,8 @@
       "confidence": "high"
     },
     {
-      "from": "flow.model_orchestration",
-      "to": "file.orchestrator_mod",
-      "type": "flows_to",
-      "confidence": "high"
-    },
-    {
       "from": "flow.sidecar_processing",
-      "to": "file.sidecar_bridge_rs",
-      "type": "flows_to",
-      "confidence": "high"
-    },
-    {
-      "from": "flow.sidecar_processing",
-      "to": "file.sidecar_bridge_py",
+      "to": "module.python_sidecar",
       "type": "flows_to",
       "confidence": "high"
     },
@@ -537,29 +585,16 @@
       "confidence": "high"
     },
     {
-      "from": "flow.image_generation",
-      "to": "module.tools",
+      "from": "flow.evaluation",
+      "to": "module.kria_eval",
       "type": "flows_to",
       "confidence": "high"
     },
     {
-      "from": "flow.mcp_tool",
-      "to": "module.mcp",
-      "type": "flows_to",
-      "confidence": "high"
-    },
-    {
-      "from": "flow.mcp_tool",
-      "to": "file.tool_registry",
-      "type": "flows_to",
-      "confidence": "high"
-    },
-    {
-      "from": "flow.server_api",
-      "to": "module.server",
+      "from": "flow.evaluation",
+      "to": "module.eval_gui",
       "type": "flows_to",
       "confidence": "high"
     }
   ]
 }
-

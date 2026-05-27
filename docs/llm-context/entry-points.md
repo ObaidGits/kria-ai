@@ -1,83 +1,131 @@
 # KRIA Entry Points
 
-## Desktop App
-- `crates/kria-desktop/src/main.rs` is the primary product entry point.
-- It registers Tauri plugins, tray integration, and the command handler list.
-- It hands off most runtime behavior to `crates/kria-desktop/src/commands/mod.rs` and `kria-core`.
+**Last updated:** 2026-05-27
 
-## Desktop Command Layer
-- `crates/kria-desktop/src/commands/mod.rs` is the largest integration surface.
-- It owns app state wiring for config, memory, tools, safety, voice, sidecar, MCP, model router, local orchestrator, image orchestrator, provisioning, health, local API bridge, and fleet/Ironclad state.
-- Most frontend calls from `ui/src/stores/app.ts` terminate here.
-- When adding/changing commands, update `main.rs`, the relevant `commands/` submodule, frontend store calls, event listeners, and tests.
+Use this as a first map. Confirm details in source before changing behavior.
+
+## Workspace
+
+- `Cargo.toml` defines the Rust workspace: `kria-core`, `kria-desktop`, `kria-server`, `kria-eval`, `kria-connection-control`, `kria-uinput-daemon`, and `kria-test-app`.
+- `ui/` is the SolidJS/Tauri frontend.
+- `kria-modules/` is the Python sidecar package.
+- `sidecars/kria-vision/` is the standalone vision sidecar.
+- `openclaw-substrate/` is the OpenClaw substrate bridge.
+
+## Desktop App
+
+- `crates/kria-desktop/src/main.rs` is the Tauri product entry point.
+- It registers plugins, tray integration, managed state, and command handlers.
+- `crates/kria-desktop/src/commands/mod.rs` is the primary backend integration surface.
+- Important command submodules include `chat.rs`, `gui_automation_control.rs`, `runtime.rs`, `runtime_status.rs`, `test_runner.rs`, `voice.rs`, `mcp.rs`, `providers.rs`, `provisioning.rs`, `local_api.rs`, `n8n.rs`, `openclaw.rs`, `device_tools.rs`, and `device_enrollment.rs`.
 
 ## UI App
+
 - `ui/src/index.tsx` renders the Solid app.
-- `ui/src/App.tsx` coordinates shell-level UI: chat, prompt lab, settings, HITL modal, voice overlay, setup wizard, fleet matrix, add-target modal, export dropdown, session sidebar, toasts, and forensics panels.
-- `ui/src/stores/app.ts` is the primary frontend/backend contract layer.
-- `ui/src/stores/provisioning.ts` owns first-run wizard calls and state.
+- `ui/src/App.tsx` coordinates the shell-level product UI.
+- `ui/src/stores/app.ts` is the main frontend/backend contract layer for Tauri invokes and events.
+- `ui/src/stores/provisioning.ts` owns first-run provisioning state.
+- Key components:
+  - `ChatView.tsx`
+  - `MessageBubble.tsx`
+  - `DecisionActionCenter.tsx`
+  - `HitlModal.tsx`
+  - `GuiWorkflowViewer.tsx`
+  - `PromptLabView.tsx`
+  - `SettingsModal.tsx`
+  - `SetupWizard.tsx`
+  - `DeviceMatrix.tsx`
+  - `ExecutiveDashboard.tsx`
+  - `TestRunnerDashboard.tsx`
 
 ## Agent Runtime
+
 - `crates/kria-core/src/agent/loop_engine/mod.rs` is the main assistant turn engine.
-- Supporting submodules in `loop_engine/`: `helpers.rs`, `intent_extractors.rs`, `intent_fallback.rs`, `response_helpers.rs`, `tests.rs`.
-- Other agent files: `prompts.rs`, `response_parser.rs`, `planner.rs`, `turn_context.rs`, `turn_gate.rs`, `router.rs`, `onnx_classifier.rs`, `interaction.rs`.
-- Agent turns depend on model routing, memory/session history, tool registry, safety/HITL, routing/mounting, and UI streaming events.
+- Supporting loop modules: `helpers.rs`, `intent_extractors.rs`, `intent_fallback.rs`, and `response_helpers.rs`.
+- Turn gating and routing: `turn_gate.rs`, `intent_gate.rs`, `router.rs`, `onnx_classifier.rs`, `turn_context.rs`, `turn_memory.rs`, and `crates/kria-core/src/routing/`.
+- Result shaping: `response_parser.rs`, `result_synthesizer.rs`, `synthesis_prompt.rs`, and `execution_transparency/`.
+
+## GUI Cognition Runtime
+
+- `gui_wiring.rs` wires GUI task execution into the broader runtime.
+- `semantic_workflow.rs`, `execution_mode_reasoner.rs`, and `workflow_intent_contract.rs` provide semantic workflow metadata, mode decisions, and declarative workflow contracts.
+- `gui_substrate_planner.rs`, `gui_planner.rs`, `stage_executor.rs`, `goal_tree.rs`, and `workflow_compiler.rs` plan bounded GUI/workflow actions.
+- `verifier_authority.rs`, `execution_verifier*.rs`, `observable_completion/`, and `hybrid_synchronization.rs` model evidence, authority, visible completion, and structural/visible synchronization.
+- `browser_cognition.rs`, `browser_media_governance.rs`, `ide_cognition.rs`, `window_observer.rs`, `atspi_engine.rs`, `ocr_engine.rs`, and `visual_reasoning.rs` handle app-specific or perception-adjacent GUI cognition.
+- `crates/kria-uinput-daemon/src/main.rs` is the separate uinput daemon used for lower-level input automation.
+
+## Safety, HITL, And Runtime Authority
+
+- Policy: `crates/kria-core/src/safety/policy.rs`.
+- HITL gateway: `crates/kria-core/src/safety/hitl.rs`.
+- Audit logger: `crates/kria-core/src/safety/audit.rs`.
+- Runtime authority and action gating:
+  - `agent/execution_authority.rs`
+  - `agent/execution_gate.rs`
+  - `agent/collaborative_decision.rs`
+  - `agent/resource_lease.rs`
+  - `agent/resume_executor.rs`
+  - `agent/continuation_reentry.rs`
+- UI surfaces: `DecisionActionCenter.tsx` and `HitlModal.tsx`.
+- Canonical docs: `docs/orchestration/runtime-authority.md` and `docs/contracts/hitl-mvp/`.
 
 ## Tool System
-- `crates/kria-core/src/tools/registry.rs` defines `ToolRegistry`, schemas, handlers, and registration behavior.
-- Tool domains live under `crates/kria-core/src/tools/`.
-- Important domains/integrations include image generation, vision, Google Workspace (+ `google_workspace_contract.rs`), MCP-backed tools, proactive/precognitive tools, scheduler, RAG/knowledge, and mount manager.
-- Tool calls should route through registry and safety policy rather than direct command execution.
 
-## Safety System
-- `crates/kria-core/src/safety/policy.rs` classifies and gates actions.
-- `hitl.rs` coordinates human approval.
-- `audit.rs` records actions.
-- `rollback.rs` creates rollback/snapshot coverage.
-- `blacklist.rs` and `pin_guard.rs` add explicit blocking/authorization controls.
+- `crates/kria-core/src/tools/registry.rs` defines `ToolRegistry`, schemas, handlers, execution context, and resume capability metadata.
+- Tool modules live under `crates/kria-core/src/tools/`.
+- Important domains include shell/exec, file ops, GUI automation, browser/Internet, desktop/system config, packages, power, developer, vision, image generation, Google Workspace, MCP, RAG/knowledge, N8N, scheduler, proactive/precognitive tools, and quarantine.
+- OpenClaw has its own core module under `crates/kria-core/src/openclaw/` plus desktop commands and the `openclaw-substrate/` bridge.
+- Tool calls should flow through registry, policy/HITL, audit, and preflight paths instead of bypassing runtime authority.
 
-## Local LLM / Orchestrator
-- `crates/kria-core/src/llm/model_router.rs` dispatches local/cloud/external model requests.
-- `crates/kria-core/src/llm/orchestrator/` manages local llama-server runtime, child processes, GPU watchdog, tier strategy, vision strategy, VRAM budgeting, thresholds, telemetry, and runtime state.
+## Model And Provider Runtime
+
+- `crates/kria-core/src/llm/model_router.rs` dispatches requests across local, cloud, and external model backends.
+- `crates/kria-core/src/llm/orchestrator/` manages local llama-server lifecycle, watchdog, tier strategy, telemetry, thresholds, vision strategy, VRAM budgeting, and runtime state.
 - `crates/kria-core/src/resource/gpu_lease.rs` coordinates GPU-heavy workloads.
-- `crates/kria-core/src/resource/telemetry.rs` provides resource-level telemetry.
+- Provider/server routes live in `crates/kria-server/src/provider_routes.rs` and `crates/kria-server/src/intelligence_routes.rs`.
 
-## Image / Vision Runtime
+## Image And Vision
+
 - `crates/kria-core/src/image/orchestrator.rs` is the image generation facade.
-- `comfy.rs`, `cloud.rs`, `ws_bridge.rs`, `prompt_enhancer.rs`, `styles.rs`, `mode.rs`, and `capabilities.rs` implement local/cloud generation behavior.
-- `crates/kria-core/src/tools/vision.rs` and `preprocessing/image.rs` handle image analysis/OCR and attachment preparation.
+- `image/comfy.rs`, `cloud.rs`, `ws_bridge.rs`, `prompt_enhancer.rs`, `styles.rs`, `mode.rs`, and `capabilities.rs` implement local/cloud behavior.
+- `tools/vision.rs`, `tools/vision_automation.rs`, and `preprocessing/image.rs` handle image analysis, OCR, attachments, and GUI vision-adjacent tools.
 
-## Voice Runtime
-- `crates/kria-core/src/voice/pipeline.rs` is the v1 voice pipeline.
-- `crates/kria-core/src/voice/v2/` contains the v2 streaming architecture: wake, AEC, STT, TTS, pipeline, playback, post_edit, and sentence splitting.
-- Desktop state can expose either active pipeline depending on config and available engines.
+## Voice
 
-## Python Sidecar
-- `kria-modules/src/kria_modules/bridge.py` is the sidecar process entry.
-- Rust manager: `crates/kria-core/src/sidecar/bridge.rs`.
+- `crates/kria-core/src/voice/pipeline.rs` is the legacy voice pipeline.
+- `crates/kria-core/src/voice/v2/` contains wake/AEC/STT/TTS/playback/post-edit streaming voice components.
+- Desktop commands live in `crates/kria-desktop/src/commands/voice.rs` and `voice_diagnostics.rs`.
+- UI surface: `VoiceOverlay.tsx`.
+
+## Python And Sidecars
+
+- `kria-modules/src/kria_modules/bridge.py` is the Python JSON-RPC sidecar dispatcher.
+- Rust bridge: `crates/kria-core/src/sidecar/bridge.rs`.
 - Protocol: `crates/kria-core/src/sidecar/protocol.rs`.
-- Bootstrap: `crates/kria-core/src/sidecar/bootstrap.rs`.
-- Health: `crates/kria-core/src/sidecar/health.rs`.
-- Sidecar is optional at startup; dependent tools must degrade gracefully.
+- Bootstrap/health: `bootstrap.rs`, `health.rs`.
+- Python processors live in `kria-modules/src/kria_modules/processors/`.
 
-## HTTP Server
+## Server, Fleet, And Remote Control
+
 - `crates/kria-server/src/main.rs` starts standalone server mode.
-- `lib.rs` assembles routes.
-- `routes.rs`, `ws.rs`, `auth.rs`, and `fleet.rs` implement HTTP, WebSocket, auth, and fleet API behavior.
-- Desktop also starts a local API bridge from `commands/local_api.rs`; do not assume server and desktop routes are equivalent.
-
-## Fleet / Remote Execution
-- `crates/kria-desktop/src/fleet_control.rs` handles desktop-side fleet/Ironclad state.
-- `crates/kria-server/src/fleet.rs` handles server-side fleet API concepts.
-- `crates/kria-connection-control/src/manager.rs` and `signer.rs` handle signed leases/connections.
-- `crates/kria-core/src/infra/environment/remote_qemu/mod.rs` (with `tests.rs` and `windows_spawn.rs`), `pool/`, `qos/`, `snapshot/`, and `supervisor.rs` support remote QEMU, pooled inventory, QoS, snapshots, and resilient orchestration.
-- RFCs 001-006 are required context before modifying these paths.
+- `lib.rs`, `routes.rs`, `ws.rs`, `auth.rs`, `provider_routes.rs`, `intelligence_routes.rs`, and `inventory.rs` provide API/WebSocket/auth/provider/inventory surfaces.
+- Desktop device/fleet control lives in `crates/kria-desktop/src/device_control.rs` and device command modules.
+- Signed connection/lease primitives live in `crates/kria-connection-control/src/manager.rs` and `signer.rs`.
+- Remote QEMU/VM/pool/QoS/snapshot/supervisor code lives under `crates/kria-core/src/infra/`.
 
 ## Evaluation
-- `crates/kria-eval/src/main.rs` starts the evaluation harness.
-- `runner.rs`, `suite.rs`, `judge.rs`, `sandbox.rs`, `llm_fixture.rs`, and `report.rs` implement scenarios, fixtures, judging, isolation, and output reports.
+
+- `crates/kria-eval/src/main.rs` starts the eval harness.
+- Base eval harness: `runner.rs`, `suite.rs`, `judge.rs`, `sandbox.rs`, `llm_fixture.rs`, and `report.rs`.
+- GUI evals: `crates/kria-eval/src/gui_eval/`.
+- Workflow evals: `crates/kria-eval/src/workflow_eval/`.
+- Integration evals: `crates/kria-eval/src/integration_eval/`.
+- Rust integration tests live under `crates/kria-core/tests/`, `crates/kria-server/tests/`, and `crates/kria-connection-control/tests/`.
+- Browser/UI e2e tests live under `tests/e2e/`.
 
 ## Test Utilities
-- `crates/kria-core/src/bin/kria-test.rs` is the test binary entry point.
-- `crates/kria-core/src/test_runner.rs` provides test runner utilities.
-- `crates/kria-desktop/src/commands/tests.rs` contains desktop command tests.
+
+- `crates/kria-core/src/bin/kria-test.rs` is the core test binary.
+- `crates/kria-core/src/test_runner/` provides test runner utilities.
+- `crates/kria-desktop/src/commands/tests.rs` covers command-layer behavior.
+- `crates/kria-test-app/src/main.rs` is a minimal app harness.

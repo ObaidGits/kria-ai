@@ -141,11 +141,13 @@
   line-height: 1;
 }
 
-.msg-bubble:hover .msg-copy-btn {
+.msg-bubble:hover .msg-copy-btn,
+.msg-bubble:focus-within .msg-copy-btn {
   opacity: 1;
 }
 
-.msg-copy-btn:hover {
+.msg-copy-btn:hover,
+.msg-copy-btn:focus-visible {
   color: var(--msg-copy-hover);
 }
 
@@ -246,6 +248,17 @@
   font-size: 11px;
   color: var(--text-muted);
   margin-bottom: -1px;
+  gap: 12px;
+}
+.msg-bubble-assistant .code-block-header.code-block-capped {
+  background: color-mix(in srgb, var(--warning) 16%, rgba(0, 0, 0, 0.35));
+  border: 1px solid color-mix(in srgb, var(--warning) 46%, transparent);
+}
+.msg-bubble-assistant .code-block-limit {
+  color: var(--warning);
+  font-size: 10px;
+  font-weight: 600;
+  margin-left: 6px;
 }
 .msg-bubble-assistant .copy-code-btn {
   background: none;
@@ -253,10 +266,17 @@
   color: var(--accent);
   cursor: pointer;
   font-size: 11px;
-  padding: 0;
+  padding: 2px 6px;
+  border-radius: 5px;
+  flex-shrink: 0;
 }
-.msg-bubble-assistant .copy-code-btn:hover {
+.msg-bubble-assistant .copy-code-btn:hover,
+.msg-bubble-assistant .copy-code-btn:focus-visible {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
   text-decoration: underline;
+}
+.msg-bubble-assistant .copy-code-btn.copied {
+  color: var(--success);
 }
 
 /* User bubble — plain text is always white */
@@ -561,4 +581,3 @@
 .chat-messages::-webkit-scrollbar-thumb:hover {
   background: rgba(255,255,255,0.15);
 }
-

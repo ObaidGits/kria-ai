@@ -4,15 +4,21 @@
 {"text":"make an illustration of a mountain village","operation":"generate_image"}
 {"text":"render a product photo style hero shot","operation":"generate_image"}
 {"text":"generate a wallpaper image in neon style","operation":"generate_image"}
+{"text":"make a clean app icon with blue and white colors","operation":"generate_image"}
+{"text":"create a realistic photo style banner for a website","operation":"generate_image"}
 {"text":"what do you remember about my schedule","operation":"retrieve_memory"}
 {"text":"recall notes about my gym routine","operation":"retrieve_memory"}
 {"text":"memory notes about meeting preferences","operation":"retrieve_memory"}
 {"text":"have i told you my food allergies","operation":"retrieve_memory"}
 {"text":"from memory tell me my wifi setup","operation":"retrieve_memory"}
 {"text":"remembered details about my doctor appointment","operation":"retrieve_memory"}
+{"text":"what did i say about my preferred editor","operation":"retrieve_memory"}
+{"text":"pull up what you know about my project preferences","operation":"retrieve_memory"}
 {"text":"search the web for rust async patterns","operation":"search"}
 {"text":"find online latest headlines about ai","operation":"search"}
 {"text":"look up internet speed troubleshooting guide","operation":"search"}
 {"text":"search news about nvidia drivers","operation":"search"}
 {"text":"browse online docs for tokio channels","operation":"search"}
 {"text":"check the internet for weather update","operation":"search"}
+{"text":"find current documentation for tauri commands","operation":"search"}
+{"text":"look up recent llama cpp server options","operation":"search"}

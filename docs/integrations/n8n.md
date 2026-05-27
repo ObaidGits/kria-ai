@@ -1,187 +1,219 @@
 # KRIA n8n Integration
 
-## 1. Purpose
+Last updated: 2026-05-27
 
-n8n integration provides workflow-execution substrate connectivity for automation chains that are better expressed as external workflow graphs. KRIA remains orchestration authority and treats n8n as bounded execution substrate.
+## Purpose
 
-Responsibilities:
-- Define contract boundaries for invoking n8n workflows.
-- Ensure n8n invocation is policy-governed and observable.
-- Preserve deterministic authority: KRIA decides when workflows run.
+n8n is an external workflow substrate for bounded automation chains that are better represented as workflow graphs than as local KRIA tools. KRIA remains the authority plane.
 
-Non-goals:
-- n8n is not a planner or authority layer for KRIA runtime.
-- n8n does not bypass tool/policy/HITL controls.
+n8n may execute delegated workflow steps, but it does not decide:
 
-## 2. Architecture Overview
+- whether a workflow should run,
+- whether external side effects are allowed,
+- whether returned evidence is sufficient,
+- whether KRIA should continue, recover, or pause for human review.
 
-Current implementation reality:
-- KRIA core now exposes a first outbound n8n substrate module in `crates/kria-core/src/n8n`.
-- The current slice supports versioned allowlisted workflow invocation through the `n8n_invoke_workflow` tool.
-- KRIA core also exposes signed callback parsing and in-memory workflow state ingestion primitives.
-- The desktop local API exposes `POST /api/n8n/callback` for signed callback ingestion.
-- Callback events are persisted to a JSONL inbox and replayed during runtime startup.
-- The KRIA dashboard now has an n8n tab for configured workflows, callback URL, run state, dead letters, and read-only n8n discovery.
-- KRIA evaluates terminal callback evidence against configured `expected_evidence` before emitting a continuation decision.
-- n8n workflows can request KRIA HITL through callback evidence and poll `/api/n8n/hitl-response`.
-- Operators can reconcile a known n8n run against the n8n execution API from the dashboard.
-- n8n execution is still treated as an external integration substrate reached through controlled tooling paths.
+## Current Implementation
 
-Architecture contract:
-1. Orchestrator chooses workflow invocation explicitly.
-2. Invocation passes through standard safety and execution gating.
-3. Workflow results return either synchronously from the invocation response or asynchronously through a signed callback envelope.
-4. Callback evidence is ingested as workflow state, not treated as final truth by itself.
+The active implementation lives in `crates/kria-core/src/n8n` and desktop command/local API glue lives in `crates/kria-desktop/src/commands`.
 
-## 3. Runtime Execution Flow
+Implemented capabilities:
 
-1. Intent analysis determines workflow substrate is appropriate.
-2. Orchestrator selects integration call path and prepares bounded input payload.
-3. Policy/HITL enforces risk controls for external side effects.
-4. Workflow executes externally; result is ingested as tool/integration response or callback event.
-5. Callback state rejects duplicate, stale, and post-terminal events.
-6. Verifier/satisfaction logic decides continuation, fallback, or termination.
+- Versioned, allowlisted workflow invocation through `n8n_invoke_workflow`.
+- HMAC-signed outbound command envelopes.
+- HMAC-signed callback parsing and schema validation.
+- In-memory run state with duplicate, out-of-order, and post-terminal callback rejection.
+- JSONL callback inbox persistence and startup replay.
+- JSONL governance audit records for n8n decisions.
+- Dashboard status, discovery, draft import, reconciliation, run state, dead-letter, and HITL response visibility.
+- HITL bridge for n8n workflows that need approval before continuation.
 
-Authority boundaries:
-- KRIA controls initiation, retries, cancellation, and final decisioning.
-- n8n executes delegated steps only.
+Still intentionally bounded:
 
-## 4. Core Components
+- n8n is not a planner.
+- n8n callbacks are evidence, not completion truth.
+- Deep paused GoalTree resume from n8n continuation events is still a future integration layer.
 
-| Component | Contract |
-|---|---|
-| Orchestrator loop | Chooses if/when n8n substrate is used |
-| `n8n` catalog/client | Validates workflow allowlist, version, status, payload size, and signed dispatch |
-| `n8n` callback parser | Validates callback signature, schema version, workflow identity, and workflow version |
-| `n8n` workflow state store | Tracks callback sequence, evidence log, side effects, terminal state, and dead letters |
-| Local API bridge | Receives signed n8n callbacks at `/api/n8n/callback` |
-| Durable callback inbox | Appends callback records to JSONL for restart replay |
-| Governance evaluator | Converts callback state into verification and continuation decisions |
-| HITL bridge | Creates KRIA approval requests for n8n approval callbacks and exposes pollable responses |
-| Reconciliation command | Reads n8n execution state by run ID for operator recovery/debugging |
-| Dashboard n8n tab | Shows workflow catalog, callback URL, run state, governance decisions, discovery output, and dead letters |
-| `n8n_invoke_workflow` tool | Serializes request + parses response through ToolRegistry |
-| Safety policy/HITL | Governs dangerous external side-effect operations |
-| Audit pipeline | Records invocation decisions/outcomes |
+## Runtime Flow
 
-Invariants:
-- No workflow runs without orchestrator-triggered call.
-- External workflow output is advisory input to KRIA, not authority output.
-- Asynchronous callback evidence never bypasses verifier authority.
-- Duplicate/stale callback events are dead-lettered instead of mutating active workflow state.
-- A completed n8n run without required evidence becomes `pause_for_hitl`, not silent success.
-- HITL responses are explicit and pollable by request ID.
+Outbound invocation:
 
-## 5. Integration Contracts
+1. `N8nConfig` is loaded from KRIA config.
+2. `register_into_tool_registry` exits without registering anything if n8n is disabled.
+3. If enabled, `N8nCatalog` validates base URL, signing secret, workflow IDs, versions, endpoint paths, and workflow status.
+4. `n8n_invoke_workflow` is registered into `ToolRegistry`.
+5. Tool execution parses `N8nToolRequest`.
+6. `N8nClient::invoke` resolves the workflow, builds an `N8nCommandEnvelope`, checks `max_payload_bytes`, signs the payload, and POSTs to the configured endpoint.
+7. Non-2xx responses fail the tool call. Successful responses are parsed as JSON and returned in `N8nInvocationResult`.
 
-| Integration | Contract |
-|---|---|
-| Orchestration | KRIA remains single source of execution authority |
-| Providers | Provider output can suggest workflows; does not execute directly |
-| Tools | n8n invocation must be represented through controlled execution interfaces |
-| Memory | Workflow outputs may be persisted through memory contracts only |
-| OpenClaw/MCP | n8n is one substrate among peers, selected by capability and policy |
-| Hardware | Workflow-triggered local actions still constrained by hardware policies |
-| Safety | Risk-tier and HITL rules apply before external side effects |
-| GUI/Browser | n8n may complement but not supersede GUI/browser substrate controls |
+Callback ingestion:
 
-## 6. Failure Handling & Recovery
-
-- Workflow endpoint unavailable: mark substrate failure and route to alternate strategy.
-- Execution timeout: cancel/abort and return structured failure.
-- Partial completion: classify side effects and continue with explicit compensating logic if defined.
-- Repeated failures: backoff and avoid tight retry loops.
-- Duplicate callbacks: ignore state mutation and record a dead letter.
-- Out-of-order callbacks: preserve current state and record a dead letter.
-- Post-terminal callbacks: preserve terminal state and record a dead letter.
-
-Recovery strategy:
-- Prefer deterministic fallback substrate paths over opaque repeated n8n retries.
-
-## 7. Performance & Constraints
-
-Constraints:
-- Network and remote runtime latency dominate.
-- Workflow queueing and external service limits affect tail latency.
-- Payload size and serialization overhead impact responsiveness.
-
-Operational tradeoff:
-- n8n improves complex workflow composability but adds external dependency surface.
-
-## 8. Security & Safety
-
-Trust boundaries:
-- n8n is external and untrusted from KRIA core authority perspective.
-
-Controls:
-- Inputs must be bounded and validated before dispatch.
-- High-risk actions require policy escalation and possible HITL.
-- Credentials and endpoints are managed as deployment configuration, not runtime authority.
-- Discovery is read-only; imported workflows are saved as draft and are not executable until explicitly approved in KRIA config.
-
-## 9. UI + Callback Usage
-
-Dashboard:
-- Open `Dashboard -> n8n`.
-- Copy the displayed callback URL into n8n workflow callback nodes.
-- Use `Discover` to inspect n8n workflows through the configured n8n API.
-
-Callback contract:
-- Method: `POST`
-- Path: `/api/n8n/callback`
-- Header: `x-kria-signature: sha256=<hmac>`
-- Body schema: `kria.n8n.callback.v1`
-
-The callback body must include:
-- `correlation_id`
-- `causation_id`
-- `event_id`
-- `sequence_number`
-- `workflow_id`
-- `workflow_version`
-- `n8n_run_id`
-- `status`
-- `evidence`
-- `occurred_at_ms`
+1. n8n POSTs a `kria.n8n.callback.v1` envelope to `/api/n8n/callback`.
+2. KRIA verifies `x-kria-signature`.
+3. KRIA validates workflow identity and version against the current catalog.
+4. `N8nWorkflowStateStore` ingests the event.
+5. Duplicate, out-of-order, or post-terminal events are dead-lettered instead of mutating active state.
+6. Accepted callbacks are appended to the callback inbox JSONL file.
+7. `evaluate_run` converts run state into a governance decision.
+8. Governance decisions are retained in memory, appended to JSONL audit, and emitted to the UI.
 
 HITL bridge:
-- n8n sends callback status `waiting_for_approval` or a callback whose evidence requires human review.
-- KRIA creates a normal HITL approval request.
-- n8n polls `GET /api/n8n/hitl-response?request_id=<id>`.
-- Response is `pending` until the user approves, denies, or the request times out.
 
-Continuation behavior:
-- `completed` + all expected evidence present -> `continue_workflow`
-- `completed` + missing expected evidence -> `pause_for_hitl`
-- `failed` / `cancelled` / `timed_out` / `rejected` -> `recover_workflow`
-- non-terminal statuses -> `await_more_events`
+1. A callback with `waiting_for_approval` or missing required evidence produces `PauseForHitl`.
+2. KRIA creates a normal approval request through the HITL gateway.
+3. The external workflow can poll `/api/n8n/hitl-response?request_id=<id>`.
+4. The poll response remains pending until the user approves, denies, or the request expires.
 
-## 10. Observability
+## Core Components
 
-Capture:
-- Invocation latency, success/failure, timeout, retry counts.
-- Callback correlation ID, event ID, sequence number, run status, and dead-letter reason.
-- Policy denials and approval paths for workflow calls.
-- External endpoint health and error taxonomy.
-- Correlation IDs linking turn, workflow run, and resulting side effects.
+| Component | Location | Runtime contract |
+|---|---|---|
+| Config | `n8n/config.rs` | Stores enabled flag, base URL, API key, signing secret, payload limit, timeout, and allowlisted workflows. |
+| Catalog | `n8n/catalog.rs` | Resolves only known, version-matching, approved workflows. |
+| Client | `n8n/client.rs` | Builds and signs command envelopes, enforces payload size, sends HTTP requests. |
+| Tool handler | `n8n/tool.rs` | Exposes `n8n_invoke_workflow` through normal `ToolRegistry` execution. |
+| Callback parser | `n8n/callback.rs` | Verifies signature, schema version, workflow ID, and workflow version. |
+| State store | `n8n/state.rs` | Tracks run status, evidence, side effects, terminal state, and dead letters. |
+| Governance | `n8n/governance.rs` | Maps run state to verification status and continuation action. |
+| Desktop commands | `commands/n8n.rs` | Provides status, discovery, draft import, and reconciliation commands. |
+| Local API | `commands/local_api.rs` | Receives callbacks and HITL polling requests. |
 
-Evaluation:
-- n8n scenarios belong in integration regressions under `docs/evaluations/overview.md`.
+## Schemas And Status
 
-## 11. Still Not Authority-Complete
+Command schema version:
 
-Implemented now:
-1. Outbound allowlisted invocation.
-2. Signed async callback ingestion.
-3. Durable callback inbox replay.
-4. Dashboard visibility.
-5. Read-only discovery and draft import command surface.
-6. Governance decisions for continuation, recovery, HITL pause, and missing evidence.
-7. HITL response bridge for n8n approval workflows.
-8. n8n execution reconciliation command.
+```text
+kria.n8n.command.v1
+```
 
-Still future:
-1. Deep GoalTree executor resume from continuation events where the paused session is known.
-2. Formal verifier federation over external SaaS side effects.
-3. Rich global SQLite audit-ledger integration beyond n8n JSONL governance records.
-4. Push-based n8n resume webhooks instead of polling HITL responses.
+Callback schema version:
+
+```text
+kria.n8n.callback.v1
+```
+
+Executable workflow status:
+
+```text
+Approved
+```
+
+Non-executable workflow statuses:
+
+```text
+Draft
+Test
+Deprecated
+Disabled
+```
+
+Terminal run statuses:
+
+```text
+Completed
+Partial
+Failed
+Cancelled
+TimedOut
+Rejected
+```
+
+## Governance Rules
+
+| Run state | KRIA verification | KRIA continuation |
+|---|---|---|
+| Waiting for approval | Human review required | Pause for HITL |
+| Non-terminal | Needs more evidence | Await more events |
+| Failed, cancelled, timed out, rejected | Failed | Recover workflow |
+| Completed or partial with missing expected evidence | Needs more evidence | Pause for HITL |
+| Completed or partial with expected evidence present | Verified | Continue workflow |
+
+Important invariant:
+
+```text
+Completed n8n status alone is not enough.
+The configured KRIA evidence contract must also be satisfied.
+```
+
+## Desktop And UI Surface
+
+Dashboard status is backed by `get_n8n_status` and includes:
+
+- enabled state,
+- base URL,
+- callback URL,
+- configured workflows,
+- active catalog workflows,
+- current runs,
+- dead letters,
+- recent governance decisions,
+- HITL poll responses,
+- callback inbox path,
+- governance audit path.
+
+Operator commands:
+
+- `discover_n8n_workflows`: read-only `GET /api/v1/workflows` against n8n.
+- `import_n8n_workflow`: imports a workflow as `Draft`, not as executable.
+- `reconcile_n8n_run`: reads a known n8n execution by `n8n_run_id` and records a governance view.
+
+## Configuration
+
+`N8nConfig` defaults are conservative:
+
+- `enabled = false`
+- no default base URL,
+- no default API key,
+- no default signing secret,
+- `request_timeout_secs = 30`
+- `max_payload_bytes = 65536`
+- `default_requested_by = local-user`
+- no configured workflows.
+
+A workflow must be present in config, version matched, and `Approved` before `n8n_invoke_workflow` can execute it.
+
+## Security Invariants
+
+- n8n is treated as external and untrusted for authority purposes.
+- Outbound payloads are HMAC signed.
+- Inbound callbacks must provide a valid `x-kria-signature`.
+- Workflow identity and version are checked on callback ingestion.
+- API discovery is read-only.
+- Imported workflows are saved as drafts.
+- Callback replay is append-only through JSONL inbox records.
+- External evidence cannot bypass KRIA verifier/governance authority.
+- HITL approval is handled through KRIA's HITL path, not through trusted callback text.
+
+## Failure Handling
+
+| Failure | Behavior |
+|---|---|
+| Integration disabled | Tool registration is skipped. |
+| Empty base URL or signing secret | Catalog construction fails. |
+| Unknown workflow | Invocation/callback validation fails. |
+| Version mismatch | Invocation/callback validation fails. |
+| Workflow not approved | Invocation is rejected. |
+| Oversized command payload | Invocation fails before dispatch. |
+| HTTP non-2xx | Tool call returns structured failure. |
+| Duplicate callback | Dead-lettered, no active state mutation. |
+| Out-of-order callback | Dead-lettered, no active state mutation. |
+| Post-terminal callback | Dead-lettered, terminal state preserved. |
+| Missing expected evidence | Pause for HITL instead of claiming success. |
+
+## Operational Notes
+
+For a working deployment:
+
+1. Enable n8n in KRIA config.
+2. Configure `base_url`, `signing_secret`, and optional `api_key`.
+3. Add workflows with explicit `workflow_id`, `workflow_version`, endpoint path, allowed actions, data scope, expected evidence, and `Approved` status.
+4. Configure n8n callback nodes to POST to KRIA's displayed callback URL.
+5. Include the `x-kria-signature` header on callbacks.
+6. Use dashboard dead letters and governance logs when diagnosing callback/order issues.
+
+## Current Limits
+
+- Continuation events are emitted, but deep live GoalTree resume requires more orchestration wiring.
+- n8n governance audit is JSONL-based; it is not yet a unified global SQLite audit ledger.
+- HITL response delivery is polling-based, not push-based webhook resume.
+- External SaaS side effects are governed by expected evidence, but there is not yet full verifier federation for every SaaS target.

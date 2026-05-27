@@ -14,13 +14,30 @@ function riskClass(risk: string): string {
   return "decision-risk low";
 }
 
+function riskPriority(risk: string): number {
+  const normalized = String(risk).toLowerCase();
+  if (normalized.includes("black") || normalized.includes("red")) return 0;
+  if (normalized.includes("yellow")) return 1;
+  return 2;
+}
+
 const DecisionActionCenter: Component = () => {
   const [expanded, setExpanded] = createSignal(false);
   const [busyDecision, setBusyDecision] = createSignal<string | null>(null);
   const [resumeReady, setResumeReady] = createSignal<Record<string, boolean>>({});
   const [verificationReady, setVerificationReady] = createSignal<Record<string, boolean>>({});
   const pending = createMemo(() =>
-    appStore.interactionDecisions().filter((decision) => decision.status === "Pending")
+    appStore
+      .interactionDecisions()
+      .filter((decision) => decision.status === "Pending")
+      .sort((left, right) => {
+        const riskDelta = riskPriority(left.risk_level) - riskPriority(right.risk_level);
+        if (riskDelta !== 0) return riskDelta;
+        return new Date(right.created_at).getTime() - new Date(left.created_at).getTime();
+      })
+  );
+  const highRiskPending = createMemo(
+    () => pending().filter((decision) => riskPriority(decision.risk_level) === 0).length
   );
   const recent = createMemo(() =>
     appStore.interactionDecisions().filter((decision) => decision.status !== "Pending").slice(0, 3)
@@ -160,6 +177,21 @@ const DecisionActionCenter: Component = () => {
             </button>
           </div>
 
+          <div class="decision-summary-grid" aria-label="Workflow decision summary">
+            <div class="decision-summary-chip">
+              <span>Pending</span>
+              <strong>{pending().length}</strong>
+            </div>
+            <div class={`decision-summary-chip ${highRiskPending() > 0 ? "attention" : ""}`}>
+              <span>High risk</span>
+              <strong>{highRiskPending()}</strong>
+            </div>
+            <div class="decision-summary-chip">
+              <span>Recent</span>
+              <strong>{recent().length}</strong>
+            </div>
+          </div>
+
           <Show
             when={pending().length > 0}
             fallback={<div class="decision-empty">No pending workflow decisions.</div>}
@@ -176,16 +208,42 @@ const DecisionActionCenter: Component = () => {
                     {decision.workflow_id}
                     <Show when={decision.stage_id}> / {decision.stage_id}</Show>
                   </div>
+                  <div class="decision-meta-grid">
+                    <div>
+                      <span>Confidence</span>
+                      <strong>{label(decision.confidence)}</strong>
+                    </div>
+                    <div>
+                      <span>Rollback</span>
+                      <strong>{label(decision.rollbackability)}</strong>
+                    </div>
+                    <div>
+                      <span>Resources</span>
+                      <strong>{decision.affected_resources?.length ?? 0}</strong>
+                    </div>
+                  </div>
                   <Show when={decision.evidence?.length}>
-                    <div class="decision-evidence">
-                      {decision.evidence[0].source}: {decision.evidence[0].summary}
+                    <div class="decision-evidence-list" aria-label="Decision evidence">
+                      <For each={decision.evidence.slice(0, 2)}>
+                        {(evidence) => (
+                          <div class="decision-evidence">
+                            <strong>{evidence.source}</strong>
+                            <span>
+                              {label(evidence.reliability)} / {label(evidence.freshness)}
+                            </span>
+                            <p>{evidence.summary}</p>
+                          </div>
+                        )}
+                      </For>
                     </div>
                   </Show>
                   <div class="decision-options">
                     <For each={decision.options.slice(0, 3)}>
                       {(option) => (
                         <button
-                          class="btn-secondary"
+                          class={`btn-secondary ${
+                            option.id === decision.recommended_option ? "decision-option-recommended" : ""
+                          }`}
                           disabled={busyDecision() === decision.id}
                           title={option.impact}
                           onClick={() => void resolve(decision, option.id)}
@@ -215,50 +273,50 @@ const DecisionActionCenter: Component = () => {
                   <span>{label(decision.status)}</span>
                   <span>{label(decision.decision_type)}</span>
                   <span>{decision.resolution ?? "no resolution"}</span>
-	                  <Show when={decision.status === "Resolved"}>
-	                    <Show
-	                      when={decision.execution?.state !== "Executed"}
-	                      fallback={
-	                        <>
-	                          <span>{label(decision.continuation?.state ?? decision.execution?.state)}</span>
-	                          <Show
-	                            when={
-	                              decision.continuation?.state !== "CompletedOneStep" &&
-	                              decision.continuation?.state !== "ReadyForNextSafeStep" &&
-	                              decision.continuation?.state !== "UnknownAfterCrash"
-	                            }
-	                          >
-	                            <button
-	                              class="btn-secondary"
-	                              disabled={busyDecision() === decision.id}
-	                              title="Check deterministic evidence for the executed step"
-	                              onClick={() => void checkContinuation(decision)}
-	                            >
-	                              Verify Step
-	                            </button>
-	                            <Show when={verificationReady()[decision.id]}>
-	                              <button
-	                                class="btn-secondary"
-	                                disabled={busyDecision() === decision.id}
-	                                title="Record one verified action-level continuation step"
-	                                onClick={() => void continueAfterExecution(decision)}
-	                              >
-	                                Record Verified Step
-	                              </button>
-	                            </Show>
-	                          </Show>
-	                          <Show when={decision.continuation?.state === "VerifyingPriorAction"}>
-	                            <button
-	                              class="btn-secondary"
-	                              disabled={busyDecision() === decision.id}
-	                              onClick={() => void cancelContinuation(decision)}
-	                            >
-	                              Cancel
-	                            </button>
-	                          </Show>
-	                        </>
-	                      }
-	                    >
+                  <Show when={decision.status === "Resolved"}>
+                    <Show
+                      when={decision.execution?.state !== "Executed"}
+                      fallback={
+                        <>
+                          <span>{label(decision.continuation?.state ?? decision.execution?.state)}</span>
+                          <Show
+                            when={
+                              decision.continuation?.state !== "CompletedOneStep" &&
+                              decision.continuation?.state !== "ReadyForNextSafeStep" &&
+                              decision.continuation?.state !== "UnknownAfterCrash"
+                            }
+                          >
+                            <button
+                              class="btn-secondary"
+                              disabled={busyDecision() === decision.id}
+                              title="Check deterministic evidence for the executed step"
+                              onClick={() => void checkContinuation(decision)}
+                            >
+                              Verify Step
+                            </button>
+                            <Show when={verificationReady()[decision.id]}>
+                              <button
+                                class="btn-secondary"
+                                disabled={busyDecision() === decision.id}
+                                title="Record one verified action-level continuation step"
+                                onClick={() => void continueAfterExecution(decision)}
+                              >
+                                Record Verified Step
+                              </button>
+                            </Show>
+                          </Show>
+                          <Show when={decision.continuation?.state === "VerifyingPriorAction"}>
+                            <button
+                              class="btn-secondary"
+                              disabled={busyDecision() === decision.id}
+                              onClick={() => void cancelContinuation(decision)}
+                            >
+                              Cancel
+                            </button>
+                          </Show>
+                        </>
+                      }
+                    >
                       <Show
                         when={decision.execution?.state === "Executing"}
                         fallback={

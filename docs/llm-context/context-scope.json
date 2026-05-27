@@ -1,16 +1,33 @@
 {
+  "schema_version": "2026-05-27",
+  "purpose": "Defines the source and documentation scope used for KRIA's AI-facing context pack.",
   "enable_auto_update": false,
   "fast_mode": true,
   "watched_paths": [
     "Cargo.toml",
+    "Cargo.lock",
     "crates/kria-core/src",
     "crates/kria-desktop/src",
     "crates/kria-server/src",
     "crates/kria-eval/src",
     "crates/kria-connection-control/src",
+    "crates/kria-uinput-daemon/src",
+    "crates/kria-test-app/src",
     "kria-modules/src",
+    "sidecars/kria-vision",
+    "openclaw-substrate/src",
     "ui/src",
-    "config"
+    "config",
+    "docs/architecture",
+    "docs/orchestration",
+    "docs/contracts",
+    "docs/decisions",
+    "docs/evaluations",
+    "docs/operations",
+    "docs/integrations",
+    "docs/reference",
+    "docs/voice",
+    "tests/e2e"
   ],
   "ignore_paths": [
     ".git",
@@ -18,11 +35,20 @@
     ".ruff_cache",
     "__pycache__",
     "docs/llm-context",
+    "eval_reports",
+    "graphify-out",
     "models",
     "target",
+    "tests-logs",
     "tests/e2e/playwright-report",
     "tests/e2e/test-results",
+    "tmp",
     "ui/dist",
     "ui/node_modules"
+  ],
+  "notes": [
+    "This file is context-pack metadata, not a build manifest.",
+    "routing-corpus.jsonl is consumed by crates/kria-core/src/agent/onnx_classifier.rs and must keep supported operation labels.",
+    "Generated logs and reports are intentionally excluded from LLM context."
   ]
 }

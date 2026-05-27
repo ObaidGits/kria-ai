@@ -1,48 +1,49 @@
 # KRIA HITL MVP Boundary
 
-**Document status:** Scope freeze  
-**Purpose:** Define the smallest production-survivable HITL implementation.  
-**Rule:** If a feature is not listed as in-scope here, it is out of MVP.
+**Document status:** Implementation-bound scope contract
+**Last updated:** 2026-05-27
+**Primary code:** `crates/kria-core/src/agent/collaborative_decision.rs`, `execution_gate.rs`, `resume_executor.rs`, `resource_lease.rs`, `continuation_reentry.rs`, `gui_wiring.rs`, `crates/kria-core/src/safety/audit.rs`
 
 ---
 
-## 1. MVP Goal
+## 1. Goal
 
-KRIA MVP HITL exists to do one thing reliably:
+KRIA HITL MVP exists to do one bounded job:
 
 ```text
-pause unsafe or underdetermined workflow execution,
-ask a bounded decision,
-persist enough state to resume safely,
-reject stale answers,
-and audit the result.
+pause unsafe or underdetermined side effects,
+persist the exact action and target being paused,
+accept only a fresh scoped decision,
+revalidate before execution,
+lease shared resources before side effects,
+and leave enough audit/decision evidence to explain what happened.
 ```
 
-MVP is not an AI OS, scheduler, replay engine, trust system, or adaptive autonomy system.
+This layer is not a scheduler, replay engine, trust model, semantic OS, or adaptive autonomy system.
 
 ---
 
 ## 2. In Scope
 
-| Capability | MVP Requirement |
+| Capability | Current implementation requirement |
 |---|---|
-| Durable decision | Persist `InteractionDecision` with status and version. |
-| Immutable action intent | Bind every decision to `action_hash` and `target_hash`. |
-| Deterministic gate | Return only `Proceed`, `Block`, `PauseForDecision`, `NeedReobserve`, or `NeedLease`. |
-| Workflow pause | `StageExecutor` can return `PausedForDecision`. |
-| Checkpoint binding | A paused workflow stores decision ID and checkpoint generation. |
-| Decision resolution | Backend command resolves decision by ID, option ID, and version. |
-| Revalidation | Backend rejects stale decision before execution. |
-| Minimal leases | GUI foreground, keyboard/mouse, filesystem write, VM destructive, external owner token. |
-| Minimal action center | List pending decisions, show details, resolve/pause/abort. |
-| Audit | Record create, resolve, invalidate, execute, abort. |
-| Tests | Machine-testable invariants and stale-resolution evals. |
+| Durable decision envelope | `InteractionDecision` is persisted through `DecisionStore`; persistent default is `.kria/decisions/decision_events.jsonl`. |
+| Immutable action intent | `ActionProposal` binds `workflow_id`, `attempt_id`, `stage_id`, `tool_name`, normalized JSON parameters, target, tool schema version, registry version, `action_hash`, and `target_hash`. |
+| Target binding | `TargetBinding` records kind, id, optional workspace/session/execution boundary, and metadata. |
+| Deterministic execution gate | Live tool execution uses `ExecutionGateOutcome::{Proceed, Block, PauseForDecision, RequiresApproval}`. |
+| Authority ambiguity pause | Execution-authority ambiguity creates a durable target-selection decision and returns `PauseForDecision`. |
+| Policy approval | Policy-required approval creates a durable approval decision and returns `RequiresApproval`. |
+| Resume validation | `ResumeExecutor` validates decision version, action hash, target hash, tool versions, gate result, grounding, and leases before one-step execution. |
+| Minimal leases | `ResourceLeaseManager` handles GUI foreground/input, filesystem path, browser profile, and VM target requirements declared by `ExecutionGate`. |
+| Bounded continuation | `ContinuationReentryService` verifies one executed decision-bound action and stops; it does not replay a whole workflow. |
+| Audit | `AuditLogger` records policy/HITL execution decisions in SQLite with a hash chain; `DecisionStore` records decision lifecycle/execution/continuation events in JSONL. |
+| Tests | Unit and integration tests must cover stale version/hash rejection, policy blocks, lease conflicts, resume gate blocking, unsupported resume tools, and decision replay from JSONL. |
 
 ---
 
 ## 3. Explicitly Out Of MVP
 
-Do not implement these in MVP:
+Do not add these to HITL MVP scope:
 
 - semantic scheduler,
 - cognitive pressure scoring,
@@ -52,53 +53,53 @@ Do not implement these in MVP:
 - substrate trust decay,
 - planner outcome scoring,
 - global causality graph,
-- broad event sourcing,
 - deterministic GUI replay,
 - external delegated HITL bridging,
-- mobile/remote/voice approval,
+- mobile/remote/voice approval expansion,
 - LLM-generated recovery sessions,
 - metrics-driven safety tuning,
 - preference learning from HITL answers,
 - multi-user collaboration model,
-- full replay UI,
-- GPU/model/verifier leases in HITL layer.
+- full replay UI.
 
-These may be reconsidered only after MVP invariants pass in real workflows.
+Generic enum values such as `GpuModel`, `VerifierSlot`, or `DelegatedWorkflow` may exist in shared lease vocabulary, but HITL MVP must not build new scheduling systems around them.
 
 ---
 
-## 4. MVP Authority Order
+## 4. Runtime Authority Order
 
-Runtime authority is fixed:
+Authority order is represented by `AuthorityLevel` and must remain monotonic:
 
 ```text
-HardPolicyBlock
+PolicyBlock
 PolicyRisk
 VerifierTruth
 ExecutionAuthority
+RecoveryFeasibility
 WorkflowSemantics
-CurrentUserInstruction
-ExplicitScopedPreference
-PlannerSuggestion
-LLMWording
+UserInstruction
+Preference
+PlannerRecommendation
+ModelSuggestion
 ```
 
-No lower authority may reduce risk, override verifier truth, or bypass policy.
+Lower authority may provide context or wording. It must not reduce risk, bypass policy, override verifier truth, or mutate persisted action/target hashes.
 
 ---
 
-## 5. MVP Success Criteria
+## 5. Completion Criteria
 
-MVP is complete only when:
+The HITL MVP boundary is satisfied only when:
 
-- stale decisions are rejected,
-- action mutation invalidates approval,
-- target mutation invalidates approval,
-- Red/Black policy cannot be bypassed,
-- timeout ambiguity pauses recoverably,
-- workflow checkpoint survives restart,
-- action center cannot resolve invalid decisions,
-- GUI typing requires valid foreground lease,
-- destructive VM operations require exclusive lease,
-- audit can explain why a decision existed and what happened.
-
+- side-effecting live tools pass through `ExecutionGate`,
+- policy `Black` decisions block even if a user approves,
+- policy `Red` or approval-required actions cannot execute without a fresh approved decision,
+- stale decision versions are rejected,
+- action hash mutation rejects resolution or resume,
+- target hash mutation rejects resolution or resume,
+- expired decisions invalidate instead of executing,
+- resume executes exactly one persisted `ActionProposal`,
+- unsupported tools cannot be resumed from the action center,
+- GUI/input/filesystem/browser/VM resource conflicts block execution,
+- continuation re-entry verifies one previous action and stops,
+- audit and decision events explain pause, resolution, execution, invalidation, denial, timeout, or lease conflict.

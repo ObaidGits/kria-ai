@@ -7,6 +7,8 @@ tool execution, verification, recovery, and final user-facing output. It is inte
 architecture-first: the focus is not "how to call an LLM", but how KRIA controls LLMs
 inside a desktop operations runtime without giving raw model output unchecked authority.
 
+Updated against the current KRIA working tree on 2026-05-27.
+
 ## Reader Contract
 
 This handbook is written for both newcomers and engineers:
@@ -64,7 +66,7 @@ Model Response
 Tool Call Parser + Deterministic Fallbacks
     |
     v
-PolicyEngine + HITL + Isolation + ToolRegistry
+ExecutionGate + PolicyEngine + HITL/DecisionStore + Isolation + ToolRegistry
     |
     v
 Tool Execution + Verification + Recovery
@@ -85,6 +87,7 @@ The orchestrator solves four problems at once:
 | Providers differ | Normalize every provider behind `LlmBackend` and `ProviderRegistry` |
 | Context can explode | Use prompt sections, token ledgers, payload shaping, and trimming |
 | Tool execution is risky | Route tools through policy, HITL, audit, isolation, and verification |
+| GUI workflow expectations can be lost | Resolve semantic workflow frame, fidelity, mode, contract, and verifier authority before substrate planning |
 
 ### Hybrid Intelligence Philosophy
 
@@ -174,6 +177,9 @@ Tool parser / deterministic fallback
     |
     v
 Tool availability gate
+    |
+    v
+ExecutionGate
     |
     v
 PolicyEngine
@@ -278,6 +284,8 @@ Layer 1: Turn admission and intent
 | Cloud runtime | `llm/cloud.rs`, `llm/provider/openai.rs` | OpenAI-compatible request/stream handling |
 | Tool orchestration | `tools/registry.rs`, `mcp/payload_shaper.rs` | Tool schemas, handlers, compact LLM payloads |
 | Policy/HITL | `safety/policy.rs`, `safety/hitl.rs`, `safety/audit.rs` | Safety tiering, approval, audit trail |
+| Execution gate | `agent/execution_gate.rs`, `agent/collaborative_decision.rs` | Preflight, execution authority, policy, resource leases, and durable decisions. |
+| GUI semantic workflow | `agent/semantic_workflow.rs`, `execution_mode_reasoner.rs`, `workflow_intent_contract.rs` | Deterministic GUI workflow/fidelity/mode/contract metadata before substrate execution. |
 | GUI cognition | `agent/gui_wiring.rs`, `agent/gui_planner.rs`, `tools/gui_automation.rs` | Desktop automation integration |
 | PSDG/context | `agent/psdg/*`, `agent/desktop_awareness/*` | Live desktop facts and workflow state |
 | Recovery | `agent/workflow_continuation/*`, failure classifiers in `AgentLoop` | Interruption and failure handling |
@@ -336,7 +344,10 @@ LLM response: text and/or native function calls
 Tool parser: native calls first, text fallback second, deterministic fallback last
   |
   v
-Policy/HITL/audit/isolation
+Semantic GUI workflow metadata when the turn is GUI-eligible
+  |
+  v
+ExecutionGate / Policy / HITL / audit / isolation
   |
   v
 Tool results shaped for LLM and full payload streamed to UI
@@ -360,23 +371,30 @@ TurnGate: operation ~= Automate / ExecuteCode / Write
 Intent compiler: complex multi-verb GUI/code workflow
   |
   v
+Semantic workflow metadata:
+  - task family = Coding
+  - app anchor = IDE required
+  - fidelity = WorkflowStageFidelity
+  - mode = HybridWorkflow
+  - contract = VisibleCodingWorkflow
+  |
+  v
 Tool routing: IDE/GUI/code tools become visible
   |
   v
 Prompt compiler injects desktop context if PSDG has active workspace
   |
   v
-Model call generates plan/tool calls
+Model call only if deterministic routing cannot produce a known workflow
   |
-  +--> open app / IDE substrate
-  +--> write source file or type into editor
-  +--> run code
-  +--> capture output
+  +--> deterministic path: IdeCodeRunWorkflow
+  +--> fallback path: LLM-generated tool/workflow proposal, still policy-gated
   |
   v
 ExecutionVerifier checks observable effects:
-  - app/window opened
   - file/content exists
+  - runner script exists
+  - IDE launch is observed by process evidence
   - command ran
   - output contains Pascal triangle-like lines
   |
@@ -405,6 +423,7 @@ Failure branches:
 | ------- | ---------------- |
 | VSCode opens but does not focus | GUI/focus verification fails; workflow may recover or ask user |
 | LLM emits no tool call | TurnGate fallback can inject a deterministic tool call |
+| Visible terminal launch unavailable | Runner uses structural fallback and appends a disclosure marker to the output artifact |
 | Code runs but output hidden | semantic completion may fail; final response should not claim output was shown |
 | local model unavailable | ModelRouter/FailoverRouter may route fallback or return clear unavailable message |
 
@@ -420,6 +439,7 @@ TurnGate: Browser/GUI automation, live/personal ambiguity
 Tool routing:
   - browser_search/open_url/browser cognition if available
   - GUI tools only as last resort if browser substrate unavailable
+  - browser/media governance marks private playlist/account state as HITL-required metadata
   |
   v
 Prompt context:
@@ -1593,7 +1613,7 @@ Provider health dashboard
   |
 Verification expansion
   |
-  +-- more semantic completion checks per workflow type
+  +-- consume verifier-authority and hybrid-sync metadata as hard live completion gates
 ```
 
 ### Medium-Term Evolution
@@ -1604,7 +1624,7 @@ Verification expansion
 | Prompt runtime | retire legacy string prompt assembly in favor of typed compiler |
 | Provider routing | cost/latency/capability-aware model selection |
 | Workflow memory | stronger procedural learning with bounded retrieval |
-| GUI cognition | better browser/IDE semantic substrates, less blind input |
+| GUI cognition | live enforcement of semantic workflow contracts, browser/media verifier authority, and hybrid synchronization |
 | Eval runtime | provider outage harnesses, GUI live evals, long-horizon workflows |
 
 ### Long-Term Architecture
@@ -1639,6 +1659,12 @@ What should remain stable:
 | Turn planning | `crates/kria-core/src/agent/turn_gate.rs` | `TurnGate`, `Operation`, `ResourcePlan` | Classifies operation type and fallback tool hints |
 | Rule intent compiler | `crates/kria-core/src/agent/intent_compiler_rule.rs` | rule compiler types | Fast deterministic intent classification |
 | LLM intent compiler | `crates/kria-core/src/agent/intent_compiler_llm.rs` | `LlmIntentCompiler` | Bounded fallback for complex GUI/multi-step intents |
+| Semantic workflow | `crates/kria-core/src/agent/semantic_workflow.rs` | `SemanticWorkflowFrame`, `WorkflowFidelityResolution` | GUI workflow expectation and fidelity metadata |
+| Execution mode reasoner | `crates/kria-core/src/agent/execution_mode_reasoner.rs` | `ExecutionModeReasoner`, `ExecutionModeDecision` | Deterministic structural/visible/hybrid/HITL mode selection |
+| Workflow contracts | `crates/kria-core/src/agent/workflow_intent_contract.rs` | `WorkflowIntentContractRegistry`, `ContractCheck` | Declarative GUI workflow requirements |
+| Verifier authority | `crates/kria-core/src/agent/verifier_authority.rs` | `VerifierAuthorityEvaluator` | Evidence authority/freshness requirements |
+| Browser/media governance | `crates/kria-core/src/agent/browser_media_governance.rs` | `BrowserMediaGovernanceEvaluator` | Session/private-state governance metadata |
+| Execution gate | `crates/kria-core/src/agent/execution_gate.rs` | `ExecutionGate`, `ResumeGateOutcome` | Preflight, authority, policy, resource, and decision gating |
 | LLM contract | `crates/kria-core/src/llm/mod.rs` | `LlmBackend`, `ChatMessage`, `LlmResponse`, `ToolSchema`, `trim_messages_for_context` | Provider-neutral model interface and message/tool types |
 | Model router | `crates/kria-core/src/llm/model_router.rs` | `ModelRouter`, `RoutingMode`, `route`, `route_vision` | Selects local/cloud/vision backend |
 | Failover | `crates/kria-core/src/llm/failover.rs` | `FailoverRouter`, `ProviderFsm`, `FailoverPolicy` | Deterministic provider health and fallback routing |

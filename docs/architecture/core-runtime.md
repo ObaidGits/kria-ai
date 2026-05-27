@@ -2,7 +2,7 @@
 
 Internal architecture handbook for KRIA's bounded desktop cognition runtime.
 
-Generated from the current KRIA working tree on 2026-05-24. This document describes the live architecture represented in `crates/kria-core`, `crates/kria-desktop`, `tests/e2e`, and the existing runtime/eval reports.
+Updated from the current KRIA working tree on 2026-05-27. This document describes the live architecture represented in `crates/kria-core`, `crates/kria-desktop`, `crates/kria-eval`, `tests/e2e`, and the existing runtime/eval reports.
 
 ## Reader Contract
 
@@ -158,6 +158,12 @@ Fail-closed means KRIA prefers honest failure over fake success. If evidence is 
 | AgentLoop | `agent/loop_engine/mod.rs` | Main conversational/tool execution loop, result processing, memory writes, routing handoff. |
 | TurnGate | `agent/turn_gate.rs` | Operation, hazard, compute, confidence, tool hints. |
 | IntentCompiler | `agent/intent_compiler.rs`, `intent_compiler_rule.rs` | Natural language to typed GUI/task spec. |
+| SemanticWorkflowFrame | `agent/semantic_workflow.rs` | Deterministic GUI workflow metadata: task family, app anchors, visibility, ambiguity, safety class, fidelity tier. |
+| ExecutionModeReasoner | `agent/execution_mode_reasoner.rs` | Selects structural, visible, hybrid, human-collaborative, verification-visible, or silent workflow mode. |
+| WorkflowIntentContractRegistry | `agent/workflow_intent_contract.rs` | Declarative workflow contracts for visible coding, browser, media, human review, silent execution, and general visible workflows. |
+| VerifierAuthorityEvaluator | `agent/verifier_authority.rs` | Maps required verifiers to authority/freshness requirements and rejects unsupported evidence claims. |
+| HybridSynchronizationEvaluator | `agent/hybrid_synchronization.rs` | Defines and evaluates structural-visible sync checkpoints for hybrid workflows. |
+| BrowserMediaGovernanceEvaluator | `agent/browser_media_governance.rs` | Adds browser/media session-risk, visible-verifier, and HITL metadata. |
 | GoalTree | `agent/goal_tree.rs`, `stage_executor.rs` | Immutable multi-stage workflow and bounded execution. |
 | GuiPlanner | `agent/gui_planner.rs` | Unified GUI workflow planning trait and rule planner. |
 | SubstratePlanner | `agent/gui_substrate_planner.rs` | Selects file, terminal, browser, keystroke, app, or interaction substrate. |
@@ -187,6 +193,11 @@ AgentLoop
   |- PolicyEngine / HITL / Audit
   |- GuiExecutionCoordinator
        |- IntentCompiler
+       |- SemanticWorkflowFrame / FidelityResolution
+       |- ExecutionModeReasoner
+       |- WorkflowIntentContractRegistry
+       |- VerifierAuthorityEvaluator
+       |- BrowserMediaGovernance / HybridSynchronization metadata
        |- SubstratePlanner
        |- EnvironmentGrounder
        |- GuiExecutor / StageExecutor
@@ -219,6 +230,7 @@ User prompt
   -> TurnGate creates TurnGatePlan
   -> routing chooses conversation, direct tool, GUI, workflow, or fallback
   -> intent/workflow compiler creates typed plan
+  -> GUI workflows resolve semantic frame, fidelity, mode, contract, and verifier authority metadata
   -> environment grounding supplies bounded facts
   -> policy and execution authority gate each action
   -> ToolRegistry dispatches concrete handlers
@@ -233,11 +245,14 @@ User prompt
 Prompt
   -> TurnGate: Automate
   -> RuleIntentCompiler: Open App("code"), Generated("pascal triangle", python)
+  -> SemanticWorkflowFrame: Coding + required IDE anchor + WorkflowVisible
+  -> ExecutionModeDecision: HybridWorkflow / VisibleCodingWorkflow
+  -> ContractCheck: IDE file visible + workflow stage/output surfaced requirements
   -> Multi-intent guard: substrate can handle it
-  -> SubstratePlanner: TerminalExecution
-  -> Tools: write_file -> execute_bash -> open_application_with_file
-  -> Verifier: FileSystemEffect + DeterministicOutput + process/app evidence
-  -> Result: source file + captured output surfaced to user
+  -> SubstratePlanner: IdeCodeRunWorkflow
+  -> Tools: write_file source -> write_file runner -> open_application_with_file -> execute_bash terminal launcher
+  -> Verifier: FileSystemEffect + ProcessLaunched + DeterministicOutput
+  -> Result: source file, runner, captured output, and fallback disclosure when visible terminal launch is unavailable
 ```
 
 State transitions:
@@ -246,16 +261,18 @@ State transitions:
 Idle
   -> Planning
   -> Executing(write_file)
-  -> Executing(run)
-  -> Verifying(output)
+  -> Executing(write_runner)
   -> OpeningEditor
+  -> Executing(visible_terminal_launcher_or_structural_fallback)
+  -> Verifying(output)
   -> CompletedWithEvidence
 ```
 
 Decision points:
 
 - If generated code is detected, KRIA avoids keystroke typing.
-- If "run/show output" is detected, output artifact is required.
+- If "open code" plus "run/show output" is detected, the mode decision is hybrid visible coding and the substrate planner uses `IdeCodeRunWorkflow`.
+- If the visible terminal launcher cannot produce output, the runner falls back structurally and appends an explicit fallback marker to the output artifact.
 - If execution output is absent, semantic completion fails.
 
 ### Example 2: "open youtube and play latest song from my playlist"
@@ -264,9 +281,11 @@ Decision points:
 Prompt
   -> TurnGate: browser/automation intent
   -> Intent compiler: YouTube target, play action, private playlist scope
+  -> SemanticWorkflowFrame: Media/Browser + account/private context ambiguity
+  -> BrowserMediaGovernance: HITL pause required for private/session-dependent playlist state
   -> SubstratePlanner: BrowserNavigate / InteractionHeavy
   -> BrowserCognitionEngine: launch/reuse Chrome with CDP
-  -> Verification: BrowserPageLoaded
+  -> Verification metadata: BrowserPageVisible, BrowserAccountContext, MediaPlaybackVisible
   -> If login/private playlist needed: HITL/AuthRequired
   -> If "latest" cannot be resolved: clarify or user attestation
 ```
@@ -968,6 +987,7 @@ Near term
   -> expand AT-SPI semantic actions
   -> improve browser media verification
   -> richer HITL resume flows
+  -> wire verifier-authority and hybrid-sync metadata into hard live completion gates
 
 Mid term
   -> stronger IDE diagnostics loop
@@ -989,12 +1009,14 @@ What should remain stable:
 - policy/HITL authority
 - immutable GoalTree execution
 - local-first memory and state
-- substrate-first GUI design
+- semantic-contract-before-substrate GUI design
+- substrate execution remains bounded and explicit
 
 What should evolve:
 
 - platform-specific grounders
 - semantic browser/media state
+- live consumption of workflow contracts, verifier authority, and hybrid sync verdicts
 - procedural memory use in planning
 - recovery action quality
 - observability and user-facing diagnostics
@@ -1012,6 +1034,12 @@ What should evolve:
 | Turn gate | `agent/turn_gate.rs` | `TurnGate`, `IntentEnvelope`, `ResourcePlan` | Operation, hazard, confidence, compute routing. |
 | Intent compiler | `agent/intent_compiler.rs` | `GuiTaskSpec`, `IntentCompiler` | Typed intent contract. |
 | Rule compiler | `agent/intent_compiler_rule.rs` | `RuleIntentCompiler::compile` | Deterministic prompt normalization. |
+| Semantic workflow | `agent/semantic_workflow.rs` | `analyze_semantic_workflow`, `SemanticWorkflowFrame`, `WorkflowFidelityResolution` | GUI workflow expectation and fidelity metadata. |
+| Execution mode | `agent/execution_mode_reasoner.rs` | `ExecutionModeReasoner::decide`, `ExecutionModeDecision` | Deterministic visible/structural/hybrid mode selection. |
+| Workflow contracts | `agent/workflow_intent_contract.rs` | `WorkflowIntentContractRegistry::evaluate`, `WorkflowIntentContract` | Declarative workflow invariants and verifier requirements. |
+| Verifier authority | `agent/verifier_authority.rs` | `VerifierAuthorityEvaluator`, `VerifierAuthorityRequirement` | Authority/freshness boundaries for visible and structural evidence. |
+| Hybrid sync | `agent/hybrid_synchronization.rs` | `HybridSynchronizationEvaluator`, checkpoints | Structural-visible divergence metadata for hybrid workflows. |
+| Browser/media governance | `agent/browser_media_governance.rs` | `BrowserMediaGovernanceEvaluator` | Session/private-state governance for browser and media workflows. |
 | Multi-intent | `agent/multi_intent.rs` | `RuleBasedMultiIntentDecomposer` | Compound prompt decomposition. |
 | OpGraph | `agent/opgraph.rs`, `opgraph_compiler.rs` | `GoalTreeOpGraphCompiler` | Intent graph to GoalTree. |
 | Workflow compiler | `agent/workflow_compiler.rs` | `RuleBasedWorkflowCompiler`, `MultiVerbSpec` | Multi-stage workflow compilation. |

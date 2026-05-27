@@ -1,8 +1,12 @@
 # KRIA Documentation
 
-KRIA documentation is organized as production documentation, not as implementation scratch notes.
+This is the canonical documentation entry point. KRIA docs are organized as
+production documentation, not implementation scratch notes or temporary rollout
+logs.
 
-## Canonical Structure
+Use this file to find the authoritative document for each subsystem.
+
+## Structure
 
 ```text
 docs/
@@ -39,6 +43,9 @@ docs/
     overview.md
     gui-e2e.md
     voice-validation.md
+  integrations/
+    n8n.md
+    openclaw.md
   llm-context/
     index.md
     entry-points.md
@@ -47,56 +54,94 @@ docs/
     project-graph.json
     context-scope.json
     routing-corpus.jsonl
-  integrations/
-    n8n.md
-    openclaw.md
   decisions/
     adr/
+      001-e2e-eval-harness.md
+      002-tool-execution-overhaul.md
     rfc/
+      007-gui-system-control.md
+      008-recursive-intelligence.md
   voice/
     overview.md
   reference/
     source-navigation.md
 ```
 
+`docs/index.md` is the docs entry point. Do not create a parallel
+`docs/README.md` unless a packaging tool explicitly requires it.
+
 ## Authority Map
 
-| Domain | Canonical Document |
+| Domain | Canonical document |
 |---|---|
 | Platform overview | `architecture/overview.md` |
 | Core runtime | `architecture/core-runtime.md` |
-| LLM orchestration | `architecture/llm-orchestrator-runtime.md` |
-| GUI cognition runtime | `architecture/gui-cognition-runtime.md` |
-| Operational cognition / OpGraph | `architecture/core-runtime.md` |
 | Runtime flow | `architecture/overview.md` |
 | Subsystem boundaries | `architecture/overview.md` |
 | Result synthesis | `architecture/core-runtime.md` |
-| Safety model | `architecture/safety-hitl-runtime.md` |
-| Safety + HITL runtime | `architecture/safety-hitl-runtime.md` |
 | Memory architecture | `architecture/core-runtime.md` |
-| Orchestration authority | `orchestration/runtime-authority.md` |
-| Tool contracts | `orchestration/tool-system.md` |
+| LLM orchestration | `architecture/llm-orchestrator-runtime.md` |
+| GUI cognition runtime | `architecture/gui-cognition-runtime.md` |
+| Safety + HITL runtime | `architecture/safety-hitl-runtime.md` |
+| Runtime authority | `orchestration/runtime-authority.md` |
+| Tool system | `orchestration/tool-system.md` |
 | GUI execution | `orchestration/gui-execution.md` |
 | OpGraph execution contract | `orchestration/opgraph-contract.md` |
 | HITL MVP contracts | `contracts/hitl-mvp/01-boundary.md` through `contracts/hitl-mvp/10-eval-plan.md` |
 | Voice runtime | `voice/overview.md` |
 | Provider operations | `operations/provider-orchestration.md` |
-| OpenClaw integration | `integrations/openclaw.md` |
-| n8n integration | `integrations/n8n.md` |
-| Evaluation system | `evaluations/overview.md` |
-| GUI E2E runbook | `evaluations/gui-e2e.md` |
-| Voice validation | `evaluations/voice-validation.md` |
-| AI/LLM development context | `llm-context/index.md` |
 | Development | `operations/development.md` |
 | Deployment | `operations/deployment.md` |
 | Hardware | `operations/hardware.md` |
+| Evaluation system | `evaluations/overview.md` |
+| GUI E2E runbook | `evaluations/gui-e2e.md` |
+| Voice validation | `evaluations/voice-validation.md` |
+| n8n integration | `integrations/n8n.md` |
+| OpenClaw integration | `integrations/openclaw.md` |
+| AI/LLM development context | `llm-context/index.md` |
 | Source navigation | `reference/source-navigation.md` |
 
-## Rules
+## Reading Order
+
+For a new engineer or LLM agent:
+
+1. `architecture/overview.md`
+2. `reference/source-navigation.md`
+3. `orchestration/runtime-authority.md`
+4. `orchestration/tool-system.md`
+5. The subsystem-specific document for the change being made.
+
+For GUI cognition work:
+
+1. `architecture/gui-cognition-runtime.md`
+2. `orchestration/gui-execution.md`
+3. `orchestration/opgraph-contract.md`
+4. `evaluations/gui-e2e.md`
+
+For voice work:
+
+1. `voice/overview.md`
+2. `evaluations/voice-validation.md`
+3. `architecture/safety-hitl-runtime.md`
+4. `orchestration/runtime-authority.md`
+
+For HITL contract work, preserve the numeric order under
+`contracts/hitl-mvp/`.
+
+## Documentation Rules
 
 1. A subsystem has one canonical overview document.
-2. Deep architecture docs stay in `architecture/`; execution contracts stay in `orchestration/` or `contracts/`.
-3. ADRs and RFCs are historical decision records under `decisions/`.
-4. Implementation trackers, debug notes, phase logs, and one-off planning notes are not permanent documentation.
-5. The HITL MVP contract pack keeps its numeric order because downstream implementation and review depend on that sequence.
-6. AI-facing project context belongs in `llm-context/`; do not create a separate duplicate context folder.
+2. Deep architecture docs stay in `architecture/`.
+3. Execution authority and runtime contracts stay in `orchestration/`.
+4. Implementation-binding contracts stay in `contracts/`.
+5. ADRs and RFCs are historical decision records under `decisions/`; do not edit
+   them as live architecture unless the decision record itself is being amended.
+6. Generated eval reports, logs, phase notes, debug notes, and one-off planning
+   docs are not permanent documentation.
+7. The HITL MVP contract pack keeps numeric order because implementation and
+   review depend on that sequence.
+8. AI-facing project context belongs in `llm-context/`; do not recreate a
+   separate `ai-context/` folder.
+9. Keep filenames lowercase kebab-case for Markdown and JSON docs.
+10. When code changes runtime behavior, update the matching canonical doc in the
+    same change set.

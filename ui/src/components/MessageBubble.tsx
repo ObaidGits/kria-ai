@@ -1,6 +1,21 @@
 import { Component, Show, For, createSignal, createMemo, createEffect, onCleanup, untrack } from "solid-js";
 import { marked } from "marked";
-import hljs from "highlight.js";
+import hljs from "highlight.js/lib/core";
+import bash from "highlight.js/lib/languages/bash";
+import c from "highlight.js/lib/languages/c";
+import cpp from "highlight.js/lib/languages/cpp";
+import css from "highlight.js/lib/languages/css";
+import go from "highlight.js/lib/languages/go";
+import java from "highlight.js/lib/languages/java";
+import javascript from "highlight.js/lib/languages/javascript";
+import json from "highlight.js/lib/languages/json";
+import markdown from "highlight.js/lib/languages/markdown";
+import python from "highlight.js/lib/languages/python";
+import rust from "highlight.js/lib/languages/rust";
+import sql from "highlight.js/lib/languages/sql";
+import typescript from "highlight.js/lib/languages/typescript";
+import xml from "highlight.js/lib/languages/xml";
+import yaml from "highlight.js/lib/languages/yaml";
 import DOMPurify from "dompurify";
 import { invoke } from "@tauri-apps/api/core";
 import { appStore, type Message, type ToolCall } from "../stores/app";
@@ -67,13 +82,72 @@ marked.setOptions({
   gfm: true,
 });
 
+const CODE_HIGHLIGHT_MAX_CHARS = 80_000;
+const CODE_HIGHLIGHT_MAX_LINES = 400;
+const CODE_PREVIEW_HEAD_LINES = 220;
+const CODE_PREVIEW_TAIL_LINES = 80;
+
+hljs.registerLanguage("bash", bash);
+hljs.registerLanguage("c", c);
+hljs.registerLanguage("cpp", cpp);
+hljs.registerLanguage("css", css);
+hljs.registerLanguage("go", go);
+hljs.registerLanguage("java", java);
+hljs.registerLanguage("javascript", javascript);
+hljs.registerLanguage("json", json);
+hljs.registerLanguage("markdown", markdown);
+hljs.registerLanguage("python", python);
+hljs.registerLanguage("rust", rust);
+hljs.registerLanguage("sql", sql);
+hljs.registerLanguage("typescript", typescript);
+hljs.registerLanguage("xml", xml);
+hljs.registerLanguage("yaml", yaml);
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function makeCodePreview(text: string): { text: string; capped: boolean; omittedLines: number } {
+  const lines = text.split(/\r?\n/);
+  const tooLarge = text.length > CODE_HIGHLIGHT_MAX_CHARS || lines.length > CODE_HIGHLIGHT_MAX_LINES;
+  if (!tooLarge) {
+    return { text, capped: false, omittedLines: 0 };
+  }
+
+  const head = lines.slice(0, CODE_PREVIEW_HEAD_LINES);
+  const tail = lines.slice(Math.max(lines.length - CODE_PREVIEW_TAIL_LINES, CODE_PREVIEW_HEAD_LINES));
+  const omittedLines = Math.max(lines.length - head.length - tail.length, 0);
+  return {
+    text: [
+      ...head,
+      "",
+      `[KRIA preview: ${omittedLines} lines omitted to keep the UI responsive. Use message copy for full content.]`,
+      "",
+      ...tail,
+    ].join("\n"),
+    capped: true,
+    omittedLines,
+  };
+}
+
 const renderer = new marked.Renderer();
 
 renderer.code = function ({ text, lang }: { text: string; lang?: string; escaped?: boolean }) {
-  const language = lang && hljs.getLanguage(lang) ? lang : "plaintext";
-  const highlighted = hljs.highlight(text, { language }).value;
-  const langLabel = lang || "";
-  return `<div class="code-block-header"><span>${langLabel}</span><button class="copy-code-btn" onclick="navigator.clipboard.writeText(this.closest('.code-block-header').nextElementSibling.textContent)">Copy</button></div><pre><code class="hljs language-${language}">${highlighted}</code></pre>`;
+  const supportedLanguage = lang && hljs.getLanguage(lang) ? lang : null;
+  const language = supportedLanguage ?? "plaintext";
+  const preview = makeCodePreview(text);
+  const highlighted = preview.capped || !supportedLanguage
+    ? escapeHtml(preview.text)
+    : hljs.highlight(preview.text, { language: supportedLanguage }).value;
+  const langLabel = escapeHtml(lang || "plaintext");
+  const cappedLabel = preview.capped ? ` <span class="code-block-limit">preview, ${preview.omittedLines} lines omitted</span>` : "";
+  const cappedClass = preview.capped ? " code-block-capped" : "";
+  return `<div class="code-block-header${cappedClass}"><span>${langLabel}${cappedLabel}</span><button type="button" class="copy-code-btn" aria-label="Copy code block">Copy</button></div><pre><code class="hljs language-${language}">${highlighted}</code></pre>`;
 };
 
 renderer.codespan = function ({ text }: { text: string }) {
@@ -85,14 +159,36 @@ marked.use({ renderer });
 function renderMarkdown(content: string): string {
   const raw = marked.parse(content) as string;
   return DOMPurify.sanitize(raw, {
-    ADD_ATTR: ["onclick"],
     ALLOWED_TAGS: [
       "p", "br", "strong", "em", "del", "a", "code", "pre", "div",
       "h1", "h2", "h3", "h4", "h5", "h6",
       "ul", "ol", "li", "blockquote", "table", "thead", "tbody",
       "tr", "th", "td", "hr", "span", "button", "img",
     ],
-    ALLOWED_ATTR: ["href", "target", "rel", "class", "onclick", "src", "alt"],
+    ALLOWED_ATTR: ["href", "target", "rel", "class", "src", "alt", "type", "aria-label"],
+  });
+}
+
+function handleMarkdownCopyClick(event: MouseEvent) {
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+
+  const button = target.closest(".copy-code-btn") as HTMLButtonElement | null;
+  if (!button) return;
+
+  const header = button.closest(".code-block-header");
+  const code = header?.nextElementSibling?.querySelector("code");
+  const text = code?.textContent ?? "";
+  if (!text) return;
+
+  void navigator.clipboard.writeText(text).then(() => {
+    const previousText = button.textContent ?? "Copy";
+    button.textContent = "Copied";
+    button.classList.add("copied");
+    window.setTimeout(() => {
+      button.textContent = previousText;
+      button.classList.remove("copied");
+    }, 1500);
   });
 }
 
@@ -809,6 +905,7 @@ const ToolCallBlock: Component<{
               <div
                 class="tool-human-readable"
                 innerHTML={renderMarkdown(props.tc.human_readable!)}
+                onClick={handleMarkdownCopyClick}
               />
             </Show>
             <details class="tool-raw-details">
@@ -1214,7 +1311,7 @@ const MessageBubble: Component<Props> = (props) => {
           </Show>
           <div class="msg-text">
             {isAssistant()
-              ? <div innerHTML={htmlContent()} />
+              ? <div innerHTML={htmlContent()} onClick={handleMarkdownCopyClick} />
               : <span>{props.message.content}</span>
             }
           </div>

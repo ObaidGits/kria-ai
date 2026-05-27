@@ -1,12 +1,12 @@
-# KRIA Runtime Contracts
+# KRIA HITL Runtime Contracts
 
-**Document status:** MVP contract specification  
-**Purpose:** Define the structs, enums, and narrow traits required for HITL MVP.  
-**Rule:** Runtime contracts must be deterministic, serializable, versioned, and testable.
+**Document status:** Implementation-bound contract specification
+**Last updated:** 2026-05-27
+**Primary code:** `crates/kria-core/src/agent/collaborative_decision.rs`, `execution_gate.rs`, `resume_executor.rs`, `resource_lease.rs`
 
 ---
 
-## 1. Core Types
+## 1. Canonical IDs
 
 ```rust
 type WorkflowId = String;
@@ -14,18 +14,19 @@ type AttemptId = String;
 type StageId = String;
 type DecisionId = String;
 type OptionId = String;
-type LeaseId = String;
-type EvidenceId = String;
-type AuditId = String;
 type ActionHash = String;
 type TargetHash = String;
+type CheckpointId = String;
+type ActionId = String;
 ```
 
-IDs must be opaque. Do not encode behavior in IDs.
+IDs are opaque. Runtime behavior must come from typed fields and policy/verifier outputs, not encoded ID meaning.
 
 ---
 
 ## 2. ActionProposal
+
+Current shape:
 
 ```rust
 struct ActionProposal {
@@ -35,107 +36,156 @@ struct ActionProposal {
     tool_name: String,
     parameters: serde_json::Value,
     target: TargetBinding,
+    tool_schema_version: String,
+    tool_registry_version: String,
     action_hash: ActionHash,
     target_hash: TargetHash,
     requested_by: Actor,
-    created_at: DateTime<Utc>,
+    created_at: String,
 }
 ```
 
-`action_hash` and `target_hash` are immutable. Any parameter or target mutation creates a new proposal.
+`action_hash` and `target_hash` are immutable. Any changed parameter, target binding, stage, tool schema version, or registry version creates a different proposal.
 
 ---
 
-## 3. InteractionDecision
+## 3. TargetBinding
+
+Current shape:
+
+```rust
+struct TargetBinding {
+    kind: String,
+    id: String,
+    workspace_id: Option<String>,
+    session_id: Option<String>,
+    execution_boundary: Option<String>,
+    metadata: serde_json::Value,
+}
+```
+
+The execution gate builds this from `execution_authority::ValidationResult`. Ambiguous or blocked authority results still produce a target binding so the decision can explain what was unsafe or unresolved.
+
+---
+
+## 4. InteractionDecision
+
+Current shape:
 
 ```rust
 struct InteractionDecision {
-    id: DecisionId,
-    workflow_id: WorkflowId,
-    attempt_id: AttemptId,
-    stage_id: StageId,
-    action_hash: ActionHash,
-    target_hash: TargetHash,
+    id: String,
+    workflow_id: String,
+    attempt_id: String,
+    stage_id: Option<String>,
+    action_hash: String,
+    target_hash: String,
+    action_proposal: Option<ActionProposal>,
     decision_type: DecisionType,
-    risk_class: RiskClass,
-    rollbackability: Rollbackability,
     status: DecisionStatus,
     version: u64,
+    reason: String,
+    risk_level: RiskLevel,
     options: Vec<DecisionOption>,
-    evidence_refs: Vec<EvidenceId>,
-    created_at: DateTime<Utc>,
-    expires_at: Option<DateTime<Utc>>,
-    invalidation: InvalidationRules,
+    recommended_option: Option<String>,
+    rollbackability: Rollbackability,
+    confidence: ConfidenceBand,
+    affected_resources: Vec<String>,
+    rule_id: Option<String>,
+    evidence: Vec<EvidenceSummary>,
+    invalidation_rules: Vec<String>,
+    created_at: String,
+    updated_at: String,
+    expires_at: Option<String>,
+    resolution: Option<String>,
+    execution: Option<DecisionExecutionRecord>,
+    stage_binding: Option<DecisionStageBinding>,
+    checkpoint_summary: Option<CheckpointSummary>,
+    continuation: Option<ContinuationClaim>,
+    verification: Option<PostDecisionVerification>,
 }
 ```
 
-Resolution must include `id`, `version`, and `option_id`.
+Resolution must be scoped by decision ID and version. Hash-scoped resolution uses `DecisionResolutionContext` with `expected_action_hash` and `expected_target_hash`.
 
 ---
 
-## 4. DecisionOption
+## 5. Decision Types And Statuses
 
 ```rust
-struct DecisionOption {
-    id: OptionId,
-    label: String,
-    effect: DecisionEffect,
-    risk_delta: RiskDelta,
-    requires_revalidation: bool,
+enum DecisionType {
+    Approval,
+    TargetSelection,
+    ScopeClarification,
+    RecoveryChoice,
+    CredentialRequired,
+    VerifierConflict,
+    UnsafeUncertainty,
+}
+
+enum DecisionStatus {
+    Pending,
+    Resolved,
+    Deferred,
+    Expired,
+    Invalidated,
+    Denied,
+    Cancelled,
 }
 ```
 
-Options must be executable by deterministic backend code. LLM wording may describe options but must not create authority.
+Only `Pending` decisions can be resolved, denied, cancelled, expired, or invalidated by the transition helpers.
 
 ---
 
-## 5. GateOutcome
+## 6. Gate Outcomes
+
+The live pre-tool gate returns:
 
 ```rust
-enum GateOutcome {
-    Proceed { lease_requirements: Vec<LeaseRequirement> },
-    Block { reason: BlockReason },
-    PauseForDecision { decision: InteractionDecision },
-    NeedReobserve { reason: String },
-    NeedLease { requirements: Vec<LeaseRequirement> },
+enum ExecutionGateOutcome {
+    Proceed,
+    Block { reason: String },
+    PauseForDecision { decision_id: String, decision_type: &'static str, reason: String },
+    RequiresApproval { decision: InteractionDecision },
 }
 ```
 
-No other MVP gate outcomes are allowed.
-
----
-
-## 6. Narrow Traits
+Resume uses a separate result:
 
 ```rust
-trait PolicyEngine {
-    fn classify(&self, action: &ActionProposal) -> PolicyDecision;
-}
-
-trait ExecutionAuthority {
-    fn bind_target(&self, action: &ActionProposal) -> TargetAuthorityResult;
-}
-
-trait DecisionStore {
-    fn create(&self, decision: InteractionDecision) -> Result<DecisionId>;
-    fn resolve(&self, id: &DecisionId, version: u64, option: &OptionId) -> Result<ResolvedDecision>;
-    fn invalidate(&self, id: &DecisionId, reason: InvalidationReason) -> Result<()>;
-}
-
-trait AuditSink {
-    fn record(&self, event: AuditRecord) -> Result<AuditId>;
+enum ResumeGateOutcome {
+    Ready,
+    MissingActionProposal,
+    StaleActionProposal { reason: String },
+    Block { reason: String },
+    RiskIncreased { previous: RiskLevel, current: RiskLevel, reason: String },
+    RequiresApproval { risk_level: RiskLevel, reason: String },
 }
 ```
 
-Do not expose a plugin-style `DecisionProducer` ecosystem in MVP.
+`NeedLease` and `NeedReobserve` exist only in the generic collaborative-decision vocabulary. They are not live `ExecutionGateOutcome` variants. Live resource ownership is represented by `resource_requirements` returned alongside the gate outcome.
 
 ---
 
-## 7. Serialization Rules
+## 7. Runtime Components
 
-- All persisted structs must include schema version.
-- Unknown enum variants must fail closed.
-- Decision resolution must be idempotent.
-- Audit append failure must stop side-effecting execution.
-- Deserialization must reject missing `action_hash` or `target_hash`.
+| Component | Contract |
+|---|---|
+| `ExecutionGate` | Runs readiness, preflight, execution authority, policy, decision creation, and resource declaration. It does not execute tools. |
+| `DecisionStore` | Persists and replays decision, execution, continuation, and evidence events. It rejects stale version/hash/status transitions. |
+| `ResourceLeaseManager` | Acquires scoped leases and releases them through `ResourceLeaseGuard`. |
+| `ResumeExecutor` | Executes exactly one resolved persisted action after context, version, hash, gate, grounding, tool-version, tool-capability, and lease checks. |
+| `ContinuationReentryService` | Verifies one previously executed decision-bound action and records action-level progress only. |
+| `AuditLogger` | Writes SQLite policy/HITL action decisions with hash-chain verification. |
 
+---
+
+## 8. Serialization Rules
+
+- `DecisionStore` persistence is append-only JSONL and replay-derived state.
+- Unknown or missing critical fields must fail closed at transition or resume boundaries.
+- `action_hash`, `target_hash`, tool schema version, and tool registry version are resume-critical.
+- Decision events include `policy_version` and `runtime_version`.
+- SQLite audit rows are hash-chained and queryable by session, risk, and action.
+- Tool result stored in decision execution records must be redacted.

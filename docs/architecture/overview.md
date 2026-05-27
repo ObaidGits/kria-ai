@@ -1,13 +1,27 @@
 # KRIA Platform Architecture
 
-> **Last Updated:** 2026-05-21
+> **Last Updated:** 2026-05-27
 > **Status:** Production
 
 ---
 
 ## Executive Summary
 
-KRIA is a local-first **Execution Intelligence Platform** built with Rust at its core. The architecture follows the **Sovereign-Orchestrator Principle**: Rust owns planning, safety, memory authority, resource allocation, and audit boundaries. All external systems (Python sidecar, MCP servers, OpenClaw skills, cloud APIs) are execution engines that receive sanitized input and return structured output.
+KRIA is a local-first **Execution Intelligence Platform** built with Rust at its core. The architecture follows the **Sovereign-Orchestrator Principle**: Rust owns planning, workflow semantics, safety, memory authority, resource allocation, verification boundaries, and audit boundaries. All external systems (Python sidecar, MCP servers, OpenClaw skills, browser/desktop apps, cloud APIs) are execution engines that receive sanitized input and return structured output.
+
+The latest runtime adds a GUI workflow intelligence layer before substrate planning:
+
+```text
+GuiTaskSpec
+  -> SemanticWorkflowFrame
+  -> WorkflowFidelityResolution
+  -> ExecutionModeDecision
+  -> WorkflowIntentContract
+  -> VerifierAuthorityAssessment
+  -> SubstratePlanner / GoalTree
+```
+
+This layer is deterministic and contract-oriented. It does not replace `TurnGate`, does not call tools, and does not grant the LLM execution authority. Today it is wired into the live GUI planning path as trace/contract metadata, while concrete execution still flows through `SubstratePlanner`, `GuiExecutor`, `PolicyToolExecutor`, and the bounded verifier.
 
 ---
 
@@ -83,6 +97,7 @@ Execution Plane
   |-- AgentLoop ReAct executor
   |-- ToolRegistry
   |-- PolicyEngine / HITL / Audit
+  |-- ExecutionGate / DecisionStore
   |-- ExecutionVerifier
   |-- ResultSynthesizer
   |-- Python sidecar
@@ -114,6 +129,10 @@ MemoryManager
 9. **Every turn has a root cancellation token and bounded admission.**
 10. **Telemetry reconciliation, not logical state alone, decides GPU recovery and degraded mode.**
 11. **Tool results are synthesized before user-facing rendering or LLM context injection.**
+12. **GUI workflow semantics are selected before substrate planning and recorded as explicit contract metadata.**
+13. **Workflow contracts declare invariants only; they must not plan, execute, verify, or recover.**
+14. **Verifier authority metadata prevents weak surface evidence from claiming semantic truth.**
+15. **Hybrid GUI workflows must reconcile structural state and visible state before claiming full visible-workflow success.**
 
 ---
 
@@ -126,6 +145,12 @@ The heart of KRIA. All agent logic, tool execution, memory management, and safet
 | Module | Responsibility |
 |--------|----------------|
 | `agent/` | TurnGate, AgentLoop, IntentRouter, Planner |
+| `agent/semantic_workflow.rs` | GUI workflow frame, fidelity tier, app anchor, ambiguity, safety metadata |
+| `agent/execution_mode_reasoner.rs` | Deterministic GUI mode and contract selection |
+| `agent/workflow_intent_contract.rs` | Declarative workflow contracts and contract checks |
+| `agent/verifier_authority.rs` | Verifier authority/freshness claim boundaries |
+| `agent/hybrid_synchronization.rs` | Hybrid structural-visible synchronization metadata |
+| `agent/browser_media_governance.rs` | Browser/media account, private-session, and HITL governance metadata |
 | `tools/` | 60+ native Rust tools, ToolRegistry, handlers |
 | `safety/` | PolicyEngine, RiskLevel classification, HITL gateway |
 | `memory/` | MemoryManager, MemoryStore (SQLite), RAG engine |
@@ -176,20 +201,23 @@ Test framework for measuring agent quality.
 2. TurnGate classifies intent (deterministic → semantic → classifier → validator)
 3. ResourcePlan created (ReflexRust | ToolOnly | L1Text | L1Vision | ImageGeneration | MixedPipeline)
 4. GPU lease requested if needed
-5. AgentLoop executes within ResourcePlan bounds
-6. Tool calls → ToolRegistry → PolicyEngine → (HITL if Red) → Execute
-7. Execution verification runs (when enabled) and captures evidence
-8. Result synthesis produces conversational summaries + execution metadata
-9. Results → MemoryManager (if persistent)
-10. Response emitted to UI
+5. GUI-eligible turns create semantic workflow/fidelity/mode/contract metadata
+6. AgentLoop executes within ResourcePlan bounds
+7. Tool calls → ExecutionGate → PolicyEngine → DecisionStore/HITL if required → ToolRegistry
+8. Execution verification runs and captures evidence
+9. Result synthesis produces conversational summaries + execution metadata
+10. Results → MemoryManager / PSDG / session checkpoints where applicable
+11. Response emitted to UI
 ```
 
 ### Tool Execution Flow
 
 ```
 ToolRegistry.get_def(name)
+    → ExecutionGate.evaluate(action, params)
+    → readiness + preflight + execution-authority checks
     → PolicyEngine.evaluate(tool, params)
-    → HITL.approve() if Red tier
+    → DecisionStore/HITL approval if required
     → ToolHandler.execute(params)
   → ExecutionVerifier.verify() when enabled
   → ResultSynthesizer.synthesize()
@@ -237,7 +265,15 @@ Tool execution output must be normalized and synthesized by the core runtime bef
 
 ### GUI Automation Boundary
 
-GUI automation is treated as a high-risk execution substrate and remains governed by the same safety, verification, and audit controls as any other tool domain. Automation tooling may propose actions but cannot bypass `PolicyEngine`, HITL, or rollback requirements.
+GUI automation is treated as a high-risk execution substrate and remains governed by the same safety, verification, and audit controls as any other tool domain. The live GUI path now resolves semantic workflow metadata before substrate planning, but concrete tool execution still must pass `ExecutionGate`, `PolicyEngine`, HITL/decision storage where required, resource leases, and audit. Automation tooling may propose actions but cannot bypass these authorities.
+
+Current important GUI substrates:
+
+- `IdeCodeRunWorkflow`: writes generated code, creates a runner script, opens an IDE-class app with the file, launches a visible terminal run when possible, and captures output structurally.
+- `TerminalExecution`: writes or extracts runnable content, executes safely with bounded output capture, and verifies deterministic output.
+- `BrowserNavigate`: uses managed browser navigation for URL targets and `browser_search` for browser-app search intent.
+- `InteractionHeavy`: uses AT-SPI for semantic clicks/forms/dialogs where available.
+- `Keystroke`: last-resort literal input path, guarded by foreground lease and kill switch.
 
 ### Evaluation Boundary
 
@@ -320,6 +356,8 @@ Core traits for modularity and future extensibility:
 | `MemoryManager` | Memory write authority | SQLite-backed store |
 | `L1Runtime` | Local LLM lifecycle | llama-server orchestrator |
 | `ResourceTelemetry` | Hardware monitoring | NVML, system stats |
+| `WorkflowIntentContract` | GUI workflow invariants | Contract registry |
+| `ExecutionGate` | Tool-bound side-effect gate | Policy, preflight, decision store |
 
 ---
 
@@ -343,5 +381,7 @@ The architecture is designed to scale to:
 - **`../integrations/openclaw.md`** — OpenClaw substrate integration
 - **`safety-hitl-runtime.md`** — Safety model, policy engine, HITL, and audit
 - **`core-runtime.md`** — Core runtime, memory, verification, recovery, operational cognition, and result synthesis
+- **`gui-cognition-runtime.md`** — Semantic GUI workflow intelligence, substrates, verifier authority, and live GUI limitations
+- **`llm-orchestrator-runtime.md`** — Model routing and LLM/tool orchestration authority boundaries
 - **`../operations/hardware.md`** — Hardware lease/orchestration behavior
 - **`../operations/development.md`** — Development workflow and engineering contracts
