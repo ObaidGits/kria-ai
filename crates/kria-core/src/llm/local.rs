@@ -13,6 +13,43 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
+/// Pre-flight memory check — estimates whether the requested context will fit in
+/// available RAM. Returns `Some(warning_message)` if risky, `None` otherwise.
+///
+/// This is a best-effort heuristic, not a hard refusal. Llama-server's actual
+/// memory usage depends on model size + KV cache + tokens. We assume:
+/// - 4 bytes per char ~ 1 token
+/// - Each token uses ~ 256KB of KV cache (varies by model)
+/// - Available RAM threshold: 70% of total system RAM
+fn check_memory_budget(context_tokens: usize, max_response_tokens: usize) -> Option<String> {
+    use sysinfo::System;
+
+    let mut sys = System::new();
+    sys.refresh_memory();
+    let available_bytes = sys.available_memory();
+    let total_bytes = sys.total_memory();
+
+    // Rough estimate: each token uses ~256KB for KV cache + activations
+    // (this varies wildly by model size, but is a useful upper bound for 7B-13B models)
+    const BYTES_PER_TOKEN_ESTIMATE: u64 = 256 * 1024;
+    let total_tokens = (context_tokens + max_response_tokens) as u64;
+    let estimated_memory_needed = total_tokens * BYTES_PER_TOKEN_ESTIMATE;
+
+    // Warn if estimated memory exceeds 70% of available
+    let threshold = (available_bytes as f64 * 0.7) as u64;
+    if estimated_memory_needed > threshold {
+        return Some(format!(
+            "Estimated context memory ({:.1} GB) exceeds 70% of available RAM ({:.1} GB free of {:.1} GB total). \
+             May cause OOM in llama-server. Consider reducing context or using a smaller model.",
+            estimated_memory_needed as f64 / 1_073_741_824.0,
+            available_bytes as f64 / 1_073_741_824.0,
+            total_bytes as f64 / 1_073_741_824.0,
+        ));
+    }
+    None
+}
+
+
 /// Local LLM backend using llama.cpp via HTTP API.
 ///
 /// When an orchestrator `LlamaServerManager` is attached, the API URL and
@@ -433,6 +470,21 @@ impl LlmBackend for LocalBackend {
         temperature: f32,
         max_tokens: u32,
     ) -> anyhow::Result<LlmResponse> {
+        // ─── Pre-flight memory check ───────────────────────────────────────
+        // Estimate the approximate context size and refuse if available RAM is
+        // insufficient. Prevents silent OOM in llama-server.
+        let estimated_context_chars: usize = messages.iter().map(|m| m.content.len()).sum();
+        let estimated_context_tokens = estimated_context_chars / 4; // Rough heuristic
+        if let Some(memory_warning) = check_memory_budget(estimated_context_tokens, max_tokens as usize) {
+            tracing::warn!(
+                target: "llm_local",
+                warning = %memory_warning,
+                "Pre-flight memory check warns about potential OOM"
+            );
+            // We log but don't refuse — the user might be willing to risk it.
+            // A future improvement: refuse with HITL if estimated_context > available_ram * 0.7
+        }
+
         let mut current_messages = messages.to_vec();
         const MAX_CHAT_ATTEMPTS: usize = 5;
 

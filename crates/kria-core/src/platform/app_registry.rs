@@ -220,13 +220,36 @@ impl InstalledAppRegistry {
         match self.aliases.try_read() {
             Ok(aliases) => {
                 let normalized = normalize_alias(name);
+
+                // Try original normalized first (exact match)
                 if let Some(id_str) = aliases.get(&normalized) {
                     return Some(CanonicalAppId::from_registry(id_str.clone()));
                 }
 
+                // Try filler-word-stripped candidates (handles "the settings app" → "settings")
+                let stripped_candidates = strip_filler_words(&normalized);
+                for candidate in &stripped_candidates {
+                    if candidate == &normalized {
+                        continue; // already tried above
+                    }
+                    if let Some(id_str) = aliases.get(candidate) {
+                        debug!(
+                            target: "app_registry",
+                            input = %name,
+                            normalized = %normalized,
+                            matched_candidate = %candidate,
+                            "Resolved alias via filler-word stripping"
+                        );
+                        return Some(CanonicalAppId::from_registry(id_str.clone()));
+                    }
+                }
+
                 if let Ok(apps) = self.apps.try_read() {
-                    if let Some(id_str) = resolve_class_alias(&normalized, &aliases, &apps) {
-                        return Some(CanonicalAppId::from_registry(id_str));
+                    // Try class-alias resolution on each candidate
+                    for candidate in &stripped_candidates {
+                        if let Some(id_str) = resolve_class_alias(candidate, &aliases, &apps) {
+                            return Some(CanonicalAppId::from_registry(id_str));
+                        }
                     }
                 }
 
@@ -284,6 +307,84 @@ fn normalize_alias(name: &str) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// Strip common filler words ("the", "a", "an", "app", "application", "program", "tool")
+/// from an alias to enable natural-language phrasing like "the Settings app" → "settings".
+///
+/// Returns a list of progressively-stripped candidates, ordered from least-modified
+/// to most-modified. Callers should try each in order.
+fn strip_filler_words(normalized: &str) -> Vec<String> {
+    let filler_words: &[&str] = &[
+        "the", "a", "an", "my",
+        "app", "application", "applications",
+        "program", "programs",
+        "tool", "tools",
+        "software",
+    ];
+
+    let tokens: Vec<&str> = normalized.split_whitespace().collect();
+    if tokens.is_empty() {
+        return vec![normalized.to_string()];
+    }
+
+    let mut candidates: Vec<String> = Vec::new();
+    candidates.push(normalized.to_string()); // original first
+
+    // Strip filler words and produce a stripped candidate
+    let stripped: Vec<&str> = tokens
+        .iter()
+        .copied()
+        .filter(|t| !filler_words.contains(&t.to_ascii_lowercase().as_str()))
+        .collect();
+
+    if !stripped.is_empty() && stripped.len() != tokens.len() {
+        candidates.push(stripped.join(" "));
+    }
+
+    // Also try just the first non-filler token (e.g., "settings app" → "settings")
+    if let Some(first) = stripped.first() {
+        let single = first.to_string();
+        if !candidates.contains(&single) {
+            candidates.push(single);
+        }
+    }
+
+    // Also try the last non-filler token (e.g., "the file manager" → "manager" already
+    // handled by stripped; but "the chrome browser" → "browser" might be wrong, so
+    // we prefer first-token. Skip last-token strategy for now to avoid false matches.)
+
+    candidates
+}
+
+#[cfg(test)]
+mod alias_tests {
+    use super::*;
+
+    #[test]
+    fn strip_filler_settings_app() {
+        let candidates = strip_filler_words("settings app");
+        assert!(candidates.contains(&"settings app".to_string()));
+        assert!(candidates.contains(&"settings".to_string()));
+    }
+
+    #[test]
+    fn strip_filler_the_settings_app() {
+        let candidates = strip_filler_words("the settings app");
+        assert!(candidates.contains(&"settings".to_string()));
+    }
+
+    #[test]
+    fn strip_filler_my_browser() {
+        let candidates = strip_filler_words("my browser");
+        assert!(candidates.contains(&"browser".to_string()));
+    }
+
+    #[test]
+    fn strip_filler_no_change() {
+        let candidates = strip_filler_words("chrome");
+        assert_eq!(candidates, vec!["chrome".to_string()]);
+    }
 }
 
 fn resolve_class_alias(
@@ -665,6 +766,38 @@ mod tests {
             .resolve_alias("Excel or Calc")
             .expect("spreadsheet class alias should resolve");
         assert_eq!(resolved.as_str(), "libreoffice-calc");
+    }
+
+    #[tokio::test]
+    async fn filler_words_stripped_settings_app_resolves_to_settings() {
+        let registry = Arc::new(InstalledAppRegistry {
+            apps: Arc::new(RwLock::new(HashMap::new())),
+            aliases: Arc::new(RwLock::new(HashMap::new())),
+            schemes: Arc::new(RwLock::new(HashMap::new())),
+        });
+        registry
+            .load_manifests(vec![AppManifest {
+                app_id: CanonicalAppId::from_registry("gnome-control-center".to_string()),
+                display_name: "Settings".to_string(),
+                desktop_path: PathBuf::from("/tmp/gnome-control-center.desktop"),
+                exec_line: "gnome-control-center".to_string(),
+                exec_fingerprint: sha256_bytes(b"gnome-control-center"),
+                registered_schemes: Vec::new(),
+                name_aliases: vec!["settings".to_string()],
+            }])
+            .await;
+
+        // Direct match works
+        assert!(registry.resolve_alias("settings").is_some());
+        // Filler-word stripping works
+        assert!(registry.resolve_alias("settings app").is_some(),
+            "'settings app' should resolve to 'settings' after stripping filler word");
+        assert!(registry.resolve_alias("the settings app").is_some(),
+            "'the settings app' should resolve to 'settings'");
+        assert!(registry.resolve_alias("the settings application").is_some(),
+            "'the settings application' should resolve to 'settings'");
+        assert!(registry.resolve_alias("settings program").is_some(),
+            "'settings program' should resolve to 'settings'");
     }
 
     #[test]

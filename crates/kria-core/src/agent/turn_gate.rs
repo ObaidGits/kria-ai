@@ -912,6 +912,23 @@ fn operation_for_tool_hint(tool_hint: &str) -> Operation {
         return Operation::Automate;
     }
 
+    // ── Deterministic write/create operations ─────────────────────────────────
+    // These tools can execute without LLM reasoning (mkdir, write_file, etc.)
+    // Routing them as Operation::Write ensures they enter the ReAct loop with
+    // the correct tool hint and don't get misclassified as Converse (which
+    // requires LLM availability for even trivial operations).
+    if lower.contains("write")
+        || lower.contains("create")
+        || lower.contains("mkdir")
+        || matches!(
+            lower.as_str(),
+            "write_file" | "create_directory" | "create_file" | "append_file"
+                | "copy_file" | "move_file" | "rename_file"
+        )
+    {
+        return Operation::Write;
+    }
+
     if lower.starts_with("gw_")
         || lower.starts_with("get_")
         || lower.starts_with("list_")

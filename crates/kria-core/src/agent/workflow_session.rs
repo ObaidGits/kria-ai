@@ -264,6 +264,30 @@ impl SessionManager {
             }
         }
     }
+
+    /// Aggressive cleanup: enforce both age limit AND max count cap.
+    /// Removes the oldest sessions when count exceeds `max_count`.
+    /// Should be called periodically (e.g., on app startup, on each turn).
+    pub fn enforce_session_limits(&self, max_age_hours: u64, max_count: usize) {
+        // First, remove old sessions
+        self.cleanup_old_sessions(max_age_hours);
+
+        // Then enforce count cap by removing oldest
+        let mut sessions = self.list_sessions();
+        if sessions.len() > max_count {
+            sessions.sort_by_key(|s| s.updated_at);
+            let to_remove = sessions.len().saturating_sub(max_count);
+            for session in sessions.iter().take(to_remove) {
+                self.delete(&session.session_id);
+            }
+            tracing::info!(
+                target: "session_manager",
+                removed = to_remove,
+                kept = max_count,
+                "Enforced session count cap"
+            );
+        }
+    }
 }
 
 fn continuation_dedup_key(session: &WorkflowSession) -> String {

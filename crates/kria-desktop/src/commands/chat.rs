@@ -1,5 +1,122 @@
 use super::*;
 
+/// Parse "X of Y step(s)" patterns from completion messages.
+/// Returns (completed, total). Defaults to (0, 1) if no match.
+fn parse_partial_step_count(text: &str) -> (u32, u32) {
+    if let Some(re) = regex::Regex::new(r"(\d+)\s+of\s+(\d+)\s+step").ok() {
+        if let Some(cap) = re.captures(text) {
+            let completed = cap.get(1).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
+            let total = cap.get(2).and_then(|m| m.as_str().parse().ok()).unwrap_or(1);
+            return (completed, total);
+        }
+    }
+    (0, 1)
+}
+
+/// Classify a final response message into a typed verdict for the frontend.
+/// This lets the frontend render typed badges (Complete, Partial, Failed, Blocked)
+/// without parsing the response text — addresses P10-1 from GUI_VULS.md.
+///
+/// The frontend should prefer this typed verdict over string parsing.
+fn classify_response_verdict(text: &str) -> &'static str {
+    let lower = text.to_lowercase();
+
+    // Failure signals (highest priority)
+    if lower.contains("did not fully complete")
+        || lower.contains("task failed")
+        || lower.contains("workflow failed")
+        || lower.contains("error:")
+        || lower.contains("⚠")
+    {
+        // Distinguish blocked (HITL/login required) from failed
+        if lower.contains("requires approval")
+            || lower.contains("login required")
+            || lower.contains("not installed")
+            || lower.contains("hitl")
+        {
+            return "blocked";
+        }
+        // Partial completion (some steps succeeded)
+        if lower.contains("verified") && lower.contains("of") && lower.contains("step") {
+            return "partial";
+        }
+        return "failed";
+    }
+
+    // Structural completion (succeeded but visibility unverified)
+    if lower.contains("structurally complete") || lower.contains("structural success") {
+        return "structurally_complete";
+    }
+
+    // Already satisfied
+    if lower.contains("already") && (lower.contains("done") || lower.contains("complete") || lower.contains("running")) {
+        return "already_satisfied";
+    }
+
+    // Standard completion
+    if lower.contains("task completed") || lower.contains("✓") || lower.contains("completed") {
+        return "complete";
+    }
+
+    // Cancelled
+    if lower.contains("cancel") || lower.contains("stopped") {
+        return "cancelled";
+    }
+
+    // Default: assume conversation (no workflow verdict applies)
+    "conversation"
+}
+
+#[cfg(test)]
+mod chat_verdict_tests {
+    use super::*;
+
+    #[test]
+    fn classify_complete() {
+        assert_eq!(classify_response_verdict("Task completed. KRIA verified 1 step."), "complete");
+        assert_eq!(classify_response_verdict("✓ browser at https://example.com"), "complete");
+    }
+
+    #[test]
+    fn classify_partial() {
+        assert_eq!(
+            classify_response_verdict("⚠️ Task did not fully complete. KRIA verified 1 of 2 steps."),
+            "partial"
+        );
+    }
+
+    #[test]
+    fn classify_failed() {
+        // "app not found" doesn't trigger blocked patterns
+        assert_eq!(
+            classify_response_verdict("⚠️ Workflow failed: timeout"),
+            "failed"
+        );
+        // But "not installed" DOES trigger blocked
+        assert_eq!(
+            classify_response_verdict("⚠️ Error: app is not installed"),
+            "blocked"
+        );
+    }
+
+    #[test]
+    fn classify_blocked_login() {
+        assert_eq!(
+            classify_response_verdict("⚠️ Error: HITL approval timed out"),
+            "blocked"
+        );
+    }
+
+    #[test]
+    fn classify_conversation() {
+        assert_eq!(
+            classify_response_verdict("Hello! How can I help you today?"),
+            "conversation"
+        );
+    }
+}
+
+
 async fn send_message_with_profile(
     message: String,
     execution_profile: TurnExecutionProfile,
@@ -677,6 +794,62 @@ async fn send_message_with_profile(
                             "status": step.status,
                         }),
                     );
+                    // ── Phase: Canonical Telemetry Bridge ──────────────────────────
+                    // Emit structured workflow telemetry alongside legacy task_step.
+                    // Frontend progressively migrates to consuming this instead.
+                    let telemetry_event = match step.status {
+                        kria_core::agent::loop_engine::TaskStepStatus::Running => {
+                            Some(serde_json::json!({
+                                "version": 1,
+                                "seq": step.index,
+                                "event": {
+                                    "type": "step_started",
+                                    "workflow_id": session_id_clone,
+                                    "step_index": step.index,
+                                    "description": step.description,
+                                    "step_type": "command_execution"
+                                },
+                                "timestamp_ms": 0,
+                                "source": "legacy_shim"
+                            }))
+                        }
+                        kria_core::agent::loop_engine::TaskStepStatus::Done => {
+                            Some(serde_json::json!({
+                                "version": 1,
+                                "seq": step.index,
+                                "event": {
+                                    "type": "step_completed",
+                                    "workflow_id": session_id_clone,
+                                    "step_index": step.index,
+                                    "structural_success": true,
+                                    "visibility_confidence": { "level": "not_applicable" },
+                                    "artifacts": []
+                                },
+                                "timestamp_ms": 0,
+                                "source": "legacy_shim"
+                            }))
+                        }
+                        kria_core::agent::loop_engine::TaskStepStatus::Failed => {
+                            Some(serde_json::json!({
+                                "version": 1,
+                                "seq": step.index,
+                                "event": {
+                                    "type": "step_completed",
+                                    "workflow_id": session_id_clone,
+                                    "step_index": step.index,
+                                    "structural_success": false,
+                                    "visibility_confidence": { "level": "not_applicable" },
+                                    "artifacts": []
+                                },
+                                "timestamp_ms": 0,
+                                "source": "legacy_shim"
+                            }))
+                        }
+                        _ => None,
+                    };
+                    if let Some(telemetry) = telemetry_event {
+                        let _ = app_handle.emit("workflow:telemetry", telemetry);
+                    }
                 }
                 StreamEvent::Error(err) => {
                     tracing::error!("Agent error: {}", err);
@@ -888,12 +1061,76 @@ async fn send_message_with_profile(
                             }),
                         );
                     }
+
+                    // ── P10-1 / P12-4: Emit structured verdict telemetry ─────
+                    // Frontend can consume this typed envelope instead of parsing
+                    // the natural-language `final_text` content.
+                    let verdict_kind = classify_response_verdict(&final_text);
+
+                    // Build the typed verdict object matching the frontend type
+                    // discriminator pattern: { type: "<kind>", ...kind-specific-fields }
+                    let verdict_obj = match verdict_kind {
+                        "complete" => serde_json::json!({ "type": "complete" }),
+                        "structurally_complete" => serde_json::json!({
+                            "type": "structurally_complete",
+                            "unverified_outcomes": Vec::<String>::new(),
+                        }),
+                        "already_satisfied" => serde_json::json!({
+                            "type": "already_satisfied",
+                            "evidence": final_text.chars().take(200).collect::<String>(),
+                        }),
+                        "partial" => {
+                            // Try to extract "X of Y steps" from text
+                            let (completed, total) = parse_partial_step_count(&final_text);
+                            serde_json::json!({
+                                "type": "partial",
+                                "completed": completed,
+                                "total": total,
+                                "reason": final_text.chars().take(200).collect::<String>(),
+                            })
+                        }
+                        "blocked" => serde_json::json!({
+                            "type": "blocked",
+                            "reason": final_text.chars().take(200).collect::<String>(),
+                        }),
+                        "failed" => serde_json::json!({
+                            "type": "failed",
+                            "step": 0,
+                            "reason": final_text.chars().take(200).collect::<String>(),
+                        }),
+                        "cancelled" => serde_json::json!({
+                            "type": "failed",
+                            "step": 0,
+                            "reason": "cancelled",
+                        }),
+                        _ => serde_json::json!({ "type": "complete" }), // Default for conversation
+                    };
+
+                    let _ = app_handle.emit(
+                        "workflow:telemetry",
+                        serde_json::json!({
+                            "version": 1,
+                            "seq": 0,
+                            "event": {
+                                "type": "completed",
+                                "workflow_id": session_id_clone,
+                                "verdict": verdict_obj,
+                                "summary": final_text.chars().take(300).collect::<String>(),
+                                "artifacts": [],
+                                "continuation": []
+                            },
+                            "timestamp_ms": 0,
+                            "source": "react_loop"
+                        }),
+                    );
+
                     emit_agent_stage(
                         &app_handle,
                         "llm_done",
                         "LLM stream completed",
                         Some(serde_json::json!({
                             "response_chars": full_response.chars().count(),
+                            "verdict": verdict_kind,
                         })),
                     );
                 }

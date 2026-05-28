@@ -923,8 +923,35 @@ pub(super) fn start_local_api_bridge(
     tokio::spawn(async move {
         match tokio::net::TcpListener::bind(&bind_addr).await {
             Ok(listener) => {
+                // Ensure API token exists (generate if first run)
+                let _ = super::api_auth::ensure_api_token();
+
+                // Initialize HITL store for API delivery
+                let hitl_store = super::api_hitl::HitlStore::new();
+                let hitl_state = super::api_hitl::HitlApiState {
+                    store: Arc::clone(&hitl_store),
+                };
+
+                // Background task: expire old HITL requests every 60s
+                let expiry_store = Arc::clone(&hitl_store);
+                tokio::spawn(async move {
+                    let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+                    loop {
+                        interval.tick().await;
+                        // Expire requests older than 5 minutes (300 seconds)
+                        let _ = expiry_store.expire_old(300).await;
+                    }
+                });
+
+                let hitl_router = Router::new()
+                    .route("/api/hitl/pending", get(super::api_hitl::list_pending_handler))
+                    .route("/api/hitl/respond", post(super::api_hitl::respond_handler))
+                    .route("/api/hitl/stream", get(super::api_hitl::hitl_stream_handler))
+                    .with_state(hitl_state);
+
                 let router = Router::new()
                     .route("/api/health", get(local_api_health))
+                    .route("/api/auth/token", get(super::api_auth::get_token_handler))
                     .route("/api/chat", post(local_api_chat))
                     .route("/api/n8n/callback", post(local_api_n8n_callback))
                     .route("/api/n8n/hitl-response", get(local_api_n8n_hitl_response))
@@ -938,6 +965,7 @@ pub(super) fn start_local_api_bridge(
                         "/api/fleet/docker-evals",
                         post(local_api_fleet_docker_evals),
                     )
+                    .layer(axum::middleware::from_fn(super::api_auth::auth_middleware))
                     .layer(CorsLayer::permissive())
                     .with_state(LocalApiBridgeState {
                         responder,
@@ -952,6 +980,9 @@ pub(super) fn start_local_api_bridge(
                         decision_store,
                         app_handle: Some(app_handle),
                     });
+
+                // Merge HITL router (separate state) into main router
+                let router = router.merge(hitl_router);
 
                 health.update(
                     "local_api_bridge",

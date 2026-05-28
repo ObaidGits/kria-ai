@@ -57,6 +57,16 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\b(system\s+health|health\s+check)\b",
             "check_system_health",
         ),
+        // System info queries — "what is my username/hostname/kernel/etc"
+        // MUST come before recall_fact / search_knowledge to avoid misrouting
+        (
+            r"(?i)\bwhat\s+(is|are)\s+my\s+(current\s+)?(username|hostname|host\s*name|kernel|os|operating\s*system|system|cpu|ram|memory|disk|ip|user\s*name|user|distro|distribution|shell)\b",
+            "execute_bash",
+        ),
+        (
+            r"(?i)\b(my|current)\s+(username|hostname|host\s*name|kernel\s*version|os\s*version|distro|shell)\b",
+            "execute_bash",
+        ),
         // Installed apps/packages — MUST come before generic search/news patterns
         (
             r"(?i)\b(list|show|get|what|display|view)\b.{0,30}\b(installed)\b.{0,20}\b(apps?|applications?|packages?|programs?|software)\b",

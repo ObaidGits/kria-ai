@@ -722,7 +722,10 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     ));
 
     // Safety subsystems
-    let hitl = Arc::new(HitlGateway::new(30));
+    // HITL timeout: 5 minutes (300s). Previous value (30s) was too short — users
+    // need time to read the prompt, evaluate the action, and respond. With the
+    // longer timeout the system feels collaborative rather than rushed.
+    let hitl = Arc::new(HitlGateway::new(300));
 
     let policy_engine = Arc::new(PolicyEngine::new());
 
@@ -928,6 +931,13 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     // Wire SessionManager for ReAct checkpoint persistence (Batch 1 Phase 3)
     {
         let session_mgr = Arc::new(kria_core::agent::workflow_session::SessionManager::new());
+
+        // Enforce session limits on startup to prevent unbounded accumulation.
+        // Caps: 7-day age limit + maximum 200 sessions retained.
+        // Eval scripts and frequent automation users would otherwise accumulate
+        // thousands of session checkpoints over time.
+        session_mgr.enforce_session_limits(168, 200); // 168h = 7 days, 200 sessions
+
         agent_loop_builder = agent_loop_builder.with_session_manager(session_mgr);
         tracing::info!("[INIT] SessionManager: ReAct checkpoint persistence wired");
     }

@@ -1,6 +1,8 @@
 pub(crate) mod analytics;
 pub(crate) mod app_commands;
 pub(crate) mod app_state;
+pub(crate) mod api_auth;
+pub(crate) mod api_hitl;
 pub(crate) mod automation;
 pub(crate) mod chat;
 pub(crate) mod colab;
@@ -31,6 +33,7 @@ pub(crate) mod tool_result_helpers;
 pub(crate) mod voice;
 pub(crate) mod voice_diagnostics;
 pub(crate) mod voice_runtime_helpers;
+pub(crate) mod workflow;
 
 use colab::collect_colab_tier_status;
 #[cfg(test)]

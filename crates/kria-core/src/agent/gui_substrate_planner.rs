@@ -573,8 +573,8 @@ impl SubstratePlanner {
                 url_contains: site.map(|s| s.to_string()),
                 title_contains: query.map(|q| q.to_string()),
             },
-            // 30s: managed Chrome launch (up to 10s CDP poll) + navigation + verification
-            timeout_ms: Some(30_000),
+            // 45s: browser launch + navigation + verification (increased from 30s)
+            timeout_ms: Some(45_000),
         }];
 
         SubstratePlan {
@@ -586,7 +586,7 @@ impl SubstratePlanner {
                     action: "press_shortcut".into(),
                     params: serde_json::json!({ "keys": ["Escape"] }),
                 }],
-                max_duration_sec: 45,
+                max_duration_sec: 60,
             }),
             artifacts: vec![],
         }
@@ -846,9 +846,9 @@ impl SubstratePlanner {
                 }),
                 verify: VerificationType::ProcessLaunched {
                     binary: app_alias_to_binary(app),
-                    max_wait_ms: 8000,
+                    max_wait_ms: 5000,
                 },
-                timeout_ms: Some(12000),
+                timeout_ms: Some(8000),
             },
         ];
 
@@ -903,9 +903,9 @@ impl SubstratePlanner {
                 }),
                 verify: VerificationType::ProcessLaunched {
                     binary: app_alias_to_binary(app),
-                    max_wait_ms: 8000,
+                    max_wait_ms: 5000,
                 },
-                timeout_ms: Some(12000),
+                timeout_ms: Some(8000),
             },
         ];
 
@@ -1398,7 +1398,7 @@ impl SubstratePlanner {
                     url_contains: Some(url.to_string()),
                     title_contains: None,
                 },
-                timeout_ms: Some(30_000),
+                timeout_ms: Some(45_000),
             });
             step_num += 1;
         }

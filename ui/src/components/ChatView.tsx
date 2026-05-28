@@ -3,6 +3,14 @@ import { appStore } from "../stores/app";
 import MessageBubble from "./MessageBubble";
 import ExportDropdown from "./ExportDropdown";
 import ImageProgressChip from "./ImageProgressChip";
+import { WorkflowProgress } from "./WorkflowProgress";
+import {
+  activeSession as activeWorkflowSession,
+  respondToHitl,
+  cancelActiveWorkflow,
+  executeContinuation,
+  dismissWorkflow,
+} from "../stores/workflowSession";
 
 interface SlashCmd {
   name: string;
@@ -302,6 +310,38 @@ const ChatView: Component = () => {
             );
           }}
         </For>
+
+        {/* ── Canonical Workflow Progress (Phase: Frontend Mounting) ──────── */}
+        {/* Renders active workflow state from structured telemetry.          */}
+        {/* Never parses strings — purely typed WorkflowSession rendering.   */}
+        <Show when={activeWorkflowSession()}>
+          <div class="workflow-progress-container" style={{ padding: "0 1rem", "margin-bottom": "0.5rem" }}>
+            <WorkflowProgress
+              session={activeWorkflowSession()!}
+              onHitlRespond={(optionId) => {
+                const session = activeWorkflowSession();
+                if (session) {
+                  void respondToHitl({
+                    workflow_id: session.workflowId,
+                    option_id: optionId,
+                    action_type: { type: 'approve' },
+                  });
+                }
+              }}
+              onCancel={() => void cancelActiveWorkflow()}
+              onContinuation={(action) => {
+                const session = activeWorkflowSession();
+                if (session) {
+                  void executeContinuation(session.workflowId, action);
+                }
+              }}
+              onDismiss={() => {
+                const session = activeWorkflowSession();
+                if (session) dismissWorkflow(session.workflowId);
+              }}
+            />
+          </div>
+        </Show>
 
         {isThinking() && (
           <div class="thinking-row">

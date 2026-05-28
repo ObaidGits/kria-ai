@@ -267,7 +267,10 @@ impl GuiExecutionCoordinator {
         self.grounder = grounder;
     }
 
-    fn build_tool_executor(
+    /// Build a PolicyToolExecutor for workflow step execution.
+    /// Public so the canonical HybridWorkflowExecutor can use the same
+    /// policy/HITL/isolation infrastructure as the legacy executor.
+    pub fn build_tool_executor(
         &self,
         cancellation: CancellationToken,
         session_id: &str,
@@ -353,9 +356,12 @@ impl GuiExecutionCoordinator {
         }
 
         // Operation-based routing now requires sufficient confidence.
+        // Expanded to include Write/ExecuteShell/ExecuteCode operations because
+        // these can often be handled deterministically by the substrate planner
+        // (file writes, code generation + run) without requiring LLM reasoning.
         let is_gui_operation = matches!(
             plan.intent.operation,
-            Operation::Automate | Operation::ConfigureSystem
+            Operation::Automate | Operation::ConfigureSystem | Operation::Write
         );
 
         if !is_gui_operation {
@@ -495,6 +501,41 @@ impl GuiExecutionCoordinator {
         user_text: &str,
     ) -> WorkflowResult {
         let needs_input_daemon = workflow_needs_input_daemon(workflow);
+
+        // ── Pre-flight: fail fast if uinput is required but unavailable ──────
+        // Without this check, workflows that need keystroke/click injection
+        // silently timeout after 30-45s when the daemon isn't running.
+        // This gives an immediate, actionable error instead.
+        if needs_input_daemon {
+            let uinput_running = crate::agent::workflow_capability::detect_uinput_daemon();
+            if !uinput_running {
+                let reason = "GUI_UINPUT_UNAVAILABLE: This workflow requires keyboard/mouse \
+                    injection (type_text, click_mouse, etc.) but the kria-uinput-daemon is not \
+                    running. Enable GUI Automation in Settings or run: \
+                    cargo build --release -p kria-uinput-daemon && sudo ./target/release/kria-uinput-daemon"
+                    .to_string();
+                tracing::warn!(
+                    target: "gui_wiring",
+                    workflow_id = %workflow.task_id,
+                    steps_needing_uinput = workflow.sub_goals.iter()
+                        .filter(|s| matches!(s.action.as_str(),
+                            "type_text" | "click_mouse" | "click_element" | "press_shortcut" | "focus_window"))
+                        .count(),
+                    "Workflow requires uinput daemon but it is not running — failing fast"
+                );
+                return WorkflowResult {
+                    task_id: workflow.task_id.clone(),
+                    success: false,
+                    completed_steps: 0,
+                    total_steps: workflow.sub_goals.len(),
+                    error: Some(reason),
+                    aborted: true,
+                    duration_ms: 0,
+                    created_artifacts: Vec::new(),
+                };
+            }
+        }
+
         let foreground_lease = if needs_input_daemon {
             match self
                 .foreground_lease
@@ -1029,7 +1070,54 @@ impl ToolExecutor for PolicyToolExecutor {
         let decision = gate_evaluation.policy_decision.clone();
         let action_proposal = gate_evaluation.action_proposal.clone();
         let resource_requirements = gate_evaluation.resource_requirements.clone();
-        match gate_evaluation.outcome {
+
+        // ── Phase 1 Environment Override ──────────────────────────────────────
+        // If the legacy gate blocks or requires approval due to "Target mismatch"
+        // but the new environment validation says the tool is allowed (because
+        // Browser/Mcp/CloudProvider all map to Host), override to Proceed.
+        let gate_outcome = match &gate_evaluation.outcome {
+            ExecutionGateOutcome::Block { reason }
+                if reason.contains("Target mismatch") || reason.contains("EXECUTION_BLOCKED") =>
+            {
+                let turn_target = crate::agent::turn_memory::ExecutionTarget::infer(&self.user_text, action);
+                let env_check = crate::agent::execution_environment::validate_environment(action, turn_target);
+                if env_check.is_allowed() {
+                    tracing::info!(
+                        target: "authority_trace",
+                        action = action,
+                        legacy_reason = %reason,
+                        "PolicyToolExecutor: legacy target-mismatch BLOCK overridden"
+                    );
+                    ExecutionGateOutcome::Proceed
+                } else {
+                    gate_evaluation.outcome.clone()
+                }
+            }
+            ExecutionGateOutcome::RequiresApproval { .. } => {
+                // Check if this approval is triggered by target-mismatch logic
+                // (browser/desktop tools should not require approval just because
+                // the turn target is "Browser")
+                let turn_target = crate::agent::turn_memory::ExecutionTarget::infer(&self.user_text, action);
+                let env_check = crate::agent::execution_environment::validate_environment(action, turn_target);
+                if env_check.is_allowed() && matches!(turn_target,
+                    crate::agent::turn_memory::ExecutionTarget::Browser |
+                    crate::agent::turn_memory::ExecutionTarget::Mcp |
+                    crate::agent::turn_memory::ExecutionTarget::CloudProvider
+                ) {
+                    tracing::info!(
+                        target: "authority_trace",
+                        action = action,
+                        "PolicyToolExecutor: legacy HITL approval overridden (browser/desktop tool on Host)"
+                    );
+                    ExecutionGateOutcome::Proceed
+                } else {
+                    gate_evaluation.outcome.clone()
+                }
+            }
+            _ => gate_evaluation.outcome.clone(),
+        };
+
+        match gate_outcome {
             ExecutionGateOutcome::Block { reason } => {
                 if let Some(policy_decision) = &decision {
                     if policy_decision.blocked {
@@ -1222,6 +1310,32 @@ impl ToolExecutor for PolicyToolExecutor {
 /// Extension trait for KillSwitchInterceptor to access backend.
 pub trait KillSwitchBackendExt {
     fn get_backend(&self) -> Arc<dyn crate::tools::gui_automation::GuiBackend>;
+}
+
+/// Build a PolicyToolExecutor without needing a GuiExecutionCoordinator.
+/// Used by the canonical HybridWorkflowExecutor for Stage 1 execution.
+pub fn build_policy_tool_executor(
+    registry: Arc<ToolRegistry>,
+    cancellation: tokio_util::sync::CancellationToken,
+    policy_engine: Arc<PolicyEngine>,
+    hitl_gateway: Arc<HitlGateway>,
+    audit_logger: Arc<AuditLogger>,
+    session_id: String,
+    user_text: String,
+    destructive_hint: bool,
+) -> impl crate::agent::htn_executor::ToolExecutor {
+    PolicyToolExecutor {
+        registry,
+        cancellation,
+        policy_engine,
+        hitl_gateway,
+        audit_logger,
+        session_id,
+        user_text,
+        destructive_hint,
+        decision_store: Arc::new(DecisionStore::in_memory()),
+        resource_lease: ResourceLeaseManager::new(),
+    }
 }
 
 // ============================================================================

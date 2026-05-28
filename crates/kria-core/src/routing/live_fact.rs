@@ -220,6 +220,29 @@ pub fn is_live_fact_query(query: &str) -> bool {
         return false;
     }
 
+    // ── Pre-filter: Code generation / execution prompts ───────────────────
+    // "Create a Python script...", "Write a program...", "Generate code..."
+    // are code-generation requests, never live-fact queries.
+    {
+        let lower = query.to_lowercase();
+        let code_gen_signals = [
+            "create a python", "create a rust", "create a javascript",
+            "write a python", "write a rust", "write a program",
+            "write a script", "write a function", "write code",
+            "generate a python", "generate a script", "generate code",
+            "run it", "run the", "execute it", "compile it",
+            "fibonacci", "factorial", "hello world", "calculator",
+            "open code", "open vs code", "open vscode",
+        ];
+        if code_gen_signals.iter().any(|s| lower.contains(s)) {
+            tracing::info!(
+                query = %query,
+                "LiveFactClassifier: code generation/execution query — not a live fact"
+            );
+            return false;
+        }
+    }
+
     // Gate 1: Temporal-signal lexical gate (open-world, catches unseen prompts)
     let gate1_temporal = contains_temporal_signal(query);
 

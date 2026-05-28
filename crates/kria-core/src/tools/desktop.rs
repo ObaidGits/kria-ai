@@ -819,46 +819,52 @@ impl ToolHandler for ManagedBrowserNavigate {
         }
 
         if cfg!(target_os = "linux") {
-            // First, launch the managed browser
-            match crate::agent::browser_cognition::BrowserCognitionEngine::launch_with_debugging()
-                .await
-            {
-                Ok(_) => {
-                    let engine = crate::agent::browser_cognition::BrowserCognitionEngine::new();
-                    match engine.navigate(url).await {
-                        res if res.success => {
-                            return ToolResult::ok(serde_json::json!({ "managed_opened": url }))
-                        }
-                        res => {
-                            return ToolResult::err(format!(
-                                "Managed navigation failed: {}",
-                                res.evidence
-                            ))
-                        }
+            // Direct xdg-open approach — most reliable on Linux.
+            // CDP-managed navigation is attempted only if already available (< 500ms check).
+            let cdp_available = tokio::time::timeout(
+                std::time::Duration::from_millis(300),
+                crate::agent::browser_cognition::BrowserCognitionEngine::is_available(),
+            ).await.unwrap_or(false);
+
+            if cdp_available {
+                // CDP already running — use it (fast path)
+                let engine = crate::agent::browser_cognition::BrowserCognitionEngine::new();
+                let nav_result = tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    engine.navigate(url),
+                ).await;
+
+                if let Ok(res) = nav_result {
+                    if res.success {
+                        return ToolResult::ok(serde_json::json!({ "managed_opened": url, "method": "cdp" }));
                     }
                 }
-                Err(e) => {
-                    tracing::warn!(
-                        "Failed to launch managed browser, falling back to xdg-open: {}",
-                        e
-                    );
+                // CDP failed — fall through to xdg-open
+                tracing::warn!(target: "browser_cognition", "CDP available but navigation failed, using xdg-open");
+            }
+
+            // Primary path: xdg-open (always works, instant, no CDP dependency)
+            tracing::info!(target: "browser_cognition", url = url, "Opening URL via xdg-open");
+            match run_apply_owned("xdg-open", vec![url.to_string()]).await {
+                Ok(_) => {
+                    tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+                    return ToolResult::ok(serde_json::json!({
+                        "opened": url,
+                        "method": "xdg-open",
+                        "browser_opened": true
+                    }));
                 }
+                Err(error) => return ToolResult::err(format!("failed to open URL: {error}")),
             }
         }
 
-        // Fallback for non-Linux or if managed launch fails
-        let open_result = if cfg!(target_os = "linux") {
-            run_apply_owned("xdg-open", vec![url.to_string()]).await
-        } else if cfg!(target_os = "macos") {
+        // Non-Linux fallback
+        let open_result = if cfg!(target_os = "macos") {
             run_apply_owned("open", vec![url.to_string()]).await
         } else if cfg!(target_os = "windows") {
-            run_apply_owned(
-                "cmd",
-                vec!["/C".into(), "start".into(), "".into(), url.to_string()],
-            )
-            .await
+            run_apply_owned("cmd", vec!["/C".into(), "start".into(), "".into(), url.to_string()]).await
         } else {
-            Err("managed_browser_navigate fallback not implemented for this OS".to_string())
+            Err("managed_browser_navigate not implemented for this OS".to_string())
         };
 
         match open_result {

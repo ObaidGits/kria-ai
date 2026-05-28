@@ -372,10 +372,16 @@ impl ProviderFsm {
     /// Classify an error string as hard or soft failure.
     pub fn classify_error(error_msg: &str) -> FailureKind {
         let lower = error_msg.to_ascii_lowercase();
-        // Hard failures: auth, permanent errors
+        // Hard failures: auth, permanent errors, malformed payload (400)
+        // 400 Bad Request indicates the request payload is incompatible with this
+        // provider — retrying won't fix it, must fail over to a different backend.
         if lower.contains("authentication failed")
             || lower.contains("401")
             || lower.contains("403")
+            || lower.contains("400")
+            || lower.contains("bad request")
+            || lower.contains("invalid request")
+            || lower.contains("malformed")
             || lower.contains("circuit breaker")
             || lower.contains("circuit open")
             || lower.contains("failed after 3 retries")

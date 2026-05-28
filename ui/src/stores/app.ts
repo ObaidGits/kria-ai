@@ -2965,6 +2965,21 @@ function initListeners() {
     setVramBlackoutInfo(null);
   });
 
+  // ── Canonical Workflow Telemetry Bridge ──────────────────────────────────
+  // Consumes structured WorkflowTelemetry events from the backend and
+  // forwards them to the workflowSession store. This is the primary
+  // frontend/backend synchronization channel for workflow state.
+  listen<any>("workflow:telemetry", (event) => {
+    try {
+      // Dynamic import to avoid circular dependency
+      import("./workflowSession").then(({ handleTelemetryEvent }) => {
+        handleTelemetryEvent(event.payload);
+      });
+    } catch (e) {
+      console.warn("[WorkflowTelemetry] Failed to process telemetry event:", e);
+    }
+  });
+
   // Tier B VRAM blackout events
   listen<{ free_mb: number; required_mb: number; stage: string }>("image:tier_blackout", (event) => {
     if (event.payload.stage === "restored") {

@@ -1,3 +1,63 @@
+// ── Phase 0: Canonical Workflow Runtime Types ─────────────────────────────────
+// Single source of truth for workflow lifecycle, telemetry, verdicts, HITL, and capabilities.
+pub mod workflow_types;
+
+// ── Phase 1: Execution Environment Resolution ────────────────────────────────
+// Transitional bridge from legacy ExecutionTarget to canonical ExecutionEnvironment + ToolCategory.
+pub mod execution_environment;
+
+// ── Phase 1b: Canonical Workflow Verdict ──────────────────────────────────────
+// Single source of completion truth. Replaces dual-truth contradiction.
+pub mod workflow_verdict;
+
+// ── Phase 2: Workflow Lifecycle State Machine ─────────────────────────────────
+// Deterministic state ownership. Every workflow follows this FSM.
+pub mod workflow_lifecycle;
+
+// ── Phase 3: Structured Workflow Telemetry ────────────────────────────────────
+// Observable runtime events with monotonic ordering and frontend adapter.
+pub mod workflow_telemetry;
+
+// ── Phase 4: Capability Resolution + HITL Runtime ────────────────────────────
+// Environment detection, capability-aware negotiation, and structured HITL triggers.
+pub mod workflow_capability;
+
+// ── Phase 5: Capability-Aware Workflow Planning ──────────────────────────────
+// Adaptive substrate planning with outcome contracts and HITL negotiation.
+pub mod workflow_planner;
+
+// ── Phase 6: Outcome-Driven Verification ─────────────────────────────────────
+// Contract-bound verification with capability-aware strategy selection.
+pub mod workflow_verifier;
+
+// ── Phase 7: Hybrid Workflow Executor ────────────────────────────────────────
+// Canonical execution runtime: lifecycle + telemetry + verification + verdict.
+pub mod workflow_executor;
+
+// ── Phase 8: Runtime Convergence — Workflow Router ────────────────────────────
+// Canonical dispatch authority with progressive migration support.
+pub mod workflow_router;
+
+// ── Milestone A: Shadow Mode Validation ──────────────────────────────────────
+// Runtime parity infrastructure: dry-run execution, divergence detection, comparison reports.
+pub mod workflow_shadow;
+
+// ── Milestone B: Canonical Runtime Activation ────────────────────────────────
+// Progressive activation policy, safety gates, fallback architecture, metrics.
+pub mod workflow_activation;
+
+// ── Stage 1: Runtime Invariant Monitor ───────────────────────────────────────
+// Detects violations: double finalization, ordering corruption, orphan workflows.
+pub mod workflow_invariants;
+
+// ── Stage 4: Interaction Safety Layer ────────────────────────────────────────
+// Prevents unsafe GUI interactions: confidence scoring, focus drift, safe typing.
+pub mod workflow_interaction_safety;
+
+// ── Production: Telemetry Persistence ────────────────────────────────────────
+// SQLite-backed workflow traces for debugging, replay, and crash recovery.
+pub mod workflow_persistence;
+
 pub mod atspi_engine;
 pub mod browser_cognition;
 pub mod browser_media_governance;

@@ -1460,3 +1460,143 @@ fn intent_fallback_uses_builtin_file_pattern_search_when_mcp_unavailable() {
     assert_eq!(call.arguments["pattern"], "zrok");
     assert_eq!(call.arguments["type"], "dir");
 }
+
+
+// ─── Deterministic Dispatch Fast-Path Tests ──────────────────────────────────
+
+#[test]
+fn deterministic_dispatch_username() {
+    let result = try_deterministic_dispatch("What is my current username?");
+    assert!(result.is_some(), "Should match system info pattern");
+    let (tool, params) = result.unwrap();
+    assert_eq!(tool, "execute_bash");
+    let cmd = params["command"].as_str().unwrap();
+    assert!(cmd.contains("whoami"), "Command should include whoami: {}", cmd);
+}
+
+#[test]
+fn deterministic_dispatch_hostname_kernel_combo() {
+    let result = try_deterministic_dispatch("What is my current username, hostname, and Linux kernel version?");
+    assert!(result.is_some());
+    let (tool, params) = result.unwrap();
+    assert_eq!(tool, "execute_bash");
+    let cmd = params["command"].as_str().unwrap();
+    assert!(cmd.contains("whoami"));
+    assert!(cmd.contains("hostname"));
+    assert!(cmd.contains("uname"));
+}
+
+#[test]
+fn deterministic_dispatch_disk_space_root() {
+    let result = try_deterministic_dispatch("Check how much free disk space is available on the root partition and tell me.");
+    assert!(result.is_some(), "Should match disk space pattern");
+    let (tool, params) = result.unwrap();
+    assert_eq!(tool, "execute_bash");
+    assert!(params["command"].as_str().unwrap().contains("df"));
+}
+
+#[test]
+fn deterministic_dispatch_list_tmp_with_prefix() {
+    let result = try_deterministic_dispatch("List all files in /tmp that start with 'kria' and show me the results.");
+    assert!(result.is_some());
+    let (tool, params) = result.unwrap();
+    assert_eq!(tool, "execute_bash");
+    let cmd = params["command"].as_str().unwrap();
+    assert!(cmd.contains("ls"), "Command should list files: {}", cmd);
+    assert!(cmd.contains("kria"), "Command should filter for 'kria': {}", cmd);
+}
+
+#[test]
+fn deterministic_dispatch_create_project_folder() {
+    let result = try_deterministic_dispatch(
+        "Create a project folder called kria-eval-test in /tmp with src, tests, and docs subfolders, and a README.md file."
+    );
+    assert!(result.is_some(), "Should match folder creation pattern");
+    let (tool, params) = result.unwrap();
+    assert_eq!(tool, "execute_bash");
+    let cmd = params["command"].as_str().unwrap();
+    assert!(cmd.contains("/tmp/kria-eval-test"), "Should create base folder: {}", cmd);
+    assert!(cmd.contains("src"), "Should create src subfolder: {}", cmd);
+    assert!(cmd.contains("tests"), "Should create tests subfolder: {}", cmd);
+    assert!(cmd.contains("README"), "Should create README: {}", cmd);
+}
+
+#[test]
+fn deterministic_dispatch_browser_search() {
+    let result = try_deterministic_dispatch("Search for 'rust programming language' on Google using the browser.");
+    assert!(result.is_some(), "Should match browser search pattern");
+    let (tool, params) = result.unwrap();
+    assert_eq!(tool, "browser_search");
+    assert_eq!(params["query"].as_str().unwrap(), "rust programming language");
+    assert_eq!(params["site"].as_str().unwrap(), "google");
+}
+
+#[test]
+fn deterministic_dispatch_create_rust_file() {
+    let result = try_deterministic_dispatch(
+        "Create a Rust file at /tmp/greet.rs with a main function that prints 'Greetings from KRIA'. Show me the file contents."
+    );
+    assert!(result.is_some(), "Should match Rust file creation pattern");
+    let (tool, params) = result.unwrap();
+    assert_eq!(tool, "write_file");
+    assert_eq!(params["path"].as_str().unwrap(), "/tmp/greet.rs");
+    let content = params["content"].as_str().unwrap();
+    assert!(content.contains("fn main"), "Should have main function: {}", content);
+    assert!(content.contains("Greetings from KRIA"), "Should print expected text: {}", content);
+}
+
+#[test]
+fn deterministic_dispatch_create_file_with_lines() {
+    let result = try_deterministic_dispatch(
+        "Create a file at /tmp/kria_notes.txt with three lines: line 1 says 'Task started', line 2 says 'Processing', line 3 says 'Done'. Then read it back to me."
+    );
+    assert!(result.is_some(), "Should match file with lines pattern");
+    let (tool, params) = result.unwrap();
+    assert_eq!(tool, "write_file");
+    assert_eq!(params["path"].as_str().unwrap(), "/tmp/kria_notes.txt");
+    let content = params["content"].as_str().unwrap();
+    assert!(content.contains("Task started"));
+    assert!(content.contains("Processing"));
+    assert!(content.contains("Done"));
+}
+
+#[test]
+fn deterministic_dispatch_does_not_match_complex_prompts() {
+    // Multi-step IDE workflow: "Create + run + show output"
+    // The new behavior: write file + run via execute_bash (single shell command)
+    // This is correct — the user wants to see the output, and we can do that without LLM
+    let result = try_deterministic_dispatch(
+        "Create a Python file at /tmp/hello_kria.py that prints 'Hello KRIA', run it, and show me the output."
+    );
+    assert!(result.is_some(), "Should match Python create+run pattern");
+    let (tool, params) = result.unwrap();
+    // Should use execute_bash to run the file and capture output
+    assert_eq!(tool, "execute_bash", "Multi-step create+run should use execute_bash for one-shot file write+run");
+    let cmd = params["command"].as_str().unwrap();
+    assert!(cmd.contains("/tmp/hello_kria.py"), "Should write to the requested path");
+    assert!(cmd.contains("python3"), "Should run with python3");
+    assert!(cmd.contains("Hello KRIA"), "Should print the requested text");
+}
+
+#[test]
+fn deterministic_dispatch_python_fibonacci_run() {
+    // Real eval scenario: "Create a Python script at /tmp/fib.py that calculates fibonacci numbers up to 100, run it, and show the output."
+    let result = try_deterministic_dispatch(
+        "Create a Python script at /tmp/fib.py that calculates fibonacci numbers up to 100, run it, and show the output."
+    );
+    assert!(result.is_some(), "Should match fibonacci create+run pattern");
+    let (tool, params) = result.unwrap();
+    assert_eq!(tool, "execute_bash");
+    let cmd = params["command"].as_str().unwrap();
+    assert!(cmd.contains("/tmp/fib.py"));
+    assert!(cmd.contains("fib_up_to") || cmd.contains("fibonacci") || cmd.contains("a, b ="),
+        "Should generate fibonacci code: {}", cmd);
+    assert!(cmd.contains("python3"));
+}
+
+#[test]
+fn deterministic_dispatch_does_not_match_chitchat() {
+    assert!(try_deterministic_dispatch("hello").is_none());
+    assert!(try_deterministic_dispatch("how are you").is_none());
+    assert!(try_deterministic_dispatch("tell me a joke").is_none());
+}

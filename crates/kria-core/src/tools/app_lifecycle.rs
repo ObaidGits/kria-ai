@@ -392,47 +392,31 @@ impl ToolHandler for WebBrowserSearch {
 
         let url_str = url.to_string();
 
-        // RFC Browser Ownership: Attempt to use managed Chrome with CDP so that
-        // MANAGED_BROWSER_PID is recorded and all verification layers have evidence:
-        //   Layer 1 (CDP FullSemantic)     — URL/title visible via DevTools
-        //   Layer 2 (AT-SPI StructuralOnly) — window title visible after browser opens
-        //   Layer 3 (Process Unobservable)  — /proc/<pid> exists
-        // Without this, browser_search via xdg-open leaves no PID trace and CDP is
-        // never opened, causing all three layers to fail → false verification error.
+        // Use xdg-open-first approach (same as managed_browser_navigate).
+        // CDP is only used if already available (< 300ms check).
         if cfg!(target_os = "linux") {
-            match crate::agent::browser_cognition::BrowserCognitionEngine::launch_with_debugging()
-                .await
-            {
-                Ok(pid) => {
-                    tracing::info!(
-                        target: "app_lifecycle",
-                        pid = pid,
-                        url = %url_str,
-                        "browser_search: managed Chrome launched with CDP, navigating"
-                    );
-                    let engine = crate::agent::browser_cognition::BrowserCognitionEngine::new();
-                    let nav = engine.navigate(&url_str).await;
-                    if nav.success {
+            let cdp_available = tokio::time::timeout(
+                std::time::Duration::from_millis(300),
+                crate::agent::browser_cognition::BrowserCognitionEngine::is_available(),
+            ).await.unwrap_or(false);
+
+            if cdp_available {
+                let engine = crate::agent::browser_cognition::BrowserCognitionEngine::new();
+                let nav = tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    engine.navigate(&url_str),
+                ).await;
+                if let Ok(result) = nav {
+                    if result.success {
                         return ToolResult::ok(serde_json::json!({
                             "url": url_str,
                             "query": query,
                             "managed": true,
-                            "pid": pid,
+                            "method": "cdp",
                         }));
                     }
-                    tracing::warn!(
-                        target: "app_lifecycle",
-                        err = %nav.evidence,
-                        "browser_search: CDP navigation failed, falling back to IntentDispatcher"
-                    );
                 }
-                Err(e) => {
-                    tracing::warn!(
-                        target: "app_lifecycle",
-                        err = %e,
-                        "browser_search: managed Chrome launch failed, falling back to IntentDispatcher"
-                    );
-                }
+                tracing::warn!(target: "app_lifecycle", "browser_search: CDP navigation failed or timed out, using IntentDispatcher");
             }
         }
 
