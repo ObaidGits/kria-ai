@@ -21,8 +21,7 @@ pub fn save_report(result: &EvalBatchResult, output_dir: &PathBuf) -> Result<Pat
     let json_path = output_dir.join(format!("gui_eval_results_{}.json", timestamp));
     let json = serde_json::to_string_pretty(result)
         .map_err(|e| format!("Failed to serialize results: {}", e))?;
-    std::fs::write(&json_path, json)
-        .map_err(|e| format!("Failed to write JSON: {}", e))?;
+    std::fs::write(&json_path, json).map_err(|e| format!("Failed to write JSON: {}", e))?;
 
     Ok(report_path)
 }

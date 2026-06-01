@@ -165,7 +165,8 @@ fn browser_scenarios() -> Vec<EvalScenario> {
         EvalScenario {
             id: "browser-001-navigate-url".into(),
             description: "Open browser and navigate to a specific URL".into(),
-            prompt: "Open the browser and go to https://example.com. Show me that the page loaded.".into(),
+            prompt: "Open the browser and go to https://example.com. Show me that the page loaded."
+                .into(),
             category: EvalCategory::BrowserWorkflow,
             expected_min_steps: 1,
             max_duration_secs: 30,
@@ -173,7 +174,11 @@ fn browser_scenarios() -> Vec<EvalScenario> {
                 SuccessCriterion::BrowserNavigated,
                 SuccessCriterion::NoTimeout,
             ],
-            known_risks: vec!["CDP timeout".into(), "browser launch race".into(), "xdg-open fallback".into()],
+            known_risks: vec![
+                "CDP timeout".into(),
+                "browser launch race".into(),
+                "xdg-open fallback".into(),
+            ],
             difficulty: Difficulty::Basic,
         },
         EvalScenario {
@@ -193,7 +198,8 @@ fn browser_scenarios() -> Vec<EvalScenario> {
         EvalScenario {
             id: "browser-003-localhost".into(),
             description: "Open browser to localhost after starting a server".into(),
-            prompt: "Start a simple Python HTTP server on port 8080 and open it in the browser.".into(),
+            prompt: "Start a simple Python HTTP server on port 8080 and open it in the browser."
+                .into(),
             category: EvalCategory::BrowserWorkflow,
             expected_min_steps: 2,
             max_duration_secs: 30,
@@ -208,7 +214,8 @@ fn browser_scenarios() -> Vec<EvalScenario> {
         EvalScenario {
             id: "browser-004-outbro".into(),
             description: "Navigate to outbro.net and verify page load".into(),
-            prompt: "Open the browser and go to https://outbro.net Show me that the page loaded.".into(),
+            prompt: "Open the browser and go to https://outbro.net Show me that the page loaded."
+                .into(),
             category: EvalCategory::BrowserWorkflow,
             expected_min_steps: 1,
             max_duration_secs: 30,
@@ -309,22 +316,19 @@ fn recovery_scenarios() -> Vec<EvalScenario> {
             category: EvalCategory::Recovery,
             expected_min_steps: 1,
             max_duration_secs: 10,
-            success_criteria: vec![
-                SuccessCriterion::HitlTriggered,
-            ],
+            success_criteria: vec![SuccessCriterion::HitlTriggered],
             known_risks: vec!["silent failure instead of HITL".into()],
             difficulty: Difficulty::Basic,
         },
         EvalScenario {
             id: "recovery-002-invalid-command".into(),
             description: "Handle invalid command execution gracefully".into(),
-            prompt: "Run the command 'nonexistent_tool_xyz --version' and show me the output.".into(),
+            prompt: "Run the command 'nonexistent_tool_xyz --version' and show me the output."
+                .into(),
             category: EvalCategory::Recovery,
             expected_min_steps: 1,
             max_duration_secs: 15,
-            success_criteria: vec![
-                SuccessCriterion::NoTimeout,
-            ],
+            success_criteria: vec![SuccessCriterion::NoTimeout],
             known_risks: vec!["silent swallow of error".into()],
             difficulty: Difficulty::Basic,
         },
@@ -336,23 +340,23 @@ fn recovery_scenarios() -> Vec<EvalScenario> {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 fn multi_app_scenarios() -> Vec<EvalScenario> {
-    vec![
-        EvalScenario {
-            id: "multi-001-code-and-browser".into(),
-            description: "VS Code + Browser coordination".into(),
-            prompt: "Open Code, create an HTML file with a hello world page, then open it in the browser.".into(),
-            category: EvalCategory::MultiApp,
-            expected_min_steps: 3,
-            max_duration_secs: 45,
-            success_criteria: vec![
-                SuccessCriterion::ProcessRunning("code".into()),
-                SuccessCriterion::BrowserNavigated,
-                SuccessCriterion::NoTimeout,
-            ],
-            known_risks: vec!["focus switching".into(), "file path resolution".into()],
-            difficulty: Difficulty::Intermediate,
-        },
-    ]
+    vec![EvalScenario {
+        id: "multi-001-code-and-browser".into(),
+        description: "VS Code + Browser coordination".into(),
+        prompt:
+            "Open Code, create an HTML file with a hello world page, then open it in the browser."
+                .into(),
+        category: EvalCategory::MultiApp,
+        expected_min_steps: 3,
+        max_duration_secs: 45,
+        success_criteria: vec![
+            SuccessCriterion::ProcessRunning("code".into()),
+            SuccessCriterion::BrowserNavigated,
+            SuccessCriterion::NoTimeout,
+        ],
+        known_risks: vec!["focus switching".into(), "file path resolution".into()],
+        difficulty: Difficulty::Intermediate,
+    }]
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

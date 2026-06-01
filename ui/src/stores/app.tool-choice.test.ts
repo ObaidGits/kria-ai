@@ -8,6 +8,8 @@ const { invokeMock, listenMock, listenerMap, setSessionHistory } = vi.hoisted(()
     switch (command) {
       case "send_message":
         return { status: "ok", message: args?.message };
+      case "send_manual_tool_message":
+        return { status: "ok", message: args?.message, profile: args?.profile };
       case "create_session":
         return { session_id: "mock-created-session" };
       case "list_sessions":
@@ -97,6 +99,7 @@ describe("appStore low-confidence tool choice flow", () => {
     invokeMock.mockClear();
     setSessionHistory([]);
     appStore.dismissToolChoice();
+    appStore.setManualToolMode("auto");
   });
 
   it("captures tool-choice event and clears thinking state", () => {
@@ -162,6 +165,62 @@ describe("appStore low-confidence tool choice flow", () => {
       "send_message",
       expect.objectContaining({ message: expect.stringContaining("#tool:") }),
     );
+  });
+});
+
+describe("appStore manual tool selection mode", () => {
+  beforeEach(() => {
+    invokeMock.mockClear();
+    setSessionHistory([]);
+    appStore.dismissToolChoice();
+    appStore.setManualToolMode("auto");
+    window.localStorage.clear();
+  });
+
+  it("keeps auto mode on the normal assistant command path", async () => {
+    appStore.setManualToolMode("auto");
+
+    await appStore.sendMessage("check the weather");
+    await flushAsync(8);
+
+    expect(invokeMock).toHaveBeenCalledWith("send_message", {
+      message: "check the weather",
+    });
+    expect(invokeMock).not.toHaveBeenCalledWith(
+      "send_manual_tool_message",
+      expect.anything(),
+    );
+  });
+
+  it("sends manual n8n mode through the manual profile command", async () => {
+    appStore.setManualToolMode("n8n");
+
+    await appStore.sendMessage("run test_workflow");
+    await flushAsync(8);
+
+    expect(invokeMock).toHaveBeenCalledWith("send_manual_tool_message", {
+      message: "run test_workflow",
+      profile: {
+        mode_id: "n8n",
+        label: "n8n",
+        app_lock: null,
+        tool_lock: "n8n_invoke_workflow",
+        strategy: "direct",
+      },
+    });
+    expect(invokeMock).not.toHaveBeenCalledWith("send_message", {
+      message: "run test_workflow",
+    });
+  });
+
+  it("persists the last selected manual mode", () => {
+    appStore.setManualToolMode("browser");
+
+    expect(appStore.manualToolMode()).toBe("browser");
+    expect(window.localStorage.getItem("kria_manual_tool_mode")).toBe("browser");
+
+    appStore.setManualToolMode("auto");
+    expect(window.localStorage.getItem("kria_manual_tool_mode")).toBeNull();
   });
 });
 
@@ -331,6 +390,53 @@ describe("appStore stream scope parity", () => {
     appStore.setCurrentEnvironment("assistant");
     await flushAsync();
     expect(appStore.currentSession()).toBe("assistant-session-1");
+  });
+});
+
+describe("appStore n8n chat result formatting", () => {
+  beforeEach(async () => {
+    invokeMock.mockClear();
+    setSessionHistory([]);
+    appStore.setCurrentEnvironment("assistant");
+    appStore.setManualToolMode("auto");
+    await flushAsync();
+  });
+
+  it("renders workflow evidence details instead of only the result line", () => {
+    const before = appStore.messages().length;
+
+    emit("n8n:chat_result", {
+      success: true,
+      display_name: "Inbox Digest",
+      workflow_id: "gmail_inbox_digest",
+      status: "completed",
+      evidence: {
+        result: "Found 2 unread Gmail message(s).",
+        message_count: 2,
+        messages: [
+          {
+            message_ref: "gmail-1",
+            from: "team@example.com",
+            subject: "Build passed",
+            preview: "Build passed and deployment starts at 5 PM.",
+          },
+          {
+            message_ref: "gmail-2",
+            from: "ops@example.com",
+            subject: "",
+            preview: "Please review the latest deployment notes.",
+          },
+        ],
+      },
+    });
+
+    const inserted = appStore.messages().slice(before);
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0].content).toContain('Workflow "Inbox Digest" completed');
+    expect(inserted[0].content).toContain("Found 2 unread Gmail message(s).");
+    expect(inserted[0].content).toContain("Messages found: 2");
+    expect(inserted[0].content).toContain("Build passed");
+    expect(inserted[0].content).toContain("Ref: gmail-1");
   });
 });
 

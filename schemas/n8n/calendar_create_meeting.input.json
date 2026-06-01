@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Calendar Create Meeting Input",
+  "type": "object",
+  "required": ["title", "attendees", "start_time", "duration_minutes"],
+  "properties": {
+    "source_prompt": { "type": "string" },
+    "title": { "type": "string" },
+    "attendees": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "start_time": { "type": "string" },
+    "duration_minutes": { "type": "integer", "minimum": 5, "maximum": 480 },
+    "agenda": { "type": "string" },
+    "confirmed_by_user": { "type": "boolean", "default": false }
+  },
+  "additionalProperties": false
+}

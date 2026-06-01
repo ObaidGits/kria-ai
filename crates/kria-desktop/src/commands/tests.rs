@@ -736,6 +736,9 @@ async fn local_api_chat_rejects_empty_messages() {
         n8n_hitl_responses: std::sync::Arc::new(tokio::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
+        n8n_pending_suggestions: std::sync::Arc::new(tokio::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
         hitl: std::sync::Arc::new(kria_core::safety::hitl::HitlGateway::new(1)),
         decision_store: std::sync::Arc::new(
             kria_core::agent::collaborative_decision::DecisionStore::in_memory(),
@@ -772,6 +775,9 @@ async fn local_api_chat_uses_responder_payload() {
         n8n_audit_path: std::path::PathBuf::from("/tmp/kria-test-n8n-audit.jsonl"),
         n8n_governance_log: std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new())),
         n8n_hitl_responses: std::sync::Arc::new(tokio::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
+        n8n_pending_suggestions: std::sync::Arc::new(tokio::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
         hitl: std::sync::Arc::new(kria_core::safety::hitl::HitlGateway::new(1)),

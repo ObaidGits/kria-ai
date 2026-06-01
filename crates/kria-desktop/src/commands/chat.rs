@@ -5,8 +5,14 @@ use super::*;
 fn parse_partial_step_count(text: &str) -> (u32, u32) {
     if let Some(re) = regex::Regex::new(r"(\d+)\s+of\s+(\d+)\s+step").ok() {
         if let Some(cap) = re.captures(text) {
-            let completed = cap.get(1).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
-            let total = cap.get(2).and_then(|m| m.as_str().parse().ok()).unwrap_or(1);
+            let completed = cap
+                .get(1)
+                .and_then(|m| m.as_str().parse().ok())
+                .unwrap_or(0);
+            let total = cap
+                .get(2)
+                .and_then(|m| m.as_str().parse().ok())
+                .unwrap_or(1);
             return (completed, total);
         }
     }
@@ -49,7 +55,9 @@ fn classify_response_verdict(text: &str) -> &'static str {
     }
 
     // Already satisfied
-    if lower.contains("already") && (lower.contains("done") || lower.contains("complete") || lower.contains("running")) {
+    if lower.contains("already")
+        && (lower.contains("done") || lower.contains("complete") || lower.contains("running"))
+    {
         return "already_satisfied";
     }
 
@@ -73,14 +81,22 @@ mod chat_verdict_tests {
 
     #[test]
     fn classify_complete() {
-        assert_eq!(classify_response_verdict("Task completed. KRIA verified 1 step."), "complete");
-        assert_eq!(classify_response_verdict("✓ browser at https://example.com"), "complete");
+        assert_eq!(
+            classify_response_verdict("Task completed. KRIA verified 1 step."),
+            "complete"
+        );
+        assert_eq!(
+            classify_response_verdict("✓ browser at https://example.com"),
+            "complete"
+        );
     }
 
     #[test]
     fn classify_partial() {
         assert_eq!(
-            classify_response_verdict("⚠️ Task did not fully complete. KRIA verified 1 of 2 steps."),
+            classify_response_verdict(
+                "⚠️ Task did not fully complete. KRIA verified 1 of 2 steps."
+            ),
             "partial"
         );
     }
@@ -115,7 +131,6 @@ mod chat_verdict_tests {
         );
     }
 }
-
 
 async fn send_message_with_profile(
     message: String,
@@ -1232,6 +1247,52 @@ impl LabExecutionProfileInput {
     }
 }
 
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(default)]
+pub struct ManualToolProfileInput {
+    pub mode_id: String,
+    pub label: Option<String>,
+    pub app_lock: Option<String>,
+    pub tool_lock: Option<String>,
+    pub strategy: Option<String>,
+}
+
+impl ManualToolProfileInput {
+    fn tool_selection_strategy(&self) -> PromptLabToolSelectionStrategy {
+        match self
+            .strategy
+            .as_deref()
+            .map(|value| value.trim().to_ascii_lowercase())
+        {
+            Some(value)
+                if value == "direct"
+                    || value == "direct_locked_tool"
+                    || value == "direct-locked-tool" =>
+            {
+                PromptLabToolSelectionStrategy::DirectLockedTool
+            }
+            _ => PromptLabToolSelectionStrategy::RoutedWithinLock,
+        }
+    }
+
+    fn to_core_profile(&self) -> TurnExecutionProfile {
+        TurnExecutionProfile::manual_tool(
+            self.app_lock.clone(),
+            self.tool_lock.clone(),
+            self.tool_selection_strategy(),
+        )
+    }
+
+    fn selected_label(&self) -> String {
+        self.label
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| self.mode_id.trim())
+            .to_string()
+    }
+}
+
 #[tauri::command]
 pub async fn send_message(
     message: String,
@@ -1239,6 +1300,84 @@ pub async fn send_message(
     app: AppHandle,
 ) -> Result<serde_json::Value, String> {
     send_message_with_profile(message, TurnExecutionProfile::assistant(), state, app).await
+}
+
+#[tauri::command]
+pub async fn send_manual_tool_message(
+    message: String,
+    profile: ManualToolProfileInput,
+    state: State<'_, AppStateCell>,
+    app: AppHandle,
+) -> Result<serde_json::Value, String> {
+    if profile.mode_id.trim().eq_ignore_ascii_case("auto")
+        || (profile.app_lock.as_deref().unwrap_or("").trim().is_empty()
+            && profile.tool_lock.as_deref().unwrap_or("").trim().is_empty())
+    {
+        return send_message_with_profile(message, TurnExecutionProfile::assistant(), state, app)
+            .await;
+    }
+
+    let execution_profile = profile.to_core_profile();
+    let execution_id = Uuid::new_v4().to_string();
+    let prompt_preview = kria_core::infra::pipeline_trace::sanitize_text_for_logs(&message, 220);
+    let selected_tool = profile.selected_label();
+    let matched_tools = {
+        let state_ref = state.get().ok_or_else(|| {
+            "KRIA is still initializing — please try again in a moment".to_string()
+        })?;
+        let hw_tier = state_ref.hardware_info.tier.as_str();
+        state_ref
+            .tool_registry
+            .list_for_tier(hw_tier)
+            .into_iter()
+            .filter(|tool| execution_profile.allows_tool_name(&tool.name))
+            .map(|tool| tool.name)
+            .collect::<Vec<_>>()
+    };
+
+    if matched_tools.is_empty() {
+        return Err(format!(
+            "Manual tool mode '{}' has no available tools for this runtime",
+            selected_tool
+        ));
+    }
+
+    tracing::info!(
+        target: "tool_mode",
+        mode = "manual",
+        selected_tool = %selected_tool,
+        app_lock = ?execution_profile.app_lock,
+        tool_lock = ?execution_profile.tool_lock,
+        routing = "manual_override",
+        semantic_routing = "bypassed",
+        execution_id = %execution_id,
+        prompt_preview = %prompt_preview,
+        matched_tool_count = matched_tools.len(),
+        matched_tools = ?matched_tools,
+        "[TOOL_MODE] manual tool selection activated"
+    );
+
+    let telemetry = serde_json::json!({
+        "event": "ManualToolSelectionActivated",
+        "selected_tool": selected_tool,
+        "mode_id": profile.mode_id,
+        "timestamp_ms": unix_now_ms(),
+        "execution_id": execution_id,
+        "prompt_preview": prompt_preview,
+        "routing": "manual_override",
+        "semantic_routing": "bypassed",
+        "matched_tools": matched_tools,
+    });
+    let _ = app.emit("ManualToolSelectionActivated", telemetry.clone());
+    let _ = app.emit("tool_mode:telemetry", telemetry.clone());
+    emit_agent_stage(
+        &app,
+        "manual_tool_selection_activated",
+        "Manual tool mode selected by user",
+        Some(telemetry),
+    );
+
+    send_message_with_profile(message, execution_profile, state, app).await
 }
 
 #[tauri::command]

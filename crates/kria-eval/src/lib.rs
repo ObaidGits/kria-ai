@@ -1,5 +1,5 @@
-pub mod gui_eval;
 pub mod gui_cognition_ops;
+pub mod gui_eval;
 pub mod integration_eval;
 pub mod judge;
 pub mod llm_fixture;

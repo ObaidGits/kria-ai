@@ -70,9 +70,7 @@ pub async fn workflow_hitl_respond(
 /// Propagates cancellation to the canonical runtime.
 #[tauri::command]
 #[allow(dead_code)]
-pub async fn workflow_cancel(
-    workflow_id: String,
-) -> Result<serde_json::Value, String> {
+pub async fn workflow_cancel(workflow_id: String) -> Result<serde_json::Value, String> {
     tracing::info!(
         target: "workflow_commands",
         workflow_id = %workflow_id,
@@ -134,18 +132,14 @@ pub async fn workflow_continuation(
         "open_url" => {
             if let Some(url) = &payload {
                 tracing::info!(target: "workflow_commands", url = %url, "Opening URL");
-                let _ = tokio::process::Command::new("xdg-open")
-                    .arg(url)
-                    .spawn();
+                let _ = tokio::process::Command::new("xdg-open").arg(url).spawn();
             }
             Ok(serde_json::json!({ "status": "attempted", "action": "open_url" }))
         }
         "open_file" => {
             if let Some(path) = &payload {
                 tracing::info!(target: "workflow_commands", path = %path, "Opening file");
-                let _ = tokio::process::Command::new("xdg-open")
-                    .arg(path)
-                    .spawn();
+                let _ = tokio::process::Command::new("xdg-open").arg(path).spawn();
             }
             Ok(serde_json::json!({ "status": "attempted", "action": "open_file" }))
         }
@@ -154,12 +148,10 @@ pub async fn workflow_continuation(
             // TODO: Re-trigger the workflow with the same intent
             Ok(serde_json::json!({ "status": "retry_queued", "workflow_id": workflow_id }))
         }
-        _ => {
-            Ok(serde_json::json!({
-                "status": "unknown_action",
-                "action_type": action_type,
-            }))
-        }
+        _ => Ok(serde_json::json!({
+            "status": "unknown_action",
+            "action_type": action_type,
+        })),
     }
 }
 

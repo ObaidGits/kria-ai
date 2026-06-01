@@ -908,7 +908,11 @@ fn operation_for_tool_hint(tool_hint: &str) -> Operation {
         return Operation::RetrieveMemory;
     }
 
-    if lower.starts_with("open_") || lower == "browser_search" || lower == "focus_window" {
+    if lower.starts_with("open_")
+        || lower == "browser_search"
+        || lower == "focus_window"
+        || lower == "n8n_invoke_workflow"
+    {
         return Operation::Automate;
     }
 
@@ -922,8 +926,13 @@ fn operation_for_tool_hint(tool_hint: &str) -> Operation {
         || lower.contains("mkdir")
         || matches!(
             lower.as_str(),
-            "write_file" | "create_directory" | "create_file" | "append_file"
-                | "copy_file" | "move_file" | "rename_file"
+            "write_file"
+                | "create_directory"
+                | "create_file"
+                | "append_file"
+                | "copy_file"
+                | "move_file"
+                | "rename_file"
         )
     {
         return Operation::Write;

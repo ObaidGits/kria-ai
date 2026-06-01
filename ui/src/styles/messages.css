@@ -520,6 +520,30 @@
   align-items: center;
 }
 
+.response-loading-bubble {
+  position: relative;
+  min-height: 42px;
+  max-width: min(620px, calc(100% - 44px));
+  gap: 12px;
+  color: var(--text-secondary);
+  box-shadow: 0 0 0 1px rgba(58, 196, 125, 0.12);
+  animation: response-loading-border 1.8s ease-in-out infinite;
+}
+
+.thinking-label {
+  font-size: 13px;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.thinking-dots {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
 .thinking-bubble .dot {
   width: 7px;
   height: 7px;
@@ -534,6 +558,17 @@
 @keyframes thinking-bounce {
   0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
   30% { transform: translateY(-6px); opacity: 1; }
+}
+
+@keyframes response-loading-border {
+  0%, 100% {
+    border-color: var(--assistant-bubble-border);
+    box-shadow: 0 0 0 1px rgba(58, 196, 125, 0.08);
+  }
+  50% {
+    border-color: rgba(58, 196, 125, 0.58);
+    box-shadow: 0 0 0 3px rgba(58, 196, 125, 0.12);
+  }
 }
 
 /* ── Welcome card ────────────────────────────────────────────── */

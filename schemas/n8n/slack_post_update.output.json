@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Slack Post Update Output",
+  "type": "object",
+  "required": ["result", "message_ref", "confirmed_by_user"],
+  "properties": {
+    "result": { "type": "string" },
+    "message_ref": { "type": "string" },
+    "permalink": { "type": "string" },
+    "confirmed_by_user": { "type": "boolean" }
+  },
+  "additionalProperties": true
+}

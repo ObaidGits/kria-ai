@@ -1164,6 +1164,12 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\b(watch|monitor)\s+(the\s+)?(directory|folder|dir)\s+\S+\s+(for\s+)?(changes?|modifications?)\b",
             "watch_directory",
         ),
+        // ── n8n workflow invocation ──
+        (
+            r"(?i)\b(run|execute|trigger|invoke|start)\s+(n8n\s+)?(workflow|wf)\b",
+            "n8n_invoke_workflow",
+        ),
+        (r"(?i)\bn8n_invoke_workflow\b", "n8n_invoke_workflow"),
         (
             r"(?i)\b(list|show)\s+(watched|monitored)\s+(directories|folders|dirs)\b",
             "list_watched_dirs",

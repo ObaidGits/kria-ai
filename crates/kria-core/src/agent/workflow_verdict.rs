@@ -23,8 +23,7 @@
 //! - Honest about what it can and cannot verify
 
 use crate::agent::workflow_types::{
-    OutcomeContract,
-    OutcomeFailurePolicy, VisibilityConfidence, WorkflowVerdict,
+    OutcomeContract, OutcomeFailurePolicy, VisibilityConfidence, WorkflowVerdict,
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -102,10 +101,7 @@ pub fn compute_verdict(
                 recovery: None,
             },
             visibility_confidence: VisibilityConfidence::NotApplicable,
-            narrative: format!(
-                "Workflow failed at step {}/{}.",
-                failed_step, total_steps
-            ),
+            narrative: format!("Workflow failed at step {}/{}.", failed_step, total_steps),
         };
     }
 
@@ -177,7 +173,10 @@ pub fn compute_verdict(
         let avg_confidence = if verification_results.is_empty() {
             1.0
         } else {
-            verification_results.iter().map(|r| r.confidence).sum::<f32>()
+            verification_results
+                .iter()
+                .map(|r| r.confidence)
+                .sum::<f32>()
                 / verification_results.len() as f32
         };
 
@@ -203,7 +202,11 @@ pub fn compute_verdict(
                 reason: format!(
                     "{} visibility expectation{} could not be verified",
                     unverified_desired.len(),
-                    if unverified_desired.len() == 1 { "" } else { "s" }
+                    if unverified_desired.len() == 1 {
+                        ""
+                    } else {
+                        "s"
+                    }
                 ),
             },
             narrative: format!(
@@ -290,7 +293,9 @@ pub fn verdict_from_legacy_result(
         };
 
         VerdictComputation {
-            verdict: WorkflowVerdict::StructurallyComplete { unverified_outcomes },
+            verdict: WorkflowVerdict::StructurallyComplete {
+                unverified_outcomes,
+            },
             visibility_confidence: VisibilityConfidence::StructuralOnly {
                 reason: "Observable completion check reported visibility failure".into(),
             },
@@ -327,13 +332,29 @@ pub fn verdict_from_legacy_result(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::workflow_types::{OutcomeContract, OutcomeExpectation, OutcomeFailurePolicy, PlannedOutcome};
+    use crate::agent::workflow_types::{
+        OutcomeContract, OutcomeExpectation, OutcomeFailurePolicy, PlannedOutcome,
+    };
 
     #[test]
     fn all_steps_pass_no_contract_gives_complete() {
         let steps = vec![
-            StepResult { step_index: 1, action: "write_file".into(), success: true, error: None, artifacts: vec![], duration_ms: 100 },
-            StepResult { step_index: 2, action: "open_app".into(), success: true, error: None, artifacts: vec![], duration_ms: 200 },
+            StepResult {
+                step_index: 1,
+                action: "write_file".into(),
+                success: true,
+                error: None,
+                artifacts: vec![],
+                duration_ms: 100,
+            },
+            StepResult {
+                step_index: 2,
+                action: "open_app".into(),
+                success: true,
+                error: None,
+                artifacts: vec![],
+                duration_ms: 200,
+            },
         ];
         let result = compute_verdict(&steps, &[], &OutcomeContract::empty(), 2);
         assert!(matches!(result.verdict, WorkflowVerdict::Complete));
@@ -342,8 +363,22 @@ mod tests {
     #[test]
     fn step_failure_gives_failed_verdict() {
         let steps = vec![
-            StepResult { step_index: 1, action: "write_file".into(), success: true, error: None, artifacts: vec![], duration_ms: 100 },
-            StepResult { step_index: 2, action: "open_app".into(), success: false, error: Some("app not found".into()), artifacts: vec![], duration_ms: 50 },
+            StepResult {
+                step_index: 1,
+                action: "write_file".into(),
+                success: true,
+                error: None,
+                artifacts: vec![],
+                duration_ms: 100,
+            },
+            StepResult {
+                step_index: 2,
+                action: "open_app".into(),
+                success: false,
+                error: Some("app not found".into()),
+                artifacts: vec![],
+                duration_ms: 50,
+            },
         ];
         let result = compute_verdict(&steps, &[], &OutcomeContract::empty(), 2);
         match result.verdict {
@@ -357,14 +392,22 @@ mod tests {
 
     #[test]
     fn structural_pass_with_unverified_desired_gives_structurally_complete() {
-        let steps = vec![
-            StepResult { step_index: 1, action: "write_file".into(), success: true, error: None, artifacts: vec![], duration_ms: 100 },
-        ];
+        let steps = vec![StepResult {
+            step_index: 1,
+            action: "write_file".into(),
+            success: true,
+            error: None,
+            artifacts: vec![],
+            duration_ms: 100,
+        }];
         let contract = OutcomeContract {
             required: vec![],
             desired: vec![PlannedOutcome {
                 description: "VS Code window visible".into(),
-                expectation: OutcomeExpectation::AppWindowVisible { app: "code".into(), title_hint: None },
+                expectation: OutcomeExpectation::AppWindowVisible {
+                    app: "code".into(),
+                    title_hint: None,
+                },
                 min_confidence: 0.7,
                 on_failure: OutcomeFailurePolicy::DowngradeFidelity,
             }],
@@ -372,24 +415,37 @@ mod tests {
         // No verification results → desired outcome unverified
         let result = compute_verdict(&steps, &[], &contract, 1);
         match result.verdict {
-            WorkflowVerdict::StructurallyComplete { unverified_outcomes } => {
+            WorkflowVerdict::StructurallyComplete {
+                unverified_outcomes,
+            } => {
                 assert_eq!(unverified_outcomes.len(), 1);
                 assert!(unverified_outcomes[0].contains("VS Code"));
             }
-            _ => panic!("Expected StructurallyComplete verdict, got {:?}", result.verdict),
+            _ => panic!(
+                "Expected StructurallyComplete verdict, got {:?}",
+                result.verdict
+            ),
         }
     }
 
     #[test]
     fn structural_pass_with_verified_desired_gives_complete() {
-        let steps = vec![
-            StepResult { step_index: 1, action: "write_file".into(), success: true, error: None, artifacts: vec![], duration_ms: 100 },
-        ];
+        let steps = vec![StepResult {
+            step_index: 1,
+            action: "write_file".into(),
+            success: true,
+            error: None,
+            artifacts: vec![],
+            duration_ms: 100,
+        }];
         let contract = OutcomeContract {
             required: vec![],
             desired: vec![PlannedOutcome {
                 description: "VS Code window visible".into(),
-                expectation: OutcomeExpectation::AppWindowVisible { app: "code".into(), title_hint: None },
+                expectation: OutcomeExpectation::AppWindowVisible {
+                    app: "code".into(),
+                    title_hint: None,
+                },
                 min_confidence: 0.7,
                 on_failure: OutcomeFailurePolicy::DowngradeFidelity,
             }],
@@ -415,7 +471,10 @@ mod tests {
     fn legacy_adapter_success_with_visibility_failure_gives_structurally_complete() {
         let narrative = "⚠ Expected outcome not yet visible: code is open (Visibility probe timed out after 750ms)";
         let result = verdict_from_legacy_result(true, 3, 3, None, Some(narrative));
-        assert!(matches!(result.verdict, WorkflowVerdict::StructurallyComplete { .. }));
+        assert!(matches!(
+            result.verdict,
+            WorkflowVerdict::StructurallyComplete { .. }
+        ));
     }
 
     #[test]
@@ -434,14 +493,21 @@ mod tests {
     fn never_claims_complete_without_evidence_when_contract_has_desired() {
         // If there's a desired outcome and NO verification results,
         // the verdict must be StructurallyComplete, never Complete.
-        let steps = vec![
-            StepResult { step_index: 1, action: "open_app".into(), success: true, error: None, artifacts: vec![], duration_ms: 100 },
-        ];
+        let steps = vec![StepResult {
+            step_index: 1,
+            action: "open_app".into(),
+            success: true,
+            error: None,
+            artifacts: vec![],
+            duration_ms: 100,
+        }];
         let contract = OutcomeContract {
             required: vec![],
             desired: vec![PlannedOutcome {
                 description: "Browser at localhost".into(),
-                expectation: OutcomeExpectation::BrowserAtUrl { url_contains: "localhost".into() },
+                expectation: OutcomeExpectation::BrowserAtUrl {
+                    url_contains: "localhost".into(),
+                },
                 min_confidence: 0.6,
                 on_failure: OutcomeFailurePolicy::DowngradeFidelity,
             }],

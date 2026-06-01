@@ -83,13 +83,9 @@ pub enum RoutingDecision {
         planning_result: PlanningResultSummary,
     },
     /// Route to legacy GUI execution path (existing loop_engine branch)
-    LegacyGuiExecution {
-        reason: &'static str,
-    },
+    LegacyGuiExecution { reason: &'static str },
     /// Route to ReAct loop (non-GUI intent)
-    ReactLoop {
-        reason: &'static str,
-    },
+    ReactLoop { reason: &'static str },
     /// Workflow needs HITL before routing can proceed
     HitlBeforeRouting {
         reason: HitlReason,
@@ -97,9 +93,7 @@ pub enum RoutingDecision {
         context: String,
     },
     /// Cannot route — explain to user
-    Unroutable {
-        reason: String,
-    },
+    Unroutable { reason: String },
 }
 
 /// Summary of planning result for routing decision (avoids cloning full plan).
@@ -151,12 +145,8 @@ impl WorkflowRuntimeRouter {
         }
 
         // Run capability-aware planning
-        let planning_result = CapabilityAwarePlanner::plan(
-            spec,
-            raw_user_text,
-            capabilities,
-            app_registry,
-        );
+        let planning_result =
+            CapabilityAwarePlanner::plan(spec, raw_user_text, capabilities, app_registry);
 
         self.route_from_planning_result(planning_result, capabilities)
     }
@@ -182,7 +172,9 @@ impl WorkflowRuntimeRouter {
         let planner = crate::agent::gui_substrate_planner::SubstratePlanner;
         let substrate_plan = planner.plan(spec, raw_user_text);
 
-        if substrate_plan.substrate == crate::agent::gui_substrate_planner::ExecutionSubstrate::Unknown {
+        if substrate_plan.substrate
+            == crate::agent::gui_substrate_planner::ExecutionSubstrate::Unknown
+        {
             return RoutingDecision::ReactLoop {
                 reason: "Substrate planner could not generate a plan",
             };
@@ -191,11 +183,17 @@ impl WorkflowRuntimeRouter {
         let summary = PlanningResultSummary {
             substrate: format!("{:?}", substrate_plan.substrate),
             execution_mode: crate::agent::workflow_telemetry::execution_mode_from_previews(
-                &substrate_plan.workflow.as_ref()
+                &substrate_plan
+                    .workflow
+                    .as_ref()
                     .map(|w| crate::agent::workflow_telemetry::step_previews_from_workflow(w))
-                    .unwrap_or_default()
+                    .unwrap_or_default(),
             ),
-            step_count: substrate_plan.workflow.as_ref().map(|w| w.sub_goals.len() as u32).unwrap_or(0),
+            step_count: substrate_plan
+                .workflow
+                .as_ref()
+                .map(|w| w.sub_goals.len() as u32)
+                .unwrap_or(0),
             has_outcome_contract: true,
         };
 
@@ -207,13 +205,13 @@ impl WorkflowRuntimeRouter {
                     steps = summary.step_count,
                     "Routing to CANONICAL workflow runtime (no registry)"
                 );
-                RoutingDecision::CanonicalWorkflow { planning_result: summary }
-            }
-            RuntimeMode::Legacy | RuntimeMode::Shadow => {
-                RoutingDecision::LegacyGuiExecution {
-                    reason: "RuntimeMode::Legacy — canonical runtime not yet default",
+                RoutingDecision::CanonicalWorkflow {
+                    planning_result: summary,
                 }
             }
+            RuntimeMode::Legacy | RuntimeMode::Shadow => RoutingDecision::LegacyGuiExecution {
+                reason: "RuntimeMode::Legacy — canonical runtime not yet default",
+            },
         }
     }
 
@@ -222,7 +220,6 @@ impl WorkflowRuntimeRouter {
         planning_result: PlanningResult,
         _capabilities: &CapabilitySet,
     ) -> RoutingDecision {
-
         match planning_result {
             PlanningResult::Planned {
                 substrate_plan,
@@ -386,7 +383,7 @@ impl CapabilitySummary {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::intent_compiler::{GuiTaskSpec, TargetRef, Verb, ContentClass};
+    use crate::agent::intent_compiler::{ContentClass, GuiTaskSpec, TargetRef, Verb};
 
     fn make_capabilities() -> CapabilitySet {
         CapabilitySet {
@@ -399,7 +396,10 @@ mod tests {
                 ocr_available: false,
             },
             verifier: VerifierCapability {
-                available_methods: vec![VerificationMethod::FileSystem, VerificationMethod::ProcessTable],
+                available_methods: vec![
+                    VerificationMethod::FileSystem,
+                    VerificationMethod::ProcessTable,
+                ],
                 window_state_max_confidence: 0.90,
                 cdp_available: false,
                 filesystem_available: true,
@@ -445,8 +445,11 @@ mod tests {
         let decision = router.route(&spec, "open firefox", &caps, &registry, true);
         // In legacy mode, even plannable workflows go to legacy runtime
         assert!(
-            matches!(decision, RoutingDecision::LegacyGuiExecution { .. }
-                | RoutingDecision::HitlBeforeRouting { .. }),
+            matches!(
+                decision,
+                RoutingDecision::LegacyGuiExecution { .. }
+                    | RoutingDecision::HitlBeforeRouting { .. }
+            ),
             "Expected Legacy or HITL routing, got {:?}",
             decision
         );

@@ -42,7 +42,9 @@ pub enum InvariantType {
     DuplicateVerdict,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub enum ViolationSeverity {
     Warning,
     Error,
@@ -113,7 +115,11 @@ impl InvariantMonitor {
     }
 
     /// Check: telemetry sequence is monotonically increasing.
-    pub fn check_telemetry_ordering(&mut self, workflow_id: &str, seq: u64) -> Option<InvariantViolation> {
+    pub fn check_telemetry_ordering(
+        &mut self,
+        workflow_id: &str,
+        seq: u64,
+    ) -> Option<InvariantViolation> {
         if let Some(&last) = self.last_seq.get(workflow_id) {
             if seq <= last {
                 let violation = InvariantViolation {
@@ -142,7 +148,10 @@ impl InvariantMonitor {
                 workflow_id: workflow_id.to_string(),
                 invariant: InvariantType::DuplicateCompletionTelemetry,
                 severity: ViolationSeverity::Critical,
-                description: format!("Duplicate completion telemetry for workflow '{}'", workflow_id),
+                description: format!(
+                    "Duplicate completion telemetry for workflow '{}'",
+                    workflow_id
+                ),
                 timestamp: Some(Instant::now()),
                 should_rollback: true,
             };
@@ -165,7 +174,9 @@ impl InvariantMonitor {
 
     /// Whether rollback is recommended based on violation count.
     pub fn should_recommend_rollback(&self) -> bool {
-        let critical_count = self.violations.iter()
+        let critical_count = self
+            .violations
+            .iter()
             .filter(|v| v.severity == ViolationSeverity::Critical)
             .count();
         critical_count >= self.max_violations_before_rollback
@@ -179,9 +190,21 @@ impl InvariantMonitor {
 
     /// Get violation count by severity.
     pub fn violation_counts(&self) -> (usize, usize, usize) {
-        let warnings = self.violations.iter().filter(|v| v.severity == ViolationSeverity::Warning).count();
-        let errors = self.violations.iter().filter(|v| v.severity == ViolationSeverity::Error).count();
-        let critical = self.violations.iter().filter(|v| v.severity == ViolationSeverity::Critical).count();
+        let warnings = self
+            .violations
+            .iter()
+            .filter(|v| v.severity == ViolationSeverity::Warning)
+            .count();
+        let errors = self
+            .violations
+            .iter()
+            .filter(|v| v.severity == ViolationSeverity::Error)
+            .count();
+        let critical = self
+            .violations
+            .iter()
+            .filter(|v| v.severity == ViolationSeverity::Critical)
+            .count();
         (warnings, errors, critical)
     }
 }
@@ -206,7 +229,10 @@ mod tests {
         assert!(monitor.check_finalization("wf-1").is_none());
         let violation = monitor.check_finalization("wf-1");
         assert!(violation.is_some());
-        assert_eq!(violation.unwrap().invariant, InvariantType::DoubleFinalization);
+        assert_eq!(
+            violation.unwrap().invariant,
+            InvariantType::DoubleFinalization
+        );
     }
 
     #[test]
@@ -215,7 +241,10 @@ mod tests {
         monitor.record_cancellation("wf-1");
         let violation = monitor.check_not_cancelled("wf-1");
         assert!(violation.is_some());
-        assert_eq!(violation.unwrap().invariant, InvariantType::ExecutionAfterCancellation);
+        assert_eq!(
+            violation.unwrap().invariant,
+            InvariantType::ExecutionAfterCancellation
+        );
     }
 
     #[test]
@@ -225,7 +254,10 @@ mod tests {
         assert!(monitor.check_telemetry_ordering("wf-1", 2).is_none());
         let violation = monitor.check_telemetry_ordering("wf-1", 1); // Out of order!
         assert!(violation.is_some());
-        assert_eq!(violation.unwrap().invariant, InvariantType::TelemetryOrderingViolation);
+        assert_eq!(
+            violation.unwrap().invariant,
+            InvariantType::TelemetryOrderingViolation
+        );
     }
 
     #[test]
@@ -234,7 +266,10 @@ mod tests {
         assert!(monitor.check_completion_uniqueness("wf-1").is_none());
         let violation = monitor.check_completion_uniqueness("wf-1");
         assert!(violation.is_some());
-        assert_eq!(violation.unwrap().invariant, InvariantType::DuplicateCompletionTelemetry);
+        assert_eq!(
+            violation.unwrap().invariant,
+            InvariantType::DuplicateCompletionTelemetry
+        );
     }
 
     #[test]
@@ -271,10 +306,10 @@ mod tests {
         // 1 warning (ordering)
         monitor.check_telemetry_ordering("wf-1", 5);
         monitor.check_telemetry_ordering("wf-1", 3); // warning
-        // 1 error (execution after cancel)
+                                                     // 1 error (execution after cancel)
         monitor.record_cancellation("wf-2");
         monitor.check_not_cancelled("wf-2"); // error
-        // 1 critical (double finalization)
+                                             // 1 critical (double finalization)
         monitor.check_finalization("wf-3");
         monitor.check_finalization("wf-3"); // critical
 

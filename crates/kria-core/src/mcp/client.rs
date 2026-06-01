@@ -108,7 +108,11 @@ impl McpClient {
         args: &[String],
         env: &HashMap<String, String>,
     ) -> anyhow::Result<()> {
-        tracing::info!(
+        tracing::debug!(
+            target: "mcp_startup",
+            server = %self.name,
+            command,
+            args = ?args,
             "[MCP:{}] do_start — spawning: {} {:?}",
             self.name,
             command,
@@ -139,7 +143,13 @@ impl McpClient {
             );
             e
         })?;
-        tracing::info!("[MCP:{}] process spawned (pid={:?})", self.name, child.id());
+        tracing::debug!(
+            target: "mcp_startup",
+            server = %self.name,
+            pid = ?child.id(),
+            "[MCP:{}] process spawned",
+            self.name
+        );
 
         let stdout = child
             .stdout
@@ -200,7 +210,21 @@ impl McpClient {
                 line.clear();
                 match reader.read_line(&mut line).await {
                     Ok(0) => {
-                        tracing::info!("[MCP:{}] stdout EOF — server process exited", reader_name);
+                        if stopping.load(Ordering::Relaxed) {
+                            tracing::debug!(
+                                target: "mcp_startup",
+                                server = %reader_name,
+                                "[MCP:{}] stdout EOF during shutdown",
+                                reader_name
+                            );
+                        } else {
+                            tracing::warn!(
+                                target: "mcp_startup",
+                                server = %reader_name,
+                                "[MCP:{}] stdout EOF — server process exited",
+                                reader_name
+                            );
+                        }
                         // Drop all outstanding response senders so in-flight requests fail fast.
                         pending.lock().await.clear();
                         if !stopping.load(Ordering::Relaxed) {
@@ -274,7 +298,9 @@ impl McpClient {
         *self.reader_task.lock().await = Some(reader_handle);
 
         // MCP initialize handshake
-        tracing::info!(
+        tracing::debug!(
+            target: "mcp_startup",
+            server = %self.name,
             "[MCP:{}] sending initialize request (protocol 2024-11-05)",
             self.name
         );
@@ -309,7 +335,11 @@ impl McpClient {
         })?;
         *self.server_info.lock().await = init_result.server_info.clone();
 
-        tracing::info!(
+        tracing::debug!(
+            target: "mcp_startup",
+            server = %self.name,
+            server_name = ?init_result.server_info.as_ref().map(|s| &s.name),
+            protocol = %init_result.protocol_version,
             "[MCP:{}] initialize OK — server_name={:?} protocol={}",
             self.name,
             init_result.server_info.as_ref().map(|s| &s.name),
@@ -322,7 +352,9 @@ impl McpClient {
 
         // Discover tools if the server supports them
         if init_result.capabilities.tools.is_some() {
-            tracing::info!(
+            tracing::debug!(
+                target: "mcp_startup",
+                server = %self.name,
                 "[MCP:{}] server supports tools — requesting tools/list",
                 self.name
             );
@@ -333,13 +365,23 @@ impl McpClient {
                     tracing::error!("[MCP:{}] tools/list request failed: {}", self.name, e);
                     e
                 })?;
-            tracing::info!(
+            tracing::debug!(
+                target: "mcp_startup",
+                server = %self.name,
+                tools = tools_list.len(),
                 "[MCP:{}] discovered {} tool(s):",
                 self.name,
                 tools_list.len()
             );
             for t in &tools_list {
-                tracing::info!("[MCP:{}]   - {}", self.name, t.name);
+                tracing::trace!(
+                    target: "mcp_startup",
+                    server = %self.name,
+                    tool = %t.name,
+                    "[MCP:{}] discovered tool '{}'",
+                    self.name,
+                    t.name
+                );
             }
             *self.tools.lock().await = tools_list;
         } else {
@@ -351,7 +393,12 @@ impl McpClient {
 
         *self.state.lock().await = McpServerState::Running;
         self.restart_count.store(0, Ordering::Relaxed);
-        tracing::info!("[MCP:{}] state = Running", self.name);
+        tracing::debug!(
+            target: "mcp_startup",
+            server = %self.name,
+            "[MCP:{}] state = Running",
+            self.name
+        );
         Ok(())
     }
 

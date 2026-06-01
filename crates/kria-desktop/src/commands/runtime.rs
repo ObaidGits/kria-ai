@@ -4,11 +4,24 @@ use std::collections::HashMap;
 
 pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     // Initialize logging first so startup diagnostics are filterable.
+    let startup_started = std::time::Instant::now();
     let bootstrap_paths = kria_core::platform::paths::KriaPaths::resolve();
     kria_core::infra::logging::setup_logging(&bootstrap_paths.logs_dir);
 
     let mut config = KriaConfig::load(None)?;
     let paths = config.resolve_paths()?;
+    if let Some(path) = config
+        .n8n
+        .migrate_literal_api_key_to_file()
+        .map_err(|error| anyhow::anyhow!("failed to migrate n8n API key: {error}"))?
+    {
+        config.save()?;
+        tracing::info!(
+            target: "n8n_config",
+            path = %path.display(),
+            "migrated literal n8n API key into owner-only secret file during startup"
+        );
+    }
 
     // Resolve hardware tier with precedence: env > config > cache > detect.
     let hw_cache_path = paths.data_dir.join("hardware_tier.json");
@@ -598,7 +611,7 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
 
     // ── MCP server startup ────────────────────────────────────────────────────
     // Load MCP server configs from mcp_servers.json (supplements TOML config)
-    tracing::info!("[MCP] loading MCP server configs from mcp_servers.json");
+    tracing::debug!("[MCP] loading MCP server configs from mcp_servers.json");
     {
         let mut cfg = config.clone();
         kria_core::config::load_mcp_servers(&mut cfg);
@@ -624,12 +637,21 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     let total_servers = config.mcp.servers.len();
     let enabled_servers = config.mcp.servers.iter().filter(|s| s.enabled).count();
     tracing::info!(
+        target: "mcp_config",
+        configured = total_servers,
+        enabled = enabled_servers,
+        disabled = total_servers.saturating_sub(enabled_servers),
         "[MCP] {} total MCP server(s) configured, {} enabled",
         total_servers,
         enabled_servers
     );
     for s in &config.mcp.servers {
-        tracing::info!(
+        tracing::debug!(
+            target: "mcp_config",
+            server = %s.name,
+            enabled = s.enabled,
+            command = %s.command,
+            args = ?s.args,
             "[MCP]   server='{}' enabled={} command='{}' args={:?}",
             s.name,
             s.enabled,
@@ -645,9 +667,56 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     tracing::info!("[GW] created lazy GwClientRef — registering Google Workspace tools now");
     gw::register(&tool_registry_inner, gw_client_ref.clone(), sidecar.clone());
 
-    match kria_core::n8n::register_into_tool_registry(&tool_registry_inner, config.n8n.clone()) {
+    let workflow_registry_path = kria_core::n8n::default_workflow_registry_store_path();
+    let (workflow_registry_store, migrated_legacy_n8n_workflows) =
+        match kria_core::n8n::migrate_toml_workflows_to_registry_at(
+            &workflow_registry_path,
+            &config.n8n.workflows,
+        ) {
+            Ok(result) => result,
+            Err(error) => {
+                tracing::warn!(
+                    target: "n8n_workflow_registry",
+                    error = %error,
+                    path = %workflow_registry_path.display(),
+                    "[n8n] failed to migrate legacy TOML workflow registry"
+                );
+                (
+                    kria_core::n8n::load_workflow_registry_store_at(&workflow_registry_path)
+                        .unwrap_or_default(),
+                    0,
+                )
+            }
+        };
+    if migrated_legacy_n8n_workflows > 0 {
+        tracing::warn!(
+            target: "n8n_workflow_registry",
+            migrated = migrated_legacy_n8n_workflows,
+            path = %workflow_registry_path.display(),
+            "[n8n] legacy TOML workflow entries detected; using migrated workflow_registry.json instead"
+        );
+    } else if !config.n8n.workflows.is_empty() {
+        tracing::warn!(
+            target: "n8n_workflow_registry",
+            legacy_toml_workflows = config.n8n.workflows.len(),
+            registry_workflows = workflow_registry_store.workflows.len(),
+            "[n8n] legacy TOML workflow entries detected; workflow_registry.json remains source of truth"
+        );
+    }
+    let workflow_registry_workflows =
+        kria_core::n8n::workflow_registry_workflows(&workflow_registry_store);
+    let mut n8n_runtime_config = config.n8n.clone();
+    n8n_runtime_config.workflows = workflow_registry_workflows.clone();
+
+    match kria_core::n8n::register_into_tool_registry(
+        &tool_registry_inner,
+        n8n_runtime_config.clone(),
+    ) {
         Ok(Some(_client)) => {
-            tracing::info!("[n8n] registered n8n_invoke_workflow tool from configured catalog");
+            tracing::info!(
+                workflows = workflow_registry_workflows.len(),
+                "[n8n] registered n8n_invoke_workflow tool from workflow_registry.json"
+            );
         }
         Ok(None) => {
             tracing::debug!("[n8n] integration disabled; n8n tools not registered");
@@ -657,7 +726,7 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         }
     }
     let n8n_catalog = Arc::new(RwLock::new(if config.n8n.enabled {
-        match kria_core::n8n::N8nCatalog::new(config.n8n.clone()) {
+        match kria_core::n8n::N8nCatalog::new(n8n_runtime_config.with_resolved_secret()) {
             Ok(catalog) => Some(Arc::new(catalog)),
             Err(error) => {
                 tracing::warn!(error = %error, "[n8n] callback catalog unavailable");
@@ -682,6 +751,77 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         Err(error) => {
             tracing::warn!(error = %error, path = %n8n_inbox_path.display(), "[n8n] failed to replay callback inbox");
         }
+    }
+
+    // ── n8n Background Maintenance Task ──────────────────────────────────────
+    // Periodically checks for:
+    // 1. Timed-out workflow runs (no callback within deadline)
+    // 2. Stale HITL responses (expire after 10 min)
+    // 3. Old completed runs (evict from memory after 1 hour)
+    {
+        let state_store = n8n_state_store.clone();
+        let hitl_responses = n8n_hitl_responses.clone();
+        let handle_n8n_timeout = handle.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+            loop {
+                interval.tick().await;
+
+                // 1. Check for timed-out runs (use Background deadline: 5 min)
+                let timed_out = state_store.check_timeouts(300_000);
+                if !timed_out.is_empty() {
+                    tracing::warn!(
+                        target: "n8n_maintenance",
+                        count = timed_out.len(),
+                        "Marked n8n runs as timed out (no callback within deadline)"
+                    );
+                    for run in &timed_out {
+                        let _ = handle_n8n_timeout.emit(
+                            "n8n:workflow_timeout",
+                            serde_json::json!({
+                                "event_type": "n8n:workflow_timeout",
+                                "workflow_id": run.workflow_id,
+                                "workflow_version": run.workflow_version,
+                                "correlation_id": run.correlation_id,
+                                "status": "timed_out",
+                                "timestamp_ms": std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .map(|d| d.as_millis() as u64)
+                                    .unwrap_or(0),
+                                "user_visible_summary": "Workflow timed out while waiting for an n8n terminal callback.",
+                            }),
+                        );
+                    }
+                }
+
+                // 2. Expire old HITL responses (>10 min)
+                {
+                    let now_ms = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as u64)
+                        .unwrap_or(0);
+                    let mut responses = hitl_responses.write().await;
+                    let before = responses.len();
+                    responses.retain(|_, v| {
+                        v.get("decided_at_unix_ms")
+                            .and_then(|t| t.as_u64())
+                            .map(|t| now_ms.saturating_sub(t) < 600_000) // 10 min
+                            .unwrap_or(true) // keep if no timestamp
+                    });
+                    let removed = before - responses.len();
+                    if removed > 0 {
+                        tracing::debug!(target: "n8n_maintenance", removed, "Expired old HITL responses");
+                    }
+                }
+
+                // 3. Evict completed runs older than 1 hour from memory
+                let evicted = state_store.evict_old_runs(3_600_000);
+                if evicted > 0 {
+                    tracing::debug!(target: "n8n_maintenance", evicted, "Evicted old completed n8n runs");
+                }
+            }
+        });
+        tracing::info!("[n8n] background maintenance task started (timeout check + cleanup)");
     }
 
     let fleet_control_runtime = match DesktopFleetControlRuntime::initialize(
@@ -1071,6 +1211,14 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
 
     // Async probe of the LLM server — updates health once result is known
     // Wrap config in Arc<RwLock> early so both the probe and AppState share it
+    let n8n_enabled_for_startup = config.n8n.enabled;
+    let hardware_tier_for_startup = hardware_info.tier.as_str().to_string();
+    let approved_workflows_for_startup = config
+        .n8n
+        .workflows
+        .iter()
+        .filter(|workflow| matches!(workflow.status, kria_core::n8n::N8nWorkflowStatus::Approved))
+        .count();
     let config = Arc::new(RwLock::new(config));
     {
         let mr = model_router.clone();
@@ -1354,7 +1502,6 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
             workflow_continuation_runtime.clone(),
         ),
     );
-
     let state = AppState {
         config,
         model_router,
@@ -1774,7 +1921,7 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     }
 
     start_local_api_bridge(
-        local_api_host,
+        local_api_host.clone(),
         local_api_port,
         local_api_responder,
         fleet_control_runtime_for_bridge,
@@ -1801,7 +1948,10 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         let health_bg = health.clone();
         let handle_bg = handle.clone();
         tokio::spawn(async move {
-            tracing::info!("[MCP] starting MCP servers in background (parallel)");
+            tracing::info!(
+                target: "mcp_startup",
+                "[MCP] Background provider startup scheduled"
+            );
             let mut mgr = mcp_mgr_bg.lock().await;
             mgr.start_all(&tool_reg_bg).await;
 
@@ -1902,6 +2052,8 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
             }
 
             tracing::info!(
+                target: "mcp_startup",
+                tools = tool_reg_bg.len(),
                 "[MCP] background startup complete — {} tools available",
                 tool_reg_bg.len()
             );
@@ -1911,6 +2063,29 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
             McpServerManager::spawn_health_heartbeat(mcp_mgr_bg, tool_reg_bg, 30);
         });
     }
+
+    let startup_ms = startup_started.elapsed().as_millis();
+    tracing::info!(
+        target: "startup_summary",
+        version = env!("CARGO_PKG_VERSION"),
+        startup_ms,
+        hardware_tier = %hardware_tier_for_startup,
+        mcp_configured = total_servers,
+        mcp_enabled = enabled_servers,
+        approved_workflows = approved_workflows_for_startup,
+        local_api = %format!("http://{}:{}", local_api_host, local_api_port),
+        n8n_enabled = n8n_enabled_for_startup,
+        "══════════════════════════════════\nKRIA Startup Summary\nVersion: {}\nSubsystems:\n✓ GUI Cognition\n✓ n8n Integration: {}\n✓ MCP Manager: {} enabled / {} configured\n✓ Local API: http://{}:{}\nWorkflows: {} approved\nHardware Tier: {}\nStartup Time: {}ms\n══════════════════════════════════",
+        env!("CARGO_PKG_VERSION"),
+        if n8n_enabled_for_startup { "enabled" } else { "disabled" },
+        enabled_servers,
+        total_servers,
+        local_api_host,
+        local_api_port,
+        approved_workflows_for_startup,
+        hardware_tier_for_startup,
+        startup_ms
+    );
 
     Ok(())
 }

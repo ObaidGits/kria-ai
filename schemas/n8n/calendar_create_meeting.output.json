@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Calendar Create Meeting Output",
+  "type": "object",
+  "required": ["result", "event_ref", "confirmed_by_user"],
+  "properties": {
+    "result": { "type": "string" },
+    "event_ref": { "type": "string" },
+    "meeting_time": { "type": "string" },
+    "confirmed_by_user": { "type": "boolean" }
+  },
+  "additionalProperties": true
+}

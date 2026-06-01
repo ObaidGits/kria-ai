@@ -1,3 +1,5 @@
+use super::matching::WorkflowConfirmationFlow;
+use super::schema::{schema_error_issues, validate_n8n_output_evidence};
 use super::types::{N8nRunStatus, N8nWorkflowConfig};
 use super::N8nWorkflowRunState;
 use serde::{Deserialize, Serialize};
@@ -76,6 +78,36 @@ pub fn evaluate_run(
     let expected = workflow
         .map(|workflow| workflow.expected_evidence.as_slice())
         .unwrap_or(&[]);
+
+    if let Some(workflow) = workflow {
+        if WorkflowConfirmationFlow::workflow_requires_confirmation(workflow)
+            && !run
+                .evidence_log
+                .iter()
+                .any(|evidence| evidence_bool_true(evidence, "confirmed_by_user"))
+        {
+            return decision(
+                run,
+                N8nVerificationStatus::HumanReviewRequired,
+                N8nContinuationAction::PauseForHitl,
+                vec!["confirmed_by_user".into()],
+                "n8n workflow requires explicit user review before KRIA can verify completion",
+            );
+        }
+
+        if !workflow.output_schema_ref.trim().is_empty() {
+            if let Err(error) = validate_n8n_output_evidence(workflow, &run.evidence_log) {
+                return decision(
+                    run,
+                    N8nVerificationStatus::NeedsMoreEvidence,
+                    N8nContinuationAction::PauseForHitl,
+                    schema_error_issues(error),
+                    "n8n reported completion but callback evidence does not satisfy the output schema",
+                );
+            }
+        }
+    }
+
     let missing = expected
         .iter()
         .filter(|key| {
@@ -101,7 +133,7 @@ pub fn evaluate_run(
         N8nVerificationStatus::Verified,
         N8nContinuationAction::ContinueWorkflow,
         Vec::new(),
-        "n8n callback evidence satisfies the configured KRIA contract",
+        "n8n evidence satisfies the configured KRIA contract",
     )
 }
 
@@ -141,6 +173,19 @@ fn evidence_contains(value: &serde_json::Value, expected: &str) -> bool {
             items.iter().any(|item| evidence_contains(item, expected))
         }
         serde_json::Value::String(text) => text.contains(expected),
+        _ => false,
+    }
+}
+
+fn evidence_bool_true(value: &serde_json::Value, expected: &str) -> bool {
+    match value {
+        serde_json::Value::Object(map) => map.iter().any(|(key, value)| {
+            (key == expected && value.as_bool().unwrap_or(false))
+                || evidence_bool_true(value, expected)
+        }),
+        serde_json::Value::Array(items) => {
+            items.iter().any(|item| evidence_bool_true(item, expected))
+        }
         _ => false,
     }
 }

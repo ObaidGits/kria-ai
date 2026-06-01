@@ -21,7 +21,7 @@ use crate::safety::{AuditLogger, PolicyEngine};
 use crate::tools::gui_automation::KillSwitchInterceptor;
 use crate::tools::registry::ToolRegistry;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 
 // P3: GoalTree multi-stage workflow types
@@ -500,7 +500,17 @@ impl GuiExecutionCoordinator {
         session_id: &str,
         user_text: &str,
     ) -> WorkflowResult {
+        let workflow_started = Instant::now();
         let needs_input_daemon = workflow_needs_input_daemon(workflow);
+        tracing::info!(
+            target: "gui_execution_trace",
+            session = session_id,
+            workflow_id = %workflow.task_id,
+            steps = workflow.sub_goals.len(),
+            needs_input_daemon,
+            prompt_preview = %crate::infra::pipeline_trace::sanitize_text_for_logs(user_text, 180),
+            "[GUI] Workflow execution coordinator started"
+        );
 
         // ── Pre-flight: fail fast if uinput is required but unavailable ──────
         // Without this check, workflows that need keystroke/click injection
@@ -683,6 +693,18 @@ impl GuiExecutionCoordinator {
         // (e.g., direct coordinator calls from tests or other callers).
         // The loop engine's save_session_checkpoint call with last_user_text takes precedence.
         Self::save_session_checkpoint(workflow, &result, None).await;
+
+        tracing::info!(
+            target: "gui_execution_trace",
+            session = session_id,
+            workflow_id = %workflow.task_id,
+            success = result.success,
+            completed_steps = result.completed_steps,
+            total_steps = result.total_steps,
+            duration_ms = workflow_started.elapsed().as_millis(),
+            error = %result.error.as_deref().unwrap_or("-"),
+            "[GUI] Workflow coordinator complete; verdict generated"
+        );
 
         result
     }
@@ -1079,8 +1101,10 @@ impl ToolExecutor for PolicyToolExecutor {
             ExecutionGateOutcome::Block { reason }
                 if reason.contains("Target mismatch") || reason.contains("EXECUTION_BLOCKED") =>
             {
-                let turn_target = crate::agent::turn_memory::ExecutionTarget::infer(&self.user_text, action);
-                let env_check = crate::agent::execution_environment::validate_environment(action, turn_target);
+                let turn_target =
+                    crate::agent::turn_memory::ExecutionTarget::infer(&self.user_text, action);
+                let env_check =
+                    crate::agent::execution_environment::validate_environment(action, turn_target);
                 if env_check.is_allowed() {
                     tracing::info!(
                         target: "authority_trace",
@@ -1097,13 +1121,18 @@ impl ToolExecutor for PolicyToolExecutor {
                 // Check if this approval is triggered by target-mismatch logic
                 // (browser/desktop tools should not require approval just because
                 // the turn target is "Browser")
-                let turn_target = crate::agent::turn_memory::ExecutionTarget::infer(&self.user_text, action);
-                let env_check = crate::agent::execution_environment::validate_environment(action, turn_target);
-                if env_check.is_allowed() && matches!(turn_target,
-                    crate::agent::turn_memory::ExecutionTarget::Browser |
-                    crate::agent::turn_memory::ExecutionTarget::Mcp |
-                    crate::agent::turn_memory::ExecutionTarget::CloudProvider
-                ) {
+                let turn_target =
+                    crate::agent::turn_memory::ExecutionTarget::infer(&self.user_text, action);
+                let env_check =
+                    crate::agent::execution_environment::validate_environment(action, turn_target);
+                if env_check.is_allowed()
+                    && matches!(
+                        turn_target,
+                        crate::agent::turn_memory::ExecutionTarget::Browser
+                            | crate::agent::turn_memory::ExecutionTarget::Mcp
+                            | crate::agent::turn_memory::ExecutionTarget::CloudProvider
+                    )
+                {
                     tracing::info!(
                         target: "authority_trace",
                         action = action,
@@ -1293,7 +1322,28 @@ impl ToolExecutor for PolicyToolExecutor {
             // of a fresh unconnected token. This allows running tools to be
             // cancelled when the workflow is cancelled.
             let ctx = self.registry.make_tool_context(self.cancellation.clone());
+            let execution_id = uuid::Uuid::now_v7().to_string();
+            let started = Instant::now();
+            tracing::info!(
+                target: "tool_execution",
+                session = %self.session_id,
+                execution_id = %execution_id,
+                tool_name = %action,
+                input_summary = %crate::infra::pipeline_trace::sanitize_json_for_logs(params, 220, 8),
+                "Tool execution started"
+            );
             let result = handler.execute_with_context(params.clone(), ctx).await;
+            tracing::info!(
+                target: "tool_execution",
+                session = %self.session_id,
+                execution_id = %execution_id,
+                tool_name = %action,
+                duration_ms = started.elapsed().as_millis(),
+                success = result.success,
+                failure_reason = %result.error.as_deref().unwrap_or("-"),
+                result_summary = %crate::infra::pipeline_trace::sanitize_json_for_logs(&result.data, 220, 8),
+                "Tool execution completed"
+            );
             for guard in lease_guards {
                 guard.release().await;
             }

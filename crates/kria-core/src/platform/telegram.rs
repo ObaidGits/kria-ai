@@ -615,29 +615,17 @@ pub async fn process_message(
     let hitl = agent_loop.hitl_gateway();
 
     let mut full_response = String::new();
-    let mut active_turn_id: Option<String> = None;
     while let Some(event) = event_rx.recv().await {
-        if let StreamEvent::TurnAccepted {
-            session_id: event_session_id,
-            turn_id,
-        } = &event
-        {
-            if event_session_id == &session_id {
-                active_turn_id = Some(turn_id.clone());
-            }
-            continue;
-        }
-
-        if let Some(turn_id) = active_turn_id.as_deref() {
-            if !agent_loop.is_turn_active(&session_id, turn_id) {
-                tracing::debug!(
-                    session_id = %session_id,
-                    turn_id = %turn_id,
-                    "Telegram: dropping stale stream event"
-                );
-                continue;
-            }
-        }
+        // NOTE: We intentionally do NOT check is_turn_active() here.
+        // The channel being open (sender not dropped) IS the authoritative
+        // signal that events are valid. TurnAdmission.complete_turn() fires
+        // on Drop of TurnGuard which happens BEFORE channel close in fast
+        // dispatch paths. Checking is_turn_active() here causes a race
+        // condition where valid Token/Done events are dropped because the
+        // turn was already marked complete (but events are still in-flight).
+        //
+        // The channel will close naturally when the agent loop exits
+        // (event_tx is dropped), ending this while loop correctly.
 
         match event {
             StreamEvent::TurnAccepted { .. } => {}

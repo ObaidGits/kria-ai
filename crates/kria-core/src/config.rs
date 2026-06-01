@@ -1102,7 +1102,9 @@ impl KriaConfig {
             std::fs::create_dir_all(parent)?;
         }
         let toml_str = toml::to_string_pretty(self)?;
-        std::fs::write(&user_config_path, toml_str)?;
+        let tmp_path = user_config_path.with_extension(format!("toml.tmp.{}", std::process::id()));
+        std::fs::write(&tmp_path, toml_str)?;
+        std::fs::rename(&tmp_path, &user_config_path)?;
         tracing::info!(path = %user_config_path.display(), "config saved");
         Ok(())
     }
@@ -1364,6 +1366,7 @@ fn merge_config(base: &mut KriaConfig, user: &KriaConfig) {
     if user.colab != ColabConfig::default() {
         base.colab = user.colab.clone();
     }
+    merge_n8n_config(&mut base.n8n, &user.n8n);
     // Merge openclaw registry config — allows ~/.kria/config.toml to override
     // the default registry index_url and allowed_hosts.
     {
@@ -1377,6 +1380,87 @@ fn merge_config(base: &mut KriaConfig, user: &KriaConfig) {
         if user.openclaw.enabled {
             base.openclaw.enabled = true;
         }
+    }
+}
+
+fn merge_n8n_config(base: &mut crate::n8n::N8nConfig, user: &crate::n8n::N8nConfig) {
+    let default = crate::n8n::N8nConfig::default();
+
+    if user.config_version != default.config_version {
+        base.config_version = user.config_version;
+    }
+    if user.enabled != default.enabled {
+        base.enabled = user.enabled;
+    }
+    if user.mode != default.mode {
+        base.mode = user.mode.clone();
+    }
+
+    macro_rules! merge_string {
+        ($field:ident) => {
+            if !user.$field.trim().is_empty() {
+                base.$field = user.$field.clone();
+            }
+        };
+    }
+
+    merge_string!(base_url);
+    merge_string!(dashboard_url);
+    merge_string!(api_key);
+    merge_string!(api_key_env);
+    merge_string!(api_key_file);
+    merge_string!(api_key_keyring);
+    merge_string!(signing_secret);
+    merge_string!(signing_secret_env);
+    merge_string!(signing_secret_file);
+    merge_string!(signing_secret_keyring);
+    merge_string!(callback_base_url);
+    merge_string!(callback_path);
+    merge_string!(last_connection_status);
+    merge_string!(last_connection_message);
+    merge_string!(default_requested_by);
+
+    if user.request_timeout_secs != default.request_timeout_secs {
+        base.request_timeout_secs = user.request_timeout_secs;
+    }
+    if user.max_payload_bytes != default.max_payload_bytes {
+        base.max_payload_bytes = user.max_payload_bytes;
+    }
+    if user.auto_start != default.auto_start {
+        base.auto_start = user.auto_start;
+    }
+    if user.open_dashboard_on_start != default.open_dashboard_on_start {
+        base.open_dashboard_on_start = user.open_dashboard_on_start;
+    }
+    if user.open_dashboard_from_settings != default.open_dashboard_from_settings {
+        base.open_dashboard_from_settings = user.open_dashboard_from_settings;
+    }
+    if user.healthcheck_timeout_secs != default.healthcheck_timeout_secs {
+        base.healthcheck_timeout_secs = user.healthcheck_timeout_secs;
+    }
+    if user.healthcheck_interval_secs != default.healthcheck_interval_secs {
+        base.healthcheck_interval_secs = user.healthcheck_interval_secs;
+    }
+    if user.execution_poll_interval_secs != default.execution_poll_interval_secs {
+        base.execution_poll_interval_secs = user.execution_poll_interval_secs;
+    }
+    if user.event_stream_enabled != default.event_stream_enabled {
+        base.event_stream_enabled = user.event_stream_enabled;
+    }
+    if user.callback_freshness_window_secs != default.callback_freshness_window_secs {
+        base.callback_freshness_window_secs = user.callback_freshness_window_secs;
+    }
+    if user.future_callback_skew_secs != default.future_callback_skew_secs {
+        base.future_callback_skew_secs = user.future_callback_skew_secs;
+    }
+    if user.last_connection_checked_at_ms != default.last_connection_checked_at_ms {
+        base.last_connection_checked_at_ms = user.last_connection_checked_at_ms;
+    }
+    if user.managed_docker != default.managed_docker {
+        base.managed_docker = user.managed_docker.clone();
+    }
+    if !user.workflows.is_empty() {
+        base.workflows = user.workflows.clone();
     }
 }
 

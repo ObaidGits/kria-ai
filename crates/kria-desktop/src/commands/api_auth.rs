@@ -15,7 +15,7 @@
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use axum::middleware::Next;
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use base64::Engine;
 use rand::RngCore;
 use std::path::PathBuf;
@@ -26,8 +26,7 @@ static API_TOKEN: OnceLock<String> = OnceLock::new();
 
 /// Path to the API token file.
 fn token_path() -> PathBuf {
-    let home = std::env::var("HOME")
-        .unwrap_or_else(|_| "/tmp".to_string());
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     PathBuf::from(home).join(".kria").join("api_token")
 }
 
@@ -98,12 +97,16 @@ pub fn current_token() -> String {
 ///
 /// Exempt paths:
 /// - `/api/health` — allows uptime monitoring without auth
-/// - `/api/auth/token` — provides the token to localhost clients (gated by additional check)
+/// - `/api/auth/token` — provides the token to localhost clients
+/// - `/api/n8n/callback` — uses HMAC signature verification (its own auth layer)
 pub async fn auth_middleware(request: Request<Body>, next: Next) -> Result<Response, StatusCode> {
     let path = request.uri().path();
 
-    // Exempt paths
-    if path == "/api/health" || path == "/api/auth/token" {
+    // Exempt paths:
+    // - /api/health — uptime monitoring
+    // - /api/auth/token — localhost token retrieval
+    // - /api/n8n/callback — n8n callbacks use HMAC signature verification (own auth)
+    if path == "/api/health" || path == "/api/auth/token" || path == "/api/n8n/callback" {
         return Ok(next.run(request).await);
     }
 
@@ -129,17 +132,34 @@ pub async fn auth_middleware(request: Request<Body>, next: Next) -> Result<Respo
     }
 }
 
-/// Endpoint that returns the API token to localhost clients.
-/// This endpoint is intentionally only accessible from localhost (the API binds
-/// to 127.0.0.1, so this is enforced at the transport layer).
+/// Token bootstrap endpoint.
 ///
-/// Eval scripts and other local automation can fetch the token via:
-///   curl -s http://127.0.0.1:3001/api/auth/token
-pub async fn get_token_handler() -> axum::Json<serde_json::Value> {
-    axum::Json(serde_json::json!({
-        "token": current_token(),
-        "header": format!("Authorization: Bearer {}", current_token()),
-    }))
+/// Disabled by default: local automation should read `~/.kria/api_token`, which
+/// is protected by mode 0600. For legacy diagnostics only, set
+/// `KRIA_LOCAL_API_ALLOW_TOKEN_ENDPOINT=1` before starting KRIA.
+pub async fn get_token_handler() -> impl IntoResponse {
+    let allowed = std::env::var("KRIA_LOCAL_API_ALLOW_TOKEN_ENDPOINT")
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    if !allowed {
+        return (
+            StatusCode::FORBIDDEN,
+            axum::Json(serde_json::json!({
+                "status": "disabled",
+                "message": "API token endpoint is disabled. Read ~/.kria/api_token as the same OS user.",
+            })),
+        )
+            .into_response();
+    }
+
+    (
+        StatusCode::OK,
+        axum::Json(serde_json::json!({
+            "token": current_token(),
+            "header": format!("Authorization: Bearer {}", current_token()),
+        })),
+    )
+        .into_response()
 }
 
 #[cfg(test)]

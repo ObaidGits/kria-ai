@@ -1,6 +1,7 @@
 use super::catalog::{N8nCatalog, N8nCatalogError};
 use super::client::{sign_payload, N8nClientError};
 use super::types::{N8nCallbackEnvelope, N8N_CALLBACK_SCHEMA_VERSION};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, thiserror::Error)]
 pub enum N8nCallbackError {
@@ -12,6 +13,12 @@ pub enum N8nCallbackError {
     InvalidJson(#[from] serde_json::Error),
     #[error("n8n callback schema version mismatch: expected {expected}, got {actual}")]
     SchemaVersionMismatch { expected: String, actual: String },
+    #[error("n8n callback is too old: age_ms={age_ms}, max_age_ms={max_age_ms}")]
+    CallbackTooOld { age_ms: u128, max_age_ms: u128 },
+    #[error(
+        "n8n callback timestamp is too far in the future: skew_ms={skew_ms}, max_skew_ms={max_skew_ms}"
+    )]
+    CallbackFromFuture { skew_ms: u128, max_skew_ms: u128 },
     #[error("{0}")]
     Catalog(#[from] N8nCatalogError),
     #[error("failed to sign n8n callback payload: {0}")]
@@ -32,6 +39,22 @@ pub fn parse_and_verify_callback(
             actual: envelope.schema_version,
         });
     }
+    validate_callback_freshness(
+        &envelope,
+        current_unix_ms(),
+        u128::from(
+            catalog
+                .config()
+                .callback_freshness_window_secs
+                .saturating_mul(1000),
+        ),
+        u128::from(
+            catalog
+                .config()
+                .future_callback_skew_secs
+                .saturating_mul(1000),
+        ),
+    )?;
 
     let workflow = catalog
         .get(&envelope.workflow_id)
@@ -47,6 +70,31 @@ pub fn parse_and_verify_callback(
     }
 
     Ok(envelope)
+}
+
+fn validate_callback_freshness(
+    envelope: &N8nCallbackEnvelope,
+    now_ms: u128,
+    max_age_ms: u128,
+    max_future_skew_ms: u128,
+) -> Result<(), N8nCallbackError> {
+    if envelope.occurred_at_ms > now_ms {
+        let skew_ms = envelope.occurred_at_ms - now_ms;
+        if max_future_skew_ms > 0 && skew_ms > max_future_skew_ms {
+            return Err(N8nCallbackError::CallbackFromFuture {
+                skew_ms,
+                max_skew_ms: max_future_skew_ms,
+            });
+        }
+        return Ok(());
+    }
+
+    let age_ms = now_ms - envelope.occurred_at_ms;
+    if max_age_ms > 0 && age_ms > max_age_ms {
+        return Err(N8nCallbackError::CallbackTooOld { age_ms, max_age_ms });
+    }
+
+    Ok(())
 }
 
 pub fn verify_callback_signature(
@@ -76,4 +124,11 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
         diff |= a ^ b;
     }
     diff == 0
+}
+
+fn current_unix_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or_default()
 }

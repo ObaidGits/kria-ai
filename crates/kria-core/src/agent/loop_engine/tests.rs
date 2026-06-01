@@ -1,5 +1,42 @@
 use super::*;
 
+fn n8n_dispatch_fixture_workflows() -> Vec<crate::n8n::N8nWorkflowConfig> {
+    vec![crate::n8n::N8nWorkflowConfig {
+        workflow_id: "gmail_inbox_digest".into(),
+        workflow_version: "v1".into(),
+        display_name: "Inbox Digest".into(),
+        endpoint_path: "/webhook/kria-gmail-inbox-digest".into(),
+        status: crate::n8n::N8nWorkflowStatus::Approved,
+        environment: crate::n8n::N8nWorkflowEnvironment::Dev,
+        risk_tier: crate::safety::RiskLevel::Green,
+        irreversibility_class: crate::n8n::N8nIrreversibilityClass::ReadOnly,
+        timeout_class: crate::n8n::N8nTimeoutClass::Interactive,
+        owner: "test".into(),
+        requires_callback: Some(true),
+        input_schema_ref: "schemas/n8n/gmail_inbox_digest.input.json".into(),
+        output_schema_ref: "schemas/n8n/gmail_inbox_digest.output.json".into(),
+        credential_requirements: vec!["gmail.readonly".into()],
+        hitl_policy: "none".into(),
+        category: "email".into(),
+        description: "Summarizes unread or important Gmail inbox messages.".into(),
+        example_prompts: vec![
+            "Summarize my inbox".into(),
+            "Show me important emails from today".into(),
+        ],
+        tags: vec![
+            "gmail".into(),
+            "email".into(),
+            "inbox".into(),
+            "digest".into(),
+        ],
+        aliases: vec!["inbox digest".into(), "summarize my inbox".into()],
+        allowed_actions: vec!["gmail.messages.read".into()],
+        data_scope: vec!["email_metadata".into(), "email_body".into()],
+        expected_evidence: vec!["result".into(), "message_count".into()],
+        ..Default::default()
+    }]
+}
+
 #[test]
 fn autonomy_notice_is_human_readable_and_not_truncated() {
     let prompt =
@@ -1377,6 +1414,160 @@ fn prompt_lab_colab_app_lock_matches_colab_mcp_tools() {
 }
 
 #[test]
+fn manual_tool_profile_restricts_assistant_mode_to_selected_family() {
+    let profile = TurnExecutionProfile::manual_tool(
+        Some("gmail".into()),
+        None,
+        PromptLabToolSelectionStrategy::RoutedWithinLock,
+    );
+
+    assert!(profile.is_manual_tool_override());
+    assert!(profile.allows_tool_name("gw_gmail_inbox"));
+    assert!(profile.allows_tool_name("gw_gmail_search"));
+    assert!(!profile.allows_tool_name("gw_calendar_today"));
+    assert!(!profile.allows_tool_name("browser_search"));
+}
+
+#[test]
+fn manual_tool_profile_exact_lock_blocks_other_tools() {
+    let profile = TurnExecutionProfile::manual_tool(
+        None,
+        Some("n8n_invoke_workflow".into()),
+        PromptLabToolSelectionStrategy::DirectLockedTool,
+    );
+
+    assert!(profile.is_manual_tool_override());
+    assert!(profile.uses_direct_strategy());
+    assert!(profile.allows_tool_name("n8n_invoke_workflow"));
+    assert!(!profile.allows_tool_name("generate_image"));
+    assert!(!profile.allows_tool_name("gw_gmail_inbox"));
+}
+
+#[test]
+fn manual_n8n_mode_directly_dispatches_exact_green_workflow() {
+    let _guard = set_test_n8n_workflows_for_dispatch(n8n_dispatch_fixture_workflows());
+    let profile = TurnExecutionProfile::manual_tool(
+        None,
+        Some("n8n_invoke_workflow".into()),
+        PromptLabToolSelectionStrategy::DirectLockedTool,
+    );
+
+    let (tool, params) =
+        try_deterministic_dispatch_with_profile("gmail_inbox_digest", None, &profile)
+            .expect("manual n8n mode should dispatch exact workflow id");
+
+    assert_eq!(tool, "n8n_invoke_workflow");
+    assert_eq!(params["workflow_id"], "gmail_inbox_digest");
+    assert_eq!(params["workflow_version"], "v1");
+    assert_eq!(
+        params["input_payload"]["source_prompt"],
+        "gmail_inbox_digest"
+    );
+}
+
+#[test]
+fn manual_n8n_mode_extracts_workflow_id_from_natural_prompt() {
+    let _guard = set_test_n8n_workflows_for_dispatch(n8n_dispatch_fixture_workflows());
+    let profile = TurnExecutionProfile::manual_tool(
+        None,
+        Some("n8n_invoke_workflow".into()),
+        PromptLabToolSelectionStrategy::DirectLockedTool,
+    );
+
+    let (tool, params) = try_deterministic_dispatch_with_profile(
+        "run gmail_inbox_digest workflow from n8n",
+        None,
+        &profile,
+    )
+    .expect("manual n8n mode should dispatch mentioned workflow id");
+
+    assert_eq!(tool, "n8n_invoke_workflow");
+    assert_eq!(params["workflow_id"], "gmail_inbox_digest");
+}
+
+#[test]
+fn manual_n8n_mode_dispatches_unique_metadata_prompt() {
+    let _guard = set_test_n8n_workflows_for_dispatch(n8n_dispatch_fixture_workflows());
+    let profile = TurnExecutionProfile::manual_tool(
+        None,
+        Some("n8n_invoke_workflow".into()),
+        PromptLabToolSelectionStrategy::DirectLockedTool,
+    );
+
+    let (tool, params) =
+        try_deterministic_dispatch_with_profile("Summarize my inbox", None, &profile)
+            .expect("manual n8n mode should dispatch unique inbox metadata prompt");
+
+    assert_eq!(tool, "n8n_invoke_workflow");
+    assert_eq!(params["workflow_id"], "gmail_inbox_digest");
+    assert_eq!(
+        params["input_payload"]["source_prompt"],
+        "Summarize my inbox"
+    );
+}
+
+#[test]
+fn manual_n8n_mode_lists_workflows_without_tool_execution() {
+    let _guard = set_test_n8n_workflows_for_dispatch(n8n_dispatch_fixture_workflows());
+    let profile = TurnExecutionProfile::manual_tool(
+        None,
+        Some("n8n_invoke_workflow".into()),
+        PromptLabToolSelectionStrategy::DirectLockedTool,
+    );
+
+    for prompt in [
+        "List of n8n workflows i have",
+        "List of workflows i have",
+        "all workflows list",
+    ] {
+        let (tool, params) = try_deterministic_dispatch_with_profile(prompt, None, &profile)
+            .expect("manual n8n workflow inventory query should be handled locally");
+
+        assert_eq!(tool, KRIA_DETERMINISTIC_NOTICE_TOOL);
+        let message = deterministic_notice_message(&params);
+        assert!(message.contains("Available n8n workflows"));
+        assert!(message.contains("Inbox Digest"));
+        assert!(message.contains("gmail_inbox_digest"));
+    }
+}
+
+#[test]
+fn n8n_workflow_list_query_does_not_match_run_or_confirmation() {
+    assert!(is_n8n_workflow_list_query("List of n8n workflows i have"));
+    assert!(is_n8n_workflow_list_query("all workflows list"));
+    assert!(!is_n8n_workflow_list_query(
+        "run gmail_inbox_digest workflow"
+    ));
+    assert!(!is_n8n_workflow_list_query(
+        "Confirm workflow gmail_inbox_digest"
+    ));
+}
+
+#[test]
+fn manual_tool_app_locks_cover_requested_tool_families() {
+    assert!(tool_matches_lab_app_lock("n8n_invoke_workflow", "n8n"));
+    assert!(tool_matches_lab_app_lock("oc_browser_skill", "openclaw"));
+    assert!(tool_matches_lab_app_lock(
+        "click_ui_element",
+        "gui_cognition"
+    ));
+    assert!(tool_matches_lab_app_lock(
+        "generate_image",
+        "image_generation"
+    ));
+    assert!(tool_matches_lab_app_lock("gw_gmail_inbox", "gmail"));
+    assert!(tool_matches_lab_app_lock("gw_calendar_today", "calendar"));
+    assert!(tool_matches_lab_app_lock("git_status", "github"));
+    assert!(tool_matches_lab_app_lock("read_file", "filesystem"));
+    assert!(tool_matches_lab_app_lock(
+        "managed_browser_navigate",
+        "browser"
+    ));
+    assert!(tool_matches_lab_app_lock("n8n_invoke_workflow", "slack"));
+    assert!(!tool_matches_lab_app_lock("gw_calendar_today", "gmail"));
+}
+
+#[test]
 fn tool_choice_candidates_include_primary_and_web_alternatives() {
     let allowed: HashSet<String> = ["search_news", "web_search", "searxng_search"]
         .iter()
@@ -1461,7 +1652,6 @@ fn intent_fallback_uses_builtin_file_pattern_search_when_mcp_unavailable() {
     assert_eq!(call.arguments["type"], "dir");
 }
 
-
 // ─── Deterministic Dispatch Fast-Path Tests ──────────────────────────────────
 
 #[test]
@@ -1471,12 +1661,18 @@ fn deterministic_dispatch_username() {
     let (tool, params) = result.unwrap();
     assert_eq!(tool, "execute_bash");
     let cmd = params["command"].as_str().unwrap();
-    assert!(cmd.contains("whoami"), "Command should include whoami: {}", cmd);
+    assert!(
+        cmd.contains("whoami"),
+        "Command should include whoami: {}",
+        cmd
+    );
 }
 
 #[test]
 fn deterministic_dispatch_hostname_kernel_combo() {
-    let result = try_deterministic_dispatch("What is my current username, hostname, and Linux kernel version?");
+    let result = try_deterministic_dispatch(
+        "What is my current username, hostname, and Linux kernel version?",
+    );
     assert!(result.is_some());
     let (tool, params) = result.unwrap();
     assert_eq!(tool, "execute_bash");
@@ -1488,7 +1684,9 @@ fn deterministic_dispatch_hostname_kernel_combo() {
 
 #[test]
 fn deterministic_dispatch_disk_space_root() {
-    let result = try_deterministic_dispatch("Check how much free disk space is available on the root partition and tell me.");
+    let result = try_deterministic_dispatch(
+        "Check how much free disk space is available on the root partition and tell me.",
+    );
     assert!(result.is_some(), "Should match disk space pattern");
     let (tool, params) = result.unwrap();
     assert_eq!(tool, "execute_bash");
@@ -1497,13 +1695,19 @@ fn deterministic_dispatch_disk_space_root() {
 
 #[test]
 fn deterministic_dispatch_list_tmp_with_prefix() {
-    let result = try_deterministic_dispatch("List all files in /tmp that start with 'kria' and show me the results.");
+    let result = try_deterministic_dispatch(
+        "List all files in /tmp that start with 'kria' and show me the results.",
+    );
     assert!(result.is_some());
     let (tool, params) = result.unwrap();
     assert_eq!(tool, "execute_bash");
     let cmd = params["command"].as_str().unwrap();
     assert!(cmd.contains("ls"), "Command should list files: {}", cmd);
-    assert!(cmd.contains("kria"), "Command should filter for 'kria': {}", cmd);
+    assert!(
+        cmd.contains("kria"),
+        "Command should filter for 'kria': {}",
+        cmd
+    );
 }
 
 #[test]
@@ -1515,19 +1719,32 @@ fn deterministic_dispatch_create_project_folder() {
     let (tool, params) = result.unwrap();
     assert_eq!(tool, "execute_bash");
     let cmd = params["command"].as_str().unwrap();
-    assert!(cmd.contains("/tmp/kria-eval-test"), "Should create base folder: {}", cmd);
+    assert!(
+        cmd.contains("/tmp/kria-eval-test"),
+        "Should create base folder: {}",
+        cmd
+    );
     assert!(cmd.contains("src"), "Should create src subfolder: {}", cmd);
-    assert!(cmd.contains("tests"), "Should create tests subfolder: {}", cmd);
+    assert!(
+        cmd.contains("tests"),
+        "Should create tests subfolder: {}",
+        cmd
+    );
     assert!(cmd.contains("README"), "Should create README: {}", cmd);
 }
 
 #[test]
 fn deterministic_dispatch_browser_search() {
-    let result = try_deterministic_dispatch("Search for 'rust programming language' on Google using the browser.");
+    let result = try_deterministic_dispatch(
+        "Search for 'rust programming language' on Google using the browser.",
+    );
     assert!(result.is_some(), "Should match browser search pattern");
     let (tool, params) = result.unwrap();
     assert_eq!(tool, "browser_search");
-    assert_eq!(params["query"].as_str().unwrap(), "rust programming language");
+    assert_eq!(
+        params["query"].as_str().unwrap(),
+        "rust programming language"
+    );
     assert_eq!(params["site"].as_str().unwrap(), "google");
 }
 
@@ -1541,8 +1758,16 @@ fn deterministic_dispatch_create_rust_file() {
     assert_eq!(tool, "write_file");
     assert_eq!(params["path"].as_str().unwrap(), "/tmp/greet.rs");
     let content = params["content"].as_str().unwrap();
-    assert!(content.contains("fn main"), "Should have main function: {}", content);
-    assert!(content.contains("Greetings from KRIA"), "Should print expected text: {}", content);
+    assert!(
+        content.contains("fn main"),
+        "Should have main function: {}",
+        content
+    );
+    assert!(
+        content.contains("Greetings from KRIA"),
+        "Should print expected text: {}",
+        content
+    );
 }
 
 #[test]
@@ -1571,11 +1796,20 @@ fn deterministic_dispatch_does_not_match_complex_prompts() {
     assert!(result.is_some(), "Should match Python create+run pattern");
     let (tool, params) = result.unwrap();
     // Should use execute_bash to run the file and capture output
-    assert_eq!(tool, "execute_bash", "Multi-step create+run should use execute_bash for one-shot file write+run");
+    assert_eq!(
+        tool, "execute_bash",
+        "Multi-step create+run should use execute_bash for one-shot file write+run"
+    );
     let cmd = params["command"].as_str().unwrap();
-    assert!(cmd.contains("/tmp/hello_kria.py"), "Should write to the requested path");
+    assert!(
+        cmd.contains("/tmp/hello_kria.py"),
+        "Should write to the requested path"
+    );
     assert!(cmd.contains("python3"), "Should run with python3");
-    assert!(cmd.contains("Hello KRIA"), "Should print the requested text");
+    assert!(
+        cmd.contains("Hello KRIA"),
+        "Should print the requested text"
+    );
 }
 
 #[test]
@@ -1584,13 +1818,19 @@ fn deterministic_dispatch_python_fibonacci_run() {
     let result = try_deterministic_dispatch(
         "Create a Python script at /tmp/fib.py that calculates fibonacci numbers up to 100, run it, and show the output."
     );
-    assert!(result.is_some(), "Should match fibonacci create+run pattern");
+    assert!(
+        result.is_some(),
+        "Should match fibonacci create+run pattern"
+    );
     let (tool, params) = result.unwrap();
     assert_eq!(tool, "execute_bash");
     let cmd = params["command"].as_str().unwrap();
     assert!(cmd.contains("/tmp/fib.py"));
-    assert!(cmd.contains("fib_up_to") || cmd.contains("fibonacci") || cmd.contains("a, b ="),
-        "Should generate fibonacci code: {}", cmd);
+    assert!(
+        cmd.contains("fib_up_to") || cmd.contains("fibonacci") || cmd.contains("a, b ="),
+        "Should generate fibonacci code: {}",
+        cmd
+    );
     assert!(cmd.contains("python3"));
 }
 

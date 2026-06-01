@@ -95,10 +95,14 @@ impl EvalBatchResult {
         let mut patterns: HashMap<String, usize> = HashMap::new();
 
         for result in results.iter().filter(|r| !r.success) {
-            *by_category.entry(format!("{:?}", result.category)).or_default() += 1;
+            *by_category
+                .entry(format!("{:?}", result.category))
+                .or_default() += 1;
 
             if let Some(ref fc) = result.failure_classification {
-                *by_classification.entry(format!("{:?}", fc.classification)).or_default() += 1;
+                *by_classification
+                    .entry(format!("{:?}", fc.classification))
+                    .or_default() += 1;
                 *by_severity.entry(format!("{:?}", fc.severity)).or_default() += 1;
                 *patterns.entry(fc.probable_cause.clone()).or_default() += 1;
             }
@@ -111,7 +115,11 @@ impl EvalBatchResult {
             by_category: by_category.into_iter().collect(),
             by_classification: by_classification.into_iter().collect(),
             by_severity: by_severity.into_iter().collect(),
-            top_failure_patterns: top_patterns.into_iter().take(10).map(|(p, c)| format!("{} ({}x)", p, c)).collect(),
+            top_failure_patterns: top_patterns
+                .into_iter()
+                .take(10)
+                .map(|(p, c)| format!("{} ({}x)", p, c))
+                .collect(),
         }
     }
 
@@ -122,10 +130,15 @@ impl EvalBatchResult {
         report.push_str("  KRIA GUI COGNITION OPERATIONAL EVAL REPORT\n");
         report.push_str("═══════════════════════════════════════════════════════════════\n\n");
         report.push_str(&format!("Timestamp: {}\n", self.timestamp));
-        report.push_str(&format!("Environment: {} ({:?})\n", self.environment.session_type, self.environment.compositor));
+        report.push_str(&format!(
+            "Environment: {} ({:?})\n",
+            self.environment.session_type, self.environment.compositor
+        ));
         report.push_str(&format!("Total Duration: {}ms\n\n", self.total_duration_ms));
-        report.push_str(&format!("RESULTS: {} passed / {} failed / {} timed out (of {})\n\n",
-            self.passed, self.failed, self.timed_out, self.total_scenarios));
+        report.push_str(&format!(
+            "RESULTS: {} passed / {} failed / {} timed out (of {})\n\n",
+            self.passed, self.failed, self.timed_out, self.total_scenarios
+        ));
 
         if !self.failure_summary.top_failure_patterns.is_empty() {
             report.push_str("TOP FAILURE PATTERNS:\n");
@@ -138,13 +151,23 @@ impl EvalBatchResult {
         report.push_str("DETAILED RESULTS:\n");
         report.push_str("─────────────────────────────────────────────────────────────\n");
         for result in &self.results {
-            let status = if result.success { "✓ PASS" } else { "✗ FAIL" };
-            report.push_str(&format!("[{}] {} ({}ms)\n", status, result.scenario_id, result.duration_ms));
+            let status = if result.success {
+                "✓ PASS"
+            } else {
+                "✗ FAIL"
+            };
+            report.push_str(&format!(
+                "[{}] {} ({}ms)\n",
+                status, result.scenario_id, result.duration_ms
+            ));
             if let Some(ref err) = result.error {
                 report.push_str(&format!("    Error: {}\n", err));
             }
             if let Some(ref fc) = result.failure_classification {
-                report.push_str(&format!("    Class: {:?} | Severity: {:?}\n", fc.classification, fc.severity));
+                report.push_str(&format!(
+                    "    Class: {:?} | Severity: {:?}\n",
+                    fc.classification, fc.severity
+                ));
                 report.push_str(&format!("    Cause: {}\n", fc.probable_cause));
                 report.push_str(&format!("    Fix:   {}\n", fc.suggested_fix));
             }

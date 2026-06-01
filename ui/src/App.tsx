@@ -616,9 +616,11 @@ const App: Component = () => {
                 <button class="btn-secondary" onClick={() => setShowTestDashboard((v) => !v)}>
                   {showTestDashboard() ? "Hide Tests" : "Tests"}
                 </button>
-                <button class="btn-secondary" onClick={() => setShowAnalytics((v) => !v)}>
-                  Analytics {showAnalytics() ? "▾" : "▸"}
-                </button>
+                <Show when={dashboardView() === "overview"}>
+                  <button class="btn-secondary" onClick={() => setShowAnalytics((v) => !v)}>
+                    Analytics {showAnalytics() ? "▾" : "▸"}
+                  </button>
+                </Show>
                 <Show when={controlPanelExpanded()}>
                   <button class="btn-secondary" onClick={() => setDashboardView("forensics")}>
                     Forensics
@@ -821,7 +823,7 @@ const App: Component = () => {
             </Suspense>
           </Show>
 
-          <Show when={route() === "dashboard" && showAnalytics()}>
+          <Show when={route() === "dashboard" && dashboardView() === "overview" && showAnalytics()}>
             <Suspense fallback={<div class="status-pill subtle">Loading analytics…</div>}>
               <AnalyticsDashboard />
             </Suspense>

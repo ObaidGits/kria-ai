@@ -991,7 +991,8 @@ async fn verify_browser_page_loaded(
     title_contains: Option<&str>,
 ) -> VerifyOutcome {
     let engine = crate::agent::browser_cognition::BrowserCognitionEngine::new();
-    let cdp_available = crate::agent::browser_cognition::BrowserCognitionEngine::is_available().await;
+    let cdp_available =
+        crate::agent::browser_cognition::BrowserCognitionEngine::is_available().await;
 
     // ── Layer 1: CDP (FullSemantic) — strongest evidence ────────────────
     if cdp_available {
@@ -1042,7 +1043,9 @@ async fn verify_browser_page_loaded(
                     tokio::process::Command::new("xdotool")
                         .args(["search", "--name", &host])
                         .output(),
-                ).await {
+                )
+                .await
+                {
                     if let Ok(result) = output {
                         if result.status.success() {
                             let ids = String::from_utf8_lossy(&result.stdout);
@@ -1057,7 +1060,9 @@ async fn verify_browser_page_loaded(
                                         .output()
                                         .await
                                     {
-                                        String::from_utf8_lossy(&name_output.stdout).trim().to_string()
+                                        String::from_utf8_lossy(&name_output.stdout)
+                                            .trim()
+                                            .to_string()
                                     } else {
                                         format!("{} matching windows", id_count)
                                     }
@@ -1089,7 +1094,9 @@ async fn verify_browser_page_loaded(
                 tokio::process::Command::new("xdotool")
                     .args(["search", "--name", title_fragment])
                     .output(),
-            ).await {
+            )
+            .await
+            {
                 if let Ok(result) = output {
                     if result.status.success() {
                         let ids = String::from_utf8_lossy(&result.stdout);
@@ -1129,7 +1136,7 @@ async fn verify_browser_page_loaded(
 
     if let Some(browser) = running_browser {
         return VerifyOutcome {
-            verified: true,  // Browser is running and we've verified it via process check
+            verified: true, // Browser is running and we've verified it via process check
             confidence: 0.55,
             confidence_tier: VerificationConfidenceTier::PartialObservable,
             evidence: format!(

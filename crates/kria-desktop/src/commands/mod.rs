@@ -1,8 +1,8 @@
 pub(crate) mod analytics;
-pub(crate) mod app_commands;
-pub(crate) mod app_state;
 pub(crate) mod api_auth;
 pub(crate) mod api_hitl;
+pub(crate) mod app_commands;
+pub(crate) mod app_state;
 pub(crate) mod automation;
 pub(crate) mod chat;
 pub(crate) mod colab;
@@ -84,7 +84,7 @@ pub use automation::{
     list_workflows, remove_scheduled_task, start_macro_recording, stop_macro_recording,
 };
 #[allow(unused_imports)]
-pub use chat::{send_lab_message, send_message};
+pub use chat::{send_lab_message, send_manual_tool_message, send_message};
 #[allow(unused_imports)]
 pub use colab::{
     connect_colab_tier, disconnect_colab_tier, get_colab_tier_status, set_colab_selected_notebook,
@@ -108,7 +108,26 @@ pub use media::{
     get_session_media, open_html_for_print, read_local_image, save_export_file, save_uploaded_image,
 };
 #[allow(unused_imports)]
-pub use n8n::{discover_n8n_workflows, get_n8n_status, import_n8n_workflow, reconcile_n8n_run};
+pub use n8n::{
+    analyze_n8n_code_nodes, analyze_n8n_v5_workflow_inputs, analyze_n8n_workflow_input_capability,
+    archive_legacy_n8n_toml_workflows, audit_n8n_workflow_lifecycle, cleanup_n8n_generated_copy,
+    continue_n8n_pending_copy_operation, create_n8n_binary_input_aware_copy,
+    create_n8n_code_input_aware_copy, create_n8n_input_aware_copy, delete_n8n_runtime_profile,
+    detect_n8n_connection_candidates, discover_n8n_runtime_profile_drafts, discover_n8n_workflows,
+    enrich_n8n_runtime_profile_draft, enrich_n8n_runtime_profile_drafts,
+    enrich_n8n_runtime_profile_payload, generate_n8n_binary_input_copy_preview,
+    generate_n8n_code_patch_preview, get_n8n_copy_lifecycle_items, get_n8n_runtime_profiles,
+    get_n8n_runtime_status, get_n8n_status, import_n8n_workflow, invoke_n8n_workflow_from_ui,
+    list_n8n_workflow_executions, open_n8n_dashboard, prepare_n8n_workflow_input,
+    reconcile_n8n_run, refresh_n8n_lifecycle_item, refresh_n8n_runtime_profile_draft,
+    remove_sample_n8n_workflows, repair_n8n_connection, restart_managed_n8n,
+    resume_n8n_waiting_execution, save_n8n_api_key_secret, save_n8n_preferred_output_node,
+    save_n8n_profile_as_workflow_draft, save_n8n_runtime_profile_draft, save_n8n_settings,
+    start_managed_n8n, start_or_prepare_managed_n8n, stop_managed_n8n,
+    test_n8n_binary_input_aware_copy, test_n8n_code_input_aware_copy, test_n8n_connection,
+    test_n8n_connection_profile, test_n8n_input_aware_copy, update_n8n_workflow_metadata,
+    view_n8n_workflow_execution,
+};
 #[allow(unused_imports)]
 pub use openclaw::{
     clawhub_fetch_remote_skills, clawhub_install_skill, clawhub_list_skills, clawhub_search_skills,

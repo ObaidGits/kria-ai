@@ -30,7 +30,10 @@ impl WorkflowTelemetryStore {
     pub fn new(db_path: std::path::PathBuf) -> Result<Self, String> {
         let conn = rusqlite::Connection::open(&db_path)
             .map_err(|e| format!("Failed to open workflow DB: {}", e))?;
-        let store = Self { conn, max_workflows: 100 };
+        let store = Self {
+            conn,
+            max_workflows: 100,
+        };
         store.initialize_schema()?;
         Ok(store)
     }
@@ -39,14 +42,18 @@ impl WorkflowTelemetryStore {
     pub fn in_memory() -> Result<Self, String> {
         let conn = rusqlite::Connection::open_in_memory()
             .map_err(|e| format!("Failed to open in-memory DB: {}", e))?;
-        let store = Self { conn, max_workflows: 50 };
+        let store = Self {
+            conn,
+            max_workflows: 50,
+        };
         store.initialize_schema()?;
         Ok(store)
     }
 
     fn initialize_schema(&self) -> Result<(), String> {
-        self.conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS workflow_events (
+        self.conn
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS workflow_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 workflow_id TEXT NOT NULL,
                 seq INTEGER NOT NULL,
@@ -74,8 +81,8 @@ impl WorkflowTelemetryStore {
             );
             CREATE INDEX IF NOT EXISTS idx_workflow_summaries_created
                 ON workflow_summaries (created_at DESC);",
-        )
-        .map_err(|e| format!("Failed to initialize workflow schema: {}", e))
+            )
+            .map_err(|e| format!("Failed to initialize workflow schema: {}", e))
     }
 
     /// Persist a telemetry event.
@@ -141,7 +148,10 @@ impl WorkflowTelemetryStore {
     }
 
     /// Load the telemetry timeline for a workflow.
-    pub fn load_workflow_timeline(&self, workflow_id: &str) -> Result<Vec<TelemetryEnvelope>, String> {
+    pub fn load_workflow_timeline(
+        &self,
+        workflow_id: &str,
+    ) -> Result<Vec<TelemetryEnvelope>, String> {
         let conn = &self.conn;
         let mut stmt = conn
             .prepare(
@@ -183,7 +193,10 @@ impl WorkflowTelemetryStore {
     }
 
     /// Load recent workflow summaries.
-    pub fn load_recent_summaries(&self, limit: usize) -> Result<Vec<WorkflowSummaryRecord>, String> {
+    pub fn load_recent_summaries(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<WorkflowSummaryRecord>, String> {
         let conn = &self.conn;
         let mut stmt = conn
             .prepare(
@@ -215,23 +228,25 @@ impl WorkflowTelemetryStore {
 
     /// Prune old workflows to stay within storage bounds.
     fn prune_old_workflows(&self) -> Result<(), String> {
-        self.conn.execute(
-            "DELETE FROM workflow_events WHERE workflow_id NOT IN (
+        self.conn
+            .execute(
+                "DELETE FROM workflow_events WHERE workflow_id NOT IN (
                 SELECT workflow_id FROM workflow_summaries
                 ORDER BY created_at DESC LIMIT ?1
             )",
-            rusqlite::params![self.max_workflows as i64],
-        )
-        .map_err(|e| format!("Prune error: {}", e))?;
+                rusqlite::params![self.max_workflows as i64],
+            )
+            .map_err(|e| format!("Prune error: {}", e))?;
 
-        self.conn.execute(
-            "DELETE FROM workflow_summaries WHERE workflow_id NOT IN (
+        self.conn
+            .execute(
+                "DELETE FROM workflow_summaries WHERE workflow_id NOT IN (
                 SELECT workflow_id FROM workflow_summaries
                 ORDER BY created_at DESC LIMIT ?1
             )",
-            rusqlite::params![self.max_workflows as i64],
-        )
-        .map_err(|e| format!("Prune summaries error: {}", e))?;
+                rusqlite::params![self.max_workflows as i64],
+            )
+            .map_err(|e| format!("Prune summaries error: {}", e))?;
 
         Ok(())
     }
@@ -314,15 +329,17 @@ mod tests {
     fn store_persists_and_loads_summaries() {
         let store = WorkflowTelemetryStore::in_memory().unwrap();
 
-        store.persist_summary(
-            "wf-1",
-            "open firefox",
-            &WorkflowVerdict::Complete,
-            1500,
-            2,
-            WorkflowSource::SubstrateRouter,
-            None,
-        ).unwrap();
+        store
+            .persist_summary(
+                "wf-1",
+                "open firefox",
+                &WorkflowVerdict::Complete,
+                1500,
+                2,
+                WorkflowSource::SubstrateRouter,
+                None,
+            )
+            .unwrap();
 
         let summaries = store.load_recent_summaries(10).unwrap();
         assert_eq!(summaries.len(), 1);
@@ -336,15 +353,17 @@ mod tests {
         store.max_workflows = 3;
 
         for i in 0..5 {
-            store.persist_summary(
-                &format!("wf-{}", i),
-                "test",
-                &WorkflowVerdict::Complete,
-                100,
-                1,
-                WorkflowSource::SubstrateRouter,
-                None,
-            ).unwrap();
+            store
+                .persist_summary(
+                    &format!("wf-{}", i),
+                    "test",
+                    &WorkflowVerdict::Complete,
+                    100,
+                    1,
+                    WorkflowSource::SubstrateRouter,
+                    None,
+                )
+                .unwrap();
         }
 
         let summaries = store.load_recent_summaries(10).unwrap();

@@ -890,10 +890,18 @@ impl ScreenshotCapture {
                 .first()
                 .ok_or_else(|| VisionError::ScreenshotFailed("No monitors found".to_string()))?;
 
-            // Capture screenshot
+            // Capture screenshot and convert xcap's image crate version into
+            // KRIA's image crate version through raw RGBA bytes.
             let image = primary
                 .capture_image()
                 .map_err(|e| VisionError::ScreenshotFailed(format!("Failed to capture: {}", e)))?;
+            let image_width = image.width();
+            let image_height = image.height();
+            let image = image::RgbaImage::from_raw(image_width, image_height, image.into_raw())
+                .ok_or_else(|| {
+                    VisionError::ScreenshotFailed("Failed to convert screenshot buffer".to_string())
+                })?;
+            let image = image::DynamicImage::ImageRgba8(image);
 
             // Encode to PNG bytes
             let mut buffer = Cursor::new(Vec::new());
@@ -948,10 +956,17 @@ impl ScreenshotCapture {
                 .first()
                 .ok_or_else(|| VisionError::ScreenshotFailed("No monitors found".to_string()))?;
 
-            // Capture screenshot (xcap returns image::RgbaImage)
+            // Capture screenshot and convert xcap's image crate version into
+            // KRIA's image crate version through raw RGBA bytes.
             let image = primary
                 .capture_image()
                 .map_err(|e| VisionError::ScreenshotFailed(format!("Failed to capture: {}", e)))?;
+            let image_width = image.width();
+            let image_height = image.height();
+            let image = image::RgbaImage::from_raw(image_width, image_height, image.into_raw())
+                .ok_or_else(|| {
+                    VisionError::ScreenshotFailed("Failed to convert screenshot buffer".to_string())
+                })?;
 
             // Extract exact region using provided dimensions
             let screen_width = image.width();

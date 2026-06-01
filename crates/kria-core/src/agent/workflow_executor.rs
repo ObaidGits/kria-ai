@@ -24,13 +24,13 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use tokio_util::sync::CancellationToken;
 use crate::agent::workflow_lifecycle::{LifecycleError, WorkflowInstance};
 use crate::agent::workflow_telemetry::{
     execution_mode_from_previews, step_previews_from_workflow, WorkflowTelemetryEmitter,
 };
 use crate::agent::workflow_types::*;
-use crate::agent::workflow_verifier::{verify_contract, verdict_from_contract};
+use crate::agent::workflow_verifier::{verdict_from_contract, verify_contract};
+use tokio_util::sync::CancellationToken;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // §1 — Executor Configuration
@@ -136,7 +136,16 @@ impl HybridWorkflowExecutor {
         cancellation: CancellationToken,
         config: ExecutorConfig,
     ) -> WorkflowExecutionResult {
-        Self::execute_with_tools(plan, outcome_contract, execution_mode, capabilities, cancellation, config, None).await
+        Self::execute_with_tools(
+            plan,
+            outcome_contract,
+            execution_mode,
+            capabilities,
+            cancellation,
+            config,
+            None,
+        )
+        .await
     }
 
     /// Execute with a real tool executor (production path).
@@ -166,10 +175,8 @@ impl HybridWorkflowExecutor {
             .unwrap_or(0);
 
         // Create telemetry emitter
-        let (telemetry, _receiver) = WorkflowTelemetryEmitter::new(
-            workflow_id.clone(),
-            WorkflowSource::SubstrateRouter,
-        );
+        let (telemetry, _receiver) =
+            WorkflowTelemetryEmitter::new(workflow_id.clone(), WorkflowSource::SubstrateRouter);
 
         // Create lifecycle instance
         let mut instance = WorkflowInstance::new(
@@ -206,7 +213,11 @@ impl HybridWorkflowExecutor {
             execution_mode,
             telemetry,
             step_results: Vec::new(),
-            artifacts: plan.artifacts.iter().map(|p| p.display().to_string()).collect(),
+            artifacts: plan
+                .artifacts
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect(),
             budget_remaining_ms: config.max_budget_ms,
             cancellation: cancellation.clone(),
             config,
@@ -262,17 +273,16 @@ impl HybridWorkflowExecutor {
 
                 // Emit step started
                 let step_type = classify_step_type(&goal.action);
-                ctx.telemetry.emit_step_started(
-                    step_index,
-                    &goal.action,
-                    step_type,
-                );
+                ctx.telemetry
+                    .emit_step_started(step_index, &goal.action, step_type);
 
                 // Execute the step
                 let step_start = Instant::now();
                 let step_result = if let Some(ref executor) = tool_executor {
                     // REAL EXECUTION — tool registry with policy/HITL/isolation
-                    let step_timeout = goal.timeout_ms.unwrap_or(ctx.config.default_step_timeout_ms);
+                    let step_timeout = goal
+                        .timeout_ms
+                        .unwrap_or(ctx.config.default_step_timeout_ms);
                     let tool_result = tokio::time::timeout(
                         Duration::from_millis(step_timeout),
                         executor.execute(&goal.action, &goal.params),
@@ -293,10 +303,7 @@ impl HybridWorkflowExecutor {
                             step_index,
                             action: goal.action.clone(),
                             success: false,
-                            error: Some(format!(
-                                "Step timed out after {}ms",
-                                step_timeout
-                            )),
+                            error: Some(format!("Step timed out after {}ms", step_timeout)),
                             artifacts: vec![],
                             duration_ms: step_start.elapsed().as_millis() as u64,
                             retries_used: 0,
@@ -325,7 +332,10 @@ impl HybridWorkflowExecutor {
 
                 // Handle step failure
                 if !step_result.success {
-                    let error = step_result.error.clone().unwrap_or_else(|| "Unknown error".into());
+                    let error = step_result
+                        .error
+                        .clone()
+                        .unwrap_or_else(|| "Unknown error".into());
                     let _ = ctx.instance.mark_finalized(WorkflowVerdict::Failed {
                         step: step_index,
                         reason: error.clone(),
@@ -357,7 +367,9 @@ impl HybridWorkflowExecutor {
 
                 // Record step completion
                 let _ = ctx.instance.mark_step_completed(step_index);
-                ctx.budget_remaining_ms = ctx.budget_remaining_ms.saturating_sub(step_result.duration_ms);
+                ctx.budget_remaining_ms = ctx
+                    .budget_remaining_ms
+                    .saturating_sub(step_result.duration_ms);
                 ctx.step_results.push(step_result);
             }
         }
@@ -440,13 +452,19 @@ fn format_verdict_summary(verdict: &WorkflowVerdict) -> String {
         WorkflowVerdict::AlreadySatisfied { evidence } => {
             format!("Already done: {}", evidence)
         }
-        WorkflowVerdict::StructurallyComplete { unverified_outcomes } => {
+        WorkflowVerdict::StructurallyComplete {
+            unverified_outcomes,
+        } => {
             format!(
                 "Completed structurally. Unverified: {}",
                 unverified_outcomes.join(", ")
             )
         }
-        WorkflowVerdict::Partial { completed, total, reason } => {
+        WorkflowVerdict::Partial {
+            completed,
+            total,
+            reason,
+        } => {
             format!("Partial: {}/{} steps. {}", completed, total, reason)
         }
         WorkflowVerdict::Blocked { reason } => format!("Blocked: {}", reason),
@@ -500,21 +518,19 @@ mod tests {
             substrate: ExecutionSubstrate::FileWriteThenOpen,
             workflow: Some(GuiWorkflow {
                 task_id: "test-executor-wf".into(),
-                sub_goals: vec![
-                    SubGoal {
-                        step: 1,
-                        action: "write_file".into(),
-                        params: serde_json::json!({
-                            "path": test_file.display().to_string(),
-                            "content": "test content",
-                        }),
-                        verify: VerificationType::FileSystemEffect {
-                            path: test_file.clone(),
-                            expected_substring: "test".into(),
-                        },
-                        timeout_ms: Some(5000),
+                sub_goals: vec![SubGoal {
+                    step: 1,
+                    action: "write_file".into(),
+                    params: serde_json::json!({
+                        "path": test_file.display().to_string(),
+                        "content": "test content",
+                    }),
+                    verify: VerificationType::FileSystemEffect {
+                        path: test_file.clone(),
+                        expected_substring: "test".into(),
                     },
-                ],
+                    timeout_ms: Some(5000),
+                }],
                 safe_abort_steps: vec![],
                 max_duration_sec: 30,
             }),
@@ -540,7 +556,9 @@ mod tests {
         let cancel = CancellationToken::new();
 
         // Write the test file so verification passes
-        tokio::fs::write("/tmp/kria_executor_test.txt", "test content").await.unwrap();
+        tokio::fs::write("/tmp/kria_executor_test.txt", "test content")
+            .await
+            .unwrap();
 
         let result = HybridWorkflowExecutor::execute(
             &plan,
@@ -655,7 +673,9 @@ mod tests {
         let contract = OutcomeContract {
             required: vec![PlannedOutcome {
                 description: "File exists".into(),
-                expectation: OutcomeExpectation::FileExists { path: test_path.into() },
+                expectation: OutcomeExpectation::FileExists {
+                    path: test_path.into(),
+                },
                 min_confidence: 0.80,
                 on_failure: OutcomeFailurePolicy::FailWorkflow,
             }],
@@ -678,7 +698,9 @@ mod tests {
         let result = HybridWorkflowExecutor::execute(
             &plan,
             contract,
-            ExecutionMode::Hybrid { visible_steps: vec![2] },
+            ExecutionMode::Hybrid {
+                visible_steps: vec![2],
+            },
             caps,
             cancel,
             ExecutorConfig::default(),
@@ -701,10 +723,16 @@ mod tests {
 
     #[async_trait::async_trait]
     impl crate::agent::htn_executor::ToolExecutor for RealMockToolExecutor {
-        async fn execute(&self, action: &str, params: &serde_json::Value) -> crate::infra::ToolResult {
+        async fn execute(
+            &self,
+            action: &str,
+            params: &serde_json::Value,
+        ) -> crate::infra::ToolResult {
             match action {
                 "write_file" => {
-                    let path = params["path"].as_str().unwrap_or("/tmp/kria_mock_write.txt");
+                    let path = params["path"]
+                        .as_str()
+                        .unwrap_or("/tmp/kria_mock_write.txt");
                     let content = params["content"].as_str().unwrap_or("mock content");
                     match tokio::fs::write(path, content).await {
                         Ok(_) => crate::infra::ToolResult::ok(serde_json::json!({"written": path})),
@@ -729,7 +757,9 @@ mod tests {
                         Err(e) => crate::infra::ToolResult::err(format!("Exec error: {}", e)),
                     }
                 }
-                _ => crate::infra::ToolResult::ok(serde_json::json!({"action": action, "simulated": true})),
+                _ => crate::infra::ToolResult::ok(
+                    serde_json::json!({"action": action, "simulated": true}),
+                ),
             }
         }
     }
@@ -765,7 +795,9 @@ mod tests {
         let contract = OutcomeContract {
             required: vec![PlannedOutcome {
                 description: "Test file created".into(),
-                expectation: OutcomeExpectation::FileExists { path: test_path.into() },
+                expectation: OutcomeExpectation::FileExists {
+                    path: test_path.into(),
+                },
                 min_confidence: 0.80,
                 on_failure: OutcomeFailurePolicy::FailWorkflow,
             }],
@@ -790,7 +822,10 @@ mod tests {
 
         // Verify the file was ACTUALLY written
         let file_exists = tokio::fs::metadata(test_path).await.is_ok();
-        assert!(file_exists, "Canonical executor should have ACTUALLY written the file");
+        assert!(
+            file_exists,
+            "Canonical executor should have ACTUALLY written the file"
+        );
 
         let content = tokio::fs::read_to_string(test_path).await.unwrap();
         assert!(content.contains("canonical executor wrote this"));

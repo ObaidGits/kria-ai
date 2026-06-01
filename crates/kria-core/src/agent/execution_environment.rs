@@ -352,7 +352,9 @@ pub fn validate_environment(
 /// Result of environment validation.
 #[derive(Debug, Clone)]
 pub enum EnvironmentValidation {
-    Allowed { environment: ExecutionEnvironment },
+    Allowed {
+        environment: ExecutionEnvironment,
+    },
     Blocked {
         resolved_environment: ExecutionEnvironment,
         allowed: Vec<String>,
@@ -423,37 +425,61 @@ mod tests {
 
     #[test]
     fn browser_target_maps_to_host_environment() {
-        assert_eq!(to_environment(ExecutionTarget::Browser), ExecutionEnvironment::Host);
+        assert_eq!(
+            to_environment(ExecutionTarget::Browser),
+            ExecutionEnvironment::Host
+        );
     }
 
     #[test]
     fn mcp_target_maps_to_host_environment() {
-        assert_eq!(to_environment(ExecutionTarget::Mcp), ExecutionEnvironment::Host);
+        assert_eq!(
+            to_environment(ExecutionTarget::Mcp),
+            ExecutionEnvironment::Host
+        );
     }
 
     #[test]
     fn cloud_target_maps_to_host_environment() {
-        assert_eq!(to_environment(ExecutionTarget::CloudProvider), ExecutionEnvironment::Host);
+        assert_eq!(
+            to_environment(ExecutionTarget::CloudProvider),
+            ExecutionEnvironment::Host
+        );
     }
 
     #[test]
     fn vm_target_maps_to_vm_environment() {
-        assert_eq!(to_environment(ExecutionTarget::Vm), ExecutionEnvironment::Vm);
+        assert_eq!(
+            to_environment(ExecutionTarget::Vm),
+            ExecutionEnvironment::Vm
+        );
     }
 
     // ── Category classification ──────────────────────────────────────────────
 
     #[test]
     fn browser_tools_classified_as_desktop() {
-        assert_eq!(classify_tool_category("managed_browser_navigate"), ToolCategory::Desktop);
-        assert_eq!(classify_tool_category("open_application"), ToolCategory::Desktop);
+        assert_eq!(
+            classify_tool_category("managed_browser_navigate"),
+            ToolCategory::Desktop
+        );
+        assert_eq!(
+            classify_tool_category("open_application"),
+            ToolCategory::Desktop
+        );
         assert_eq!(classify_tool_category("type_text"), ToolCategory::Desktop);
     }
 
     #[test]
     fn mcp_tools_classified_correctly() {
-        assert_eq!(classify_tool_category("mcp_filesystem_read"), ToolCategory::Mcp);
-        assert_eq!(classify_tool_category("mcp_colab_execute"), ToolCategory::Mcp);
+        assert_eq!(
+            classify_tool_category("mcp_filesystem_read"),
+            ToolCategory::Mcp
+        );
+        assert_eq!(
+            classify_tool_category("mcp_colab_execute"),
+            ToolCategory::Mcp
+        );
     }
 
     #[test]
@@ -468,7 +494,10 @@ mod tests {
         // This is the exact bug that caused EXECUTION_BLOCKED.
         // Browser target → Host environment → Host is always allowed for desktop tools.
         let result = validate_environment("managed_browser_navigate", ExecutionTarget::Browser);
-        assert!(result.is_allowed(), "browser tools must not be blocked when target is Browser");
+        assert!(
+            result.is_allowed(),
+            "browser tools must not be blocked when target is Browser"
+        );
     }
 
     #[test]

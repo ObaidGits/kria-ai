@@ -113,9 +113,18 @@ fn estimate_interaction_confidence(capabilities: &CapabilitySet) -> f32 {
 
     // Input injection quality
     match capabilities.interaction.keyboard_injection {
-        InputInjectionLevel::Full => { confidence += 0.90; factors += 1; }
-        InputInjectionLevel::XdotoolOnly => { confidence += 0.60; factors += 1; }
-        InputInjectionLevel::None => { confidence += 0.0; factors += 1; }
+        InputInjectionLevel::Full => {
+            confidence += 0.90;
+            factors += 1;
+        }
+        InputInjectionLevel::XdotoolOnly => {
+            confidence += 0.60;
+            factors += 1;
+        }
+        InputInjectionLevel::None => {
+            confidence += 0.0;
+            factors += 1;
+        }
     }
 
     // Window observation quality (can we verify focus?)
@@ -124,13 +133,29 @@ fn estimate_interaction_confidence(capabilities: &CapabilitySet) -> f32 {
 
     // AT-SPI availability (can we verify elements?)
     match &capabilities.environment.atspi_level {
-        AtSpiLevel::Full => { confidence += 0.85; factors += 1; }
-        AtSpiLevel::Partial { .. } => { confidence += 0.55; factors += 1; }
-        AtSpiLevel::BusOnly => { confidence += 0.30; factors += 1; }
-        AtSpiLevel::None => { confidence += 0.10; factors += 1; }
+        AtSpiLevel::Full => {
+            confidence += 0.85;
+            factors += 1;
+        }
+        AtSpiLevel::Partial { .. } => {
+            confidence += 0.55;
+            factors += 1;
+        }
+        AtSpiLevel::BusOnly => {
+            confidence += 0.30;
+            factors += 1;
+        }
+        AtSpiLevel::None => {
+            confidence += 0.10;
+            factors += 1;
+        }
     }
 
-    if factors > 0 { confidence / factors as f32 } else { 0.0 }
+    if factors > 0 {
+        confidence / factors as f32
+    } else {
+        0.0
+    }
 }
 
 /// Result of an interaction safety check.
@@ -184,7 +209,10 @@ pub fn detect_focus_drift(
 ) -> FocusDriftStatus {
     // On Wayland without AT-SPI, we cannot reliably detect focus drift
     if capabilities.environment.session_type == SessionType::Wayland
-        && matches!(capabilities.environment.atspi_level, AtSpiLevel::None | AtSpiLevel::BusOnly)
+        && matches!(
+            capabilities.environment.atspi_level,
+            AtSpiLevel::None | AtSpiLevel::BusOnly
+        )
     {
         return FocusDriftStatus::Unknown {
             reason: "Cannot verify focus on Wayland without AT-SPI".into(),
@@ -204,7 +232,10 @@ pub enum FocusDriftStatus {
     /// Focus is on the expected target
     Stable { confidence: f32 },
     /// Focus has moved to a different window
-    Drifted { current_app: String, expected_app: String },
+    Drifted {
+        current_app: String,
+        expected_app: String,
+    },
     /// Cannot determine focus state
     Unknown { reason: String },
 }
@@ -278,7 +309,10 @@ mod tests {
         let caps = make_full_caps();
         let thresholds = InteractionThresholds::default();
         let result = check_interaction_safety("type_text", &caps, &thresholds);
-        assert!(result.is_safe(), "Typing should be safe with full capabilities");
+        assert!(
+            result.is_safe(),
+            "Typing should be safe with full capabilities"
+        );
     }
 
     #[test]
@@ -320,7 +354,15 @@ mod tests {
         let full_conf = estimate_interaction_confidence(&full);
         let none_conf = estimate_interaction_confidence(&none);
 
-        assert!(full_conf > 0.70, "Full caps should give high confidence: {}", full_conf);
-        assert!(none_conf < 0.30, "No caps should give low confidence: {}", none_conf);
+        assert!(
+            full_conf > 0.70,
+            "Full caps should give high confidence: {}",
+            full_conf
+        );
+        assert!(
+            none_conf < 0.30,
+            "No caps should give low confidence: {}",
+            none_conf
+        );
     }
 }

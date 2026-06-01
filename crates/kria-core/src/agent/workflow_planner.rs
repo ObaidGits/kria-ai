@@ -28,9 +28,8 @@
 use crate::agent::gui_substrate_planner::{ExecutionSubstrate, SubstratePlan, SubstratePlanner};
 use crate::agent::intent_compiler::GuiTaskSpec;
 use crate::agent::workflow_types::{
-    CapabilitySet, ExecutionMode,
-    HitlOption, HitlReason, InputInjectionLevel, OutcomeContract, OutcomeExpectation,
-    OutcomeFailurePolicy, PlannedOutcome,
+    CapabilitySet, ExecutionMode, HitlOption, HitlReason, InputInjectionLevel, OutcomeContract,
+    OutcomeExpectation, OutcomeFailurePolicy, PlannedOutcome,
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -54,9 +53,7 @@ pub enum PlanningResult {
         context: String,
     },
     /// Cannot plan this workflow (falls through to ReAct)
-    Unplannable {
-        reason: String,
-    },
+    Unplannable { reason: String },
 }
 
 /// A planning adaptation that was applied due to capability constraints.
@@ -120,11 +117,7 @@ impl CapabilityAwarePlanner {
         let adaptations = Self::adapt_plan(&substrate_plan, capabilities);
 
         // ── Step 4: Generate outcome contract ─────────────────────────────────
-        let outcome_contract = Self::generate_outcome_contract(
-            &substrate_plan,
-            spec,
-            capabilities,
-        );
+        let outcome_contract = Self::generate_outcome_contract(&substrate_plan, spec, capabilities);
 
         // ── Step 5: Determine execution mode ──────────────────────────────────
         let execution_mode = Self::determine_execution_mode(&substrate_plan);
@@ -184,7 +177,8 @@ impl CapabilityAwarePlanner {
                         HitlOption {
                             id: "manual".into(),
                             label: "I'll do it manually".into(),
-                            action_type: crate::agent::workflow_types::HitlActionType::ManualComplete,
+                            action_type:
+                                crate::agent::workflow_types::HitlActionType::ManualComplete,
                         },
                         HitlOption {
                             id: "cancel".into(),
@@ -202,10 +196,7 @@ impl CapabilityAwarePlanner {
 
     // ─── Plan Adaptation ──────────────────────────────────────────────────
 
-    fn adapt_plan(
-        plan: &SubstratePlan,
-        capabilities: &CapabilitySet,
-    ) -> Vec<PlanAdaptation> {
+    fn adapt_plan(plan: &SubstratePlan, capabilities: &CapabilitySet) -> Vec<PlanAdaptation> {
         let mut adaptations = Vec::new();
 
         // Check if the substrate requires capabilities we don't have
@@ -221,7 +212,8 @@ impl CapabilityAwarePlanner {
             ExecutionSubstrate::InteractionHeavy => {
                 if capabilities.interaction.keyboard_injection == InputInjectionLevel::None {
                     adaptations.push(PlanAdaptation {
-                        description: "Interactive workflow on environment without input injection".into(),
+                        description: "Interactive workflow on environment without input injection"
+                            .into(),
                         category: AdaptationCategory::InteractionGated,
                     });
                 }
@@ -229,7 +221,9 @@ impl CapabilityAwarePlanner {
             ExecutionSubstrate::BrowserNavigate => {
                 if !capabilities.verifier.cdp_available {
                     adaptations.push(PlanAdaptation {
-                        description: "CDP unavailable; browser verification will use process-only check".into(),
+                        description:
+                            "CDP unavailable; browser verification will use process-only check"
+                                .into(),
                         category: AdaptationCategory::VerificationDowngrade,
                     });
                 }
@@ -462,7 +456,10 @@ mod tests {
             ocr_available: false,
         };
         let verifier = VerifierCapability {
-            available_methods: vec![VerificationMethod::FileSystem, VerificationMethod::ProcessTable],
+            available_methods: vec![
+                VerificationMethod::FileSystem,
+                VerificationMethod::ProcessTable,
+            ],
             window_state_max_confidence: match (&env.session_type, &env.atspi_level) {
                 (SessionType::X11, AtSpiLevel::Full) => 0.90,
                 (SessionType::Wayland, AtSpiLevel::Full) => 0.70,
@@ -473,14 +470,30 @@ mod tests {
             process_table_available: true,
         };
         let interaction = InteractionCapability {
-            keyboard_injection: if uinput { InputInjectionLevel::Full } else { InputInjectionLevel::None },
-            mouse_injection: if uinput { InputInjectionLevel::Full } else { InputInjectionLevel::None },
+            keyboard_injection: if uinput {
+                InputInjectionLevel::Full
+            } else {
+                InputInjectionLevel::None
+            },
+            mouse_injection: if uinput {
+                InputInjectionLevel::Full
+            } else {
+                InputInjectionLevel::None
+            },
             clipboard_available: true,
         };
-        CapabilitySet { environment: env, verifier, interaction }
+        CapabilitySet {
+            environment: env,
+            verifier,
+            interaction,
+        }
     }
 
-    fn make_spec(verb: Verb, targets: Vec<TargetRef>, content: Option<ContentClass>) -> GuiTaskSpec {
+    fn make_spec(
+        verb: Verb,
+        targets: Vec<TargetRef>,
+        content: Option<ContentClass>,
+    ) -> GuiTaskSpec {
         GuiTaskSpec {
             primary_verb: verb,
             targets,
@@ -496,20 +509,34 @@ mod tests {
         let spec = make_spec(
             Verb::Open,
             vec![TargetRef::App("gedit".into())],
-            Some(ContentClass::Generated { hint: "fibonacci program".into(), language: Some("python".into()) }),
+            Some(ContentClass::Generated {
+                hint: "fibonacci program".into(),
+                language: Some("python".into()),
+            }),
         );
         let caps = make_capabilities(SessionType::X11, AtSpiLevel::Full, true);
         let registry = crate::platform::app_registry::InstalledAppRegistry::build_sync();
 
-        let result = CapabilityAwarePlanner::plan(&spec, "open gedit and write fibonacci", &caps, &registry);
+        let result =
+            CapabilityAwarePlanner::plan(&spec, "open gedit and write fibonacci", &caps, &registry);
 
         match result {
-            PlanningResult::Planned { outcome_contract, execution_mode, .. } => {
+            PlanningResult::Planned {
+                outcome_contract,
+                execution_mode,
+                ..
+            } => {
                 // Should have at least one required outcome (file exists)
-                assert!(!outcome_contract.required.is_empty(), "Should have required outcomes");
+                assert!(
+                    !outcome_contract.required.is_empty(),
+                    "Should have required outcomes"
+                );
                 // Should be hybrid (file write + app open)
                 assert!(
-                    matches!(execution_mode, ExecutionMode::Hybrid { .. } | ExecutionMode::Visible),
+                    matches!(
+                        execution_mode,
+                        ExecutionMode::Hybrid { .. } | ExecutionMode::Visible
+                    ),
                     "Should be hybrid or visible mode"
                 );
             }
@@ -546,11 +573,7 @@ mod tests {
 
     #[test]
     fn plan_adaptation_notes_wayland_visibility_limitation() {
-        let spec = make_spec(
-            Verb::Open,
-            vec![TargetRef::App("nautilus".into())],
-            None,
-        );
+        let spec = make_spec(Verb::Open, vec![TargetRef::App("nautilus".into())], None);
         // Wayland without AT-SPI = low visibility confidence
         let caps = make_capabilities(SessionType::Wayland, AtSpiLevel::None, true);
         let registry = crate::platform::app_registry::InstalledAppRegistry::build_sync();
@@ -560,9 +583,9 @@ mod tests {
         match result {
             PlanningResult::Planned { adaptations, .. } => {
                 // Should note visibility limitation
-                let has_visibility_adaptation = adaptations.iter().any(|a| {
-                    a.category == AdaptationCategory::VisibilityBestEffort
-                });
+                let has_visibility_adaptation = adaptations
+                    .iter()
+                    .any(|a| a.category == AdaptationCategory::VisibilityBestEffort);
                 assert!(
                     has_visibility_adaptation,
                     "Should note visibility limitation on Wayland without AT-SPI"
@@ -577,22 +600,27 @@ mod tests {
 
     #[test]
     fn outcome_contract_gates_window_verification_on_capability() {
-        let spec = make_spec(
-            Verb::Open,
-            vec![TargetRef::App("firefox".into())],
-            None,
-        );
+        let spec = make_spec(Verb::Open, vec![TargetRef::App("firefox".into())], None);
 
         // High capability environment
         let high_caps = make_capabilities(SessionType::X11, AtSpiLevel::Full, true);
         let registry = crate::platform::app_registry::InstalledAppRegistry::build_sync();
 
         let result = CapabilityAwarePlanner::plan(&spec, "open firefox", &high_caps, &registry);
-        if let PlanningResult::Planned { outcome_contract, .. } = &result {
+        if let PlanningResult::Planned {
+            outcome_contract, ..
+        } = &result
+        {
             // On X11 with full AT-SPI, desired outcomes should have higher confidence threshold
             for desired in &outcome_contract.desired {
-                if matches!(desired.expectation, OutcomeExpectation::AppWindowVisible { .. }) {
-                    assert!(desired.min_confidence >= 0.60, "X11+AT-SPI should have high confidence threshold");
+                if matches!(
+                    desired.expectation,
+                    OutcomeExpectation::AppWindowVisible { .. }
+                ) {
+                    assert!(
+                        desired.min_confidence >= 0.60,
+                        "X11+AT-SPI should have high confidence threshold"
+                    );
                 }
             }
         }
@@ -600,11 +628,20 @@ mod tests {
         // Low capability environment
         let low_caps = make_capabilities(SessionType::Wayland, AtSpiLevel::None, true);
         let result_low = CapabilityAwarePlanner::plan(&spec, "open firefox", &low_caps, &registry);
-        if let PlanningResult::Planned { outcome_contract, .. } = &result_low {
+        if let PlanningResult::Planned {
+            outcome_contract, ..
+        } = &result_low
+        {
             for desired in &outcome_contract.desired {
-                if matches!(desired.expectation, OutcomeExpectation::AppWindowVisible { .. }) {
+                if matches!(
+                    desired.expectation,
+                    OutcomeExpectation::AppWindowVisible { .. }
+                ) {
                     // On Wayland without AT-SPI, confidence threshold should be lower
-                    assert!(desired.min_confidence <= 0.40, "Wayland without AT-SPI should have low confidence threshold");
+                    assert!(
+                        desired.min_confidence <= 0.40,
+                        "Wayland without AT-SPI should have low confidence threshold"
+                    );
                 }
             }
         }
@@ -615,7 +652,10 @@ mod tests {
         let spec = make_spec(
             Verb::Open,
             vec![TargetRef::App("code".into())],
-            Some(ContentClass::Generated { hint: "hello world".into(), language: Some("python".into()) }),
+            Some(ContentClass::Generated {
+                hint: "hello world".into(),
+                language: Some("python".into()),
+            }),
         );
         let caps = make_capabilities(SessionType::X11, AtSpiLevel::Full, true);
         let registry = crate::platform::app_registry::InstalledAppRegistry::build_sync();

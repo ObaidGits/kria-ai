@@ -282,6 +282,12 @@ function getWorkflowIdFromEvent(event: WorkflowTelemetry): string {
   return (event as any).workflow_id ?? '';
 }
 
+function workflowDebug(...args: unknown[]): void {
+  if (import.meta.env.DEV) {
+    console.debug(...args);
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // §5 — Public Actions
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -289,7 +295,7 @@ function getWorkflowIdFromEvent(event: WorkflowTelemetry): string {
 /** Send a HITL response back to the backend. */
 export async function respondToHitl(response: HitlResponse): Promise<void> {
   // This will be wired to a Tauri invoke command
-  console.log('[WorkflowStore] HITL response:', response);
+  workflowDebug('[WorkflowStore] HITL response:', response);
   // TODO: invoke("workflow_hitl_respond", { response })
 
   // Optimistically update state
@@ -308,7 +314,7 @@ export async function respondToHitl(response: HitlResponse): Promise<void> {
 export async function cancelActiveWorkflow(): Promise<void> {
   const id = state.activeWorkflowId;
   if (!id) return;
-  console.log('[WorkflowStore] Cancelling workflow:', id);
+  workflowDebug('[WorkflowStore] Cancelling workflow:', id);
   // TODO: invoke("workflow_cancel", { workflow_id: id })
 }
 
@@ -328,7 +334,7 @@ export async function executeContinuation(
   workflowId: string,
   action: ContinuationAction,
 ): Promise<void> {
-  console.log('[WorkflowStore] Continuation action:', workflowId, action);
+  workflowDebug('[WorkflowStore] Continuation action:', workflowId, action);
   // TODO: invoke("workflow_continuation", { workflow_id: workflowId, action })
 }
 

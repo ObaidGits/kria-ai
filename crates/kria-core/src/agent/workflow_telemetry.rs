@@ -183,12 +183,7 @@ impl WorkflowTelemetryEmitter {
     }
 
     /// Emit HITL required event (critical — never dropped).
-    pub fn emit_hitl_required(
-        &self,
-        reason: HitlReason,
-        options: Vec<HitlOption>,
-        context: &str,
-    ) {
+    pub fn emit_hitl_required(&self, reason: HitlReason, options: Vec<HitlOption>, context: &str) {
         self.emit(
             WorkflowTelemetry::HitlRequired {
                 workflow_id: self.workflow_id.clone(),
@@ -249,9 +244,7 @@ impl WorkflowTelemetryEmitter {
 /// - `StreamEvent::Plan` for workflow start (existing UI)
 /// - `StreamEvent::Token` / `StreamEvent::Done` for completion (existing UI)
 /// - Raw JSON telemetry event for new frontend components (future)
-pub fn adapt_telemetry_to_legacy_events(
-    envelope: &TelemetryEnvelope,
-) -> Vec<LegacyEventAdapter> {
+pub fn adapt_telemetry_to_legacy_events(envelope: &TelemetryEnvelope) -> Vec<LegacyEventAdapter> {
     match &envelope.event {
         WorkflowTelemetry::Started { title, steps, .. } => {
             let mut events = vec![LegacyEventAdapter::Plan(format!(
@@ -375,8 +368,11 @@ pub fn step_previews_from_workflow(
             };
             let execution_mode = match goal.action.as_str() {
                 "write_file" | "execute_bash" | "execute_python" => StepExecutionMode::Backend,
-                "open_application" | "open_application_with_file" | "browser_search"
-                | "managed_browser_navigate" | "open_url" => StepExecutionMode::Visible,
+                "open_application"
+                | "open_application_with_file"
+                | "browser_search"
+                | "managed_browser_navigate"
+                | "open_url" => StepExecutionMode::Visible,
                 "click_element" | "click_mouse" | "type_text" | "press_shortcut" => {
                     StepExecutionMode::Interactive
                 }
@@ -420,9 +416,7 @@ fn gui_action_label_for_telemetry(action: &str) -> String {
         "execute_bash" => "Run command".into(),
         "open_application_with_file" => "Open file in application".into(),
         "open_application" => "Open application".into(),
-        "browser_search" | "managed_browser_navigate" | "open_url" => {
-            "Open browser target".into()
-        }
+        "browser_search" | "managed_browser_navigate" | "open_url" => "Open browser target".into(),
         "click_element" | "click_mouse" => "Click target".into(),
         "type_text" => "Type text".into(),
         "press_shortcut" => "Press shortcut".into(),
@@ -441,7 +435,8 @@ mod tests {
 
     #[tokio::test]
     async fn emitter_produces_monotonic_sequence() {
-        let (emitter, mut receiver) = WorkflowTelemetryEmitter::new("test-1", WorkflowSource::SubstrateRouter);
+        let (emitter, mut receiver) =
+            WorkflowTelemetryEmitter::new("test-1", WorkflowSource::SubstrateRouter);
 
         emitter.emit_step_started(1, "Write file", StepType::FileWrite);
         emitter.emit_step_started(2, "Open app", StepType::AppLaunch);
@@ -460,7 +455,8 @@ mod tests {
 
     #[tokio::test]
     async fn emitter_includes_correct_version_and_source() {
-        let (emitter, mut receiver) = WorkflowTelemetryEmitter::new("test-2", WorkflowSource::LegacyShim);
+        let (emitter, mut receiver) =
+            WorkflowTelemetryEmitter::new("test-2", WorkflowSource::LegacyShim);
 
         emitter.emit_step_started(1, "Test", StepType::FileWrite);
 
@@ -471,7 +467,8 @@ mod tests {
 
     #[tokio::test]
     async fn emitter_started_event_contains_workflow_id() {
-        let (emitter, mut receiver) = WorkflowTelemetryEmitter::new("wf-abc", WorkflowSource::SubstrateRouter);
+        let (emitter, mut receiver) =
+            WorkflowTelemetryEmitter::new("wf-abc", WorkflowSource::SubstrateRouter);
 
         emitter.emit_started(
             "Test Workflow",
@@ -487,7 +484,12 @@ mod tests {
 
         let envelope = receiver.rx.recv().await.unwrap();
         match envelope.event {
-            WorkflowTelemetry::Started { workflow_id, title, steps, .. } => {
+            WorkflowTelemetry::Started {
+                workflow_id,
+                title,
+                steps,
+                ..
+            } => {
                 assert_eq!(workflow_id, "wf-abc");
                 assert_eq!(title, "Test Workflow");
                 assert_eq!(steps.len(), 1);
@@ -498,7 +500,8 @@ mod tests {
 
     #[tokio::test]
     async fn emitter_completed_event_carries_verdict() {
-        let (emitter, mut receiver) = WorkflowTelemetryEmitter::new("wf-done", WorkflowSource::SubstrateRouter);
+        let (emitter, mut receiver) =
+            WorkflowTelemetryEmitter::new("wf-done", WorkflowSource::SubstrateRouter);
 
         emitter.emit_completed(
             WorkflowVerdict::StructurallyComplete {
@@ -511,8 +514,16 @@ mod tests {
 
         let envelope = receiver.rx.recv().await.unwrap();
         match envelope.event {
-            WorkflowTelemetry::Completed { verdict, summary, artifacts, .. } => {
-                assert!(matches!(verdict, WorkflowVerdict::StructurallyComplete { .. }));
+            WorkflowTelemetry::Completed {
+                verdict,
+                summary,
+                artifacts,
+                ..
+            } => {
+                assert!(matches!(
+                    verdict,
+                    WorkflowVerdict::StructurallyComplete { .. }
+                ));
                 assert_eq!(summary, "All steps done structurally");
                 assert_eq!(artifacts, vec!["/tmp/test.py"]);
             }
@@ -529,10 +540,22 @@ mod tests {
                 workflow_id: "test".into(),
                 title: "Generate website".into(),
                 steps: vec![
-                    StepPreview { index: 1, description: "Write files".into(), step_type: StepType::FileWrite, execution_mode: StepExecutionMode::Backend },
-                    StepPreview { index: 2, description: "Open IDE".into(), step_type: StepType::AppLaunch, execution_mode: StepExecutionMode::Visible },
+                    StepPreview {
+                        index: 1,
+                        description: "Write files".into(),
+                        step_type: StepType::FileWrite,
+                        execution_mode: StepExecutionMode::Backend,
+                    },
+                    StepPreview {
+                        index: 2,
+                        description: "Open IDE".into(),
+                        step_type: StepType::AppLaunch,
+                        execution_mode: StepExecutionMode::Visible,
+                    },
                 ],
-                execution_mode: ExecutionMode::Hybrid { visible_steps: vec![2] },
+                execution_mode: ExecutionMode::Hybrid {
+                    visible_steps: vec![2],
+                },
                 estimated_duration_ms: Some(10000),
             },
             timestamp_ms: 0,
@@ -541,7 +564,9 @@ mod tests {
 
         let legacy = adapt_telemetry_to_legacy_events(&envelope);
         assert!(legacy.len() >= 1);
-        assert!(matches!(&legacy[0], LegacyEventAdapter::Plan(s) if s.contains("Generate website")));
+        assert!(
+            matches!(&legacy[0], LegacyEventAdapter::Plan(s) if s.contains("Generate website"))
+        );
     }
 
     #[test]
@@ -573,7 +598,11 @@ mod tests {
             seq: 3,
             event: WorkflowTelemetry::Completed {
                 workflow_id: "test".into(),
-                verdict: WorkflowVerdict::Failed { step: 2, reason: "app not found".into(), recovery: None },
+                verdict: WorkflowVerdict::Failed {
+                    step: 2,
+                    reason: "app not found".into(),
+                    recovery: None,
+                },
                 summary: "Failed at step 2".into(),
                 artifacts: vec![],
                 continuation: vec![],
@@ -590,21 +619,60 @@ mod tests {
     #[test]
     fn execution_mode_detection_works() {
         let all_backend = vec![
-            StepPreview { index: 1, description: "".into(), step_type: StepType::FileWrite, execution_mode: StepExecutionMode::Backend },
-            StepPreview { index: 2, description: "".into(), step_type: StepType::CommandExecution, execution_mode: StepExecutionMode::Backend },
+            StepPreview {
+                index: 1,
+                description: "".into(),
+                step_type: StepType::FileWrite,
+                execution_mode: StepExecutionMode::Backend,
+            },
+            StepPreview {
+                index: 2,
+                description: "".into(),
+                step_type: StepType::CommandExecution,
+                execution_mode: StepExecutionMode::Backend,
+            },
         ];
-        assert!(matches!(execution_mode_from_previews(&all_backend), ExecutionMode::Structural));
+        assert!(matches!(
+            execution_mode_from_previews(&all_backend),
+            ExecutionMode::Structural
+        ));
 
         let hybrid = vec![
-            StepPreview { index: 1, description: "".into(), step_type: StepType::FileWrite, execution_mode: StepExecutionMode::Backend },
-            StepPreview { index: 2, description: "".into(), step_type: StepType::AppLaunch, execution_mode: StepExecutionMode::Visible },
+            StepPreview {
+                index: 1,
+                description: "".into(),
+                step_type: StepType::FileWrite,
+                execution_mode: StepExecutionMode::Backend,
+            },
+            StepPreview {
+                index: 2,
+                description: "".into(),
+                step_type: StepType::AppLaunch,
+                execution_mode: StepExecutionMode::Visible,
+            },
         ];
-        assert!(matches!(execution_mode_from_previews(&hybrid), ExecutionMode::Hybrid { .. }));
+        assert!(matches!(
+            execution_mode_from_previews(&hybrid),
+            ExecutionMode::Hybrid { .. }
+        ));
 
         let all_visible = vec![
-            StepPreview { index: 1, description: "".into(), step_type: StepType::AppLaunch, execution_mode: StepExecutionMode::Visible },
-            StepPreview { index: 2, description: "".into(), step_type: StepType::BrowserNavigation, execution_mode: StepExecutionMode::Visible },
+            StepPreview {
+                index: 1,
+                description: "".into(),
+                step_type: StepType::AppLaunch,
+                execution_mode: StepExecutionMode::Visible,
+            },
+            StepPreview {
+                index: 2,
+                description: "".into(),
+                step_type: StepType::BrowserNavigation,
+                execution_mode: StepExecutionMode::Visible,
+            },
         ];
-        assert!(matches!(execution_mode_from_previews(&all_visible), ExecutionMode::Visible));
+        assert!(matches!(
+            execution_mode_from_previews(&all_visible),
+            ExecutionMode::Visible
+        ));
     }
 }

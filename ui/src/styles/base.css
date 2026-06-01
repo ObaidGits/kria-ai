@@ -1429,6 +1429,62 @@ details[open] .tool-raw-summary::before {
   padding: 10px 14px 12px;
 }
 
+.manual-tool-mode-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 14px 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.manual-tool-mode-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.manual-tool-mode-select span {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.manual-tool-mode-select select {
+  min-width: 145px;
+  max-width: 190px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  padding: 6px 8px;
+  font: inherit;
+}
+
+.manual-tool-mode-banner {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  text-align: right;
+  color: var(--text-primary);
+}
+
+.manual-tool-mode-banner span,
+.manual-tool-mode-copy {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-primary));
+  padding: 5px 8px;
+  line-height: 1.2;
+}
+
+.manual-tool-mode-bar.auto .manual-tool-mode-copy {
+  background: var(--bg-primary);
+}
+
 .chat-input {
   flex: 1;
   resize: none;
@@ -1629,6 +1685,27 @@ details[open] .tool-raw-summary::before {
   color: var(--text-secondary);
   font-size: 24px;
   cursor: pointer;
+}
+
+@media (max-width: 760px) {
+  .manual-tool-mode-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .manual-tool-mode-select {
+    justify-content: space-between;
+  }
+
+  .manual-tool-mode-select select {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .manual-tool-mode-banner {
+    justify-content: flex-start;
+    text-align: left;
+  }
 }
 
 .modal-body {

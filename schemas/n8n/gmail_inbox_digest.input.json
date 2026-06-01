@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Gmail Inbox Digest Input",
+  "type": "object",
+  "properties": {
+    "source_prompt": { "type": "string" },
+    "time_window": { "type": "string", "default": "today" },
+    "labels": { "type": "array", "items": { "type": "string" } },
+    "priority_filter": { "type": "string", "default": "important" },
+    "max_messages": { "type": "integer", "minimum": 1, "maximum": 50, "default": 10 }
+  },
+  "additionalProperties": false
+}

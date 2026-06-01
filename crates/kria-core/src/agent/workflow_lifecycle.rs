@@ -97,8 +97,12 @@ impl WorkflowInstance {
             | WorkflowState::Executing { .. }
             | WorkflowState::HitlPending { .. } => {
                 let completed = match &self.state {
-                    WorkflowState::Executing { completed_steps, .. } => *completed_steps,
-                    WorkflowState::HitlPending { suspended_at_step, .. } => *suspended_at_step,
+                    WorkflowState::Executing {
+                        completed_steps, ..
+                    } => *completed_steps,
+                    WorkflowState::HitlPending {
+                        suspended_at_step, ..
+                    } => *suspended_at_step,
                     _ => 0,
                 };
                 self.state = WorkflowState::Executing {
@@ -193,7 +197,9 @@ impl WorkflowInstance {
     pub fn mark_cancelled(&mut self, reason: String) -> Result<(), LifecycleError> {
         let at_step = match &self.state {
             WorkflowState::Executing { current_step, .. } => *current_step,
-            WorkflowState::HitlPending { suspended_at_step, .. } => *suspended_at_step,
+            WorkflowState::HitlPending {
+                suspended_at_step, ..
+            } => *suspended_at_step,
             _ => 0,
         };
         // Cancellation is allowed from any non-terminal state
@@ -280,7 +286,13 @@ mod tests {
         assert!(matches!(wf.state(), WorkflowState::Planned));
 
         wf.mark_executing(1).unwrap();
-        assert!(matches!(wf.state(), WorkflowState::Executing { current_step: 1, .. }));
+        assert!(matches!(
+            wf.state(),
+            WorkflowState::Executing {
+                current_step: 1,
+                ..
+            }
+        ));
 
         wf.mark_step_completed(1).unwrap();
         wf.mark_executing(2).unwrap();
@@ -306,14 +318,24 @@ mod tests {
 
         // HITL pause
         wf.mark_hitl_pending(
-            HitlReason::InstallRequired { app: "code".into(), install_command: None },
+            HitlReason::InstallRequired {
+                app: "code".into(),
+                install_command: None,
+            },
             2,
-        ).unwrap();
+        )
+        .unwrap();
         assert!(matches!(wf.state(), WorkflowState::HitlPending { .. }));
 
         // Resume after user responds
         wf.mark_executing(2).unwrap();
-        assert!(matches!(wf.state(), WorkflowState::Executing { current_step: 2, .. }));
+        assert!(matches!(
+            wf.state(),
+            WorkflowState::Executing {
+                current_step: 2,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -333,11 +355,16 @@ mod tests {
         wf.mark_planned().unwrap();
         wf.mark_executing(1).unwrap();
         wf.mark_hitl_pending(
-            HitlReason::LoginRequired { service: "youtube".into(), guidance: "".into() },
+            HitlReason::LoginRequired {
+                service: "youtube".into(),
+                guidance: "".into(),
+            },
             1,
-        ).unwrap();
+        )
+        .unwrap();
 
-        wf.mark_cancelled("User cancelled during HITL".into()).unwrap();
+        wf.mark_cancelled("User cancelled during HITL".into())
+            .unwrap();
         assert!(wf.is_terminal());
     }
 
@@ -402,7 +429,8 @@ mod tests {
             step: 1,
             reason: "app not found".into(),
             recovery: None,
-        }).unwrap();
+        })
+        .unwrap();
         assert!(wf.is_terminal());
     }
 

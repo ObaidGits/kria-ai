@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Gmail Search Messages Input",
+  "type": "object",
+  "properties": {
+    "source_prompt": { "type": "string" },
+    "query": { "type": "string" },
+    "sender": { "type": "string" },
+    "date_range": { "type": "string" },
+    "attachment_hint": { "type": "string" },
+    "max_results": { "type": "integer", "minimum": 1, "maximum": 50, "default": 10 }
+  },
+  "additionalProperties": false
+}

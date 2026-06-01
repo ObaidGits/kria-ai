@@ -49,7 +49,6 @@ fn check_memory_budget(context_tokens: usize, max_response_tokens: usize) -> Opt
     None
 }
 
-
 /// Local LLM backend using llama.cpp via HTTP API.
 ///
 /// When an orchestrator `LlamaServerManager` is attached, the API URL and
@@ -475,7 +474,9 @@ impl LlmBackend for LocalBackend {
         // insufficient. Prevents silent OOM in llama-server.
         let estimated_context_chars: usize = messages.iter().map(|m| m.content.len()).sum();
         let estimated_context_tokens = estimated_context_chars / 4; // Rough heuristic
-        if let Some(memory_warning) = check_memory_budget(estimated_context_tokens, max_tokens as usize) {
+        if let Some(memory_warning) =
+            check_memory_budget(estimated_context_tokens, max_tokens as usize)
+        {
             tracing::warn!(
                 target: "llm_local",
                 warning = %memory_warning,

@@ -6,8 +6,9 @@ import { SUPPORTED_LANGUAGES, setLocale } from "../stores/i18n";
 import SkillMarketplace from "./SkillMarketplace";
 import SubstrateStatus from "./SubstrateStatus";
 import ProviderSettings from "./ProviderSettings";
+import N8nSettings from "./N8nSettings";
 
-type Tab = "llm" | "voice" | "safety" | "ui" | "assistant" | "labs" | "search" | "services" | "telegram" | "automation" | "gui_automation" | "hardware" | "knowledge" | "google" | "colab" | "ironclad" | "marketplace";
+type Tab = "llm" | "voice" | "safety" | "ui" | "assistant" | "labs" | "search" | "services" | "telegram" | "n8n" | "automation" | "gui_automation" | "hardware" | "knowledge" | "google" | "colab" | "ironclad" | "marketplace";
 type SettingsLayer = "basic" | "workflow" | "integrations" | "advanced" | "developer";
 
 interface SettingsTabDefinition {
@@ -789,6 +790,13 @@ const SettingsModal: Component = () => {
           label: "Telegram",
           icon: "T",
           description: "Connect a Telegram bot for mobile chat and remote assistant access.",
+          layer: "integrations",
+        },
+        {
+          id: "n8n",
+          label: "n8n",
+          icon: "N",
+          description: "Manage n8n runtime mode, connection settings, secrets, and dashboard access.",
           layer: "integrations",
         },
         {
@@ -1863,6 +1871,11 @@ const SettingsModal: Component = () => {
                 </ol>
               </div>
             </section>
+          </Show>
+
+          {/* n8n Tab */}
+          <Show when={activeTab() === "n8n"}>
+            <N8nSettings />
           </Show>
 
           {/* Automation Tab */}
@@ -2970,8 +2983,12 @@ const SettingsModal: Component = () => {
 
         <div class="modal-footer">
           <button class="btn-secondary" onClick={closeSettings}>Cancel</button>
-          <button class="btn-primary" onClick={handleSave} disabled={saving()}>
-            {saving() ? "Saving..." : activeTab() === "llm" ? "Save Defaults" : "Save"}
+          <button
+            class="btn-primary"
+            onClick={activeTab() === "n8n" ? closeSettings : handleSave}
+            disabled={saving()}
+          >
+            {activeTab() === "n8n" ? "Done" : saving() ? "Saving..." : activeTab() === "llm" ? "Save Defaults" : "Save"}
           </button>
         </div>
       </div>

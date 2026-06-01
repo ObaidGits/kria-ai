@@ -8,6 +8,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 use tokio::sync::Mutex;
 
@@ -69,19 +70,28 @@ impl McpServerManager {
     /// Start all enabled MCP servers and register their tools.
     /// Start all enabled MCP servers in parallel and register their tools.
     pub async fn start_all(&mut self, registry: &ToolRegistry) {
+        let started_at = Instant::now();
         let configs = self.configs.clone();
         let total = configs.len();
         let enabled: Vec<_> = configs.iter().filter(|c| c.enabled).cloned().collect();
+        let disabled: Vec<String> = configs
+            .iter()
+            .filter(|c| !c.enabled)
+            .map(|c| c.name.clone())
+            .collect();
         tracing::info!(
-            "[MCP] start_all: {} configured, {} enabled — launching in parallel",
-            total,
-            enabled.len()
+            target: "mcp_startup",
+            configured = total,
+            enabled = enabled.len(),
+            disabled = disabled.len(),
+            "[MCP] Loading providers..."
         );
-
-        for config in &configs {
-            if !config.enabled {
-                tracing::info!("[MCP] server '{}' is disabled — skipping", config.name);
-            }
+        if !disabled.is_empty() {
+            tracing::debug!(
+                target: "mcp_startup",
+                providers = ?disabled,
+                "[MCP] disabled providers skipped"
+            );
         }
 
         // Launch all enabled servers concurrently
@@ -90,7 +100,11 @@ impl McpServerManager {
             .map(|config| {
                 let config = config.clone();
                 tokio::spawn(async move {
-                    tracing::info!(
+                    tracing::debug!(
+                        target: "mcp_startup",
+                        server = %config.name,
+                        command = %config.command,
+                        args = ?config.args,
                         "[MCP] starting server '{}' (command='{}' args={:?})",
                         config.name,
                         config.command,
@@ -106,7 +120,10 @@ impl McpServerManager {
                         {
                             Ok(()) => {
                                 let tools = client.tools().await;
-                                tracing::info!(
+                                tracing::debug!(
+                                    target: "mcp_startup",
+                                    server = %config.name,
+                                    tool_count = tools.len(),
                                     "[MCP] server '{}' started — {} tool(s) discovered",
                                     config.name,
                                     tools.len()
@@ -116,6 +133,9 @@ impl McpServerManager {
                             Err(e) => {
                                 let msg = e.to_string();
                                 tracing::warn!(
+                                    target: "mcp_startup",
+                                    server = %config.name,
+                                    attempt,
                                     "[MCP] server '{}' start attempt {}/2 failed: {}",
                                     config.name,
                                     attempt,
@@ -130,15 +150,18 @@ impl McpServerManager {
                         }
                     }
 
-                    if let Some(err) = last_err {
-                        tracing::error!("[MCP] server '{}' FAILED to start: {}", config.name, err);
-                    }
-                    Err(config.name.clone())
+                    let err = last_err
+                        .map(|err| err.to_string())
+                        .unwrap_or_else(|| "unknown startup error".to_string());
+                    Err((config.name.clone(), err))
                 })
             })
             .collect();
 
         // Collect results and register tools
+        let mut active = Vec::new();
+        let mut failures = Vec::new();
+        let mut registered_tool_count = 0usize;
         for handle in handles {
             match handle.await {
                 Ok(Ok((config, client, tools))) => {
@@ -148,7 +171,11 @@ impl McpServerManager {
                             .get(&tool_def.name)
                             .map(|s| s.as_str())
                             .unwrap_or("(default)");
-                        tracing::info!(
+                        tracing::debug!(
+                            target: "mcp_startup",
+                            server = %config.name,
+                            tool = %tool_def.name,
+                            override_tier,
                             "[MCP]   tool='{}' override={}",
                             tool_def.name,
                             override_tier
@@ -162,26 +189,42 @@ impl McpServerManager {
                             &config.tool_overrides,
                         );
                     }
-                    tracing::info!(
-                        "[MCP] server '{}' ready: {} tools registered (trust_level={})",
-                        config.name,
-                        tools.len(),
-                        config.trust_level
-                    );
+                    registered_tool_count += tools.len();
+                    active.push(format!("{} ({} tools)", config.name, tools.len()));
                     self.clients.insert(config.name.clone(), client);
                 }
-                Ok(Err(name)) => {
-                    tracing::error!("[MCP] server '{}' failed — skipped", name);
+                Ok(Err((name, error))) => {
+                    failures.push(format!("{name}: {error}"));
                 }
                 Err(e) => {
-                    tracing::error!("[MCP] server spawn panicked: {}", e);
+                    failures.push(format!("startup task failed: {e}"));
                 }
             }
         }
+        let elapsed_ms = started_at.elapsed().as_millis();
         tracing::info!(
-            "[MCP] start_all complete — {} server(s) running",
-            self.clients.len()
+            target: "mcp_startup",
+            configured = total,
+            enabled = enabled.len(),
+            disabled = disabled.len(),
+            loaded = self.clients.len(),
+            tools = registered_tool_count,
+            elapsed_ms,
+            active = ?active,
+            disabled_providers = ?disabled,
+            "[MCP] Startup summary: loaded {}/{} enabled provider(s), {} tool(s), {}ms",
+            self.clients.len(),
+            enabled.len(),
+            registered_tool_count,
+            elapsed_ms
         );
+        if !failures.is_empty() {
+            tracing::warn!(
+                target: "mcp_startup",
+                failures = ?failures,
+                "[MCP] Provider startup failures grouped"
+            );
+        }
         self.notify_tools_changed();
     }
 
@@ -201,7 +244,10 @@ impl McpServerManager {
 
         // Register each discovered tool with a prefixed name
         let tools = client.tools().await;
-        tracing::info!(
+        tracing::debug!(
+            target: "mcp_startup",
+            server = %config.name,
+            tool_count = tools.len(),
             "[MCP] server '{}' advertises {} tool(s):",
             config.name,
             tools.len()
@@ -212,7 +258,11 @@ impl McpServerManager {
                 .get(&tool_def.name)
                 .map(|s| s.as_str())
                 .unwrap_or("(default)");
-            tracing::info!(
+            tracing::debug!(
+                target: "mcp_startup",
+                server = %config.name,
+                tool = %tool_def.name,
+                override_tier,
                 "[MCP]   tool='{}' override={}",
                 tool_def.name,
                 override_tier
@@ -228,6 +278,10 @@ impl McpServerManager {
         }
 
         tracing::info!(
+            target: "mcp_startup",
+            server = %config.name,
+            tools = tools.len(),
+            trust_level = %config.trust_level,
             "[MCP] server '{}' ready: {} tools registered (trust_level={})",
             config.name,
             tools.len(),

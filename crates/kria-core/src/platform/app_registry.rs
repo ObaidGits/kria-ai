@@ -316,10 +316,17 @@ fn normalize_alias(name: &str) -> String {
 /// to most-modified. Callers should try each in order.
 fn strip_filler_words(normalized: &str) -> Vec<String> {
     let filler_words: &[&str] = &[
-        "the", "a", "an", "my",
-        "app", "application", "applications",
-        "program", "programs",
-        "tool", "tools",
+        "the",
+        "a",
+        "an",
+        "my",
+        "app",
+        "application",
+        "applications",
+        "program",
+        "programs",
+        "tool",
+        "tools",
         "software",
     ];
 
@@ -790,14 +797,22 @@ mod tests {
         // Direct match works
         assert!(registry.resolve_alias("settings").is_some());
         // Filler-word stripping works
-        assert!(registry.resolve_alias("settings app").is_some(),
-            "'settings app' should resolve to 'settings' after stripping filler word");
-        assert!(registry.resolve_alias("the settings app").is_some(),
-            "'the settings app' should resolve to 'settings'");
-        assert!(registry.resolve_alias("the settings application").is_some(),
-            "'the settings application' should resolve to 'settings'");
-        assert!(registry.resolve_alias("settings program").is_some(),
-            "'settings program' should resolve to 'settings'");
+        assert!(
+            registry.resolve_alias("settings app").is_some(),
+            "'settings app' should resolve to 'settings' after stripping filler word"
+        );
+        assert!(
+            registry.resolve_alias("the settings app").is_some(),
+            "'the settings app' should resolve to 'settings'"
+        );
+        assert!(
+            registry.resolve_alias("the settings application").is_some(),
+            "'the settings application' should resolve to 'settings'"
+        );
+        assert!(
+            registry.resolve_alias("settings program").is_some(),
+            "'settings program' should resolve to 'settings'"
+        );
     }
 
     #[test]

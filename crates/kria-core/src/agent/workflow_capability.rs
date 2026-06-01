@@ -67,13 +67,14 @@ pub async fn detect_atspi_level() -> AtSpiLevel {
 
     // Check if toolkit accessibility is enabled
     let toolkit_enabled = tokio::process::Command::new("gsettings")
-        .args(["get", "org.gnome.desktop.interface", "toolkit-accessibility"])
+        .args([
+            "get",
+            "org.gnome.desktop.interface",
+            "toolkit-accessibility",
+        ])
         .output()
         .await
-        .map(|o| {
-            o.status.success()
-                && String::from_utf8_lossy(&o.stdout).trim() == "true"
-        })
+        .map(|o| o.status.success() && String::from_utf8_lossy(&o.stdout).trim() == "true")
         .unwrap_or(false);
 
     if !toolkit_enabled {
@@ -514,9 +515,15 @@ mod tests {
             ocr_available: false,
         };
         let verifier = derive_verifier_capability(&env);
-        assert!(verifier.available_methods.contains(&VerificationMethod::FileSystem));
-        assert!(verifier.available_methods.contains(&VerificationMethod::ProcessTable));
-        assert!(verifier.available_methods.contains(&VerificationMethod::PortCheck));
+        assert!(verifier
+            .available_methods
+            .contains(&VerificationMethod::FileSystem));
+        assert!(verifier
+            .available_methods
+            .contains(&VerificationMethod::ProcessTable));
+        assert!(verifier
+            .available_methods
+            .contains(&VerificationMethod::PortCheck));
         assert!(verifier.filesystem_available);
         assert!(verifier.process_table_available);
     }
@@ -547,9 +554,15 @@ mod tests {
         };
         let verifier = derive_verifier_capability(&env);
         assert!(verifier.window_state_max_confidence >= 0.85);
-        assert!(verifier.available_methods.contains(&VerificationMethod::AtSpi));
-        assert!(verifier.available_methods.contains(&VerificationMethod::Xdotool));
-        assert!(verifier.available_methods.contains(&VerificationMethod::Ocr));
+        assert!(verifier
+            .available_methods
+            .contains(&VerificationMethod::AtSpi));
+        assert!(verifier
+            .available_methods
+            .contains(&VerificationMethod::Xdotool));
+        assert!(verifier
+            .available_methods
+            .contains(&VerificationMethod::Ocr));
     }
 
     #[test]
@@ -592,7 +605,10 @@ mod tests {
             ocr_available: false,
         };
         let interaction = derive_interaction_capability(&env);
-        assert_eq!(interaction.keyboard_injection, InputInjectionLevel::XdotoolOnly);
+        assert_eq!(
+            interaction.keyboard_injection,
+            InputInjectionLevel::XdotoolOnly
+        );
     }
 
     #[test]

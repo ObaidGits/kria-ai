@@ -76,11 +76,12 @@ kria-connection-control = { path = "../kria-connection-control" }
 # ─── Vision dependencies (Phase 2.5) ────────────────────────────────────────
 # Note: image crate already in workspace dependencies
 img_hash = "3.2"
-xcap = "0.0.11"
+xcap = "0.1.1"
 
 # ML Orchestrator dependencies
 tree-sitter = { workspace = true }
 tree-sitter-python = { workspace = true }
+tree-sitter-javascript = { workspace = true }
 xxhash-rust = { workspace = true }
 
 # ─── Voice v2 native backends — STRICTLY OPTIONAL ─────────────────────────

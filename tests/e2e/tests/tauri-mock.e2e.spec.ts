@@ -51,11 +51,36 @@ test.describe("Tauri mock bridge E2E", () => {
     });
   });
 
+  test("manual tool mode sends prompt through manual profile command", async ({ page }) => {
+    await page.getByLabel("Tool Mode").selectOption("n8n");
+
+    await expect(page.getByText("Tool Mode: n8n")).toBeVisible();
+    await expect(page.getByText("Routing: Manual")).toBeVisible();
+    await expect(page.getByText("Selection Source: User")).toBeVisible();
+
+    await page.locator("textarea.chat-input").fill("Run test_workflow");
+    await page.getByRole("button", { name: "Send" }).click();
+
+    const commands = await getTauriMockCommands(page);
+    expect(commands.some((entry) => entry.cmd === "send_message")).toBeFalsy();
+    expect(
+      commands.some(
+        (entry) =>
+          entry.cmd === "send_manual_tool_message" &&
+          entry.args?.message === "Run test_workflow" &&
+          entry.args?.profile?.mode_id === "n8n" &&
+          entry.args?.profile?.tool_lock === "n8n_invoke_workflow" &&
+          entry.args?.profile?.strategy === "direct",
+      ),
+    ).toBeTruthy();
+  });
+
   test("Google settings tab persists account and triggers runtime controls", async ({ page }) => {
     await page.getByRole("button", { name: "Configure Assistant" }).click();
-    await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Settings", exact: true })).toBeVisible();
 
-    await page.locator(".settings-nav-item", { hasText: "Google" }).click();
+    await page.getByRole("button", { name: /Integrations/ }).click();
+    await page.getByRole("button", { name: /Google/ }).click();
 
     const accountInput = page.getByPlaceholder("personal");
     await accountInput.fill("work");

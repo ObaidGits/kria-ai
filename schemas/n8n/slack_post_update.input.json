@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Slack Post Update Input",
+  "type": "object",
+  "required": ["channel", "message"],
+  "properties": {
+    "source_prompt": { "type": "string" },
+    "channel": { "type": "string" },
+    "message": { "type": "string" },
+    "attachments": { "type": "array", "items": { "type": "string" } },
+    "confirmed_by_user": { "type": "boolean", "default": false }
+  },
+  "additionalProperties": false
+}

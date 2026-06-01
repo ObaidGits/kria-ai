@@ -80,9 +80,15 @@ pub enum WorkflowState {
     /// Plan generated, ready to execute
     Planned,
     /// Currently executing steps
-    Executing { current_step: u32, completed_steps: u32 },
+    Executing {
+        current_step: u32,
+        completed_steps: u32,
+    },
     /// Suspended waiting for human input
-    HitlPending { reason: HitlReason, suspended_at_step: u32 },
+    HitlPending {
+        reason: HitlReason,
+        suspended_at_step: u32,
+    },
     /// All steps done, running outcome verification
     Verifying,
     /// Terminal state — verdict computed
@@ -241,7 +247,10 @@ pub enum VisibilityConfidence {
     /// Structurally succeeded but visibility unverifiable in this environment
     StructuralOnly { reason: String },
     /// Verification attempted but inconclusive
-    Inconclusive { reason: String, suggestion: Option<String> },
+    Inconclusive {
+        reason: String,
+        suggestion: Option<String>,
+    },
     /// Not applicable (backend-only step)
     NotApplicable,
 }
@@ -262,11 +271,19 @@ pub enum WorkflowVerdict {
     /// All steps succeeded structurally, some visibility unverifiable
     StructurallyComplete { unverified_outcomes: Vec<String> },
     /// Partial completion — some steps succeeded
-    Partial { completed: u32, total: u32, reason: String },
+    Partial {
+        completed: u32,
+        total: u32,
+        reason: String,
+    },
     /// Workflow blocked — needs human intervention (should not reach finalizer)
     Blocked { reason: String },
     /// Workflow failed at a specific step
-    Failed { step: u32, reason: String, recovery: Option<RecoveryPath> },
+    Failed {
+        step: u32,
+        reason: String,
+        recovery: Option<RecoveryPath>,
+    },
 }
 
 /// Suggested recovery path after a failure.
@@ -304,31 +321,64 @@ pub enum ContinuationActionType {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HitlReason {
     /// App is not installed
-    InstallRequired { app: String, install_command: Option<String> },
+    InstallRequired {
+        app: String,
+        install_command: Option<String>,
+    },
     /// Login/authentication needed
     LoginRequired { service: String, guidance: String },
     /// Session expired
     SessionExpired { service: String },
     /// Multiple possible targets
-    AmbiguousTarget { options: Vec<String>, question: String },
+    AmbiguousTarget {
+        options: Vec<String>,
+        question: String,
+    },
     /// Execution mode choice (GUI vs backend)
-    ExecutionModeChoice { task: String, backend_option: String, gui_option: String },
+    ExecutionModeChoice {
+        task: String,
+        backend_option: String,
+        gui_option: String,
+    },
     /// Destructive action needs approval
-    ApprovalNeeded { action: String, risk_level: String, description: String },
+    ApprovalNeeded {
+        action: String,
+        risk_level: String,
+        description: String,
+    },
     /// Visibility cannot be confirmed
-    VisibilityUncertain { step_description: String, suggestion: String },
+    VisibilityUncertain {
+        step_description: String,
+        suggestion: String,
+    },
     /// Focus was lost during a visible step
     FocusLost { step_description: String },
     /// Manual step needed (e.g., typing on Wayland)
-    ManualStepNeeded { instruction: String, context: String },
+    ManualStepNeeded {
+        instruction: String,
+        context: String,
+    },
     /// Intent unclear after LLM parsing
-    IntentUnclear { original_text: String, what_understood: String, suggestion: String },
+    IntentUnclear {
+        original_text: String,
+        what_understood: String,
+        suggestion: String,
+    },
     /// Workflow taking too long
-    BudgetExhausted { elapsed_ms: u64, remaining_steps: u32 },
+    BudgetExhausted {
+        elapsed_ms: u64,
+        remaining_steps: u32,
+    },
     /// Accessibility setup needed (first-time)
-    AccessibilitySetup { current_state: String, impact: String },
+    AccessibilitySetup {
+        current_state: String,
+        impact: String,
+    },
     /// Step failed with recovery options
-    StepFailed { step_description: String, error: String },
+    StepFailed {
+        step_description: String,
+        error: String,
+    },
 }
 
 /// An option presented to the user in a HITL prompt.
@@ -419,12 +469,26 @@ pub struct PlannedOutcome {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum OutcomeExpectation {
-    FileExists { path: String },
-    ProcessRunning { binary: String },
-    AppWindowVisible { app: String, title_hint: Option<String> },
-    BrowserAtUrl { url_contains: String },
-    OutputContains { substring: String, in_file: String },
-    PortListening { port: u16 },
+    FileExists {
+        path: String,
+    },
+    ProcessRunning {
+        binary: String,
+    },
+    AppWindowVisible {
+        app: String,
+        title_hint: Option<String>,
+    },
+    BrowserAtUrl {
+        url_contains: String,
+    },
+    OutputContains {
+        substring: String,
+        in_file: String,
+    },
+    PortListening {
+        port: u16,
+    },
 }
 
 /// What to do when an outcome verification fails.
@@ -539,9 +603,15 @@ pub enum FailurePolicy {
     /// Workflow stops immediately
     Fatal,
     /// Retry with exponential backoff, then fail
-    RetryThenFatal { max_attempts: u8, initial_backoff_ms: u64 },
+    RetryThenFatal {
+        max_attempts: u8,
+        initial_backoff_ms: u64,
+    },
     /// Retry with backoff, then skip
-    RetryThenSkip { max_attempts: u8, initial_backoff_ms: u64 },
+    RetryThenSkip {
+        max_attempts: u8,
+        initial_backoff_ms: u64,
+    },
     /// Skip this step, continue with next
     Skippable,
     /// Ask the user what to do
@@ -568,10 +638,15 @@ pub enum ConfidenceGrade {
 
 impl ConfidenceGrade {
     pub fn from_confidence(c: f32) -> Self {
-        if c >= 0.85 { Self::Strong }
-        else if c >= 0.60 { Self::Moderate }
-        else if c >= 0.30 { Self::Weak }
-        else { Self::NoEvidence }
+        if c >= 0.85 {
+            Self::Strong
+        } else if c >= 0.60 {
+            Self::Moderate
+        } else if c >= 0.30 {
+            Self::Weak
+        } else {
+            Self::NoEvidence
+        }
     }
 }
 

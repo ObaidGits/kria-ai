@@ -22,8 +22,7 @@ use std::time::{Duration, Instant};
 
 use crate::agent::workflow_types::{
     AtSpiLevel, CapabilitySet, ConfidenceGrade, OutcomeContract, OutcomeExpectation,
-    PlannedOutcome, SessionType, VerificationMethod, VisibilityConfidence,
-    WorkflowVerdict,
+    PlannedOutcome, SessionType, VerificationMethod, VisibilityConfidence, WorkflowVerdict,
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -107,14 +106,17 @@ pub async fn verify_contract(
     });
 
     let visibility_confidence = if desired_satisfied && required_satisfied {
-        let avg_conf = outcomes.iter().map(|o| o.confidence).sum::<f32>()
-            / outcomes.len().max(1) as f32;
+        let avg_conf =
+            outcomes.iter().map(|o| o.confidence).sum::<f32>() / outcomes.len().max(1) as f32;
         VisibilityConfidence::Confirmed {
             confidence: avg_conf,
             evidence: "All contract outcomes verified".into(),
         }
     } else if required_satisfied {
-        let unverified: Vec<&str> = contract.desired.iter().enumerate()
+        let unverified: Vec<&str> = contract
+            .desired
+            .iter()
+            .enumerate()
             .filter(|(i, o)| {
                 let r = &outcomes[desired_start + *i];
                 !r.verified || r.confidence < o.min_confidence
@@ -151,12 +153,8 @@ async fn verify_single_outcome(
 
     let result = tokio::time::timeout(timeout, async {
         match &outcome.expectation {
-            OutcomeExpectation::FileExists { path } => {
-                verify_file_exists(path).await
-            }
-            OutcomeExpectation::ProcessRunning { binary } => {
-                verify_process_running(binary).await
-            }
+            OutcomeExpectation::FileExists { path } => verify_file_exists(path).await,
+            OutcomeExpectation::ProcessRunning { binary } => verify_process_running(binary).await,
             OutcomeExpectation::AppWindowVisible { app, title_hint } => {
                 verify_app_window(app, title_hint.as_deref(), capabilities).await
             }
@@ -166,9 +164,7 @@ async fn verify_single_outcome(
             OutcomeExpectation::OutputContains { substring, in_file } => {
                 verify_output_contains(substring, in_file).await
             }
-            OutcomeExpectation::PortListening { port } => {
-                verify_port_listening(*port).await
-            }
+            OutcomeExpectation::PortListening { port } => verify_port_listening(*port).await,
         }
     })
     .await;
@@ -210,7 +206,11 @@ async fn verify_file_exists(path: &str) -> OutcomeVerification {
         description: format!("File exists: {}", path),
         verified: exists,
         confidence: if exists { 0.95 } else { 0.95 },
-        grade: if exists { ConfidenceGrade::Strong } else { ConfidenceGrade::Strong },
+        grade: if exists {
+            ConfidenceGrade::Strong
+        } else {
+            ConfidenceGrade::Strong
+        },
         evidence: if exists {
             format!("File confirmed at {}", path)
         } else {
@@ -268,10 +268,14 @@ async fn verify_app_window(
     let binary = crate::agent::gui_substrate_planner::app_alias_to_binary_pub(app);
     if process_is_running(&binary.to_lowercase()) {
         // Process is running — confidence depends on environment
-        let confidence: f32 = match (&capabilities.environment.session_type, &capabilities.environment.atspi_level) {
+        let confidence: f32 = match (
+            &capabilities.environment.session_type,
+            &capabilities.environment.atspi_level,
+        ) {
             (SessionType::X11, AtSpiLevel::Full) => 0.85,
             (SessionType::X11, _) => 0.75,
-            (SessionType::Wayland, AtSpiLevel::Full) | (SessionType::XWayland, AtSpiLevel::Full) => 0.70,
+            (SessionType::Wayland, AtSpiLevel::Full)
+            | (SessionType::XWayland, AtSpiLevel::Full) => 0.70,
             (SessionType::Wayland, _) => 0.50,
             _ => 0.45,
         };
@@ -283,7 +287,9 @@ async fn verify_app_window(
             grade: ConfidenceGrade::from_confidence(confidence),
             evidence: format!(
                 "Process '{}' running; window visibility confidence {:.0}% ({:?} session)",
-                binary, confidence * 100.0, capabilities.environment.session_type
+                binary,
+                confidence * 100.0,
+                capabilities.environment.session_type
             ),
             method: VerificationMethod::ProcessTable,
             latency_ms: 0,
@@ -329,7 +335,10 @@ async fn verify_browser_url(
                 verified: true,
                 confidence: 0.50, // Low confidence without CDP
                 grade: ConfidenceGrade::Weak,
-                evidence: format!("Browser process '{}' running (URL not verified — no CDP)", browser),
+                evidence: format!(
+                    "Browser process '{}' running (URL not verified — no CDP)",
+                    browser
+                ),
                 method: VerificationMethod::ProcessTable,
                 latency_ms: 0,
             };
@@ -357,14 +366,32 @@ async fn verify_output_contains(substring: &str, file_path: &str) -> OutcomeVeri
                 content.contains(substring)
             };
             OutcomeVerification {
-                description: format!("Output contains '{}'", if substring.is_empty() { "<any>" } else { substring }),
+                description: format!(
+                    "Output contains '{}'",
+                    if substring.is_empty() {
+                        "<any>"
+                    } else {
+                        substring
+                    }
+                ),
                 verified: found,
                 confidence: if found { 0.95 } else { 0.90 },
-                grade: if found { ConfidenceGrade::Strong } else { ConfidenceGrade::Strong },
-                evidence: if found {
-                    format!("Output file contains expected content ({} bytes)", content.len())
+                grade: if found {
+                    ConfidenceGrade::Strong
                 } else {
-                    format!("Output file does NOT contain '{}' ({} bytes)", substring, content.len())
+                    ConfidenceGrade::Strong
+                },
+                evidence: if found {
+                    format!(
+                        "Output file contains expected content ({} bytes)",
+                        content.len()
+                    )
+                } else {
+                    format!(
+                        "Output file does NOT contain '{}' ({} bytes)",
+                        substring,
+                        content.len()
+                    )
                 },
                 method: VerificationMethod::FileSystem,
                 latency_ms: 0,
@@ -456,7 +483,9 @@ pub fn verdict_from_contract(
 ) -> WorkflowVerdict {
     if !contract_verification.required_satisfied {
         // Find the first failed required outcome
-        let failed = contract_verification.outcomes.iter()
+        let failed = contract_verification
+            .outcomes
+            .iter()
             .take(contract.required.len())
             .enumerate()
             .find(|(_, o)| !o.verified)
@@ -473,7 +502,9 @@ pub fn verdict_from_contract(
     if contract_verification.desired_satisfied {
         WorkflowVerdict::Complete
     } else {
-        let unverified: Vec<String> = contract.desired.iter()
+        let unverified: Vec<String> = contract
+            .desired
+            .iter()
             .enumerate()
             .filter(|(i, _)| {
                 let idx = contract.required.len() + i;
@@ -547,7 +578,9 @@ mod tests {
     async fn verify_output_contains_with_real_file() {
         // Write a temp file and verify
         let path = "/tmp/kria_verifier_test_output.txt";
-        tokio::fs::write(path, "Hello KRIA World\nLine 2\n").await.unwrap();
+        tokio::fs::write(path, "Hello KRIA World\nLine 2\n")
+            .await
+            .unwrap();
 
         let result = verify_output_contains("KRIA", path).await;
         assert!(result.verified);
@@ -566,7 +599,10 @@ mod tests {
         tokio::fs::write(path, "some output").await.unwrap();
 
         let result = verify_output_contains("", path).await;
-        assert!(result.verified, "Empty substring should match any non-empty content");
+        assert!(
+            result.verified,
+            "Empty substring should match any non-empty content"
+        );
 
         let _ = tokio::fs::remove_file(path).await;
     }
@@ -756,6 +792,9 @@ mod tests {
         };
 
         // X11 should allow higher confidence
-        assert!(x11_caps.verifier.window_state_max_confidence > wayland_caps.verifier.window_state_max_confidence);
+        assert!(
+            x11_caps.verifier.window_state_max_confidence
+                > wayland_caps.verifier.window_state_max_confidence
+        );
     }
 }

@@ -44,6 +44,313 @@ use intent_extractors::*;
 use intent_fallback::*;
 use response_helpers::*;
 
+#[cfg(test)]
+thread_local! {
+    static TEST_N8N_WORKFLOWS_FOR_DISPATCH: std::cell::RefCell<Option<Vec<crate::n8n::N8nWorkflowConfig>>> =
+        std::cell::RefCell::new(None);
+}
+
+#[cfg(test)]
+struct TestN8nWorkflowDispatchGuard;
+
+#[cfg(test)]
+impl Drop for TestN8nWorkflowDispatchGuard {
+    fn drop(&mut self) {
+        TEST_N8N_WORKFLOWS_FOR_DISPATCH.with(|slot| {
+            *slot.borrow_mut() = None;
+        });
+    }
+}
+
+#[cfg(test)]
+fn set_test_n8n_workflows_for_dispatch(
+    workflows: Vec<crate::n8n::N8nWorkflowConfig>,
+) -> TestN8nWorkflowDispatchGuard {
+    TEST_N8N_WORKFLOWS_FOR_DISPATCH.with(|slot| {
+        *slot.borrow_mut() = Some(workflows);
+    });
+    TestN8nWorkflowDispatchGuard
+}
+
+fn load_n8n_workflows_for_dispatch() -> Vec<crate::n8n::N8nWorkflowConfig> {
+    #[cfg(test)]
+    if let Some(workflows) = TEST_N8N_WORKFLOWS_FOR_DISPATCH.with(|slot| slot.borrow().clone()) {
+        return workflows;
+    }
+
+    if let Ok(store) = crate::n8n::load_workflow_registry_store_at(
+        &crate::n8n::default_workflow_registry_store_path(),
+    ) {
+        let workflows = crate::n8n::workflow_registry_workflows(&store);
+        if !workflows.is_empty() {
+            return workflows;
+        }
+    }
+
+    crate::config::KriaConfig::load(None)
+        .map(|config| config.n8n.workflows)
+        .unwrap_or_default()
+}
+
+const KRIA_DETERMINISTIC_NOTICE_TOOL: &str = "__kria_deterministic_notice";
+
+fn deterministic_notice_tool(message: String) -> Option<(String, serde_json::Value)> {
+    Some((
+        KRIA_DETERMINISTIC_NOTICE_TOOL.to_string(),
+        serde_json::json!({
+            "message": message,
+        }),
+    ))
+}
+
+fn deterministic_notice_message(params: &serde_json::Value) -> String {
+    params
+        .get("message")
+        .and_then(|value| value.as_str())
+        .unwrap_or("The request was handled locally.")
+        .to_string()
+}
+
+fn is_n8n_workflow_list_query(user_text: &str) -> bool {
+    let lower = user_text.to_ascii_lowercase();
+    let lower = lower.trim();
+    if lower.starts_with("run ") || lower.contains("confirm workflow") {
+        return false;
+    }
+
+    let mentions_workflows =
+        lower.contains("workflow") || lower.contains("workflows") || lower.contains("automat");
+    let asks_for_list = lower.contains("list")
+        || lower.contains("show")
+        || lower.contains("available")
+        || lower.contains("what")
+        || lower.contains("which")
+        || lower.contains("have")
+        || lower.contains("registered");
+    let owned_or_n8n_context = lower.contains("n8n")
+        || lower.contains("my")
+        || lower.contains("i have")
+        || lower.contains("all")
+        || lower.contains("registered")
+        || lower.contains("available");
+
+    mentions_workflows && asks_for_list && owned_or_n8n_context
+}
+
+fn n8n_workflow_list_notice() -> String {
+    let workflows = load_n8n_workflows_for_dispatch();
+    if workflows.is_empty() {
+        return "No n8n workflows are registered in KRIA. Sync n8n profiles, save a draft profile, then approve it from the workflow registry.".to_string();
+    }
+
+    let total = workflows.len();
+    let executable = workflows
+        .iter()
+        .filter(|workflow| workflow.is_approved_for_execution())
+        .count();
+    let list = workflows
+        .iter()
+        .map(|workflow| {
+            let execution_state = if workflow.is_approved_for_execution() {
+                "executable"
+            } else {
+                "not executable"
+            };
+            format!(
+                "• {} ({}) — status={:?}, {}",
+                workflow.display_name, workflow.workflow_id, workflow.status, execution_state
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    format!(
+        "Available n8n workflows ({executable}/{total} executable):\n\n{list}\n\nTo start a workflow, say: Run <workflow_id>. KRIA will show candidates first; confirm with: Confirm workflow <workflow_id>."
+    )
+}
+
+fn n8n_match_summary(matches: &[crate::n8n::N8nWorkflowMatchCandidate]) -> String {
+    if matches.is_empty() {
+        return "No n8n workflows are currently registered in KRIA.".to_string();
+    }
+
+    matches
+        .iter()
+        .map(|workflow| {
+            format!(
+                "{} ({}, status={})",
+                workflow.display_name, workflow.workflow_id, workflow.status
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn n8n_suggestion_notice(response: &crate::n8n::WorkflowSuggestionResponse) -> String {
+    if response.candidates.is_empty() {
+        return response.message.clone();
+    }
+
+    let candidates = response
+        .candidates
+        .iter()
+        .enumerate()
+        .map(|(index, candidate)| {
+            format!(
+                "{}. {} ({}) — {} confidence",
+                index + 1,
+                candidate.display_name,
+                candidate.workflow_id,
+                candidate.confidence_label
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    let hint = response
+        .confirmation_hint
+        .as_deref()
+        .unwrap_or("Confirm with: Confirm workflow <workflow_id>");
+    format!("{} {candidates}. {hint}.", response.message)
+}
+
+fn is_direct_manual_n8n_profile(execution_profile: &TurnExecutionProfile) -> bool {
+    execution_profile.is_manual_tool_override()
+        && execution_profile
+            .tool_lock
+            .as_deref()
+            .is_some_and(|tool| tool == "n8n_invoke_workflow")
+}
+
+fn workflow_name_mentioned_in_prompt(
+    workflow: &crate::n8n::N8nWorkflowConfig,
+    prompt: &str,
+) -> bool {
+    let prompt = prompt.to_ascii_lowercase();
+    let mut keys = vec![
+        workflow.workflow_id.to_ascii_lowercase(),
+        workflow.display_name.to_ascii_lowercase(),
+    ];
+    keys.extend(
+        workflow
+            .aliases
+            .iter()
+            .map(|alias| alias.to_ascii_lowercase()),
+    );
+
+    keys.into_iter()
+        .map(|key| key.trim().to_string())
+        .filter(|key| !key.is_empty() && key.len() >= 3)
+        .any(|key| prompt.contains(&key))
+}
+
+fn resolve_manual_n8n_workflow<'a>(
+    workflows: &'a [crate::n8n::N8nWorkflowConfig],
+    user_text: &str,
+) -> Option<&'a crate::n8n::N8nWorkflowConfig> {
+    let mut references = Vec::new();
+    if let Some(reference) =
+        crate::n8n::WorkflowConfirmationFlow::parse_confirmation_reference(user_text)
+    {
+        references.push(reference);
+    }
+    if let Some(reference) = crate::n8n::parse_n8n_workflow_run_reference(user_text) {
+        references.push(reference);
+    }
+    references.push(user_text.trim().to_string());
+
+    for reference in references {
+        if reference.trim().is_empty() {
+            continue;
+        }
+        if let crate::n8n::N8nWorkflowReferenceMatch::Unique { workflow, .. } =
+            crate::n8n::resolve_n8n_workflow_reference(workflows, &reference)
+        {
+            return Some(workflow);
+        }
+    }
+
+    let mentioned = workflows
+        .iter()
+        .filter(|workflow| workflow_name_mentioned_in_prompt(workflow, user_text))
+        .collect::<Vec<_>>();
+    if mentioned.len() == 1 {
+        return mentioned.first().copied();
+    }
+
+    let response = crate::n8n::WorkflowRankingEngine::new(workflows.to_vec()).suggest(user_text);
+    if response.candidates.len() == 1
+        && !response.ambiguous
+        && !response.hard_prompt
+        && response.candidates[0].confidence >= 0.70
+    {
+        if let crate::n8n::N8nWorkflowReferenceMatch::Unique { workflow, .. } =
+            crate::n8n::resolve_n8n_workflow_reference(
+                workflows,
+                &response.candidates[0].workflow_id,
+            )
+        {
+            return Some(workflow);
+        }
+    }
+
+    None
+}
+
+fn try_manual_n8n_direct_dispatch(
+    user_text: &str,
+    previous_user_text: Option<&str>,
+    execution_profile: &TurnExecutionProfile,
+) -> Option<(String, serde_json::Value)> {
+    if !is_direct_manual_n8n_profile(execution_profile) {
+        return None;
+    }
+
+    let workflows = load_n8n_workflows_for_dispatch();
+    let workflow = resolve_manual_n8n_workflow(&workflows, user_text)?;
+
+    if crate::n8n::WorkflowConfirmationFlow::workflow_requires_confirmation(workflow)
+        && crate::n8n::WorkflowConfirmationFlow::parse_confirmation_reference(user_text).is_none()
+    {
+        return deterministic_notice_tool(format!(
+            "Workflow \"{}\" needs an explicit review confirmation before execution. Confirm with: Confirm workflow {}.",
+            workflow.display_name, workflow.workflow_id
+        ));
+    }
+
+    let prompt_context = previous_user_text
+        .filter(|text| !text.trim().is_empty())
+        .unwrap_or(user_text);
+    let input_payload =
+        crate::n8n::build_n8n_suggested_input_payload(workflow, prompt_context, true);
+
+    tracing::info!(
+        target: "n8n_routing",
+        routing = "manual_direct_n8n",
+        workflow_id = %workflow.workflow_id,
+        workflow_version = %workflow.workflow_version,
+        prompt_preview = %sanitize_text_for_logs(user_text, 180),
+        "Manual n8n mode resolved workflow without LLM routing"
+    );
+
+    Some((
+        "n8n_invoke_workflow".to_string(),
+        serde_json::json!({
+            "workflow_id": &workflow.workflow_id,
+            "workflow_version": &workflow.workflow_version,
+            "input_payload": input_payload,
+        }),
+    ))
+}
+
+fn try_deterministic_dispatch_with_profile(
+    user_text: &str,
+    previous_user_text: Option<&str>,
+    execution_profile: &TurnExecutionProfile,
+) -> Option<(String, serde_json::Value)> {
+    try_manual_n8n_direct_dispatch(user_text, previous_user_text, execution_profile)
+        .or_else(|| try_deterministic_dispatch_with_context(user_text, previous_user_text))
+}
+
 /// Try to deterministically extract a tool name + parameters from user text WITHOUT
 /// calling the LLM. Returns Some((tool_name, params)) when the prompt clearly maps
 /// to a specific tool with extractable parameters.
@@ -56,7 +363,22 @@ use response_helpers::*;
 /// robust because router classification can be wrong while patterns in the
 /// prompt are unambiguous.
 fn try_deterministic_dispatch(user_text: &str) -> Option<(String, serde_json::Value)> {
+    try_deterministic_dispatch_with_context(user_text, None)
+}
+
+fn try_deterministic_dispatch_with_context(
+    user_text: &str,
+    previous_user_text: Option<&str>,
+) -> Option<(String, serde_json::Value)> {
     let lower = user_text.to_ascii_lowercase();
+
+    // ── Workflow discovery ("What workflows can I run?") ────────────────────
+    // Returns the list of configured n8n workflows.
+    // Instead of calling a tool, we build the response directly here since
+    // the workflow list is static config data.
+    if is_n8n_workflow_list_query(user_text) {
+        return deterministic_notice_tool(n8n_workflow_list_notice());
+    }
 
     // ── System info queries (highest specificity) ──────────────────────────
     if lower.contains("what is my")
@@ -82,51 +404,140 @@ fn try_deterministic_dispatch(user_text: &str) -> Option<(String, serde_json::Va
             info_parts.push("Shell: $SHELL");
         }
         if !info_parts.is_empty() {
-            let cmd = info_parts.iter().map(|p| format!("echo \"{}\"", p)).collect::<Vec<_>>().join("; ");
-            return Some(("execute_bash".to_string(), serde_json::json!({
-                "command": cmd,
-                "timeout_secs": 10,
-            })));
+            let cmd = info_parts
+                .iter()
+                .map(|p| format!("echo \"{}\"", p))
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Some((
+                "execute_bash".to_string(),
+                serde_json::json!({
+                    "command": cmd,
+                    "timeout": 10,
+                }),
+            ));
         }
     }
 
     // ── Disk space queries ──────────────────────────────────────────────────
-    if (lower.contains("disk space") || lower.contains("free space") || lower.contains("how much") && lower.contains("disk"))
-        && (lower.contains("root") || lower.contains("/") || lower.contains("partition"))
+    if lower.contains("disk space")
+        || lower.contains("free space")
+        || (lower.contains("how much") && lower.contains("disk"))
+        || (lower.contains("check") && lower.contains("disk"))
+        || (lower.contains("storage")
+            && (lower.contains("how much")
+                || lower.contains("available")
+                || lower.contains("free")))
     {
-        let cmd = if lower.contains("root") || lower.contains("/ ") || lower.contains(" /") {
+        let cmd = if lower.contains("root") || lower.contains("/ ") || lower.contains("partition") {
             "df -h /"
         } else {
             "df -h"
         };
-        return Some(("execute_bash".to_string(), serde_json::json!({
-            "command": cmd,
-            "timeout_secs": 10,
-        })));
+        return Some((
+            "execute_bash".to_string(),
+            serde_json::json!({
+                "command": cmd,
+                "timeout": 10,
+            }),
+        ));
     }
 
     // ── List files in directory (must require explicit list/files keywords) ───
     // Must explicitly mention "files" to avoid false matching on "Show me the file contents"
-    if (lower.contains("list all files") || lower.contains("list files") || lower.contains("show files") || lower.contains("show all files") || lower.contains("ls /tmp"))
+    if (lower.contains("list all files")
+        || lower.contains("list files")
+        || lower.contains("show files")
+        || lower.contains("show all files")
+        || lower.contains("ls /tmp"))
         && lower.contains("/tmp")
     {
         // Match "start with 'X'" / "starting with 'X'" / "starts with 'X'"
-        if let Some(cap) = regex::Regex::new(r#"(?i)start[s]?(?:ing)?\s+with\s+['"]?([^'"\s]+)['"]?"#).ok()
-            .and_then(|re| re.captures(user_text))
+        if let Some(cap) =
+            regex::Regex::new(r#"(?i)start[s]?(?:ing)?\s+with\s+['"]?([^'"\s]+)['"]?"#)
+                .ok()
+                .and_then(|re| re.captures(user_text))
         {
-            let prefix = cap.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
+            let prefix = cap
+                .get(1)
+                .map(|m| m.as_str().to_string())
+                .unwrap_or_default();
             if !prefix.is_empty() {
-                return Some(("execute_bash".to_string(), serde_json::json!({
-                    "command": format!("ls -la /tmp/ 2>/dev/null | grep -E '^[^.].*\\b{}' || echo 'No files matching {} found'", prefix, prefix),
-                    "timeout_secs": 10,
-                })));
+                return Some((
+                    "execute_bash".to_string(),
+                    serde_json::json!({
+                        "command": format!("ls -la /tmp/ 2>/dev/null | grep -E '^[^.].*\\b{}' || echo 'No files matching {} found'", prefix, prefix),
+                        "timeout": 10,
+                    }),
+                ));
             }
         }
         // Default: list all files in /tmp
-        return Some(("execute_bash".to_string(), serde_json::json!({
-            "command": "ls -la /tmp/",
-            "timeout_secs": 10,
-        })));
+        return Some((
+            "execute_bash".to_string(),
+            serde_json::json!({
+                "command": "ls -la /tmp/",
+                "timeout": 10,
+            }),
+        ));
+    }
+
+    // ── n8n workflow invocation ────────────────────────────────────────────
+    // Stage 3 first slice: deterministic metadata ranking only. Workflow
+    // prompts produce suggestions and require explicit confirmation. The only
+    // chat path that invokes n8n is "Confirm workflow <workflow_id>".
+    if let Some(reference) =
+        crate::n8n::WorkflowConfirmationFlow::parse_confirmation_reference(user_text)
+    {
+        let workflows = load_n8n_workflows_for_dispatch();
+        match crate::n8n::resolve_n8n_workflow_reference(&workflows, &reference) {
+            crate::n8n::N8nWorkflowReferenceMatch::Unique { workflow, .. } => {
+                let prompt_context = previous_user_text
+                    .filter(|text| !text.trim().is_empty())
+                    .unwrap_or(user_text);
+                let input_payload =
+                    crate::n8n::build_n8n_suggested_input_payload(workflow, prompt_context, true);
+                return Some((
+                    "n8n_invoke_workflow".to_string(),
+                    serde_json::json!({
+                        "workflow_id": &workflow.workflow_id,
+                        "workflow_version": &workflow.workflow_version,
+                        "input_payload": input_payload,
+                    }),
+                ));
+            }
+            crate::n8n::N8nWorkflowReferenceMatch::Ambiguous { matches } => {
+                return deterministic_notice_tool(format!(
+                    "That confirmation still matches more than one workflow. Confirm with an exact workflow ID: {}.",
+                    n8n_match_summary(&matches)
+                ));
+            }
+            crate::n8n::N8nWorkflowReferenceMatch::NoMatch { available } => {
+                return deterministic_notice_tool(format!(
+                    "Workflow \"{}\" was not found. Confirm with an approved workflow ID. Available workflows: {}.",
+                    reference,
+                    n8n_match_summary(&available)
+                ));
+            }
+        }
+    }
+
+    if let Some(reference) = crate::n8n::parse_n8n_workflow_run_reference(user_text) {
+        let workflows = load_n8n_workflows_for_dispatch();
+        let engine = crate::n8n::WorkflowRankingEngine::new(workflows);
+        let response = engine.suggest_for_reference(user_text, &reference);
+        return deterministic_notice_tool(n8n_suggestion_notice(&response));
+    }
+
+    {
+        let workflows = load_n8n_workflows_for_dispatch();
+        if !workflows.is_empty() {
+            let engine = crate::n8n::WorkflowRankingEngine::new(workflows);
+            let response = engine.suggest(user_text);
+            if !response.candidates.is_empty() {
+                return deterministic_notice_tool(n8n_suggestion_notice(&response));
+            }
+        }
     }
 
     // ── Browser search ─────────────────────────────────────────────────────
@@ -186,7 +597,7 @@ fn try_deterministic_dispatch(user_text: &str) -> Option<(String, serde_json::Va
         let cmd = cmd_parts.join(" && ");
         return Some(("execute_bash".to_string(), serde_json::json!({
             "command": cmd,
-            "timeout_secs": 15,
+            "timeout": 15,
         })));
     }
 
@@ -211,12 +622,16 @@ fn try_deterministic_dispatch(user_text: &str) -> Option<(String, serde_json::Va
             let path = cap.get(2)?.as_str().to_string();
 
             // Detect "run it" / "execute it" / "show output" intent
-            let wants_run = lower.contains(" run it") || lower.contains("run the")
-                || lower.contains("execute it") || lower.contains("show me the output")
-                || lower.contains("show the output") || lower.contains("show output");
+            let wants_run = lower.contains(" run it")
+                || lower.contains("run the")
+                || lower.contains("execute it")
+                || lower.contains("show me the output")
+                || lower.contains("show the output")
+                || lower.contains("show output");
 
             // Extract quoted print/output content
-            let print_content = regex::Regex::new(r#"(?i)\bprints?\s+['"]([^'"]+)['"]"#).ok()
+            let print_content = regex::Regex::new(r#"(?i)\bprints?\s+['"]([^'"]+)['"]"#)
+                .ok()
                 .and_then(|re| re.captures(user_text))
                 .and_then(|c| c.get(1).map(|m| m.as_str().to_string()));
 
@@ -287,23 +702,32 @@ fn try_deterministic_dispatch(user_text: &str) -> Option<(String, serde_json::Va
                         path, content, runner, path
                     )
                 };
-                return Some(("execute_bash".to_string(), serde_json::json!({
-                    "command": cmd,
-                    "timeout_secs": 20,
-                })));
+                return Some((
+                    "execute_bash".to_string(),
+                    serde_json::json!({
+                        "command": cmd,
+                        "timeout": 20,
+                    }),
+                ));
             }
 
-            return Some(("write_file".to_string(), serde_json::json!({
-                "path": path,
-                "content": content,
-            })));
+            return Some((
+                "write_file".to_string(),
+                serde_json::json!({
+                    "path": path,
+                    "content": content,
+                }),
+            ));
         }
     }
 
     // ── Create file with content (deterministic patterns) ───────────────────
     // "Create a file at /tmp/X.txt with three lines: line 1 says 'Task started'..."
-    if let Some(cap) = regex::Regex::new(r"(?i)\b(?:create|write|save)\s+(?:a\s+)?file\s+(?:at\s+)?(/[a-zA-Z0-9_./\-]+)").ok()
-        .and_then(|re| re.captures(user_text))
+    if let Some(cap) = regex::Regex::new(
+        r"(?i)\b(?:create|write|save)\s+(?:a\s+)?file\s+(?:at\s+)?(/[a-zA-Z0-9_./\-]+)",
+    )
+    .ok()
+    .and_then(|re| re.captures(user_text))
     {
         let path = cap.get(1)?.as_str().to_string();
         // Try to extract content
@@ -319,17 +743,22 @@ fn try_deterministic_dispatch(user_text: &str) -> Option<(String, serde_json::Va
                 return None; // Can't extract meaningful content
             }
             lines.join("\n")
-        } else if let Some(c) = regex::Regex::new(r#"(?i)\bwith\s+(?:the\s+)?contents?\s+['"]([^'"]+)['"]"#).ok()
-            .and_then(|re| re.captures(user_text))
+        } else if let Some(c) =
+            regex::Regex::new(r#"(?i)\bwith\s+(?:the\s+)?contents?\s+['"]([^'"]+)['"]"#)
+                .ok()
+                .and_then(|re| re.captures(user_text))
         {
             c.get(1)?.as_str().to_string()
         } else {
             return None; // No deterministic content extraction
         };
-        return Some(("write_file".to_string(), serde_json::json!({
-            "path": path,
-            "content": content,
-        })));
+        return Some((
+            "write_file".to_string(),
+            serde_json::json!({
+                "path": path,
+                "content": content,
+            }),
+        ));
     }
 
     None
@@ -339,6 +768,175 @@ fn try_deterministic_dispatch(user_text: &str) -> Option<(String, serde_json::Va
 #[allow(dead_code)]
 fn try_deterministic_extract(_tool_hint: &str, user_text: &str) -> Option<serde_json::Value> {
     try_deterministic_dispatch(user_text).map(|(_, params)| params)
+}
+
+/// Format tool errors into user-friendly messages.
+/// Rules:
+/// - Never expose internal tool names (n8n_invoke_workflow, execute_bash, etc.)
+/// - Extract actionable information from the raw error
+/// - For n8n: suggest available workflows when unknown workflow requested
+fn format_tool_error_for_user(tool_name: &str, raw_error: &str) -> String {
+    let lower = raw_error.to_lowercase();
+
+    // n8n-specific errors
+    if tool_name == "n8n_invoke_workflow" {
+        if lower.contains("unknown n8n workflow") {
+            // Extract workflow name from error
+            let wf_name = raw_error
+                .split('\'')
+                .nth(1)
+                .unwrap_or("the requested workflow");
+            return format!(
+                "⚠️ Workflow '{}' not found.\n\nTo see available workflows, ask: \"What workflows can I run?\"",
+                wf_name
+            );
+        }
+        if lower.contains("not approved") {
+            return "⚠️ This workflow exists but hasn't been approved yet. Use the Dashboard to approve it.".to_string();
+        }
+        if lower.contains("connection refused") || lower.contains("connect error") {
+            return "⚠️ Cannot reach n8n. Make sure n8n is running (docker start n8n).".to_string();
+        }
+        if lower.contains("404") || lower.contains("not registered") {
+            return "⚠️ n8n webhook not active. Activate the workflow in n8n's editor.".to_string();
+        }
+        // Generic n8n error
+        return format!(
+            "⚠️ Workflow failed: {}",
+            raw_error.replace("n8n workflow invocation failed: ", "")
+        );
+    }
+
+    // Shell errors
+    if tool_name == "execute_bash" || tool_name == "execute_python" {
+        if lower.contains("command not found") {
+            return format!("⚠️ Command not found: {}", raw_error);
+        }
+        if lower.contains("permission denied") {
+            return "⚠️ Permission denied. Try with a different path or check file permissions."
+                .to_string();
+        }
+        return format!("⚠️ {}", raw_error);
+    }
+
+    // Generic fallback — still don't show tool name
+    format!("⚠️ {}", raw_error)
+}
+
+/// Format tool results into human-readable output.
+/// Extracts meaningful content from structured tool responses instead of
+/// dumping raw JSON with exit_code/stdout/stderr fields.
+fn format_tool_result_for_user(tool_name: &str, data: &serde_json::Value) -> String {
+    // Shell tools (execute_bash, execute_python) — extract stdout
+    if tool_name == "execute_bash"
+        || tool_name == "execute_python"
+        || tool_name == "execute_powershell"
+    {
+        let stdout = data.get("stdout").and_then(|v| v.as_str()).unwrap_or("");
+        let stderr = data.get("stderr").and_then(|v| v.as_str()).unwrap_or("");
+        let exit_code = data.get("exit_code").and_then(|v| v.as_i64()).unwrap_or(-1);
+
+        if exit_code != 0 && !stderr.is_empty() {
+            return format!("⚠️ Command failed (exit {}):\n{}", exit_code, stderr.trim());
+        }
+
+        let output = stdout.trim();
+        if output.is_empty() && stderr.trim().is_empty() {
+            return "✓ Command completed (no output)".to_string();
+        }
+
+        if output.is_empty() {
+            return stderr.trim().to_string();
+        }
+
+        // Clean output — no wrapper, just the content
+        output.to_string()
+    }
+    // File tools — show path-based confirmation
+    else if tool_name == "write_file" || tool_name == "create_directory" {
+        let path = data
+            .get("path")
+            .and_then(|v| v.as_str())
+            .or_else(|| data.get("created").and_then(|v| v.as_str()));
+        if let Some(p) = path {
+            return format!("✓ Created: {}", p);
+        }
+        "✓ Done".to_string()
+    }
+    // Disk/system tools — format as readable summary
+    else if tool_name == "get_disk_space" {
+        if let Some(disks) = data.get("disks").and_then(|v| v.as_array()) {
+            let lines: Vec<String> = disks
+                .iter()
+                .filter_map(|d| {
+                    let mount = d.get("mount")?.as_str()?;
+                    let total = d.get("total_gb")?.as_u64()?;
+                    let available = d.get("available_gb")?.as_u64()?;
+                    let used_pct = if total > 0 {
+                        ((total - available) * 100) / total
+                    } else {
+                        0
+                    };
+                    Some(format!(
+                        "  {} — {} GB free of {} GB ({}% used)",
+                        mount, available, total, used_pct
+                    ))
+                })
+                .collect();
+            return format!("Disk space:\n{}", lines.join("\n"));
+        }
+        serde_json::to_string_pretty(data).unwrap_or_default()
+    }
+    // Default: try to extract meaningful string content
+    else {
+        if let Some(s) = data.as_str() {
+            return s.to_string();
+        }
+        // For objects, try common result fields
+        if let Some(msg) = data.get("message").and_then(|v| v.as_str()) {
+            return msg.to_string();
+        }
+        if let Some(result) = data.get("result").and_then(|v| v.as_str()) {
+            return result.to_string();
+        }
+        // Fallback: compact JSON (but truncated)
+        let json_str = serde_json::to_string_pretty(data).unwrap_or_default();
+        if json_str.len() > 500 {
+            format!("{}...", &json_str[..500])
+        } else {
+            json_str
+        }
+    }
+}
+
+/// Format n8n workflow invocation result for the user.
+/// Rules:
+/// - Never show raw JSON webhook ack ({"received":true} is meaningless to user)
+/// - Never show internal tool names
+/// - Never duplicate the ⏳ indicator (it's already emitted before invoke)
+/// - Just confirm workflow was triggered and we're awaiting results
+fn format_n8n_result(data: &serde_json::Value) -> String {
+    let workflow_id = data
+        .get("workflow_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("workflow");
+    let accepted = data
+        .get("accepted")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    if !accepted {
+        return format!(
+            "⚠️ Workflow '{}' was not accepted. Check if it's active in n8n.",
+            workflow_id
+        );
+    }
+
+    // Simple clean confirmation — no raw JSON, no tracking ID clutter
+    format!(
+        "Workflow '{}' triggered successfully. Awaiting results...",
+        workflow_id
+    )
 }
 
 fn strip_notice_prefix(summary: &str) -> &str {
@@ -662,13 +1260,17 @@ fn build_workflow_failure_recovery_options(
     let lower = error.to_lowercase();
 
     // App not installed
-    if lower.contains("not found in the installed app registry") || lower.contains("application not found") {
+    if lower.contains("not found in the installed app registry")
+        || lower.contains("application not found")
+    {
         // Extract app name from error
-        let app_name = if let Some(re) = regex::Regex::new(r"application '([^']+)' is not found").ok() {
-            re.captures(error).and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
-        } else {
-            None
-        };
+        let app_name =
+            if let Some(re) = regex::Regex::new(r"application '([^']+)' is not found").ok() {
+                re.captures(error)
+                    .and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
+            } else {
+                None
+            };
 
         if let Some(app) = app_name {
             options.push(RecoveryOption {
@@ -695,7 +1297,10 @@ fn build_workflow_failure_recovery_options(
             // If files were created, offer to open them
             if let Some(first) = artifacts.first() {
                 options.push(RecoveryOption {
-                    label: format!("Open the generated file ({})", first.file_name().and_then(|n| n.to_str()).unwrap_or("file")),
+                    label: format!(
+                        "Open the generated file ({})",
+                        first.file_name().and_then(|n| n.to_str()).unwrap_or("file")
+                    ),
                     action_prompt: format!("Open the file {}", first.display()),
                     style: "primary",
                 });
@@ -721,7 +1326,10 @@ fn build_workflow_failure_recovery_options(
         });
         options.push(RecoveryOption {
             label: "Use file-based approach instead".into(),
-            action_prompt: format!("{} (use file-based approach, no keyboard injection needed)", user_text),
+            action_prompt: format!(
+                "{} (use file-based approach, no keyboard injection needed)",
+                user_text
+            ),
             style: "secondary",
         });
     }
@@ -3454,6 +4062,23 @@ impl TurnExecutionProfile {
         Self::default()
     }
 
+    pub fn manual_tool(
+        app_lock: Option<String>,
+        tool_lock: Option<String>,
+        prompt_lab_strategy: PromptLabToolSelectionStrategy,
+    ) -> Self {
+        Self {
+            mode: TurnExecutionMode::Assistant,
+            app_lock: app_lock
+                .map(|value| value.trim().to_ascii_lowercase())
+                .filter(|value| !value.is_empty()),
+            tool_lock: tool_lock
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
+            prompt_lab_strategy,
+        }
+    }
+
     pub fn prompt_lab(
         app_lock: Option<String>,
         tool_lock: Option<String>,
@@ -3475,12 +4100,33 @@ impl TurnExecutionProfile {
         matches!(self.mode, TurnExecutionMode::PromptLab)
     }
 
+    pub fn is_manual_tool_override(&self) -> bool {
+        matches!(self.mode, TurnExecutionMode::Assistant)
+            && (self.app_lock.is_some() || self.tool_lock.is_some())
+    }
+
     fn uses_direct_strategy(&self) -> bool {
-        self.is_prompt_lab()
+        (self.is_prompt_lab() || self.is_manual_tool_override())
             && matches!(
                 self.prompt_lab_strategy,
                 PromptLabToolSelectionStrategy::DirectLockedTool
             )
+    }
+
+    pub fn allows_tool_name(&self, tool_name: &str) -> bool {
+        if self.tool_lock.is_none() && self.app_lock.is_none() {
+            return true;
+        }
+
+        if let Some(tool_lock) = self.tool_lock.as_deref() {
+            return tool_name == tool_lock;
+        }
+
+        if let Some(app_lock) = self.app_lock.as_deref() {
+            return tool_matches_lab_app_lock(tool_name, app_lock);
+        }
+
+        true
     }
 }
 
@@ -3508,6 +4154,85 @@ fn tool_matches_lab_app_lock(tool_name: &str, app_lock: &str) -> bool {
         "slides" => tool_name_lower.starts_with("gw_slides_"),
         "forms" => tool_name_lower.starts_with("gw_forms_"),
         "google" | "gworkspace" | "google_workspace" => tool_name_lower.starts_with("gw_"),
+        "n8n" => tool_name_lower == "n8n_invoke_workflow",
+        "openclaw" | "claw" => tool_name_lower.starts_with("oc_"),
+        "gui" | "gui_cognition" | "gui-cognition" | "desktop_gui" => {
+            matches!(
+                tool_name_lower.as_str(),
+                "open_application"
+                    | "open_application_with_file"
+                    | "get_active_window"
+                    | "list_windows"
+                    | "move_window"
+                    | "resize_window"
+                    | "maximize_window"
+                    | "minimize_window"
+                    | "tile_windows"
+                    | "click_mouse"
+                    | "type_text"
+                    | "press_shortcut"
+                    | "release_all"
+                    | "focus_window"
+                    | "system_sleep"
+                    | "click_ui_element"
+                    | "fill_form_field"
+                    | "detect_dialog"
+                    | "dismiss_dialog"
+                    | "get_desktop_state"
+                    | "check_app_responding"
+                    | "find_ui_elements"
+                    | "get_accessibility_capabilities"
+                    | "accessibility_doctor"
+            )
+        }
+        "image" | "image_generation" | "image-generation" => tool_name_lower == "generate_image",
+        "github" => {
+            tool_name_lower.starts_with("git_")
+                || (tool_name_lower.starts_with("mcp_") && tool_name_lower.contains("github"))
+        }
+        "filesystem" | "file_system" | "files" => matches!(
+            tool_name_lower.as_str(),
+            "read_file"
+                | "search_files"
+                | "list_directory"
+                | "get_file_info"
+                | "calculate_dir_size"
+                | "write_file"
+                | "create_directory"
+                | "rename_file"
+                | "copy_file"
+                | "delete_file"
+                | "delete_directory"
+                | "move_file"
+                | "search_file_contents"
+                | "find_files_by_pattern"
+                | "get_project_structure"
+                | "count_lines_of_code"
+                | "diff_files"
+                | "find_todos"
+                | "analyze_code"
+        ),
+        "docker" => {
+            tool_name_lower.contains("docker")
+                || tool_name_lower.starts_with("oc_")
+                || tool_name_lower == "n8n_invoke_workflow"
+        }
+        "browser" => matches!(
+            tool_name_lower.as_str(),
+            "browser_search"
+                | "open_url"
+                | "managed_browser_navigate"
+                | "web_search"
+                | "searxng_search"
+                | "fetch_webpage"
+                | "check_url_status"
+                | "get_news"
+        ),
+        "slack" => {
+            tool_name_lower.contains("slack")
+                || tool_name_lower == "n8n_invoke_workflow"
+                || tool_name_lower == "send_message"
+        }
         "colab" | "google_colab" | "notebook" => {
             tool_name_lower.starts_with("mcp_") && tool_name_lower.contains("colab")
         }
@@ -3522,19 +4247,7 @@ fn tool_matches_lab_app_lock(tool_name: &str, app_lock: &str) -> bool {
 }
 
 fn tool_allowed_by_execution_profile(profile: &TurnExecutionProfile, tool_name: &str) -> bool {
-    if !profile.is_prompt_lab() {
-        return true;
-    }
-
-    if let Some(tool_lock) = profile.tool_lock.as_deref() {
-        return tool_name == tool_lock;
-    }
-
-    if let Some(app_lock) = profile.app_lock.as_deref() {
-        return tool_matches_lab_app_lock(tool_name, app_lock);
-    }
-
-    true
+    profile.allows_tool_name(tool_name)
 }
 
 /// The core ReAct agent loop.
@@ -4162,6 +4875,12 @@ impl AgentLoop {
             .find(|m| m.role == "user")
             .map(|m| m.content.clone())
             .unwrap_or_default();
+        let previous_user_text = messages
+            .iter()
+            .rev()
+            .filter(|m| m.role == "user")
+            .nth(1)
+            .map(|m| m.content.clone());
         let explicit_queue_requested = user_requested_explicit_queue(&last_user_text);
 
         // ── Per-turn ReAct session checkpoint (for recovery / continuation) ────
@@ -4374,8 +5093,11 @@ impl AgentLoop {
         // Layer 2: Deterministic Tool Forcing for live-fact queries
         // MUST run BEFORE tool_lock prefix injection so the classifier sees clean user text
         // SKIP if IntentGate already classified as conversational fast-path
-        let is_live_fact = if gate_decision.fast_path {
-            false // Never force live-fact search on conversational inputs
+        let is_live_fact = if gate_decision.fast_path
+            || execution_profile.is_manual_tool_override()
+            || is_n8n_workflow_list_query(&routing_focus_text)
+        {
+            false // Never force live-fact search on conversational, manual, or local n8n inventory queries.
         } else {
             crate::routing::live_fact::is_live_fact_query(&routing_focus_text)
         };
@@ -4654,6 +5376,7 @@ impl AgentLoop {
                 "wants_vision_backend": wants_vision_backend,
                 "reflex_cancel_turn": reflex_cancel_turn,
                 "prompt_lab_mode": execution_profile.is_prompt_lab(),
+                "manual_tool_override": execution_profile.is_manual_tool_override(),
                 "prompt_lab_strategy": format!("{:?}", execution_profile.prompt_lab_strategy),
                 "app_lock": execution_profile.app_lock.clone(),
                 "tool_lock": execution_profile.tool_lock.clone(),
@@ -4720,6 +5443,137 @@ impl AgentLoop {
         }
 
         // ═══════════════════════════════════════════════════════════════════════════
+        // DETERMINISTIC DISPATCH — runs BEFORE GUI routing and BEFORE ReAct loop.
+        // This ensures simple operations (whoami, mkdir, ls, n8n workflows) always
+        // work regardless of LLM availability or GUI routing decisions.
+        // ═══════════════════════════════════════════════════════════════════════════
+        if let Some((tool_name, deterministic_params)) = try_deterministic_dispatch_with_profile(
+            &last_user_text,
+            previous_user_text.as_deref(),
+            &execution_profile,
+        ) {
+            if tool_name == KRIA_DETERMINISTIC_NOTICE_TOOL {
+                let message = deterministic_notice_message(&deterministic_params);
+                log_pipeline_step(
+                    session_id,
+                    "deterministic_notice_early",
+                    "Prompt matched local deterministic notice — responding without LLM or tool execution",
+                    Some(serde_json::json!({
+                        "manual_tool_override": execution_profile.is_manual_tool_override(),
+                        "app_lock": execution_profile.app_lock.clone(),
+                        "tool_lock": execution_profile.tool_lock.clone(),
+                    })),
+                );
+                let _ = event_tx.send(StreamEvent::Token(message.clone()));
+                let _ = event_tx.send(StreamEvent::Done(message));
+                return;
+            } else if !execution_profile.allows_tool_name(&tool_name) {
+                log_pipeline_step(
+                    session_id,
+                    "deterministic_dispatch_blocked_by_execution_profile",
+                    "Deterministic tool match ignored because it is outside the active manual tool mode",
+                    Some(serde_json::json!({
+                        "tool": tool_name,
+                        "manual_tool_override": execution_profile.is_manual_tool_override(),
+                        "app_lock": execution_profile.app_lock.clone(),
+                        "tool_lock": execution_profile.tool_lock.clone(),
+                    })),
+                );
+            } else if let Some(handler) = self.tool_registry.get_handler(&tool_name) {
+                log_pipeline_step(
+                    session_id,
+                    "deterministic_dispatch_early",
+                    "Prompt matched deterministic pattern — executing before GUI/ReAct routing",
+                    Some(serde_json::json!({
+                        "tool": tool_name,
+                    })),
+                );
+
+                // Emit in-progress indicator for n8n workflows
+                if tool_name == "n8n_invoke_workflow" {
+                    let wf_display = deterministic_params
+                        .get("workflow_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("workflow");
+                    let _ = event_tx.send(StreamEvent::Token(format!(
+                        "⏳ Running workflow '{}'...\n",
+                        wf_display
+                    )));
+                }
+
+                let handler = handler.clone();
+                let tool_context = self
+                    .tool_registry
+                    .make_tool_context(tokio_util::sync::CancellationToken::new());
+
+                let tool_execution_id = Uuid::now_v7().to_string();
+                let tool_execution_started = std::time::Instant::now();
+                tracing::info!(
+                    target: "tool_execution",
+                    session = session_id,
+                    execution_id = %tool_execution_id,
+                    tool_name = %tool_name,
+                    input_summary = %sanitize_json_for_logs(&deterministic_params, 220, 8),
+                    "Tool execution started"
+                );
+
+                let dispatch_result = tokio::time::timeout(
+                    std::time::Duration::from_secs(30),
+                    handler.execute_with_context(deterministic_params.clone(), tool_context),
+                )
+                .await;
+
+                match dispatch_result {
+                    Ok(result) => {
+                        tracing::info!(
+                            target: "tool_execution",
+                            session = session_id,
+                            execution_id = %tool_execution_id,
+                            tool_name = %tool_name,
+                            duration_ms = tool_execution_started.elapsed().as_millis(),
+                            success = result.success,
+                            failure_reason = %result.error.as_deref().unwrap_or("-"),
+                            result_summary = %sanitize_json_for_logs(&result.data, 220, 8),
+                            "Tool execution completed"
+                        );
+                        let summary = if result.error.is_some() {
+                            // User-friendly error formatting — never expose tool names
+                            format_tool_error_for_user(
+                                &tool_name,
+                                result.error.as_deref().unwrap_or("unknown"),
+                            )
+                        } else if tool_name == "n8n_invoke_workflow" {
+                            format_n8n_result(&result.data)
+                        } else {
+                            // Smart output formatting: extract human-readable content
+                            format_tool_result_for_user(&tool_name, &result.data)
+                        };
+
+                        let _ = event_tx.send(StreamEvent::Token(summary.clone()));
+                        let _ = event_tx.send(StreamEvent::Done(summary));
+                        return;
+                    }
+                    Err(_) => {
+                        tracing::warn!(
+                            target: "tool_execution",
+                            session = session_id,
+                            execution_id = %tool_execution_id,
+                            tool_name = %tool_name,
+                            duration_ms = tool_execution_started.elapsed().as_millis(),
+                            "Tool execution timed out"
+                        );
+                        tracing::warn!(
+                            target: "deterministic_dispatch",
+                            tool = %tool_name,
+                            "Early deterministic dispatch timed out — falling to normal routing"
+                        );
+                        // Fall through to GUI/ReAct routing below
+                    }
+                }
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════════
         // RFC 007 Phase 4: GUI HTN Routing - BYPASS ReAct loop for GUI automation
         // ═══════════════════════════════════════════════════════════════════════════
         // Routing now requires BOTH TurnGate confidence gating AND a valid
@@ -4732,6 +5586,15 @@ impl AgentLoop {
 
         if should_route_to_gui {
             let spec = compiled_spec.as_ref().unwrap();
+            tracing::info!(
+                target: "gui_execution_trace",
+                session = session_id,
+                operation = ?turn_gate_plan.intent.operation,
+                confidence = turn_gate_plan.intent.confidence,
+                resource_plan = ?turn_gate_plan.resource_plan,
+                prompt_preview = %sanitize_text_for_logs(&last_user_text, 180),
+                "[GUI] Prompt Received -> Intent Classified -> Execution Mode Selected"
+            );
 
             // ═══════════════════════════════════════════════════════════════════════════
             // Phase 8: Canonical Runtime Router — dispatch authority
@@ -4744,7 +5607,7 @@ impl AgentLoop {
             //   Canonical → new HybridWorkflowExecutor is authoritative
             let _router_is_react_loop = {
                 use crate::agent::workflow_router::{
-                    RuntimeMode, RoutingDecision, WorkflowRuntimeRouter,
+                    RoutingDecision, RuntimeMode, WorkflowRuntimeRouter,
                 };
 
                 // Resolve capabilities for this workflow
@@ -4785,7 +5648,11 @@ impl AgentLoop {
                 // This gives us observability into what the canonical runtime WOULD do
                 // without changing any behavior.
                 match routing_decision {
-                    RoutingDecision::HitlBeforeRouting { reason, options, context } => {
+                    RoutingDecision::HitlBeforeRouting {
+                        reason,
+                        options,
+                        context,
+                    } => {
                         // HITL needed before execution — emit structured HITL telemetry
                         // This is the ONE place where pre-execution HITL is surfaced.
                         tracing::info!(
@@ -4836,22 +5703,24 @@ impl AgentLoop {
                         let _ = event_tx.send(StreamEvent::Done(msg));
                         return;
                     }
-                    RoutingDecision::CanonicalWorkflow { ref planning_result }
-                    => {
+                    RoutingDecision::CanonicalWorkflow {
+                        ref planning_result,
+                    } => {
                         let plan_summary = planning_result;
                         // ═══════════════════════════════════════════════════════════════
                         // STAGE 1 CANONICAL EXECUTION — Authority Transfer
                         // ═══════════════════════════════════════════════════════════════
                         // The canonical runtime is now the execution authority for
                         // eligible workflows. Check activation policy before executing.
-                        use crate::agent::workflow_activation::{
-                            ActivationStage, CanonicalActivationPolicy, RuntimeEligibility,
-                            validate_canonical_readiness,
-                        };
                         use crate::agent::gui_substrate_planner::SubstratePlanner;
+                        use crate::agent::workflow_activation::{
+                            validate_canonical_readiness, ActivationStage,
+                            CanonicalActivationPolicy, RuntimeEligibility,
+                        };
 
                         // Check activation policy
-                        let policy = CanonicalActivationPolicy::at_stage(ActivationStage::FullActivation);
+                        let policy =
+                            CanonicalActivationPolicy::at_stage(ActivationStage::FullActivation);
                         let substrate_plan = SubstratePlanner.plan(spec, &last_user_text);
 
                         let eligibility = policy.is_eligible(substrate_plan.substrate);
@@ -4859,7 +5728,8 @@ impl AgentLoop {
                         match eligibility {
                             RuntimeEligibility::Canonical => {
                                 // Validate readiness
-                                let readiness = validate_canonical_readiness(&workflow_capabilities);
+                                let readiness =
+                                    validate_canonical_readiness(&workflow_capabilities);
                                 if !readiness.is_ready() {
                                     tracing::warn!(
                                         target: "workflow_activation",
@@ -4898,10 +5768,14 @@ impl AgentLoop {
                                     );
 
                                     // Build real tool executor directly from AgentLoop resources
-                                    let canonical_cancellation = tokio_util::sync::CancellationToken::new();
-                                    let modality = crate::routing::verbs::classify_modality(&last_user_text);
-                                    let canonical_tool_executor: std::sync::Arc<dyn crate::agent::htn_executor::ToolExecutor> =
-                                        std::sync::Arc::new(crate::agent::gui_wiring::build_policy_tool_executor(
+                                    let canonical_cancellation =
+                                        tokio_util::sync::CancellationToken::new();
+                                    let modality =
+                                        crate::routing::verbs::classify_modality(&last_user_text);
+                                    let canonical_tool_executor: std::sync::Arc<
+                                        dyn crate::agent::htn_executor::ToolExecutor,
+                                    > = std::sync::Arc::new(
+                                        crate::agent::gui_wiring::build_policy_tool_executor(
                                             Arc::clone(&self.tool_registry),
                                             canonical_cancellation.clone(),
                                             Arc::clone(&self.policy_engine),
@@ -4910,12 +5784,14 @@ impl AgentLoop {
                                             session_id.to_string(),
                                             last_user_text.clone(),
                                             modality.destructive,
-                                        ));
+                                        ),
+                                    );
 
                                     // Get outcome contract — use empty contract to avoid
                                     // blocking async runtime with build_sync()
                                     let oc = crate::agent::workflow_types::OutcomeContract::empty();
-                                    let em = crate::agent::workflow_types::ExecutionMode::Structural;
+                                    let em =
+                                        crate::agent::workflow_types::ExecutionMode::Structural;
 
                                     // Execute via canonical runtime
                                     let cr = crate::agent::workflow_executor::HybridWorkflowExecutor::execute_with_tools(
@@ -4940,7 +5816,9 @@ impl AgentLoop {
                                         other => format!("{:?}", other),
                                     };
 
-                                    log_pipeline_step(session_id, "canonical_execution_complete",
+                                    log_pipeline_step(
+                                        session_id,
+                                        "canonical_execution_complete",
                                         "Canonical execution finished",
                                         Some(serde_json::json!({
                                             "verdict": format!("{:?}", cr.verdict),
@@ -4948,7 +5826,10 @@ impl AgentLoop {
                                         })),
                                     );
 
-                                    if matches!(cr.verdict, crate::agent::workflow_types::WorkflowVerdict::Failed { .. }) {
+                                    if matches!(
+                                        cr.verdict,
+                                        crate::agent::workflow_types::WorkflowVerdict::Failed { .. }
+                                    ) {
                                         let _ = event_tx.send(StreamEvent::Error(summary.clone()));
                                         let _ = event_tx.send(StreamEvent::Done(summary));
                                     } else {
@@ -5006,256 +5887,263 @@ impl AgentLoop {
 
             // Only proceed with GUI execution if the router did NOT redirect to ReAct.
             if !router_redirected_to_react {
-
-            log_pipeline_step(
-                session_id,
-                "gui_htn_routing",
-                "Routing to HTN GuiExecutor (bypassing ReAct loop)",
-                Some(serde_json::json!({
-                    "turn_gate": {
-                        "operation": format!("{:?}", turn_gate_plan.intent.operation),
-                        "direct_tool_hint": turn_gate_plan.direct_tool_hint,
-                    },
-                    "primary_verb": format!("{:?}", spec.primary_verb),
-                    "user_text_preview": sanitize_text_for_logs(&last_user_text, 100),
-                })),
-            );
-
-            // Create kill switch interceptor for this workflow
-            let socket_path = crate::agent::gui_services::default_uinput_socket_path();
-            let gui_backend = Arc::new(crate::tools::gui_automation::YdotoolBackend::new(
-                socket_path,
-            ));
-            let workflow_cancellation = tokio_util::sync::CancellationToken::new();
-            let kill_switch = Arc::new(crate::tools::gui_automation::KillSwitchInterceptor::new(
-                workflow_cancellation.clone(),
-                gui_backend,
-            ));
-
-            // ── Batch 2: Workflow Expectation + Autonomy Pre-flight ────────────────────────────
-            //
-            // 1. Classify workflow category and infer expected visible outcomes.
-            // 2. Consult CollaborativeAutonomyEngine to decide proceed/clarify/confirm.
-            //    If the decision requires user interaction, emit a clarification and return.
-            let psdg_opt = self.world_model.clone();
-            let wf_category = {
-                use crate::agent::workflow_expectation::WorkflowExpectationEngine;
-                let wf_eng = WorkflowExpectationEngine::new(psdg_opt.clone());
-                wf_eng.classify(
-                    &last_user_text,
-                    &spec.primary_verb,
-                    &spec.targets,
-                    turn_gate_plan.intent.operation,
-                )
-            };
-            tracing::debug!(
-                target: "gui_htn_routing",
-                category = ?wf_category,
-                "Batch 2: WorkflowExpectationEngine classified workflow"
-            );
-
-            // Apply CollaborativeAutonomyEngine pre-execution gate.
-            {
-                use crate::agent::collaborative_autonomy::{
-                    AutonomyContext, CollaborativeAutonomyEngine,
-                };
-                let autonomy = CollaborativeAutonomyEngine::new(psdg_opt.clone());
-                let mut ctx = AutonomyContext::new(
-                    turn_gate_plan.intent.operation,
-                    turn_gate_plan.intent.hazard_hint,
-                    turn_gate_plan.intent.confidence,
-                    format!(
-                        "{:?} workflow: {}",
-                        wf_category,
-                        sanitize_text_for_logs(&last_user_text, 80)
-                    ),
+                tracing::info!(
+                    target: "gui_execution_trace",
+                    session = session_id,
+                    primary_verb = ?spec.primary_verb,
+                    target_count = spec.targets.len(),
+                    "[GUI] Capability Resolution complete; preparing workflow plan"
                 );
-                if !spec.ambiguities.is_empty() {
-                    ctx = ctx.with_ambiguities();
-                }
-                let decision = autonomy.decide(&ctx);
+                log_pipeline_step(
+                    session_id,
+                    "gui_htn_routing",
+                    "Routing to HTN GuiExecutor (bypassing ReAct loop)",
+                    Some(serde_json::json!({
+                        "turn_gate": {
+                            "operation": format!("{:?}", turn_gate_plan.intent.operation),
+                            "direct_tool_hint": turn_gate_plan.direct_tool_hint,
+                        },
+                        "primary_verb": format!("{:?}", spec.primary_verb),
+                        "user_text_preview": sanitize_text_for_logs(&last_user_text, 100),
+                    })),
+                );
+
+                // Create kill switch interceptor for this workflow
+                let socket_path = crate::agent::gui_services::default_uinput_socket_path();
+                let gui_backend = Arc::new(crate::tools::gui_automation::YdotoolBackend::new(
+                    socket_path,
+                ));
+                let workflow_cancellation = tokio_util::sync::CancellationToken::new();
+                let kill_switch =
+                    Arc::new(crate::tools::gui_automation::KillSwitchInterceptor::new(
+                        workflow_cancellation.clone(),
+                        gui_backend,
+                    ));
+
+                // ── Batch 2: Workflow Expectation + Autonomy Pre-flight ────────────────────────────
+                //
+                // 1. Classify workflow category and infer expected visible outcomes.
+                // 2. Consult CollaborativeAutonomyEngine to decide proceed/clarify/confirm.
+                //    If the decision requires user interaction, emit a clarification and return.
+                let psdg_opt = self.world_model.clone();
+                let wf_category = {
+                    use crate::agent::workflow_expectation::WorkflowExpectationEngine;
+                    let wf_eng = WorkflowExpectationEngine::new(psdg_opt.clone());
+                    wf_eng.classify(
+                        &last_user_text,
+                        &spec.primary_verb,
+                        &spec.targets,
+                        turn_gate_plan.intent.operation,
+                    )
+                };
                 tracing::debug!(
                     target: "gui_htn_routing",
-                    decision = decision.label(),
-                    "Batch 2: CollaborativeAutonomyEngine decision"
+                    category = ?wf_category,
+                    "Batch 2: WorkflowExpectationEngine classified workflow"
                 );
-                // Confirm / Clarify decisions stop execution and ask the user.
-                if decision.requires_user_interaction() {
-                    use crate::agent::collaborative_autonomy::AutonomyDecision;
-                    let msg = match &decision {
-                        AutonomyDecision::Clarify {
-                            question, options, ..
-                        } => {
-                            let opts: Vec<String> =
-                                options.iter().map(|o| format!("- {}", o)).collect();
-                            format!("{}\n{}", question, opts.join("\n"))
-                        }
-                        AutonomyDecision::Confirm {
-                            question,
-                            consequence_summary,
-                            ..
-                        } => {
-                            format!(
-                                "Confirmation required: {}\n{}",
-                                question, consequence_summary
-                            )
-                        }
-                        AutonomyDecision::Escalate { reason, guidance } => {
-                            format!("Cannot proceed: {}\n{}", reason, guidance)
-                        }
-                        _ => "Please confirm before I proceed.".to_string(),
+
+                // Apply CollaborativeAutonomyEngine pre-execution gate.
+                {
+                    use crate::agent::collaborative_autonomy::{
+                        AutonomyContext, CollaborativeAutonomyEngine,
                     };
-                    let _ = event_tx.send(StreamEvent::Token(msg.clone()));
-                    let _ = event_tx.send(StreamEvent::Done(msg));
-                    return;
-                }
-                // ProceedWithNotice: surface the notice but continue.
-                if let crate::agent::collaborative_autonomy::AutonomyDecision::ProceedWithNotice {
+                    let autonomy = CollaborativeAutonomyEngine::new(psdg_opt.clone());
+                    let mut ctx = AutonomyContext::new(
+                        turn_gate_plan.intent.operation,
+                        turn_gate_plan.intent.hazard_hint,
+                        turn_gate_plan.intent.confidence,
+                        format!(
+                            "{:?} workflow: {}",
+                            wf_category,
+                            sanitize_text_for_logs(&last_user_text, 80)
+                        ),
+                    );
+                    if !spec.ambiguities.is_empty() {
+                        ctx = ctx.with_ambiguities();
+                    }
+                    let decision = autonomy.decide(&ctx);
+                    tracing::debug!(
+                        target: "gui_htn_routing",
+                        decision = decision.label(),
+                        "Batch 2: CollaborativeAutonomyEngine decision"
+                    );
+                    // Confirm / Clarify decisions stop execution and ask the user.
+                    if decision.requires_user_interaction() {
+                        use crate::agent::collaborative_autonomy::AutonomyDecision;
+                        let msg = match &decision {
+                            AutonomyDecision::Clarify {
+                                question, options, ..
+                            } => {
+                                let opts: Vec<String> =
+                                    options.iter().map(|o| format!("- {}", o)).collect();
+                                format!("{}\n{}", question, opts.join("\n"))
+                            }
+                            AutonomyDecision::Confirm {
+                                question,
+                                consequence_summary,
+                                ..
+                            } => {
+                                format!(
+                                    "Confirmation required: {}\n{}",
+                                    question, consequence_summary
+                                )
+                            }
+                            AutonomyDecision::Escalate { reason, guidance } => {
+                                format!("Cannot proceed: {}\n{}", reason, guidance)
+                            }
+                            _ => "Please confirm before I proceed.".to_string(),
+                        };
+                        let _ = event_tx.send(StreamEvent::Token(msg.clone()));
+                        let _ = event_tx.send(StreamEvent::Done(msg));
+                        return;
+                    }
+                    // ProceedWithNotice: surface the notice but continue.
+                    if let crate::agent::collaborative_autonomy::AutonomyDecision::ProceedWithNotice {
                     ref summary,
                 } = decision
                 {
                     let _ =
                         event_tx.send(StreamEvent::Plan(format_autonomy_notice_for_user(summary)));
                 }
-            }
-
-            // Create coordinator and generate workflow
-            let mut coordinator = GuiExecutionCoordinator::new(
-                Arc::clone(&self.tool_registry),
-                kill_switch,
-                Arc::clone(&self.policy_engine),
-                Arc::clone(&self.hitl_gateway),
-                Arc::clone(&self.audit_logger),
-            );
-            // Wire EnvironmentStateTracker so grounding facts persist to PSDG.
-            if let Some(ref psdg) = self.world_model {
-                coordinator = coordinator.with_env_tracker(psdg.clone());
-                // Batch 2: also pass raw PsdgHandle to StageExecutor for stage persistence.
-                coordinator = coordinator.with_psdg(psdg.clone());
-            }
-            // Batch 2: wire continuation_runtime and transparency into GoalTree path.
-            if let Some(ref rt) = self.continuation_runtime {
-                coordinator = coordinator.with_continuation_runtime(std::sync::Arc::clone(rt));
-            }
-            if let Some(ref t) = self.transparency_layer {
-                coordinator = coordinator.with_transparency(t.clone());
-            }
-
-            // ── Batch 3 Wave 1: OpGraph multi-intent workflow path ───────────────────────────────
-            if let Some(tree) = coordinator
-                .generate_opgraph_workflow(&last_user_text, &turn_gate_plan.intent)
-                .await
-            {
-                let _ = event_tx.send(StreamEvent::Plan(format!(
-                    "Starting operational workflow: {} ({} stages)",
-                    tree.description,
-                    tree.stages.len()
-                )));
-
-                let result = coordinator
-                    .execute_goal_tree(
-                        &tree,
-                        workflow_cancellation.clone(),
-                        session_id,
-                        &last_user_text,
-                    )
-                    .await;
-
-                // ── Batch 2 Step 2: Transparency trace closure ────────────────────────
-                // Complete the GoalTree transparency trace so the per-workflow
-                // lineage record is closed before we return.
-                if let Some(ref t) = self.transparency_layer {
-                    t.complete_trace(&tree.workflow_id, result.success, result.error.clone());
                 }
 
-                // ── Batch 2 Step 2: ObservableCompletionEngine post-GoalTree check ─────
-                // Infer and verify human-visible outcomes after GoalTree execution.
-                // Non-blocking; failures surface as advisory narrative, not errors.
-                let observable_narrative = if result.success {
-                    use crate::agent::observable_completion::{
-                        infer_outcomes, CompletionVisibilityPolicy, ObservableCompletionEngine,
-                    };
-                    let oce = ObservableCompletionEngine::new(self.world_model.clone());
-                    let outcomes = infer_outcomes(
-                        &last_user_text,
-                        &spec.primary_verb,
-                        &spec.targets,
-                        turn_gate_plan.intent.operation,
-                    );
-                    let policies: Vec<CompletionVisibilityPolicy> = outcomes
-                        .into_iter()
-                        .map(|o| {
-                            CompletionVisibilityPolicy::for_outcome(
-                                o,
-                                turn_gate_plan.intent.operation,
-                            )
-                        })
-                        .collect();
-                    if !policies.is_empty() {
-                        let aggregate = oce.verify_all(&policies).await;
-                        let narrative =
-                            oce.completion_narrative(&aggregate, turn_gate_plan.intent.operation);
-                        if !narrative.is_empty() {
-                            log_pipeline_step(
-                                session_id,
-                                "b2_goal_tree_completion_verified",
-                                &narrative,
-                                None,
-                            );
-                            Some(narrative)
+                // Create coordinator and generate workflow
+                let mut coordinator = GuiExecutionCoordinator::new(
+                    Arc::clone(&self.tool_registry),
+                    kill_switch,
+                    Arc::clone(&self.policy_engine),
+                    Arc::clone(&self.hitl_gateway),
+                    Arc::clone(&self.audit_logger),
+                );
+                // Wire EnvironmentStateTracker so grounding facts persist to PSDG.
+                if let Some(ref psdg) = self.world_model {
+                    coordinator = coordinator.with_env_tracker(psdg.clone());
+                    // Batch 2: also pass raw PsdgHandle to StageExecutor for stage persistence.
+                    coordinator = coordinator.with_psdg(psdg.clone());
+                }
+                // Batch 2: wire continuation_runtime and transparency into GoalTree path.
+                if let Some(ref rt) = self.continuation_runtime {
+                    coordinator = coordinator.with_continuation_runtime(std::sync::Arc::clone(rt));
+                }
+                if let Some(ref t) = self.transparency_layer {
+                    coordinator = coordinator.with_transparency(t.clone());
+                }
+
+                // ── Batch 3 Wave 1: OpGraph multi-intent workflow path ───────────────────────────────
+                if let Some(tree) = coordinator
+                    .generate_opgraph_workflow(&last_user_text, &turn_gate_plan.intent)
+                    .await
+                {
+                    let _ = event_tx.send(StreamEvent::Plan(format!(
+                        "Starting operational workflow: {} ({} stages)",
+                        tree.description,
+                        tree.stages.len()
+                    )));
+
+                    let result = coordinator
+                        .execute_goal_tree(
+                            &tree,
+                            workflow_cancellation.clone(),
+                            session_id,
+                            &last_user_text,
+                        )
+                        .await;
+
+                    // ── Batch 2 Step 2: Transparency trace closure ────────────────────────
+                    // Complete the GoalTree transparency trace so the per-workflow
+                    // lineage record is closed before we return.
+                    if let Some(ref t) = self.transparency_layer {
+                        t.complete_trace(&tree.workflow_id, result.success, result.error.clone());
+                    }
+
+                    // ── Batch 2 Step 2: ObservableCompletionEngine post-GoalTree check ─────
+                    // Infer and verify human-visible outcomes after GoalTree execution.
+                    // Non-blocking; failures surface as advisory narrative, not errors.
+                    let observable_narrative = if result.success {
+                        use crate::agent::observable_completion::{
+                            infer_outcomes, CompletionVisibilityPolicy, ObservableCompletionEngine,
+                        };
+                        let oce = ObservableCompletionEngine::new(self.world_model.clone());
+                        let outcomes = infer_outcomes(
+                            &last_user_text,
+                            &spec.primary_verb,
+                            &spec.targets,
+                            turn_gate_plan.intent.operation,
+                        );
+                        let policies: Vec<CompletionVisibilityPolicy> = outcomes
+                            .into_iter()
+                            .map(|o| {
+                                CompletionVisibilityPolicy::for_outcome(
+                                    o,
+                                    turn_gate_plan.intent.operation,
+                                )
+                            })
+                            .collect();
+                        if !policies.is_empty() {
+                            let aggregate = oce.verify_all(&policies).await;
+                            let narrative = oce
+                                .completion_narrative(&aggregate, turn_gate_plan.intent.operation);
+                            if !narrative.is_empty() {
+                                log_pipeline_step(
+                                    session_id,
+                                    "b2_goal_tree_completion_verified",
+                                    &narrative,
+                                    None,
+                                );
+                                Some(narrative)
+                            } else {
+                                None
+                            }
                         } else {
                             None
                         }
                     } else {
                         None
-                    }
-                } else {
-                    None
-                };
+                    };
 
-                if result.success {
-                    let base_summary = format!(
-                        "Completed: {} stage{} in {}ms.",
-                        result.stage_results.len(),
-                        if result.stage_results.len() == 1 {
-                            ""
+                    if result.success {
+                        let base_summary = format!(
+                            "Completed: {} stage{} in {}ms.",
+                            result.stage_results.len(),
+                            if result.stage_results.len() == 1 {
+                                ""
+                            } else {
+                                "s"
+                            },
+                            result.duration_ms
+                        );
+                        let summary_with_narrative = if let Some(narrative) = observable_narrative {
+                            format!("{} {}", base_summary, narrative)
                         } else {
-                            "s"
-                        },
-                        result.duration_ms
-                    );
-                    let summary_with_narrative = if let Some(narrative) = observable_narrative {
-                        format!("{} {}", base_summary, narrative)
+                            base_summary
+                        };
+                        // Bug 7: Append captured program output when execute_bash was used
+                        // for a "run and show output" stage so the result reaches the user.
+                        let summary = if let Some(ref output) = result.terminal_output {
+                            format!(
+                                "{}\n\nProgram output:\n```\n{}\n```",
+                                summary_with_narrative,
+                                output.trim()
+                            )
+                        } else {
+                            summary_with_narrative
+                        };
+                        let _ = event_tx.send(StreamEvent::Token(summary.clone()));
+                        let _ = event_tx.send(StreamEvent::Done(summary));
                     } else {
-                        base_summary
-                    };
-                    // Bug 7: Append captured program output when execute_bash was used
-                    // for a "run and show output" stage so the result reaches the user.
-                    let summary = if let Some(ref output) = result.terminal_output {
-                        format!(
-                            "{}\n\nProgram output:\n```\n{}\n```",
-                            summary_with_narrative,
-                            output.trim()
-                        )
-                    } else {
-                        summary_with_narrative
-                    };
-                    let _ = event_tx.send(StreamEvent::Token(summary.clone()));
-                    let _ = event_tx.send(StreamEvent::Done(summary));
-                } else {
-                    let detail = result.error.as_deref().unwrap_or("unknown error");
+                        let detail = result.error.as_deref().unwrap_or("unknown error");
 
-                    // Detect infrastructure-level failures (GLOBAL_SAFETY_HALT) and
-                    // surface a human-readable explanation with remediation guidance
-                    // instead of the raw internal error string.
-                    let is_infra_failure = detail.contains("GLOBAL_SAFETY_HALT")
-                        || detail.contains("service not ready")
-                        || detail.contains("uinput=stopped")
-                        || detail.contains("uinput=FAILED");
+                        // Detect infrastructure-level failures (GLOBAL_SAFETY_HALT) and
+                        // surface a human-readable explanation with remediation guidance
+                        // instead of the raw internal error string.
+                        let is_infra_failure = detail.contains("GLOBAL_SAFETY_HALT")
+                            || detail.contains("service not ready")
+                            || detail.contains("uinput=stopped")
+                            || detail.contains("uinput=FAILED");
 
-                    let summary = if is_infra_failure {
-                        // Report which stages completed before the infrastructure failed
-                        let succeeded: Vec<&str> = result
+                        let summary = if is_infra_failure {
+                            // Report which stages completed before the infrastructure failed
+                            let succeeded: Vec<&str> = result
                             .stage_results
                             .iter()
                             .filter(|sr| {
@@ -5267,12 +6155,12 @@ impl AgentLoop {
                             })
                             .map(|sr| sr.label.as_str())
                             .collect();
-                        let prefix = if succeeded.is_empty() {
-                            String::new()
-                        } else {
-                            format!("{} completed successfully. ", succeeded.join(", "))
-                        };
-                        format!(
+                            let prefix = if succeeded.is_empty() {
+                                String::new()
+                            } else {
+                                format!("{} completed successfully. ", succeeded.join(", "))
+                            };
+                            format!(
                             "{}Keyboard automation is unavailable because the GUI input service \
                              (uinput daemon) is not running. KRIA is attempting to restart it \
                              automatically (up to 3 attempts). \
@@ -5281,282 +6169,322 @@ impl AgentLoop {
                              `<user> ALL=(ALL) NOPASSWD: /path/to/kria-uinput-daemon`",
                             prefix
                         )
-                    } else {
-                        format!(
-                            "Operational workflow failed after {} stage{} ({}).",
-                            result.stage_results.len(),
-                            if result.stage_results.len() == 1 {
-                                ""
-                            } else {
-                                "s"
-                            },
-                            detail
-                        )
-                    };
-                    let _ = event_tx.send(StreamEvent::Error(summary));
+                        } else {
+                            format!(
+                                "Operational workflow failed after {} stage{} ({}).",
+                                result.stage_results.len(),
+                                if result.stage_results.len() == 1 {
+                                    ""
+                                } else {
+                                    "s"
+                                },
+                                detail
+                            )
+                        };
+                        let _ = event_tx.send(StreamEvent::Error(summary));
+                    }
+
+                    return;
                 }
 
-                return;
-            }
+                // First try the deterministic rule-based planner; if it cannot
+                // build a concrete workflow, ask the LLM to emit an HTN JSON plan.
+                // generate_workflow now returns (workflow, artifacts) so we can
+                // populate WorkflowResult.created_artifacts correctly.
+                let mut planned_workflow_and_artifacts: Option<(
+                    crate::agent::htn_executor::GuiWorkflow,
+                    Vec<std::path::PathBuf>,
+                )> = coordinator
+                    .generate_workflow(session_id, &turn_gate_plan.intent, spec, &last_user_text)
+                    .await;
 
-            // First try the deterministic rule-based planner; if it cannot
-            // build a concrete workflow, ask the LLM to emit an HTN JSON plan.
-            // generate_workflow now returns (workflow, artifacts) so we can
-            // populate WorkflowResult.created_artifacts correctly.
-            let mut planned_workflow_and_artifacts: Option<(
-                crate::agent::htn_executor::GuiWorkflow,
-                Vec<std::path::PathBuf>,
-            )> = coordinator
-                .generate_workflow(session_id, &turn_gate_plan.intent, spec, &last_user_text)
-                .await;
-
-            if planned_workflow_and_artifacts.is_none() {
-                if let Some(backend) = self.model_router.route("chat").await {
-                    log_pipeline_step(
-                        session_id,
-                        "gui_htn_llm_planner",
-                        "Rule-based planner produced no workflow; invoking LLM HTN planner",
-                        None,
-                    );
-                    match crate::agent::htn_integration::plan_gui_workflow_via_llm(
-                        backend.as_ref(),
-                        session_id,
-                        &last_user_text,
-                    )
-                    .await
-                    {
-                        Ok(wf) => {
-                            tracing::info!(
-                                target: "gui_htn_routing",
-                                task_id = %wf.task_id,
-                                steps = wf.sub_goals.len(),
-                                "LLM HTN planner produced workflow"
-                            );
-                            // LLM planner doesn't track artifacts
-                            planned_workflow_and_artifacts = Some((wf, Vec::new()));
+                if planned_workflow_and_artifacts.is_none() {
+                    if let Some(backend) = self.model_router.route("chat").await {
+                        log_pipeline_step(
+                            session_id,
+                            "gui_htn_llm_planner",
+                            "Rule-based planner produced no workflow; invoking LLM HTN planner",
+                            None,
+                        );
+                        match crate::agent::htn_integration::plan_gui_workflow_via_llm(
+                            backend.as_ref(),
+                            session_id,
+                            &last_user_text,
+                        )
+                        .await
+                        {
+                            Ok(wf) => {
+                                tracing::info!(
+                                    target: "gui_htn_routing",
+                                    task_id = %wf.task_id,
+                                    steps = wf.sub_goals.len(),
+                                    "LLM HTN planner produced workflow"
+                                );
+                                // LLM planner doesn't track artifacts
+                                planned_workflow_and_artifacts = Some((wf, Vec::new()));
+                            }
+                            Err(e) => {
+                                log_pipeline_step(
+                                    session_id,
+                                    "gui_htn_llm_planner_failed",
+                                    "LLM HTN planner failed; falling back to ReAct loop",
+                                    Some(serde_json::json!({ "error": e })),
+                                );
+                            }
                         }
-                        Err(e) => {
-                            log_pipeline_step(
-                                session_id,
-                                "gui_htn_llm_planner_failed",
-                                "LLM HTN planner failed; falling back to ReAct loop",
-                                Some(serde_json::json!({ "error": e })),
-                            );
-                        }
-                    }
-                } else {
-                    log_pipeline_step(
+                    } else {
+                        log_pipeline_step(
                         session_id,
                         "gui_htn_llm_planner_unavailable",
                         "No chat backend available for LLM HTN planner; falling back to ReAct loop",
                         None,
                     );
+                    }
                 }
-            }
 
-            if let Some((workflow, planned_artifacts)) = planned_workflow_and_artifacts {
-                // ── Phase 3: Structured Telemetry Emission ────────────────────────────────
-                // Create telemetry emitter for this workflow and emit Started event.
-                let step_previews = crate::agent::workflow_telemetry::step_previews_from_workflow(&workflow);
-                let exec_mode = crate::agent::workflow_telemetry::execution_mode_from_previews(&step_previews);
-                let (telemetry_emitter, _telemetry_receiver) = crate::agent::workflow_telemetry::WorkflowTelemetryEmitter::new(
-                    workflow.task_id.clone(),
-                    crate::agent::workflow_types::WorkflowSource::SubstrateRouter,
-                );
-                telemetry_emitter.emit_started(
-                    &last_user_text,
-                    &step_previews,
-                    exec_mode,
-                    Some((workflow.max_duration_sec as u64) * 1000),
-                );
-                log_pipeline_step(
-                    session_id,
-                    "workflow_telemetry_started",
-                    "Structured telemetry: workflow started",
-                    Some(serde_json::json!({
-                        "workflow_id": workflow.task_id,
-                        "steps": step_previews.len(),
-                        "source": "SubstrateRouter",
-                    })),
-                );
-
-                // Emit legacy events (backward compatibility)
-                let _ = event_tx.send(StreamEvent::Plan(format_gui_workflow_start_for_user(
-                    &workflow,
-                )));
-                emit_gui_workflow_initial_task_steps(&event_tx, &workflow);
-
-                // Execute via HTN executor (NOT ReAct loop).
-                // Pass planned_artifacts so WorkflowResult.created_artifacts is populated.
-                let result = coordinator
-                    .execute_workflow(
-                        &workflow,
-                        workflow_cancellation,
-                        planned_artifacts,
-                        session_id,
+                if let Some((workflow, planned_artifacts)) = planned_workflow_and_artifacts {
+                    tracing::info!(
+                        target: "gui_execution_trace",
+                        session = session_id,
+                        workflow_id = %workflow.task_id,
+                        steps = workflow.sub_goals.len(),
+                        planned_artifacts = planned_artifacts.len(),
+                        "[GUI] Workflow Plan Generated"
+                    );
+                    // ── Phase 3: Structured Telemetry Emission ────────────────────────────────
+                    // Create telemetry emitter for this workflow and emit Started event.
+                    let step_previews =
+                        crate::agent::workflow_telemetry::step_previews_from_workflow(&workflow);
+                    let exec_mode = crate::agent::workflow_telemetry::execution_mode_from_previews(
+                        &step_previews,
+                    );
+                    let (telemetry_emitter, _telemetry_receiver) =
+                        crate::agent::workflow_telemetry::WorkflowTelemetryEmitter::new(
+                            workflow.task_id.clone(),
+                            crate::agent::workflow_types::WorkflowSource::SubstrateRouter,
+                        );
+                    telemetry_emitter.emit_started(
                         &last_user_text,
+                        &step_previews,
+                        exec_mode,
+                        Some((workflow.max_duration_sec as u64) * 1000),
+                    );
+                    log_pipeline_step(
+                        session_id,
+                        "workflow_telemetry_started",
+                        "Structured telemetry: workflow started",
+                        Some(serde_json::json!({
+                            "workflow_id": workflow.task_id,
+                            "steps": step_previews.len(),
+                            "source": "SubstrateRouter",
+                        })),
+                    );
+
+                    // Emit legacy events (backward compatibility)
+                    let _ = event_tx.send(StreamEvent::Plan(format_gui_workflow_start_for_user(
+                        &workflow,
+                    )));
+                    emit_gui_workflow_initial_task_steps(&event_tx, &workflow);
+
+                    // Execute via HTN executor (NOT ReAct loop).
+                    // Pass planned_artifacts so WorkflowResult.created_artifacts is populated.
+                    tracing::info!(
+                        target: "gui_execution_trace",
+                        session = session_id,
+                        workflow_id = %workflow.task_id,
+                        "[GUI] Workflow execution starting"
+                    );
+                    let result = coordinator
+                        .execute_workflow(
+                            &workflow,
+                            workflow_cancellation,
+                            planned_artifacts,
+                            session_id,
+                            &last_user_text,
+                        )
+                        .await;
+                    tracing::info!(
+                        target: "gui_execution_trace",
+                        session = session_id,
+                        workflow_id = %workflow.task_id,
+                        success = result.success,
+                        completed_steps = result.completed_steps,
+                        total_steps = result.total_steps,
+                        duration_ms = result.duration_ms,
+                        error = %result.error.as_deref().unwrap_or("-"),
+                        "[GUI] Workflow Complete"
+                    );
+
+                    // Save session checkpoint with the actual user intent (not just task_id).
+                    // This overwrites the checkpoint saved inside execute_workflow with
+                    // a more informative one that includes the real user text.
+                    crate::agent::gui_wiring::GuiExecutionCoordinator::save_session_checkpoint(
+                        &workflow,
+                        &result,
+                        Some(&last_user_text),
                     )
                     .await;
+                    emit_gui_workflow_final_task_steps(&event_tx, &workflow, &result);
 
-                // Save session checkpoint with the actual user intent (not just task_id).
-                // This overwrites the checkpoint saved inside execute_workflow with
-                // a more informative one that includes the real user text.
-                crate::agent::gui_wiring::GuiExecutionCoordinator::save_session_checkpoint(
-                    &workflow,
-                    &result,
-                    Some(&last_user_text),
-                )
-                .await;
-                emit_gui_workflow_final_task_steps(&event_tx, &workflow, &result);
-
-                // ── Batch 2: ObservableCompletionEngine post-execution visibility check ───────
-                // Verify that the expected human-visible outcomes are actually observable.
-                // This check is non-blocking; failures do not fail the workflow.
-                let observable_narrative = {
-                    use crate::agent::observable_completion::{
-                        infer_outcomes, CompletionVisibilityPolicy, ObservableCompletionEngine,
-                    };
-                    let oce = ObservableCompletionEngine::new(psdg_opt.clone());
-                    let outcomes = infer_outcomes(
-                        &last_user_text,
-                        &spec.primary_verb,
-                        &spec.targets,
-                        turn_gate_plan.intent.operation,
-                    );
-                    let policies: Vec<CompletionVisibilityPolicy> = outcomes
-                        .into_iter()
-                        .map(|o| {
-                            CompletionVisibilityPolicy::for_outcome(
-                                o,
-                                turn_gate_plan.intent.operation,
-                            )
-                        })
-                        .collect();
-                    if !policies.is_empty() {
-                        let aggregate = oce.verify_all(&policies).await;
-                        let narrative =
-                            oce.completion_narrative(&aggregate, turn_gate_plan.intent.operation);
-                        if !narrative.is_empty() {
-                            Some(narrative)
+                    // ── Batch 2: ObservableCompletionEngine post-execution visibility check ───────
+                    // Verify that the expected human-visible outcomes are actually observable.
+                    // This check is non-blocking; failures do not fail the workflow.
+                    let observable_narrative = {
+                        use crate::agent::observable_completion::{
+                            infer_outcomes, CompletionVisibilityPolicy, ObservableCompletionEngine,
+                        };
+                        let oce = ObservableCompletionEngine::new(psdg_opt.clone());
+                        let outcomes = infer_outcomes(
+                            &last_user_text,
+                            &spec.primary_verb,
+                            &spec.targets,
+                            turn_gate_plan.intent.operation,
+                        );
+                        let policies: Vec<CompletionVisibilityPolicy> = outcomes
+                            .into_iter()
+                            .map(|o| {
+                                CompletionVisibilityPolicy::for_outcome(
+                                    o,
+                                    turn_gate_plan.intent.operation,
+                                )
+                            })
+                            .collect();
+                        if !policies.is_empty() {
+                            let aggregate = oce.verify_all(&policies).await;
+                            let narrative = oce
+                                .completion_narrative(&aggregate, turn_gate_plan.intent.operation);
+                            if !narrative.is_empty() {
+                                Some(narrative)
+                            } else {
+                                None
+                            }
                         } else {
                             None
                         }
-                    } else {
-                        None
-                    }
-                };
+                    };
 
-                // ── Canonical Workflow Verdict (Phase 2) ──────────────────────────────────
-                // Replace the contradictory dual-path (format_gui_workflow_partial vs
-                // format_gui_workflow_success) with a single canonical verdict computation.
-                // This eliminates the "Task completed" + "outcome not visible" contradiction.
-                let verdict_computation = crate::agent::workflow_verdict::verdict_from_legacy_result(
-                    result.success,
-                    result.completed_steps,
-                    result.total_steps,
-                    result.error.as_deref(),
-                    observable_narrative.as_deref(),
-                );
-
-                // ── Phase 3: Emit structured completion telemetry ─────────────────────────
-                telemetry_emitter.emit_completed(
-                    verdict_computation.verdict.clone(),
-                    &verdict_computation.narrative,
-                    result.created_artifacts.iter().map(|p| p.display().to_string()).collect(),
-                    vec![], // continuation actions (future: derive from verdict)
-                );
-
-                // Emit structured telemetry for the new runtime
-                log_pipeline_step(
-                    session_id,
-                    "workflow_verdict",
-                    "Canonical workflow verdict computed",
-                    Some(serde_json::json!({
-                        "verdict": format!("{:?}", verdict_computation.verdict),
-                        "visibility_confidence": format!("{:?}", verdict_computation.visibility_confidence),
-                        "completed_steps": result.completed_steps,
-                        "total_steps": result.total_steps,
-                    })),
-                );
-
-                // Generate user-facing summary from the canonical verdict
-                let summary = match &verdict_computation.verdict {
-                    crate::agent::workflow_types::WorkflowVerdict::Complete => {
-                        format_gui_workflow_success_for_user(
-                            &result,
-                            observable_narrative.as_deref(),
-                        )
-                    }
-                    crate::agent::workflow_types::WorkflowVerdict::StructurallyComplete { unverified_outcomes } => {
-                        // Honest reporting: structural success + visibility gap
-                        let mut lines = vec![format!(
-                            "Task completed structurally. KRIA verified {} step{} in {}ms.",
+                    // ── Canonical Workflow Verdict (Phase 2) ──────────────────────────────────
+                    // Replace the contradictory dual-path (format_gui_workflow_partial vs
+                    // format_gui_workflow_success) with a single canonical verdict computation.
+                    // This eliminates the "Task completed" + "outcome not visible" contradiction.
+                    let verdict_computation =
+                        crate::agent::workflow_verdict::verdict_from_legacy_result(
+                            result.success,
                             result.completed_steps,
-                            if result.completed_steps == 1 { "" } else { "s" },
-                            result.duration_ms
-                        )];
-                        if !unverified_outcomes.is_empty() {
-                            lines.push(format!(
-                                "Visibility unverified: {}",
-                                unverified_outcomes.join(", ")
-                            ));
-                        }
-                        if let Some(artifacts) = artifact_summary_for_user(&result.created_artifacts) {
-                            lines.push(artifacts);
-                        }
-                        if let Some(output) = output_preview_from_artifacts(&result.created_artifacts) {
-                            lines.push(format!("Captured output:\n```\n{}\n```", output));
-                        }
-                        lines.join("\n\n")
-                    }
-                    crate::agent::workflow_types::WorkflowVerdict::Failed { .. } => {
-                        format_gui_workflow_failure_for_user(&result)
-                    }
-                    _ => verdict_computation.narrative.clone(),
-                };
+                            result.total_steps,
+                            result.error.as_deref(),
+                            observable_narrative.as_deref(),
+                        );
 
-                tracing::info!(
-                    target: "gui_htn_routing",
-                    success = result.success,
-                    completed = result.completed_steps,
-                    total = result.total_steps,
-                    verdict = ?verdict_computation.verdict,
-                    "Emitting GUI workflow result with canonical verdict"
-                );
-
-                // Emit to frontend
-                if result.success {
-                    let _ = event_tx.send(StreamEvent::Token(summary.clone()));
-                    let _ = event_tx.send(StreamEvent::Done(summary));
-                } else {
-                    // Emit structured recovery options for failed GUI workflows
-                    let error_detail = result.error.as_deref().unwrap_or("unknown error");
-                    let recovery_options = build_workflow_failure_recovery_options(
-                        error_detail,
-                        &last_user_text,
-                        &result.created_artifacts,
+                    // ── Phase 3: Emit structured completion telemetry ─────────────────────────
+                    telemetry_emitter.emit_completed(
+                        verdict_computation.verdict.clone(),
+                        &verdict_computation.narrative,
+                        result
+                            .created_artifacts
+                            .iter()
+                            .map(|p| p.display().to_string())
+                            .collect(),
+                        vec![], // continuation actions (future: derive from verdict)
                     );
-                    if !recovery_options.is_empty() {
-                        let _ = event_tx.send(StreamEvent::RecoveryOptions {
-                            context: "Workflow did not complete fully".to_string(),
-                            detail: error_detail.to_string(),
-                            options: recovery_options,
-                        });
-                    }
-                    let _ = event_tx.send(StreamEvent::Error(summary.clone()));
-                    let _ = event_tx.send(StreamEvent::Done(summary));
-                }
 
-                // EARLY RETURN - completely bypass ReAct loop
-                return;
-            } else {
-                log_pipeline_step(
-                    session_id,
-                    "gui_htn_fallback",
-                    "GUI routing detected but no workflow generated; falling back to ReAct",
-                    None,
-                );
-            }
+                    // Emit structured telemetry for the new runtime
+                    log_pipeline_step(
+                        session_id,
+                        "workflow_verdict",
+                        "Canonical workflow verdict computed",
+                        Some(serde_json::json!({
+                            "verdict": format!("{:?}", verdict_computation.verdict),
+                            "visibility_confidence": format!("{:?}", verdict_computation.visibility_confidence),
+                            "completed_steps": result.completed_steps,
+                            "total_steps": result.total_steps,
+                        })),
+                    );
+
+                    // Generate user-facing summary from the canonical verdict
+                    let summary = match &verdict_computation.verdict {
+                        crate::agent::workflow_types::WorkflowVerdict::Complete => {
+                            format_gui_workflow_success_for_user(
+                                &result,
+                                observable_narrative.as_deref(),
+                            )
+                        }
+                        crate::agent::workflow_types::WorkflowVerdict::StructurallyComplete {
+                            unverified_outcomes,
+                        } => {
+                            // Honest reporting: structural success + visibility gap
+                            let mut lines = vec![format!(
+                                "Task completed structurally. KRIA verified {} step{} in {}ms.",
+                                result.completed_steps,
+                                if result.completed_steps == 1 { "" } else { "s" },
+                                result.duration_ms
+                            )];
+                            if !unverified_outcomes.is_empty() {
+                                lines.push(format!(
+                                    "Visibility unverified: {}",
+                                    unverified_outcomes.join(", ")
+                                ));
+                            }
+                            if let Some(artifacts) =
+                                artifact_summary_for_user(&result.created_artifacts)
+                            {
+                                lines.push(artifacts);
+                            }
+                            if let Some(output) =
+                                output_preview_from_artifacts(&result.created_artifacts)
+                            {
+                                lines.push(format!("Captured output:\n```\n{}\n```", output));
+                            }
+                            lines.join("\n\n")
+                        }
+                        crate::agent::workflow_types::WorkflowVerdict::Failed { .. } => {
+                            format_gui_workflow_failure_for_user(&result)
+                        }
+                        _ => verdict_computation.narrative.clone(),
+                    };
+
+                    tracing::info!(
+                        target: "gui_htn_routing",
+                        success = result.success,
+                        completed = result.completed_steps,
+                        total = result.total_steps,
+                        verdict = ?verdict_computation.verdict,
+                        "Emitting GUI workflow result with canonical verdict"
+                    );
+
+                    // Emit to frontend
+                    if result.success {
+                        let _ = event_tx.send(StreamEvent::Token(summary.clone()));
+                        let _ = event_tx.send(StreamEvent::Done(summary));
+                    } else {
+                        // Emit structured recovery options for failed GUI workflows
+                        let error_detail = result.error.as_deref().unwrap_or("unknown error");
+                        let recovery_options = build_workflow_failure_recovery_options(
+                            error_detail,
+                            &last_user_text,
+                            &result.created_artifacts,
+                        );
+                        if !recovery_options.is_empty() {
+                            let _ = event_tx.send(StreamEvent::RecoveryOptions {
+                                context: "Workflow did not complete fully".to_string(),
+                                detail: error_detail.to_string(),
+                                options: recovery_options,
+                            });
+                        }
+                        let _ = event_tx.send(StreamEvent::Error(summary.clone()));
+                        let _ = event_tx.send(StreamEvent::Done(summary));
+                    }
+
+                    // EARLY RETURN - completely bypass ReAct loop
+                    return;
+                } else {
+                    log_pipeline_step(
+                        session_id,
+                        "gui_htn_fallback",
+                        "GUI routing detected but no workflow generated; falling back to ReAct",
+                        None,
+                    );
+                }
             } // closes: if !router_redirected_to_react
         }
 
@@ -5574,8 +6502,39 @@ impl AgentLoop {
         // The function scans the prompt directly and selects the best tool —
         // bypassing whatever (potentially-wrong) tool_hint the router suggested.
         // When the LLM is unavailable, this path still works.
-        if let Some((tool_name, deterministic_params)) = try_deterministic_dispatch(&last_user_text) {
-            if let Some(handler) = self.tool_registry.get_handler(&tool_name) {
+        if let Some((tool_name, deterministic_params)) = try_deterministic_dispatch_with_profile(
+            &last_user_text,
+            previous_user_text.as_deref(),
+            &execution_profile,
+        ) {
+            if tool_name == KRIA_DETERMINISTIC_NOTICE_TOOL {
+                let message = deterministic_notice_message(&deterministic_params);
+                log_pipeline_step(
+                    session_id,
+                    "deterministic_notice",
+                    "Prompt matched local deterministic notice — responding without LLM or tool execution",
+                    Some(serde_json::json!({
+                        "manual_tool_override": execution_profile.is_manual_tool_override(),
+                        "app_lock": execution_profile.app_lock.clone(),
+                        "tool_lock": execution_profile.tool_lock.clone(),
+                    })),
+                );
+                let _ = event_tx.send(StreamEvent::Token(message.clone()));
+                let _ = event_tx.send(StreamEvent::Done(message));
+                return;
+            } else if !execution_profile.allows_tool_name(&tool_name) {
+                log_pipeline_step(
+                    session_id,
+                    "deterministic_dispatch_blocked_by_execution_profile",
+                    "Deterministic tool match ignored because it is outside the active manual tool mode",
+                    Some(serde_json::json!({
+                        "tool": tool_name,
+                        "manual_tool_override": execution_profile.is_manual_tool_override(),
+                        "app_lock": execution_profile.app_lock.clone(),
+                        "tool_lock": execution_profile.tool_lock.clone(),
+                    })),
+                );
+            } else if let Some(handler) = self.tool_registry.get_handler(&tool_name) {
                 log_pipeline_step(
                     session_id,
                     "deterministic_dispatch",
@@ -5586,9 +6545,32 @@ impl AgentLoop {
                     })),
                 );
 
+                // Emit in-progress indicator for n8n workflows (visible in chat)
+                if tool_name == "n8n_invoke_workflow" {
+                    let wf_display = deterministic_params
+                        .get("workflow_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("workflow");
+                    let _ = event_tx.send(StreamEvent::Token(format!(
+                        "⏳ Running workflow '{}'...\n",
+                        wf_display
+                    )));
+                }
+
                 let handler = handler.clone();
-                let tool_context = self.tool_registry.make_tool_context(
-                    tokio_util::sync::CancellationToken::new(),
+                let tool_context = self
+                    .tool_registry
+                    .make_tool_context(tokio_util::sync::CancellationToken::new());
+
+                let tool_execution_id = Uuid::now_v7().to_string();
+                let tool_execution_started = std::time::Instant::now();
+                tracing::info!(
+                    target: "tool_execution",
+                    session = session_id,
+                    execution_id = %tool_execution_id,
+                    tool_name = %tool_name,
+                    input_summary = %sanitize_json_for_logs(&deterministic_params, 220, 8),
+                    "Tool execution started"
                 );
 
                 let dispatch_result = tokio::time::timeout(
@@ -5599,12 +6581,26 @@ impl AgentLoop {
 
                 match dispatch_result {
                     Ok(result) => {
+                        tracing::info!(
+                            target: "tool_execution",
+                            session = session_id,
+                            execution_id = %tool_execution_id,
+                            tool_name = %tool_name,
+                            duration_ms = tool_execution_started.elapsed().as_millis(),
+                            success = result.success,
+                            failure_reason = %result.error.as_deref().unwrap_or("-"),
+                            result_summary = %sanitize_json_for_logs(&result.data, 220, 8),
+                            "Tool execution completed"
+                        );
                         let summary = if result.error.is_some() {
                             format!(
                                 "Tool '{}' completed with error: {}",
                                 tool_name,
                                 result.error.as_deref().unwrap_or("unknown")
                             )
+                        } else if tool_name == "n8n_invoke_workflow" {
+                            // Semantic formatting for n8n workflow results
+                            format_n8n_result(&result.data)
                         } else {
                             let output_str = if let Some(s) = result.data.as_str() {
                                 s.to_string()
@@ -5634,6 +6630,14 @@ impl AgentLoop {
                         return;
                     }
                     Err(_) => {
+                        tracing::warn!(
+                            target: "tool_execution",
+                            session = session_id,
+                            execution_id = %tool_execution_id,
+                            tool_name = %tool_name,
+                            duration_ms = tool_execution_started.elapsed().as_millis(),
+                            "Tool execution timed out"
+                        );
                         tracing::warn!(
                             target: "deterministic_dispatch",
                             tool = %tool_name,
@@ -5878,6 +6882,7 @@ impl AgentLoop {
                 "google_workspace_intent": google_workspace_intent,
                 "pure_image_analysis_turn": pure_image_analysis_turn,
                 "prompt_lab_mode": execution_profile.is_prompt_lab(),
+                "manual_tool_override": execution_profile.is_manual_tool_override(),
                 "prompt_lab_direct_mode": prompt_lab_direct_mode,
                 "tool_count": tool_schemas.len(),
                 "tool_names": tool_schemas
@@ -6252,27 +7257,28 @@ impl AgentLoop {
             // relevant tools **regardless of ONNX domain boundaries**.
             // This runs unconditionally so the results are available for
             // the override instruction below.
-            let semantic_injections: Vec<SemanticInjection> = if suppress_all_tool_routing {
-                Vec::new()
-            } else if self.tool_index.is_some() && !pure_image_analysis_turn {
-                if let Some(ref tool_index) = self.tool_index {
-                    let matches = tool_index
-                        .top_k_by_text(&round_focus_text, 3, &self.hardware_tier)
-                        .await;
-                    matches
-                        .into_iter()
-                        .filter(|m| m.confidence >= 0.35)
-                        .map(|m| SemanticInjection {
-                            name: m.name,
-                            cosine_similarity: m.confidence,
-                        })
-                        .collect()
+            let semantic_injections: Vec<SemanticInjection> =
+                if suppress_all_tool_routing || execution_profile.is_manual_tool_override() {
+                    Vec::new()
+                } else if self.tool_index.is_some() && !pure_image_analysis_turn {
+                    if let Some(ref tool_index) = self.tool_index {
+                        let matches = tool_index
+                            .top_k_by_text(&round_focus_text, 3, &self.hardware_tier)
+                            .await;
+                        matches
+                            .into_iter()
+                            .filter(|m| m.confidence >= 0.35)
+                            .map(|m| SemanticInjection {
+                                name: m.name,
+                                cosine_similarity: m.confidence,
+                            })
+                            .collect()
+                    } else {
+                        Vec::new()
+                    }
                 } else {
                     Vec::new()
-                }
-            } else {
-                Vec::new()
-            };
+                };
 
             if !semantic_injections.is_empty() {
                 tracing::debug!(
@@ -6285,12 +7291,39 @@ impl AgentLoop {
                 Vec::new()
             } else {
                 // Phase 3: Try direct tool match first (skip LLM)
-                if let Some(direct_schema) = self.try_direct_tool_match(&round_focus_text).await {
-                    tracing::info!(
-                        tool = %direct_schema.name,
-                        "Direct tool match via semantic index — skipping LLM"
-                    );
-                    vec![direct_schema]
+                let direct_semantic_match = if execution_profile.is_manual_tool_override() {
+                    None
+                } else {
+                    self.try_direct_tool_match(&round_focus_text).await
+                };
+                if let Some(direct_schema) = direct_semantic_match {
+                    if allowed_tool_names.contains(&direct_schema.name)
+                        && execution_profile.allows_tool_name(&direct_schema.name)
+                    {
+                        tracing::info!(
+                            tool = %direct_schema.name,
+                            manual_tool_override = execution_profile.is_manual_tool_override(),
+                            "Direct tool match via semantic index — skipping LLM"
+                        );
+                        vec![direct_schema]
+                    } else {
+                        tracing::info!(
+                            tool = %direct_schema.name,
+                            manual_tool_override = execution_profile.is_manual_tool_override(),
+                            "Direct tool match ignored because it is outside the active execution profile"
+                        );
+                        select_routed_tool_schemas(
+                            &tool_schemas,
+                            &round_focus_text,
+                            round_direct_tool_hint.as_deref(),
+                            &routed_tool_names,
+                            &fallback_tool_names,
+                            forced_tool_name.as_deref(),
+                            execution_profile.tool_lock.as_deref(),
+                            conversation_only_route,
+                            &semantic_injections,
+                        )
+                    }
                 } else {
                     select_routed_tool_schemas(
                         &tool_schemas,
@@ -6561,7 +7594,10 @@ impl AgentLoop {
 
                             let _ = event_tx.send(StreamEvent::RecoveryOptions {
                                 context: "AI model unavailable".to_string(),
-                                detail: format!("Backend error: {}", sanitize_text_for_logs(&error_text, 200)),
+                                detail: format!(
+                                    "Backend error: {}",
+                                    sanitize_text_for_logs(&error_text, 200)
+                                ),
                                 options,
                             });
                             let _ = event_tx.send(StreamEvent::Error(user_message));
@@ -7184,6 +8220,17 @@ impl AgentLoop {
                         "agent_loop: injected hard_visual_token_cap for analyze_image pre-flight"
                     );
                 }
+
+                let tool_execution_id = Uuid::now_v7().to_string();
+                let tool_execution_started = std::time::Instant::now();
+                tracing::info!(
+                    target: "tool_execution",
+                    session = session_id,
+                    execution_id = %tool_execution_id,
+                    tool_name = %call.name,
+                    input_summary = %sanitize_json_for_logs(&execution_args, 220, 8),
+                    "Tool execution started"
+                );
 
                 log_pipeline_step(
                     session_id,
@@ -7891,10 +8938,11 @@ impl AgentLoop {
                         // blocking legitimate tool execution. The new validator
                         // maps Browser/Mcp/CloudProvider targets to Host environment
                         // before checking, eliminating the category conflation bug.
-                        let env_precheck = crate::agent::execution_environment::validate_environment(
-                            &call.name,
-                            turn_memory.primary_target,
-                        );
+                        let env_precheck =
+                            crate::agent::execution_environment::validate_environment(
+                                &call.name,
+                                turn_memory.primary_target,
+                            );
                         if !env_precheck.is_allowed() {
                             if let crate::agent::execution_environment::EnvironmentValidation::Blocked {
                                 reason, ..
@@ -7933,8 +8981,11 @@ impl AgentLoop {
                         // This eliminates the browser-target-mismatch class of bugs
                         // while preserving all other legacy safety checks.
                         let authority_result = match &authority_result {
-                            crate::agent::execution_authority::ValidationResult::Blocked { reason, .. }
-                                if env_precheck.is_allowed() && reason.contains("Target mismatch") =>
+                            crate::agent::execution_authority::ValidationResult::Blocked {
+                                reason,
+                                ..
+                            } if env_precheck.is_allowed()
+                                && reason.contains("Target mismatch") =>
                             {
                                 tracing::info!(
                                     tool = %call.name,
@@ -8098,6 +9149,18 @@ impl AgentLoop {
 
                 // Stop the heartbeat task.
                 hb_cancel.cancel();
+
+                tracing::info!(
+                    target: "tool_execution",
+                    session = session_id,
+                    execution_id = %tool_execution_id,
+                    tool_name = %call.name,
+                    duration_ms = tool_execution_started.elapsed().as_millis(),
+                    success = tool_result.success,
+                    failure_reason = %tool_result.error.as_deref().unwrap_or("-"),
+                    result_summary = %sanitize_json_for_logs(&tool_result.data, 220, 8),
+                    "Tool execution completed"
+                );
 
                 // ── Phase 3: Post-execution verification ─────────────────────
                 // Validate tool results for non-trivial tools when a verifier is attached.

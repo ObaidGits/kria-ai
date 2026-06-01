@@ -824,19 +824,22 @@ impl ToolHandler for ManagedBrowserNavigate {
             let cdp_available = tokio::time::timeout(
                 std::time::Duration::from_millis(300),
                 crate::agent::browser_cognition::BrowserCognitionEngine::is_available(),
-            ).await.unwrap_or(false);
+            )
+            .await
+            .unwrap_or(false);
 
             if cdp_available {
                 // CDP already running — use it (fast path)
                 let engine = crate::agent::browser_cognition::BrowserCognitionEngine::new();
-                let nav_result = tokio::time::timeout(
-                    std::time::Duration::from_secs(5),
-                    engine.navigate(url),
-                ).await;
+                let nav_result =
+                    tokio::time::timeout(std::time::Duration::from_secs(5), engine.navigate(url))
+                        .await;
 
                 if let Ok(res) = nav_result {
                     if res.success {
-                        return ToolResult::ok(serde_json::json!({ "managed_opened": url, "method": "cdp" }));
+                        return ToolResult::ok(
+                            serde_json::json!({ "managed_opened": url, "method": "cdp" }),
+                        );
                     }
                 }
                 // CDP failed — fall through to xdg-open
@@ -862,7 +865,11 @@ impl ToolHandler for ManagedBrowserNavigate {
         let open_result = if cfg!(target_os = "macos") {
             run_apply_owned("open", vec![url.to_string()]).await
         } else if cfg!(target_os = "windows") {
-            run_apply_owned("cmd", vec!["/C".into(), "start".into(), "".into(), url.to_string()]).await
+            run_apply_owned(
+                "cmd",
+                vec!["/C".into(), "start".into(), "".into(), url.to_string()],
+            )
+            .await
         } else {
             Err("managed_browser_navigate not implemented for this OS".to_string())
         };

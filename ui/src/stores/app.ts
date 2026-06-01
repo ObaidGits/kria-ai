@@ -10,6 +10,7 @@ const STORAGE_KEYS = {
   assistantSession: "kria_assistant_session_id",
   promptLabSession: "kria_prompt_lab_session_id",
   telegramBotInfo: "kria_telegram_bot_info",
+  manualToolMode: "kria_manual_tool_mode",
 } as const;
 
 function readStorageValue(key: string): string | null {
@@ -31,6 +32,41 @@ const resolveInitialEnvironment = (): "assistant" | "prompt_lab" => {
   const saved = readStorageValue(STORAGE_KEYS.environment);
   return saved === "prompt_lab" ? "prompt_lab" : "assistant";
 };
+
+const MANUAL_TOOL_MODES = [
+  { id: "auto", label: "Auto", appLock: null, toolLock: null, strategy: "routed_within_lock" },
+  { id: "n8n", label: "n8n", appLock: null, toolLock: "n8n_invoke_workflow", strategy: "direct" },
+  { id: "openclaw", label: "OpenClaw", appLock: "openclaw", toolLock: null, strategy: "routed_within_lock" },
+  { id: "gui_cognition", label: "GUI Cognition", appLock: "gui_cognition", toolLock: null, strategy: "routed_within_lock" },
+  { id: "image_generation", label: "Image Generation", appLock: null, toolLock: "generate_image", strategy: "direct" },
+  { id: "gmail", label: "Gmail", appLock: "gmail", toolLock: null, strategy: "routed_within_lock" },
+  { id: "calendar", label: "Calendar", appLock: "calendar", toolLock: null, strategy: "routed_within_lock" },
+  { id: "github", label: "GitHub", appLock: "github", toolLock: null, strategy: "routed_within_lock" },
+  { id: "filesystem", label: "Filesystem", appLock: "filesystem", toolLock: null, strategy: "routed_within_lock" },
+  { id: "docker", label: "Docker", appLock: "docker", toolLock: null, strategy: "routed_within_lock" },
+  { id: "browser", label: "Browser", appLock: "browser", toolLock: null, strategy: "routed_within_lock" },
+  { id: "slack", label: "Slack", appLock: "slack", toolLock: null, strategy: "routed_within_lock" },
+] as const;
+
+export type ManualToolModeId = typeof MANUAL_TOOL_MODES[number]["id"];
+
+export interface ManualToolModeOption {
+  id: ManualToolModeId;
+  label: string;
+  appLock: string | null;
+  toolLock: string | null;
+  strategy: "direct" | "routed_within_lock";
+}
+
+const manualToolModes: ManualToolModeOption[] = MANUAL_TOOL_MODES.map((mode) => ({ ...mode }));
+
+const normalizeManualToolMode = (value: unknown): ManualToolModeId => {
+  const raw = typeof value === "string" ? value.trim() : "";
+  return manualToolModes.some((mode) => mode.id === raw) ? (raw as ManualToolModeId) : "auto";
+};
+
+const resolveInitialManualToolMode = (): ManualToolModeId =>
+  normalizeManualToolMode(readStorageValue(STORAGE_KEYS.manualToolMode));
 
 // --- Signals ---
 const [assistantMessages, setAssistantMessages] = createSignal<Message[]>([]);
@@ -65,6 +101,9 @@ const [voiceTtfaMs, setVoiceTtfaMs] = createSignal<number | null>(null);
 let suppressVoiceErrorUntil = 0;
 let liveVoiceDraftMessageId: string | null = null;
 const [inputText, setInputText] = createSignal("");
+const [manualToolMode, setManualToolModeSignal] = createSignal<ManualToolModeId>(
+  resolveInitialManualToolMode()
+);
 const [settings, setSettings] = createSignal<Record<string, any> | null>(null);
 const [models, setModels] = createSignal<any[]>([]);
 const [audioDevices, setAudioDevices] = createSignal<AudioDevicesData | null>(null);
@@ -1112,6 +1151,16 @@ function setScopedToolChoice(scope: StreamScope, req: ToolChoiceRequest | null) 
   }
 }
 
+function selectedManualToolMode(): ManualToolModeOption {
+  return manualToolModes.find((mode) => mode.id === manualToolMode()) ?? manualToolModes[0];
+}
+
+function setManualToolMode(mode: ManualToolModeId) {
+  const normalized = normalizeManualToolMode(mode);
+  setManualToolModeSignal(normalized);
+  writeStorageValue(STORAGE_KEYS.manualToolMode, normalized === "auto" ? null : normalized);
+}
+
 function formatColabDispatchWarning(stage: AgentStageEvent): string {
   const detail = stage.detail && typeof stage.detail === "object" ? stage.detail : null;
   const requestedMode = typeof detail?.requested_mode === "string" ? detail.requested_mode : "colab";
@@ -1129,6 +1178,7 @@ async function sendMessage(text: string) {
   if (!text.trim()) return;
 
   setScopedToolChoice("assistant", null);
+  const selectedMode = selectedManualToolMode();
 
   const userMsg: Message = {
     id: crypto.randomUUID(),
@@ -1143,10 +1193,26 @@ async function sendMessage(text: string) {
   try {
     const sessionId = await ensureScopedSessionActive("assistant");
     void autoRenameSessionFromPrompt(sessionId, text);
-    await invoke<{ status: string }>(
-      "send_message",
-      { message: text }
-    );
+    if (selectedMode.id === "auto") {
+      await invoke<{ status: string }>(
+        "send_message",
+        { message: text }
+      );
+    } else {
+      await invoke<{ status: string }>(
+        "send_manual_tool_message",
+        {
+          message: text,
+          profile: {
+            mode_id: selectedMode.id,
+            label: selectedMode.label,
+            app_lock: selectedMode.appLock,
+            tool_lock: selectedMode.toolLock,
+            strategy: selectedMode.strategy,
+          },
+        }
+      );
+    }
     // Response arrives asynchronously via agent:token / agent:done events
   } catch (e) {
     const errMsg: Message = {
@@ -2980,6 +3046,116 @@ function initListeners() {
     }
   });
 
+  // n8n workflow completion — inject result into active chat as system message.
+  // This bridges async n8n callbacks into the conversational UI so users see
+  // workflow results without checking the admin Dashboard.
+  const logN8nFrontendDebug = (...args: unknown[]) => {
+    if (import.meta.env.DEV) {
+      console.debug(...args);
+    }
+  };
+
+  const truncateChatText = (value: unknown, maxLength: number): string => {
+    if (typeof value !== "string") return "";
+    const compact = value.replace(/\s+/g, " ").trim();
+    if (compact.length <= maxLength) return compact;
+    return `${compact.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
+  };
+
+  const formatN8nMessageLine = (message: unknown, index: number): string | null => {
+    if (!message || typeof message !== "object") return null;
+    const record = message as Record<string, unknown>;
+    const subject = truncateChatText(record.subject, 90);
+    const preview = truncateChatText(record.preview, 120);
+    const from = truncateChatText(record.from, 60);
+    const ref = truncateChatText(record.message_ref ?? record.id, 24);
+    const title = subject || preview || (ref ? `Message ${ref}` : `Message ${index + 1}`);
+    const parts = [`${index + 1}. ${title}`];
+    if (from) parts.push(`From: ${from}`);
+    if (ref) parts.push(`Ref: ${ref}`);
+    return parts.join(" | ");
+  };
+
+  const formatN8nEvidenceForChat = (evidence: unknown): string => {
+    if (!evidence || typeof evidence !== "object") {
+      return truncateChatText(evidence, 300) || "Workflow completed.";
+    }
+
+    const record = evidence as Record<string, unknown>;
+    const lines: string[] = [];
+    const result = truncateChatText(record.result ?? record.message, 220);
+    if (result) lines.push(result);
+
+    if (typeof record.message_count === "number") {
+      lines.push(`Messages found: ${record.message_count}`);
+    }
+
+    if (Array.isArray(record.messages) && record.messages.length > 0) {
+      const messageLines = record.messages
+        .slice(0, 5)
+        .map((message, index) => formatN8nMessageLine(message, index))
+        .filter((line): line is string => Boolean(line));
+
+      if (messageLines.length > 0) {
+        lines.push("Latest messages:");
+        lines.push(...messageLines.map((line) => `- ${line}`));
+      }
+
+      if (record.messages.length > messageLines.length) {
+        lines.push(`...and ${record.messages.length - messageLines.length} more.`);
+      }
+    } else if (Array.isArray(record.message_refs) && record.message_refs.length > 0) {
+      const refs = record.message_refs
+        .slice(0, 5)
+        .map((ref) => truncateChatText(ref, 24))
+        .filter(Boolean);
+      if (refs.length > 0) {
+        lines.push(`Message refs: ${refs.join(", ")}`);
+      }
+    }
+
+    if (lines.length > 0) return lines.join("\n");
+
+    const fallback = truncateChatText(JSON.stringify(record), 300);
+    return fallback || "Workflow completed.";
+  };
+
+  listen<any>("n8n:chat_result", (event) => {
+    try {
+      const payload = event.payload;
+      logN8nFrontendDebug("[n8n:chat_result] HOP-5: Event received in frontend:", JSON.stringify(payload).slice(0, 300));
+      const success = payload.success;
+      const name = payload.display_name || payload.workflow_id || "n8n workflow";
+      const status = payload.status || "unknown";
+
+      // Build a human-readable summary
+      let summary = "";
+      if (success) {
+        summary = `✓ Workflow "${name}" completed\n\n${formatN8nEvidenceForChat(payload.evidence)}`;
+      } else {
+        summary = `⚠️ Workflow "${name}" ${status.toLowerCase()}\n\n${formatN8nEvidenceForChat(payload.evidence)}`;
+      }
+
+      logN8nFrontendDebug("[n8n:chat_result] HOP-6: Injecting message into chat:", summary);
+
+      // Inject as assistant message into chat
+      setAssistantMessages((prev) => {
+        logN8nFrontendDebug("[n8n:chat_result] HOP-7: Previous message count:", prev.length, "Adding n8n result");
+        return [
+        ...prev,
+        {
+          id: `n8n-${Date.now()}`,
+          role: "assistant" as const,
+          content: summary,
+          timestamp: Date.now(),
+        },
+        ];
+      });
+    } catch (e) {
+      console.warn("[n8n:chat_result] Failed to process:", e);
+    }
+  });
+
   // Tier B VRAM blackout events
   listen<{ free_mb: number; required_mb: number; stage: string }>("image:tier_blackout", (event) => {
     if (event.payload.stage === "restored") {
@@ -3563,6 +3739,10 @@ export const appStore = {
   imageGenStage,
   vramBlackoutInfo,
   imageSessionDegraded,
+  manualToolModes,
+  manualToolMode,
+  selectedManualToolMode,
+  setManualToolMode,
 
   // Intelligence Enhancement (Phase A-F)
   executiveSnapshot,

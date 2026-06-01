@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Gmail Inbox Digest Output",
+  "type": "object",
+  "required": ["result", "message_count"],
+  "properties": {
+    "result": { "type": "string" },
+    "message_count": { "type": "integer", "minimum": 0 },
+    "message_refs": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": true
+}

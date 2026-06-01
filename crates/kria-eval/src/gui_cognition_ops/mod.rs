@@ -6,7 +6,7 @@
 //! This is NOT a unit test framework. It runs real GUI workflows and
 //! discovers operational failures systematically.
 
-pub mod scenarios;
-pub mod runner;
 pub mod failure_classifier;
 pub mod report;
+pub mod runner;
+pub mod scenarios;

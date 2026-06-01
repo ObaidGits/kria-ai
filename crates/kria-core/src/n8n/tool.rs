@@ -58,6 +58,7 @@ fn classify_error(error: &N8nClientError) -> &'static str {
     match error {
         N8nClientError::Catalog(_) => "contract_or_catalog_error",
         N8nClientError::PayloadTooLarge { .. } => "payload_too_large",
+        N8nClientError::SchemaValidation(_) => "workflow_input_schema_error",
         N8nClientError::Serialize(_) => "serialization_error",
         N8nClientError::Signing => "signing_error",
         N8nClientError::Http(_) => "external_transport_error",

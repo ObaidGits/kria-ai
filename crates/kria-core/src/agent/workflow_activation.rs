@@ -42,7 +42,9 @@ pub struct CanonicalActivationPolicy {
 }
 
 /// Progressive activation stages.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub enum ActivationStage {
     /// No canonical execution (legacy only)
     Disabled,
@@ -239,7 +241,10 @@ pub enum FallbackReason {
     /// Workflow exceeded time budget
     BudgetExceeded { elapsed_ms: u64, budget_ms: u64 },
     /// Substrate not yet activated at current stage
-    UnsupportedSubstrate { substrate: String, required_stage: String },
+    UnsupportedSubstrate {
+        substrate: String,
+        required_stage: String,
+    },
     /// Auto-rollback triggered by consecutive failures
     AutoRollback { consecutive_failures: u32 },
     /// Readiness check failed
@@ -352,20 +357,29 @@ impl CanonicalActivationReport {
             ActivationStage::Disabled => vec![],
             ActivationStage::StructuralOnly => vec!["TerminalExecution".into()],
             ActivationStage::SimpleVisible => {
-                vec!["TerminalExecution".into(), "AppOpenOnly".into(), "BrowserNavigate".into()]
+                vec![
+                    "TerminalExecution".into(),
+                    "AppOpenOnly".into(),
+                    "BrowserNavigate".into(),
+                ]
             }
             ActivationStage::HybridWorkflows => {
                 vec![
-                    "TerminalExecution".into(), "AppOpenOnly".into(),
-                    "BrowserNavigate".into(), "FileWriteThenOpen".into(),
+                    "TerminalExecution".into(),
+                    "AppOpenOnly".into(),
+                    "BrowserNavigate".into(),
+                    "FileWriteThenOpen".into(),
                     "IdeCodeRunWorkflow".into(),
                 ]
             }
             ActivationStage::FullActivation => {
                 vec![
-                    "TerminalExecution".into(), "AppOpenOnly".into(),
-                    "BrowserNavigate".into(), "FileWriteThenOpen".into(),
-                    "IdeCodeRunWorkflow".into(), "Keystroke".into(),
+                    "TerminalExecution".into(),
+                    "AppOpenOnly".into(),
+                    "BrowserNavigate".into(),
+                    "FileWriteThenOpen".into(),
+                    "IdeCodeRunWorkflow".into(),
+                    "Keystroke".into(),
                     "InteractionHeavy".into(),
                 ]
             }
@@ -374,10 +388,18 @@ impl CanonicalActivationReport {
         let unsafe_substrates = match policy.stage {
             ActivationStage::Disabled => vec!["All".into()],
             ActivationStage::StructuralOnly => {
-                vec!["AppOpenOnly".into(), "BrowserNavigate".into(), "Interactive".into()]
+                vec![
+                    "AppOpenOnly".into(),
+                    "BrowserNavigate".into(),
+                    "Interactive".into(),
+                ]
             }
             ActivationStage::SimpleVisible => {
-                vec!["FileWriteThenOpen".into(), "IdeCodeRunWorkflow".into(), "Interactive".into()]
+                vec![
+                    "FileWriteThenOpen".into(),
+                    "IdeCodeRunWorkflow".into(),
+                    "Interactive".into(),
+                ]
             }
             ActivationStage::HybridWorkflows => {
                 vec!["Keystroke".into(), "InteractionHeavy".into()]
@@ -391,7 +413,8 @@ impl CanonicalActivationReport {
             metrics: metrics.clone(),
             success_rate: metrics.success_rate(),
             fallback_rate: metrics.fallback_rate(),
-            recommend_advancement: metrics.success_rate() >= 0.95 && metrics.canonical_executions >= 5,
+            recommend_advancement: metrics.success_rate() >= 0.95
+                && metrics.canonical_executions >= 5,
             recommend_full_activation: metrics.recommend_full_activation(),
             unsafe_substrates,
             active_substrates,
@@ -413,7 +436,9 @@ mod tests {
         assert!(!policy.enabled);
         assert_eq!(
             policy.is_eligible(ExecutionSubstrate::TerminalExecution),
-            RuntimeEligibility::Legacy { reason: "Canonical execution disabled" }
+            RuntimeEligibility::Legacy {
+                reason: "Canonical execution disabled"
+            }
         );
     }
 
@@ -426,42 +451,71 @@ mod tests {
         );
         assert_eq!(
             policy.is_eligible(ExecutionSubstrate::AppOpenOnly),
-            RuntimeEligibility::Legacy { reason: "Substrate not yet activated at current stage" }
+            RuntimeEligibility::Legacy {
+                reason: "Substrate not yet activated at current stage"
+            }
         );
         assert_eq!(
             policy.is_eligible(ExecutionSubstrate::IdeCodeRunWorkflow),
-            RuntimeEligibility::Legacy { reason: "Substrate not yet activated at current stage" }
+            RuntimeEligibility::Legacy {
+                reason: "Substrate not yet activated at current stage"
+            }
         );
     }
 
     #[test]
     fn stage2_allows_simple_visible() {
         let policy = CanonicalActivationPolicy::at_stage(ActivationStage::SimpleVisible);
-        assert_eq!(policy.is_eligible(ExecutionSubstrate::TerminalExecution), RuntimeEligibility::Canonical);
-        assert_eq!(policy.is_eligible(ExecutionSubstrate::AppOpenOnly), RuntimeEligibility::Canonical);
-        assert_eq!(policy.is_eligible(ExecutionSubstrate::BrowserNavigate), RuntimeEligibility::Canonical);
+        assert_eq!(
+            policy.is_eligible(ExecutionSubstrate::TerminalExecution),
+            RuntimeEligibility::Canonical
+        );
+        assert_eq!(
+            policy.is_eligible(ExecutionSubstrate::AppOpenOnly),
+            RuntimeEligibility::Canonical
+        );
+        assert_eq!(
+            policy.is_eligible(ExecutionSubstrate::BrowserNavigate),
+            RuntimeEligibility::Canonical
+        );
         assert_eq!(
             policy.is_eligible(ExecutionSubstrate::IdeCodeRunWorkflow),
-            RuntimeEligibility::Legacy { reason: "Substrate not yet activated at current stage" }
+            RuntimeEligibility::Legacy {
+                reason: "Substrate not yet activated at current stage"
+            }
         );
     }
 
     #[test]
     fn stage3_allows_hybrid() {
         let policy = CanonicalActivationPolicy::at_stage(ActivationStage::HybridWorkflows);
-        assert_eq!(policy.is_eligible(ExecutionSubstrate::IdeCodeRunWorkflow), RuntimeEligibility::Canonical);
-        assert_eq!(policy.is_eligible(ExecutionSubstrate::FileWriteThenOpen), RuntimeEligibility::Canonical);
+        assert_eq!(
+            policy.is_eligible(ExecutionSubstrate::IdeCodeRunWorkflow),
+            RuntimeEligibility::Canonical
+        );
+        assert_eq!(
+            policy.is_eligible(ExecutionSubstrate::FileWriteThenOpen),
+            RuntimeEligibility::Canonical
+        );
         assert_eq!(
             policy.is_eligible(ExecutionSubstrate::Keystroke),
-            RuntimeEligibility::Legacy { reason: "Substrate not yet activated at current stage" }
+            RuntimeEligibility::Legacy {
+                reason: "Substrate not yet activated at current stage"
+            }
         );
     }
 
     #[test]
     fn stage4_allows_all() {
         let policy = CanonicalActivationPolicy::at_stage(ActivationStage::FullActivation);
-        assert_eq!(policy.is_eligible(ExecutionSubstrate::Keystroke), RuntimeEligibility::Canonical);
-        assert_eq!(policy.is_eligible(ExecutionSubstrate::InteractionHeavy), RuntimeEligibility::Canonical);
+        assert_eq!(
+            policy.is_eligible(ExecutionSubstrate::Keystroke),
+            RuntimeEligibility::Canonical
+        );
+        assert_eq!(
+            policy.is_eligible(ExecutionSubstrate::InteractionHeavy),
+            RuntimeEligibility::Canonical
+        );
     }
 
     #[test]
@@ -477,7 +531,9 @@ mod tests {
         assert!(!policy.enabled); // Auto-rollback triggered
         assert_eq!(
             policy.is_eligible(ExecutionSubstrate::TerminalExecution),
-            RuntimeEligibility::Legacy { reason: "Canonical execution disabled" }
+            RuntimeEligibility::Legacy {
+                reason: "Canonical execution disabled"
+            }
         );
     }
 
@@ -517,7 +573,10 @@ mod tests {
                 ocr_available: false,
             },
             verifier: VerifierCapability {
-                available_methods: vec![VerificationMethod::FileSystem, VerificationMethod::ProcessTable],
+                available_methods: vec![
+                    VerificationMethod::FileSystem,
+                    VerificationMethod::ProcessTable,
+                ],
                 window_state_max_confidence: 0.90,
                 cdp_available: false,
                 filesystem_available: true,
@@ -588,7 +647,11 @@ mod tests {
 
         assert_eq!(report.current_stage, ActivationStage::SimpleVisible);
         assert!(report.enabled);
-        assert!(report.active_substrates.contains(&"AppOpenOnly".to_string()));
-        assert!(report.unsafe_substrates.contains(&"Interactive".to_string()));
+        assert!(report
+            .active_substrates
+            .contains(&"AppOpenOnly".to_string()));
+        assert!(report
+            .unsafe_substrates
+            .contains(&"Interactive".to_string()));
     }
 }

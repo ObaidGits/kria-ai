@@ -115,8 +115,14 @@ impl HitlStore {
             allowed_option_ids,
         };
 
-        self.pending.write().await.insert(request_id.clone(), pending);
-        self.response_routes.lock().await.insert(request_id.clone(), tx);
+        self.pending
+            .write()
+            .await
+            .insert(request_id.clone(), pending);
+        self.response_routes
+            .lock()
+            .await
+            .insert(request_id.clone(), tx);
 
         info!(
             target: "api_hitl",
@@ -172,7 +178,11 @@ impl HitlStore {
 
         // Remove from pending and route to oneshot
         self.pending.write().await.remove(&response.request_id);
-        let tx = self.response_routes.lock().await.remove(&response.request_id);
+        let tx = self
+            .response_routes
+            .lock()
+            .await
+            .remove(&response.request_id);
 
         match tx {
             Some(tx) => {
@@ -384,7 +394,6 @@ mod tests {
         assert!(!pending.iter().any(|p| p.request_id == rid1));
     }
 }
-
 
 // ─── SSE streaming endpoint ──────────────────────────────────────────────────
 // Provides server-sent events for clients that want to track HITL prompts +

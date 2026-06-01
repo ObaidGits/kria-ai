@@ -46,7 +46,9 @@ use crate::agent::turn_gate::IntentEnvelope;
 /// - A valid TLD pattern (word.tld where tld is 2-6 alpha chars, not sentence punctuation)
 fn looks_like_url(s: &str) -> bool {
     // Strip trailing punctuation that's clearly sentence-ending
-    let cleaned = s.trim_end_matches(|c: char| c == '.' || c == ',' || c == ';' || c == '!' || c == '?' || c == ')' || c == ']');
+    let cleaned = s.trim_end_matches(|c: char| {
+        c == '.' || c == ',' || c == ';' || c == '!' || c == '?' || c == ')' || c == ']'
+    });
 
     // Explicit scheme — always a URL
     if cleaned.starts_with("http://") || cleaned.starts_with("https://") {
@@ -80,13 +82,27 @@ fn looks_like_url(s: &str) -> bool {
         // Before the dot must have at least 2 chars and no spaces
         let valid_domain = before_dot.len() >= 2
             && !before_dot.contains(' ')
-            && before_dot.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.' || c == '_');
+            && before_dot
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.' || c == '_');
 
         // Reject common abbreviations and sentence fragments
         let is_abbreviation = matches!(
             cleaned.to_lowercase().as_str(),
-            "e.g." | "i.e." | "etc." | "vs." | "mr." | "mrs." | "dr." | "st."
-                | "no." | "vol." | "fig." | "eq." | "approx." | "dept."
+            "e.g."
+                | "i.e."
+                | "etc."
+                | "vs."
+                | "mr."
+                | "mrs."
+                | "dr."
+                | "st."
+                | "no."
+                | "vol."
+                | "fig."
+                | "eq."
+                | "approx."
+                | "dept."
         );
 
         if valid_tld && valid_domain && !is_abbreviation {
@@ -309,26 +325,56 @@ impl IntentCompiler for RuleIntentCompiler {
         {
             let lower_text = lower.as_str();
             let script_pattern_starts = [
-                "write a python", "write a rust", "write a javascript", "write a js ",
-                "write a bash", "write a shell", "write a node", "write a ruby",
-                "write a go ", "write a c ", "write a c++", "write a cpp",
-                "create a python", "create a rust", "create a javascript", "create a js ",
-                "create a bash", "create a shell", "create a node", "create a ruby",
-                "generate a python", "generate a rust", "generate a bash",
+                "write a python",
+                "write a rust",
+                "write a javascript",
+                "write a js ",
+                "write a bash",
+                "write a shell",
+                "write a node",
+                "write a ruby",
+                "write a go ",
+                "write a c ",
+                "write a c++",
+                "write a cpp",
+                "create a python",
+                "create a rust",
+                "create a javascript",
+                "create a js ",
+                "create a bash",
+                "create a shell",
+                "create a node",
+                "create a ruby",
+                "generate a python",
+                "generate a rust",
+                "generate a bash",
             ];
-            let matched_prefix = script_pattern_starts.iter().find(|p| lower_text.starts_with(*p));
+            let matched_prefix = script_pattern_starts
+                .iter()
+                .find(|p| lower_text.starts_with(*p));
             if let Some(prefix) = matched_prefix {
                 // Extract the language from the prefix
-                let language = if prefix.contains("python") { "python" }
-                    else if prefix.contains("rust") { "rust" }
-                    else if prefix.contains("javascript") || prefix.contains(" js ") { "javascript" }
-                    else if prefix.contains("bash") || prefix.contains("shell") { "bash" }
-                    else if prefix.contains("node") { "node" }
-                    else if prefix.contains("ruby") { "ruby" }
-                    else if prefix.contains(" go ") { "go" }
-                    else if prefix.contains("c++") || prefix.contains("cpp") { "cpp" }
-                    else if prefix.contains(" c ") { "c" }
-                    else { "text" };
+                let language = if prefix.contains("python") {
+                    "python"
+                } else if prefix.contains("rust") {
+                    "rust"
+                } else if prefix.contains("javascript") || prefix.contains(" js ") {
+                    "javascript"
+                } else if prefix.contains("bash") || prefix.contains("shell") {
+                    "bash"
+                } else if prefix.contains("node") {
+                    "node"
+                } else if prefix.contains("ruby") {
+                    "ruby"
+                } else if prefix.contains(" go ") {
+                    "go"
+                } else if prefix.contains("c++") || prefix.contains("cpp") {
+                    "cpp"
+                } else if prefix.contains(" c ") {
+                    "c"
+                } else {
+                    "text"
+                };
 
                 // Try to extract path: "at /path/to/file.ext" or "in /path/to/file.ext"
                 let path = extract_file_path(text);
@@ -354,7 +400,7 @@ impl IntentCompiler for RuleIntentCompiler {
                 targets.push(TargetRef::App(language.to_string()));
 
                 return Ok(GuiTaskSpec {
-                    primary_verb: Verb::Open,  // treated as "create + open"
+                    primary_verb: Verb::Open, // treated as "create + open"
                     targets,
                     content: Some(ContentClass::Generated {
                         hint,
@@ -503,7 +549,9 @@ impl IntentCompiler for RuleIntentCompiler {
         // PRIMARY content of the sentence (not just a word ending with a period).
         for token in text.split_whitespace() {
             // Skip tokens that are clearly just words with trailing punctuation
-            let cleaned = token.trim_end_matches(|c: char| c == '.' || c == ',' || c == ';' || c == '!' || c == '?');
+            let cleaned = token.trim_end_matches(|c: char| {
+                c == '.' || c == ',' || c == ';' || c == '!' || c == '?'
+            });
             if cleaned.is_empty() {
                 continue;
             }
@@ -513,11 +561,31 @@ impl IntentCompiler for RuleIntentCompiler {
                 // don't treat it as a URL even if looks_like_url passes.
                 // This catches edge cases the TLD check might miss.
                 let word_lower = cleaned.to_lowercase();
-                let is_common_word = matches!(word_lower.as_str(),
-                    "output" | "results" | "loaded" | "running" | "available" | "installed"
-                    | "complete" | "finished" | "started" | "stopped" | "working" | "ready"
-                    | "done" | "failed" | "success" | "error" | "warning" | "info"
-                    | "file" | "folder" | "directory" | "process" | "service"
+                let is_common_word = matches!(
+                    word_lower.as_str(),
+                    "output"
+                        | "results"
+                        | "loaded"
+                        | "running"
+                        | "available"
+                        | "installed"
+                        | "complete"
+                        | "finished"
+                        | "started"
+                        | "stopped"
+                        | "working"
+                        | "ready"
+                        | "done"
+                        | "failed"
+                        | "success"
+                        | "error"
+                        | "warning"
+                        | "info"
+                        | "file"
+                        | "folder"
+                        | "directory"
+                        | "process"
+                        | "service"
                 );
                 if is_common_word {
                     continue;
@@ -722,8 +790,11 @@ mod tests {
             .await
             .unwrap();
         // Should be Verb::Other, NOT Verb::Open with Url target
-        assert!(!spec.targets.iter().any(|t| matches!(t, TargetRef::Url(_))),
-            "Sentence-ending 'output.' must not be classified as URL, got: {:?}", spec.targets);
+        assert!(
+            !spec.targets.iter().any(|t| matches!(t, TargetRef::Url(_))),
+            "Sentence-ending 'output.' must not be classified as URL, got: {:?}",
+            spec.targets
+        );
     }
 
     #[tokio::test]
@@ -733,8 +804,13 @@ mod tests {
             .compile("check out github.com for the code", &env)
             .await
             .unwrap();
-        assert!(spec.targets.iter().any(|t| matches!(t, TargetRef::Url(u) if u.contains("github.com"))),
-            "Real URL 'github.com' should be detected, got: {:?}", spec.targets);
+        assert!(
+            spec.targets
+                .iter()
+                .any(|t| matches!(t, TargetRef::Url(u) if u.contains("github.com"))),
+            "Real URL 'github.com' should be detected, got: {:?}",
+            spec.targets
+        );
     }
 
     // ── Script-write deterministic patterns (no LLM needed) ──────────────────
@@ -743,27 +819,42 @@ mod tests {
     async fn write_python_script_at_path_recognized() {
         let env = make_envelope();
         let spec = RuleIntentCompiler
-            .compile("Write a Python script at /tmp/foo.py that prints hello", &env)
+            .compile(
+                "Write a Python script at /tmp/foo.py that prints hello",
+                &env,
+            )
             .await
             .unwrap();
         // Should produce a Verb::Open (file-write workflow)
         assert_eq!(spec.primary_verb, Verb::Open);
         // Should have the file path target
-        assert!(spec.targets.iter().any(|t| matches!(t, TargetRef::File(p) if p.to_str().unwrap().contains("foo.py"))),
-            "File path target missing: {:?}", spec.targets);
+        assert!(
+            spec.targets
+                .iter()
+                .any(|t| matches!(t, TargetRef::File(p) if p.to_str().unwrap().contains("foo.py"))),
+            "File path target missing: {:?}",
+            spec.targets
+        );
         // Should have generated content with python language
-        assert!(matches!(&spec.content, Some(ContentClass::Generated { language: Some(l), .. }) if l == "python"));
+        assert!(
+            matches!(&spec.content, Some(ContentClass::Generated { language: Some(l), .. }) if l == "python")
+        );
     }
 
     #[tokio::test]
     async fn create_rust_program_recognized() {
         let env = make_envelope();
         let spec = RuleIntentCompiler
-            .compile("Create a Rust program at /tmp/main.rs that calculates fibonacci", &env)
+            .compile(
+                "Create a Rust program at /tmp/main.rs that calculates fibonacci",
+                &env,
+            )
             .await
             .unwrap();
         assert_eq!(spec.primary_verb, Verb::Open);
-        assert!(matches!(&spec.content, Some(ContentClass::Generated { language: Some(l), .. }) if l == "rust"));
+        assert!(
+            matches!(&spec.content, Some(ContentClass::Generated { language: Some(l), .. }) if l == "rust")
+        );
     }
 
     #[tokio::test]
@@ -774,6 +865,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(spec.primary_verb, Verb::Open);
-        assert!(matches!(&spec.content, Some(ContentClass::Generated { language: Some(l), .. }) if l == "bash"));
+        assert!(
+            matches!(&spec.content, Some(ContentClass::Generated { language: Some(l), .. }) if l == "bash")
+        );
     }
 }

@@ -150,6 +150,75 @@ export async function installTauriMockBridge(page: Page, options: TauriMockOptio
       const state = {
         settings: initialSettings,
         googleStatus: initialGoogleStatus,
+        n8nStatus: {
+          enabled: true,
+          mode: "external",
+          base_url: "http://127.0.0.1:5678",
+          dashboard_url: "http://127.0.0.1:5678",
+          callback_url: "http://127.0.0.1:3001/api/n8n/callback",
+          configured_workflows: [
+            {
+              workflow_id: "test_workflow",
+              workflow_version: "v1",
+              display_name: "Test Workflow",
+              endpoint_path: "/webhook/kria-test",
+              status: "approved",
+              environment: "dev",
+              risk_tier: "Green",
+              irreversibility_class: "read_only",
+              timeout_class: "interactive",
+              owner: "local-user",
+              requires_callback: true,
+              input_schema_ref: "schemas/n8n/test.input.json",
+              output_schema_ref: "schemas/n8n/test.output.json",
+              expected_evidence: ["result"],
+              credential_requirements: ["none"],
+              data_scope: ["diagnostic"],
+              hitl_policy: "none",
+              category: "diagnostic",
+              description: "Safe diagnostic workflow",
+              example_prompts: ["Run test_workflow"],
+              tags: ["diagnostic", "test"],
+              aliases: ["test workflow"],
+            },
+          ],
+          catalog_workflows: [],
+          runs: [] as any[],
+          dead_letters: [] as any[],
+          governance_log: [] as any[],
+          hitl_responses: {},
+          stage3_readiness: {
+            status: "blocked",
+            ready: false,
+            required_workflow_count: 3,
+            workflow_metadata_count: 1,
+            checked_at_ms: Date.now(),
+            checks: [],
+            missing_gates: ["workflow_metadata_count"],
+            first_slice: [],
+          },
+          inbox_path: "/tmp/kria-n8n-callback-inbox.jsonl",
+          audit_path: "/tmp/kria-n8n-governance-audit.jsonl",
+          notes: [],
+        },
+        n8nRuntimeStatus: {
+          enabled: true,
+          mode: "external",
+          base_url: "http://127.0.0.1:5678",
+          dashboard_url: "http://127.0.0.1:5678",
+          callback_url: "http://127.0.0.1:3001/api/n8n/callback",
+          secret_sources: {
+            signing_secret: "file",
+            api_key: "none",
+          },
+          runtime: {
+            last_connection: {
+              status: "ok",
+              message: "Mock n8n connection healthy",
+              checked_at_ms: Date.now(),
+            },
+          },
+        },
       };
 
       const clone = (value: any) => JSON.parse(JSON.stringify(value));
@@ -300,6 +369,90 @@ export async function installTauriMockBridge(page: Page, options: TauriMockOptio
             }
             return clone(state.googleStatus);
           }
+          case "get_n8n_status":
+            return clone(state.n8nStatus);
+          case "get_n8n_runtime_status":
+            return clone(state.n8nRuntimeStatus);
+          case "list_n8n_executions":
+            return {
+              source: "mock",
+              executions: clone(state.n8nStatus.runs),
+              count: state.n8nStatus.runs.length,
+            };
+          case "suggest_n8n_workflows": {
+            const prompt = String(args?.request?.prompt ?? "");
+            const workflow = state.n8nStatus.configured_workflows[0];
+            return {
+              schema_version: "kria.n8n.workflow_suggestion.v1",
+              prompt,
+              reference: prompt,
+              status: "needs_confirmation",
+              candidates: [
+                {
+                  workflow_id: workflow.workflow_id,
+                  workflow_version: workflow.workflow_version,
+                  display_name: workflow.display_name,
+                  category: workflow.category,
+                  risk_tier: workflow.risk_tier,
+                  status: workflow.status,
+                  hitl_policy: workflow.hitl_policy,
+                  score: 100,
+                  confidence: 1,
+                  confidence_label: "high",
+                  matched_on: ["workflow_id"],
+                  requires_confirmation: true,
+                  reason: "Exact workflow_id match",
+                },
+              ],
+              requires_confirmation: true,
+              can_auto_run: false,
+              ambiguous: false,
+              hard_prompt: false,
+              message: `I found "${workflow.display_name}". Confirm before I run it.`,
+              confirmation_hint: `Confirm with: Confirm workflow ${workflow.workflow_id}`,
+            };
+          }
+          case "invoke_n8n_workflow_from_ui": {
+            const workflowId = String(args?.request?.workflowId ?? "test_workflow");
+            const workflowVersion = String(args?.request?.workflowVersion ?? "v1");
+            const correlationId = `pw-${workflowId}-${Date.now()}`;
+            state.n8nStatus.runs.unshift({
+              correlation_id: correlationId,
+              workflow_id: workflowId,
+              workflow_version: workflowVersion,
+              n8n_run_id: "",
+              last_sequence_number: 0,
+              status: "accepted",
+              evidence_log: [],
+              side_effects: [],
+              terminal: false,
+              triggered_at_ms: Date.now(),
+            });
+            emitEvent("n8n:workflow_invocation_started", {
+              event_type: "n8n:workflow_invocation_started",
+              workflow_id: workflowId,
+              workflow_version: workflowVersion,
+              correlation_id: correlationId,
+            });
+            emitEvent("n8n:workflow_invocation_accepted", {
+              event_type: "n8n:workflow_invocation_accepted",
+              workflow_id: workflowId,
+              workflow_version: workflowVersion,
+              correlation_id: correlationId,
+              status: "accepted",
+            });
+            return {
+              workflow_id: workflowId,
+              workflow_version: workflowVersion,
+              correlation_id: correlationId,
+              accepted: true,
+              message: `Workflow "${workflowId}" triggered. Waiting for n8n callback.`,
+            };
+          }
+          case "reconcile_n8n_run":
+            return { status: "ok", correlation_id: args?.correlationId ?? null };
+          case "discover_n8n_workflows":
+            return { status: "ok", workflows: [] };
           case "set_google_workspace_account": {
             const account = String(args?.account ?? "personal").trim() || "personal";
             state.googleStatus.account = account;
@@ -330,6 +483,17 @@ export async function installTauriMockBridge(page: Page, options: TauriMockOptio
           case "restart_mcp_server_runtime":
             return { status: "ok", restarted: true, name: args?.name ?? null };
           case "send_message":
+            return { status: "ok" };
+          case "send_manual_tool_message":
+            emitEvent("ManualToolSelectionActivated", {
+              event: "ManualToolSelectionActivated",
+              selected_tool: args?.profile?.label ?? args?.profile?.mode_id ?? "manual",
+              mode_id: args?.profile?.mode_id ?? null,
+              execution_id: `mock-manual-${Date.now()}`,
+              prompt_preview: String(args?.message ?? "").slice(0, 120),
+              routing: "manual_override",
+              semantic_routing: "bypassed",
+            });
             return { status: "ok" };
           case "send_image_message":
             return { status: "ok", attachment: "mock" };

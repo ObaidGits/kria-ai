@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "KRIA Test Workflow Output",
+  "type": "object",
+  "required": ["result"],
+  "properties": {
+    "result": { "type": "string" }
+  },
+  "additionalProperties": true
+}

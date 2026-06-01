@@ -1,5 +1,6 @@
 import { Component, For, Show, createEffect, createSignal, createMemo, onCleanup, untrack } from "solid-js";
 import { appStore } from "../stores/app";
+import type { ManualToolModeId } from "../stores/app";
 import MessageBubble from "./MessageBubble";
 import ExportDropdown from "./ExportDropdown";
 import ImageProgressChip from "./ImageProgressChip";
@@ -46,6 +47,10 @@ const ChatView: Component = () => {
     sessions,
     isSwapping,
     degradationLevel,
+    manualToolModes,
+    manualToolMode,
+    selectedManualToolMode,
+    setManualToolMode,
   } = appStore;
 
   // Derive the title of the current session for exports
@@ -346,8 +351,15 @@ const ChatView: Component = () => {
         {isThinking() && (
           <div class="thinking-row">
             <div class="thinking-avatar">K</div>
-            <div class="thinking-bubble">
-              <span class="dot" /><span class="dot" /><span class="dot" />
+            <div class="thinking-bubble response-loading-bubble" role="status" aria-live="polite">
+              <span class="thinking-label">
+                {manualToolMode() === "n8n"
+                  ? "Waiting for n8n workflow result"
+                  : "KRIA is preparing a response"}
+              </span>
+              <span class="thinking-dots" aria-hidden="true">
+                <span class="dot" /><span class="dot" /><span class="dot" />
+              </span>
             </div>
           </div>
         )}
@@ -361,6 +373,32 @@ const ChatView: Component = () => {
         <Show when={degradationLevel && degradationLevel() === "critical"}>
           <div class="degradation-banner">⚠️ Operating in reduced capacity mode.</div>
         </Show>
+
+        <div class={`manual-tool-mode-bar ${manualToolMode() === "auto" ? "auto" : "manual"}`}>
+          <label class="manual-tool-mode-select">
+            <span>Tool Mode</span>
+            <select
+              value={manualToolMode()}
+              onChange={(e) => setManualToolMode(e.currentTarget.value as ManualToolModeId)}
+              disabled={isThinking()}
+            >
+              <For each={manualToolModes}>
+                {(mode) => <option value={mode.id}>{mode.label}</option>}
+              </For>
+            </select>
+          </label>
+
+          <Show
+            when={manualToolMode() !== "auto"}
+            fallback={<span class="manual-tool-mode-copy">Routing: Auto</span>}
+          >
+            <div class="manual-tool-mode-banner" role="status" aria-live="polite">
+              <span>Tool Mode: {selectedManualToolMode().label}</span>
+              <span>Routing: Manual</span>
+              <span>Selection Source: User</span>
+            </div>
+          </Show>
+        </div>
 
         {/* File chips (pending document attachments) */}
         <Show when={pendingFiles().length > 0}>

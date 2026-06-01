@@ -91,7 +91,7 @@ impl N8nCatalog {
             });
         }
 
-        if workflow.endpoint_path.trim().is_empty() {
+        if workflow.requires_direct_endpoint_path() && workflow.endpoint_path.trim().is_empty() {
             return Err(N8nCatalogError::MissingEndpointPath(
                 workflow.workflow_id.clone(),
             ));

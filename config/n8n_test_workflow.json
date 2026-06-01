@@ -1,0 +1,97 @@
+{
+  "name": "KRIA Test Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "c68f6f2c-4175-4c96-913b-1b5162f356e5",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-node",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "c68f6f2c-4175-4c96-913b-1b5162f356e5"
+    },
+    {
+      "parameters": {
+        "jsCode": "const nodeCrypto = require('crypto');\nconst incoming = $input.first().json;\nconst body = incoming && typeof incoming.body === 'object' && incoming.body !== null ? incoming.body : incoming;\nconst workflowId = body.workflow_id || 'test_workflow';\nconst workflowVersion = body.workflow_version || 'v1';\nconst correlationId = body.correlation_id || `manual-${Date.now()}`;\nconst causationId = body.causation_id || correlationId;\nconst inputPayload = body.input_payload || {};\nconst nowMs = Date.now();\nconst executedAt = new Date(nowMs).toISOString();\nconst n8nRunId = typeof $execution !== 'undefined' && $execution.id ? String($execution.id) : `exec-${nowMs}`;\nconst eventId = `evt-${correlationId}-${nowMs}`;\nconst result = 'Hello from n8n! Workflow executed successfully.';\nconst callbackEnvelope = {\n  schema_version: 'kria.n8n.callback.v1',\n  correlation_id: correlationId,\n  causation_id: causationId,\n  event_id: eventId,\n  sequence_number: 1,\n  workflow_id: workflowId,\n  workflow_version: workflowVersion,\n  n8n_run_id: n8nRunId,\n  status: 'completed',\n  evidence: {\n    result,\n    received_input_payload: inputPayload,\n    executed_at: executedAt\n  },\n  side_effects: [],\n  occurred_at_ms: nowMs\n};\nconst callbackBody = JSON.stringify(callbackEnvelope);\nconst signingSecret = $env.KRIA_N8N_SIGNING_SECRET || '';\nconst callbackSignature = signingSecret\n  ? 'sha256=' + nodeCrypto.createHmac('sha256', signingSecret).update(callbackBody).digest('hex')\n  : '';\nreturn [{\n  json: {\n    ...callbackEnvelope,\n    result,\n    received_input_payload: inputPayload,\n    executed_at: executedAt,\n    callback_body: callbackBody,\n    callback_signature: callbackSignature\n  }\n}];"
+      },
+      "id": "code-node",
+      "name": "Process",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:3001/api/n8n/callback",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-kria-signature",
+              "value": "={{ $json.callback_signature }}"
+            },
+            {
+              "name": "x-kria-correlation-id",
+              "value": "={{ $json.correlation_id }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": []
+        },
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.callback_body }}",
+        "options": {}
+      },
+      "id": "callback-node",
+      "name": "Send Callback to KRIA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ received: true, correlation_id: $('Process').first().json.correlation_id, n8n_run_id: $('Process').first().json.n8n_run_id }) }}",
+        "options": {}
+      },
+      "id": "respond-node",
+      "name": "Respond to KRIA",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [680, 460]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          { "node": "Process", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Process": {
+      "main": [
+        [
+          { "node": "Send Callback to KRIA", "type": "main", "index": 0 },
+          { "node": "Respond to KRIA", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

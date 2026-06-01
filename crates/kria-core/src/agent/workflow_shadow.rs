@@ -36,7 +36,9 @@ use crate::agent::workflow_types::*;
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// Severity of a runtime divergence between legacy and canonical.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub enum DivergenceSeverity {
     /// Harmless difference (timing jitter, formatting)
     Benign,
@@ -237,7 +239,8 @@ impl ShadowExecutionContext {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 use crate::agent::intent_compiler::GuiTaskSpec;
-use crate::agent::workflow_planner::{CapabilityAwarePlanner, PlanningResult};/// Execute a workflow in shadow mode — NO side effects.
+use crate::agent::workflow_planner::{CapabilityAwarePlanner, PlanningResult};
+/// Execute a workflow in shadow mode — NO side effects.
 ///
 /// This function:
 /// 1. Runs capability-aware planning (no mutations)
@@ -255,7 +258,8 @@ pub fn execute_shadow(
     let mut ctx = ShadowExecutionContext::new(workflow_id, capabilities.clone());
 
     // Step 1: Run capability-aware planning (pure, no side effects)
-    let planning_result = CapabilityAwarePlanner::plan(spec, raw_user_text, capabilities, app_registry);
+    let planning_result =
+        CapabilityAwarePlanner::plan(spec, raw_user_text, capabilities, app_registry);
 
     match planning_result {
         PlanningResult::Planned {
@@ -292,9 +296,10 @@ pub fn execute_shadow(
             let all_steps_pass = ctx.simulated_steps.iter().all(|s| s.predicted_success);
             if all_steps_pass {
                 // Check if desired outcomes would be verifiable
-                let desired_verifiable = outcome_contract.desired.iter().all(|o| {
-                    can_verify_outcome(&o.expectation, capabilities)
-                });
+                let desired_verifiable = outcome_contract
+                    .desired
+                    .iter()
+                    .all(|o| can_verify_outcome(&o.expectation, capabilities));
                 if desired_verifiable && outcome_contract.desired.is_empty() {
                     ctx.canonical_verdict = Some(WorkflowVerdict::Complete);
                 } else if desired_verifiable {
@@ -348,13 +353,17 @@ fn predict_step_outcome(action: &str, capabilities: &CapabilitySet) -> Simulated
         "execute_bash" | "execute_python" => (true, "Shell execution always available"),
         "open_application" | "open_application_with_file" => {
             // Depends on app being installed — assume yes for simulation
-            (true, "App launch assumed available (registry check at plan time)")
+            (
+                true,
+                "App launch assumed available (registry check at plan time)",
+            )
         }
         "browser_search" | "managed_browser_navigate" | "open_url" => {
             (true, "Browser launch assumed available")
         }
         "type_text" | "click_mouse" | "click_element" | "press_shortcut" => {
-            let can_inject = capabilities.interaction.keyboard_injection != InputInjectionLevel::None;
+            let can_inject =
+                capabilities.interaction.keyboard_injection != InputInjectionLevel::None;
             if can_inject {
                 (true, "Input injection available via uinput")
             } else {
@@ -418,10 +427,8 @@ pub fn compare_runtime_parity(
         .map(|v| format!("{:?}", v))
         .unwrap_or_else(|| "None".into());
 
-    let verdict_match = classify_verdict_match(
-        legacy_success,
-        shadow_ctx.canonical_verdict.as_ref(),
-    );
+    let verdict_match =
+        classify_verdict_match(legacy_success, shadow_ctx.canonical_verdict.as_ref());
 
     if verdict_match == VerdictMatchType::DifferentVerdict {
         divergences.push(Divergence {
@@ -457,7 +464,8 @@ pub fn compare_runtime_parity(
         if !steps_match {
             divergences.push(Divergence {
                 category: DivergenceCategory::PlanningStructureMismatch,
-                severity: if (plan.step_count as i32 - legacy_total_steps as i32).unsigned_abs() > 2 {
+                severity: if (plan.step_count as i32 - legacy_total_steps as i32).unsigned_abs() > 2
+                {
                     DivergenceSeverity::Medium
                 } else {
                     DivergenceSeverity::Advisory
@@ -468,7 +476,9 @@ pub fn compare_runtime_parity(
                 ),
                 legacy_value: format!("{} steps", legacy_total_steps),
                 canonical_value: format!("{} steps", plan.step_count),
-                probable_cause: Some("Canonical planner may add/remove steps based on capabilities".into()),
+                probable_cause: Some(
+                    "Canonical planner may add/remove steps based on capabilities".into(),
+                ),
                 remediation: None,
             });
         }
@@ -541,7 +551,9 @@ fn classify_verdict_match(
 
     let canonical_success = matches!(
         canonical,
-        WorkflowVerdict::Complete | WorkflowVerdict::StructurallyComplete { .. } | WorkflowVerdict::AlreadySatisfied { .. }
+        WorkflowVerdict::Complete
+            | WorkflowVerdict::StructurallyComplete { .. }
+            | WorkflowVerdict::AlreadySatisfied { .. }
     );
 
     match (legacy_success, canonical_success) {
@@ -577,7 +589,10 @@ mod tests {
                 ocr_available: false,
             },
             verifier: VerifierCapability {
-                available_methods: vec![VerificationMethod::FileSystem, VerificationMethod::ProcessTable],
+                available_methods: vec![
+                    VerificationMethod::FileSystem,
+                    VerificationMethod::ProcessTable,
+                ],
                 window_state_max_confidence: 0.90,
                 cdp_available: false,
                 filesystem_available: true,
@@ -623,7 +638,9 @@ mod tests {
         let spec = GuiTaskSpec {
             primary_verb: Verb::Type,
             targets: vec![TargetRef::Element("search".into())],
-            content: Some(crate::agent::intent_compiler::ContentClass::Literal("hello".into())),
+            content: Some(crate::agent::intent_compiler::ContentClass::Literal(
+                "hello".into(),
+            )),
             declared_preconditions: vec![],
             declared_success_criteria: vec![],
             ambiguities: vec![],
@@ -662,7 +679,7 @@ mod tests {
         let report = compare_runtime_parity(
             "test-1",
             "open gedit",
-            true,  // legacy says success
+            true, // legacy says success
             1,
             1,
             None,
@@ -672,7 +689,10 @@ mod tests {
         // Legacy says Complete (success=true), canonical says StructurallyComplete
         // This is EquivalentOutcome (both are "success" variants)
         assert!(
-            matches!(report.verdict_diff.match_type, VerdictMatchType::Exact | VerdictMatchType::EquivalentOutcome),
+            matches!(
+                report.verdict_diff.match_type,
+                VerdictMatchType::Exact | VerdictMatchType::EquivalentOutcome
+            ),
             "Both success variants should be equivalent, got {:?}",
             report.verdict_diff.match_type
         );
@@ -691,7 +711,7 @@ mod tests {
         let report = compare_runtime_parity(
             "test-2",
             "open nonexistent",
-            true,  // legacy says success (!)
+            true, // legacy says success (!)
             1,
             1,
             None,
@@ -699,7 +719,10 @@ mod tests {
         );
 
         // Legacy success + canonical failure = Contradictory
-        assert_eq!(report.verdict_diff.match_type, VerdictMatchType::Contradictory);
+        assert_eq!(
+            report.verdict_diff.match_type,
+            VerdictMatchType::Contradictory
+        );
         assert_eq!(report.max_severity, DivergenceSeverity::Critical);
         assert!(!report.canonical_safe);
     }
@@ -712,7 +735,9 @@ mod tests {
         ctx.planning_summary = Some(ShadowPlanSummary {
             substrate: "IdeCodeRunWorkflow".into(),
             step_count: 4,
-            execution_mode: ExecutionMode::Hybrid { visible_steps: vec![3] },
+            execution_mode: ExecutionMode::Hybrid {
+                visible_steps: vec![3],
+            },
             has_outcome_contract: true,
             required_outcomes: 2,
             desired_outcomes: 1,
@@ -723,7 +748,7 @@ mod tests {
             "test-3",
             "open code and run",
             true,
-            2,  // legacy has 2 steps
+            2, // legacy has 2 steps
             2,
             None,
             &ctx,
@@ -731,7 +756,10 @@ mod tests {
 
         // Step count mismatch: legacy=2, canonical=4
         assert!(
-            report.divergences.iter().any(|d| d.category == DivergenceCategory::PlanningStructureMismatch),
+            report
+                .divergences
+                .iter()
+                .any(|d| d.category == DivergenceCategory::PlanningStructureMismatch),
             "Should detect planning structure mismatch"
         );
     }
@@ -751,15 +779,7 @@ mod tests {
             adaptations: vec![],
         });
 
-        let report = compare_runtime_parity(
-            "test-4",
-            "open firefox",
-            true,
-            1,
-            1,
-            None,
-            &ctx,
-        );
+        let report = compare_runtime_parity("test-4", "open firefox", true, 1, 1, None, &ctx);
 
         assert_eq!(report.parity, ParityAssessment::FullParity);
         assert!(report.canonical_safe);

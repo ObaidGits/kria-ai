@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Gmail Send Draft Output",
+  "type": "object",
+  "required": ["result", "draft_ref", "confirmed_by_user"],
+  "properties": {
+    "result": { "type": "string" },
+    "draft_ref": { "type": "string" },
+    "preview": { "type": "string" },
+    "confirmed_by_user": { "type": "boolean" }
+  },
+  "additionalProperties": true
+}

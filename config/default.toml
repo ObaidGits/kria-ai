@@ -278,33 +278,62 @@ prompt_enhance_mode = "auto"
 image_mode = "local_only"
 
 # ==========================================
-# n8n Workflow Substrate (disabled by default)
+# n8n Workflow Substrate
 # ==========================================
 # KRIA treats n8n as an external workflow substrate, not as cognition authority.
-# Enable only after adding approved workflow catalog entries below.
 [n8n]
-enabled = false
+config_version = 2
+enabled = true
+mode = "external"
 base_url = "http://127.0.0.1:5678"
+dashboard_url = "http://127.0.0.1:5678"
 api_key = ""
-signing_secret = ""
+api_key_env = "KRIA_N8N_API_KEY"
+api_key_file = "~/.kria/secrets/n8n_api_key"
+api_key_keyring = "kria/n8n/api_key"
+signing_secret = ""  # Set via KRIA_N8N_SIGNING_SECRET env var or ~/.kria/secrets/n8n.key
+signing_secret_env = "KRIA_N8N_SIGNING_SECRET"
+signing_secret_file = "~/.kria/secrets/n8n.key"
+signing_secret_keyring = "kria/n8n/signing_secret"
+callback_base_url = ""
+callback_path = "/api/n8n/callback"
 request_timeout_secs = 30
 max_payload_bytes = 65536
+auto_start = false
+open_dashboard_on_start = false
+open_dashboard_from_settings = true
+healthcheck_timeout_secs = 5
+healthcheck_interval_secs = 30
+execution_poll_interval_secs = 5
+event_stream_enabled = true
+callback_freshness_window_secs = 300
+future_callback_skew_secs = 30
+last_connection_status = "untested"
+last_connection_message = ""
+last_connection_checked_at_ms = 0
 default_requested_by = "local-user"
 
-# Example only. Keep status="approved" only for reviewed workflows.
-# [[n8n.workflows]]
-# workflow_id = "jira_fetch_open_tickets"
-# workflow_version = "v1"
-# display_name = "Fetch Jira Open Tickets"
-# endpoint_path = "/webhook/kria/jira-fetch-open-tickets"
-# status = "approved"
-# environment = "dev"
-# risk_tier = "Green"
-# irreversibility_class = "read_only"
-# timeout_class = "background"
-# allowed_actions = ["jira.read"]
-# data_scope = ["jira.project_key", "jira.filter"]
-# expected_evidence = ["tickets"]
+[n8n.managed_docker]
+container_name = "kria-n8n"
+image = "n8nio/n8n:2.22.5"
+image_digest = "sha256:a49bc161141d6c4b9c495b5a6e3c7c1932e61d2ed2fe3fdca01262064b4b23ca"
+bind_host = "127.0.0.1"
+host_port = 5678
+container_port = 5678
+data_dir = "~/.kria/n8n/docker"
+network = "bridge"
+restart_policy = "unless-stopped"
+pull_policy = "if_missing"
+host_gateway_name = "host.docker.internal"
+privileged = false
+user = ""
+volume_mode = "rw"
+port_collision_policy = "fail_with_guidance"
+healthcheck_path = "/healthz"
+n8n_encryption_key_file = "~/.kria/secrets/n8n_encryption_key"
+dashboard_auth_required = true
+basic_auth_user_env = "KRIA_N8N_BASIC_AUTH_USER"
+basic_auth_password_file = "~/.kria/secrets/n8n_basic_auth_password"
 
 # ==========================================
 # Universal Model Provider System
@@ -315,15 +344,15 @@ default_requested_by = "local-user"
 [providers]
 active_provider = "llama_cpp"
 prefer_streaming = true
-# fallback_provider = "ollama"    # Optional: auto-fallback on active failure
+fallback_provider = "opencode"   # Auto-fallback to cloud when local is unavailable
 
 # ─── Local llama.cpp (default) ───────────────────────────────────────────────
 [[providers.providers]]
 id = "llama_cpp"
 provider_type = "llama_cpp"
-display_name = "llama.cpp (Local)"
+display_name = "llama.cpp (Local — Qwen2.5-VL-7B)"
 enabled = true
-active_model = ""
+active_model = "qwen2.5-vl-7b"
 default_temperature = 0.7
 default_max_tokens = 4096
 prefer_streaming = true
@@ -353,12 +382,12 @@ rate_limit_rpm = 0
 # max_retries = 2
 # rate_limit_rpm = 0
 
-# ─── OpenCode(zen) (disabled by default) ────────────────────────────────────────────
+# ─── OpenCode(zen) — Cloud fallback ─────────────────────────────────────────
 [[providers.providers]]
 id = "opencode"
 provider_type = "openai_compatible"
 display_name = "OpenCode (MiniMax M2.5 Free)"
-enabled = false
+enabled = true
 active_model = "minimax-m2.5-free"
 default_temperature = 0.7
 default_max_tokens = 4096

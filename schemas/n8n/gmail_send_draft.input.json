@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Gmail Send Draft Input",
+  "type": "object",
+  "required": ["recipient", "subject", "body"],
+  "properties": {
+    "source_prompt": { "type": "string" },
+    "recipient": { "type": "string" },
+    "subject": { "type": "string" },
+    "body": { "type": "string" },
+    "thread_ref": { "type": "string" },
+    "attachments": { "type": "array", "items": { "type": "string" } },
+    "confirmed_by_user": { "type": "boolean", "default": false }
+  },
+  "additionalProperties": false
+}

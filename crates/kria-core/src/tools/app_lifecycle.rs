@@ -398,14 +398,17 @@ impl ToolHandler for WebBrowserSearch {
             let cdp_available = tokio::time::timeout(
                 std::time::Duration::from_millis(300),
                 crate::agent::browser_cognition::BrowserCognitionEngine::is_available(),
-            ).await.unwrap_or(false);
+            )
+            .await
+            .unwrap_or(false);
 
             if cdp_available {
                 let engine = crate::agent::browser_cognition::BrowserCognitionEngine::new();
                 let nav = tokio::time::timeout(
                     std::time::Duration::from_secs(5),
                     engine.navigate(&url_str),
-                ).await;
+                )
+                .await;
                 if let Ok(result) = nav {
                     if result.success {
                         return ToolResult::ok(serde_json::json!({
