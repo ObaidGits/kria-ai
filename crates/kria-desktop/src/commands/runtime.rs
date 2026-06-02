@@ -837,6 +837,25 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     };
     register_fleet_runtime_tools(&tool_registry_inner, fleet_control_runtime.clone());
 
+    if let Some(catalog) = n8n_catalog.read().await.clone() {
+        n8n::register_n8n_adapter_tool_handler(
+            &tool_registry_inner,
+            n8n::N8nAdapterRuntime {
+                catalog,
+                catalog_slot: Some(n8n_catalog.clone()),
+                n8n_state_store: n8n_state_store.clone(),
+                n8n_inbox_path: n8n_inbox_path.clone(),
+                n8n_audit_path: n8n_audit_path.clone(),
+                n8n_governance_log: n8n_governance_log.clone(),
+                app_handle: Some(handle.clone()),
+                fleet_control_runtime: Some(fleet_control_runtime.clone()),
+            },
+        );
+        tracing::info!(
+            "[n8n] registered adapter-backed n8n_invoke_workflow tool for chat/local tool dispatch"
+        );
+    }
+
     // Wrap registry in Arc immediately — thread-safe for background MCP registration
     let tool_registry = Arc::new(tool_registry_inner);
 

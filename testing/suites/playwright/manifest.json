@@ -1,0 +1,10 @@
+{
+  "schema_version": "kria.testing.suite.v1",
+  "suite_id": "playwright",
+  "name": "KRIA Playwright suite",
+  "scenario_files": [
+    "testing/suites/playwright/scenarios/curated_ci.json",
+    "testing/suites/playwright/scenarios/generated_inventory.json"
+  ],
+  "scenarios": []
+}

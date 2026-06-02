@@ -1,0 +1,78 @@
+{
+  "schema_version": "kria.testing.scenarios.v1",
+  "scenarios": [
+    {
+      "id": "n8n.prompt_e2e.desktop_chat.mock_crud_archive",
+      "title": "Desktop Chat Tauri mock E2E: n8n CRUD and archive prompts",
+      "driver": "backend_command",
+      "command": "cd testing/suites/playwright && KRIA_E2E_START_UI=1 KRIA_UI_URL=http://127.0.0.1:1420 npx playwright test --project=e2e-tauri-mock tests/n8n-chat-prompt.tauri-mock.e2e.spec.ts",
+      "tags": [
+        "live",
+        "slow",
+        "n8n",
+        "ui",
+        "prompt_e2e",
+        "desktop_chat",
+        "tauri_mock",
+        "regression"
+      ],
+      "required_services": [
+        "browser"
+      ],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "n8n.prompt_e2e.desktop_chat.command_contract",
+      "title": "Desktop Chat contract: n8n CRUD/archive prompt routing",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core n8n_desktop_chat_prompt_contract --lib",
+      "tags": [
+        "live",
+        "slow",
+        "n8n",
+        "prompt_e2e",
+        "desktop_chat",
+        "regression"
+      ],
+      "required_services": [],
+      "timeout_seconds": 300,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "n8n.prompt_e2e.parity.api_vs_desktop_core",
+      "title": "n8n parity: API prompt matrix and Desktop Chat prompt matrix both registered",
+      "driver": "backend_command",
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest testing.harness.tests.test_n8n_desktop_chat_parity",
+      "tags": [
+        "live",
+        "slow",
+        "n8n",
+        "prompt_e2e",
+        "parity",
+        "regression"
+      ],
+      "required_services": [],
+      "timeout_seconds": 120,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "n8n.prompt_e2e.parity.unregistered_n8n_target",
+      "title": "n8n parity: unregistered n8n target prompts are covered",
+      "driver": "backend_command",
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest testing.harness.tests.test_n8n_desktop_chat_parity",
+      "tags": [
+        "live",
+        "slow",
+        "n8n",
+        "prompt_e2e",
+        "parity",
+        "desktop_chat",
+        "regression"
+      ],
+      "required_services": [],
+      "timeout_seconds": 120,
+      "report_artifact_globs": []
+    }
+  ]
+}

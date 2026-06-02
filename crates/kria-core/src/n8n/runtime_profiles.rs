@@ -200,6 +200,20 @@ pub struct N8nRuntimeProfileDraft {
     pub last_lifecycle_action: String,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub generated_copy_n8n_verified: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub archived: bool,
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub archived_at_ms: u64,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub archived_reason: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub archived_by: String,
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub restored_at_ms: u64,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub crud_lifecycle_status: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub crud_lifecycle_warnings: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enrichment: Option<N8nMetadataEnrichmentProvenance>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -498,6 +512,13 @@ pub fn analyze_n8n_runtime_profile(
         last_lifecycle_checked_at_ms: 0,
         last_lifecycle_action: String::new(),
         generated_copy_n8n_verified: false,
+        archived: false,
+        archived_at_ms: 0,
+        archived_reason: String::new(),
+        archived_by: String::new(),
+        restored_at_ms: 0,
+        crud_lifecycle_status: String::new(),
+        crud_lifecycle_warnings: Vec::new(),
         enrichment: None,
         enrichment_suggestion: None,
         created_at_ms: now,

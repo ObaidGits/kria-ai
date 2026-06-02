@@ -1,0 +1,53 @@
+{
+  "schema_version": "kria.testing.registry.v1",
+  "suites": [
+    {
+      "id": "n8n",
+      "name": "n8n",
+      "manifest": "testing/suites/n8n/manifest.json",
+      "default_profile": "safe"
+    },
+    {
+      "id": "rust",
+      "name": "Rust",
+      "manifest": "testing/suites/rust/manifest.json",
+      "default_profile": "safe"
+    },
+    {
+      "id": "ui",
+      "name": "UI",
+      "manifest": "testing/suites/ui/manifest.json",
+      "default_profile": "safe"
+    },
+    {
+      "id": "playwright",
+      "name": "Playwright",
+      "manifest": "testing/suites/playwright/manifest.json",
+      "default_profile": "safe"
+    },
+    {
+      "id": "security_audit",
+      "name": "Security and audit",
+      "manifest": "testing/suites/security_audit/manifest.json",
+      "default_profile": "safe"
+    },
+    {
+      "id": "release_live",
+      "name": "Release and live",
+      "manifest": "testing/suites/release_live/manifest.json",
+      "default_profile": "safe"
+    },
+    {
+      "id": "eval_engine",
+      "name": "Eval engine",
+      "manifest": "testing/suites/eval_engine/manifest.json",
+      "default_profile": "safe"
+    },
+    {
+      "id": "examples",
+      "name": "examples",
+      "manifest": "testing/suites/examples/manifest.json",
+      "default_profile": "safe"
+    }
+  ]
+}

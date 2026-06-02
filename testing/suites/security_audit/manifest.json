@@ -1,0 +1,10 @@
+{
+  "schema_version": "kria.testing.suite.v1",
+  "suite_id": "security_audit",
+  "name": "KRIA security and audit suite",
+  "scenario_files": [
+    "testing/suites/security_audit/scenarios/curated_ci.json",
+    "testing/suites/security_audit/scenarios/generated_inventory.json"
+  ],
+  "scenarios": []
+}

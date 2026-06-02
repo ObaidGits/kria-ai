@@ -1598,6 +1598,9 @@ const N8nWorkflowManagementPanel: Component<Props> = (props) => {
     danger?: boolean;
     onConfirm: () => void;
   }>(null);
+  const [dangerWorkflow, setDangerWorkflow] = createSignal<N8nWorkflow | null>(null);
+  const [dangerTypedConfirmation, setDangerTypedConfirmation] = createSignal("");
+  const [dangerUnderstood, setDangerUnderstood] = createSignal(false);
 
   const savedRuntimeProfileIds = createMemo(() => new Set(n8nStore.savedRuntimeProfiles().map((profile) => profile.profile_id)));
   const legacyTomlStatus = createMemo(() => n8nStore.status()?.legacy_toml_workflows);
@@ -1608,6 +1611,7 @@ const N8nWorkflowManagementPanel: Component<Props> = (props) => {
       .copyLifecycleOperations()
       .filter((operation) => normalize(operation.status) !== "complete"),
   );
+  const archivedWorkflows = createMemo(() => n8nStore.archivedWorkflows());
   const visibleProfiles = createMemo(() => {
     const profiles = new Map<string, N8nRuntimeProfileDraft>();
     for (const profile of n8nStore.runtimeProfileDrafts()) {
@@ -2072,20 +2076,78 @@ const N8nWorkflowManagementPanel: Component<Props> = (props) => {
     setActionMessage(result?.message || "Workflow disabled.");
   }
 
-  async function remove(workflow: N8nWorkflow) {
+  async function archiveWorkflow(workflow: N8nWorkflow) {
     setActionMessage("");
-    const result = await n8nStore.deleteWorkflow(workflow.workflow_id);
-    setActionMessage(result?.message || "Workflow removed.");
+    const result = await n8nStore.archiveWorkflow(workflow.workflow_id);
+    setActionMessage(result?.message || "Workflow archived.");
   }
 
-  function requestRemove(workflow: N8nWorkflow) {
+  function requestArchive(workflow: N8nWorkflow) {
     requestConfirmation({
-      title: "Delete executable workflow registry entry?",
-      message: `This removes "${workflowName(workflow)}" from KRIA's executable workflow registry. The n8n workflow itself is not deleted.`,
-      confirmLabel: "Delete Workflow",
-      danger: true,
-      onConfirm: () => void remove(workflow),
+      title: "Archive workflow?",
+      message: `This hides "${workflowName(workflow)}" from KRIA workflow lists and chat routing. The n8n workflow itself is not deleted.`,
+      confirmLabel: "Archive Workflow",
+      onConfirm: () => void archiveWorkflow(workflow),
     });
+  }
+
+  async function restoreArchivedWorkflow(workflow: N8nWorkflow) {
+    setActionMessage("");
+    const result = await n8nStore.restoreWorkflow(workflow.workflow_id);
+    setActionMessage(result?.message || "Workflow restored.");
+  }
+
+  async function removeFromKria(workflow: N8nWorkflow) {
+    setActionMessage("");
+    const result = await n8nStore.removeWorkflowFromKria(workflow.workflow_id);
+    setActionMessage(result?.message || "Workflow setup removed from KRIA.");
+  }
+
+  function requestRemoveFromKria(workflow: N8nWorkflow) {
+    requestConfirmation({
+      title: "Remove workflow from KRIA?",
+      message: `This removes KRIA's local setup for "${workflowName(workflow)}". The n8n workflow itself is not deleted and run history remains available.`,
+      confirmLabel: "Remove from KRIA",
+      danger: true,
+      onConfirm: () => void removeFromKria(workflow),
+    });
+  }
+
+  function openDangerZone(workflow: N8nWorkflow) {
+    setDangerWorkflow(workflow);
+    setDangerTypedConfirmation("");
+    setDangerUnderstood(false);
+  }
+
+  async function permanentlyDeleteFromN8n() {
+    const workflow = dangerWorkflow();
+    if (!workflow) return;
+    try {
+      const result = await n8nStore.permanentlyDeleteWorkflow(
+        workflow.workflow_id,
+        dangerTypedConfirmation(),
+        dangerUnderstood(),
+      );
+      setActionMessage(result?.message || "Workflow backed up and deleted from n8n.");
+      setDangerWorkflow(null);
+      setDangerTypedConfirmation("");
+      setDangerUnderstood(false);
+    } catch (error) {
+      setActionMessage(`Permanent delete blocked: ${friendlyN8nError(error)}`);
+    }
+  }
+
+  async function restoreFromBackup(workflow: N8nWorkflow) {
+    if (!workflow.backup_path) {
+      setActionMessage("No backup path is recorded for this workflow.");
+      return;
+    }
+    try {
+      const result = await n8nStore.restoreWorkflowFromBackup(workflow.backup_path);
+      setActionMessage(result?.message || "Backup restored as a new draft.");
+    } catch (error) {
+      setActionMessage(`Could not restore backup: ${friendlyN8nError(error)}`);
+    }
   }
 
   async function archiveLegacyToml() {
@@ -2179,6 +2241,58 @@ const N8nWorkflowManagementPanel: Component<Props> = (props) => {
             </section>
           </div>
         )}
+      </Show>
+      <Show when={dangerWorkflow()}>
+        {(workflow) => {
+          const required = () => `DELETE ${workflowName(workflow())}`;
+          const canDelete = () => dangerUnderstood() && dangerTypedConfirmation().trim() === required();
+          return (
+            <div class="n8n-modal-backdrop">
+              <section class="n8n-confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="n8n-danger-title">
+                <h4 id="n8n-danger-title">Danger Zone: permanently delete from n8n</h4>
+                <p>
+                  KRIA will create a backup first, verify the workflow identity, then delete only this n8n workflow. n8n
+                  credentials are not deleted.
+                </p>
+                <div class="n8n-history-summary">
+                  <span>{workflowName(workflow())}</span>
+                  <span>{workflow().workflow_id}</span>
+                  <span>{workflow().n8n_workflow_id || "n8n ID missing"}</span>
+                </div>
+                <label class="n8n-checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={dangerUnderstood()}
+                    onChange={(event) => setDangerUnderstood(event.currentTarget.checked)}
+                  />
+                  <span>I understand this deletes the workflow from n8n.</span>
+                </label>
+                <label>
+                  <span>Type {required()}</span>
+                  <input
+                    value={dangerTypedConfirmation()}
+                    onInput={(event) => setDangerTypedConfirmation(event.currentTarget.value)}
+                  />
+                </label>
+                <div class="n8n-registry-actions">
+                  <button type="button" class="btn-secondary" onClick={() => setDangerWorkflow(null)}>
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    class="btn-secondary danger"
+                    disabled={!canDelete() || n8nStore.managementBusyKey() === `danger-delete:${workflow().workflow_id}`}
+                    onClick={() => void permanentlyDeleteFromN8n()}
+                  >
+                    {n8nStore.managementBusyKey() === `danger-delete:${workflow().workflow_id}`
+                      ? "Deleting..."
+                      : "Back up and permanently delete"}
+                  </button>
+                </div>
+              </section>
+            </div>
+          );
+        }}
       </Show>
 
       <Show when={panelView() === "profiles"}>
@@ -2342,7 +2456,7 @@ const N8nWorkflowManagementPanel: Component<Props> = (props) => {
                     const key = busy();
                     if (key === `approve:${workflow.workflow_id}`) return "Checking metadata";
                     if (key === `disable:${workflow.workflow_id}`) return "Disabling";
-                    if (key === `delete:${workflow.workflow_id}`) return "Deleting";
+                    if (key === `archive:${workflow.workflow_id}`) return "Archiving";
                     if (missing().length > 0) return "Needs metadata";
                     if (approved()) return "Approved";
                     if (disabled()) return "Disabled";
@@ -2397,11 +2511,11 @@ const N8nWorkflowManagementPanel: Component<Props> = (props) => {
                         </button>
                         <button
                           type="button"
-                          class="btn-secondary danger"
-                          disabled={n8nStore.managementBusyKey() === `delete:${workflow.workflow_id}`}
-                          onClick={() => requestRemove(workflow)}
+                          class="btn-secondary"
+                          disabled={n8nStore.managementBusyKey() === `archive:${workflow.workflow_id}`}
+                          onClick={() => requestArchive(workflow)}
                         >
-                          {n8nStore.managementBusyKey() === `delete:${workflow.workflow_id}` ? "Deleting..." : "Delete"}
+                          {n8nStore.managementBusyKey() === `archive:${workflow.workflow_id}` ? "Archiving..." : "Archive"}
                         </button>
                       </div>
                     </div>
@@ -2409,6 +2523,70 @@ const N8nWorkflowManagementPanel: Component<Props> = (props) => {
                 }}
               </For>
             </div>
+            <Show when={archivedWorkflows().length > 0}>
+              <div class="n8n-section-head compact">
+                <div>
+                  <h4>Archived workflows</h4>
+                  <small>Archived workflows stay in n8n, but KRIA will not route or auto-run them.</small>
+                </div>
+              </div>
+              <div class="n8n-registry-list">
+                <For each={archivedWorkflows()}>
+                  {(workflow) => (
+                    <div class="n8n-registry-row">
+                      <div>
+                        <div class="n8n-registry-title">
+                          <strong>{workflowName(workflow)}</strong>
+                          <span class="n8n-metadata-badge neutral">Archived</span>
+                        </div>
+                        <small>{workflow.workflow_id} · {workflow.n8n_workflow_id || "no n8n id"}</small>
+                        <small>{workflow.archived_reason || "Hidden from KRIA routing and normal workflow lists."}</small>
+                        <Show when={workflow.n8n_delete_status}>
+                          <small>Delete status: {workflow.n8n_delete_status}</small>
+                        </Show>
+                        <Show when={workflow.backup_path}>
+                          <small>Backup recorded for restore/import.</small>
+                        </Show>
+                      </div>
+                      <div class="n8n-registry-actions">
+                        <button
+                          type="button"
+                          class="btn-secondary"
+                          disabled={n8nStore.managementBusyKey() === `restore:${workflow.workflow_id}`}
+                          onClick={() => void restoreArchivedWorkflow(workflow)}
+                        >
+                          {n8nStore.managementBusyKey() === `restore:${workflow.workflow_id}` ? "Restoring..." : "Restore"}
+                        </button>
+                        <button type="button" class="btn-secondary" onClick={() => editMetadata(workflow)}>
+                          Review
+                        </button>
+                        <Show when={workflow.backup_path}>
+                          <button
+                            type="button"
+                            class="btn-secondary"
+                            disabled={n8nStore.managementBusyKey() === "restore-backup"}
+                            onClick={() => void restoreFromBackup(workflow)}
+                          >
+                            Restore Backup
+                          </button>
+                        </Show>
+                        <button
+                          type="button"
+                          class="btn-secondary danger"
+                          disabled={n8nStore.managementBusyKey() === `remove:${workflow.workflow_id}`}
+                          onClick={() => requestRemoveFromKria(workflow)}
+                        >
+                          {n8nStore.managementBusyKey() === `remove:${workflow.workflow_id}` ? "Removing..." : "Remove from KRIA"}
+                        </button>
+                        <button type="button" class="btn-secondary danger" onClick={() => openDangerZone(workflow)}>
+                          Danger Zone
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </For>
+              </div>
+            </Show>
           </section>
 
           <section class="n8n-management-section">

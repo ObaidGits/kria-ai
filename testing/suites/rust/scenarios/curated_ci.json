@@ -1,0 +1,34 @@
+{
+  "scenarios": [
+    {
+      "id": "rust.ci.kria_core_api_unload_model_wiremock",
+      "title": "Rust CI: kria-core API unload model wiremock",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test api_unload_model_wiremock",
+      "tags": [
+        "safe",
+        "ci",
+        "rust",
+        "regression"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.ci.kria_core_automation_tests",
+      "title": "Rust CI: kria-core automation tests",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test automation_tests",
+      "tags": [
+        "safe",
+        "ci",
+        "rust",
+        "regression"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    }
+  ]
+}

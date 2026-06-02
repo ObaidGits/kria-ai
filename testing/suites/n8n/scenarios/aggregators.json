@@ -1,0 +1,23 @@
+{
+  "schema_version": "kria.testing.scenarios.v1",
+  "scenarios": [
+    {
+      "id": "n8n.all_checks_aggregate",
+      "title": "n8n all checks aggregate wrapper",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_all_n8n_checks.sh",
+      "tags": [
+        "safe",
+        "n8n",
+        "aggregate",
+        "slow",
+        "regression"
+      ],
+      "required_services": [],
+      "timeout_seconds": 3600,
+      "report_artifact_globs": [
+        "testing/eval_reports/n8n_all_checks_*.txt"
+      ]
+    }
+  ]
+}

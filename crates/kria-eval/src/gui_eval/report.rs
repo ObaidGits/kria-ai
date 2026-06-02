@@ -209,9 +209,10 @@ impl GuiEvalReportBuilder {
             environment,
             summary,
             governance,
-            failure_bundles: empty_failure_bundle_summary(
-                "tests-logs/eval_reports/failure_bundles",
-            ),
+            failure_bundles: empty_failure_bundle_summary(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../eval_reports/failure_bundles"
+            )),
             category_breakdown,
             case_results,
             architectural_findings,

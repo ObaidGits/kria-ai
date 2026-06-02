@@ -1,0 +1,10 @@
+{
+  "schema_version": "kria.testing.suite.v1",
+  "suite_id": "release_live",
+  "name": "KRIA release and live suite",
+  "scenario_files": [
+    "testing/suites/release_live/scenarios/curated_ci.json",
+    "testing/suites/release_live/scenarios/generated_inventory.json"
+  ],
+  "scenarios": []
+}

@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kria.testing.suite.v1",
+  "type": "object",
+  "required": ["schema_version", "suite_id", "name"],
+  "properties": {
+    "schema_version": { "const": "kria.testing.suite.v1" },
+    "suite_id": { "type": "string" },
+    "name": { "type": "string" },
+    "scenario_files": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "scenarios": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/scenario" }
+    }
+  },
+  "$defs": {
+    "scenario": {
+      "type": "object",
+      "required": ["id", "title", "driver", "tags", "required_services", "timeout_seconds"],
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "driver": { "enum": ["backend_command", "chat_api", "desktop_chat_command", "ui", "n8n_api"] },
+        "command": { "type": "string" },
+        "tags": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "safe",
+              "build",
+              "ci",
+              "live",
+              "destructive",
+              "desktop_chat",
+              "desktop_command",
+              "ui",
+              "api",
+              "eval_engine",
+              "n8n",
+              "smoke",
+              "regression",
+              "slow",
+              "routing",
+              "authoring",
+              "audit",
+              "phase",
+              "capability",
+              "reliability",
+              "prompt_e2e",
+              "parity",
+              "callback",
+              "catalog",
+              "cleanup",
+              "credentials",
+              "file",
+              "hitl",
+              "memory",
+              "management",
+              "invocation",
+              "readiness",
+              "legacy",
+              "lifecycle",
+              "output",
+              "aggregate",
+              "playwright",
+              "release",
+              "rust",
+              "security",
+              "stress",
+              "tauri_live",
+              "tauri_mock",
+              "typecheck",
+              "v5",
+              "vitest",
+              "voice",
+              "workspace"
+            ]
+          }
+        },
+        "required_services": {
+          "type": "array",
+          "items": {
+            "enum": ["kria_api", "n8n", "docker", "browser"]
+          }
+        },
+        "timeout_seconds": { "type": "integer", "minimum": 1 },
+        "report_artifact_globs": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "inputs": { "type": "object" },
+        "assertions": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "cleanup": {
+          "type": "array",
+          "items": { "type": "object" }
+        }
+      }
+    }
+  }
+}

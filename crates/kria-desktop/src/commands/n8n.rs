@@ -1,5 +1,7 @@
 use crate::commands::AppStateCell;
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use kria_core::infra::ToolResult;
 use kria_core::llm::ChatMessage;
 use kria_core::n8n::{
     analyze_n8n_input_capability, analyze_n8n_runtime_profile, analyze_n8n_runtime_profiles,
@@ -12,11 +14,12 @@ use kria_core::n8n::{
     parse_metadata_suggestion, profile_with_enrichment, profile_with_heuristic_metadata_fallback,
     registry_has_workflow_parity, safety_merge_metadata_suggestion, save_runtime_profile_store_at,
     save_workflow_registry_store_at, semantic_workflow_hash, upsert_runtime_profile,
-    upsert_workflow_registry_record, validate_n8n_workflow_json, workflow_registry_records,
-    workflow_registry_workflows, N8nBinaryInputReview, N8nCatalog, N8nClient, N8nCodePatchReview,
-    N8nConfig, N8nCredentialStatus, N8nInputAwareMappingReview, N8nInputCapability,
-    N8nInputSurfaceType, N8nIrreversibilityClass, N8nManagedDockerConfig, N8nReadinessGateEvidence,
-    N8nResultMode, N8nRunStatus, N8nRuntimeMode, N8nRuntimeProfileDraft, N8nRuntimeProfileStatus,
+    upsert_workflow_registry_record, validate_n8n_workflow_json,
+    workflow_registry_archived_workflows, workflow_registry_records, workflow_registry_workflows,
+    N8nBinaryInputReview, N8nCatalog, N8nClient, N8nCodePatchReview, N8nConfig,
+    N8nCredentialStatus, N8nInputAwareMappingReview, N8nInputCapability, N8nInputSurfaceType,
+    N8nIrreversibilityClass, N8nManagedDockerConfig, N8nReadinessGateEvidence, N8nResultMode,
+    N8nRunStatus, N8nRuntimeMode, N8nRuntimeProfileDraft, N8nRuntimeProfileStatus,
     N8nRuntimeRiskEstimate, N8nTimeoutClass, N8nToolRequest, N8nTriggerStrategy, N8nWorkflowConfig,
     N8nWorkflowEnvironment, N8nWorkflowRegistryStore, N8nWorkflowRunState, N8nWorkflowStatus,
     N8nWorkflowValidationOptions, N8nWorkflowValidationReportStatus, WorkflowRankingEngine,
@@ -24,7 +27,10 @@ use kria_core::n8n::{
     N8N_WORKFLOW_REGISTRY_UI_SOURCE,
 };
 use kria_core::safety::RiskLevel;
+use kria_core::tools::registry::{ParamDef, ToolDef, ToolHandler, ToolRegistry};
+use kria_core::tools::ToolContext;
 use sha2::Digest;
+use std::collections::{BTreeMap, BTreeSet};
 #[cfg(not(unix))]
 use std::io::Write;
 use std::net::TcpListener;
@@ -163,6 +169,93 @@ pub struct SuggestN8nWorkflowsRequest {
     pub prompt: String,
 }
 
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RouteN8nChatPromptRequest {
+    pub prompt: String,
+    #[serde(default)]
+    pub previous_user_prompt: Option<String>,
+    #[serde(default)]
+    pub manual_n8n_mode: bool,
+    #[serde(default)]
+    pub safe_auto_run_enabled: bool,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportN8nProductionAuditBundleRequest {
+    #[serde(default = "default_audit_privacy_mode")]
+    pub privacy_mode: String,
+    #[serde(default)]
+    pub include_workflow_labels: bool,
+}
+
+fn default_audit_privacy_mode() -> String {
+    "private".into()
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepairN8nAuditFindingRequest {
+    pub finding_id: String,
+    pub repair_kind: String,
+    #[serde(default)]
+    pub confirmed: bool,
+    #[serde(default)]
+    pub workflow_id: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct N8nAuditFinding {
+    id: String,
+    category: String,
+    severity: String,
+    title: String,
+    message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    affected_workflow_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    affected_adapter: Option<String>,
+    blocks_execution: bool,
+    blocks_approval: bool,
+    safe_to_auto_fix: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    repair_kind: Option<String>,
+    next_action: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct N8nAuditAdapterReadiness {
+    adapter: String,
+    status: String,
+    #[serde(default)]
+    affected_workflow_ids: Vec<String>,
+    reason: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct N8nProductionAuditReport {
+    schema_version: String,
+    generated_at_ms: u64,
+    expires_at_ms: u64,
+    overall_status: String,
+    security_status: String,
+    reliability_status: String,
+    #[serde(default)]
+    adapter_readiness: Vec<N8nAuditAdapterReadiness>,
+    #[serde(default)]
+    summary_counts: BTreeMap<String, usize>,
+    #[serde(default)]
+    findings: Vec<N8nAuditFinding>,
+    #[serde(default)]
+    recommended_actions: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    stale_reason: Option<String>,
+}
+
 #[derive(Clone)]
 pub(crate) struct N8nAdapterRuntime {
     pub catalog: Arc<N8nCatalog>,
@@ -186,6 +279,150 @@ pub(crate) struct RunN8nWorkflowAdapterRequest {
     pub confirmed: bool,
     pub session_id: Option<String>,
     pub run_mode: String,
+}
+
+#[derive(Clone)]
+struct N8nAdapterInvokeWorkflowHandler {
+    runtime: N8nAdapterRuntime,
+}
+
+#[async_trait]
+impl ToolHandler for N8nAdapterInvokeWorkflowHandler {
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        if ctx.cancellation.is_cancelled() {
+            return ToolResult::err("n8n workflow invocation cancelled before dispatch");
+        }
+
+        let request: N8nToolRequest = match serde_json::from_value(params) {
+            Ok(request) => request,
+            Err(error) => {
+                return ToolResult::err(format!("invalid n8n_invoke_workflow params: {error}"));
+            }
+        };
+
+        let source_prompt = request
+            .input_payload
+            .get("source_prompt")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let requested_by = request
+            .requested_by
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("kria-chat")
+            .to_string();
+        let session_id = request
+            .metadata
+            .get("session_id")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+
+        let adapter_request = RunN8nWorkflowAdapterRequest {
+            workflow_id: request.workflow_id,
+            workflow_version: request.workflow_version,
+            input_payload: request.input_payload,
+            requested_by,
+            correlation_id: request.correlation_id,
+            source: "chat_tool".into(),
+            confirmed: true,
+            session_id,
+            run_mode: String::new(),
+        };
+
+        let mut runtime = self.runtime.clone();
+        if let Some(slot) = runtime.catalog_slot.as_ref() {
+            if let Some(latest_catalog) = slot.read().await.clone() {
+                runtime.catalog = latest_catalog;
+            }
+        }
+
+        match run_n8n_workflow_adapter(runtime, adapter_request).await {
+            Ok(mut result) => {
+                if let Some(map) = result.as_object_mut() {
+                    map.entry("source_prompt")
+                        .or_insert_with(|| serde_json::Value::String(source_prompt));
+                    let accepted = map
+                        .get("accepted")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false);
+                    map.insert(
+                        "chat_result_expected".into(),
+                        serde_json::Value::Bool(accepted),
+                    );
+                }
+                ToolResult::ok(result)
+            }
+            Err(error) => ToolResult::err_with_data(
+                format!("n8n workflow invocation failed: {error}"),
+                serde_json::json!({
+                    "error_class": "adapter_invocation_failed",
+                }),
+            ),
+        }
+    }
+}
+
+pub(crate) fn register_n8n_adapter_tool_handler(
+    registry: &ToolRegistry,
+    runtime: N8nAdapterRuntime,
+) {
+    registry.register(
+        ToolDef {
+            name: "n8n_invoke_workflow".into(),
+            description: "Invoke an approved n8n workflow through KRIA's shared execution adapter"
+                .into(),
+            category: "external_workflow".into(),
+            default_tier: RiskLevel::Yellow,
+            min_tier: "lite",
+            parameters: vec![
+                ParamDef {
+                    name: "workflow_id".into(),
+                    param_type: "string".into(),
+                    description: "Approved KRIA n8n workflow ID".into(),
+                    required: true,
+                    default: None,
+                },
+                ParamDef {
+                    name: "workflow_version".into(),
+                    param_type: "string".into(),
+                    description: "Optional workflow version".into(),
+                    required: false,
+                    default: None,
+                },
+                ParamDef {
+                    name: "input_payload".into(),
+                    param_type: "object".into(),
+                    description: "Structured workflow input payload".into(),
+                    required: false,
+                    default: Some(serde_json::json!({})),
+                },
+                ParamDef {
+                    name: "correlation_id".into(),
+                    param_type: "string".into(),
+                    description: "Optional KRIA run correlation ID".into(),
+                    required: false,
+                    default: None,
+                },
+                ParamDef {
+                    name: "idempotency_key".into(),
+                    param_type: "string".into(),
+                    description: "Optional idempotency key for retries".into(),
+                    required: false,
+                    default: None,
+                },
+            ],
+        },
+        Arc::new(N8nAdapterInvokeWorkflowHandler { runtime }),
+    );
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -247,6 +484,49 @@ struct N8nCopyLifecycleOperation {
     copy_workflow_hash: String,
     #[serde(default)]
     copy_workflow_semantic_hash: String,
+    #[serde(default)]
+    last_error: String,
+    #[serde(default)]
+    recovery_actions: Vec<String>,
+    created_at_ms: u64,
+    updated_at_ms: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct N8nWorkflowCrudOperationStore {
+    schema_version: String,
+    updated_at_ms: u64,
+    #[serde(default)]
+    operations: Vec<N8nWorkflowCrudOperation>,
+}
+
+impl Default for N8nWorkflowCrudOperationStore {
+    fn default() -> Self {
+        Self {
+            schema_version: "kria.n8n.workflow_crud_operations.v1".into(),
+            updated_at_ms: current_unix_ms(),
+            operations: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct N8nWorkflowCrudOperation {
+    operation_id: String,
+    operation_type: String,
+    workflow_id: String,
+    #[serde(default)]
+    n8n_workflow_id: String,
+    #[serde(default)]
+    workflow_name: String,
+    stage: String,
+    status: String,
+    #[serde(default)]
+    backup_path: String,
+    #[serde(default)]
+    backup_hash: String,
     #[serde(default)]
     last_error: String,
     #[serde(default)]
@@ -345,6 +625,51 @@ pub struct RollbackN8nWorkflowBackupRequest {
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ArchiveN8nWorkflowRequest {
+    pub workflow_id: String,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub requested_by: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreN8nWorkflowRequest {
+    pub workflow_id: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveN8nWorkflowFromKriaRequest {
+    pub workflow_id: String,
+    #[serde(default)]
+    pub confirmed: bool,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteN8nWorkflowPermanentlyRequest {
+    pub workflow_id: String,
+    #[serde(default)]
+    pub typed_confirmation: String,
+    #[serde(default)]
+    pub understand_checkbox: bool,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreN8nWorkflowFromBackupRequest {
+    #[serde(default)]
+    pub backup_id: Option<String>,
+    #[serde(default)]
+    pub backup_path: Option<String>,
+    #[serde(default)]
+    pub restore_mode: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateOrUpdateN8nWorkflowDraftRequest {
     pub workflow_id: String,
     pub workflow_json: serde_json::Value,
@@ -392,6 +717,164 @@ pub struct CreateOrUpdateN8nWorkflowDraftRequest {
     pub timeout_class: Option<N8nTimeoutClass>,
     #[serde(default)]
     pub environment: Option<N8nWorkflowEnvironment>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalyzeN8nWorkflowAuthoringRequest {
+    pub prompt: String,
+    #[serde(default)]
+    pub previous_user_prompt: Option<String>,
+    #[serde(default)]
+    pub workflow_id: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerateN8nWorkflowDraftPlanRequest {
+    pub prompt: String,
+    #[serde(default)]
+    pub workflow_id: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateN8nWorkflowDraftInN8nRequest {
+    pub prompt: String,
+    #[serde(default)]
+    pub workflow_id: Option<String>,
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub template_id: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewN8nWorkflowUpdateDiffRequest {
+    pub source_workflow_id: String,
+    pub prompt: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateN8nWorkflowUpdatedCopyRequest {
+    pub source_workflow_id: String,
+    pub prompt: String,
+    #[serde(default)]
+    pub display_name: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyN8nWorkflowUpdateAfterConfirmationRequest {
+    pub source_workflow_id: String,
+    pub draft_workflow_id: String,
+    #[serde(default)]
+    pub typed_confirmation: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TestN8nWorkflowDraftRequest {
+    pub workflow_id: String,
+    #[serde(default)]
+    pub input_payload: serde_json::Value,
+    #[serde(default)]
+    pub confirmed: bool,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApproveN8nWorkflowDraftRequest {
+    pub workflow_id: String,
+    #[serde(default)]
+    pub confirmed: bool,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RejectN8nWorkflowDraftRequest {
+    pub workflow_id: String,
+    #[serde(default)]
+    pub delete_n8n_draft: bool,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CleanupN8nWorkflowDraftRequest {
+    pub workflow_id: String,
+    #[serde(default)]
+    pub delete_n8n_draft: bool,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContinueN8nWorkflowAuthoringOperationRequest {
+    pub operation_id: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RollbackN8nWorkflowAuthoringUpdateRequest {
+    #[serde(default)]
+    pub backup_id: Option<String>,
+    #[serde(default)]
+    pub backup_path: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveN8nAuthoringCredentialMappingRequest {
+    pub workflow_id: String,
+    #[serde(default)]
+    pub mappings: Vec<N8nCredentialMappingInput>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct N8nCredentialMappingInput {
+    pub credential_type: String,
+    pub credential_id: String,
+    #[serde(default)]
+    pub credential_name: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct N8nAuthoringOperationStore {
+    schema_version: String,
+    updated_at_ms: u64,
+    operations: Vec<N8nAuthoringOperation>,
+}
+
+impl Default for N8nAuthoringOperationStore {
+    fn default() -> Self {
+        Self {
+            schema_version: "kria.n8n.workflow_authoring_operations.v1".into(),
+            updated_at_ms: current_unix_ms(),
+            operations: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct N8nAuthoringOperation {
+    operation_id: String,
+    operation_type: String,
+    workflow_id: String,
+    n8n_workflow_id: String,
+    source_workflow_id: String,
+    source_n8n_workflow_id: String,
+    stage: String,
+    status: String,
+    template_id: String,
+    risk: String,
+    backup_id: String,
+    draft_backup_id: String,
+    created_at_ms: u64,
+    updated_at_ms: u64,
+    last_error: String,
+    recovery_actions: Vec<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -1438,6 +1921,196 @@ async fn fetch_n8n_workflow_values(config: &N8nConfig) -> Result<Vec<serde_json:
     Ok(workflows)
 }
 
+fn n8n_credential_items(payload: &serde_json::Value) -> Vec<serde_json::Value> {
+    if let Some(data) = payload.get("data").and_then(|value| value.as_array()) {
+        return data.clone();
+    }
+    if let Some(credentials) = payload
+        .get("credentials")
+        .and_then(|value| value.as_array())
+    {
+        return credentials.clone();
+    }
+    if let Some(credentials) = payload.as_array() {
+        return credentials.clone();
+    }
+    Vec::new()
+}
+
+async fn fetch_n8n_credential_values(
+    client: &reqwest::Client,
+    config: &N8nConfig,
+) -> Result<Vec<serde_json::Value>, String> {
+    if !config.enabled {
+        return Err("n8n integration is disabled".into());
+    }
+    let api_key = config.resolve_api_key();
+    if api_key.trim().is_empty() {
+        return Err("n8n API key is required to list credential summaries.".into());
+    }
+    let url = format!(
+        "{}/api/v1/credentials",
+        config.base_url.trim_end_matches('/')
+    );
+    let response = client
+        .get(url)
+        .header("X-N8N-API-KEY", api_key.trim())
+        .send()
+        .await
+        .map_err(|error| format!("failed to list n8n credential summaries: {error}"))?;
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(n8n_api_error("n8n credential list", status, &body));
+    }
+    let parsed = serde_json::from_str::<serde_json::Value>(&body)
+        .map_err(|error| format!("n8n credential list response was not valid JSON: {error}"))?;
+    Ok(n8n_credential_items(&parsed))
+}
+
+fn credential_node_family(credential_type: &str) -> &'static str {
+    let lower = credential_type.to_ascii_lowercase();
+    if lower.contains("gmail") {
+        "gmail"
+    } else if lower.contains("sheets") || lower.contains("google") {
+        "google_sheets"
+    } else if lower.contains("slack") {
+        "slack"
+    } else if lower.contains("http") || lower.contains("header") || lower.contains("api") {
+        "http"
+    } else {
+        "unknown"
+    }
+}
+
+fn node_type_family(node_type: &str) -> &'static str {
+    let lower = node_type.to_ascii_lowercase();
+    if lower.contains("gmail") {
+        "gmail"
+    } else if lower.contains("googlesheets") || lower.contains("google_sheets") {
+        "google_sheets"
+    } else if lower.contains("slack") {
+        "slack"
+    } else if lower.contains("httprequest") {
+        "http"
+    } else {
+        "unknown"
+    }
+}
+
+fn credential_summary_from_value(item: &serde_json::Value) -> serde_json::Value {
+    let credential_id = item
+        .get("id")
+        .or_else(|| item.get("credential_id"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let credential_name = item
+        .get("name")
+        .or_else(|| item.get("displayName"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("Unnamed credential")
+        .trim()
+        .to_string();
+    let credential_type = item
+        .get("type")
+        .or_else(|| item.get("credentialType"))
+        .or_else(|| item.get("typeName"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown")
+        .trim()
+        .to_string();
+    serde_json::json!({
+        "credential_id": credential_id,
+        "credential_name": credential_name,
+        "credential_type": credential_type,
+        "node_family": credential_node_family(&credential_type),
+        "redacted": true,
+    })
+}
+
+fn apply_credential_mappings_to_workflow_json(
+    workflow_json: &mut serde_json::Value,
+    mappings: &[N8nCredentialMappingInput],
+) -> Result<Vec<String>, String> {
+    if mappings.is_empty() {
+        return Err("at least one credential mapping is required".into());
+    }
+    let mut applied = Vec::new();
+    let Some(nodes) = workflow_json
+        .get_mut("nodes")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return Err("workflow JSON does not contain nodes".into());
+    };
+    for node in nodes {
+        let node_type = node
+            .get("type")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let family = node_type_family(&node_type);
+        if family == "unknown" {
+            continue;
+        }
+        for mapping in mappings {
+            let credential_type = mapping.credential_type.trim();
+            let credential_id = mapping.credential_id.trim();
+            if credential_type.is_empty() || credential_id.is_empty() {
+                continue;
+            }
+            if credential_node_family(credential_type) != family {
+                continue;
+            }
+            let credential_name = mapping.credential_name.trim();
+            let credential_name = if credential_name.is_empty() {
+                credential_type
+            } else {
+                credential_name
+            };
+            let Some(node_object) = node.as_object_mut() else {
+                continue;
+            };
+            let credentials_value = node_object
+                .entry("credentials")
+                .or_insert_with(|| serde_json::json!({}));
+            let Some(credentials_object) = credentials_value.as_object_mut() else {
+                return Err("workflow node credentials field is not an object".into());
+            };
+            credentials_object.insert(
+                credential_type.to_string(),
+                serde_json::json!({
+                    "id": credential_id,
+                    "name": credential_name,
+                }),
+            );
+            let node_name = node_object
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("node");
+            applied.push(format!("{node_name}:{credential_type}"));
+        }
+    }
+    applied.sort();
+    applied.dedup();
+    if applied.is_empty() {
+        return Err(
+            "credential mappings did not match any supported nodes in this workflow".into(),
+        );
+    }
+    Ok(applied)
+}
+
+fn n8n_update_payload_from_detail(workflow_json: &serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "name": workflow_json.get("name").cloned().unwrap_or_else(|| serde_json::Value::String("KRIA workflow".into())),
+        "nodes": workflow_json.get("nodes").cloned().unwrap_or_else(|| serde_json::json!([])),
+        "connections": workflow_json.get("connections").cloned().unwrap_or_else(|| serde_json::json!({})),
+        "settings": workflow_json.get("settings").cloned().unwrap_or_else(|| serde_json::json!({"executionOrder": "v1"})),
+    })
+}
+
 async fn create_n8n_temporary_workflow(
     client: &reqwest::Client,
     config: &N8nConfig,
@@ -1509,6 +2182,40 @@ async fn create_n8n_workflow_copy(
         .filter(|value| !value.is_empty())
         .map(str::to_string)
         .ok_or_else(|| "n8n input-aware copy response did not include an id".into())
+}
+
+async fn update_n8n_workflow_json(
+    client: &reqwest::Client,
+    config: &N8nConfig,
+    workflow_id: &str,
+    payload: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let url = format!(
+        "{}/api/v1/workflows/{}",
+        config.base_url.trim_end_matches('/'),
+        workflow_id.trim()
+    );
+    let api_key = config.resolve_api_key();
+    if api_key.trim().is_empty() {
+        return Err("n8n API key is required to update a workflow.".into());
+    }
+    let response = client
+        .put(url)
+        .header("X-N8N-API-KEY", api_key.trim())
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|error| format!("failed to update n8n workflow: {error}"))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|error| format!("failed to read n8n workflow update response: {error}"))?;
+    if !status.is_success() {
+        return Err(n8n_api_error("n8n workflow update", status, &body));
+    }
+    serde_json::from_str::<serde_json::Value>(&body)
+        .map_err(|error| format!("n8n workflow update response was not valid JSON: {error}"))
 }
 
 async fn set_n8n_workflow_activation(
@@ -7138,12 +7845,7 @@ fn write_n8n_workflow_backup(
     payload: serde_json::Value,
 ) -> Result<N8nWorkflowBackupRecord, String> {
     validate_registry_workflow_id(workflow_id)?;
-    std::fs::create_dir_all(&backup_dir).map_err(|error| {
-        format!(
-            "failed to create n8n workflow backup directory '{}': {error}",
-            backup_dir.display()
-        )
-    })?;
+    owner_only_dir(&backup_dir)?;
 
     let backup_id = format!("{}_{}", current_unix_ms(), workflow_id);
     let record = N8nWorkflowBackupRecord {
@@ -7158,9 +7860,26 @@ fn write_n8n_workflow_backup(
     let path = backup_dir.join(backup_file_name(&backup_id));
     let body = serde_json::to_vec_pretty(&record)
         .map_err(|error| format!("failed to serialize n8n workflow backup: {error}"))?;
-    std::fs::write(&path, body).map_err(|error| {
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).truncate(true).write(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut file = options.open(&path).map_err(|error| {
         format!(
             "failed to write n8n workflow backup '{}': {error}",
+            path.display()
+        )
+    })?;
+    file.write_all(&body).map_err(|error| {
+        format!(
+            "failed to write n8n workflow backup '{}': {error}",
+            path.display()
+        )
+    })?;
+    #[cfg(unix)]
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).map_err(|error| {
+        format!(
+            "failed to secure n8n workflow backup '{}': {error}",
             path.display()
         )
     })?;
@@ -7180,6 +7899,12 @@ fn read_n8n_workflow_backup(path: PathBuf) -> Result<N8nWorkflowBackupRecord, St
             path.display()
         )
     })
+}
+
+fn file_sha256(path: &Path) -> Result<String, String> {
+    let body = std::fs::read(path)
+        .map_err(|error| format!("failed to read '{}' for hash: {error}", path.display()))?;
+    Ok(format!("sha256:{:x}", sha2::Sha256::digest(&body)))
 }
 
 fn resolve_backup_path(request: &RollbackN8nWorkflowBackupRequest) -> Result<PathBuf, String> {
@@ -7255,9 +7980,589 @@ fn workflow_config_from_authoring_request(
     })
 }
 
+fn slug_from_prompt(value: &str) -> String {
+    let mut slug = String::new();
+    let mut last_dash = false;
+    for ch in value.chars().take(80) {
+        if ch.is_ascii_alphanumeric() {
+            slug.push(ch.to_ascii_lowercase());
+            last_dash = false;
+        } else if !last_dash && !slug.is_empty() {
+            slug.push('_');
+            last_dash = true;
+        }
+    }
+    let slug = slug.trim_matches('_');
+    if slug.is_empty() {
+        "kria_authored_workflow".into()
+    } else {
+        slug.to_string()
+    }
+}
+
+fn title_from_prompt(prompt: &str) -> String {
+    let mut cleaned = prompt.trim().to_string();
+    for prefix in [
+        "create an n8n workflow that",
+        "create a workflow that",
+        "create n8n workflow that",
+        "create workflow that",
+        "build an n8n workflow that",
+        "build a workflow that",
+        "make an n8n workflow that",
+        "make a workflow that",
+    ] {
+        if cleaned.to_ascii_lowercase().starts_with(prefix) {
+            cleaned = cleaned[prefix.len()..].trim().to_string();
+            break;
+        }
+    }
+    let mut words = cleaned
+        .split_whitespace()
+        .take(7)
+        .map(|word| {
+            let mut chars = word
+                .trim_matches(|ch: char| !ch.is_ascii_alphanumeric())
+                .chars();
+            match chars.next() {
+                Some(first) => format!("{}{}", first.to_ascii_uppercase(), chars.as_str()),
+                None => String::new(),
+            }
+        })
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>();
+    if words.is_empty() {
+        words.push("KRIA".into());
+        words.push("Authored".into());
+        words.push("Workflow".into());
+    }
+    words.join(" ")
+}
+
+const N8N_WORKFLOW_NAME_MAX_CHARS: usize = 128;
+
+fn bounded_n8n_workflow_name(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return "KRIA Workflow".into();
+    }
+    if trimmed.chars().count() <= N8N_WORKFLOW_NAME_MAX_CHARS {
+        return trimmed.to_string();
+    }
+    let bounded = trimmed
+        .chars()
+        .take(N8N_WORKFLOW_NAME_MAX_CHARS)
+        .collect::<String>()
+        .trim_matches(|ch: char| ch.is_whitespace() || matches!(ch, '-' | '_' | ':' | '.'))
+        .trim()
+        .to_string();
+    if bounded.is_empty() {
+        "KRIA Workflow".into()
+    } else {
+        bounded
+    }
+}
+
+fn updated_copy_workflow_name(source_name: &str) -> String {
+    let suffix = " - KRIA Updated Draft";
+    let source = source_name.trim();
+    if source.chars().count() + suffix.chars().count() <= N8N_WORKFLOW_NAME_MAX_CHARS {
+        return format!("{source}{suffix}");
+    }
+    let max_source_chars = N8N_WORKFLOW_NAME_MAX_CHARS.saturating_sub(suffix.chars().count());
+    let truncated_source = source
+        .chars()
+        .take(max_source_chars)
+        .collect::<String>()
+        .trim_matches(|ch: char| ch.is_whitespace() || matches!(ch, '-' | '_' | ':' | '.'))
+        .trim()
+        .to_string();
+    let source = if truncated_source.is_empty() {
+        "KRIA Workflow"
+    } else {
+        truncated_source.as_str()
+    };
+    bounded_n8n_workflow_name(&format!("{source}{suffix}"))
+}
+
+fn authoring_template_id(prompt: &str, requested: Option<&str>) -> String {
+    if let Some(value) = requested.map(str::trim).filter(|value| !value.is_empty()) {
+        return value.to_ascii_lowercase();
+    }
+    let lower = prompt.to_ascii_lowercase();
+    if lower.contains("slack") {
+        "slack_post_message".into()
+    } else if lower.contains("gmail") || lower.contains("email") || lower.contains("mail") {
+        "gmail_read_search".into()
+    } else if lower.contains("sheet") || lower.contains("spreadsheet") {
+        "google_sheets_read_lookup".into()
+    } else if lower.contains("schedule")
+        || lower.contains("every morning")
+        || lower.contains("daily")
+    {
+        "schedule_read_notify".into()
+    } else if lower.contains("movie")
+        || lower.contains("omdb")
+        || lower.contains("http")
+        || lower.contains("api")
+    {
+        "webhook_http_request_lookup".into()
+    } else {
+        "webhook_http_response".into()
+    }
+}
+
+fn authoring_template_risk(template_id: &str) -> RiskLevel {
+    match template_id {
+        "slack_post_message" | "gmail_send_draft" | "gmail_create_draft" => RiskLevel::Yellow,
+        _ => RiskLevel::Green,
+    }
+}
+
+fn authoring_template_category(template_id: &str) -> &'static str {
+    match template_id {
+        "slack_post_message" => "communication",
+        "gmail_read_search" | "gmail_send_draft" | "gmail_create_draft" => "email",
+        "google_sheets_read_lookup" => "data",
+        "schedule_read_notify" => "schedule",
+        "webhook_http_request_lookup" => "data_retrieval",
+        _ => "automation",
+    }
+}
+
+fn authoring_template_credentials(template_id: &str) -> Vec<String> {
+    match template_id {
+        "slack_post_message" => vec!["slackOAuth2Api".into()],
+        "gmail_read_search" | "gmail_send_draft" | "gmail_create_draft" => {
+            vec!["gmailOAuth2".into()]
+        }
+        "google_sheets_read_lookup" => vec!["googleSheetsOAuth2Api".into()],
+        _ => Vec::new(),
+    }
+}
+
+fn authoring_template_label(template_id: &str) -> &'static str {
+    match template_id {
+        "webhook_http_request_lookup" => "HTTP lookup",
+        "manual_http_lookup" => "Manual HTTP lookup",
+        "schedule_read_notify" => "Scheduled lookup",
+        "gmail_read_search" => "Gmail search",
+        "gmail_send_draft" | "gmail_create_draft" => "Gmail draft",
+        "google_sheets_read_lookup" => "Google Sheets lookup",
+        "slack_post_message" => "Slack message",
+        "file_webhook_receiver" => "File receiver",
+        _ => "Webhook automation",
+    }
+}
+
+fn authoring_template_preferred_output_node(template_id: &str) -> &'static str {
+    match template_id {
+        "webhook_http_request_lookup" | "manual_http_lookup" | "schedule_read_notify" => {
+            "HTTP Lookup"
+        }
+        "gmail_read_search" => "Gmail Search",
+        "gmail_send_draft" | "gmail_create_draft" => "Create Gmail Draft",
+        "google_sheets_read_lookup" => "Google Sheets Lookup",
+        "slack_post_message" => "Post Slack Message",
+        "file_webhook_receiver" => "Prepare Result",
+        _ => "Prepare Result",
+    }
+}
+
+fn authoring_template_node_family(template_id: &str) -> &'static str {
+    match template_id {
+        "webhook_http_request_lookup" | "manual_http_lookup" | "schedule_read_notify" => "http",
+        "gmail_read_search" | "gmail_send_draft" | "gmail_create_draft" => "gmail",
+        "google_sheets_read_lookup" => "google_sheets",
+        "slack_post_message" => "slack",
+        "file_webhook_receiver" => "file",
+        _ => "set",
+    }
+}
+
+fn authoring_webhook_node(workflow_id: &str) -> serde_json::Value {
+    let webhook_path = format!(
+        "kria-authoring-{}-{}",
+        slug_from_prompt(workflow_id),
+        uuid::Uuid::now_v7()
+    );
+    let webhook_id = uuid::Uuid::now_v7().to_string();
+    serde_json::json!({
+        "id": "kria_authoring_webhook",
+        "name": "Webhook",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [0, 0],
+        "webhookId": webhook_id,
+        "parameters": {
+            "httpMethod": "POST",
+            "path": webhook_path,
+            "responseMode": "lastNode",
+            "options": {}
+        }
+    })
+}
+
+fn authoring_set_node(name: &str, x: i64, expression: &str) -> serde_json::Value {
+    serde_json::json!({
+        "id": format!("kria_authoring_{}", slug_from_prompt(name)),
+        "name": name,
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [x, 0],
+        "parameters": {
+            "assignments": {
+                "assignments": [
+                    {
+                        "id": format!("{}_result", slug_from_prompt(name)),
+                        "name": "result",
+                        "type": "object",
+                        "value": expression
+                    }
+                ]
+            },
+            "options": {}
+        }
+    })
+}
+
+fn authoring_http_lookup_node(prompt: &str) -> serde_json::Value {
+    let lower = prompt.to_ascii_lowercase();
+    let (url, query_name, query_value) = if lower.contains("movie")
+        || lower.contains("omdb")
+        || lower.contains("show")
+    {
+        (
+                "https://api.tvmaze.com/search/shows",
+                "q",
+                "={{ $json.body?.title || $json.body?.query || $json.query?.title || $json.query?.query || 'Inception' }}",
+            )
+    } else {
+        (
+            "https://httpbin.org/get",
+            "query",
+            "={{ $json.body?.query || $json.query?.query || $json.body?.title || 'kria' }}",
+        )
+    };
+    serde_json::json!({
+        "id": "kria_authoring_http_lookup",
+        "name": "HTTP Lookup",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [280, 0],
+        "parameters": {
+            "method": "GET",
+            "url": url,
+            "sendQuery": true,
+            "queryParameters": {
+                "parameters": [
+                    { "name": query_name, "value": query_value }
+                ]
+            },
+            "options": {}
+        }
+    })
+}
+
+fn authoring_gmail_search_node() -> serde_json::Value {
+    serde_json::json!({
+        "id": "kria_authoring_gmail_search",
+        "name": "Gmail Search",
+        "type": "n8n-nodes-base.gmail",
+        "typeVersion": 2.1,
+        "position": [280, 0],
+        "parameters": {
+            "resource": "message",
+            "operation": "getAll",
+            "returnAll": false,
+            "limit": "={{ Number($json.body?.limit || $json.query?.limit || 5) }}",
+            "filters": {
+                "q": "={{ $json.body?.query || $json.query?.query || 'is:unread' }}"
+            }
+        }
+    })
+}
+
+fn authoring_gmail_draft_node() -> serde_json::Value {
+    serde_json::json!({
+        "id": "kria_authoring_gmail_draft",
+        "name": "Create Gmail Draft",
+        "type": "n8n-nodes-base.gmail",
+        "typeVersion": 2.1,
+        "position": [280, 0],
+        "parameters": {
+            "resource": "draft",
+            "operation": "create",
+            "subject": "={{ $json.body?.subject || $json.query?.subject || 'KRIA draft' }}",
+            "message": "={{ $json.body?.message || $json.query?.message || 'Draft created by KRIA. Review before sending.' }}",
+            "toList": "={{ $json.body?.to || $json.query?.to || '' }}"
+        }
+    })
+}
+
+fn authoring_google_sheets_lookup_node() -> serde_json::Value {
+    serde_json::json!({
+        "id": "kria_authoring_google_sheets_lookup",
+        "name": "Google Sheets Lookup",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.5,
+        "position": [280, 0],
+        "parameters": {
+            "operation": "read",
+            "documentId": "={{ $json.body?.spreadsheet_id || $json.query?.spreadsheet_id || '' }}",
+            "sheetName": "={{ $json.body?.sheet || $json.query?.sheet || 'Sheet1' }}",
+            "range": "={{ $json.body?.range || $json.query?.range || 'A:Z' }}",
+            "options": {
+                "returnAll": false,
+                "limit": "={{ Number($json.body?.limit || $json.query?.limit || 10) }}"
+            }
+        }
+    })
+}
+
+fn authoring_slack_post_node() -> serde_json::Value {
+    serde_json::json!({
+        "id": "kria_authoring_slack_post",
+        "name": "Post Slack Message",
+        "type": "n8n-nodes-base.slack",
+        "typeVersion": 2.3,
+        "position": [280, 0],
+        "parameters": {
+            "resource": "message",
+            "operation": "post",
+            "channelId": "={{ $json.body?.channel || $json.query?.channel || '#test' }}",
+            "text": "={{ $json.body?.message || $json.query?.message || 'KRIA test message' }}",
+            "otherOptions": {}
+        }
+    })
+}
+
+fn authoring_result_expression(template_id: &str, prompt: &str) -> String {
+    let prompt_preview = n8n_log_preview_text(prompt, 240).replace('\'', "\\'");
+    match template_id {
+        "webhook_http_request_lookup" | "manual_http_lookup" | "schedule_read_notify" => {
+            "={{ { source: 'HTTP Lookup', data: $json, note: 'HTTP lookup result extracted by KRIA.' } }}".into()
+        }
+        "gmail_read_search" => {
+            "={{ { source: 'Gmail Search', messages: $json, note: 'Gmail results are bounded and should be reviewed before approval.' } }}".into()
+        }
+        "gmail_send_draft" | "gmail_create_draft" => {
+            "={{ { source: 'Create Gmail Draft', draft: $json, note: 'KRIA created a Gmail draft only; it did not send the email.' } }}".into()
+        }
+        "google_sheets_read_lookup" => {
+            "={{ { source: 'Google Sheets Lookup', rows: $json, note: 'Sheet output preview is bounded by KRIA.' } }}".into()
+        }
+        "slack_post_message" => {
+            "={{ { source: 'Post Slack Message', slack: $json, note: 'Slack post requires explicit review before production use.' } }}".into()
+        }
+        "file_webhook_receiver" => {
+            "={{ { source: 'Webhook File Receiver', files: $binary ? Object.keys($binary) : [], fields: $json.body || $json, note: 'File contents are runtime-only and are not stored by KRIA.' } }}".into()
+        }
+        _ => format!(
+            "={{ {{ received: $json.body || $json.query || $json || {{}}, prompt: '{}', message: 'KRIA authored workflow received input.' }} }}",
+            prompt_preview
+        ),
+    }
+}
+
+fn workflow_connections_for_chain(names: &[&str]) -> serde_json::Value {
+    let mut connections = serde_json::Map::new();
+    for pair in names.windows(2) {
+        connections.insert(
+            pair[0].to_string(),
+            serde_json::json!({
+                "main": [[
+                    { "node": pair[1], "type": "main", "index": 0 }
+                ]]
+            }),
+        );
+    }
+    serde_json::Value::Object(connections)
+}
+
+fn workflow_json_for_authoring_plan(
+    name: &str,
+    workflow_id: &str,
+    template_id: &str,
+    prompt: &str,
+) -> serde_json::Value {
+    let webhook = authoring_webhook_node(workflow_id);
+    let result = authoring_set_node(
+        "Prepare Result",
+        560,
+        &authoring_result_expression(template_id, prompt),
+    );
+    let app_node = match template_id {
+        "webhook_http_request_lookup" | "manual_http_lookup" | "schedule_read_notify" => {
+            authoring_http_lookup_node(prompt)
+        }
+        "gmail_read_search" => authoring_gmail_search_node(),
+        "gmail_send_draft" | "gmail_create_draft" => authoring_gmail_draft_node(),
+        "google_sheets_read_lookup" => authoring_google_sheets_lookup_node(),
+        "slack_post_message" => authoring_slack_post_node(),
+        "file_webhook_receiver" => authoring_set_node(
+            "Prepare Result",
+            280,
+            &authoring_result_expression(template_id, prompt),
+        ),
+        _ => authoring_set_node(
+            "Prepare Result",
+            280,
+            &authoring_result_expression(template_id, prompt),
+        ),
+    };
+    let app_node_name = app_node
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("Prepare Result")
+        .to_string();
+    let (nodes, connections) = if app_node_name == "Prepare Result" {
+        (
+            vec![webhook, app_node],
+            workflow_connections_for_chain(&["Webhook", "Prepare Result"]),
+        )
+    } else {
+        (
+            vec![webhook, app_node, result],
+            workflow_connections_for_chain(&["Webhook", &app_node_name, "Prepare Result"]),
+        )
+    };
+    serde_json::json!({
+        "name": name,
+        "nodes": nodes,
+        "connections": connections,
+        "settings": {
+            "executionOrder": "v1"
+        }
+    })
+}
+
+fn authoring_plan_json(
+    prompt: &str,
+    workflow_id: &str,
+    display_name: &str,
+    template_id: &str,
+) -> serde_json::Value {
+    let risk = format!("{:?}", authoring_template_risk(template_id)).to_ascii_lowercase();
+    let credentials = authoring_template_credentials(template_id);
+    let side_effect = matches!(
+        template_id,
+        "slack_post_message" | "gmail_send_draft" | "gmail_create_draft"
+    );
+    let preferred_output = authoring_template_preferred_output_node(template_id);
+    serde_json::json!({
+        "schema_version": "kria.n8n.workflow_authoring_plan.v1",
+        "status": "plan_ready",
+        "workflow_id": workflow_id,
+        "display_name": display_name,
+        "template_id": template_id,
+        "template_label": authoring_template_label(template_id),
+        "source_prompt_preview": n8n_log_preview_text(prompt, 240),
+        "risk": risk,
+        "trigger": {
+            "type": "webhook",
+            "method": "POST"
+        },
+        "steps": [
+            { "label": "Receive prompt input", "node_family": "webhook" },
+            { "label": authoring_template_label(template_id), "node_family": authoring_template_node_family(template_id) },
+            { "label": "Prepare KRIA result payload", "node_family": "set" }
+        ],
+        "inputs": [
+            { "name": "prompt", "type": "string", "required": false },
+            { "name": "title", "type": "string", "required": false },
+            { "name": "query", "type": "string", "required": false },
+            { "name": "message", "type": "string", "required": false }
+        ],
+        "outputs": [
+            { "name": "result", "source_node": "Prepare Result" },
+            { "name": "preferred_raw_source", "source_node": preferred_output }
+        ],
+        "credential_requirements": credentials,
+        "credential_mapping_status": if credentials.is_empty() { "not_required" } else { "missing" },
+        "preferred_output_node": preferred_output,
+        "side_effect_preview": if side_effect {
+            "This draft may become a side-effect workflow after credential mapping; testing requires explicit confirmation."
+        } else {
+            ""
+        },
+        "message": "KRIA generated a deterministic inactive workflow draft plan from a versioned template. Backend validation still decides whether it can be created."
+    })
+}
+
+fn build_authoring_draft_request(
+    prompt: &str,
+    workflow_id: &str,
+    display_name: &str,
+    template_id: &str,
+    workflow_json: serde_json::Value,
+    update_existing: bool,
+) -> CreateOrUpdateN8nWorkflowDraftRequest {
+    CreateOrUpdateN8nWorkflowDraftRequest {
+        workflow_id: workflow_id.into(),
+        workflow_json,
+        workflow_version: default_workflow_version(),
+        display_name: display_name.into(),
+        endpoint_path: String::new(),
+        update_existing,
+        owner: "kria-chat".into(),
+        requires_callback: Some(false),
+        input_schema_ref: String::new(),
+        output_schema_ref: String::new(),
+        expected_evidence: vec!["output_extracted".into()],
+        credential_requirements: authoring_template_credentials(template_id),
+        data_scope: vec!["prompt_input".into(), "n8n_execution_output".into()],
+        hitl_policy: "none".into(),
+        category: authoring_template_category(template_id).into(),
+        description: format!(
+            "KRIA chat-authored draft from prompt: {}",
+            n8n_log_preview_text(prompt, 160)
+        ),
+        example_prompts: vec![prompt.trim().to_string()],
+        tags: vec![
+            "n8n".into(),
+            "kria_chat_authoring".into(),
+            template_id.into(),
+        ],
+        aliases: vec![display_name.into(), workflow_id.into()],
+        allowed_actions: vec!["draft".into(), "test_after_review".into()],
+        risk_tier: Some(authoring_template_risk(template_id)),
+        irreversibility_class: Some(
+            if matches!(
+                template_id,
+                "slack_post_message" | "gmail_send_draft" | "gmail_create_draft"
+            ) {
+                N8nIrreversibilityClass::ReversibleExternal
+            } else {
+                N8nIrreversibilityClass::ReadOnly
+            },
+        ),
+        timeout_class: Some(N8nTimeoutClass::Background),
+        environment: Some(N8nWorkflowEnvironment::Dev),
+    }
+}
+
+fn workflow_has_external_credential_requirement(workflow: &N8nWorkflowConfig) -> bool {
+    workflow.credential_requirements.iter().any(|value| {
+        let normalized = value.trim().to_ascii_lowercase();
+        !normalized.is_empty()
+            && normalized != "none"
+            && !normalized.starts_with("mapped:")
+            && !normalized.contains("not_required")
+    })
+}
+
 fn n8n_eval_reports_dir() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    PathBuf::from(home).join(".kria/eval_reports")
+    std::env::var("KRIA_EVAL_REPORT_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .and_then(|path| path.parent())
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+                .join("eval_reports")
+        })
 }
 
 fn latest_n8n_eval_report_contains(prefix: &str, needles: &[&str]) -> bool {
@@ -7589,6 +8894,171 @@ fn n8n_copy_lifecycle_path() -> PathBuf {
         .join(".kria")
         .join("n8n")
         .join("copy_lifecycle.json")
+}
+
+fn n8n_workflow_crud_operations_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".kria")
+        .join("n8n")
+        .join("workflow_crud_operations.json")
+}
+
+fn n8n_workflow_authoring_operations_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".kria")
+        .join("n8n")
+        .join("workflow_authoring_operations.json")
+}
+
+fn load_workflow_authoring_operation_store() -> Result<N8nAuthoringOperationStore, String> {
+    let path = n8n_workflow_authoring_operations_path();
+    if !path.exists() {
+        return Ok(N8nAuthoringOperationStore::default());
+    }
+    let body = std::fs::read_to_string(&path).map_err(|error| {
+        format!(
+            "failed to read n8n workflow authoring operation store '{}': {error}",
+            path.display()
+        )
+    })?;
+    serde_json::from_str::<N8nAuthoringOperationStore>(&body).map_err(|error| {
+        format!(
+            "failed to parse n8n workflow authoring operation store '{}': {error}",
+            path.display()
+        )
+    })
+}
+
+fn save_workflow_authoring_operation_store(
+    store: &N8nAuthoringOperationStore,
+) -> Result<(), String> {
+    let path = n8n_workflow_authoring_operations_path();
+    if let Some(parent) = path.parent() {
+        owner_only_dir(parent)?;
+    }
+    let value = serde_json::to_value(store)
+        .map_err(|error| format!("failed to serialize workflow authoring operations: {error}"))?;
+    write_owner_only_json(&path, &value)
+}
+
+fn upsert_workflow_authoring_operation(operation: N8nAuthoringOperation) -> Result<(), String> {
+    let mut store = load_workflow_authoring_operation_store()?;
+    if let Some(existing) = store
+        .operations
+        .iter_mut()
+        .find(|item| item.operation_id == operation.operation_id)
+    {
+        *existing = operation;
+    } else {
+        store.operations.push(operation);
+    }
+    store.updated_at_ms = current_unix_ms();
+    save_workflow_authoring_operation_store(&store)
+}
+
+fn new_workflow_authoring_operation(
+    operation_type: &str,
+    workflow_id: &str,
+    n8n_workflow_id: &str,
+    source_workflow: Option<&N8nWorkflowConfig>,
+    stage: &str,
+    status: &str,
+    template_id: &str,
+    risk: &str,
+) -> N8nAuthoringOperation {
+    let now = current_unix_ms();
+    N8nAuthoringOperation {
+        operation_id: uuid::Uuid::now_v7().to_string(),
+        operation_type: operation_type.into(),
+        workflow_id: workflow_id.into(),
+        n8n_workflow_id: n8n_workflow_id.into(),
+        source_workflow_id: source_workflow
+            .map(|workflow| workflow.workflow_id.clone())
+            .unwrap_or_default(),
+        source_n8n_workflow_id: source_workflow
+            .map(|workflow| workflow.n8n_workflow_id.clone())
+            .unwrap_or_default(),
+        stage: stage.into(),
+        status: status.into(),
+        template_id: template_id.into(),
+        risk: risk.into(),
+        backup_id: String::new(),
+        draft_backup_id: String::new(),
+        created_at_ms: now,
+        updated_at_ms: now,
+        last_error: String::new(),
+        recovery_actions: Vec::new(),
+    }
+}
+
+fn load_workflow_crud_operation_store() -> Result<N8nWorkflowCrudOperationStore, String> {
+    let path = n8n_workflow_crud_operations_path();
+    if !path.exists() {
+        return Ok(N8nWorkflowCrudOperationStore::default());
+    }
+    let body = std::fs::read_to_string(&path).map_err(|error| {
+        format!(
+            "failed to read n8n workflow CRUD operation store '{}': {error}",
+            path.display()
+        )
+    })?;
+    serde_json::from_str::<N8nWorkflowCrudOperationStore>(&body).map_err(|error| {
+        format!(
+            "failed to parse n8n workflow CRUD operation store '{}': {error}",
+            path.display()
+        )
+    })
+}
+
+fn save_workflow_crud_operation_store(store: &N8nWorkflowCrudOperationStore) -> Result<(), String> {
+    let path = n8n_workflow_crud_operations_path();
+    if let Some(parent) = path.parent() {
+        owner_only_dir(parent)?;
+    }
+    let value = serde_json::to_value(store)
+        .map_err(|error| format!("failed to serialize workflow CRUD operations: {error}"))?;
+    write_owner_only_json(&path, &value)
+}
+
+fn upsert_workflow_crud_operation(operation: N8nWorkflowCrudOperation) -> Result<(), String> {
+    let mut store = load_workflow_crud_operation_store()?;
+    if let Some(existing) = store
+        .operations
+        .iter_mut()
+        .find(|item| item.operation_id == operation.operation_id)
+    {
+        *existing = operation;
+    } else {
+        store.operations.push(operation);
+    }
+    store.updated_at_ms = current_unix_ms();
+    save_workflow_crud_operation_store(&store)
+}
+
+fn new_workflow_crud_operation(
+    operation_type: &str,
+    workflow: &N8nWorkflowConfig,
+    stage: &str,
+    status: &str,
+) -> N8nWorkflowCrudOperation {
+    let now = current_unix_ms();
+    N8nWorkflowCrudOperation {
+        operation_id: uuid::Uuid::now_v7().to_string(),
+        operation_type: operation_type.into(),
+        workflow_id: workflow.workflow_id.clone(),
+        n8n_workflow_id: workflow.n8n_workflow_id.clone(),
+        workflow_name: workflow.display_name.clone(),
+        stage: stage.into(),
+        status: status.into(),
+        backup_path: String::new(),
+        backup_hash: String::new(),
+        last_error: String::new(),
+        recovery_actions: Vec::new(),
+        created_at_ms: now,
+        updated_at_ms: now,
+    }
 }
 
 fn load_copy_lifecycle_store() -> Result<N8nCopyLifecycleStore, String> {
@@ -8042,9 +9512,17 @@ fn save_workflow_registry_store(store: &N8nWorkflowRegistryStore) -> Result<(), 
     })
 }
 
-fn load_workflow_registry_workflows() -> Result<Vec<N8nWorkflowConfig>, String> {
+pub(crate) fn load_workflow_registry_workflows() -> Result<Vec<N8nWorkflowConfig>, String> {
     let store = load_workflow_registry_store()?;
     Ok(workflow_registry_workflows(&store))
+}
+
+pub(crate) fn load_workflow_registry_all_workflows() -> Result<Vec<N8nWorkflowConfig>, String> {
+    let store = load_workflow_registry_store()?;
+    Ok(workflow_registry_records(&store)
+        .into_iter()
+        .map(|record| record.workflow)
+        .collect())
 }
 
 fn n8n_config_with_workflows(config: &N8nConfig, workflows: Vec<N8nWorkflowConfig>) -> N8nConfig {
@@ -8086,6 +9564,7 @@ fn registry_store_payload(store: &N8nWorkflowRegistryStore) -> serde_json::Value
         "workflow_count": store.workflows.len(),
         "records": workflow_registry_records(store),
         "workflows": workflow_registry_workflows(store),
+        "archived_workflows": workflow_registry_archived_workflows(store),
     })
 }
 
@@ -8548,6 +10027,1034 @@ fn connection_profile_from_snapshot(
         "last_checked_at_ms": snapshot.get("checked_at_ms").and_then(|value| value.as_u64()).unwrap_or_else(current_unix_ms),
         "snapshot": snapshot,
         "container": container.cloned().unwrap_or_else(|| serde_json::json!({})),
+    })
+}
+
+fn n8n_production_audit_latest_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".kria")
+        .join("n8n")
+        .join("production_audit_latest.json")
+}
+
+fn n8n_eval_report_dir() -> PathBuf {
+    n8n_eval_reports_dir()
+}
+
+fn n8n_run_events_path_from_inbox(inbox_path: &Path) -> PathBuf {
+    n8n_run_events_path(inbox_path)
+}
+
+fn audit_file_mtime_ms(path: &Path) -> Option<u64> {
+    std::fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_millis() as u64)
+}
+
+fn audit_finding(
+    id: impl Into<String>,
+    category: impl Into<String>,
+    severity: impl Into<String>,
+    title: impl Into<String>,
+    message: impl Into<String>,
+    next_action: impl Into<String>,
+) -> N8nAuditFinding {
+    let severity = severity.into();
+    let blocks = matches!(severity.as_str(), "high" | "critical");
+    N8nAuditFinding {
+        id: id.into(),
+        category: category.into(),
+        severity,
+        title: title.into(),
+        message: message.into(),
+        affected_workflow_id: None,
+        affected_adapter: None,
+        blocks_execution: blocks,
+        blocks_approval: blocks,
+        safe_to_auto_fix: false,
+        repair_kind: None,
+        next_action: next_action.into(),
+    }
+}
+
+fn audit_finding_with_workflow(
+    mut finding: N8nAuditFinding,
+    workflow_id: &str,
+    adapter: Option<&str>,
+) -> N8nAuditFinding {
+    finding.affected_workflow_id = Some(workflow_id.to_string());
+    finding.affected_adapter = adapter.map(ToString::to_string);
+    finding
+}
+
+fn audit_safe_repair(mut finding: N8nAuditFinding, repair_kind: &str) -> N8nAuditFinding {
+    finding.safe_to_auto_fix = true;
+    finding.repair_kind = Some(repair_kind.to_string());
+    finding
+}
+
+fn audit_status_from_findings(findings: &[N8nAuditFinding]) -> String {
+    if findings.iter().any(|item| item.severity == "critical") {
+        "blocked".into()
+    } else if findings.iter().any(|item| item.severity == "high") {
+        "needs_fix".into()
+    } else if findings.iter().any(|item| item.severity == "warning") {
+        "degraded".into()
+    } else {
+        "ready".into()
+    }
+}
+
+fn audit_category_status(findings: &[N8nAuditFinding], categories: &[&str]) -> String {
+    let scoped = findings
+        .iter()
+        .filter(|finding| categories.contains(&finding.category.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    audit_status_from_findings(&scoped)
+}
+
+fn audit_summary_counts(findings: &[N8nAuditFinding]) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::new();
+    for key in ["critical", "high", "warning", "info"] {
+        counts.insert(
+            key.to_string(),
+            findings.iter().filter(|item| item.severity == key).count(),
+        );
+    }
+    counts.insert("total".into(), findings.len());
+    counts
+}
+
+fn is_safe_secret_placeholder(value: &str) -> bool {
+    let normalized = value
+        .trim()
+        .trim_matches(|ch| matches!(ch, '"' | '\'' | '`' | ',' | ';'))
+        .to_ascii_lowercase();
+    normalized.is_empty()
+        || matches!(
+            normalized.as_str(),
+            "<redacted>"
+                | "redacted"
+                | "none"
+                | "dummy"
+                | "fixture-secret"
+                | "test-key"
+                | "secret"
+                | "legacy-secret"
+                | "legacy-api-key"
+                | "manual-api-key"
+                | "file-api-key"
+                | "env-api-key"
+        )
+}
+
+fn secret_value_candidate(line: &str) -> Option<String> {
+    let lower = line.to_ascii_lowercase();
+    let sensitive_key = [
+        "api_key",
+        "apikey",
+        "authorization",
+        "bearer",
+        "token",
+        "cookie",
+        "password",
+        "oauth",
+        "signing_secret",
+        "hmac",
+        "client_secret",
+    ]
+    .iter()
+    .any(|key| lower.contains(key));
+    if !sensitive_key {
+        return None;
+    }
+    let value = line
+        .split_once('=')
+        .map(|(_, value)| value)
+        .or_else(|| line.split_once(':').map(|(_, value)| value))
+        .unwrap_or(line)
+        .trim()
+        .trim_matches(|ch| matches!(ch, '"' | '\'' | '`' | ',' | ';' | '{' | '}'))
+        .to_string();
+    if value.len() >= 10 && !is_safe_secret_placeholder(&value) {
+        Some(value)
+    } else {
+        None
+    }
+}
+
+fn has_large_or_base64_blob(text: &str) -> bool {
+    text.split(|ch: char| ch.is_whitespace() || matches!(ch, '"' | '\'' | ',' | ':' | '[' | ']'))
+        .any(|token| {
+            token.len() > 2048
+                && token.chars().all(|ch| {
+                    ch.is_ascii_alphanumeric() || matches!(ch, '+' | '/' | '=' | '_' | '-')
+                })
+        })
+}
+
+fn audit_location_severity(path: &Path, runtime_default: &str) -> String {
+    let display = path.display().to_string();
+    if display.contains("/.kria/n8n/")
+        || display.ends_with(".kria/config.toml")
+        || display.contains("\\.kria\\n8n\\")
+    {
+        runtime_default.into()
+    } else if display.contains("/planning_docs/") || display.contains("/scripts/") {
+        "warning".into()
+    } else {
+        "high".into()
+    }
+}
+
+fn scan_file_for_audit_findings(path: &Path, location_label: &str) -> Vec<N8nAuditFinding> {
+    const MAX_SCAN_BYTES: u64 = 2 * 1024 * 1024;
+    if !path.exists() {
+        return Vec::new();
+    }
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return vec![audit_finding(
+            format!("storage_read_failed:{}", location_label),
+            "storage",
+            "warning",
+            "KRIA could not read an audit target",
+            format!("KRIA could not inspect {location_label}."),
+            "Check file permissions if audit details look incomplete.",
+        )];
+    };
+    if metadata.len() > MAX_SCAN_BYTES {
+        return vec![audit_finding(
+            format!("storage_large_file:{}", location_label),
+            "storage",
+            "info",
+            "Large audit target was skipped",
+            format!("{location_label} is larger than the bounded audit scan limit."),
+            "Use export bundle or rotate old logs if this file keeps growing.",
+        )];
+    }
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let mut findings = Vec::new();
+    for (index, line) in text.lines().enumerate() {
+        if secret_value_candidate(line).is_some() {
+            let severity = audit_location_severity(path, "critical");
+            findings.push(audit_finding(
+                format!("secret_like_value:{location_label}:{}", index + 1),
+                "secrets",
+                severity,
+                "Possible secret stored in n8n data",
+                format!(
+                    "KRIA found a secret-like value in {location_label}. The value is not shown."
+                ),
+                "Move secrets into KRIA secret files or n8n credentials, then rerun audit.",
+            ));
+            break;
+        }
+    }
+    if has_large_or_base64_blob(&text) {
+        findings.push(audit_finding(
+            format!("large_blob:{location_label}"),
+            "file",
+            audit_location_severity(path, "high"),
+            "Possible file contents stored in n8n metadata",
+            format!("KRIA found a very large encoded value in {location_label}."),
+            "Keep file contents runtime-only; store only filename, size, MIME, and short hash.",
+        ));
+    }
+    findings
+}
+
+fn audit_secret_file_permissions(path: &Path, label: &str) -> Option<N8nAuditFinding> {
+    if !path.exists() {
+        return None;
+    }
+    #[cfg(unix)]
+    {
+        let Ok(metadata) = std::fs::metadata(path) else {
+            return Some(audit_finding(
+                format!("secret_perm_read_failed:{label}"),
+                "storage",
+                "warning",
+                "KRIA could not inspect a secret file",
+                format!("KRIA could not inspect permissions for {label}."),
+                "Check local file permissions.",
+            ));
+        };
+        let mode = metadata.permissions().mode() & 0o777;
+        if mode & 0o077 != 0 {
+            return Some(audit_safe_repair(
+                audit_finding(
+                    format!("secret_file_not_owner_only:{label}"),
+                    "secrets",
+                    "high",
+                    "Secret file is readable by other users",
+                    format!("{label} should be owner-only."),
+                    "Fix secret file permissions.",
+                ),
+                "fix_secret_file_permissions",
+            ));
+        }
+    }
+    None
+}
+
+fn audit_paths(
+    config: &kria_core::config::KriaConfig,
+    inbox_path: &Path,
+    audit_path: &Path,
+) -> Vec<(PathBuf, String)> {
+    let mut paths = Vec::new();
+    if let Ok(root) = std::env::current_dir() {
+        paths.push((
+            root.join("config/default.toml"),
+            "tracked default config".into(),
+        ));
+        paths.push((
+            root.join("config/n8n_test_workflow.json"),
+            "tracked n8n test workflow export".into(),
+        ));
+    }
+    if let Some(home) = dirs::home_dir() {
+        paths.push((home.join(".kria/config.toml"), "user KRIA config".into()));
+        let eval_dir = n8n_eval_report_dir();
+        if let Ok(entries) = std::fs::read_dir(eval_dir) {
+            for entry in entries.flatten().take(20) {
+                let path = entry.path();
+                let name = path
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or_default()
+                    .to_string();
+                if name.starts_with("n8n_") && name.ends_with(".txt") {
+                    paths.push((path, format!("eval report {name}")));
+                }
+            }
+        }
+    }
+    paths.push((
+        default_runtime_profile_store_path(),
+        "runtime profiles".into(),
+    ));
+    paths.push((
+        default_workflow_registry_store_path(),
+        "workflow registry".into(),
+    ));
+    paths.push((n8n_copy_lifecycle_path(), "copy lifecycle store".into()));
+    paths.push((
+        n8n_workflow_authoring_operations_path(),
+        "workflow authoring operations".into(),
+    ));
+    paths.push((
+        n8n_run_events_path_from_inbox(inbox_path),
+        "n8n run events".into(),
+    ));
+    paths.push((inbox_path.to_path_buf(), "callback inbox".into()));
+    paths.push((audit_path.to_path_buf(), "governance audit".into()));
+    paths.push((
+        config.n8n.api_key_file_path(),
+        "n8n API key secret file".into(),
+    ));
+    paths.push((
+        config.n8n.signing_secret_file_path(),
+        "n8n callback signing secret file".into(),
+    ));
+    paths
+}
+
+fn audit_adapter_readiness(
+    config: &N8nConfig,
+    workflows: &[N8nWorkflowConfig],
+    connection_profile: &serde_json::Value,
+) -> Vec<N8nAuditAdapterReadiness> {
+    let approved = workflows
+        .iter()
+        .filter(|workflow| workflow.status == N8nWorkflowStatus::Approved)
+        .collect::<Vec<_>>();
+    let api_ok = connection_profile
+        .get("api_auth_status")
+        .and_then(|value| value.as_str())
+        .unwrap_or("unknown")
+        == "ok";
+    let signing_secret_present = !config.resolve_signing_secret().trim().is_empty();
+    let runner_ready = !matches!(
+        connection_profile
+            .get("runner_status")
+            .and_then(|value| value.as_str())
+            .unwrap_or("unknown"),
+        "monitor_only"
+            | "local_cli_missing"
+            | "local_cli_failed"
+            | "docker_needs_start"
+            | "docker_unavailable"
+            | "docker_exec_failed"
+            | "unknown"
+    );
+
+    let mut readiness = Vec::new();
+    let mut push_adapter = |adapter: &str, ids: Vec<String>, status: &str, reason: String| {
+        readiness.push(N8nAuditAdapterReadiness {
+            adapter: adapter.into(),
+            status: if ids.is_empty() && status == "ready" {
+                "not_configured".into()
+            } else {
+                status.into()
+            },
+            affected_workflow_ids: ids,
+            reason,
+        });
+    };
+
+    let callback_ids = approved
+        .iter()
+        .filter(|workflow| workflow.requires_callback.unwrap_or(false))
+        .map(|workflow| workflow.workflow_id.clone())
+        .collect::<Vec<_>>();
+    push_adapter(
+        "callback",
+        callback_ids,
+        if signing_secret_present {
+            "ready"
+        } else {
+            "blocked"
+        },
+        if signing_secret_present {
+            "Callback workflows have a signing secret.".into()
+        } else {
+            "Callback workflows need a KRIA n8n signing secret.".into()
+        },
+    );
+
+    let webhook_ids = approved
+        .iter()
+        .filter(|workflow| {
+            matches!(
+                workflow.trigger_strategy.as_str(),
+                "webhook" | "form_submit" | "chat_trigger"
+            )
+        })
+        .map(|workflow| workflow.workflow_id.clone())
+        .collect::<Vec<_>>();
+    push_adapter(
+        "webhook_polling",
+        webhook_ids,
+        if api_ok { "ready" } else { "blocked" },
+        if api_ok {
+            "Webhook/Form/Chat polling can list executions and extract output.".into()
+        } else {
+            "Polling adapters need a valid n8n API key.".into()
+        },
+    );
+
+    let manual_ids = approved
+        .iter()
+        .filter(|workflow| workflow.trigger_strategy == "manual_api_execute")
+        .map(|workflow| workflow.workflow_id.clone())
+        .collect::<Vec<_>>();
+    push_adapter(
+        "manual_runner",
+        manual_ids,
+        if api_ok && runner_ready {
+            "ready"
+        } else if api_ok {
+            "needs_setup"
+        } else {
+            "blocked"
+        },
+        if api_ok && runner_ready {
+            "Manual workflows can run through the configured runner.".into()
+        } else if api_ok {
+            "Manual workflows need local, Docker, SSH, or Fleet runner access.".into()
+        } else {
+            "Manual runner output extraction needs a valid n8n API key.".into()
+        },
+    );
+
+    let monitor_ids = approved
+        .iter()
+        .filter(|workflow| workflow.result_mode == "monitor_only")
+        .map(|workflow| workflow.workflow_id.clone())
+        .collect::<Vec<_>>();
+    push_adapter(
+        "monitor",
+        monitor_ids,
+        if api_ok { "ready" } else { "blocked" },
+        if api_ok {
+            "Monitor workflows can read n8n execution history.".into()
+        } else {
+            "Monitor mode needs a valid n8n API key.".into()
+        },
+    );
+
+    let broker_ids = approved
+        .iter()
+        .filter(|workflow| workflow.trigger_strategy == "sub_workflow_broker")
+        .map(|workflow| workflow.workflow_id.clone())
+        .collect::<Vec<_>>();
+    push_adapter(
+        "broker",
+        broker_ids,
+        if api_ok { "ready" } else { "blocked" },
+        if api_ok {
+            "Broker workflows can poll broker execution output.".into()
+        } else {
+            "Broker workflows need a valid n8n API key for output extraction.".into()
+        },
+    );
+
+    let remote_ids = approved
+        .iter()
+        .filter(|workflow| {
+            matches!(
+                workflow.runner_backend.as_str(),
+                "remote_ssh" | "remote_docker"
+            )
+        })
+        .map(|workflow| workflow.workflow_id.clone())
+        .collect::<Vec<_>>();
+    push_adapter(
+        "remote_runner",
+        remote_ids,
+        if runner_ready { "ready" } else { "needs_setup" },
+        if runner_ready {
+            "Remote runner is configured for workflows that require it.".into()
+        } else {
+            "No remote runner is required or configured.".into()
+        },
+    );
+
+    readiness
+}
+
+fn audit_registry_findings(
+    workflows: &[N8nWorkflowConfig],
+    adapter_readiness: &[N8nAuditAdapterReadiness],
+) -> Vec<N8nAuditFinding> {
+    let mut findings = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for workflow in workflows {
+        if !seen.insert(workflow.workflow_id.clone()) {
+            findings.push(audit_finding_with_workflow(
+                audit_finding(
+                    format!("duplicate_workflow_id:{}", workflow.workflow_id),
+                    "registry",
+                    "critical",
+                    "Duplicate n8n workflow ID",
+                    "Two registry entries use the same KRIA workflow ID.",
+                    "Rename or remove the duplicate registry entry.",
+                ),
+                &workflow.workflow_id,
+                None,
+            ));
+        }
+        if workflow.status != N8nWorkflowStatus::Approved {
+            continue;
+        }
+        if workflow.n8n_workflow_id.trim().is_empty()
+            && !workflow.requires_callback.unwrap_or(false)
+        {
+            findings.push(audit_finding_with_workflow(
+                audit_finding(
+                    format!("approved_missing_n8n_id:{}", workflow.workflow_id),
+                    "registry",
+                    "high",
+                    "Approved workflow is missing n8n ID",
+                    "KRIA cannot reliably run or audit this workflow without the n8n workflow ID.",
+                    "Refresh workflow setup from n8n.",
+                ),
+                &workflow.workflow_id,
+                None,
+            ));
+        }
+        if workflow.category.trim().is_empty()
+            || workflow.description.trim().is_empty()
+            || workflow.example_prompts.is_empty()
+            || (workflow.tags.is_empty() && workflow.aliases.is_empty())
+        {
+            findings.push(audit_finding_with_workflow(
+                audit_finding(
+                    format!("approved_metadata_incomplete:{}", workflow.workflow_id),
+                    "registry",
+                    "warning",
+                    "Approved workflow metadata is incomplete",
+                    "Routing can work better when description, category, examples, and tags or aliases are present.",
+                    "Open Add from n8n and refresh or save reviewed metadata.",
+                ),
+                &workflow.workflow_id,
+                None,
+            ));
+        }
+        if workflow.lifecycle_status.trim().is_empty() {
+            findings.push(audit_finding_with_workflow(
+                audit_safe_repair(
+                    audit_finding(
+                        format!("lifecycle_missing:{}", workflow.workflow_id),
+                        "lifecycle",
+                        "warning",
+                        "Workflow lifecycle has not been checked",
+                        "KRIA has not recorded drift/lifecycle status for this workflow yet.",
+                        "Run lifecycle refresh.",
+                    ),
+                    "refresh_safe_lifecycle_metadata",
+                ),
+                &workflow.workflow_id,
+                None,
+            ));
+        } else if matches!(
+            workflow.lifecycle_status.as_str(),
+            "needs_review" | "needs_retest" | "copy_changed" | "copy_missing" | "blocked"
+        ) {
+            findings.push(audit_finding_with_workflow(
+                audit_finding(
+                    format!("lifecycle_blocks:{}", workflow.workflow_id),
+                    "lifecycle",
+                    "high",
+                    "Workflow changed after approval",
+                    "This workflow needs refresh, retest, or review before safe execution.",
+                    "Open Add from n8n and review lifecycle changes.",
+                ),
+                &workflow.workflow_id,
+                None,
+            ));
+        }
+        if workflow.trigger_strategy == "webhook"
+            && !matches!(workflow.webhook_method.as_str(), "GET" | "POST")
+        {
+            findings.push(audit_finding_with_workflow(
+                audit_finding(
+                    format!("webhook_method_missing:{}", workflow.workflow_id),
+                    "execution",
+                    "high",
+                    "Webhook method is missing",
+                    "KRIA must know whether to call this webhook with GET or POST.",
+                    "Refresh analysis or review webhook method.",
+                ),
+                &workflow.workflow_id,
+                Some("webhook_polling"),
+            ));
+        }
+        if workflow.trigger_strategy == "sub_workflow_broker"
+            && (workflow.broker_workflow_id.trim().is_empty()
+                || workflow.broker_webhook_path.trim().is_empty()
+                || !matches!(workflow.broker_webhook_method.as_str(), "GET" | "POST"))
+        {
+            findings.push(audit_finding_with_workflow(
+                audit_finding(
+                    format!("broker_setup_incomplete:{}", workflow.workflow_id),
+                    "broker",
+                    "high",
+                    "Broker setup is incomplete",
+                    "Broker workflows need broker workflow ID, method, path, and fixed target ID.",
+                    "Configure broker setup before approving or running.",
+                ),
+                &workflow.workflow_id,
+                Some("broker"),
+            ));
+        }
+    }
+    for readiness in adapter_readiness {
+        if readiness.status == "blocked" && !readiness.affected_workflow_ids.is_empty() {
+            findings.push(N8nAuditFinding {
+                id: format!("adapter_blocked:{}", readiness.adapter),
+                category: "execution".into(),
+                severity: "high".into(),
+                title: format!(
+                    "{} adapter needs setup",
+                    readiness.adapter.replace('_', " ")
+                ),
+                message: readiness.reason.clone(),
+                affected_workflow_id: None,
+                affected_adapter: Some(readiness.adapter.clone()),
+                blocks_execution: true,
+                blocks_approval: false,
+                safe_to_auto_fix: false,
+                repair_kind: None,
+                next_action: "Open n8n settings or workflow setup and fix the missing requirement."
+                    .into(),
+            });
+        }
+    }
+    findings
+}
+
+fn audit_latest_report_is_stale(
+    report: &N8nProductionAuditReport,
+    paths: &[(PathBuf, String)],
+) -> Option<String> {
+    for (path, label) in paths {
+        if let Some(mtime) = audit_file_mtime_ms(path) {
+            if mtime > report.generated_at_ms {
+                return Some(format!("{label} changed after the last audit."));
+            }
+        }
+    }
+    None
+}
+
+fn audit_hash_label(value: &str) -> String {
+    let digest = sha2::Sha256::digest(value.as_bytes());
+    format!("sha256:{:x}", digest)[..19].to_string()
+}
+
+fn audit_workflow_label(workflow: &N8nWorkflowConfig, include_labels: bool) -> serde_json::Value {
+    if include_labels {
+        serde_json::json!({
+            "workflow_id": workflow.workflow_id,
+            "display_name": workflow.display_name,
+            "status": workflow.status,
+            "trigger_strategy": workflow.trigger_strategy,
+            "result_mode": workflow.result_mode,
+        })
+    } else {
+        serde_json::json!({
+            "workflow_ref": audit_hash_label(&workflow.workflow_id),
+            "status": workflow.status,
+            "trigger_strategy": workflow.trigger_strategy,
+            "result_mode": workflow.result_mode,
+        })
+    }
+}
+
+fn write_owner_only_text(path: &Path, body: &str) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        owner_only_dir(parent)?;
+    }
+    #[cfg(unix)]
+    {
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .mode(0o600)
+            .open(path)
+            .map_err(|error| format!("failed to write '{}': {error}", path.display()))?;
+        file.write_all(body.as_bytes())
+            .map_err(|error| format!("failed to write '{}': {error}", path.display()))?;
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, body)
+            .map_err(|error| format!("failed to write '{}': {error}", path.display()))?;
+    }
+    Ok(())
+}
+
+fn save_n8n_production_audit_report(report: &N8nProductionAuditReport) -> Result<(), String> {
+    let path = n8n_production_audit_latest_path();
+    if let Some(parent) = path.parent() {
+        owner_only_dir(parent)?;
+    }
+    write_owner_only_json(
+        &path,
+        &serde_json::to_value(report)
+            .map_err(|error| format!("failed to serialize production audit: {error}"))?,
+    )
+}
+
+fn load_n8n_production_audit_report() -> Result<Option<N8nProductionAuditReport>, String> {
+    let path = n8n_production_audit_latest_path();
+    if !path.exists() {
+        return Ok(None);
+    }
+    let body = std::fs::read_to_string(&path).map_err(|error| {
+        format!(
+            "failed to read n8n production audit '{}': {error}",
+            path.display()
+        )
+    })?;
+    serde_json::from_str::<N8nProductionAuditReport>(&body)
+        .map(Some)
+        .map_err(|error| {
+            format!(
+                "failed to parse n8n production audit '{}': {error}",
+                path.display()
+            )
+        })
+}
+
+fn latest_eval_report_path(prefix: &str) -> Option<PathBuf> {
+    let dir = n8n_eval_report_dir();
+    let mut entries = std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            let name = path.file_name()?.to_str()?.to_string();
+            if name.starts_with(prefix) {
+                let mtime = audit_file_mtime_ms(&path).unwrap_or(0);
+                Some((mtime, path))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by_key(|(mtime, _)| *mtime);
+    entries.pop().map(|(_, path)| path)
+}
+
+fn audit_writable_parent(path: &Path, label: &str) -> Option<N8nAuditFinding> {
+    let parent = if path.extension().is_some() {
+        path.parent().unwrap_or(path)
+    } else {
+        path
+    };
+    if parent.exists() {
+        let readonly = std::fs::metadata(parent)
+            .map(|metadata| metadata.permissions().readonly())
+            .unwrap_or(false);
+        if readonly {
+            return Some(audit_finding(
+                format!("storage_readonly:{label}"),
+                "storage",
+                "high",
+                "n8n storage path is read-only",
+                format!("KRIA may not be able to write {label}."),
+                "Fix local directory permissions.",
+            ));
+        }
+    } else {
+        return Some(audit_finding(
+            format!("storage_parent_missing:{label}"),
+            "storage",
+            "warning",
+            "n8n storage directory is missing",
+            format!("KRIA has not created the directory for {label} yet."),
+            "Run the related n8n action once or create the KRIA data directory.",
+        ));
+    }
+    None
+}
+
+async fn build_n8n_production_audit_report(
+    config: &kria_core::config::KriaConfig,
+    inbox_path: &Path,
+    governance_audit_path: &Path,
+) -> Result<N8nProductionAuditReport, String> {
+    let generated_at_ms = current_unix_ms();
+    let expires_at_ms = generated_at_ms + 5 * 60 * 1000;
+    let n8n = config.n8n.clone();
+    let callback = callback_url(config);
+    let container = if n8n.mode == N8nRuntimeMode::ManagedDocker {
+        Some(docker_container_status(&n8n.managed_docker.container_name).await)
+    } else {
+        None
+    };
+    let snapshot = test_connection_snapshot(&n8n, &callback).await;
+    let connection_profile = connection_profile_from_snapshot(&n8n, &snapshot, container.as_ref());
+
+    let mut findings = Vec::<N8nAuditFinding>::new();
+    if !n8n.enabled {
+        findings.push(audit_finding(
+            "n8n_disabled",
+            "config",
+            "warning",
+            "n8n integration is disabled",
+            "KRIA will not run n8n workflows until the integration is enabled.",
+            "Enable n8n in Settings when you want to use workflows.",
+        ));
+    }
+    if !n8n.api_key.trim().is_empty() {
+        findings.push(audit_safe_repair(
+            audit_finding(
+                "literal_api_key_in_config",
+                "secrets",
+                "high",
+                "n8n API key is stored directly in config",
+                "KRIA should store the n8n API key in an owner-only secret file.",
+                "Move API key from config to secret file.",
+            ),
+            "move_literal_api_key_to_secret_file",
+        ));
+    }
+    if !n8n.signing_secret.trim().is_empty() {
+        findings.push(audit_safe_repair(
+            audit_finding(
+                "literal_signing_secret_in_config",
+                "secrets",
+                "high",
+                "n8n callback signing secret is stored directly in config",
+                "KRIA should store the n8n callback signing secret in an owner-only secret file.",
+                "Move signing secret from config to secret file.",
+            ),
+            "move_literal_signing_secret_to_secret_file",
+        ));
+    }
+    for (path, label) in [
+        (n8n.api_key_file_path(), "n8n API key secret file"),
+        (
+            n8n.signing_secret_file_path(),
+            "n8n callback signing secret file",
+        ),
+    ] {
+        if let Some(finding) = audit_secret_file_permissions(&path, label) {
+            findings.push(finding);
+        }
+    }
+
+    let health_status = connection_profile
+        .get("health_status")
+        .and_then(|value| value.as_str())
+        .unwrap_or("unknown");
+    let api_auth_status = connection_profile
+        .get("api_auth_status")
+        .and_then(|value| value.as_str())
+        .unwrap_or("unknown");
+    let workflow_api_status = connection_profile
+        .get("workflow_api_status")
+        .and_then(|value| value.as_str())
+        .unwrap_or("unknown");
+    if n8n.enabled && matches!(health_status, "failed" | "unknown") {
+        findings.push(audit_finding(
+            "connection_unreachable",
+            "connection",
+            "high",
+            "KRIA cannot reach n8n",
+            "The configured n8n URL did not respond during the audit.",
+            "Start n8n or fix the URL in Connect n8n.",
+        ));
+    }
+    if n8n.enabled && api_auth_status == "missing" {
+        findings.push(audit_finding(
+            "api_key_missing",
+            "connection",
+            "warning",
+            "n8n API key is missing",
+            "Webhook callbacks can still work, but polling, monitor, broker, discovery, and output extraction need an API key.",
+            "Paste a valid n8n API key in Connect n8n.",
+        ));
+    } else if n8n.enabled && matches!(api_auth_status, "failed" | "unknown") {
+        findings.push(audit_finding(
+            "api_key_invalid",
+            "connection",
+            "high",
+            "n8n API key is invalid or expired",
+            "KRIA can reach n8n, but API authentication failed.",
+            "Refresh the n8n API key and test the connection.",
+        ));
+    } else if n8n.enabled && api_auth_status == "ok" && workflow_api_status != "working" {
+        findings.push(audit_finding(
+            "workflow_api_unavailable",
+            "connection",
+            "high",
+            "n8n workflow API is unavailable",
+            "KRIA needs workflow API access for discovery, audit, and output extraction.",
+            "Check n8n API permissions and test the connection.",
+        ));
+    }
+
+    let registry_store = match load_workflow_registry_store() {
+        Ok(store) => store,
+        Err(error) => {
+            findings.push(audit_finding(
+                "workflow_registry_unreadable",
+                "registry",
+                "critical",
+                "Workflow registry cannot be read",
+                format!("KRIA could not read workflow_registry.json: {error}"),
+                "Fix registry file permissions or restore a valid registry.",
+            ));
+            N8nWorkflowRegistryStore::default()
+        }
+    };
+    let workflows = workflow_registry_workflows(&registry_store);
+    let adapter_readiness = audit_adapter_readiness(&n8n, &workflows, &connection_profile);
+    findings.extend(audit_registry_findings(&workflows, &adapter_readiness));
+
+    let copy_lifecycle = load_copy_lifecycle_store().unwrap_or_default();
+    for operation in copy_lifecycle
+        .operations
+        .iter()
+        .filter(|operation| operation.status != "complete")
+    {
+        findings.push(audit_finding(
+            format!("pending_copy_operation:{}", operation.operation_id),
+            "lifecycle",
+            "warning",
+            "Generated workflow copy setup is unfinished",
+            "KRIA created or planned a generated copy but setup did not fully complete.",
+            "Continue pending setup or clean the generated copy.",
+        ));
+    }
+
+    let paths = audit_paths(config, inbox_path, governance_audit_path);
+    for (path, label) in &paths {
+        findings.extend(scan_file_for_audit_findings(path, label));
+    }
+    for (path, label) in [
+        (inbox_path.to_path_buf(), "callback inbox"),
+        (governance_audit_path.to_path_buf(), "governance audit"),
+        (n8n_run_events_path_from_inbox(inbox_path), "n8n run events"),
+        (n8n_eval_report_dir(), "n8n eval reports"),
+    ] {
+        if let Some(finding) = audit_writable_parent(&path, label) {
+            findings.push(finding);
+        }
+    }
+
+    if latest_eval_report_path("n8n_chat_routing_eval_").is_none()
+        && latest_eval_report_path("n8n_stage3_routing_eval_").is_none()
+    {
+        findings.push(audit_finding(
+            "routing_eval_missing",
+            "routing",
+            "info",
+            "No recent n8n routing eval report found",
+            "KRIA can still route workflows, but a recent eval report is useful before production use.",
+            "Run scripts/run_n8n_chat_routing_eval.sh.",
+        ));
+    }
+    if latest_eval_report_path("n8n_reliability_").is_none() {
+        findings.push(audit_finding(
+            "reliability_report_missing",
+            "callback",
+            "info",
+            "No recent n8n callback reliability report found",
+            "Live callback reliability checks are optional and require KRIA to be running.",
+            "Run N8N_AUDIT_LIVE=1 scripts/run_n8n_production_audit.sh when ready.",
+        ));
+    }
+
+    let security_status = audit_category_status(
+        &findings,
+        &["secrets", "callback", "runner", "broker", "file", "ui"],
+    );
+    let reliability_status = audit_category_status(
+        &findings,
+        &[
+            "connection",
+            "registry",
+            "lifecycle",
+            "execution",
+            "polling",
+            "storage",
+            "routing",
+        ],
+    );
+    let overall_status = audit_status_from_findings(&findings);
+    let mut recommended_actions = findings
+        .iter()
+        .filter(|finding| matches!(finding.severity.as_str(), "critical" | "high" | "warning"))
+        .map(|finding| finding.next_action.clone())
+        .collect::<Vec<_>>();
+    recommended_actions.sort();
+    recommended_actions.dedup();
+    recommended_actions.truncate(8);
+    Ok(N8nProductionAuditReport {
+        schema_version: "kria.n8n.production_audit.v1".into(),
+        generated_at_ms,
+        expires_at_ms,
+        overall_status,
+        security_status,
+        reliability_status,
+        adapter_readiness,
+        summary_counts: audit_summary_counts(&findings),
+        findings,
+        recommended_actions,
+        stale_reason: None,
     })
 }
 
@@ -9801,6 +12308,1064 @@ pub async fn open_n8n_dashboard(
 }
 
 #[tauri::command]
+pub async fn analyze_n8n_workflow_authoring_request(
+    request: AnalyzeN8nWorkflowAuthoringRequest,
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    let app_state = state
+        .get()
+        .ok_or_else(|| "runtime still initializing".to_string())?;
+    let prompt = request.prompt.trim();
+    if prompt.is_empty() {
+        return Err("prompt is required".into());
+    }
+    let config = app_state.config.read().await;
+    if !config.n8n.enabled {
+        return Err("n8n integration is disabled".into());
+    }
+    drop(config);
+
+    let workflows = load_workflow_registry_workflows()?;
+    let route =
+        WorkflowRankingEngine::new(workflows).route_chat(kria_core::n8n::N8nChatRouteRequest {
+            prompt: prompt.to_string(),
+            previous_user_prompt: request.previous_user_prompt,
+            manual_n8n_mode: true,
+            safe_auto_run_enabled: false,
+            workflows: Vec::new(),
+        });
+    let extracted_display_name =
+        kria_core::n8n::extract_n8n_authoring_workflow_name(prompt).map(|name| name.display_name);
+    let workflow_id_seed = extracted_display_name.as_deref().unwrap_or(prompt);
+    let workflow_id = request
+        .workflow_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            unique_workflow_id_from_name(
+                &slug_from_prompt(workflow_id_seed),
+                &load_workflow_registry_store()
+                    .map(|store| {
+                        store
+                            .workflows
+                            .iter()
+                            .map(|record| record.workflow.workflow_id.clone())
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default(),
+            )
+        });
+    let display_name = bounded_n8n_workflow_name(
+        &extracted_display_name.unwrap_or_else(|| title_from_prompt(prompt)),
+    );
+    let template_id = authoring_template_id(prompt, None);
+    let plan = authoring_plan_json(prompt, &workflow_id, &display_name, &template_id);
+
+    Ok(serde_json::json!({
+        "schema_version": "kria.n8n.workflow_authoring_analysis.v1",
+        "status": "plan_ready",
+        "route": route,
+        "plan": plan,
+        "message": "KRIA can prepare an inactive n8n workflow draft for review.",
+    }))
+}
+
+#[tauri::command]
+pub async fn generate_n8n_workflow_draft_plan(
+    request: GenerateN8nWorkflowDraftPlanRequest,
+) -> Result<serde_json::Value, String> {
+    let prompt = request.prompt.trim();
+    if prompt.is_empty() {
+        return Err("prompt is required".into());
+    }
+    let existing_ids = load_workflow_registry_store()
+        .map(|store| {
+            store
+                .workflows
+                .iter()
+                .map(|record| record.workflow.workflow_id.clone())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let extracted_display_name =
+        kria_core::n8n::extract_n8n_authoring_workflow_name(prompt).map(|name| name.display_name);
+    let workflow_id_seed = extracted_display_name.as_deref().unwrap_or(prompt);
+    let workflow_id = request
+        .workflow_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            unique_workflow_id_from_name(&slug_from_prompt(workflow_id_seed), &existing_ids)
+        });
+    validate_registry_workflow_id(&workflow_id)?;
+    let display_name = bounded_n8n_workflow_name(
+        &extracted_display_name.unwrap_or_else(|| title_from_prompt(prompt)),
+    );
+    let template_id = authoring_template_id(prompt, None);
+    let workflow_json =
+        workflow_json_for_authoring_plan(&display_name, &workflow_id, &template_id, prompt);
+    let validation_report = validate_n8n_workflow_json(
+        &workflow_json,
+        N8nWorkflowValidationOptions {
+            workflow_id: workflow_id.clone(),
+            requires_callback: false,
+            ..Default::default()
+        },
+    );
+    Ok(serde_json::json!({
+        "schema_version": "kria.n8n.workflow_authoring_plan_result.v1",
+        "status": if validation_report.safe_to_import { "validated" } else { "validation_failed" },
+        "plan": authoring_plan_json(prompt, &workflow_id, &display_name, &template_id),
+        "workflow_json": workflow_json,
+        "validation_report": validation_report,
+    }))
+}
+
+#[tauri::command]
+pub async fn list_n8n_credential_summaries(
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    let app_state = state
+        .get()
+        .ok_or_else(|| "runtime still initializing".to_string())?;
+    let config = app_state.config.read().await.n8n.clone();
+    let client = reqwest::Client::new();
+    let credentials = fetch_n8n_credential_values(&client, &config).await?;
+    let mut summaries = credentials
+        .iter()
+        .map(credential_summary_from_value)
+        .filter(|summary| {
+            summary
+                .get("credential_id")
+                .and_then(serde_json::Value::as_str)
+                .map(|value| !value.trim().is_empty())
+                .unwrap_or(false)
+        })
+        .collect::<Vec<_>>();
+    summaries.sort_by(|left, right| {
+        let left_key = format!(
+            "{}:{}",
+            left.get("node_family")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or(""),
+            left.get("credential_name")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+        );
+        let right_key = format!(
+            "{}:{}",
+            right
+                .get("node_family")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or(""),
+            right
+                .get("credential_name")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+        );
+        left_key.cmp(&right_key)
+    });
+    let families = summaries
+        .iter()
+        .filter_map(|summary| {
+            summary
+                .get("node_family")
+                .and_then(serde_json::Value::as_str)
+        })
+        .filter(|family| *family != "unknown")
+        .map(str::to_string)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    Ok(serde_json::json!({
+        "schema_version": "kria.n8n.credential_summaries.v1",
+        "status": "loaded",
+        "credentials": summaries,
+        "families": families,
+        "message": "Credential summaries loaded. Secret values were not requested or returned.",
+    }))
+}
+
+#[tauri::command]
+pub async fn save_n8n_authoring_credential_mapping(
+    request: SaveN8nAuthoringCredentialMappingRequest,
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    let app_state = state
+        .get()
+        .ok_or_else(|| "runtime still initializing".to_string())?;
+    let config = app_state.config.read().await.n8n.clone();
+    let mut store = load_workflow_registry_store()?;
+    let index = store
+        .workflows
+        .iter()
+        .position(|record| record.workflow.workflow_id == request.workflow_id)
+        .ok_or_else(|| format!("workflow '{}' was not found", request.workflow_id))?;
+    let mut workflow = store.workflows[index].workflow.clone();
+    if !workflow.adaptation_strategy.contains("chat_") || !workflow.generated_copy_n8n_verified {
+        return Err(
+            "credential mapping is limited to verified KRIA chat-authored drafts/copies.".into(),
+        );
+    }
+    if workflow.n8n_workflow_id.trim().is_empty() {
+        return Err("workflow does not have an n8n workflow id for credential mapping.".into());
+    }
+    let client = reqwest::Client::new();
+    let mut workflow_json =
+        fetch_n8n_workflow_detail(&client, &config, &workflow.n8n_workflow_id).await?;
+    let applied =
+        apply_credential_mappings_to_workflow_json(&mut workflow_json, &request.mappings)?;
+    let updated = update_n8n_workflow_json(
+        &client,
+        &config,
+        &workflow.n8n_workflow_id,
+        n8n_update_payload_from_detail(&workflow_json),
+    )
+    .await?;
+    workflow.n8n_workflow_hash = semantic_workflow_hash(&updated);
+    workflow.n8n_workflow_semantic_hash = semantic_workflow_hash(&updated);
+    workflow.lifecycle_status = "needs_retest".into();
+    workflow.lifecycle_severity = "warning".into();
+    workflow.lifecycle_warnings = vec![
+        "Credential mapping was applied to the KRIA-authored draft. Test it before approval."
+            .into(),
+    ];
+    workflow.tags.push("credential_mapped".into());
+    workflow.tags.sort();
+    workflow.tags.dedup();
+    store.workflows[index].workflow = workflow.clone();
+    save_workflow_registry_store(&store)?;
+    let rebuilt = rebuild_catalog_from_workflows(&config, workflow_registry_workflows(&store));
+    *app_state.n8n_catalog.write().await = rebuilt;
+    Ok(serde_json::json!({
+        "schema_version": "kria.n8n.authoring_credential_mapping.v1",
+        "status": "mapped_needs_test",
+        "workflow": workflow,
+        "applied": applied,
+        "message": "Credential references were mapped on the KRIA-authored draft. Test the draft before approval.",
+    }))
+}
+
+fn register_authoring_workflow_draft(
+    config: &N8nConfig,
+    workflow: N8nWorkflowConfig,
+    workflow_detail: serde_json::Value,
+) -> Result<N8nWorkflowConfig, String> {
+    let mut store = load_workflow_registry_store()?;
+    upsert_workflow_registry_record(
+        &mut store,
+        workflow.clone(),
+        N8N_WORKFLOW_REGISTRY_AUTHORING_SOURCE,
+    )
+    .map_err(|error| format!("failed to save authored workflow registry draft: {error}"))?;
+    save_workflow_registry_store(&store)?;
+
+    let mut profile = analyze_n8n_runtime_profile(&workflow_detail, &[workflow.clone()]);
+    profile.workflow_id = workflow.workflow_id.clone();
+    profile.display_name = workflow.display_name.clone();
+    profile.status = N8nRuntimeProfileStatus::NeedsReview;
+    profile.lifecycle_status = "authoring_draft".into();
+    profile
+        .lifecycle_warnings
+        .push("KRIA-authored draft must be tested and approved before normal routing.".into());
+    profile.warnings.push(
+        "Created by KRIA chat authoring; review credentials and output before approval.".into(),
+    );
+    let path = default_runtime_profile_store_path();
+    let mut profile_store = load_runtime_profile_store_at(&path).unwrap_or_default();
+    upsert_runtime_profile(&mut profile_store, profile);
+    save_runtime_profile_store_at(&path, &profile_store)
+        .map_err(|error| format!("failed to save authored workflow runtime profile: {error}"))?;
+
+    let rebuilt = rebuild_catalog_from_workflows(config, workflow_registry_workflows(&store));
+    // The caller updates the shared catalog slot where available.
+    drop(rebuilt);
+    Ok(workflow)
+}
+
+#[tauri::command]
+pub async fn create_n8n_workflow_draft_in_n8n(
+    request: CreateN8nWorkflowDraftInN8nRequest,
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    let app_state = state
+        .get()
+        .ok_or_else(|| "runtime still initializing".to_string())?;
+    let prompt = request.prompt.trim();
+    if prompt.is_empty() {
+        return Err("prompt is required".into());
+    }
+    let config = app_state.config.read().await.n8n.clone();
+    if config.resolve_api_key().trim().is_empty() {
+        return Err("n8n API key is required to create workflow drafts from KRIA chat.".into());
+    }
+    let existing_ids = load_workflow_registry_store()?
+        .workflows
+        .iter()
+        .map(|record| record.workflow.workflow_id.clone())
+        .collect::<Vec<_>>();
+    let extracted_display_name = request
+        .display_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            kria_core::n8n::extract_n8n_authoring_workflow_name(prompt)
+                .map(|name| name.display_name)
+        });
+    let workflow_id_seed = extracted_display_name.as_deref().unwrap_or(prompt);
+    let workflow_id = request
+        .workflow_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            unique_workflow_id_from_name(&slug_from_prompt(workflow_id_seed), &existing_ids)
+        });
+    validate_registry_workflow_id(&workflow_id)?;
+    let display_name = bounded_n8n_workflow_name(
+        &extracted_display_name.unwrap_or_else(|| title_from_prompt(prompt)),
+    );
+    let template_id = authoring_template_id(prompt, request.template_id.as_deref());
+    let workflow_json =
+        workflow_json_for_authoring_plan(&display_name, &workflow_id, &template_id, prompt);
+    let validation_report = validate_n8n_workflow_json(
+        &workflow_json,
+        N8nWorkflowValidationOptions {
+            workflow_id: workflow_id.clone(),
+            requires_callback: false,
+            ..Default::default()
+        },
+    );
+    if validation_report.status == N8nWorkflowValidationReportStatus::Failed {
+        return Ok(serde_json::json!({
+            "status": "validation_failed",
+            "workflow_id": workflow_id,
+            "validation_report": validation_report,
+            "message": "KRIA did not create the n8n draft because validation failed.",
+        }));
+    }
+
+    let mut operation = new_workflow_authoring_operation(
+        "create_draft",
+        &workflow_id,
+        "",
+        None,
+        "draft_validated",
+        "running",
+        &template_id,
+        &format!("{:?}", authoring_template_risk(&template_id)).to_ascii_lowercase(),
+    );
+    upsert_workflow_authoring_operation(operation.clone())?;
+
+    let client = reqwest::Client::new();
+    let n8n_workflow_id =
+        match create_n8n_workflow_copy(&client, &config, workflow_json.clone()).await {
+            Ok(id) => id,
+            Err(error) => {
+                operation.stage = "n8n_draft_create_failed".into();
+                operation.status = "failed".into();
+                operation.last_error = error.clone();
+                operation.recovery_actions = vec![
+                    "check_connection_manager".into(),
+                    "retry_create_draft".into(),
+                ];
+                let _ = upsert_workflow_authoring_operation(operation);
+                return Err(error);
+            }
+        };
+    operation.n8n_workflow_id = n8n_workflow_id.clone();
+    operation.stage = "n8n_draft_created".into();
+    upsert_workflow_authoring_operation(operation.clone())?;
+
+    let workflow_detail = fetch_n8n_workflow_detail(&client, &config, &n8n_workflow_id)
+        .await
+        .unwrap_or_else(|_| workflow_json.clone());
+    let endpoint_path = infer_webhook_endpoint_path(&workflow_detail)
+        .or_else(|| infer_webhook_endpoint_path(&workflow_json))
+        .unwrap_or_else(|| "/webhook/kria-authoring-draft".into());
+    let draft_request = build_authoring_draft_request(
+        prompt,
+        &workflow_id,
+        &display_name,
+        &template_id,
+        workflow_json.clone(),
+        false,
+    );
+    let mut workflow =
+        workflow_config_from_authoring_request(&draft_request, endpoint_path.clone())?;
+    workflow.n8n_workflow_id = n8n_workflow_id.clone();
+    workflow.trigger_strategy = "webhook".into();
+    workflow.result_mode = "poll_execution".into();
+    workflow.webhook_method = "POST".into();
+    workflow.webhook_path = endpoint_path.clone();
+    workflow.output_strategy = "final_non_empty_node".into();
+    workflow.preferred_output_node =
+        Some(authoring_template_preferred_output_node(&template_id).into());
+    workflow.adaptation_strategy = "chat_authored_draft".into();
+    workflow.adaptation_status = "draft".into();
+    workflow.lifecycle_status = "authoring_draft".into();
+    workflow.lifecycle_severity = "info".into();
+    workflow.lifecycle_warnings = vec!["Draft must be tested and approved before routing.".into()];
+    workflow.n8n_workflow_hash = semantic_workflow_hash(&workflow_detail);
+    workflow.n8n_workflow_semantic_hash = semantic_workflow_hash(&workflow_detail);
+    workflow.generated_copy_n8n_verified = true;
+
+    let workflow =
+        match register_authoring_workflow_draft(&config, workflow, workflow_detail.clone()) {
+            Ok(workflow) => workflow,
+            Err(error) => {
+                operation.stage = "registry_save_failed".into();
+                operation.status = "failed".into();
+                operation.last_error = error.clone();
+                operation.recovery_actions = vec![
+                    "continue_authoring_setup".into(),
+                    "cleanup_generated_draft".into(),
+                ];
+                let _ = upsert_workflow_authoring_operation(operation);
+                return Err(error);
+            }
+        };
+    let mut store = load_workflow_registry_store()?;
+    let rebuilt = rebuild_catalog_from_workflows(&config, workflow_registry_workflows(&store));
+    *app_state.n8n_catalog.write().await = rebuilt;
+    store.updated_at_ms = current_unix_ms();
+
+    let backup = write_n8n_workflow_backup(
+        n8n_workflow_backup_dir(),
+        &workflow.workflow_id,
+        "n8n_workflow_json_draft",
+        "KRIA chat-authored workflow draft",
+        workflow_json,
+    )?;
+    operation.draft_backup_id = backup.backup_id.clone();
+    operation.stage = "complete".into();
+    operation.status = "complete".into();
+    operation.updated_at_ms = current_unix_ms();
+    upsert_workflow_authoring_operation(operation.clone())?;
+
+    Ok(serde_json::json!({
+        "status": "draft_created",
+        "workflow": workflow,
+        "operation": operation,
+        "plan": authoring_plan_json(prompt, &workflow_id, &display_name, &template_id),
+        "validation_report": validation_report,
+        "n8n_workflow_id": n8n_workflow_id,
+        "message": "Inactive n8n draft created and registered in KRIA. Test and approve it before normal routing.",
+    }))
+}
+
+#[tauri::command]
+pub async fn preview_n8n_workflow_update_diff(
+    request: PreviewN8nWorkflowUpdateDiffRequest,
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    let app_state = state
+        .get()
+        .ok_or_else(|| "runtime still initializing".to_string())?;
+    let prompt = request.prompt.trim();
+    if prompt.is_empty() {
+        return Err("prompt is required".into());
+    }
+    let config = app_state.config.read().await.n8n.clone();
+    let store = load_workflow_registry_store()?;
+    let source = store
+        .workflows
+        .iter()
+        .find(|record| record.workflow.workflow_id == request.source_workflow_id)
+        .map(|record| record.workflow.clone())
+        .ok_or_else(|| {
+            format!(
+                "source workflow '{}' was not found",
+                request.source_workflow_id
+            )
+        })?;
+    if source.is_archived_or_deleted() {
+        return Err(
+            "archived or deleted workflows must be restored before update proposals.".into(),
+        );
+    }
+    let client = reqwest::Client::new();
+    let source_detail = fetch_workflow_for_registry(&config, &source).await?;
+    let copy_name = format!("{} - KRIA Updated Draft", workflow_display_or_id(&source));
+    let copy_workflow_id = unique_workflow_id_from_name(
+        &format!("{}_updated", source.workflow_id),
+        &store
+            .workflows
+            .iter()
+            .map(|record| record.workflow.workflow_id.clone())
+            .collect::<Vec<_>>(),
+    );
+    let copy_payload = prepare_workflow_payload_for_authoring_copy(
+        source_detail.clone(),
+        &copy_name,
+        &copy_workflow_id,
+    );
+    let validation_report = validate_n8n_workflow_json(
+        &copy_payload,
+        N8nWorkflowValidationOptions {
+            workflow_id: copy_workflow_id.clone(),
+            requires_callback: source.requires_callback.unwrap_or(false),
+            ..Default::default()
+        },
+    );
+    drop(client);
+    Ok(serde_json::json!({
+        "schema_version": "kria.n8n.workflow_update_diff.v1",
+        "status": if validation_report.safe_to_import { "diff_ready" } else { "validation_failed" },
+        "source_workflow_id": source.workflow_id,
+        "source_n8n_workflow_id": source.n8n_workflow_id,
+        "draft_workflow_id": copy_workflow_id,
+        "draft_display_name": copy_name,
+        "summary": [
+            "Original workflow will not be changed.",
+            "KRIA will create an updated inactive draft copy.",
+            "Webhook paths are regenerated on the copy to avoid production URL collisions."
+        ],
+        "diff": {
+            "name": { "from": workflow_display_or_id(&source), "to": copy_name },
+            "n8n_workflow_id": { "from": source.n8n_workflow_id, "to": "" },
+            "prompt": prompt
+        },
+        "workflow_json": copy_payload,
+        "validation_report": validation_report,
+    }))
+}
+
+#[tauri::command]
+pub async fn create_n8n_workflow_updated_copy(
+    request: CreateN8nWorkflowUpdatedCopyRequest,
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    let app_state = state
+        .get()
+        .ok_or_else(|| "runtime still initializing".to_string())?;
+    let prompt = request.prompt.trim();
+    if prompt.is_empty() {
+        return Err("prompt is required".into());
+    }
+    let config = app_state.config.read().await.n8n.clone();
+    let mut store = load_workflow_registry_store()?;
+    let source = store
+        .workflows
+        .iter()
+        .find(|record| record.workflow.workflow_id == request.source_workflow_id)
+        .map(|record| record.workflow.clone())
+        .ok_or_else(|| {
+            format!(
+                "source workflow '{}' was not found",
+                request.source_workflow_id
+            )
+        })?;
+    if source.is_archived_or_deleted() {
+        return Err(
+            "archived or deleted workflows must be restored before update proposals.".into(),
+        );
+    }
+    let client = reqwest::Client::new();
+    let source_detail = fetch_workflow_for_registry(&config, &source).await?;
+    let copy_name = request
+        .display_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .map(|value| bounded_n8n_workflow_name(&value))
+        .unwrap_or_else(|| updated_copy_workflow_name(&workflow_display_or_id(&source)));
+    let copy_workflow_id = unique_workflow_id_from_name(
+        &format!("{}_updated", source.workflow_id),
+        &store
+            .workflows
+            .iter()
+            .map(|record| record.workflow.workflow_id.clone())
+            .collect::<Vec<_>>(),
+    );
+    let copy_payload = prepare_workflow_payload_for_authoring_copy(
+        source_detail.clone(),
+        &copy_name,
+        &copy_workflow_id,
+    );
+    let validation_report = validate_n8n_workflow_json(
+        &copy_payload,
+        N8nWorkflowValidationOptions {
+            workflow_id: copy_workflow_id.clone(),
+            requires_callback: source.requires_callback.unwrap_or(false),
+            ..Default::default()
+        },
+    );
+    if validation_report.status == N8nWorkflowValidationReportStatus::Failed {
+        return Ok(serde_json::json!({
+            "status": "validation_failed",
+            "validation_report": validation_report,
+            "message": "KRIA did not create the updated copy because validation failed.",
+        }));
+    }
+    let backup = write_n8n_workflow_backup(
+        n8n_workflow_backup_dir(),
+        &source.workflow_id,
+        "n8n_workflow_json",
+        "automatic backup before KRIA chat update copy",
+        source_detail.clone(),
+    )?;
+    let n8n_workflow_id = create_n8n_workflow_copy(&client, &config, copy_payload.clone()).await?;
+    let copy_detail = fetch_n8n_workflow_detail(&client, &config, &n8n_workflow_id)
+        .await
+        .unwrap_or_else(|_| copy_payload.clone());
+    let endpoint_path = infer_webhook_endpoint_path(&copy_detail)
+        .or_else(|| infer_webhook_endpoint_path(&copy_payload))
+        .unwrap_or_else(|| source.endpoint_path.clone());
+    let mut workflow = source.clone();
+    workflow.workflow_id = copy_workflow_id.clone();
+    workflow.display_name = copy_name.clone();
+    workflow.status = N8nWorkflowStatus::Draft;
+    workflow.n8n_workflow_id = n8n_workflow_id.clone();
+    workflow.endpoint_path = endpoint_path.clone();
+    workflow.webhook_path = endpoint_path;
+    workflow.webhook_method = if workflow.webhook_method.trim().is_empty() {
+        "POST".into()
+    } else {
+        workflow.webhook_method.clone()
+    };
+    workflow.adapted_from_workflow_id = source.workflow_id.clone();
+    workflow.adapted_from_n8n_workflow_id = source.n8n_workflow_id.clone();
+    workflow.adaptation_strategy = "chat_updated_copy".into();
+    workflow.adaptation_status = "draft".into();
+    workflow.source_workflow_hash = semantic_workflow_hash(&source_detail);
+    workflow.source_workflow_semantic_hash = semantic_workflow_hash(&source_detail);
+    workflow.copy_workflow_hash = semantic_workflow_hash(&copy_detail);
+    workflow.copy_workflow_semantic_hash = semantic_workflow_hash(&copy_detail);
+    workflow.n8n_workflow_hash = semantic_workflow_hash(&copy_detail);
+    workflow.n8n_workflow_semantic_hash = semantic_workflow_hash(&copy_detail);
+    workflow.lifecycle_status = "authoring_draft".into();
+    workflow.lifecycle_severity = "info".into();
+    workflow.lifecycle_warnings =
+        vec!["Updated copy must be reviewed, tested, and approved before normal routing.".into()];
+    workflow.generated_copy_n8n_verified = true;
+    workflow.backup_path = n8n_workflow_backup_dir()
+        .join(backup_file_name(&backup.backup_id))
+        .display()
+        .to_string();
+    workflow.backup_hash = file_sha256(&PathBuf::from(&workflow.backup_path)).unwrap_or_default();
+    workflow.example_prompts.push(prompt.to_string());
+    workflow.tags.push("kria_chat_authoring".into());
+    workflow.tags.push("chat_updated_copy".into());
+    workflow.tags.sort();
+    workflow.tags.dedup();
+
+    upsert_workflow_registry_record(
+        &mut store,
+        workflow.clone(),
+        N8N_WORKFLOW_REGISTRY_AUTHORING_SOURCE,
+    )
+    .map_err(|error| format!("failed to register updated draft copy: {error}"))?;
+    save_workflow_registry_store(&store)?;
+    let rebuilt = rebuild_catalog_from_workflows(&config, workflow_registry_workflows(&store));
+    *app_state.n8n_catalog.write().await = rebuilt;
+
+    let mut profile = analyze_n8n_runtime_profile(&copy_detail, &[workflow.clone()]);
+    profile.workflow_id = workflow.workflow_id.clone();
+    profile.display_name = workflow.display_name.clone();
+    profile.status = N8nRuntimeProfileStatus::NeedsReview;
+    profile.lifecycle_status = "authoring_draft".into();
+    profile
+        .lifecycle_warnings
+        .push("Updated copy must be tested and approved before normal routing.".into());
+    let path = default_runtime_profile_store_path();
+    let mut profile_store = load_runtime_profile_store_at(&path).unwrap_or_default();
+    upsert_runtime_profile(&mut profile_store, profile);
+    save_runtime_profile_store_at(&path, &profile_store)
+        .map_err(|error| format!("failed to save updated copy runtime profile: {error}"))?;
+
+    let mut operation = new_workflow_authoring_operation(
+        "create_updated_copy",
+        &workflow.workflow_id,
+        &workflow.n8n_workflow_id,
+        Some(&source),
+        "complete",
+        "complete",
+        "updated_copy",
+        &format!("{:?}", workflow.risk_tier).to_ascii_lowercase(),
+    );
+    operation.backup_id = backup.backup_id.clone();
+    upsert_workflow_authoring_operation(operation.clone())?;
+
+    Ok(serde_json::json!({
+        "status": "updated_copy_created",
+        "workflow": workflow,
+        "operation": operation,
+        "validation_report": validation_report,
+        "message": "Updated inactive n8n draft copy created. Original workflow remains unchanged.",
+    }))
+}
+
+#[tauri::command]
+pub async fn apply_n8n_workflow_update_after_confirmation(
+    request: ApplyN8nWorkflowUpdateAfterConfirmationRequest,
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    let app_state = state
+        .get()
+        .ok_or_else(|| "runtime still initializing".to_string())?;
+    let config = app_state.config.read().await.n8n.clone();
+    let mut store = load_workflow_registry_store()?;
+    let source_index = store
+        .workflows
+        .iter()
+        .position(|record| record.workflow.workflow_id == request.source_workflow_id)
+        .ok_or_else(|| {
+            format!(
+                "source workflow '{}' was not found",
+                request.source_workflow_id
+            )
+        })?;
+    let draft = store
+        .workflows
+        .iter()
+        .find(|record| record.workflow.workflow_id == request.draft_workflow_id)
+        .map(|record| record.workflow.clone())
+        .ok_or_else(|| {
+            format!(
+                "draft workflow '{}' was not found",
+                request.draft_workflow_id
+            )
+        })?;
+    let source = store.workflows[source_index].workflow.clone();
+    let expected = format!("APPLY UPDATE {}", workflow_display_or_id(&source));
+    if request.typed_confirmation.trim() != expected {
+        return Err(format!("typed_confirmation must be exactly '{expected}'"));
+    }
+    if draft.adapted_from_workflow_id != source.workflow_id
+        || draft.adapted_from_n8n_workflow_id != source.n8n_workflow_id
+    {
+        return Err("draft/source identity mismatch; refusing to update original workflow".into());
+    }
+    let client = reqwest::Client::new();
+    let source_detail = fetch_workflow_for_registry(&config, &source).await?;
+    let draft_detail = fetch_workflow_for_registry(&config, &draft).await?;
+    let backup = write_n8n_workflow_backup(
+        n8n_workflow_backup_dir(),
+        &source.workflow_id,
+        "n8n_workflow_json",
+        "backup before direct KRIA chat-authored update",
+        source_detail.clone(),
+    )?;
+    let payload = preserve_source_webhook_identity_for_apply(
+        serde_json::json!({
+            "name": source_detail.get("name").cloned().unwrap_or_else(|| serde_json::Value::String(source.display_name.clone())),
+            "nodes": draft_detail.get("nodes").cloned().unwrap_or_else(|| serde_json::json!([])),
+            "connections": draft_detail.get("connections").cloned().unwrap_or_else(|| serde_json::json!({})),
+            "settings": draft_detail.get("settings").cloned().unwrap_or_else(|| serde_json::json!({"executionOrder": "v1"})),
+        }),
+        &source_detail,
+    );
+    let updated =
+        update_n8n_workflow_json(&client, &config, &source.n8n_workflow_id, payload).await?;
+    let source_record = &mut store.workflows[source_index].workflow;
+    source_record.n8n_workflow_hash = semantic_workflow_hash(&updated);
+    source_record.n8n_workflow_semantic_hash = semantic_workflow_hash(&updated);
+    source_record.lifecycle_status = "needs_retest".into();
+    source_record.lifecycle_severity = "high".into();
+    source_record.lifecycle_warnings = vec![
+        "Original workflow was updated from a KRIA-authored draft and must be retested.".into(),
+    ];
+    source_record.backup_path = n8n_workflow_backup_dir()
+        .join(backup_file_name(&backup.backup_id))
+        .display()
+        .to_string();
+    source_record.backup_hash =
+        file_sha256(&PathBuf::from(&source_record.backup_path)).unwrap_or_default();
+    save_workflow_registry_store(&store)?;
+    let rebuilt = rebuild_catalog_from_workflows(&config, workflow_registry_workflows(&store));
+    *app_state.n8n_catalog.write().await = rebuilt;
+
+    Ok(serde_json::json!({
+        "status": "applied_needs_retest",
+        "source_workflow_id": source.workflow_id,
+        "draft_workflow_id": draft.workflow_id,
+        "backup_id": backup.backup_id,
+        "message": "Original n8n workflow was updated from the reviewed draft. Retest before normal use.",
+    }))
+}
+
+#[tauri::command]
+pub async fn test_n8n_workflow_draft(
+    request: TestN8nWorkflowDraftRequest,
+    state: State<'_, AppStateCell>,
+    app: AppHandle,
+) -> Result<serde_json::Value, String> {
+    if !request.confirmed {
+        return Err("Testing an authored n8n draft requires explicit confirmation.".into());
+    }
+    let app_state = state
+        .get()
+        .ok_or_else(|| "runtime still initializing".to_string())?;
+    let mut store = load_workflow_registry_store()?;
+    let index = store
+        .workflows
+        .iter()
+        .position(|record| record.workflow.workflow_id == request.workflow_id)
+        .ok_or_else(|| format!("workflow draft '{}' was not found", request.workflow_id))?;
+    let mut workflow = store.workflows[index].workflow.clone();
+    if !matches!(workflow.status, N8nWorkflowStatus::Draft) {
+        return Err("only draft/review workflows can use authoring draft test.".into());
+    }
+    if !workflow.adaptation_strategy.contains("chat_") {
+        return Err("only KRIA chat-authored drafts can use this test command.".into());
+    }
+    let config = app_state.config.read().await.n8n.clone();
+    let client = reqwest::Client::new();
+    if workflow.trigger_strategy == "webhook" && !workflow.n8n_workflow_id.trim().is_empty() {
+        set_n8n_workflow_activation(&client, &config, &workflow.n8n_workflow_id, true).await?;
+    }
+    workflow.status = N8nWorkflowStatus::Approved;
+    workflow.lifecycle_status = "current".into();
+    let catalog = Arc::new(
+        N8nCatalog::new(n8n_config_with_workflows(&config, vec![workflow.clone()]))
+            .map_err(|error| format!("authored draft test catalog is invalid: {error}"))?,
+    );
+    let runtime = N8nAdapterRuntime {
+        catalog,
+        catalog_slot: Some(app_state.n8n_catalog.clone()),
+        n8n_state_store: app_state.n8n_state_store.clone(),
+        n8n_inbox_path: app_state.n8n_inbox_path.clone(),
+        n8n_audit_path: app_state.n8n_audit_path.clone(),
+        n8n_governance_log: app_state.n8n_governance_log.clone(),
+        app_handle: Some(app),
+        fleet_control_runtime: Some(app_state.fleet_control_runtime.clone()),
+    };
+    let correlation_id = uuid::Uuid::now_v7().to_string();
+    let result = run_n8n_workflow_adapter(
+        runtime,
+        RunN8nWorkflowAdapterRequest {
+            workflow_id: workflow.workflow_id.clone(),
+            workflow_version: Some(workflow.workflow_version.clone()),
+            input_payload: if request.input_payload.is_null() {
+                serde_json::json!({
+                    "source_prompt": "Test KRIA-authored workflow draft",
+                    "confirmed_by_user": true,
+                })
+            } else {
+                request.input_payload
+            },
+            requested_by: "kria-chat-authoring".into(),
+            correlation_id: Some(correlation_id.clone()),
+            source: "workflow_authoring_test".into(),
+            confirmed: true,
+            session_id: None,
+            run_mode: "authoring_test".into(),
+        },
+    )
+    .await?;
+    store.workflows[index].workflow.test_execution_id = correlation_id.clone();
+    store.workflows[index].workflow.test_result_preview =
+        "Draft test started; check Run History for extracted output.".into();
+    store.workflows[index].workflow.lifecycle_status = "needs_review".into();
+    store.workflows[index].workflow.lifecycle_warnings =
+        vec!["Review authoring test output before approval.".into()];
+    save_workflow_registry_store(&store)?;
+    Ok(serde_json::json!({
+        "status": "test_started",
+        "workflow_id": workflow.workflow_id,
+        "correlation_id": correlation_id,
+        "result": result,
+        "message": "Draft test started. Review Run History before approving.",
+    }))
+}
+
+#[tauri::command]
+pub async fn approve_n8n_workflow_draft(
+    request: ApproveN8nWorkflowDraftRequest,
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    if !request.confirmed {
+        return Err("Approval requires explicit confirmation.".into());
+    }
+    let app_state = state
+        .get()
+        .ok_or_else(|| "runtime still initializing".to_string())?;
+    let config = app_state.config.read().await.n8n.clone();
+    let mut store = load_workflow_registry_store()?;
+    let index = store
+        .workflows
+        .iter()
+        .position(|record| record.workflow.workflow_id == request.workflow_id)
+        .ok_or_else(|| format!("workflow draft '{}' was not found", request.workflow_id))?;
+    let workflow = &mut store.workflows[index].workflow;
+    if !workflow.adaptation_strategy.contains("chat_") {
+        return Err("only KRIA chat-authored drafts can use this approval command.".into());
+    }
+    if workflow.test_execution_id.trim().is_empty()
+        && !matches!(workflow.risk_tier, RiskLevel::Green)
+    {
+        return Err(
+            "yellow/red authored drafts require a completed reviewed test before approval.".into(),
+        );
+    }
+    if workflow.test_execution_id.trim().is_empty()
+        && workflow_has_external_credential_requirement(workflow)
+    {
+        return Err(
+            "credentialed authored drafts require credential mapping and a reviewed test before approval."
+                .into(),
+        );
+    }
+    workflow.status = N8nWorkflowStatus::Approved;
+    workflow.adaptation_status = "approved".into();
+    workflow.lifecycle_status = "current".into();
+    workflow.lifecycle_severity.clear();
+    workflow.lifecycle_warnings.clear();
+    let mut workflow = workflow.clone();
+    save_workflow_registry_store(&store)?;
+    if workflow.trigger_strategy == "webhook" && !workflow.n8n_workflow_id.trim().is_empty() {
+        let client = reqwest::Client::new();
+        set_n8n_workflow_activation(&client, &config, &workflow.n8n_workflow_id, true).await?;
+        let activated_detail =
+            fetch_n8n_workflow_detail(&client, &config, &workflow.n8n_workflow_id).await?;
+        let activated_hash = semantic_workflow_hash(&activated_detail);
+        workflow.n8n_workflow_hash = activated_hash.clone();
+        workflow.n8n_workflow_semantic_hash = activated_hash;
+        if let Some(record) = store
+            .workflows
+            .iter_mut()
+            .find(|record| record.workflow.workflow_id == workflow.workflow_id)
+        {
+            record.workflow.n8n_workflow_hash = workflow.n8n_workflow_hash.clone();
+            record.workflow.n8n_workflow_semantic_hash =
+                workflow.n8n_workflow_semantic_hash.clone();
+            record.workflow.lifecycle_status = "current".into();
+            record.workflow.lifecycle_severity.clear();
+            record.workflow.lifecycle_warnings.clear();
+        }
+        save_workflow_registry_store(&store)?;
+    }
+    let rebuilt = rebuild_catalog_from_workflows(&config, workflow_registry_workflows(&store));
+    *app_state.n8n_catalog.write().await = rebuilt;
+    Ok(serde_json::json!({
+        "status": "approved",
+        "workflow": workflow,
+        "message": "KRIA-authored workflow approved and registered for normal routing.",
+    }))
+}
+
+#[tauri::command]
+pub async fn reject_n8n_workflow_draft(
+    request: RejectN8nWorkflowDraftRequest,
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    cleanup_n8n_workflow_draft(
+        CleanupN8nWorkflowDraftRequest {
+            workflow_id: request.workflow_id,
+            delete_n8n_draft: request.delete_n8n_draft,
+        },
+        state,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn cleanup_n8n_workflow_draft(
+    request: CleanupN8nWorkflowDraftRequest,
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    let app_state = state
+        .get()
+        .ok_or_else(|| "runtime still initializing".to_string())?;
+    let config = app_state.config.read().await.n8n.clone();
+    let mut store = load_workflow_registry_store()?;
+    let workflow = store
+        .workflows
+        .iter()
+        .find(|record| record.workflow.workflow_id == request.workflow_id)
+        .map(|record| record.workflow.clone())
+        .ok_or_else(|| format!("workflow draft '{}' was not found", request.workflow_id))?;
+    if !workflow.adaptation_strategy.contains("chat_") || !workflow.generated_copy_n8n_verified {
+        return Err("cleanup is limited to verified KRIA chat-authored drafts.".into());
+    }
+    if request.delete_n8n_draft && !workflow.n8n_workflow_id.trim().is_empty() {
+        let client = reqwest::Client::new();
+        delete_n8n_temporary_workflow(&client, &config, &workflow.n8n_workflow_id).await?;
+    }
+    delete_workflow_registry_record(&mut store, &workflow.workflow_id);
+    save_workflow_registry_store(&store)?;
+    let path = default_runtime_profile_store_path();
+    let mut profile_store = load_runtime_profile_store_at(&path).unwrap_or_default();
+    let profile_ids = profile_store
+        .profiles
+        .iter()
+        .filter(|profile| {
+            profile.workflow_id == workflow.workflow_id
+                || profile.n8n_workflow_id == workflow.n8n_workflow_id
+        })
+        .map(|profile| profile.profile_id.clone())
+        .collect::<Vec<_>>();
+    for profile_id in profile_ids {
+        delete_runtime_profile(&mut profile_store, &profile_id);
+    }
+    save_runtime_profile_store_at(&path, &profile_store)
+        .map_err(|error| format!("failed to save runtime profiles after draft cleanup: {error}"))?;
+    let rebuilt = rebuild_catalog_from_workflows(&config, workflow_registry_workflows(&store));
+    *app_state.n8n_catalog.write().await = rebuilt;
+    Ok(serde_json::json!({
+        "status": "cleaned_up",
+        "workflow_id": workflow.workflow_id,
+        "deleted_from_n8n": request.delete_n8n_draft,
+        "message": "KRIA-authored draft cleanup completed.",
+    }))
+}
+
+#[tauri::command]
+pub async fn get_n8n_workflow_authoring_sessions() -> Result<serde_json::Value, String> {
+    let store = load_workflow_authoring_operation_store()?;
+    Ok(serde_json::to_value(store)
+        .map_err(|error| format!("failed to serialize authoring operations: {error}"))?)
+}
+
+#[tauri::command]
+pub async fn continue_n8n_workflow_authoring_operation(
+    request: ContinueN8nWorkflowAuthoringOperationRequest,
+) -> Result<serde_json::Value, String> {
+    let store = load_workflow_authoring_operation_store()?;
+    let operation = store
+        .operations
+        .iter()
+        .find(|operation| operation.operation_id == request.operation_id)
+        .cloned()
+        .ok_or_else(|| {
+            format!(
+                "authoring operation '{}' was not found",
+                request.operation_id
+            )
+        })?;
+    Ok(serde_json::json!({
+        "status": if operation.status == "failed" { "manual_recovery_required" } else { "loaded" },
+        "operation": operation,
+        "message": "Authoring operation loaded. Continue by retrying create/test/cleanup from the draft card.",
+    }))
+}
+
+#[tauri::command]
+pub async fn rollback_n8n_workflow_authoring_update(
+    request: RollbackN8nWorkflowAuthoringUpdateRequest,
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    rollback_n8n_workflow_backup(
+        RollbackN8nWorkflowBackupRequest {
+            backup_id: request.backup_id,
+            backup_path: request.backup_path,
+            restore_registry: true,
+        },
+        state,
+    )
+    .await
+}
+
+#[tauri::command]
 pub async fn validate_n8n_workflow_draft(
     request: ValidateN8nWorkflowDraftRequest,
 ) -> Result<serde_json::Value, String> {
@@ -9892,7 +13457,7 @@ pub async fn dry_run_n8n_workflow_validation(
 #[tauri::command]
 pub async fn backup_n8n_workflow(
     request: BackupN8nWorkflowRequest,
-    _state: State<'_, AppStateCell>,
+    state: State<'_, AppStateCell>,
 ) -> Result<serde_json::Value, String> {
     let workflow_id = request.workflow_id.trim().to_string();
     validate_registry_workflow_id(&workflow_id)?;
@@ -9900,6 +13465,10 @@ pub async fn backup_n8n_workflow(
     let (kind, payload) = if let Some(workflow_json) = request.workflow_json {
         ("n8n_workflow_json", workflow_json)
     } else {
+        let app_state = state
+            .get()
+            .ok_or_else(|| "runtime still initializing".to_string())?;
+        let config = app_state.config.read().await.n8n.clone();
         let store = load_workflow_registry_store()?;
         let workflow = store
             .workflows
@@ -9912,11 +13481,22 @@ pub async fn backup_n8n_workflow(
                     workflow_id
                 )
             })?;
-        (
-            "kria_registry_workflow",
-            serde_json::to_value(workflow)
-                .map_err(|error| format!("failed to serialize workflow backup: {error}"))?,
-        )
+        match fetch_workflow_for_registry(&config, workflow).await {
+            Ok(workflow_json) => ("n8n_workflow_json", workflow_json),
+            Err(error) => {
+                tracing::warn!(
+                    target: "n8n_authoring",
+                    workflow_id = %workflow_id,
+                    error = %error,
+                    "falling back to KRIA registry metadata for n8n workflow backup"
+                );
+                (
+                    "kria_registry_workflow",
+                    serde_json::to_value(workflow)
+                        .map_err(|error| format!("failed to serialize workflow backup: {error}"))?,
+                )
+            }
+        }
     };
 
     let reason = request
@@ -9933,6 +13513,7 @@ pub async fn backup_n8n_workflow(
         payload,
     )?;
     let path = n8n_workflow_backup_dir().join(backup_file_name(&record.backup_id));
+    let backup_hash = file_sha256(&path)?;
 
     tracing::info!(
         target: "n8n_authoring",
@@ -9947,6 +13528,7 @@ pub async fn backup_n8n_workflow(
         "status": "backed_up",
         "backup_id": record.backup_id,
         "backup_path": path,
+        "backup_hash": backup_hash,
         "workflow_id": record.workflow_id,
         "kind": record.kind,
     }))
@@ -10173,6 +13755,286 @@ pub async fn get_n8n_status(state: State<'_, AppStateCell>) -> Result<serde_json
 }
 
 #[tauri::command]
+pub async fn run_n8n_production_audit(
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    let app_state = state
+        .get()
+        .ok_or_else(|| "runtime still initializing".to_string())?;
+    let config = app_state.config.read().await.clone();
+    let report = build_n8n_production_audit_report(
+        &config,
+        &app_state.n8n_inbox_path,
+        &app_state.n8n_audit_path,
+    )
+    .await?;
+    save_n8n_production_audit_report(&report)?;
+    Ok(serde_json::to_value(report)
+        .map_err(|error| format!("failed to serialize production audit: {error}"))?)
+}
+
+#[tauri::command]
+pub async fn get_n8n_production_audit_summary(
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    let app_state = state
+        .get()
+        .ok_or_else(|| "runtime still initializing".to_string())?;
+    let config = app_state.config.read().await.clone();
+    let paths = audit_paths(
+        &config,
+        &app_state.n8n_inbox_path,
+        &app_state.n8n_audit_path,
+    );
+    let mut report = match load_n8n_production_audit_report()? {
+        Some(report) => report,
+        None => {
+            let report = build_n8n_production_audit_report(
+                &config,
+                &app_state.n8n_inbox_path,
+                &app_state.n8n_audit_path,
+            )
+            .await?;
+            save_n8n_production_audit_report(&report)?;
+            report
+        }
+    };
+    let now = current_unix_ms();
+    if now > report.expires_at_ms {
+        report.stale_reason = Some("Audit cache expired.".into());
+    } else if let Some(reason) = audit_latest_report_is_stale(&report, &paths) {
+        report.stale_reason = Some(reason);
+    }
+    Ok(serde_json::to_value(report)
+        .map_err(|error| format!("failed to serialize production audit summary: {error}"))?)
+}
+
+#[tauri::command]
+pub async fn export_n8n_production_audit_bundle(
+    request: ExportN8nProductionAuditBundleRequest,
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    let app_state = state
+        .get()
+        .ok_or_else(|| "runtime still initializing".to_string())?;
+    let config = app_state.config.read().await.clone();
+    let report = build_n8n_production_audit_report(
+        &config,
+        &app_state.n8n_inbox_path,
+        &app_state.n8n_audit_path,
+    )
+    .await?;
+    save_n8n_production_audit_report(&report)?;
+
+    let bundle_dir =
+        n8n_eval_report_dir().join(format!("n8n_production_audit_{}", report.generated_at_ms));
+    owner_only_dir(&bundle_dir)?;
+    write_owner_only_json(
+        &bundle_dir.join("audit_report.json"),
+        &serde_json::to_value(&report)
+            .map_err(|error| format!("failed to serialize audit report: {error}"))?,
+    )?;
+    let summary = format!(
+        "KRIA n8n Production Audit\nGenerated: {}\nOverall: {}\nSecurity: {}\nReliability: {}\nFindings: {}\nPrivacy mode: {}\n",
+        report.generated_at_ms,
+        report.overall_status,
+        report.security_status,
+        report.reliability_status,
+        report.findings.len(),
+        request.privacy_mode,
+    );
+    write_owner_only_text(&bundle_dir.join("audit_summary.txt"), &summary)?;
+
+    let registry_store = load_workflow_registry_store().unwrap_or_default();
+    let workflows = workflow_registry_workflows(&registry_store)
+        .iter()
+        .map(|workflow| audit_workflow_label(workflow, request.include_workflow_labels))
+        .collect::<Vec<_>>();
+    write_owner_only_json(
+        &bundle_dir.join("redacted_registry_summary.json"),
+        &serde_json::json!({
+            "schema_version": "kria.n8n.audit_bundle.registry_summary.v1",
+            "workflow_count": workflows.len(),
+            "workflows": workflows,
+            "labels_included": request.include_workflow_labels,
+        }),
+    )?;
+    let runtime_profiles = load_runtime_profile_store_at(&default_runtime_profile_store_path())
+        .map(|store| store.profiles.len())
+        .unwrap_or(0);
+    write_owner_only_json(
+        &bundle_dir.join("redacted_profile_summary.json"),
+        &serde_json::json!({
+            "schema_version": "kria.n8n.audit_bundle.profile_summary.v1",
+            "profile_count": runtime_profiles,
+            "labels_included": false,
+        }),
+    )?;
+    write_owner_only_json(
+        &bundle_dir.join("redacted_adapter_readiness.json"),
+        &serde_json::to_value(&report.adapter_readiness)
+            .map_err(|error| format!("failed to serialize adapter readiness: {error}"))?,
+    )?;
+    write_owner_only_json(
+        &bundle_dir.join("redacted_connection_status.json"),
+        &serde_json::json!({
+            "base_url_hash": audit_hash_label(&config.n8n.base_url),
+            "dashboard_url_hash": audit_hash_label(&config.n8n.dashboard_url),
+            "mode": config.n8n.mode.as_str(),
+            "enabled": config.n8n.enabled,
+            "api_key_present": !config.n8n.resolve_api_key().trim().is_empty(),
+            "signing_secret_present": !config.n8n.resolve_signing_secret().trim().is_empty(),
+        }),
+    )?;
+    let report_paths = [
+        latest_eval_report_path("n8n_chat_routing_eval_"),
+        latest_eval_report_path("n8n_stage3_routing_eval_"),
+        latest_eval_report_path("n8n_reliability_"),
+    ]
+    .into_iter()
+    .flatten()
+    .map(|path| path.display().to_string())
+    .collect::<Vec<_>>()
+    .join("\n");
+    write_owner_only_text(
+        &bundle_dir.join("latest_eval_report_paths.txt"),
+        &(report_paths + "\n"),
+    )?;
+
+    Ok(serde_json::json!({
+        "status": "exported",
+        "bundle_path": bundle_dir,
+        "message": "Redacted n8n production audit bundle exported. Secrets, raw workflow JSON, file contents, and raw LLM prompts/responses are excluded by default.",
+    }))
+}
+
+#[tauri::command]
+pub async fn repair_n8n_audit_finding(
+    request: RepairN8nAuditFindingRequest,
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    let app_state = state
+        .get()
+        .ok_or_else(|| "runtime still initializing".to_string())?;
+    if !request.confirmed && request.repair_kind != "clear_stale_cached_audit" {
+        return Err(
+            "Confirm this safe repair before KRIA changes local audit/config metadata.".into(),
+        );
+    }
+    match request.repair_kind.as_str() {
+        "clear_stale_cached_audit" => {
+            let path = n8n_production_audit_latest_path();
+            if path.exists() {
+                std::fs::remove_file(&path).map_err(|error| {
+                    format!(
+                        "failed to remove cached n8n production audit '{}': {error}",
+                        path.display()
+                    )
+                })?;
+            }
+            Ok(serde_json::json!({
+                "status": "repaired",
+                "finding_id": request.finding_id,
+                "repair_kind": request.repair_kind,
+                "message": "Cached n8n production audit was cleared.",
+            }))
+        }
+        "move_literal_api_key_to_secret_file" => {
+            let mut config = app_state.config.write().await;
+            let moved = migrate_literal_n8n_api_key_to_file(&mut config.n8n)?;
+            if moved.is_some() {
+                config
+                    .save()
+                    .map_err(|error| format!("failed to save KRIA config: {error}"))?;
+            }
+            Ok(serde_json::json!({
+                "status": if moved.is_some() { "repaired" } else { "not_needed" },
+                "finding_id": request.finding_id,
+                "repair_kind": request.repair_kind,
+                "message": "Literal n8n API key was moved to the configured owner-only secret file when present.",
+            }))
+        }
+        "move_literal_signing_secret_to_secret_file" => {
+            let mut config = app_state.config.write().await;
+            let moved = config
+                .n8n
+                .migrate_literal_signing_secret_to_file()
+                .map_err(|error| format!("failed to migrate n8n signing secret: {error}"))?;
+            if moved.is_some() {
+                config
+                    .save()
+                    .map_err(|error| format!("failed to save KRIA config: {error}"))?;
+            }
+            Ok(serde_json::json!({
+                "status": if moved.is_some() { "repaired" } else { "not_needed" },
+                "finding_id": request.finding_id,
+                "repair_kind": request.repair_kind,
+                "message": "Literal n8n signing secret was moved to the configured owner-only secret file when present.",
+            }))
+        }
+        "fix_secret_file_permissions" => {
+            let config = app_state.config.read().await;
+            let paths = [
+                config.n8n.api_key_file_path(),
+                config.n8n.signing_secret_file_path(),
+            ];
+            drop(config);
+            let mut fixed = 0usize;
+            #[cfg(unix)]
+            {
+                for path in paths.iter().filter(|path| path.exists()) {
+                    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+                        .map_err(|error| {
+                            format!("failed to secure '{}': {error}", path.display())
+                        })?;
+                    fixed += 1;
+                }
+            }
+            Ok(serde_json::json!({
+                "status": "repaired",
+                "finding_id": request.finding_id,
+                "repair_kind": request.repair_kind,
+                "fixed_count": fixed,
+                "message": "KRIA applied owner-only permissions to local n8n secret files where supported.",
+            }))
+        }
+        "refresh_safe_lifecycle_metadata" => {
+            let workflow_id = request.workflow_id.ok_or_else(|| {
+                "workflow_id is required for lifecycle refresh repair".to_string()
+            })?;
+            refresh_n8n_lifecycle_item(RefreshN8nLifecycleItemRequest { workflow_id }, state).await
+        }
+        "cleanup_local_generated_copy_metadata" => {
+            let workflow_id = request.workflow_id.ok_or_else(|| {
+                "workflow_id is required for generated copy cleanup repair".to_string()
+            })?;
+            cleanup_n8n_generated_copy(
+                CleanupN8nGeneratedCopyRequest {
+                    workflow_id,
+                    delete_from_n8n: false,
+                },
+                state,
+            )
+            .await
+        }
+        "delete_verified_generated_copy_from_n8n" => {
+            let workflow_id = request.workflow_id.ok_or_else(|| {
+                "workflow_id is required for generated copy deletion repair".to_string()
+            })?;
+            cleanup_n8n_generated_copy(
+                CleanupN8nGeneratedCopyRequest {
+                    workflow_id,
+                    delete_from_n8n: true,
+                },
+                state,
+            )
+            .await
+        }
+        _ => Err("This finding needs manual review. KRIA will not auto-fix it.".into()),
+    }
+}
+
+#[tauri::command]
 pub async fn archive_legacy_n8n_toml_workflows(
     state: State<'_, AppStateCell>,
 ) -> Result<serde_json::Value, String> {
@@ -10260,8 +14122,15 @@ pub async fn suggest_n8n_workflows(
         format!("prompt=\"{}\"", n8n_log_preview_text(prompt, 180)),
         None,
     );
-    let engine = WorkflowRankingEngine::new(workflows);
-    let response = engine.suggest(prompt);
+    let route =
+        WorkflowRankingEngine::new(workflows).route_chat(kria_core::n8n::N8nChatRouteRequest {
+            prompt: prompt.to_string(),
+            previous_user_prompt: None,
+            manual_n8n_mode: false,
+            safe_auto_run_enabled: false,
+            workflows: Vec::new(),
+        });
+    let response = route.to_workflow_suggestion_response();
     let candidates = response
         .candidates
         .iter()
@@ -10290,6 +14159,70 @@ pub async fn suggest_n8n_workflows(
     );
     Ok(serde_json::to_value(response)
         .map_err(|error| format!("failed to serialize n8n workflow suggestions: {error}"))?)
+}
+
+#[tauri::command]
+pub async fn route_n8n_chat_prompt(
+    request: RouteN8nChatPromptRequest,
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    let app_state = state
+        .get()
+        .ok_or_else(|| "runtime still initializing".to_string())?;
+    let prompt = request.prompt.trim();
+    if prompt.is_empty() {
+        return Err("prompt is required".into());
+    }
+
+    let config = app_state.config.read().await;
+    if !config.n8n.enabled {
+        return Err("n8n integration is disabled".into());
+    }
+    drop(config);
+
+    let workflows = load_workflow_registry_workflows()?;
+    let routing_id = uuid::Uuid::now_v7().to_string();
+    log_n8n_execution_step(
+        &routing_id,
+        1,
+        3,
+        "Chat Route Prompt",
+        None,
+        format!("prompt=\"{}\"", n8n_log_preview_text(prompt, 180)),
+        None,
+    );
+    let route =
+        WorkflowRankingEngine::new(workflows).route_chat(kria_core::n8n::N8nChatRouteRequest {
+            prompt: prompt.to_string(),
+            previous_user_prompt: request.previous_user_prompt,
+            manual_n8n_mode: request.manual_n8n_mode,
+            safe_auto_run_enabled: request.safe_auto_run_enabled,
+            workflows: Vec::new(),
+        });
+    log_n8n_execution_step(
+        &routing_id,
+        2,
+        3,
+        "Chat Route Decision",
+        route
+            .selected_workflow
+            .as_ref()
+            .map(|candidate| candidate.workflow_id.as_str()),
+        format!(
+            "status={:?}, candidates={}, can_auto_run={}, blockers={}",
+            route.status,
+            route.candidates.len(),
+            route.can_auto_run,
+            if route.blockers.is_empty() {
+                "-".to_string()
+            } else {
+                route.blockers.join("; ")
+            }
+        ),
+        None,
+    );
+    Ok(serde_json::to_value(route)
+        .map_err(|error| format!("failed to serialize n8n chat route: {error}"))?)
 }
 
 #[tauri::command]
@@ -13643,48 +17576,769 @@ pub async fn disable_n8n_workflow(
     }))
 }
 
-/// Delete a workflow from KRIA's workflow registry entirely.
+fn sync_runtime_profile_archive_state(
+    workflow_id: &str,
+    n8n_workflow_id: &str,
+    archived: bool,
+    reason: &str,
+    requested_by: &str,
+    timestamp_ms: u64,
+) -> Result<(), String> {
+    let path = default_runtime_profile_store_path();
+    let mut store = load_runtime_profile_store_at(&path).unwrap_or_default();
+    let mut changed = false;
+    for profile in &mut store.profiles {
+        if profile.workflow_id == workflow_id
+            || (!n8n_workflow_id.trim().is_empty() && profile.n8n_workflow_id == n8n_workflow_id)
+        {
+            profile.archived = archived;
+            if archived {
+                profile.archived_at_ms = timestamp_ms;
+                profile.archived_reason = reason.into();
+                profile.archived_by = requested_by.into();
+                profile.crud_lifecycle_status = "archived".into();
+            } else {
+                profile.restored_at_ms = timestamp_ms;
+                profile.crud_lifecycle_status = "restored".into();
+                profile.crud_lifecycle_warnings.clear();
+            }
+            profile.updated_at_ms = timestamp_ms;
+            changed = true;
+        }
+    }
+    if changed {
+        save_runtime_profile_store_at(&path, &store).map_err(|error| {
+            format!("failed to save n8n runtime profiles after archive change: {error}")
+        })?;
+    }
+    Ok(())
+}
+
+async fn rebuild_n8n_catalog_from_registry(state: State<'_, AppStateCell>) -> Result<(), String> {
+    let app_state = state
+        .get()
+        .ok_or_else(|| "runtime still initializing".to_string())?;
+    let config = app_state.config.read().await.n8n.clone();
+    let store = load_workflow_registry_store()?;
+    let rebuilt = rebuild_catalog_from_workflows(&config, workflow_registry_workflows(&store));
+    *app_state.n8n_catalog.write().await = rebuilt;
+    Ok(())
+}
+
 #[tauri::command]
-pub async fn delete_n8n_workflow(
-    workflow_id: String,
+pub async fn archive_n8n_workflow(
+    request: ArchiveN8nWorkflowRequest,
     state: State<'_, AppStateCell>,
 ) -> Result<serde_json::Value, String> {
+    let workflow_id = request.workflow_id.trim().to_string();
+    validate_registry_workflow_id(&workflow_id)?;
+    let reason = request
+        .reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("archived by user")
+        .to_string();
+    let requested_by = request
+        .requested_by
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("kria-ui")
+        .to_string();
+
+    let mut store = load_workflow_registry_store()?;
+    let now = current_unix_ms();
+    let workflow = store
+        .workflows
+        .iter_mut()
+        .find(|record| record.workflow.workflow_id == workflow_id)
+        .map(|record| {
+            record.workflow.archived = true;
+            record.workflow.archived_at_ms = now;
+            record.workflow.archived_reason = reason.clone();
+            record.workflow.archived_by = requested_by.clone();
+            record.workflow.crud_lifecycle_status = "archived".into();
+            record.updated_at_ms = now;
+            record.workflow.clone()
+        })
+        .ok_or_else(|| {
+            format!(
+                "workflow '{}' not found in KRIA workflow registry",
+                workflow_id
+            )
+        })?;
+    save_workflow_registry_store(&store)?;
+    sync_runtime_profile_archive_state(
+        &workflow.workflow_id,
+        &workflow.n8n_workflow_id,
+        true,
+        &reason,
+        &requested_by,
+        now,
+    )?;
+    upsert_workflow_crud_operation(new_workflow_crud_operation(
+        "archive", &workflow, "complete", "complete",
+    ))?;
+    rebuild_n8n_catalog_from_registry(state).await?;
+
+    Ok(serde_json::json!({
+        "status": "archived",
+        "workflow_id": workflow.workflow_id,
+        "n8n_workflow_id": workflow.n8n_workflow_id,
+        "message": "Workflow archived in KRIA. It remains unchanged in n8n and will not be routed or auto-run.",
+        "workflow_registry": registry_store_payload(&store),
+    }))
+}
+
+#[tauri::command]
+pub async fn restore_n8n_workflow(
+    request: RestoreN8nWorkflowRequest,
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    let workflow_id = request.workflow_id.trim().to_string();
+    validate_registry_workflow_id(&workflow_id)?;
     let app_state = state
         .get()
         .ok_or_else(|| "runtime still initializing".to_string())?;
     let config = app_state.config.read().await.n8n.clone();
     let mut store = load_workflow_registry_store()?;
+    let now = current_unix_ms();
+    let mut restored = store
+        .workflows
+        .iter()
+        .find(|record| record.workflow.workflow_id == workflow_id)
+        .map(|record| record.workflow.clone())
+        .ok_or_else(|| {
+            format!(
+                "workflow '{}' not found in KRIA workflow registry",
+                workflow_id
+            )
+        })?;
+    if restored.n8n_deleted_at_ms > 0 || restored.n8n_delete_status.trim() == "deleted" {
+        return Err(
+            "This workflow was deleted from n8n. Restore/import it from backup as a new draft."
+                .into(),
+        );
+    }
 
-    let workflow_id = workflow_id.trim().to_string();
+    let lifecycle_report = classify_n8n_workflow_lifecycle(&config, &restored).await;
+
+    restored.archived = false;
+    restored.restored_at_ms = now;
+    restored.n8n_delete_status = String::new();
+    restored.crud_lifecycle_status = "restored".into();
+    restored.lifecycle_status = lifecycle_report.lifecycle_status.clone();
+    restored.lifecycle_severity = lifecycle_report.lifecycle_severity.clone();
+    restored.lifecycle_warnings = lifecycle_report.blockers.clone();
+    restored.last_lifecycle_checked_at_ms = now;
+    restored.last_lifecycle_action = "restore".into();
+    if matches!(
+        lifecycle_report.lifecycle_status.as_str(),
+        "needs_review"
+            | "needs_retest"
+            | "copy_changed"
+            | "source_missing"
+            | "copy_missing"
+            | "blocked"
+    ) {
+        restored.crud_lifecycle_warnings =
+            vec!["Workflow was restored but must be reviewed before safe execution.".into()];
+    }
+
+    if let Some(record) = store
+        .workflows
+        .iter_mut()
+        .find(|record| record.workflow.workflow_id == workflow_id)
+    {
+        record.workflow = restored.clone();
+        record.updated_at_ms = now;
+    }
+    save_workflow_registry_store(&store)?;
+    sync_runtime_profile_archive_state(
+        &restored.workflow_id,
+        &restored.n8n_workflow_id,
+        false,
+        "",
+        "kria-ui",
+        now,
+    )?;
+    upsert_workflow_crud_operation(new_workflow_crud_operation(
+        "restore", &restored, "complete", "complete",
+    ))?;
+    let rebuilt = rebuild_catalog_from_workflows(&config, workflow_registry_workflows(&store));
+    *app_state.n8n_catalog.write().await = rebuilt;
+
+    Ok(serde_json::json!({
+        "status": if restored.lifecycle_status == "current" || restored.lifecycle_status.is_empty() { "restored" } else { "restored_needs_review" },
+        "workflow_id": restored.workflow_id,
+        "lifecycle_status": restored.lifecycle_status,
+        "message": if restored.crud_lifecycle_warnings.is_empty() {
+            "Workflow restored in KRIA.".to_string()
+        } else {
+            "Workflow restored, but lifecycle review is required before running.".to_string()
+        },
+        "workflow_registry": registry_store_payload(&store),
+    }))
+}
+
+#[tauri::command]
+pub async fn list_archived_n8n_workflows() -> Result<serde_json::Value, String> {
+    let store = load_workflow_registry_store()?;
+    Ok(serde_json::json!({
+        "status": "ok",
+        "workflows": workflow_registry_archived_workflows(&store),
+    }))
+}
+
+#[tauri::command]
+pub async fn remove_n8n_workflow_from_kria(
+    request: RemoveN8nWorkflowFromKriaRequest,
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    if !request.confirmed {
+        return Err("Removing a workflow from KRIA requires explicit confirmation.".into());
+    }
+    let workflow_id = request.workflow_id.trim().to_string();
     validate_registry_workflow_id(&workflow_id)?;
-
-    let before = store.workflows.len();
+    let mut store = load_workflow_registry_store()?;
+    let workflow = store
+        .workflows
+        .iter()
+        .find(|record| record.workflow.workflow_id == workflow_id)
+        .map(|record| record.workflow.clone())
+        .ok_or_else(|| {
+            format!(
+                "workflow '{}' not found in KRIA workflow registry",
+                workflow_id
+            )
+        })?;
     if !delete_workflow_registry_record(&mut store, &workflow_id) {
         return Err(format!(
             "workflow '{}' not found in KRIA workflow registry",
             workflow_id
         ));
     }
-
     save_workflow_registry_store(&store)?;
 
-    let after = store.workflows.len();
+    let runtime_path = default_runtime_profile_store_path();
+    let mut runtime_store = load_runtime_profile_store_at(&runtime_path).unwrap_or_default();
+    let before_profiles = runtime_store.profiles.len();
+    runtime_store.profiles.retain(|profile| {
+        profile.workflow_id != workflow_id
+            && (workflow.n8n_workflow_id.trim().is_empty()
+                || profile.n8n_workflow_id != workflow.n8n_workflow_id)
+    });
+    if runtime_store.profiles.len() != before_profiles {
+        save_runtime_profile_store_at(&runtime_path, &runtime_store).map_err(|error| {
+            format!("failed to save runtime profiles after removing workflow from KRIA: {error}")
+        })?;
+    }
+    let mut operation =
+        new_workflow_crud_operation("remove_from_kria", &workflow, "complete", "complete");
+    operation.recovery_actions = vec!["sync_from_n8n".into()];
+    upsert_workflow_crud_operation(operation)?;
+    rebuild_n8n_catalog_from_registry(state).await?;
+
+    Ok(serde_json::json!({
+        "status": "removed_from_kria",
+        "workflow_id": workflow_id,
+        "n8n_workflow_id": workflow.n8n_workflow_id,
+        "message": "Workflow setup was removed from KRIA. The n8n workflow itself was not deleted.",
+        "workflow_registry": registry_store_payload(&store),
+    }))
+}
+
+fn workflow_display_or_id(workflow: &N8nWorkflowConfig) -> String {
+    workflow
+        .display_name
+        .trim()
+        .to_string()
+        .if_empty_then(|| workflow.workflow_id.clone())
+}
+
+trait EmptyStringFallback {
+    fn if_empty_then(self, fallback: impl FnOnce() -> String) -> String;
+}
+
+impl EmptyStringFallback for String {
+    fn if_empty_then(self, fallback: impl FnOnce() -> String) -> String {
+        if self.trim().is_empty() {
+            fallback()
+        } else {
+            self
+        }
+    }
+}
+
+fn n8n_workflow_name_from_json(workflow_json: &serde_json::Value) -> String {
+    workflow_json
+        .get("name")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+fn prepare_workflow_payload_for_restore(
+    payload: serde_json::Value,
+    workflow_id: &str,
+) -> serde_json::Value {
+    let current_name = payload
+        .get("name")
+        .and_then(|value| value.as_str())
+        .unwrap_or(workflow_id)
+        .trim();
+    serde_json::json!({
+        "name": format!("{current_name} - KRIA Restored Draft"),
+        "nodes": payload.get("nodes").cloned().unwrap_or_else(|| serde_json::json!([])),
+        "connections": payload.get("connections").cloned().unwrap_or_else(|| serde_json::json!({})),
+        "settings": payload.get("settings").cloned().unwrap_or_else(|| serde_json::json!({"executionOrder": "v1"})),
+    })
+}
+
+fn prepare_workflow_payload_for_authoring_copy(
+    payload: serde_json::Value,
+    copy_name: &str,
+    copy_workflow_id: &str,
+) -> serde_json::Value {
+    let mut nodes = payload
+        .get("nodes")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!([]));
+    if let Some(nodes) = nodes.as_array_mut() {
+        for node in nodes {
+            let node_type = node
+                .get("type")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            if node_type.contains("webhook") && !node_type.contains("respondtowebhook") {
+                let unique_path = format!(
+                    "kria-updated-{}-{}",
+                    slug_from_prompt(copy_workflow_id),
+                    uuid::Uuid::now_v7()
+                );
+                if let Some(parameters) = node
+                    .get_mut("parameters")
+                    .and_then(|value| value.as_object_mut())
+                {
+                    parameters.insert("path".into(), serde_json::Value::String(unique_path));
+                    parameters
+                        .entry("httpMethod")
+                        .or_insert_with(|| serde_json::Value::String("POST".into()));
+                }
+                node.as_object_mut().map(|map| {
+                    map.insert(
+                        "webhookId".into(),
+                        serde_json::Value::String(uuid::Uuid::now_v7().to_string()),
+                    )
+                });
+            }
+        }
+    }
+    serde_json::json!({
+        "name": copy_name,
+        "nodes": nodes,
+        "connections": payload.get("connections").cloned().unwrap_or_else(|| serde_json::json!({})),
+        "settings": payload.get("settings").cloned().unwrap_or_else(|| serde_json::json!({"executionOrder": "v1"})),
+    })
+}
+
+fn preserve_source_webhook_identity_for_apply(
+    mut draft_payload: serde_json::Value,
+    source_payload: &serde_json::Value,
+) -> serde_json::Value {
+    let source_webhooks = source_payload
+        .get("nodes")
+        .and_then(|value| value.as_array())
+        .map(|nodes| {
+            nodes
+                .iter()
+                .filter(|node| {
+                    let node_type = node
+                        .get("type")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or_default()
+                        .to_ascii_lowercase();
+                    node_type.contains("webhook") && !node_type.contains("respondtowebhook")
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let Some(nodes) = draft_payload
+        .get_mut("nodes")
+        .and_then(|value| value.as_array_mut())
+    else {
+        return draft_payload;
+    };
+    let mut index = 0usize;
+    for node in nodes {
+        let node_type = node
+            .get("type")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if !node_type.contains("webhook") || node_type.contains("respondtowebhook") {
+            continue;
+        }
+        if let Some(source) = source_webhooks.get(index) {
+            if let Some(source_id) = source.get("webhookId").cloned() {
+                if let Some(map) = node.as_object_mut() {
+                    map.insert("webhookId".into(), source_id);
+                }
+            }
+            let source_params = source.get("parameters").and_then(|value| value.as_object());
+            if let (Some(source_params), Some(params)) = (
+                source_params,
+                node.get_mut("parameters")
+                    .and_then(|value| value.as_object_mut()),
+            ) {
+                for key in ["path", "httpMethod"] {
+                    if let Some(value) = source_params.get(key).cloned() {
+                        params.insert(key.into(), value);
+                    }
+                }
+            }
+        }
+        index += 1;
+    }
+    draft_payload
+}
+
+fn unique_workflow_id_from_name(base: &str, existing_ids: &[String]) -> String {
+    let normalized = base
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
+        .collect::<String>()
+        .split('_')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("_");
+    let base = if normalized.is_empty() {
+        "restored_workflow".to_string()
+    } else {
+        normalized
+    };
+    let existing = existing_ids
+        .iter()
+        .map(|value| value.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    if !existing.contains(base.as_str()) {
+        return base;
+    }
+    for index in 2..=999 {
+        let candidate = format!("{base}_{index}");
+        if !existing.contains(candidate.as_str()) {
+            return candidate;
+        }
+    }
+    format!("{base}_{}", current_unix_ms())
+}
+
+#[tauri::command]
+pub async fn delete_n8n_workflow_permanently(
+    request: DeleteN8nWorkflowPermanentlyRequest,
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    let workflow_id = request.workflow_id.trim().to_string();
+    validate_registry_workflow_id(&workflow_id)?;
+    if !request.understand_checkbox {
+        return Err("Permanent n8n delete requires the Danger Zone confirmation checkbox.".into());
+    }
+
+    let app_state = state
+        .get()
+        .ok_or_else(|| "runtime still initializing".to_string())?;
+    let config = app_state.config.read().await.n8n.clone();
+    if config.resolve_api_key().trim().is_empty() {
+        return Err(
+            "n8n API key is required before KRIA can permanently delete an n8n workflow.".into(),
+        );
+    }
+
+    let mut store = load_workflow_registry_store()?;
+    let workflow = store
+        .workflows
+        .iter()
+        .find(|record| record.workflow.workflow_id == workflow_id)
+        .map(|record| record.workflow.clone())
+        .ok_or_else(|| {
+            format!(
+                "workflow '{}' not found in KRIA workflow registry",
+                workflow_id
+            )
+        })?;
+    let display_name = workflow_display_or_id(&workflow);
+    let required_confirmation = format!("DELETE {display_name}");
+    if request.typed_confirmation.trim() != required_confirmation {
+        return Err(format!(
+            "Typed confirmation must exactly match '{}'.",
+            required_confirmation
+        ));
+    }
+    if workflow.n8n_workflow_id.trim().is_empty() {
+        return Err("Cannot permanently delete: KRIA does not have the n8n workflow ID.".into());
+    }
+
+    let client = reqwest::Client::new();
+    let current_json =
+        fetch_n8n_workflow_detail(&client, &config, &workflow.n8n_workflow_id).await?;
+    let current_n8n_id = n8n_workflow_api_id(&current_json).unwrap_or_default();
+    if current_n8n_id != workflow.n8n_workflow_id {
+        return Err("Identity mismatch: n8n returned a different workflow ID.".into());
+    }
+    let current_name = n8n_workflow_name_from_json(&current_json);
+    if !current_name.is_empty()
+        && !workflow.display_name.trim().is_empty()
+        && current_name != workflow.display_name
+        && current_name != workflow.workflow_id
+    {
+        return Err(format!(
+            "Identity mismatch: n8n workflow name is '{}', but KRIA expected '{}'. Refresh/review before deleting.",
+            current_name, workflow.display_name
+        ));
+    }
+
+    let mut operation =
+        new_workflow_crud_operation("permanent_delete", &workflow, "backup", "pending");
+    upsert_workflow_crud_operation(operation.clone())?;
+    let backup = write_n8n_workflow_backup(
+        n8n_workflow_backup_dir(),
+        &workflow.workflow_id,
+        "n8n_workflow_json",
+        "pre-permanent-delete backup",
+        current_json,
+    )?;
+    let backup_path = n8n_workflow_backup_dir().join(backup_file_name(&backup.backup_id));
+    let backup_hash = file_sha256(&backup_path)?;
+    operation.backup_path = backup_path.display().to_string();
+    operation.backup_hash = backup_hash.clone();
+    operation.stage = "local_pending_delete".into();
+    operation.updated_at_ms = current_unix_ms();
+    upsert_workflow_crud_operation(operation.clone())?;
+
+    let now = current_unix_ms();
+    if let Some(record) = store
+        .workflows
+        .iter_mut()
+        .find(|record| record.workflow.workflow_id == workflow_id)
+    {
+        record.workflow.archived = true;
+        record.workflow.archived_at_ms = if record.workflow.archived_at_ms == 0 {
+            now
+        } else {
+            record.workflow.archived_at_ms
+        };
+        record.workflow.n8n_delete_status = "pending_delete".into();
+        record.workflow.backup_path = operation.backup_path.clone();
+        record.workflow.backup_hash = backup_hash.clone();
+        record.workflow.crud_lifecycle_status = "pending_delete".into();
+        record.updated_at_ms = now;
+    }
+    save_workflow_registry_store(&store)?;
     let rebuilt = rebuild_catalog_from_workflows(&config, workflow_registry_workflows(&store));
     *app_state.n8n_catalog.write().await = rebuilt;
 
-    tracing::info!(
-        target: "n8n_workflow_registry",
-        workflow_id = %workflow_id,
-        before,
-        after,
-        "deleted n8n workflow registry entry and rebuilt catalog"
-    );
+    if let Err(error) =
+        delete_n8n_temporary_workflow(&client, &config, &workflow.n8n_workflow_id).await
+    {
+        if let Some(record) = store
+            .workflows
+            .iter_mut()
+            .find(|record| record.workflow.workflow_id == workflow_id)
+        {
+            record.workflow.n8n_delete_status = "pending_delete_failed".into();
+            record.workflow.crud_lifecycle_status = "pending_delete_failed".into();
+            record.workflow.crud_lifecycle_warnings = vec![error.clone()];
+            record.updated_at_ms = current_unix_ms();
+        }
+        save_workflow_registry_store(&store)?;
+        operation.stage = "n8n_delete_failed".into();
+        operation.status = "pending_recovery".into();
+        operation.last_error = error.clone();
+        operation.recovery_actions = vec![
+            "retry_delete".into(),
+            "restore_kria_record".into(),
+            "keep_archived".into(),
+        ];
+        operation.updated_at_ms = current_unix_ms();
+        upsert_workflow_crud_operation(operation)?;
+        return Err(format!(
+            "n8n delete failed after backup was created. Backup: {}. Error: {}",
+            backup_path.display(),
+            error
+        ));
+    }
+
+    let mut final_status = "deleted";
+    if is_generated_copy_workflow(&workflow) {
+        delete_workflow_registry_record(&mut store, &workflow_id);
+        let runtime_path = default_runtime_profile_store_path();
+        let mut runtime_store = load_runtime_profile_store_at(&runtime_path).unwrap_or_default();
+        runtime_store
+            .profiles
+            .retain(|profile| profile.workflow_id != workflow_id);
+        let _ = save_runtime_profile_store_at(&runtime_path, &runtime_store);
+        final_status = "deleted_generated_copy";
+    } else if let Some(record) = store
+        .workflows
+        .iter_mut()
+        .find(|record| record.workflow.workflow_id == workflow_id)
+    {
+        record.workflow.n8n_deleted_at_ms = current_unix_ms();
+        record.workflow.n8n_delete_status = "deleted".into();
+        record.workflow.crud_lifecycle_status = "n8n_deleted".into();
+        record.updated_at_ms = current_unix_ms();
+    }
+    save_workflow_registry_store(&store)?;
+    operation.stage = "complete".into();
+    operation.status = "complete".into();
+    operation.updated_at_ms = current_unix_ms();
+    upsert_workflow_crud_operation(operation)?;
+    let rebuilt = rebuild_catalog_from_workflows(&config, workflow_registry_workflows(&store));
+    *app_state.n8n_catalog.write().await = rebuilt;
 
     Ok(serde_json::json!({
-        "status": "deleted",
+        "status": final_status,
         "workflow_id": workflow_id,
-        "message": "Workflow removed from KRIA workflow registry.",
+        "n8n_workflow_id": workflow.n8n_workflow_id,
+        "backup_id": backup.backup_id,
+        "backup_path": backup_path,
+        "backup_hash": backup_hash,
+        "message": "Workflow was backed up and permanently deleted from n8n.",
+        "workflow_registry": registry_store_payload(&store),
     }))
+}
+
+#[tauri::command]
+pub async fn restore_n8n_workflow_from_backup(
+    request: RestoreN8nWorkflowFromBackupRequest,
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    let app_state = state
+        .get()
+        .ok_or_else(|| "runtime still initializing".to_string())?;
+    let config = app_state.config.read().await.n8n.clone();
+    let rollback = RollbackN8nWorkflowBackupRequest {
+        backup_id: request.backup_id.clone(),
+        backup_path: request.backup_path.clone(),
+        restore_registry: false,
+    };
+    let backup_path = resolve_backup_path(&rollback)?;
+    let backup = read_n8n_workflow_backup(backup_path.clone())?;
+    let mode = request
+        .restore_mode
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("new_draft_copy");
+    if mode != "new_draft_copy" {
+        return Err("Only restore_mode=new_draft_copy is supported for safe n8n restore.".into());
+    }
+    if backup.kind != "n8n_workflow_json" {
+        return Err("This backup does not contain full n8n workflow JSON and cannot be imported automatically.".into());
+    }
+    let payload = prepare_workflow_payload_for_restore(backup.payload.clone(), &backup.workflow_id);
+    let client = reqwest::Client::new();
+    let n8n_id = create_n8n_workflow_copy(&client, &config, payload.clone()).await?;
+    let workflow_name = n8n_workflow_name_from_json(&payload);
+    let workflow_id = unique_workflow_id_from_name(
+        &format!("{}_restored", backup.workflow_id),
+        &load_workflow_registry_store()?
+            .workflows
+            .iter()
+            .map(|record| record.workflow.workflow_id.clone())
+            .collect::<Vec<_>>(),
+    );
+    let workflow = N8nWorkflowConfig {
+        workflow_id: workflow_id.clone(),
+        workflow_version: "v1".into(),
+        display_name: if workflow_name.is_empty() {
+            format!("{} Restored Draft", backup.workflow_id)
+        } else {
+            workflow_name
+        },
+        n8n_workflow_id: n8n_id.clone(),
+        n8n_workflow_hash: semantic_workflow_hash(&payload),
+        n8n_workflow_semantic_hash: semantic_workflow_hash(&payload),
+        status: N8nWorkflowStatus::Draft,
+        crud_lifecycle_status: "restored_from_backup".into(),
+        backup_path: backup_path.display().to_string(),
+        backup_hash: file_sha256(&backup_path)?,
+        ..Default::default()
+    };
+    let mut store = load_workflow_registry_store()?;
+    upsert_workflow_registry_record(
+        &mut store,
+        workflow.clone(),
+        N8N_WORKFLOW_REGISTRY_ROLLBACK_SOURCE,
+    )
+    .map_err(|error| format!("failed to register restored workflow draft: {error}"))?;
+    save_workflow_registry_store(&store)?;
+    let rebuilt = rebuild_catalog_from_workflows(&config, workflow_registry_workflows(&store));
+    *app_state.n8n_catalog.write().await = rebuilt;
+    upsert_workflow_crud_operation(new_workflow_crud_operation(
+        "restore_from_backup",
+        &workflow,
+        "complete",
+        "complete",
+    ))?;
+
+    Ok(serde_json::json!({
+        "status": "restored_as_new_draft",
+        "workflow_id": workflow_id,
+        "n8n_workflow_id": n8n_id,
+        "message": "Backup was imported into n8n as a new KRIA draft. Review and test it before approval.",
+        "workflow_registry": registry_store_payload(&store),
+    }))
+}
+
+#[tauri::command]
+pub async fn get_n8n_workflow_crud_operations() -> Result<serde_json::Value, String> {
+    let store = load_workflow_crud_operation_store()?;
+    Ok(serde_json::to_value(store)
+        .map_err(|error| format!("failed to serialize n8n workflow CRUD operations: {error}"))?)
+}
+
+#[tauri::command]
+pub async fn continue_n8n_workflow_crud_operation(
+    operation_id: String,
+) -> Result<serde_json::Value, String> {
+    let operation_id = operation_id.trim();
+    if operation_id.is_empty() {
+        return Err("operation_id is required".into());
+    }
+    let store = load_workflow_crud_operation_store()?;
+    let operation = store
+        .operations
+        .iter()
+        .find(|operation| operation.operation_id == operation_id)
+        .ok_or_else(|| format!("CRUD operation '{}' was not found", operation_id))?;
+    Ok(serde_json::json!({
+        "status": operation.status,
+        "operation": operation,
+        "message": "This operation is recorded. Use the matching Archive/Restore/Delete action to retry or finish recovery.",
+    }))
+}
+
+/// Delete a workflow from KRIA's workflow registry entirely.
+#[tauri::command]
+pub async fn delete_n8n_workflow(
+    workflow_id: String,
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    remove_n8n_workflow_from_kria(
+        RemoveN8nWorkflowFromKriaRequest {
+            workflow_id,
+            confirmed: true,
+        },
+        state,
+    )
+    .await
 }
 
 /// Remove all bundled sample/test-harness workflows from KRIA's registry in one
@@ -13893,6 +18547,13 @@ mod tests {
             last_lifecycle_checked_at_ms: 0,
             last_lifecycle_action: String::new(),
             generated_copy_n8n_verified: false,
+            archived: false,
+            archived_at_ms: 0,
+            archived_reason: String::new(),
+            archived_by: String::new(),
+            restored_at_ms: 0,
+            crud_lifecycle_status: String::new(),
+            crud_lifecycle_warnings: Vec::new(),
             enrichment: None,
             enrichment_suggestion: None,
             created_at_ms: 1,
@@ -14024,6 +18685,124 @@ mod tests {
     }
 
     #[test]
+    fn production_audit_secret_scanner_detects_real_values_and_ignores_placeholders() {
+        assert!(
+            secret_value_candidate("api_key = \"n8n_live_abcdefghijklmnopqrstuvwxyz\"").is_some()
+        );
+        assert!(
+            secret_value_candidate("authorization: Bearer abcdefghijklmnopqrstuvwxyz123456")
+                .is_some()
+        );
+        assert!(secret_value_candidate("api_key = \"<redacted>\"").is_none());
+        assert!(secret_value_candidate("signing_secret = \"dummy\"").is_none());
+        assert!(
+            secret_value_candidate("normal_field = \"n8n_live_abcdefghijklmnopqrstuvwxyz\"")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn production_audit_status_aggregates_severity_without_treating_info_as_failure() {
+        assert_eq!(audit_status_from_findings(&[]), "ready");
+        assert_eq!(
+            audit_status_from_findings(&[audit_finding(
+                "info_only",
+                "routing",
+                "info",
+                "Info",
+                "Informational finding.",
+                "No action needed.",
+            )]),
+            "ready"
+        );
+        assert_eq!(
+            audit_status_from_findings(&[audit_finding(
+                "warning_only",
+                "connection",
+                "warning",
+                "Warning",
+                "Warning finding.",
+                "Review.",
+            )]),
+            "degraded"
+        );
+        assert_eq!(
+            audit_status_from_findings(&[audit_finding(
+                "high_only",
+                "secrets",
+                "high",
+                "High",
+                "High finding.",
+                "Fix.",
+            )]),
+            "needs_fix"
+        );
+        assert_eq!(
+            audit_status_from_findings(&[audit_finding(
+                "critical_only",
+                "registry",
+                "critical",
+                "Critical",
+                "Critical finding.",
+                "Fix.",
+            )]),
+            "blocked"
+        );
+    }
+
+    #[test]
+    fn production_audit_readiness_blocks_only_affected_api_dependent_adapters() {
+        let dir = std::env::temp_dir().join(format!(
+            "kria-n8n-audit-readiness-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let signing_secret_file = dir.join("n8n_signing_secret");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&signing_secret_file, "unit-test-signing-secret\n").unwrap();
+
+        let mut config = N8nConfig::default();
+        config.signing_secret_file = signing_secret_file.display().to_string();
+
+        let mut callback_workflow = complete_workflow();
+        callback_workflow.workflow_id = "callback_ready".into();
+        callback_workflow.status = N8nWorkflowStatus::Approved;
+        callback_workflow.requires_callback = Some(true);
+
+        let mut webhook_workflow = complete_workflow();
+        webhook_workflow.workflow_id = "webhook_blocked".into();
+        webhook_workflow.status = N8nWorkflowStatus::Approved;
+        webhook_workflow.requires_callback = Some(false);
+        webhook_workflow.trigger_strategy = "webhook".into();
+        webhook_workflow.result_mode = "poll_execution".into();
+
+        let connection_profile = serde_json::json!({
+            "api_auth_status": "missing",
+            "runner_status": "monitor_only",
+        });
+        let readiness = audit_adapter_readiness(
+            &config,
+            &[callback_workflow, webhook_workflow],
+            &connection_profile,
+        );
+
+        let callback = readiness
+            .iter()
+            .find(|item| item.adapter == "callback")
+            .expect("callback readiness should exist");
+        let webhook = readiness
+            .iter()
+            .find(|item| item.adapter == "webhook_polling")
+            .expect("webhook readiness should exist");
+
+        assert_eq!(callback.status, "ready");
+        assert_eq!(callback.affected_workflow_ids, vec!["callback_ready"]);
+        assert_eq!(webhook.status, "blocked");
+        assert_eq!(webhook.affected_workflow_ids, vec!["webhook_blocked"]);
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn managed_secret_prepare_creates_missing_owner_only_file() {
         let dir = std::env::temp_dir().join(format!(
             "kria-n8n-managed-secret-test-{}",
@@ -14146,6 +18925,13 @@ mod tests {
             last_lifecycle_checked_at_ms: 0,
             last_lifecycle_action: String::new(),
             generated_copy_n8n_verified: false,
+            archived: false,
+            archived_at_ms: 0,
+            archived_reason: String::new(),
+            archived_by: String::new(),
+            restored_at_ms: 0,
+            crud_lifecycle_status: String::new(),
+            crud_lifecycle_warnings: Vec::new(),
             enrichment: None,
             enrichment_suggestion: None,
             created_at_ms: 1,
@@ -14447,6 +19233,183 @@ mod tests {
         assert_eq!(workflow.workflow_version, "v2");
         assert_eq!(workflow.status, N8nWorkflowStatus::Draft);
         assert!(workflow.is_ready_for_approval());
+    }
+
+    #[test]
+    fn n8n_chat_authoring_generates_valid_inactive_webhook_draft() {
+        let prompt = "Create an n8n workflow that receives a movie title and returns details";
+        let workflow_id = "kria_authoring_movie_lookup";
+        let display_name = "Movie Lookup";
+        let template_id = authoring_template_id(prompt, None);
+        let workflow_json =
+            workflow_json_for_authoring_plan(display_name, workflow_id, &template_id, prompt);
+
+        assert_eq!(template_id, "webhook_http_request_lookup");
+        assert_eq!(workflow_json["name"], "Movie Lookup");
+        assert!(workflow_json.get("active").is_none());
+        let report = validate_n8n_workflow_json(
+            &workflow_json,
+            N8nWorkflowValidationOptions {
+                workflow_id: workflow_id.into(),
+                requires_callback: false,
+                ..Default::default()
+            },
+        );
+        assert_eq!(report.status, N8nWorkflowValidationReportStatus::Passed);
+    }
+
+    #[test]
+    fn n8n_authoring_templates_emit_real_app_nodes() {
+        let cases = [
+            (
+                "Create a Gmail workflow that searches unread invoice emails",
+                "gmail_read_search",
+                "n8n-nodes-base.gmail",
+                "Gmail Search",
+            ),
+            (
+                "Create a Google Sheets lookup workflow",
+                "google_sheets_read_lookup",
+                "n8n-nodes-base.googleSheets",
+                "Google Sheets Lookup",
+            ),
+            (
+                "Create a Slack workflow that posts a message",
+                "slack_post_message",
+                "n8n-nodes-base.slack",
+                "Post Slack Message",
+            ),
+            (
+                "Create an HTTP lookup workflow",
+                "webhook_http_request_lookup",
+                "n8n-nodes-base.httpRequest",
+                "HTTP Lookup",
+            ),
+        ];
+        for (prompt, expected_template, expected_type, expected_node_name) in cases {
+            let template_id = authoring_template_id(prompt, None);
+            assert_eq!(template_id, expected_template);
+            let workflow_json = workflow_json_for_authoring_plan(
+                "Template Test",
+                "template_test",
+                &template_id,
+                prompt,
+            );
+            let nodes = workflow_json["nodes"].as_array().unwrap();
+            assert!(nodes.iter().any(|node| node["type"] == expected_type));
+            assert!(nodes.iter().any(|node| node["name"] == expected_node_name));
+            let report = validate_n8n_workflow_json(
+                &workflow_json,
+                N8nWorkflowValidationOptions {
+                    workflow_id: "template_test".into(),
+                    requires_callback: false,
+                    ..Default::default()
+                },
+            );
+            assert_eq!(report.status, N8nWorkflowValidationReportStatus::Passed);
+        }
+    }
+
+    #[test]
+    fn n8n_authoring_credential_mapping_injects_references_only() {
+        let mut workflow_json = workflow_json_for_authoring_plan(
+            "Gmail Test",
+            "gmail_test",
+            "gmail_read_search",
+            "Create a Gmail search workflow",
+        );
+        let applied = apply_credential_mappings_to_workflow_json(
+            &mut workflow_json,
+            &[N8nCredentialMappingInput {
+                credential_type: "gmailOAuth2".into(),
+                credential_id: "credential-id".into(),
+                credential_name: "Gmail".into(),
+            }],
+        )
+        .unwrap();
+        assert_eq!(applied, vec!["Gmail Search:gmailOAuth2"]);
+        let gmail = workflow_json["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|node| node["name"] == "Gmail Search")
+            .unwrap();
+        assert_eq!(
+            gmail["credentials"]["gmailOAuth2"]["id"].as_str(),
+            Some("credential-id")
+        );
+        let serialized = serde_json::to_string(&workflow_json).unwrap();
+        assert!(!serialized.contains("refresh_token"));
+        assert!(!serialized.contains("password"));
+    }
+
+    #[test]
+    fn n8n_authoring_update_copy_regenerates_webhook_path() {
+        let source = serde_json::json!({
+            "name": "Source",
+            "nodes": [
+                {
+                    "id": "webhook",
+                    "name": "Webhook",
+                    "type": "n8n-nodes-base.webhook",
+                    "typeVersion": 2.1,
+                    "parameters": {
+                        "httpMethod": "POST",
+                        "path": "original-path"
+                    }
+                }
+            ],
+            "connections": {},
+            "settings": { "executionOrder": "v1" }
+        });
+        let copy = prepare_workflow_payload_for_authoring_copy(
+            source,
+            "Source - KRIA Updated Draft",
+            "source_updated",
+        );
+        let path = copy["nodes"][0]["parameters"]["path"]
+            .as_str()
+            .unwrap_or_default();
+
+        assert_ne!(path, "original-path");
+        assert!(path.starts_with("kria-updated-source_updated"));
+        assert_eq!(copy["name"], "Source - KRIA Updated Draft");
+    }
+
+    #[test]
+    fn n8n_authoring_direct_apply_preserves_source_webhook_identity() {
+        let source = serde_json::json!({
+            "nodes": [
+                {
+                    "name": "Webhook",
+                    "type": "n8n-nodes-base.webhook",
+                    "webhookId": "source-webhook-id",
+                    "parameters": {
+                        "httpMethod": "POST",
+                        "path": "source-path"
+                    }
+                }
+            ]
+        });
+        let draft = serde_json::json!({
+            "nodes": [
+                {
+                    "name": "Webhook",
+                    "type": "n8n-nodes-base.webhook",
+                    "webhookId": "draft-webhook-id",
+                    "parameters": {
+                        "httpMethod": "GET",
+                        "path": "draft-path"
+                    }
+                }
+            ]
+        });
+
+        let applied = preserve_source_webhook_identity_for_apply(draft, &source);
+
+        assert_eq!(applied["nodes"][0]["webhookId"], "source-webhook-id");
+        assert_eq!(applied["nodes"][0]["parameters"]["path"], "source-path");
+        assert_eq!(applied["nodes"][0]["parameters"]["httpMethod"], "POST");
     }
 
     #[test]

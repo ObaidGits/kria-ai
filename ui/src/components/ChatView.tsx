@@ -23,6 +23,7 @@ const ChatView: Component = () => {
   let messagesEnd: HTMLDivElement | undefined;
   let fileInput: HTMLInputElement | undefined;
   let textareaRef: HTMLTextAreaElement | undefined;
+  let scrollFrame: number | null = null;
   const {
     messages,
     isThinking,
@@ -126,10 +127,26 @@ const ChatView: Component = () => {
     setSlashIndex(0);
   });
 
-  // Auto-scroll to bottom on new messages
+  // Auto-scroll to bottom on new messages. Token streaming can update the
+  // message list many times per second, so keep this to one scroll per frame.
   createEffect(() => {
     messages(); // track
-    messagesEnd?.scrollIntoView({ behavior: "smooth" });
+    isThinking(); // track scroll behavior changes
+    if (scrollFrame !== null && typeof cancelAnimationFrame === "function") {
+      cancelAnimationFrame(scrollFrame);
+    }
+    const scroll = () => {
+      scrollFrame = null;
+      messagesEnd?.scrollIntoView({
+        behavior: isThinking() ? "auto" : "smooth",
+        block: "end",
+      });
+    };
+    if (typeof requestAnimationFrame === "function") {
+      scrollFrame = requestAnimationFrame(scroll);
+    } else {
+      scroll();
+    }
   });
 
   // Reset pending image when session changes to avoid stale preview/input state.
@@ -142,6 +159,10 @@ const ChatView: Component = () => {
 
   onCleanup(() => {
     clearPendingImage();
+    if (scrollFrame !== null && typeof cancelAnimationFrame === "function") {
+      cancelAnimationFrame(scrollFrame);
+      scrollFrame = null;
+    }
   });
 
   // Auto-grow textarea
@@ -164,6 +185,7 @@ const ChatView: Component = () => {
 
   const handleSubmit = (e: Event) => {
     e.preventDefault();
+    if (isThinking()) return;
     if (showSlash() && filteredSlash().length > 0) {
       executeSlash(filteredSlash()[slashIndex()]);
       return;
@@ -208,6 +230,7 @@ const ChatView: Component = () => {
     }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
+      if (isThinking()) return;
       const files = pendingFiles();
       const img = pendingImage();
       if (files.length > 0) {

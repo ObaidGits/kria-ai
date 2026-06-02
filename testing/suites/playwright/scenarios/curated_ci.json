@@ -1,0 +1,39 @@
+{
+  "scenarios": [
+    {
+      "id": "playwright.typecheck",
+      "title": "Playwright TypeScript typecheck",
+      "driver": "backend_command",
+      "command": "cd testing/suites/playwright && npm run typecheck",
+      "tags": [
+        "safe",
+        "ci",
+        "playwright",
+        "typecheck",
+        "regression"
+      ],
+      "required_services": [],
+      "timeout_seconds": 300,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "playwright.tauri_mock_smoke",
+      "title": "Playwright Tauri mock smoke",
+      "driver": "backend_command",
+      "command": "cd testing/suites/playwright && npm run test:tauri-mock",
+      "tags": [
+        "live",
+        "slow",
+        "playwright",
+        "ui",
+        "smoke",
+        "regression"
+      ],
+      "required_services": [
+        "browser"
+      ],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    }
+  ]
+}

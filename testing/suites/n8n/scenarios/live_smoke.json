@@ -1,0 +1,171 @@
+{
+  "schema_version": "kria.testing.scenarios.v1",
+  "scenarios": [
+    {
+      "id": "n8n.full_capability_eval",
+      "title": "n8n full capability eval wrapper",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_full_capability_eval.sh",
+      "tags": [
+        "live",
+        "slow",
+        "n8n",
+        "api",
+        "capability",
+        "regression"
+      ],
+      "required_services": [
+        "kria_api"
+      ],
+      "timeout_seconds": 900,
+      "report_artifact_globs": [
+        "testing/eval_reports/n8n_capability_*.txt"
+      ]
+    },
+    {
+      "id": "n8n.basic_prompt_eval",
+      "title": "n8n basic prompt eval wrapper",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_evals.sh",
+      "tags": [
+        "live",
+        "slow",
+        "n8n",
+        "api",
+        "regression"
+      ],
+      "required_services": [
+        "kria_api",
+        "n8n"
+      ],
+      "timeout_seconds": 900,
+      "report_artifact_globs": [
+        "testing/eval_reports/n8n_eval_*.txt"
+      ]
+    },
+    {
+      "id": "n8n.live_e2e_callback",
+      "title": "n8n live E2E callback wrapper",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_live_e2e.sh",
+      "tags": [
+        "live",
+        "slow",
+        "n8n",
+        "api",
+        "callback",
+        "smoke"
+      ],
+      "required_services": [
+        "kria_api",
+        "n8n"
+      ],
+      "timeout_seconds": 1200,
+      "report_artifact_globs": [
+        "testing/eval_reports/n8n_live_e2e_*.txt"
+      ]
+    },
+    {
+      "id": "n8n.stage2_6_catalog_e2e",
+      "title": "n8n stage 2.6 catalog E2E wrapper",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_stage2_6_catalog_e2e.sh",
+      "tags": [
+        "live",
+        "slow",
+        "n8n",
+        "api",
+        "catalog",
+        "regression"
+      ],
+      "required_services": [
+        "kria_api",
+        "n8n"
+      ],
+      "timeout_seconds": 1200,
+      "report_artifact_globs": [
+        "testing/eval_reports/n8n_stage2_6_catalog_e2e_*.txt"
+      ]
+    },
+    {
+      "id": "n8n.webhook_polling_smoke",
+      "title": "n8n webhook polling smoke wrapper",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_webhook_polling_smoke.sh",
+      "tags": [
+        "live",
+        "n8n",
+        "api",
+        "callback",
+        "smoke"
+      ],
+      "required_services": [
+        "kria_api"
+      ],
+      "timeout_seconds": 600,
+      "report_artifact_globs": [
+        "testing/eval_reports/n8n_webhook_polling_*.txt"
+      ]
+    },
+    {
+      "id": "n8n.reliability_tests",
+      "title": "n8n reliability tests wrapper",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_reliability_tests.sh",
+      "tags": [
+        "live",
+        "n8n",
+        "api",
+        "reliability",
+        "regression"
+      ],
+      "required_services": [
+        "kria_api"
+      ],
+      "timeout_seconds": 600,
+      "report_artifact_globs": [
+        "testing/eval_reports/n8n_reliability_*.txt"
+      ]
+    },
+    {
+      "id": "n8n.prompt_e2e",
+      "title": "n8n prompt E2E eval wrapper",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_prompt_e2e_eval.sh",
+      "tags": [
+        "live",
+        "slow",
+        "n8n",
+        "api",
+        "legacy",
+        "regression"
+      ],
+      "required_services": [
+        "kria_api",
+        "n8n",
+        "docker"
+      ],
+      "timeout_seconds": 1800,
+      "report_artifact_globs": [
+        "testing/eval_reports/n8n_prompt_e2e_*.txt"
+      ]
+    },
+    {
+      "id": "n8n.authoring_live_smoke",
+      "title": "n8n authoring live smoke wrapper",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_authoring_live_smoke.sh",
+      "tags": [
+        "live",
+        "n8n",
+        "authoring",
+        "smoke"
+      ],
+      "required_services": [
+        "n8n"
+      ],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    }
+  ]
+}

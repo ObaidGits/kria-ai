@@ -2,7 +2,7 @@
 
 Internal architecture handbook for KRIA's bounded desktop cognition runtime.
 
-Updated from the current KRIA working tree on 2026-05-27. This document describes the live architecture represented in `crates/kria-core`, `crates/kria-desktop`, `crates/kria-eval`, `tests/e2e`, and the existing runtime/eval reports.
+Updated from the current KRIA working tree on 2026-05-27. This document describes the live architecture represented in `crates/kria-core`, `crates/kria-desktop`, `crates/kria-eval`, `testing/suites/playwright`, and the existing runtime/eval reports.
 
 ## Reader Contract
 

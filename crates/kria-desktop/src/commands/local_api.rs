@@ -135,6 +135,13 @@ pub(super) struct LocalApiChatRequest {
     pub(super) from_user: Option<String>,
 }
 
+#[derive(Debug, Clone, serde::Deserialize)]
+struct LocalApiDesktopChatCommandRequest {
+    message: String,
+    #[serde(default)]
+    session_id: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct LocalApiN8nPendingSuggestion {
     prompt: String,
@@ -169,6 +176,30 @@ struct LocalApiFleetDockerEvalRequest {
     target_id: String,
     #[serde(default)]
     suite_name: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalApiN8nRoutePromptRequest {
+    prompt: String,
+    #[serde(default)]
+    previous_user_prompt: Option<String>,
+    #[serde(default)]
+    manual_n8n_mode: bool,
+    #[serde(default)]
+    safe_auto_run_enabled: bool,
+}
+
+struct NoopLocalApiResponder;
+
+#[async_trait]
+impl LocalApiResponder for NoopLocalApiResponder {
+    async fn respond(&self, request: &LocalApiChatRequest) -> serde_json::Value {
+        serde_json::json!({
+            "status": "ignored",
+            "message": request.message,
+        })
+    }
 }
 
 #[async_trait]
@@ -278,56 +309,1061 @@ pub(super) async fn local_api_chat(
         );
     }
 
-    if let Some(response) = local_api_n8n_info_response(&state, &request).await {
-        return (StatusCode::OK, Json(response));
-    }
-
-    if let Some(reference) = parse_local_api_n8n_confirmation_reference(&request.message) {
-        return match invoke_local_api_n8n_confirmed_workflow_reference(&state, &request, &reference)
-            .await
-        {
-            Ok(response) => (StatusCode::OK, Json(response)),
-            Err(error) => (
-                StatusCode::BAD_GATEWAY,
-                Json(serde_json::json!({
-                    "status": "error",
-                    "error": error.clone(),
-                    "message": error.clone(),
-                    "reply": error,
-                    "source": request.source.clone().unwrap_or_else(|| "api".to_string()),
-                    "chat_id": request.chat_id,
-                    "from_user": request.from_user,
-                    "session_id": local_api_session_id(&request),
-                })),
-            ),
-        };
-    }
-
-    if let Some(reference) = parse_local_api_n8n_run_reference(&request.message) {
-        return match suggest_local_api_n8n_workflow_reference(&state, &request, &reference).await {
-            Ok(response) => (StatusCode::OK, Json(response)),
-            Err(error) => (
-                StatusCode::BAD_GATEWAY,
-                Json(serde_json::json!({
-                    "status": "error",
-                    "error": error.clone(),
-                    "message": error.clone(),
-                    "reply": error,
-                    "source": request.source.clone().unwrap_or_else(|| "api".to_string()),
-                    "chat_id": request.chat_id,
-                    "from_user": request.from_user,
-                    "session_id": local_api_session_id(&request),
-                })),
-            ),
-        };
-    }
-
-    if let Some(response) = suggest_local_api_n8n_workflow_prompt(&state, &request).await {
-        return (StatusCode::OK, Json(response));
+    if let Some(response) = local_api_n8n_pre_fallback_response(&state, &request).await {
+        return response;
     }
 
     let response = state.responder.respond(&request).await;
     (StatusCode::OK, Json(response))
+}
+
+async fn local_api_desktop_chat_command(
+    AxumState(state): AxumState<LocalApiBridgeState>,
+    Json(request): Json<LocalApiDesktopChatCommandRequest>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    if request.message.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "status": "error",
+                "message": "message is required",
+                "reply": "message is required",
+            })),
+        );
+    }
+
+    let app = match state.app_handle.clone() {
+        Some(app) => app,
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "status": "error",
+                    "message": "KRIA app runtime is not attached to the desktop chat command bridge",
+                    "reply": "KRIA app runtime is not attached to the desktop chat command bridge",
+                })),
+            )
+        }
+    };
+    let state_cell = match local_api_app_state(&state) {
+        Ok(state_cell) => state_cell,
+        Err(error) => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "status": "error",
+                    "message": error,
+                    "reply": error,
+                })),
+            )
+        }
+    };
+    let Some(app_state) = state_cell.get() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "status": "error",
+                "message": "KRIA is still initializing — please try again in a moment",
+                "reply": "KRIA is still initializing — please try again in a moment",
+            })),
+        );
+    };
+
+    match super::chat::desktop_n8n_pre_fallback_command_capture(
+        request.message,
+        app_state,
+        app,
+        request.session_id,
+        "agent",
+    )
+    .await
+    {
+        Some(Ok(capture)) => {
+            let status = StatusCode::from_u16(capture.status_code).unwrap_or(StatusCode::OK);
+            (
+                status,
+                Json(serde_json::json!({
+                    "status": capture.status,
+                    "reply": capture.reply,
+                    "events": capture.events,
+                    "desktop_command": {
+                        "path": "send_message",
+                        "ui_opened": false,
+                        "source": "desktop_chat"
+                    },
+                    "response": capture.response,
+                })),
+            )
+        }
+        Some(Err(error)) => (
+            StatusCode::BAD_GATEWAY,
+            Json(serde_json::json!({
+                "status": "error",
+                "message": error,
+                "reply": error,
+            })),
+        ),
+        None => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "status": "not_handled",
+                "reply": "Desktop send_message did not enter deterministic n8n handling for this prompt.",
+                "events": [],
+                "desktop_command": {
+                    "path": "send_message",
+                    "ui_opened": false,
+                    "source": "desktop_chat"
+                },
+            })),
+        ),
+    }
+}
+
+pub(super) async fn local_api_n8n_pre_fallback_response_from_app_state(
+    app_state: &AppState,
+    app_handle: AppHandle,
+    request: LocalApiChatRequest,
+) -> Option<(StatusCode, Json<serde_json::Value>)> {
+    let state = LocalApiBridgeState {
+        responder: Arc::new(NoopLocalApiResponder),
+        fleet_control_runtime: app_state.fleet_control_runtime.clone(),
+        n8n_catalog: app_state.n8n_catalog.clone(),
+        n8n_state_store: app_state.n8n_state_store.clone(),
+        n8n_inbox_path: app_state.n8n_inbox_path.clone(),
+        n8n_audit_path: app_state.n8n_audit_path.clone(),
+        n8n_governance_log: app_state.n8n_governance_log.clone(),
+        n8n_hitl_responses: app_state.n8n_hitl_responses.clone(),
+        n8n_pending_suggestions: Arc::new(RwLock::new(HashMap::new())),
+        hitl: app_state.hitl.clone(),
+        decision_store: app_state.decision_store.clone(),
+        app_handle: Some(app_handle),
+    };
+    local_api_n8n_pre_fallback_response(&state, &request).await
+}
+
+async fn local_api_n8n_pre_fallback_response(
+    state: &LocalApiBridgeState,
+    request: &LocalApiChatRequest,
+) -> Option<(StatusCode, Json<serde_json::Value>)> {
+    if let Some(response) = local_api_n8n_prompt_action_response(&state, &request).await {
+        return Some(response);
+    }
+
+    if let Some(response) = local_api_n8n_info_response(&state, &request).await {
+        return Some((StatusCode::OK, Json(response)));
+    }
+
+    if let Some(reference) = parse_local_api_n8n_confirmation_reference(&request.message) {
+        return Some(
+            match invoke_local_api_n8n_confirmed_workflow_reference(&state, &request, &reference)
+                .await
+            {
+                Ok(response) => (StatusCode::OK, Json(response)),
+                Err(error) => (
+                    StatusCode::BAD_GATEWAY,
+                    Json(serde_json::json!({
+                        "status": "error",
+                        "error": error.clone(),
+                        "message": error.clone(),
+                        "reply": error,
+                        "source": request.source.clone().unwrap_or_else(|| "api".to_string()),
+                        "chat_id": request.chat_id,
+                        "from_user": request.from_user,
+                        "session_id": local_api_session_id(&request),
+                    })),
+                ),
+            },
+        );
+    }
+
+    if let Some(reference) = parse_local_api_n8n_run_reference(&request.message) {
+        return Some(
+            match suggest_local_api_n8n_workflow_reference(&state, &request, &reference).await {
+                Ok(response) => (StatusCode::OK, Json(response)),
+                Err(error) => (
+                    StatusCode::BAD_GATEWAY,
+                    Json(serde_json::json!({
+                        "status": "error",
+                        "error": error.clone(),
+                        "message": error.clone(),
+                        "reply": error,
+                        "source": request.source.clone().unwrap_or_else(|| "api".to_string()),
+                        "chat_id": request.chat_id,
+                        "from_user": request.from_user,
+                        "session_id": local_api_session_id(&request),
+                    })),
+                ),
+            },
+        );
+    }
+
+    if let Some(response) = suggest_local_api_n8n_workflow_prompt(&state, &request).await {
+        return Some((StatusCode::OK, Json(response)));
+    }
+
+    None
+}
+
+fn local_api_app_state<'a>(
+    state: &'a LocalApiBridgeState,
+) -> Result<tauri::State<'a, AppStateCell>, String> {
+    state
+        .app_handle
+        .as_ref()
+        .map(|app| app.state::<AppStateCell>())
+        .ok_or_else(|| "KRIA app runtime is not attached to the local API bridge".to_string())
+}
+
+fn local_api_command_json(
+    result: Result<serde_json::Value, String>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    match result {
+        Ok(value) => (StatusCode::OK, Json(value)),
+        Err(error) => (
+            StatusCode::BAD_GATEWAY,
+            Json(serde_json::json!({
+                "status": "error",
+                "error": error,
+                "message": error,
+                "reply": error,
+            })),
+        ),
+    }
+}
+
+fn local_api_route_requested_display_name(
+    route: &kria_core::n8n::N8nChatRouteDecision,
+) -> Option<String> {
+    route
+        .input_payload_preview
+        .get("requested_workflow_name")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn local_api_n8n_card(
+    action: &str,
+    title: impl Into<String>,
+    subtitle: impl Into<String>,
+    primary_action: impl Into<String>,
+    secondary_actions: Vec<&str>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "title": title.into(),
+        "subtitle": subtitle.into(),
+        "primary_action": primary_action.into(),
+        "secondary_actions": secondary_actions,
+        "action": action,
+    })
+}
+
+fn local_api_prefixed_reference(message: &str, prefixes: &[&str]) -> Option<String> {
+    let trimmed = message.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    let prefix = prefixes.iter().find(|prefix| lower.starts_with(**prefix))?;
+    let mut reference = trimmed[prefix.len()..].trim();
+    if reference.to_ascii_lowercase().starts_with("the ") {
+        reference = reference[4..].trim();
+    }
+    let mut cleaned = reference
+        .trim_matches(|ch: char| matches!(ch, '"' | '\'' | '`' | ',' | '.' | ':' | ';'))
+        .trim()
+        .to_string();
+    for separator in [" with ", " using ", " and ", " please", " now"] {
+        let lower_cleaned = cleaned.to_ascii_lowercase();
+        if let Some(index) = lower_cleaned.find(separator) {
+            cleaned.truncate(index);
+            cleaned = cleaned
+                .trim_matches(|ch: char| matches!(ch, '"' | '\'' | '`' | ',' | '.' | ':' | ';'))
+                .trim()
+                .to_string();
+        }
+    }
+    if cleaned.is_empty()
+        || cleaned
+            .chars()
+            .any(|ch| ch.is_control() || matches!(ch, '/' | '\\'))
+    {
+        return None;
+    }
+    Some(cleaned)
+}
+
+fn parse_local_api_n8n_archive_reference(message: &str) -> Option<String> {
+    local_api_prefixed_reference(
+        message,
+        &[
+            "archive n8n workflow ",
+            "archive workflow ",
+            "archive n8n ",
+            "archive ",
+        ],
+    )
+}
+
+fn parse_local_api_n8n_restore_reference(message: &str) -> Option<String> {
+    local_api_prefixed_reference(
+        message,
+        &[
+            "restore n8n workflow ",
+            "restore workflow ",
+            "restore n8n ",
+            "restore ",
+        ],
+    )
+}
+
+fn parse_local_api_n8n_test_draft_reference(message: &str) -> Option<String> {
+    local_api_prefixed_reference(
+        message,
+        &[
+            "test n8n draft ",
+            "test workflow draft ",
+            "test draft workflow ",
+            "test draft ",
+        ],
+    )
+}
+
+fn parse_local_api_n8n_approve_draft_reference(message: &str) -> Option<String> {
+    local_api_prefixed_reference(
+        message,
+        &[
+            "approve n8n draft ",
+            "approve workflow draft ",
+            "approve draft workflow ",
+            "approve draft ",
+        ],
+    )
+}
+
+fn parse_local_api_n8n_cleanup_draft_reference(message: &str) -> Option<String> {
+    local_api_prefixed_reference(
+        message,
+        &[
+            "cleanup n8n draft ",
+            "clean up n8n draft ",
+            "cleanup workflow draft ",
+            "clean up workflow draft ",
+            "cleanup draft ",
+            "clean up draft ",
+            "reject draft ",
+        ],
+    )
+}
+
+fn local_api_test_input_payload_from_prompt(message: &str) -> serde_json::Value {
+    let lower = message.to_ascii_lowercase();
+    let title = if lower.contains("inception") {
+        "Inception"
+    } else if lower.contains("matrix") {
+        "The Matrix"
+    } else if lower.contains("avatar") {
+        "Avatar"
+    } else {
+        "Inception"
+    };
+    serde_json::json!({
+        "title": title,
+        "query": title,
+        "body": {
+            "title": title,
+            "query": title
+        },
+        "query_params": {
+            "title": title,
+            "query": title
+        }
+    })
+}
+
+fn local_api_n8n_route_decision(
+    state: &LocalApiBridgeState,
+    request: &LocalApiChatRequest,
+    previous_user_prompt: Option<String>,
+    manual_n8n_mode: bool,
+    safe_auto_run_enabled: bool,
+) -> Option<kria_core::n8n::N8nChatRouteDecision> {
+    let catalog = state.n8n_catalog.try_read().ok()?.clone()?;
+    let workflows = catalog.workflows();
+    Some(
+        kria_core::n8n::WorkflowRankingEngine::new(workflows).route_chat(
+            kria_core::n8n::N8nChatRouteRequest {
+                prompt: request.message.clone(),
+                previous_user_prompt,
+                manual_n8n_mode,
+                safe_auto_run_enabled,
+                workflows: Vec::new(),
+            },
+        ),
+    )
+}
+
+async fn resolve_local_api_n8n_action_reference(
+    state: &LocalApiBridgeState,
+    reference: &str,
+) -> Option<String> {
+    let catalog = state.n8n_catalog.read().await.clone()?;
+    let workflows = catalog.workflows();
+    match kria_core::n8n::resolve_n8n_workflow_reference(&workflows, reference) {
+        kria_core::n8n::N8nWorkflowReferenceMatch::Unique { workflow, .. } => {
+            Some(workflow.workflow_id.clone())
+        }
+        _ => {
+            let registry_workflows =
+                super::n8n::load_workflow_registry_all_workflows().unwrap_or_default();
+            match kria_core::n8n::resolve_n8n_workflow_reference(&registry_workflows, reference) {
+                kria_core::n8n::N8nWorkflowReferenceMatch::Unique { workflow, .. } => {
+                    Some(workflow.workflow_id.clone())
+                }
+                _ => Some(reference.trim().to_string()).filter(|value| !value.is_empty()),
+            }
+        }
+    }
+}
+
+fn local_api_normalized_reference(value: &str) -> String {
+    let mut normalized = String::with_capacity(value.len());
+    let mut last_space = false;
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() {
+            normalized.push(ch.to_ascii_lowercase());
+            last_space = false;
+        } else if !last_space && !normalized.is_empty() {
+            normalized.push(' ');
+            last_space = true;
+        }
+    }
+    normalized.trim().to_string()
+}
+
+fn local_api_prompt_has_n8n_targeting_intent(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    if [
+        "create ",
+        "build ",
+        "make ",
+        "generate ",
+        "set up ",
+        "setup ",
+    ]
+    .iter()
+    .any(|phrase| lower.contains(phrase))
+        && kria_core::n8n::extract_n8n_authoring_workflow_name(message).is_some()
+    {
+        return false;
+    }
+    let has_target_verb = [
+        "update ",
+        "change ",
+        "modify ",
+        "edit ",
+        "archive ",
+        "restore ",
+        "delete ",
+        "remove ",
+        "permanently delete",
+    ]
+    .iter()
+    .any(|phrase| lower.contains(phrase));
+    has_target_verb && (lower.contains("workflow") || lower.contains("n8n"))
+}
+
+async fn local_api_find_unregistered_n8n_target(
+    state: &LocalApiBridgeState,
+    prompt_or_reference: &str,
+) -> Option<(String, String)> {
+    let needle = local_api_normalized_reference(prompt_or_reference);
+    if needle.len() < 3 {
+        return None;
+    }
+    let catalog_workflows = state
+        .n8n_catalog
+        .read()
+        .await
+        .clone()
+        .map(|catalog| catalog.workflows())
+        .unwrap_or_default();
+    let registry_workflows = super::n8n::load_workflow_registry_all_workflows().unwrap_or_default();
+    let state_cell = local_api_app_state(state).ok()?;
+    let app_state = state_cell.get()?;
+    let config = app_state.config.read().await.n8n.clone();
+    let api_key = config.resolve_api_key();
+    if api_key.trim().is_empty() {
+        return None;
+    }
+    let url = format!(
+        "{}/api/v1/workflows?limit=250",
+        config.base_url.trim_end_matches('/')
+    );
+    let response = reqwest::Client::new()
+        .get(url)
+        .header("X-N8N-API-KEY", api_key)
+        .send()
+        .await
+        .ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    let payload = response.json::<serde_json::Value>().await.ok()?;
+    let rows = if let Some(rows) = payload.get("data").and_then(serde_json::Value::as_array) {
+        rows.clone()
+    } else {
+        payload
+            .get("data")
+            .and_then(|value| value.get("data"))
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+    };
+    for row in rows {
+        let id = row
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .trim();
+        let name = row
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .trim();
+        if id.is_empty() || name.is_empty() {
+            continue;
+        }
+        let normalized_id = local_api_normalized_reference(id);
+        let normalized_name = local_api_normalized_reference(name);
+        let exact_match = needle == normalized_id
+            || needle == normalized_name
+            || (normalized_name.len() >= 8 && needle.contains(&normalized_name));
+        if !exact_match {
+            continue;
+        }
+        let registered_in_catalog = catalog_workflows.iter().any(|workflow| {
+            workflow.n8n_workflow_id == id
+                || local_api_normalized_reference(&workflow.workflow_id) == normalized_id
+                || local_api_normalized_reference(&workflow.display_name) == normalized_name
+        });
+        let registered_in_registry = registry_workflows.iter().any(|workflow| {
+            workflow.n8n_workflow_id == id
+                || local_api_normalized_reference(&workflow.workflow_id) == normalized_id
+                || local_api_normalized_reference(&workflow.display_name) == normalized_name
+        });
+        if !registered_in_catalog && !registered_in_registry {
+            return Some((id.to_string(), name.to_string()));
+        }
+    }
+    None
+}
+
+fn local_api_n8n_import_required_json(
+    request: &LocalApiChatRequest,
+    source: String,
+    session_id: String,
+    n8n_workflow_id: String,
+    n8n_workflow_name: String,
+) -> serde_json::Value {
+    let reply = format!(
+        "Workflow \"{n8n_workflow_name}\" exists in n8n but is not registered in KRIA. Import or sync it into KRIA before updating, archiving, restoring, or running it."
+    );
+    serde_json::json!({
+        "status": "import_required",
+        "message": request.message,
+        "source": source,
+        "chat_id": request.chat_id,
+        "from_user": request.from_user,
+        "session_id": session_id,
+        "reply": reply,
+        "n8n": {
+            "action": "import_required",
+            "routing_status": "import_required",
+            "workflow_id": serde_json::Value::Null,
+            "n8n_workflow_id": n8n_workflow_id,
+            "blockers": ["Workflow exists in n8n but is not registered in KRIA."],
+            "next_actions": ["Import or sync workflow into KRIA", "Review workflow before CRUD actions"],
+            "result": {
+                "n8n_workflow_name": n8n_workflow_name,
+            },
+            "card": local_api_n8n_card(
+                "import_required",
+                "Import workflow into KRIA",
+                "This n8n workflow must be registered before KRIA can manage it safely.",
+                "Import workflow",
+                vec!["Open n8n"]
+            )
+        }
+    })
+}
+
+async fn local_api_n8n_route_prompt(
+    AxumState(state): AxumState<LocalApiBridgeState>,
+    Json(request): Json<LocalApiN8nRoutePromptRequest>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let chat_request = LocalApiChatRequest {
+        message: request.prompt,
+        session_id: None,
+        source: Some("n8n_prompt_route_eval".into()),
+        chat_id: None,
+        from_user: Some("prompt-eval".into()),
+    };
+    let Some(route) = local_api_n8n_route_decision(
+        &state,
+        &chat_request,
+        request.previous_user_prompt,
+        request.manual_n8n_mode,
+        request.safe_auto_run_enabled,
+    ) else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "status": "error",
+                "message": "n8n integration is not enabled in KRIA",
+                "reply": "n8n integration is not enabled in KRIA",
+            })),
+        );
+    };
+    (
+        StatusCode::OK,
+        Json(serde_json::to_value(route).unwrap_or_else(|_| {
+            serde_json::json!({
+                "status": "error",
+                "message": "failed to serialize n8n route decision",
+            })
+        })),
+    )
+}
+
+async fn local_api_n8n_create_authoring_draft(
+    AxumState(state): AxumState<LocalApiBridgeState>,
+    Json(request): Json<super::n8n::CreateN8nWorkflowDraftInN8nRequest>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let state_cell = match local_api_app_state(&state) {
+        Ok(state_cell) => state_cell,
+        Err(error) => return local_api_command_json(Err(error)),
+    };
+    local_api_command_json(super::n8n::create_n8n_workflow_draft_in_n8n(request, state_cell).await)
+}
+
+async fn local_api_n8n_create_updated_copy(
+    AxumState(state): AxumState<LocalApiBridgeState>,
+    Json(request): Json<super::n8n::CreateN8nWorkflowUpdatedCopyRequest>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let state_cell = match local_api_app_state(&state) {
+        Ok(state_cell) => state_cell,
+        Err(error) => return local_api_command_json(Err(error)),
+    };
+    local_api_command_json(super::n8n::create_n8n_workflow_updated_copy(request, state_cell).await)
+}
+
+async fn local_api_n8n_archive_workflow(
+    AxumState(state): AxumState<LocalApiBridgeState>,
+    Json(request): Json<super::n8n::ArchiveN8nWorkflowRequest>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let state_cell = match local_api_app_state(&state) {
+        Ok(state_cell) => state_cell,
+        Err(error) => return local_api_command_json(Err(error)),
+    };
+    local_api_command_json(super::n8n::archive_n8n_workflow(request, state_cell).await)
+}
+
+async fn local_api_n8n_restore_workflow(
+    AxumState(state): AxumState<LocalApiBridgeState>,
+    Json(request): Json<super::n8n::RestoreN8nWorkflowRequest>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let state_cell = match local_api_app_state(&state) {
+        Ok(state_cell) => state_cell,
+        Err(error) => return local_api_command_json(Err(error)),
+    };
+    local_api_command_json(super::n8n::restore_n8n_workflow(request, state_cell).await)
+}
+
+async fn local_api_n8n_list_archived_workflows() -> (StatusCode, Json<serde_json::Value>) {
+    local_api_command_json(super::n8n::list_archived_n8n_workflows().await)
+}
+
+async fn local_api_n8n_test_authoring_draft(
+    AxumState(state): AxumState<LocalApiBridgeState>,
+    Json(request): Json<super::n8n::TestN8nWorkflowDraftRequest>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let state_cell = match local_api_app_state(&state) {
+        Ok(state_cell) => state_cell,
+        Err(error) => return local_api_command_json(Err(error)),
+    };
+    let app = match state.app_handle.clone() {
+        Some(app) => app,
+        None => {
+            return local_api_command_json(Err(
+                "KRIA app runtime is not attached to the local API bridge".into(),
+            ))
+        }
+    };
+    local_api_command_json(super::n8n::test_n8n_workflow_draft(request, state_cell, app).await)
+}
+
+async fn local_api_n8n_approve_authoring_draft(
+    AxumState(state): AxumState<LocalApiBridgeState>,
+    Json(request): Json<super::n8n::ApproveN8nWorkflowDraftRequest>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let state_cell = match local_api_app_state(&state) {
+        Ok(state_cell) => state_cell,
+        Err(error) => return local_api_command_json(Err(error)),
+    };
+    local_api_command_json(super::n8n::approve_n8n_workflow_draft(request, state_cell).await)
+}
+
+async fn local_api_n8n_cleanup_authoring_draft(
+    AxumState(state): AxumState<LocalApiBridgeState>,
+    Json(request): Json<super::n8n::CleanupN8nWorkflowDraftRequest>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let state_cell = match local_api_app_state(&state) {
+        Ok(state_cell) => state_cell,
+        Err(error) => return local_api_command_json(Err(error)),
+    };
+    local_api_command_json(super::n8n::cleanup_n8n_workflow_draft(request, state_cell).await)
+}
+
+async fn local_api_n8n_prompt_action_response(
+    state: &LocalApiBridgeState,
+    request: &LocalApiChatRequest,
+) -> Option<(StatusCode, Json<serde_json::Value>)> {
+    let session_id = local_api_session_id(request);
+    let source = request.source.clone().unwrap_or_else(|| "api".to_string());
+
+    if let Some(reference) = parse_local_api_n8n_archive_reference(&request.message) {
+        if let Some((n8n_workflow_id, n8n_workflow_name)) =
+            local_api_find_unregistered_n8n_target(state, &reference).await
+        {
+            return Some((
+                StatusCode::OK,
+                Json(local_api_n8n_import_required_json(
+                    request,
+                    source.clone(),
+                    session_id.clone(),
+                    n8n_workflow_id,
+                    n8n_workflow_name,
+                )),
+            ));
+        }
+        let workflow_id = resolve_local_api_n8n_action_reference(state, &reference).await?;
+        let state_cell = match local_api_app_state(state) {
+            Ok(state_cell) => state_cell,
+            Err(error) => return Some(local_api_command_json(Err(error))),
+        };
+        let result = super::n8n::archive_n8n_workflow(
+            super::n8n::ArchiveN8nWorkflowRequest {
+                workflow_id,
+                reason: Some("archived from KRIA chat prompt".into()),
+                requested_by: request.from_user.clone().or_else(|| Some("local_api_chat".into())),
+            },
+            state_cell,
+        )
+        .await
+        .map(|value| {
+            serde_json::json!({
+                "status": value.get("status").and_then(serde_json::Value::as_str).unwrap_or("archived"),
+                "message": request.message,
+                "source": source,
+                "chat_id": request.chat_id,
+                "from_user": request.from_user,
+                "session_id": session_id,
+                "reply": value.get("message").and_then(serde_json::Value::as_str).unwrap_or("Workflow archived in KRIA."),
+                "n8n": {
+                    "action": "archive_workflow",
+                    "routing_status": "archived",
+                    "result": value,
+                    "card": local_api_n8n_card(
+                        "archive_workflow",
+                        "Workflow archived",
+                        "KRIA will hide this workflow from routing. The n8n workflow remains unchanged.",
+                        "Restore workflow",
+                        vec!["Open n8n"]
+                    )
+                }
+            })
+        });
+        return Some(local_api_command_json(result));
+    }
+
+    if let Some(reference) = parse_local_api_n8n_restore_reference(&request.message) {
+        if let Some((n8n_workflow_id, n8n_workflow_name)) =
+            local_api_find_unregistered_n8n_target(state, &reference).await
+        {
+            return Some((
+                StatusCode::OK,
+                Json(local_api_n8n_import_required_json(
+                    request,
+                    source.clone(),
+                    session_id.clone(),
+                    n8n_workflow_id,
+                    n8n_workflow_name,
+                )),
+            ));
+        }
+        let workflow_id = resolve_local_api_n8n_action_reference(state, &reference).await?;
+        let state_cell = match local_api_app_state(state) {
+            Ok(state_cell) => state_cell,
+            Err(error) => return Some(local_api_command_json(Err(error))),
+        };
+        let result = super::n8n::restore_n8n_workflow(
+            super::n8n::RestoreN8nWorkflowRequest { workflow_id },
+            state_cell,
+        )
+        .await
+        .map(|value| {
+            serde_json::json!({
+                "status": value.get("status").and_then(serde_json::Value::as_str).unwrap_or("restored"),
+                "message": request.message,
+                "source": source,
+                "chat_id": request.chat_id,
+                "from_user": request.from_user,
+                "session_id": session_id,
+                "reply": value.get("message").and_then(serde_json::Value::as_str).unwrap_or("Workflow restored in KRIA."),
+                "n8n": {
+                    "action": "restore_workflow",
+                    "routing_status": "restored",
+                    "result": value,
+                    "card": local_api_n8n_card(
+                        "restore_workflow",
+                        "Workflow restored",
+                        "KRIA can review this workflow again before normal routing.",
+                        "Review workflow",
+                        vec!["Archive workflow"]
+                    )
+                }
+            })
+        });
+        return Some(local_api_command_json(result));
+    }
+
+    if let Some(workflow_id) = parse_local_api_n8n_test_draft_reference(&request.message) {
+        let state_cell = match local_api_app_state(state) {
+            Ok(state_cell) => state_cell,
+            Err(error) => return Some(local_api_command_json(Err(error))),
+        };
+        let app = match state.app_handle.clone() {
+            Some(app) => app,
+            None => {
+                return Some(local_api_command_json(Err(
+                    "KRIA app runtime is not attached to the local API bridge".into(),
+                )))
+            }
+        };
+        let result = super::n8n::test_n8n_workflow_draft(
+            super::n8n::TestN8nWorkflowDraftRequest {
+                workflow_id,
+                input_payload: local_api_test_input_payload_from_prompt(&request.message),
+                confirmed: true,
+            },
+            state_cell,
+            app,
+        )
+        .await
+        .map(|value| {
+            serde_json::json!({
+                "status": value.get("status").and_then(serde_json::Value::as_str).unwrap_or("test_started"),
+                "message": request.message,
+                "source": source,
+                "chat_id": request.chat_id,
+                "from_user": request.from_user,
+                "session_id": session_id,
+                "reply": value.get("message").and_then(serde_json::Value::as_str).unwrap_or("Draft test started."),
+                "n8n": { "action": "test_authoring_draft", "result": value }
+            })
+        });
+        return Some(local_api_command_json(result));
+    }
+
+    if let Some(workflow_id) = parse_local_api_n8n_approve_draft_reference(&request.message) {
+        let state_cell = match local_api_app_state(state) {
+            Ok(state_cell) => state_cell,
+            Err(error) => return Some(local_api_command_json(Err(error))),
+        };
+        let result = super::n8n::approve_n8n_workflow_draft(
+            super::n8n::ApproveN8nWorkflowDraftRequest {
+                workflow_id,
+                confirmed: true,
+            },
+            state_cell,
+        )
+        .await
+        .map(|value| {
+            serde_json::json!({
+                "status": value.get("status").and_then(serde_json::Value::as_str).unwrap_or("approved"),
+                "message": request.message,
+                "source": source,
+                "chat_id": request.chat_id,
+                "from_user": request.from_user,
+                "session_id": session_id,
+                "reply": value.get("message").and_then(serde_json::Value::as_str).unwrap_or("Draft approved."),
+                "n8n": { "action": "approve_authoring_draft", "result": value }
+            })
+        });
+        return Some(local_api_command_json(result));
+    }
+
+    if let Some(workflow_id) = parse_local_api_n8n_cleanup_draft_reference(&request.message) {
+        let state_cell = match local_api_app_state(state) {
+            Ok(state_cell) => state_cell,
+            Err(error) => return Some(local_api_command_json(Err(error))),
+        };
+        let delete_n8n_draft = request.message.to_ascii_lowercase().contains("delete n8n");
+        let result = super::n8n::cleanup_n8n_workflow_draft(
+            super::n8n::CleanupN8nWorkflowDraftRequest {
+                workflow_id,
+                delete_n8n_draft,
+            },
+            state_cell,
+        )
+        .await
+        .map(|value| {
+            serde_json::json!({
+                "status": value.get("status").and_then(serde_json::Value::as_str).unwrap_or("cleaned_up"),
+                "message": request.message,
+                "source": source,
+                "chat_id": request.chat_id,
+                "from_user": request.from_user,
+                "session_id": session_id,
+                "reply": value.get("message").and_then(serde_json::Value::as_str).unwrap_or("Draft cleanup completed."),
+                "n8n": { "action": "cleanup_authoring_draft", "result": value }
+            })
+        });
+        return Some(local_api_command_json(result));
+    }
+
+    if local_api_prompt_has_n8n_targeting_intent(&request.message) {
+        if let Some((n8n_workflow_id, n8n_workflow_name)) =
+            local_api_find_unregistered_n8n_target(state, &request.message).await
+        {
+            return Some((
+                StatusCode::OK,
+                Json(local_api_n8n_import_required_json(
+                    request,
+                    source.clone(),
+                    session_id.clone(),
+                    n8n_workflow_id,
+                    n8n_workflow_name,
+                )),
+            ));
+        }
+    }
+
+    let route = local_api_n8n_route_decision(state, request, None, true, false)?;
+    match route.status {
+        kria_core::n8n::N8nChatRouteStatus::CreateWorkflow
+        | kria_core::n8n::N8nChatRouteStatus::CreateFromTemplate => {
+            let requested_display_name = local_api_route_requested_display_name(&route);
+            let state_cell = match local_api_app_state(state) {
+                Ok(state_cell) => state_cell,
+                Err(error) => return Some(local_api_command_json(Err(error))),
+            };
+            let result = super::n8n::create_n8n_workflow_draft_in_n8n(
+                super::n8n::CreateN8nWorkflowDraftInN8nRequest {
+                    prompt: request.message.clone(),
+                    workflow_id: None,
+                    display_name: requested_display_name,
+                    template_id: None,
+                },
+                state_cell,
+            )
+            .await
+            .map(|value| {
+                serde_json::json!({
+                    "status": value.get("status").and_then(serde_json::Value::as_str).unwrap_or("draft_created"),
+                    "message": request.message,
+                    "source": source,
+                    "chat_id": request.chat_id,
+                    "from_user": request.from_user,
+                    "session_id": session_id,
+                    "reply": value.get("message").and_then(serde_json::Value::as_str).unwrap_or("Inactive n8n draft created."),
+                    "n8n": {
+                        "routing": route,
+                        "routing_status": "create_workflow",
+                        "action": "create_authoring_draft",
+                        "result": value,
+                        "card": local_api_n8n_card(
+                            "create_authoring_draft",
+                            "Inactive n8n draft created",
+                            "Review, test, and approve this draft before normal routing.",
+                            "Review draft",
+                            vec!["Test draft", "Cleanup draft"]
+                        )
+                    }
+                })
+            });
+            Some(local_api_command_json(result))
+        }
+        kria_core::n8n::N8nChatRouteStatus::UpdateWorkflow => {
+            let source_workflow_id = match route
+                .selected_workflow
+                .as_ref()
+                .map(|candidate| candidate.workflow_id.clone())
+            {
+                Some(workflow_id) => workflow_id,
+                None => {
+                    return Some((
+                        StatusCode::OK,
+                        Json(local_api_n8n_suggestion_json(
+                            request,
+                            source,
+                            session_id,
+                            route.to_workflow_suggestion_response(),
+                        )),
+                    ))
+                }
+            };
+            let state_cell = match local_api_app_state(state) {
+                Ok(state_cell) => state_cell,
+                Err(error) => return Some(local_api_command_json(Err(error))),
+            };
+            let result = super::n8n::create_n8n_workflow_updated_copy(
+                super::n8n::CreateN8nWorkflowUpdatedCopyRequest {
+                    source_workflow_id,
+                    prompt: request.message.clone(),
+                    display_name: None,
+                },
+                state_cell,
+            )
+            .await
+            .map(|value| {
+                serde_json::json!({
+                    "status": value.get("status").and_then(serde_json::Value::as_str).unwrap_or("updated_copy_created"),
+                    "message": request.message,
+                    "source": source,
+                    "chat_id": request.chat_id,
+                    "from_user": request.from_user,
+                    "session_id": session_id,
+                    "reply": value.get("message").and_then(serde_json::Value::as_str).unwrap_or("Updated inactive n8n draft copy created."),
+                    "n8n": {
+                        "routing": route,
+                        "routing_status": "update_workflow",
+                        "action": "create_updated_copy",
+                        "result": value,
+                        "card": local_api_n8n_card(
+                            "create_updated_copy",
+                            "Updated draft copy created",
+                            "Original workflow remains unchanged until the copy is reviewed.",
+                            "Review updated copy",
+                            vec!["Test copy", "Cleanup draft"]
+                        )
+                    }
+                })
+            });
+            Some(local_api_command_json(result))
+        }
+        kria_core::n8n::N8nChatRouteStatus::OfferArchive
+        | kria_core::n8n::N8nChatRouteStatus::DangerDeleteRequested
+        | kria_core::n8n::N8nChatRouteStatus::Blocked => Some((
+            StatusCode::OK,
+            Json(local_api_n8n_suggestion_json(
+                request,
+                source,
+                session_id,
+                route.to_workflow_suggestion_response(),
+            )),
+        )),
+        _ => None,
+    }
 }
 
 async fn local_api_n8n_info_response(
@@ -341,26 +1377,25 @@ async fn local_api_n8n_info_response(
     if is_local_api_n8n_workflow_list_query(&lower) {
         let catalog = state.n8n_catalog.read().await.clone()?;
         let workflows = catalog.workflows();
-        let names = workflows
+        let reply = kria_core::n8n::n8n_workflow_inventory_notice(&workflows);
+        let total = workflows.len();
+        let runnable = workflows
             .iter()
+            .filter(|workflow| workflow.is_approved_for_execution())
+            .count();
+        let workflow_preview = workflows
+            .iter()
+            .take(12)
             .map(|workflow| {
-                let execution_state = if workflow.is_approved_for_execution() {
-                    "executable"
-                } else {
-                    "not executable"
-                };
-                format!(
-                    "{} ({}, status={:?}, {})",
-                    workflow.display_name, workflow.workflow_id, workflow.status, execution_state
-                )
+                serde_json::json!({
+                    "display_name": &workflow.display_name,
+                    "workflow_id": &workflow.workflow_id,
+                    "status": format!("{:?}", workflow.status),
+                    "runnable": workflow.is_approved_for_execution(),
+                })
             })
-            .collect::<Vec<_>>()
-            .join("; ");
-        let reply = if names.is_empty() {
-            "No n8n workflows are currently registered in KRIA.".to_string()
-        } else {
-            format!("Available n8n workflows: {names}. Say Run <workflow_id> to see candidates, then Confirm workflow <workflow_id> to execute.")
-        };
+            .collect::<Vec<_>>();
+        let preview_truncated = total > workflow_preview.len();
 
         return Some(serde_json::json!({
             "status": "ok",
@@ -371,7 +1406,13 @@ async fn local_api_n8n_info_response(
             "session_id": session_id,
             "reply": reply,
             "n8n": {
-                "workflows": workflows,
+                "summary": {
+                    "total": total,
+                    "runnable": runnable,
+                    "not_runnable": total.saturating_sub(runnable),
+                },
+                "workflow_preview": workflow_preview,
+                "preview_truncated": preview_truncated,
             },
         }));
     }
@@ -425,29 +1466,7 @@ async fn local_api_n8n_info_response(
 }
 
 fn is_local_api_n8n_workflow_list_query(lower: &str) -> bool {
-    if lower.starts_with("run ") || lower.contains("confirm workflow") {
-        return false;
-    }
-
-    let mentions_workflows =
-        lower.contains("workflow") || lower.contains("workflows") || lower.contains("automat");
-    let asks_for_list = lower.contains("list")
-        || lower.contains("show")
-        || lower.contains("available")
-        || lower.contains("what")
-        || lower.contains("which")
-        || lower.contains("have")
-        || lower.contains("registered");
-    let owned_or_n8n_context = lower.contains("n8n")
-        || lower.contains("my")
-        || lower.contains("i have")
-        || lower.contains("all")
-        || lower.contains("registered")
-        || lower.contains("available");
-
-    lower == "n8n discover"
-        || lower.contains("what can i automate")
-        || (mentions_workflows && asks_for_list && owned_or_n8n_context)
+    kria_core::n8n::is_n8n_workflow_inventory_query(lower)
 }
 
 fn local_api_session_id(request: &LocalApiChatRequest) -> String {
@@ -508,6 +1527,38 @@ fn local_api_n8n_suggestion_json(
 ) -> serde_json::Value {
     let reply = n8n_suggestion_reply(&response);
     let status = response.status.clone();
+    let routing_status = status.clone();
+    let action = match status.as_str() {
+        "offer_archive" => "offer_archive",
+        "danger_delete_requested" => "danger_delete_requested",
+        "blocked" => "blocked",
+        "needs_clarification" => "ask_clarification",
+        "not_found" => "not_found",
+        _ => status.as_str(),
+    };
+    let card = match action {
+        "offer_archive" => local_api_n8n_card(
+            "offer_archive",
+            "Archive instead of delete",
+            "KRIA keeps the n8n workflow intact and hides it from routing.",
+            "Archive workflow",
+            vec!["Open Danger Zone"],
+        ),
+        "danger_delete_requested" => local_api_n8n_card(
+            "danger_delete_requested",
+            "Permanent delete requires confirmation",
+            "KRIA will not permanently delete directly from chat.",
+            "Open Danger Zone",
+            vec!["Archive instead"],
+        ),
+        _ => local_api_n8n_card(
+            action,
+            "n8n action required",
+            "Review the suggested n8n next step.",
+            "Review workflow",
+            vec![],
+        ),
+    };
     serde_json::json!({
         "status": status,
         "message": request.message,
@@ -517,7 +1568,10 @@ fn local_api_n8n_suggestion_json(
         "session_id": session_id,
         "reply": reply,
         "n8n": {
+            "action": action,
+            "routing_status": routing_status,
             "routing": response,
+            "card": card,
         },
     })
 }
@@ -585,7 +1639,14 @@ async fn suggest_local_api_n8n_workflow_reference(
         None,
     );
     let engine = kria_core::n8n::WorkflowRankingEngine::new(workflows);
-    let response = engine.suggest_for_reference(&request.message, reference);
+    let route = engine.route_chat(kria_core::n8n::N8nChatRouteRequest {
+        prompt: request.message.clone(),
+        previous_user_prompt: None,
+        manual_n8n_mode: false,
+        safe_auto_run_enabled: false,
+        workflows: Vec::new(),
+    });
+    let response = route.to_workflow_suggestion_response();
     let candidates = response
         .candidates
         .iter()
@@ -628,10 +1689,23 @@ async fn suggest_local_api_n8n_workflow_prompt(
     let session_id = local_api_session_id(request);
     let source = request.source.clone().unwrap_or_else(|| "api".to_string());
     let engine = kria_core::n8n::WorkflowRankingEngine::new(workflows);
-    let response = engine.suggest(&request.message);
-    if response.candidates.is_empty() {
+    let route = engine.route_chat(kria_core::n8n::N8nChatRouteRequest {
+        prompt: request.message.clone(),
+        previous_user_prompt: None,
+        manual_n8n_mode: false,
+        safe_auto_run_enabled: false,
+        workflows: Vec::new(),
+    });
+    if route.candidates.is_empty()
+        || matches!(
+            route.status,
+            kria_core::n8n::N8nChatRouteStatus::UseOtherTool
+                | kria_core::n8n::N8nChatRouteStatus::ListWorkflows
+        )
+    {
         return None;
     }
+    let response = route.to_workflow_suggestion_response();
     log_n8n_execution_step(
         &session_id,
         1,
@@ -2115,6 +3189,37 @@ pub(super) fn start_local_api_bridge(
                     .route("/api/health", get(local_api_health))
                     .route("/api/auth/token", get(super::api_auth::get_token_handler))
                     .route("/api/chat", post(local_api_chat))
+                    .route(
+                        "/api/testing/desktop-chat-command",
+                        post(local_api_desktop_chat_command),
+                    )
+                    .route("/api/n8n/route", post(local_api_n8n_route_prompt))
+                    .route(
+                        "/api/n8n/authoring/create-draft",
+                        post(local_api_n8n_create_authoring_draft),
+                    )
+                    .route(
+                        "/api/n8n/authoring/create-updated-copy",
+                        post(local_api_n8n_create_updated_copy),
+                    )
+                    .route(
+                        "/api/n8n/authoring/test-draft",
+                        post(local_api_n8n_test_authoring_draft),
+                    )
+                    .route(
+                        "/api/n8n/authoring/approve-draft",
+                        post(local_api_n8n_approve_authoring_draft),
+                    )
+                    .route(
+                        "/api/n8n/authoring/cleanup-draft",
+                        post(local_api_n8n_cleanup_authoring_draft),
+                    )
+                    .route("/api/n8n/archive", post(local_api_n8n_archive_workflow))
+                    .route("/api/n8n/restore", post(local_api_n8n_restore_workflow))
+                    .route(
+                        "/api/n8n/archived",
+                        get(local_api_n8n_list_archived_workflows),
+                    )
                     .route("/api/n8n/callback", post(local_api_n8n_callback))
                     .route("/api/n8n/hitl-response", get(local_api_n8n_hitl_response))
                     .route("/api/n8n/events", get(local_api_n8n_events_sse))

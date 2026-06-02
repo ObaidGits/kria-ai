@@ -1486,6 +1486,30 @@ fn manual_n8n_mode_extracts_workflow_id_from_natural_prompt() {
 }
 
 #[test]
+fn manual_n8n_mode_uses_current_run_prompt_for_input_payload() {
+    let _guard = set_test_n8n_workflows_for_dispatch(n8n_dispatch_fixture_workflows());
+    let profile = TurnExecutionProfile::manual_tool(
+        None,
+        Some("n8n_invoke_workflow".into()),
+        PromptLabToolSelectionStrategy::DirectLockedTool,
+    );
+
+    let (tool, params) = try_deterministic_dispatch_with_profile(
+        "run gmail_inbox_digest workflow from n8n",
+        Some("List all n8n workflows"),
+        &profile,
+    )
+    .expect("manual n8n mode should dispatch mentioned workflow id");
+
+    assert_eq!(tool, "n8n_invoke_workflow");
+    assert_eq!(params["workflow_id"], "gmail_inbox_digest");
+    assert_eq!(
+        params["input_payload"]["source_prompt"],
+        "run gmail_inbox_digest workflow from n8n"
+    );
+}
+
+#[test]
 fn manual_n8n_mode_dispatches_unique_metadata_prompt() {
     let _guard = set_test_n8n_workflows_for_dispatch(n8n_dispatch_fixture_workflows());
     let profile = TurnExecutionProfile::manual_tool(
@@ -1529,6 +1553,63 @@ fn manual_n8n_mode_lists_workflows_without_tool_execution() {
         assert!(message.contains("Inbox Digest"));
         assert!(message.contains("gmail_inbox_digest"));
     }
+}
+
+#[test]
+fn manual_n8n_mode_bounds_large_workflow_inventory_notice() {
+    let mut workflows = n8n_dispatch_fixture_workflows();
+    workflows.push(crate::n8n::N8nWorkflowConfig {
+        workflow_id: "fetch_movies".into(),
+        workflow_version: "v1".into(),
+        display_name: "Fetch Movies".into(),
+        endpoint_path: "/webhook/fetch-movies".into(),
+        status: crate::n8n::N8nWorkflowStatus::Approved,
+        environment: crate::n8n::N8nWorkflowEnvironment::Dev,
+        risk_tier: crate::safety::RiskLevel::Green,
+        irreversibility_class: crate::n8n::N8nIrreversibilityClass::ReadOnly,
+        timeout_class: crate::n8n::N8nTimeoutClass::Interactive,
+        owner: "test".into(),
+        ..Default::default()
+    });
+    for index in 0..30 {
+        workflows.push(crate::n8n::N8nWorkflowConfig {
+            workflow_id: format!("generated_draft_workflow_with_a_long_identifier_{index}"),
+            workflow_version: "v1".into(),
+            display_name: format!("Generated Draft Workflow {index}"),
+            endpoint_path: format!("/webhook/generated-draft-{index}"),
+            status: crate::n8n::N8nWorkflowStatus::Draft,
+            environment: crate::n8n::N8nWorkflowEnvironment::Dev,
+            risk_tier: crate::safety::RiskLevel::Green,
+            irreversibility_class: crate::n8n::N8nIrreversibilityClass::ReadOnly,
+            timeout_class: crate::n8n::N8nTimeoutClass::Interactive,
+            owner: "test".into(),
+            ..Default::default()
+        });
+    }
+    let _guard = set_test_n8n_workflows_for_dispatch(workflows);
+    let profile = TurnExecutionProfile::manual_tool(
+        None,
+        Some("n8n_invoke_workflow".into()),
+        PromptLabToolSelectionStrategy::DirectLockedTool,
+    );
+
+    let (tool, params) = try_deterministic_dispatch_with_profile(
+        "List my n8n workflows and tell me which ones are runnable.",
+        None,
+        &profile,
+    )
+    .expect("large n8n workflow inventory query should be handled locally");
+
+    assert_eq!(tool, KRIA_DETERMINISTIC_NOTICE_TOOL);
+    let message = deterministic_notice_message(&params);
+    assert!(message.contains("Available n8n workflows: 2/32 runnable."));
+    assert!(message.contains("Runnable workflows:"));
+    assert!(message.contains("Inbox Digest"));
+    assert!(message.contains("Fetch Movies"));
+    assert!(message.contains("Not runnable: 30 draft/archived/disabled workflow(s)."));
+    assert!(message.contains("hidden to keep chat responsive"));
+    assert!(!message.contains("Generated Draft Workflow 29"));
+    assert!(message.len() < 1800, "message was {} bytes", message.len());
 }
 
 #[test]

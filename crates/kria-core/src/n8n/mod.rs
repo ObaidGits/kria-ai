@@ -39,10 +39,13 @@ pub use input_adaptation::{
     N8nOutputSelectionReport, N8nV5CapabilityStatus, N8N_INPUT_ADAPTATION_SCHEMA_VERSION,
 };
 pub use matching::{
-    build_n8n_suggested_input_payload, mark_n8n_input_payload_confirmed,
-    parse_n8n_workflow_run_reference, resolve_n8n_workflow_reference, N8nWorkflowMatchCandidate,
-    N8nWorkflowReferenceMatch, WorkflowCandidate, WorkflowConfirmationFlow, WorkflowRankingEngine,
-    WorkflowSuggestionResponse,
+    build_n8n_suggested_input_payload, extract_n8n_authoring_workflow_name,
+    is_n8n_workflow_inventory_query, mark_n8n_input_payload_confirmed,
+    parse_n8n_workflow_run_reference, prompt_has_explicit_n8n_intent,
+    prompt_looks_like_non_n8n_tool_intent, resolve_n8n_workflow_reference,
+    N8nAuthoringWorkflowName, N8nChatRouteDecision, N8nChatRouteRequest, N8nChatRouteStatus,
+    N8nWorkflowMatchCandidate, N8nWorkflowReferenceMatch, WorkflowCandidate,
+    WorkflowConfirmationFlow, WorkflowRankingEngine, WorkflowSuggestionResponse,
 };
 pub use metadata_enrichment::{
     build_n8n_metadata_enrichment_prompt, parse_metadata_suggestion, profile_with_enrichment,
@@ -81,8 +84,8 @@ pub use workflow_registry::{
     load_workflow_registry_store_at, migrate_missing_toml_workflows_to_registry_store,
     migrate_toml_workflows_to_registry_at, migrate_toml_workflows_to_registry_store,
     registry_has_workflow_parity, save_workflow_registry_store_at, upsert_workflow_registry_record,
-    workflow_registry_records, workflow_registry_workflows, N8nWorkflowRegistryRecord,
-    N8nWorkflowRegistryStore, N8nWorkflowRegistryStoreError,
+    workflow_registry_archived_workflows, workflow_registry_records, workflow_registry_workflows,
+    N8nWorkflowRegistryRecord, N8nWorkflowRegistryStore, N8nWorkflowRegistryStoreError,
     N8N_WORKFLOW_REGISTRY_AUTHORING_SOURCE, N8N_WORKFLOW_REGISTRY_MIGRATED_SOURCE,
     N8N_WORKFLOW_REGISTRY_ROLLBACK_SOURCE, N8N_WORKFLOW_REGISTRY_SCHEMA_VERSION,
     N8N_WORKFLOW_REGISTRY_UI_SOURCE,
@@ -95,6 +98,115 @@ pub use workflow_validation::{
 
 use crate::tools::ToolRegistry;
 use std::sync::Arc;
+
+const N8N_INVENTORY_RUNNABLE_PREVIEW_LIMIT: usize = 8;
+const N8N_INVENTORY_NON_RUNNABLE_PREVIEW_LIMIT: usize = 4;
+const N8N_INVENTORY_NAME_LIMIT: usize = 80;
+const N8N_INVENTORY_ID_LIMIT: usize = 96;
+
+fn truncate_inventory_text(value: &str, max_chars: usize) -> String {
+    let mut output = String::new();
+    for (index, ch) in value.chars().enumerate() {
+        if index >= max_chars {
+            output.push_str("...");
+            return output;
+        }
+        output.push(ch);
+    }
+    output
+}
+
+fn n8n_workflow_status_label(status: &N8nWorkflowStatus) -> &'static str {
+    match status {
+        N8nWorkflowStatus::Draft => "draft",
+        N8nWorkflowStatus::Test => "test",
+        N8nWorkflowStatus::Approved => "approved",
+        N8nWorkflowStatus::Deprecated => "deprecated",
+        N8nWorkflowStatus::Disabled => "disabled",
+    }
+}
+
+fn n8n_inventory_line(index: usize, workflow: &N8nWorkflowConfig) -> String {
+    format!(
+        "{}. {} (`{}`) - {}",
+        index + 1,
+        truncate_inventory_text(&workflow.display_name, N8N_INVENTORY_NAME_LIMIT),
+        truncate_inventory_text(&workflow.workflow_id, N8N_INVENTORY_ID_LIMIT),
+        n8n_workflow_status_label(&workflow.status)
+    )
+}
+
+pub fn n8n_workflow_inventory_notice(workflows: &[N8nWorkflowConfig]) -> String {
+    if workflows.is_empty() {
+        return "No n8n workflows are registered in KRIA. Sync n8n profiles, save a draft profile, then approve it from the workflow registry.".to_string();
+    }
+
+    let total = workflows.len();
+    let runnable = workflows
+        .iter()
+        .filter(|workflow| workflow.is_approved_for_execution())
+        .collect::<Vec<_>>();
+    let non_runnable = workflows
+        .iter()
+        .filter(|workflow| !workflow.is_approved_for_execution())
+        .collect::<Vec<_>>();
+
+    let mut sections = vec![format!(
+        "Available n8n workflows: {}/{} runnable.",
+        runnable.len(),
+        total
+    )];
+
+    if runnable.is_empty() {
+        sections.push("Runnable workflows: none approved right now.".to_string());
+    } else {
+        let mut runnable_lines = runnable
+            .iter()
+            .take(N8N_INVENTORY_RUNNABLE_PREVIEW_LIMIT)
+            .enumerate()
+            .map(|(index, workflow)| n8n_inventory_line(index, workflow))
+            .collect::<Vec<_>>();
+
+        if runnable.len() > N8N_INVENTORY_RUNNABLE_PREVIEW_LIMIT {
+            runnable_lines.push(format!(
+                "+ {} more runnable workflow(s). Open Dashboard -> n8n for the full catalog.",
+                runnable.len() - N8N_INVENTORY_RUNNABLE_PREVIEW_LIMIT
+            ));
+        }
+
+        sections.push(format!(
+            "Runnable workflows:\n{}",
+            runnable_lines.join("\n")
+        ));
+    }
+
+    if !non_runnable.is_empty() {
+        let mut detail = format!(
+            "Not runnable: {} draft/archived/disabled workflow(s).",
+            non_runnable.len()
+        );
+        let non_runnable_preview = non_runnable
+            .iter()
+            .take(N8N_INVENTORY_NON_RUNNABLE_PREVIEW_LIMIT)
+            .enumerate()
+            .map(|(index, workflow)| n8n_inventory_line(index, workflow))
+            .collect::<Vec<_>>();
+        if !non_runnable_preview.is_empty() {
+            detail.push_str(&format!("\n{}", non_runnable_preview.join("\n")));
+        }
+        if non_runnable.len() > N8N_INVENTORY_NON_RUNNABLE_PREVIEW_LIMIT {
+            detail.push_str(&format!(
+                "\n+ {} more non-runnable workflow(s) hidden to keep chat responsive.",
+                non_runnable.len() - N8N_INVENTORY_NON_RUNNABLE_PREVIEW_LIMIT
+            ));
+        }
+        detail.push_str("\nUse Dashboard -> n8n to review, approve, restore, or archive drafts.");
+        sections.push(detail);
+    }
+
+    sections.push("To run one: Run `workflow_id`. KRIA will show candidates first; confirm with: Confirm workflow `workflow_id`.".to_string());
+    sections.join("\n\n")
+}
 
 pub fn register_into_tool_registry(
     registry: &ToolRegistry,

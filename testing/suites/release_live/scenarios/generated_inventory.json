@@ -1,0 +1,65 @@
+{
+  "scenarios": [
+    {
+      "id": "release_live.scripts_build_release",
+      "title": "Release/live script: testing/suites/release_live/commands/build-release.sh",
+      "driver": "backend_command",
+      "command": "./testing/suites/release_live/commands/build-release.sh",
+      "tags": [
+        "destructive",
+        "release",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 1800,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "release_live.scripts_run_live_stress",
+      "title": "Release/live script: testing/suites/release_live/commands/run_live_stress.sh",
+      "driver": "backend_command",
+      "command": "./testing/suites/release_live/commands/run_live_stress.sh",
+      "tags": [
+        "live",
+        "release",
+        "regression",
+        "slow",
+        "stress"
+      ],
+      "required_services": [],
+      "timeout_seconds": 1800,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "release_live.scripts_run_release_test_gate",
+      "title": "Release/live script: testing/suites/release_live/commands/run_release_test_gate.sh",
+      "driver": "backend_command",
+      "command": "./testing/suites/release_live/commands/run_release_test_gate.sh",
+      "tags": [
+        "destructive",
+        "release",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 1800,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "release_live.scripts_setup_comfyui",
+      "title": "Release/live script: testing/suites/release_live/commands/setup_comfyui.sh",
+      "driver": "backend_command",
+      "command": "./testing/suites/release_live/commands/setup_comfyui.sh",
+      "tags": [
+        "destructive",
+        "release",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 1800,
+      "report_artifact_globs": []
+    }
+  ]
+}

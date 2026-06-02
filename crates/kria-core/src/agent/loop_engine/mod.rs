@@ -112,61 +112,12 @@ fn deterministic_notice_message(params: &serde_json::Value) -> String {
 }
 
 fn is_n8n_workflow_list_query(user_text: &str) -> bool {
-    let lower = user_text.to_ascii_lowercase();
-    let lower = lower.trim();
-    if lower.starts_with("run ") || lower.contains("confirm workflow") {
-        return false;
-    }
-
-    let mentions_workflows =
-        lower.contains("workflow") || lower.contains("workflows") || lower.contains("automat");
-    let asks_for_list = lower.contains("list")
-        || lower.contains("show")
-        || lower.contains("available")
-        || lower.contains("what")
-        || lower.contains("which")
-        || lower.contains("have")
-        || lower.contains("registered");
-    let owned_or_n8n_context = lower.contains("n8n")
-        || lower.contains("my")
-        || lower.contains("i have")
-        || lower.contains("all")
-        || lower.contains("registered")
-        || lower.contains("available");
-
-    mentions_workflows && asks_for_list && owned_or_n8n_context
+    crate::n8n::is_n8n_workflow_inventory_query(user_text)
 }
 
 fn n8n_workflow_list_notice() -> String {
     let workflows = load_n8n_workflows_for_dispatch();
-    if workflows.is_empty() {
-        return "No n8n workflows are registered in KRIA. Sync n8n profiles, save a draft profile, then approve it from the workflow registry.".to_string();
-    }
-
-    let total = workflows.len();
-    let executable = workflows
-        .iter()
-        .filter(|workflow| workflow.is_approved_for_execution())
-        .count();
-    let list = workflows
-        .iter()
-        .map(|workflow| {
-            let execution_state = if workflow.is_approved_for_execution() {
-                "executable"
-            } else {
-                "not executable"
-            };
-            format!(
-                "• {} ({}) — status={:?}, {}",
-                workflow.display_name, workflow.workflow_id, workflow.status, execution_state
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    format!(
-        "Available n8n workflows ({executable}/{total} executable):\n\n{list}\n\nTo start a workflow, say: Run <workflow_id>. KRIA will show candidates first; confirm with: Confirm workflow <workflow_id>."
-    )
+    crate::n8n::n8n_workflow_inventory_notice(&workflows)
 }
 
 fn n8n_match_summary(matches: &[crate::n8n::N8nWorkflowMatchCandidate]) -> String {
@@ -186,31 +137,53 @@ fn n8n_match_summary(matches: &[crate::n8n::N8nWorkflowMatchCandidate]) -> Strin
         .join(", ")
 }
 
-fn n8n_suggestion_notice(response: &crate::n8n::WorkflowSuggestionResponse) -> String {
-    if response.candidates.is_empty() {
-        return response.message.clone();
+fn n8n_route_notice(route: &crate::n8n::N8nChatRouteDecision) -> String {
+    match route.status {
+        crate::n8n::N8nChatRouteStatus::ListWorkflows => {
+            return n8n_workflow_list_notice();
+        }
+        crate::n8n::N8nChatRouteStatus::UseOtherTool => {
+            return route.message.clone();
+        }
+        _ => {}
     }
 
-    let candidates = response
+    if route.candidates.is_empty() {
+        return route.message.clone();
+    }
+
+    let candidates = route
         .candidates
         .iter()
         .enumerate()
         .map(|(index, candidate)| {
-            format!(
-                "{}. {} ({}) — {} confidence",
+            let mut line = format!(
+                "{}. {} ({}) — {} confidence, risk {}",
                 index + 1,
                 candidate.display_name,
                 candidate.workflow_id,
-                candidate.confidence_label
-            )
+                candidate.confidence_label,
+                candidate.risk_tier
+            );
+            if !candidate.missing_inputs.is_empty() {
+                line.push_str(&format!(
+                    ", missing input: {}",
+                    candidate.missing_inputs.join(", ")
+                ));
+            }
+            if !candidate.blockers.is_empty() {
+                line.push_str(&format!(", blocked: {}", candidate.blockers.join("; ")));
+            }
+            line
         })
         .collect::<Vec<_>>()
         .join("; ");
-    let hint = response
-        .confirmation_hint
-        .as_deref()
-        .unwrap_or("Confirm with: Confirm workflow <workflow_id>");
-    format!("{} {candidates}. {hint}.", response.message)
+    let actions = if route.next_actions.is_empty() {
+        "Confirm with: Confirm workflow <workflow_id>".to_string()
+    } else {
+        format!("Next: {}", route.next_actions.join(" | "))
+    };
+    format!("{} {candidates}. {actions}.", route.message)
 }
 
 fn is_direct_manual_n8n_profile(execution_profile: &TurnExecutionProfile) -> bool {
@@ -317,9 +290,17 @@ fn try_manual_n8n_direct_dispatch(
         ));
     }
 
-    let prompt_context = previous_user_text
-        .filter(|text| !text.trim().is_empty())
-        .unwrap_or(user_text);
+    let prompt_context = if crate::n8n::WorkflowConfirmationFlow::parse_confirmation_reference(
+        user_text,
+    )
+    .is_some()
+    {
+        previous_user_text
+            .filter(|text| !text.trim().is_empty())
+            .unwrap_or(user_text)
+    } else {
+        user_text
+    };
     let input_payload =
         crate::n8n::build_n8n_suggested_input_payload(workflow, prompt_context, true);
 
@@ -524,18 +505,38 @@ fn try_deterministic_dispatch_with_context(
 
     if let Some(reference) = crate::n8n::parse_n8n_workflow_run_reference(user_text) {
         let workflows = load_n8n_workflows_for_dispatch();
-        let engine = crate::n8n::WorkflowRankingEngine::new(workflows);
-        let response = engine.suggest_for_reference(user_text, &reference);
-        return deterministic_notice_tool(n8n_suggestion_notice(&response));
+        let route = crate::n8n::WorkflowRankingEngine::new(workflows).route_chat(
+            crate::n8n::N8nChatRouteRequest {
+                prompt: user_text.to_string(),
+                previous_user_prompt: previous_user_text.map(str::to_string),
+                manual_n8n_mode: false,
+                safe_auto_run_enabled: false,
+                workflows: Vec::new(),
+            },
+        );
+        if matches!(route.status, crate::n8n::N8nChatRouteStatus::UseOtherTool) {
+            return None;
+        }
+        let _ = reference;
+        return deterministic_notice_tool(n8n_route_notice(&route));
     }
 
-    {
+    if !crate::n8n::prompt_looks_like_non_n8n_tool_intent(user_text) {
         let workflows = load_n8n_workflows_for_dispatch();
         if !workflows.is_empty() {
-            let engine = crate::n8n::WorkflowRankingEngine::new(workflows);
-            let response = engine.suggest(user_text);
-            if !response.candidates.is_empty() {
-                return deterministic_notice_tool(n8n_suggestion_notice(&response));
+            let route = crate::n8n::WorkflowRankingEngine::new(workflows).route_chat(
+                crate::n8n::N8nChatRouteRequest {
+                    prompt: user_text.to_string(),
+                    previous_user_prompt: previous_user_text.map(str::to_string),
+                    manual_n8n_mode: false,
+                    safe_auto_run_enabled: false,
+                    workflows: Vec::new(),
+                },
+            );
+            if !route.candidates.is_empty()
+                && !matches!(route.status, crate::n8n::N8nChatRouteStatus::UseOtherTool)
+            {
+                return deterministic_notice_tool(n8n_route_notice(&route));
             }
         }
     }

@@ -1,0 +1,23 @@
+{
+  "schema_version": "kria.testing.scenarios.v1",
+  "scenarios": [
+    {
+      "id": "n8n.production_audit",
+      "title": "n8n production audit wrapper",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_production_audit.sh",
+      "tags": [
+        "safe",
+        "n8n",
+        "regression",
+        "audit",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 1800,
+      "report_artifact_globs": [
+        "testing/eval_reports/n8n_production_audit_*.txt"
+      ]
+    }
+  ]
+}

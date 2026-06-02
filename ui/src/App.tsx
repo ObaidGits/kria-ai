@@ -83,7 +83,7 @@ const App: Component = () => {
   const [editingTarget, setEditingTarget] = createSignal<any>(null);
   const [deletingTargetIds, setDeletingTargetIds] = createSignal<Set<string>>(new Set());
   const [showTestDashboard, setShowTestDashboard] = createSignal(false);
-  const [showAnalytics, setShowAnalytics] = createSignal(true);
+  const [showAnalytics, setShowAnalytics] = createSignal(false);
   const [resetReason, setResetReason] = createSignal("");
   const [hardResetConfirmation, setHardResetConfirmation] = createSignal("");
   const [lastResetToastEventId, setLastResetToastEventId] = createSignal<string | null>(null);
@@ -404,12 +404,18 @@ const App: Component = () => {
 
   const navigate = (next: AppRoute) => {
     setRoute(next);
-    if (typeof window !== "undefined") {
-      const targetHash = hashForRoute(next);
-      if (window.location.hash !== targetHash) {
-        window.location.hash = targetHash;
-      }
+    if (typeof window === "undefined") return;
+
+    const targetHash = hashForRoute(next);
+    if (window.location.hash !== targetHash) {
+      window.history.pushState(null, "", targetHash);
     }
+
+    queueMicrotask(() => {
+      if (window.location.hash === targetHash && route() !== next) {
+        setRoute(next);
+      }
+    });
   };
 
   const triggerSoftReset = async () => {
@@ -445,7 +451,8 @@ const App: Component = () => {
     // Ctrl+N → new session
     if (e.ctrlKey && e.key === "n") {
       e.preventDefault();
-      appStore.createSession();
+      navigate("home");
+      void appStore.createSession();
     }
     // Ctrl+Shift+V → toggle voice
     if (e.ctrlKey && e.shiftKey && e.key === "V") {
@@ -470,6 +477,7 @@ const App: Component = () => {
 
   onMount(() => {
     window.addEventListener("hashchange", handleHashRouteChange);
+    window.addEventListener("popstate", handleHashRouteChange);
     document.addEventListener("keydown", handleGlobalKeydown);
 
     // Retry session hydration once the app is mounted and Tauri runtime is ready.
@@ -543,6 +551,7 @@ const App: Component = () => {
     document.removeEventListener("keydown", handleGlobalKeydown);
     if (typeof window !== "undefined") {
       window.removeEventListener("hashchange", handleHashRouteChange);
+      window.removeEventListener("popstate", handleHashRouteChange);
     }
   });
 
@@ -565,7 +574,7 @@ const App: Component = () => {
 
       <Show when={!wizardLoading() && !showWizard()}>
       <div class="app-layout">
-        <SessionSidebar />
+        <SessionSidebar onSessionActivated={() => navigate("home")} />
         <main class="main-content modern-main-shell">
           <div class="modern-topbar">
             <div class="modern-topbar-left">
@@ -582,10 +591,10 @@ const App: Component = () => {
           </div>
 
           <div class="modern-nav">
-            <button class={`modern-nav-btn ${route() === "home" ? "active" : ""}`} onClick={() => navigate("home")}>Home</button>
-            <button class={`modern-nav-btn ${route() === "dashboard" ? "active" : ""}`} onClick={() => navigate("dashboard")}>Dashboard</button>
-            <button class={`modern-nav-btn ${route() === "vm-management" ? "active" : ""}`} onClick={() => navigate("vm-management")}>VM Management</button>
-            <button class={`modern-nav-btn ${route() === "settings" ? "active" : ""}`} onClick={() => { navigate("settings"); setShowSettings(true); }}>Settings</button>
+            <button type="button" class={`modern-nav-btn ${route() === "home" ? "active" : ""}`} onClick={() => navigate("home")}>Home</button>
+            <button type="button" class={`modern-nav-btn ${route() === "dashboard" ? "active" : ""}`} onClick={() => navigate("dashboard")}>Dashboard</button>
+            <button type="button" class={`modern-nav-btn ${route() === "vm-management" ? "active" : ""}`} onClick={() => navigate("vm-management")}>VM Management</button>
+            <button type="button" class={`modern-nav-btn ${route() === "settings" ? "active" : ""}`} onClick={() => { navigate("settings"); setShowSettings(true); }}>Settings</button>
           </div>
 
           <Show when={colabDispatchWarning()}>
@@ -607,22 +616,22 @@ const App: Component = () => {
                 <span class="ironclad-strip-subtitle">Non-blocking + trust-first controls</span>
               </div>
               <div class="ironclad-strip-actions">
-                <button class="btn-secondary" onClick={() => { void appStore.loadIroncladStatus(); void appStore.loadIroncladForensics(); }}>
+                <button type="button" class="btn-secondary" onClick={() => { void appStore.loadIroncladStatus(); void appStore.loadIroncladForensics(); }}>
                   Refresh
                 </button>
-                <button class="btn-secondary" onClick={toggleControlPanelExpanded}>
+                <button type="button" class="btn-secondary" onClick={toggleControlPanelExpanded}>
                   {controlPanelExpanded() ? "Collapse" : "Expand"}
                 </button>
-                <button class="btn-secondary" onClick={() => setShowTestDashboard((v) => !v)}>
+                <button type="button" class="btn-secondary" onClick={() => setShowTestDashboard((v) => !v)}>
                   {showTestDashboard() ? "Hide Tests" : "Tests"}
                 </button>
                 <Show when={dashboardView() === "overview"}>
-                  <button class="btn-secondary" onClick={() => setShowAnalytics((v) => !v)}>
+                  <button type="button" class="btn-secondary" onClick={() => setShowAnalytics((v) => !v)}>
                     Analytics {showAnalytics() ? "▾" : "▸"}
                   </button>
                 </Show>
                 <Show when={controlPanelExpanded()}>
-                  <button class="btn-secondary" onClick={() => setDashboardView("forensics")}>
+                  <button type="button" class="btn-secondary" onClick={() => setDashboardView("forensics")}>
                     Forensics
                   </button>
                 </Show>
@@ -630,10 +639,10 @@ const App: Component = () => {
             </div>
 
             <div class="modern-dashboard-tabs">
-              <button class={`modern-nav-btn ${dashboardView() === "overview" ? "active" : ""}`} onClick={() => setDashboardView("overview")}>Overview</button>
-              <button class={`modern-nav-btn ${dashboardView() === "operations" ? "active" : ""}`} onClick={() => setDashboardView("operations")}>Operations</button>
-              <button class={`modern-nav-btn ${dashboardView() === "n8n" ? "active" : ""}`} onClick={() => setDashboardView("n8n")}>n8n</button>
-              <button class={`modern-nav-btn ${dashboardView() === "forensics" ? "active" : ""}`} onClick={() => setDashboardView("forensics")}>Forensics</button>
+              <button type="button" class={`modern-nav-btn ${dashboardView() === "overview" ? "active" : ""}`} onClick={() => setDashboardView("overview")}>Overview</button>
+              <button type="button" class={`modern-nav-btn ${dashboardView() === "operations" ? "active" : ""}`} onClick={() => setDashboardView("operations")}>Operations</button>
+              <button type="button" class={`modern-nav-btn ${dashboardView() === "n8n" ? "active" : ""}`} onClick={() => setDashboardView("n8n")}>n8n</button>
+              <button type="button" class={`modern-nav-btn ${dashboardView() === "forensics" ? "active" : ""}`} onClick={() => setDashboardView("forensics")}>Forensics</button>
             </div>
 
             <Show when={!controlPanelExpanded() && dashboardView() === "overview"}>

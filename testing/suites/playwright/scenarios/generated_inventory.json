@@ -1,0 +1,138 @@
+{
+  "scenarios": [
+    {
+      "id": "playwright.tests_chat_e2e_spec",
+      "title": "Playwright spec: testing/suites/playwright/tests/chat.e2e.spec.ts",
+      "driver": "backend_command",
+      "command": "cd testing/suites/playwright && npx playwright test tests/chat.e2e.spec.ts",
+      "tags": [
+        "live",
+        "playwright",
+        "ui",
+        "regression",
+        "slow"
+      ],
+      "required_services": [
+        "kria_api",
+        "browser"
+      ],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "playwright.tests_n8n_chat_prompt_tauri_mock_e2e_spec",
+      "title": "Playwright spec: testing/suites/playwright/tests/n8n-chat-prompt.tauri-mock.e2e.spec.ts",
+      "driver": "backend_command",
+      "command": "cd testing/suites/playwright && npx playwright test tests/n8n-chat-prompt.tauri-mock.e2e.spec.ts",
+      "tags": [
+        "live",
+        "playwright",
+        "ui",
+        "regression",
+        "slow",
+        "desktop_chat",
+        "tauri_mock"
+      ],
+      "required_services": [
+        "browser"
+      ],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "playwright.tests_n8n_chat_prompt_tauri_live_e2e_spec",
+      "title": "Native Tauri driver spec: n8n Desktop live prompt E2E",
+      "driver": "backend_command",
+      "command": "cd testing/suites/playwright && npm run test:tauri-live",
+      "tags": [
+        "live",
+        "playwright",
+        "ui",
+        "regression",
+        "slow",
+        "desktop_chat",
+        "tauri_live"
+      ],
+      "required_services": [
+        "browser",
+        "n8n"
+      ],
+      "timeout_seconds": 1200,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "playwright.tests_n8n_workflow_hub_tauri_mock_e2e_spec",
+      "title": "Playwright spec: testing/suites/playwright/tests/n8n-workflow-hub.tauri-mock.e2e.spec.ts",
+      "driver": "backend_command",
+      "command": "cd testing/suites/playwright && npx playwright test tests/n8n-workflow-hub.tauri-mock.e2e.spec.ts",
+      "tags": [
+        "live",
+        "playwright",
+        "ui",
+        "regression",
+        "slow"
+      ],
+      "required_services": [
+        "kria_api",
+        "browser"
+      ],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "playwright.tests_server_api_spec",
+      "title": "Playwright spec: testing/suites/playwright/tests/server.api.spec.ts",
+      "driver": "backend_command",
+      "command": "cd testing/suites/playwright && npx playwright test tests/server.api.spec.ts",
+      "tags": [
+        "live",
+        "playwright",
+        "ui",
+        "regression",
+        "slow"
+      ],
+      "required_services": [
+        "kria_api"
+      ],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "playwright.tests_tauri_mock_e2e_spec",
+      "title": "Playwright spec: testing/suites/playwright/tests/tauri-mock.e2e.spec.ts",
+      "driver": "backend_command",
+      "command": "cd testing/suites/playwright && npx playwright test tests/tauri-mock.e2e.spec.ts",
+      "tags": [
+        "live",
+        "playwright",
+        "ui",
+        "regression",
+        "slow"
+      ],
+      "required_services": [
+        "kria_api",
+        "browser"
+      ],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "playwright.tests_websocket_api_spec",
+      "title": "Playwright spec: testing/suites/playwright/tests/websocket.api.spec.ts",
+      "driver": "backend_command",
+      "command": "cd testing/suites/playwright && npx playwright test tests/websocket.api.spec.ts",
+      "tags": [
+        "live",
+        "playwright",
+        "ui",
+        "regression",
+        "slow"
+      ],
+      "required_services": [
+        "kria_api"
+      ],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    }
+  ]
+}

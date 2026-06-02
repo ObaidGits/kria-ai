@@ -1,0 +1,51 @@
+{
+  "scenarios": [
+    {
+      "id": "ui.typecheck",
+      "title": "UI TypeScript typecheck",
+      "driver": "backend_command",
+      "command": "cd ui && npm run check",
+      "tags": [
+        "safe",
+        "ci",
+        "ui",
+        "typecheck",
+        "regression"
+      ],
+      "required_services": [],
+      "timeout_seconds": 300,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "ui.vitest_all",
+      "title": "UI Vitest suite",
+      "driver": "backend_command",
+      "command": "cd ui && npm run test:run",
+      "tags": [
+        "safe",
+        "ui",
+        "vitest",
+        "regression"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "ui.build",
+      "title": "UI production build",
+      "driver": "backend_command",
+      "command": "cd ui && npm run build",
+      "tags": [
+        "safe",
+        "ui",
+        "build",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    }
+  ]
+}

@@ -1,0 +1,126 @@
+{
+  "schema_version": "kria.testing.scenarios.v1",
+  "scenarios": [
+    {
+      "id": "n8n.prompt_e2e.native.lifecycle.drift_blocks_run",
+      "title": "Native Chat API E2E: lifecycle drift blocks confirmed run",
+      "driver": "chat_api",
+      "tags": ["live", "slow", "n8n", "api", "prompt_e2e", "regression", "lifecycle"],
+      "required_services": ["kria_api", "n8n"],
+      "timeout_seconds": 420,
+      "inputs": {
+        "steps": [
+          {
+            "prompt": "Create an n8n workflow named KRIA E2E Test Lifecycle Drift ${run_id} that receives a movie title and fetches movie details using HTTP",
+            "expected_status_any": ["draft_created", "validated"],
+            "expected_n8n_action": "create_authoring_draft",
+            "fail_on_generic_create_refusal": true,
+            "extract": {
+              "workflow_id": ["n8n.result.workflow.workflow_id", "n8n.result.workflow_id"],
+              "n8n_workflow_id": ["n8n.result.workflow.n8n_workflow_id", "n8n.result.n8n_workflow_id"]
+            },
+            "n8n_verifications": [
+              { "kind": "workflow_inactive", "var": "n8n_workflow_id" }
+            ]
+          },
+          {
+            "prompt": "Approve draft ${workflow_id}",
+            "expected_status_any": ["approved"],
+            "expected_n8n_action": "approve_authoring_draft",
+            "n8n_verifications": [
+              { "kind": "workflow_active", "var": "n8n_workflow_id" }
+            ]
+          },
+          {
+            "n8n_actions": [
+              { "kind": "store_workflow_hash", "var": "n8n_workflow_id", "output_var": "original_hash" },
+              { "kind": "mutate_workflow_name", "var": "n8n_workflow_id", "suffix": " Drifted ${run_id}", "hash_var": "drifted_hash" }
+            ],
+            "prompt": "Confirm workflow ${workflow_id}",
+            "expected_http_status_any": [502],
+            "expected_reply_contains_any": ["changed", "review", "drift", "refresh"],
+            "n8n_verifications": [
+              { "kind": "workflow_still_exists", "var": "n8n_workflow_id" }
+            ]
+          }
+        ],
+        "cleanup": {
+          "cleanup_kria_draft_workflow_ids": true,
+          "workflow_id_vars": ["workflow_id"]
+        }
+      }
+    },
+    {
+      "id": "n8n.prompt_e2e.native.lifecycle.missing_copy_recovery",
+      "title": "Native Chat API E2E: missing generated copy shows recovery",
+      "driver": "chat_api",
+      "tags": ["live", "slow", "n8n", "api", "prompt_e2e", "regression", "lifecycle", "cleanup"],
+      "required_services": ["kria_api", "n8n"],
+      "timeout_seconds": 420,
+      "inputs": {
+        "steps": [
+          {
+            "prompt": "Create an n8n workflow named KRIA E2E Test Missing Copy Source ${run_id} that receives a movie title and fetches movie details using HTTP",
+            "expected_status_any": ["draft_created", "validated"],
+            "expected_n8n_action": "create_authoring_draft",
+            "extract": {
+              "workflow_id": ["n8n.result.workflow.workflow_id", "n8n.result.workflow_id"],
+              "n8n_workflow_id": ["n8n.result.workflow.n8n_workflow_id", "n8n.result.n8n_workflow_id"]
+            }
+          },
+          {
+            "prompt": "Update ${workflow_id} so it accepts title from prompt",
+            "expected_status_any": ["updated_copy_created", "draft_created"],
+            "expected_n8n_action": "create_updated_copy",
+            "extract": {
+              "copy_workflow_id": ["n8n.result.workflow.workflow_id", "n8n.result.workflow_id"],
+              "copy_n8n_workflow_id": ["n8n.result.workflow.n8n_workflow_id", "n8n.result.n8n_workflow_id"]
+            },
+            "n8n_verifications": [
+              { "kind": "workflow_inactive", "var": "copy_n8n_workflow_id" }
+            ]
+          },
+          {
+            "n8n_actions": [
+              { "kind": "delete_disposable_workflow", "var": "copy_n8n_workflow_id" }
+            ],
+            "prompt": "Run ${copy_workflow_id}",
+            "forbidden_status_any": ["accepted"],
+            "expected_reply_contains_any": ["missing", "cleanup", "review", "not found", "workflow"],
+            "n8n_verifications": [
+              { "kind": "workflow_missing", "var": "copy_n8n_workflow_id" },
+              { "kind": "workflow_still_exists", "var": "n8n_workflow_id" }
+            ]
+          }
+        ],
+        "cleanup": {
+          "cleanup_kria_draft_workflow_ids": true,
+          "workflow_id_vars": ["workflow_id"],
+          "workflow_id_vars_no_n8n_delete": ["copy_workflow_id"]
+        }
+      }
+    },
+    {
+      "id": "n8n.prompt_e2e.native.cleanup.cleanup_only",
+      "title": "Native Chat API E2E: cleanup current run-prefix leftovers",
+      "driver": "chat_api",
+      "tags": ["live", "slow", "n8n", "api", "prompt_e2e", "regression", "cleanup"],
+      "required_services": ["kria_api", "n8n"],
+      "timeout_seconds": 180,
+      "inputs": {
+        "steps": [
+          {
+            "n8n_actions": [
+              { "kind": "delete_disposable_workflows_by_prefix", "prefix": "${run_prefix}" }
+            ],
+            "prompt": "List my n8n workflows",
+            "expected_reply_contains_any": ["workflow", "n8n", "No n8n workflows"],
+            "n8n_verifications": [
+              { "kind": "no_workflows_with_run_prefix" }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

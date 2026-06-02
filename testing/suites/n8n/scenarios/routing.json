@@ -1,0 +1,57 @@
+{
+  "schema_version": "kria.testing.scenarios.v1",
+  "scenarios": [
+    {
+      "id": "n8n.routing_baseline",
+      "title": "n8n routing baseline wrapper",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_routing_baseline.sh",
+      "tags": [
+        "safe",
+        "n8n",
+        "regression",
+        "routing"
+      ],
+      "required_services": [],
+      "timeout_seconds": 180,
+      "report_artifact_globs": [
+        "testing/eval_reports/n8n_routing_baseline_*.txt"
+      ]
+    },
+    {
+      "id": "n8n.chat_routing_eval",
+      "title": "n8n chat routing eval wrapper",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_chat_routing_eval.sh",
+      "tags": [
+        "safe",
+        "ci",
+        "n8n",
+        "regression",
+        "routing"
+      ],
+      "required_services": [],
+      "timeout_seconds": 300,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "n8n.stage3_routing_eval",
+      "title": "n8n stage 3 routing eval wrapper",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_stage3_routing_eval.sh",
+      "tags": [
+        "safe",
+        "ci",
+        "n8n",
+        "regression",
+        "routing",
+        "legacy"
+      ],
+      "required_services": [],
+      "timeout_seconds": 300,
+      "report_artifact_globs": [
+        "testing/eval_reports/n8n_stage3_routing_eval_*.txt"
+      ]
+    }
+  ]
+}

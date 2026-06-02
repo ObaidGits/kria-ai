@@ -27,7 +27,7 @@ Workspace crates:
 
 Packaging surfaces:
 
-- `scripts/build-release.sh`: Linux/macOS Tauri release build.
+- `./testing/run.sh scenario release_live.scripts_build_release --include-destructive --include-slow`: Linux/macOS Tauri release build.
 - `scripts/build-release.ps1`: Windows release build.
 - `Dockerfile`, `Dockerfile.cpu`, `docker-compose.yml`, `docker-compose.cpu.yml`: container deployment profiles.
 - `Dockerfile.openclaw-substrate`: OpenClaw sandbox image.
@@ -122,7 +122,7 @@ Environment wins over user settings for provider/runtime selection.
 Primary desktop release command:
 
 ```bash
-scripts/build-release.sh
+./testing/run.sh scenario release_live.scripts_build_release --include-destructive --include-slow
 ```
 
 The script:
@@ -144,7 +144,7 @@ cargo build --release --workspace
 Release gate profile:
 
 ```bash
-scripts/run_release_test_gate.sh
+./testing/run.sh scenario release_live.scripts_run_release_test_gate --include-destructive --include-slow
 ```
 
 That script runs `cargo kria-test --mode RELEASE` with strict release-gate environment defaults.

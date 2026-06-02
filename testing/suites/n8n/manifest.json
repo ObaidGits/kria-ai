@@ -1,0 +1,23 @@
+{
+  "schema_version": "kria.testing.suite.v1",
+  "suite_id": "n8n",
+  "name": "KRIA n8n suite",
+  "scenario_files": [
+    "testing/suites/n8n/scenarios/safe_regression.json",
+    "testing/suites/n8n/scenarios/routing.json",
+    "testing/suites/n8n/scenarios/authoring.json",
+    "testing/suites/n8n/scenarios/legacy_phase_wrappers.json",
+    "testing/suites/n8n/scenarios/ui_smoke.json",
+    "testing/suites/n8n/scenarios/live_smoke.json",
+    "testing/suites/n8n/scenarios/prompt_e2e_native.json",
+    "testing/suites/n8n/scenarios/prompt_e2e_native_core.json",
+    "testing/suites/n8n/scenarios/prompt_e2e_native_lifecycle.json",
+    "testing/suites/n8n/scenarios/prompt_e2e_native_v5.json",
+    "testing/suites/n8n/scenarios/prompt_e2e_desktop_command.json",
+    "testing/suites/n8n/scenarios/prompt_e2e_desktop_chat.json",
+    "testing/suites/n8n/scenarios/prompt_e2e_desktop_live.json",
+    "testing/suites/n8n/scenarios/production_audit.json",
+    "testing/suites/n8n/scenarios/aggregators.json"
+  ],
+  "scenarios": []
+}

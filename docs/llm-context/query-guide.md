@@ -35,7 +35,7 @@ Use `rg` first. This repo is large enough that ad hoc browsing wastes time and m
 - Image: tool/command -> `ImageOrchestrator` -> local ComfyUI or cloud fallback -> WebSocket progress -> desktop event -> `ImageProgressChip`/message media.
 - Voice: UI/tray -> desktop command/event -> v1/v2 voice pipeline -> STT -> agent turn -> TTS/playback -> `VoiceOverlay`.
 - MCP: settings/config -> MCP server manager -> discovery -> tool bridge -> `ToolRegistry` -> agent loop.
-- Eval: `kria-eval` CLI -> suite runner -> sandbox/fixtures/judge/report -> `tests-logs` or `eval_reports` artifacts.
+- Eval: `kria-eval` CLI -> suite runner -> sandbox/fixtures/judge/report -> `tests-logs` or `testing/eval_reports` artifacts.
 
 ## Where Is This Feature Implemented?
 
@@ -58,7 +58,7 @@ Use `rg` first. This repo is large enough that ad hoc browsing wastes time and m
 | N8N/OpenClaw | `tools/n8n.rs`, `crates/kria-core/src/n8n/`, `crates/kria-core/src/openclaw/`, `commands/n8n.rs`, `commands/openclaw.rs`, `openclaw-substrate/`, integration docs |
 | Provisioning | `infra/provisioning.rs`, desktop provisioning commands, `SetupWizard.tsx`, `stores/provisioning.ts` |
 | Device/fleet/remote | `device_control.rs`, `kria-connection-control`, server inventory/routes, `DeviceMatrix.tsx`, remote infra modules |
-| Evaluation | `crates/kria-eval`, `tests/e2e`, `crates/kria-core/tests` |
+| Evaluation | `crates/kria-eval`, `testing/suites/playwright`, `crates/kria-core/tests` |
 
 ## Low-Token Workflow
 

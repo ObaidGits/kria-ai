@@ -10,6 +10,7 @@ interface Props {
   isSample?: boolean;
   onRun: (workflow: N8nWorkflow) => void;
   onRunNow?: (workflow: N8nWorkflow) => void;
+  onArchive?: (workflow: N8nWorkflow) => void;
 }
 
 function normalized(value?: string): string {
@@ -134,6 +135,17 @@ const N8nWorkflowCard: Component<Props> = (props) => {
         </span>
         <Show when={props.deadLetterCount > 0}>
           <span class="n8n-dead-letter-pill">Dead letters {props.deadLetterCount}</span>
+      </Show>
+        <Show when={props.onArchive}>
+          <button
+            type="button"
+            class="btn-secondary"
+            disabled={props.running}
+            title="Hide this workflow from KRIA without deleting it from n8n"
+            onClick={() => props.onArchive?.(props.workflow)}
+          >
+            Archive
+          </button>
         </Show>
       </div>
 

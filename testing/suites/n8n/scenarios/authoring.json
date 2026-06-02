@@ -1,0 +1,23 @@
+{
+  "schema_version": "kria.testing.scenarios.v1",
+  "scenarios": [
+    {
+      "id": "n8n.authoring_validation",
+      "title": "Existing n8n workflow authoring validation wrapper",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_workflow_authoring_validation.sh",
+      "tags": [
+        "safe",
+        "ci",
+        "n8n",
+        "regression",
+        "authoring"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": [
+        "testing/eval_reports/n8n_workflow_authoring_validation_*.txt"
+      ]
+    }
+  ]
+}

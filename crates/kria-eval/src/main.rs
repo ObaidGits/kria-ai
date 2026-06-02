@@ -165,7 +165,8 @@ async fn main() {
     println!("Mode: {:?}", mode);
     println!();
 
-    std::fs::create_dir_all("tests-logs/eval_reports").expect("Failed to create report directory");
+    std::fs::create_dir_all(concat!(env!("CARGO_MANIFEST_DIR"), "/../../eval_reports"))
+        .expect("Failed to create report directory");
 
     // ── GUI Automation Eval ───────────────────────────────────────────────
     if mode == EvalMode::Gui || mode == EvalMode::GuiFull || mode == EvalMode::All {
@@ -240,7 +241,10 @@ fn run_hitl_timeline_eval() {
     print_hitl_timeline_report(&report);
 
     let json = serde_json::to_string_pretty(&report).expect("Failed to serialize HITL report");
-    let report_path = "tests-logs/eval_reports/hitl_timeline_latest_run.json";
+    let report_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../eval_reports/hitl_timeline_latest_run.json"
+    );
     std::fs::write(report_path, json).expect("Failed to write HITL timeline report");
     println!("📝 HITL timeline report saved to: {}", report_path);
     println!();
@@ -259,7 +263,10 @@ fn run_llm_cognition_matrix_eval() {
 
     let json =
         serde_json::to_string_pretty(&report).expect("Failed to serialize LLM cognition report");
-    let report_path = "tests-logs/eval_reports/llm_cognition_latest_run.json";
+    let report_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../eval_reports/llm_cognition_latest_run.json"
+    );
     std::fs::write(report_path, json).expect("Failed to write LLM cognition report");
     println!("📝 LLM cognition matrix report saved to: {}", report_path);
     println!();
@@ -278,7 +285,10 @@ fn run_destructive_safety_eval() {
 
     let json = serde_json::to_string_pretty(&report)
         .expect("Failed to serialize destructive safety report");
-    let report_path = "tests-logs/eval_reports/destructive_safety_latest_run.json";
+    let report_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../eval_reports/destructive_safety_latest_run.json"
+    );
     std::fs::write(report_path, json).expect("Failed to write destructive safety report");
     println!("📝 Destructive safety report saved to: {}", report_path);
     println!();
@@ -290,9 +300,15 @@ fn run_observability_score_eval() {
 
     let json = serde_json::to_string_pretty(&report)
         .expect("Failed to serialize observability score report");
-    let json_path = "tests-logs/eval_reports/observability_latest_run.json";
+    let json_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../eval_reports/observability_latest_run.json"
+    );
     std::fs::write(json_path, json).expect("Failed to write observability score report");
-    let markdown_path = "tests-logs/eval_reports/observability_latest.md";
+    let markdown_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../eval_reports/observability_latest.md"
+    );
     write_observability_markdown(&report, markdown_path)
         .expect("Failed to write observability score markdown");
     println!("📝 Observability score report saved to: {}", json_path);
@@ -309,9 +325,15 @@ fn run_gui_readiness_eval() {
 
     let json =
         serde_json::to_string_pretty(&report).expect("Failed to serialize GUI readiness report");
-    let json_path = "tests-logs/eval_reports/gui_cognition_readiness_latest_run.json";
+    let json_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../eval_reports/gui_cognition_readiness_latest_run.json"
+    );
     std::fs::write(json_path, json).expect("Failed to write GUI readiness report");
-    let markdown_path = "tests-logs/eval_reports/gui_cognition_readiness_latest.md";
+    let markdown_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../eval_reports/gui_cognition_readiness_latest.md"
+    );
     write_readiness_markdown(&report, markdown_path)
         .expect("Failed to write GUI readiness markdown");
     println!("📝 GUI cognition readiness report saved to: {}", json_path);
@@ -335,9 +357,15 @@ fn run_workflow_fidelity_eval() {
 
     let json = serde_json::to_string_pretty(&report)
         .expect("Failed to serialize workflow fidelity report");
-    let json_path = "tests-logs/eval_reports/workflow_fidelity_latest_run.json";
+    let json_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../eval_reports/workflow_fidelity_latest_run.json"
+    );
     std::fs::write(json_path, json).expect("Failed to write workflow fidelity report");
-    let markdown_path = "tests-logs/eval_reports/workflow_fidelity_latest.md";
+    let markdown_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../eval_reports/workflow_fidelity_latest.md"
+    );
     write_workflow_fidelity_markdown(&report, markdown_path)
         .expect("Failed to write workflow fidelity markdown");
     println!("Workflow fidelity report saved to: {}", json_path);
@@ -358,9 +386,15 @@ fn run_production_gui_workflow_eval() {
 
     let json = serde_json::to_string_pretty(&report)
         .expect("Failed to serialize production GUI workflow report");
-    let json_path = "tests-logs/eval_reports/production_gui_workflows_latest_run.json";
+    let json_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../eval_reports/production_gui_workflows_latest_run.json"
+    );
     std::fs::write(json_path, json).expect("Failed to write production GUI workflow report");
-    let markdown_path = "tests-logs/eval_reports/production_gui_workflows_latest.md";
+    let markdown_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../eval_reports/production_gui_workflows_latest.md"
+    );
     write_production_gui_workflow_markdown(&report, markdown_path)
         .expect("Failed to write production GUI workflow markdown");
     println!("Production GUI workflow report saved to: {}", json_path);
@@ -384,9 +418,15 @@ fn run_gui_hardening_eval() {
 
     let json =
         serde_json::to_string_pretty(&report).expect("Failed to serialize GUI hardening report");
-    let json_path = "tests-logs/eval_reports/gui_hardening_latest_run.json";
+    let json_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../eval_reports/gui_hardening_latest_run.json"
+    );
     std::fs::write(json_path, json).expect("Failed to write GUI hardening report");
-    let markdown_path = "tests-logs/eval_reports/gui_hardening_latest.md";
+    let markdown_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../eval_reports/gui_hardening_latest.md"
+    );
     write_gui_hardening_markdown(&report, markdown_path)
         .expect("Failed to write GUI hardening markdown");
     println!("GUI hardening report saved to: {}", json_path);
@@ -407,9 +447,15 @@ fn run_expanded_gui_eval() {
 
     let json = serde_json::to_string_pretty(&report)
         .expect("Failed to serialize expanded GUI eval report");
-    let json_path = "tests-logs/eval_reports/expanded_gui_evals_latest_run.json";
+    let json_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../eval_reports/expanded_gui_evals_latest_run.json"
+    );
     std::fs::write(json_path, json).expect("Failed to write expanded GUI eval report");
-    let markdown_path = "tests-logs/eval_reports/expanded_gui_evals_latest.md";
+    let markdown_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../eval_reports/expanded_gui_evals_latest.md"
+    );
     write_expanded_gui_eval_markdown(&report, markdown_path)
         .expect("Failed to write expanded GUI eval markdown");
     println!("Expanded GUI eval report saved to: {}", json_path);
@@ -465,7 +511,10 @@ async fn run_gui_eval() {
     }
 
     let mut report = builder.build();
-    let failure_bundle_dir = "tests-logs/eval_reports/failure_bundles";
+    let failure_bundle_dir = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../eval_reports/failure_bundles"
+    );
     match write_failure_bundles(&report, failure_bundle_dir) {
         Ok(summary) => {
             report.failure_bundles = summary;
@@ -478,7 +527,10 @@ async fn run_gui_eval() {
 
     // Write JSON report
     let json = serde_json::to_string_pretty(&report).expect("Failed to serialize GUI report");
-    let report_path = "tests-logs/eval_reports/gui_latest_run.json";
+    let report_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../eval_reports/gui_latest_run.json"
+    );
     std::fs::write(report_path, json).expect("Failed to write GUI report");
     println!("📝 GUI eval report saved to: {}", report_path);
     println!();
@@ -532,7 +584,10 @@ async fn run_gui_live_eval() {
     }
 
     let mut report = builder.build();
-    let failure_bundle_dir = "tests-logs/eval_reports/live_failure_bundles";
+    let failure_bundle_dir = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../eval_reports/live_failure_bundles"
+    );
     match write_failure_bundles(&report, failure_bundle_dir) {
         Ok(summary) => report.failure_bundles = summary,
         Err(error) => eprintln!("Warning: failed to write live GUI failure bundles: {error}"),
@@ -540,7 +595,10 @@ async fn run_gui_live_eval() {
     print_report_summary(&report);
 
     let json = serde_json::to_string_pretty(&report).expect("Failed to serialize live GUI report");
-    let report_path = "tests-logs/eval_reports/gui_live_latest_run.json";
+    let report_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../eval_reports/gui_live_latest_run.json"
+    );
     std::fs::write(report_path, json).expect("Failed to write live GUI report");
     println!("Live GUI eval report saved to: {}", report_path);
     println!();
@@ -638,7 +696,10 @@ async fn run_general_eval() {
     );
 
     let json = serde_json::to_string_pretty(&report).expect("Failed to serialize report");
-    let report_path = "tests-logs/eval_reports/latest_run.json";
+    let report_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../eval_reports/latest_run.json"
+    );
     std::fs::write(report_path, json).expect("Failed to write report");
     println!("📝 General eval report saved to: {}", report_path);
 }

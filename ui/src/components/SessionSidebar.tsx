@@ -2,7 +2,11 @@ import { Component, For, Show, createSignal } from "solid-js";
 import { appStore } from "../stores/app";
 import logo from "../assets/kria-logo.png";
 
-const SessionSidebar: Component = () => {
+interface SessionSidebarProps {
+  onSessionActivated?: () => void;
+}
+
+const SessionSidebar: Component<SessionSidebarProps> = (props) => {
   const {
     sessions,
     isSessionStartupLoading,
@@ -27,6 +31,16 @@ const SessionSidebar: Component = () => {
   const cancelRename = () => {
     setEditingSessionId(null);
     setEditingTitle("");
+  };
+
+  const createChatSession = () => {
+    props.onSessionActivated?.();
+    void createSession();
+  };
+
+  const switchChatSession = (sessionId: string) => {
+    props.onSessionActivated?.();
+    void switchSession(sessionId);
   };
 
   const commitRename = async (sessionId: string) => {
@@ -56,7 +70,7 @@ const SessionSidebar: Component = () => {
             {collapsed() ? "▶" : "◀"}
           </button>
           <Show when={!collapsed()}>
-            <button class="new-session-btn" title="New session" onClick={() => createSession()}>+</button>
+            <button type="button" class="new-session-btn" title="New session" onClick={createChatSession}>+</button>
           </Show>
         </div>
       </div>
@@ -89,10 +103,10 @@ const SessionSidebar: Component = () => {
         </div>
 
         <div class="sidebar-quick-actions">
-          <button class="settings-btn primary" onClick={() => createSession()}>
+          <button type="button" class="settings-btn primary" onClick={createChatSession}>
             + New Chat
           </button>
-          <button class="settings-btn" onClick={() => setShowSettings(true)}>
+          <button type="button" class="settings-btn" onClick={() => setShowSettings(true)}>
             Configure Assistant
           </button>
         </div>
@@ -110,7 +124,7 @@ const SessionSidebar: Component = () => {
                 class={`session-item ${currentSession() === session.id ? "active" : ""} ${editingSessionId() === session.id ? "editing" : ""}`}
                 onClick={() => {
                   if (editingSessionId() === session.id) return;
-                  void switchSession(session.id);
+                  switchChatSession(session.id);
                 }}
                 onDblClick={() => startRename(session.id, session.title)}
               >

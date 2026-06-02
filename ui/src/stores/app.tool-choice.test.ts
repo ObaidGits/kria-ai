@@ -18,6 +18,8 @@ const { invokeMock, listenMock, listenerMap, setSessionHistory } = vi.hoisted(()
         return { session_id: args?.sessionId ?? "mock-session", messages: [] };
       case "get_session_history":
         return sessionHistory;
+      case "cancel_turn":
+        return {};
       case "get_settings":
         return {
           llm: {},
@@ -172,6 +174,7 @@ describe("appStore manual tool selection mode", () => {
   beforeEach(() => {
     invokeMock.mockClear();
     setSessionHistory([]);
+    emit("agent:done", {});
     appStore.dismissToolChoice();
     appStore.setManualToolMode("auto");
     window.localStorage.clear();
@@ -190,6 +193,147 @@ describe("appStore manual tool selection mode", () => {
       "send_manual_tool_message",
       expect.anything(),
     );
+  });
+
+  it("sends the Desktop chat turn after session activation is settled", async () => {
+    appStore.setManualToolMode("auto");
+
+    await appStore.sendMessage("Update workflow exact-id so it accepts title from prompt");
+    await flushAsync(8);
+
+    const switchSessionCall = invokeMock.mock.calls.findIndex(
+      ([command]) => command === "switch_session",
+    );
+    const sendMessageCall = invokeMock.mock.calls.findIndex(
+      ([command, args]) =>
+        command === "send_message" &&
+        args?.message === "Update workflow exact-id so it accepts title from prompt",
+    );
+
+    expect(sendMessageCall).toBeGreaterThanOrEqual(0);
+    if (switchSessionCall >= 0) {
+      expect(invokeMock.mock.invocationCallOrder[switchSessionCall]).toBeLessThan(
+        invokeMock.mock.invocationCallOrder[sendMessageCall],
+      );
+    }
+    expect(
+      appStore.messages().some(
+        (message) =>
+          message.role === "user" &&
+          message.content === "Update workflow exact-id so it accepts title from prompt",
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps a newly created chat visible when the backend session list is temporarily stale", async () => {
+    appStore.setCurrentEnvironment("assistant");
+
+    await appStore.createSession();
+    await flushAsync(8);
+
+    expect(appStore.currentSession()).toBe("mock-created-session");
+    expect(
+      appStore.sessions().some((session) => session.id === "mock-created-session"),
+    ).toBe(true);
+  });
+
+  it("keeps the second prompt and assistant response visible in the active chat", async () => {
+    appStore.setCurrentEnvironment("assistant");
+    await appStore.switchSession("second-prompt-session");
+    await flushAsync(4);
+
+    await appStore.sendMessage("first n8n prompt");
+    emit("agent:token", { text: "first response" });
+    emit("agent:done", {});
+
+    await appStore.sendMessage("second n8n prompt");
+    await flushAsync(4);
+
+    expect(
+      appStore.messages().some(
+        (message) => message.role === "user" && message.content === "second n8n prompt",
+      ),
+    ).toBe(true);
+
+    emit("agent:token", { text: "second response" });
+    emit("agent:done", {});
+
+    expect(
+      appStore.messages().some(
+        (message) => message.role === "assistant" && message.content.includes("second response"),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not submit or clear a new prompt while the assistant turn is still active", async () => {
+    emit("agent:thinking", { status: "processing" });
+
+    await appStore.sendMessage("second prompt while busy");
+    await flushAsync(4);
+
+    expect(invokeMock).not.toHaveBeenCalledWith("send_message", {
+      message: "second prompt while busy",
+    });
+    expect(
+      appStore.messages().some(
+        (message) => message.role === "user" && message.content === "second prompt while busy",
+      ),
+    ).toBe(false);
+
+    emit("agent:done", {});
+  });
+
+  it("keeps unsaved active-session messages when backend history is temporarily stale", async () => {
+    appStore.setCurrentEnvironment("assistant");
+    await appStore.switchSession("stale-history-session");
+    await flushAsync(4);
+
+    await appStore.sendMessage("first persisted prompt");
+    emit("agent:token", { text: "first persisted response" });
+    emit("agent:done", {});
+
+    await appStore.sendMessage("second local prompt");
+    await flushAsync(4);
+
+    setSessionHistory([
+      {
+        role: "user",
+        content: "first persisted prompt",
+        timestamp: "2026-06-02T10:00:00.000Z",
+      },
+      {
+        role: "assistant",
+        content: "first persisted response",
+        timestamp: "2026-06-02T10:00:01.000Z",
+      },
+    ]);
+
+    await appStore.switchSession("stale-history-session");
+    await flushAsync(4);
+
+    expect(
+      appStore.messages().some(
+        (message) => message.role === "user" && message.content === "second local prompt",
+      ),
+    ).toBe(true);
+
+    emit("agent:done", {});
+  });
+
+  it("new chat cancels an active turn and becomes visible immediately", async () => {
+    emit("agent:thinking", { status: "processing" });
+
+    await appStore.createSession();
+    await flushAsync(8);
+
+    expect(invokeMock).toHaveBeenCalledWith("cancel_turn", {
+      sessionId: expect.any(String),
+    });
+    expect(appStore.isThinking()).toBe(false);
+    expect(appStore.currentSession()).toBe("mock-created-session");
+    expect(
+      appStore.sessions().some((session) => session.id === "mock-created-session"),
+    ).toBe(true);
   });
 
   it("sends manual n8n mode through the manual profile command", async () => {

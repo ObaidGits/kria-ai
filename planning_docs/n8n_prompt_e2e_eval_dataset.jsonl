@@ -1,0 +1,11 @@
+{"id":"prompt_inventory","category":"inventory","prompt":"List of n8n workflows I have","expected":"workflow list from KRIA registry"}
+{"id":"prompt_no_hijack","category":"routing","prompt":"Search the web for Inception using browser","expected":"use_other_tool; do not hijack into n8n"}
+{"id":"prompt_create_http","category":"authoring","prompt":"Create an n8n workflow named KRIA Prompt Eval Movie Lookup that receives a movie title and returns show details","expected":"inactive n8n draft created and registered in KRIA"}
+{"id":"prompt_test_draft","category":"authoring","prompt":"Test draft <workflow_id> with title Inception","expected":"draft test starts through shared n8n execution adapter"}
+{"id":"prompt_approve_draft","category":"authoring","prompt":"Approve draft <workflow_id>","expected":"draft becomes approved and routable"}
+{"id":"prompt_run_approved","category":"execution","prompt":"Run <workflow_id> then Confirm workflow <workflow_id>","expected":"approved workflow invocation accepted by n8n"}
+{"id":"prompt_update_copy","category":"authoring_update","prompt":"Update <workflow_id> workflow so it keeps prompt input but makes an updated copy","expected":"updated inactive draft copy created; original unchanged"}
+{"id":"prompt_delete_guard","category":"crud_archive","prompt":"Delete workflow <workflow_id>","expected":"offers Archive / Danger Zone; does not permanently delete"}
+{"id":"prompt_archive","category":"crud_archive","prompt":"Archive workflow <workflow_id>","expected":"workflow archived in KRIA and excluded from normal routing"}
+{"id":"prompt_restore","category":"crud_archive","prompt":"Restore workflow <workflow_id>","expected":"workflow restored with lifecycle state"}
+{"id":"prompt_cleanup","category":"cleanup","prompt":"Cleanup draft <workflow_id> and delete n8n draft","expected":"verified KRIA-generated draft cleaned up"}

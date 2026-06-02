@@ -75,6 +75,154 @@ fn classify_response_verdict(text: &str) -> &'static str {
     "conversation"
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(super) struct DesktopChatCommandEvent {
+    pub name: String,
+    pub payload: serde_json::Value,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(super) struct DesktopChatCommandCapture {
+    pub status_code: u16,
+    pub status: String,
+    pub reply: String,
+    pub response: serde_json::Value,
+    pub events: Vec<DesktopChatCommandEvent>,
+}
+
+fn desktop_chat_event(
+    name: impl Into<String>,
+    payload: serde_json::Value,
+) -> DesktopChatCommandEvent {
+    DesktopChatCommandEvent {
+        name: name.into(),
+        payload,
+    }
+}
+
+fn desktop_chat_stage_event(
+    step: &str,
+    message: &str,
+    detail: Option<serde_json::Value>,
+) -> DesktopChatCommandEvent {
+    desktop_chat_event(
+        "agent:stage",
+        serde_json::json!({
+            "step": step,
+            "message": message,
+            "detail": detail.unwrap_or(serde_json::Value::Null),
+            "ts": Utc::now().to_rfc3339(),
+        }),
+    )
+}
+
+pub(super) async fn desktop_n8n_pre_fallback_command_capture(
+    message: String,
+    app_state: &AppState,
+    app: AppHandle,
+    session_id_override: Option<String>,
+    event_scope_prefix: &str,
+) -> Option<Result<DesktopChatCommandCapture, String>> {
+    let session_id = match session_id_override.filter(|value| !value.trim().is_empty()) {
+        Some(value) => value,
+        None => app_state.current_session_id.read().await.clone(),
+    };
+    let request = super::local_api::LocalApiChatRequest {
+        message: message.clone(),
+        session_id: Some(session_id.clone()),
+        source: Some("desktop_chat".into()),
+        chat_id: None,
+        from_user: Some("Desktop".into()),
+    };
+    let Some((status_code, Json(n8n_response))) =
+        super::local_api::local_api_n8n_pre_fallback_response_from_app_state(
+            app_state, app, request,
+        )
+        .await
+    else {
+        return None;
+    };
+
+    let reply = n8n_response
+        .get("reply")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            n8n_response
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+        })
+        .unwrap_or("n8n request handled by KRIA.")
+        .to_string();
+    let n8n_action = n8n_response
+        .pointer("/n8n/action")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+
+    let memory_writer: Arc<dyn MemoryManager> = app_state.memory_store.clone();
+    let _ = memory_writer.store_turn(&memory_turn_write(
+        session_id.clone(),
+        message,
+        String::new(),
+        None,
+        None,
+        None,
+    ));
+    let _ = memory_writer.store_turn(&memory_turn_write(
+        session_id,
+        String::new(),
+        reply.clone(),
+        Some("n8n".into()),
+        Some(
+            serde_json::json!({
+                "action": n8n_action.clone(),
+            })
+            .to_string(),
+        ),
+        None,
+    ));
+
+    let events = vec![
+        desktop_chat_event(
+            format!("{event_scope_prefix}:thinking"),
+            serde_json::json!({"status": "processing"}),
+        ),
+        desktop_chat_stage_event(
+            "n8n_prompt_handled",
+            "n8n prompt handled by deterministic desktop route",
+            Some(serde_json::json!({
+                "status": status_code.as_u16(),
+                "n8n_action": n8n_action,
+            })),
+        ),
+        desktop_chat_event(
+            format!("{event_scope_prefix}:token"),
+            serde_json::json!({ "text": reply.clone() }),
+        ),
+        desktop_chat_event(
+            format!("{event_scope_prefix}:tool_result"),
+            serde_json::json!({
+                "tool": "n8n",
+                "result": n8n_response.clone(),
+            }),
+        ),
+        desktop_chat_event(format!("{event_scope_prefix}:done"), serde_json::json!({})),
+    ];
+
+    let status = if status_code.is_success() {
+        "processing"
+    } else {
+        "error"
+    }
+    .to_string();
+    Some(Ok(DesktopChatCommandCapture {
+        status_code: status_code.as_u16(),
+        status,
+        reply,
+        response: n8n_response,
+        events,
+    }))
+}
+
 #[cfg(test)]
 mod chat_verdict_tests {
     use super::*;
@@ -142,6 +290,46 @@ async fn send_message_with_profile(
         .get()
         .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
 
+    let event_scope_prefix = match execution_profile.mode {
+        TurnExecutionMode::Assistant => "agent",
+        TurnExecutionMode::PromptLab => "prompt_lab",
+    };
+    let ev_thinking = format!("{event_scope_prefix}:thinking");
+    let ev_token = format!("{event_scope_prefix}:token");
+    let ev_done = format!("{event_scope_prefix}:done");
+    let ev_tool_call = format!("{event_scope_prefix}:tool_call");
+    let ev_tool_result = format!("{event_scope_prefix}:tool_result");
+    let ev_approval_required = format!("{event_scope_prefix}:approval_required");
+    let ev_approval_result = format!("{event_scope_prefix}:approval_result");
+    let ev_tool_choice_required = format!("{event_scope_prefix}:tool_choice_required");
+
+    if let Some(capture) = desktop_n8n_pre_fallback_command_capture(
+        message.clone(),
+        state,
+        app.clone(),
+        None,
+        event_scope_prefix,
+    )
+    .await
+    {
+        let capture = capture?;
+        for event in &capture.events {
+            let _ = app.emit(&event.name, event.payload.clone());
+        }
+        if capture.status_code < 400 {
+            return Ok(serde_json::json!({
+                "status": "processing",
+            }));
+        }
+        let error = capture
+            .response
+            .get("error")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(&capture.reply)
+            .to_string();
+        return Err(error);
+    }
+
     enforce_colab_dispatch_requirements(state, &app).await?;
 
     touch_orchestrator_activity(&state.orchestrator_last_activity_at).await;
@@ -165,15 +353,11 @@ async fn send_message_with_profile(
             Some(serde_json::json!({ "error": e.clone() })),
         );
         // Also emit error as token so it shows in the chat UI
-        let ev_prefix = match execution_profile.mode {
-            TurnExecutionMode::Assistant => "agent",
-            TurnExecutionMode::PromptLab => "prompt_lab",
-        };
         let _ = app.emit(
-            &format!("{ev_prefix}:token"),
+            &ev_token,
             serde_json::json!({ "text": &user_visible_error }),
         );
-        let _ = app.emit(&format!("{ev_prefix}:done"), serde_json::json!({}));
+        let _ = app.emit(&ev_done, serde_json::json!({}));
         return Err(e);
     }
 
@@ -194,19 +378,6 @@ async fn send_message_with_profile(
             "chars": message.chars().count(),
         })),
     );
-
-    let event_scope_prefix = match execution_profile.mode {
-        TurnExecutionMode::Assistant => "agent",
-        TurnExecutionMode::PromptLab => "prompt_lab",
-    };
-    let ev_thinking = format!("{event_scope_prefix}:thinking");
-    let ev_token = format!("{event_scope_prefix}:token");
-    let ev_done = format!("{event_scope_prefix}:done");
-    let ev_tool_call = format!("{event_scope_prefix}:tool_call");
-    let ev_tool_result = format!("{event_scope_prefix}:tool_result");
-    let ev_approval_required = format!("{event_scope_prefix}:approval_required");
-    let ev_approval_result = format!("{event_scope_prefix}:approval_result");
-    let ev_tool_choice_required = format!("{event_scope_prefix}:tool_choice_required");
 
     let _ = app.emit(&ev_thinking, serde_json::json!({"status": "processing"}));
 

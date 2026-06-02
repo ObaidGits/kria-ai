@@ -1,0 +1,40 @@
+{
+  "scenarios": [
+    {
+      "id": "eval_engine.gui_evals",
+      "title": "GUI cognition operational eval runner",
+      "driver": "backend_command",
+      "command": "./testing/suites/eval_engine/commands/run_gui_evals.sh",
+      "tags": [
+        "live",
+        "slow",
+        "eval_engine",
+        "ui",
+        "regression"
+      ],
+      "required_services": [
+        "kria_api"
+      ],
+      "timeout_seconds": 1800,
+      "report_artifact_globs": [
+        "testing/eval_reports/gui_eval_*.txt",
+        "testing/eval_reports/gui_eval_*.json"
+      ]
+    },
+    {
+      "id": "eval_engine.kria_eval_test",
+      "title": "kria-eval package tests registered from inventory",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-eval",
+      "tags": [
+        "safe",
+        "eval_engine",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 1200,
+      "report_artifact_globs": []
+    }
+  ]
+}

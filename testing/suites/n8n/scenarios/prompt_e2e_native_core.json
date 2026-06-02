@@ -1,0 +1,241 @@
+{
+  "schema_version": "kria.testing.scenarios.v1",
+  "scenarios": [
+    {
+      "id": "n8n.prompt_e2e.native.inventory.show_archived",
+      "title": "Native Chat API E2E: show archived n8n workflows",
+      "driver": "chat_api",
+      "tags": ["live", "slow", "n8n", "api", "prompt_e2e", "regression", "management"],
+      "required_services": ["kria_api", "n8n"],
+      "timeout_seconds": 240,
+      "inputs": {
+        "steps": [
+          {
+            "prompt": "Create an n8n workflow named KRIA E2E Test Archived Inventory ${run_id} that receives a movie title and fetches movie details using HTTP",
+            "expected_status_any": ["draft_created", "validated"],
+            "expected_n8n_action": "create_authoring_draft",
+            "fail_on_generic_create_refusal": true,
+            "extract": {
+              "workflow_id": ["n8n.result.workflow.workflow_id", "n8n.result.workflow_id"],
+              "n8n_workflow_id": ["n8n.result.workflow.n8n_workflow_id", "n8n.result.n8n_workflow_id"]
+            }
+          },
+          {
+            "prompt": "Archive workflow ${workflow_id}",
+            "expected_status_any": ["archived"],
+            "expected_n8n_action": "archive_workflow"
+          },
+          {
+            "prompt": "Show archived n8n workflows",
+            "expected_reply_contains_any": ["archived", "workflow", "${workflow_id}"],
+            "n8n_verifications": [
+              { "kind": "workflow_still_exists", "var": "n8n_workflow_id" }
+            ]
+          }
+        ],
+        "cleanup": {
+          "cleanup_kria_draft_workflow_ids": true,
+          "workflow_id_vars": ["workflow_id"]
+        }
+      }
+    },
+    {
+      "id": "n8n.prompt_e2e.native.inventory.runnable_workflows",
+      "title": "Native Chat API E2E: list runnable n8n workflows",
+      "driver": "chat_api",
+      "tags": ["live", "slow", "n8n", "api", "prompt_e2e", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "prompt": "What n8n workflows can I run?",
+        "expected_reply_contains_any": ["workflow", "n8n", "Run"],
+        "forbidden_reply_contains_any": ["I don't have access", "I cannot access"]
+      }
+    },
+    {
+      "id": "n8n.prompt_e2e.native.routing.github_no_hijack",
+      "title": "Native Chat API E2E: GitHub prompt is not hijacked by n8n",
+      "driver": "chat_api",
+      "tags": ["live", "slow", "n8n", "api", "prompt_e2e", "regression", "routing"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "prompt": "Tell me what a GitHub pull request is in one sentence",
+        "forbidden_json_paths": ["n8n.action"],
+        "forbidden_n8n_actions": ["create_authoring_draft", "create_updated_copy", "archive_workflow", "restore_workflow"]
+      }
+    },
+    {
+      "id": "n8n.prompt_e2e.native.create.schedule_draft",
+      "title": "Native Chat API E2E: create simple schedule draft or setup blocker",
+      "driver": "chat_api",
+      "tags": ["live", "slow", "n8n", "api", "prompt_e2e", "regression", "authoring"],
+      "required_services": ["kria_api", "n8n"],
+      "timeout_seconds": 180,
+      "inputs": {
+        "prompt": "Create an n8n scheduled workflow named KRIA E2E Test Schedule ${run_id} that runs every day and prepares a short status summary",
+        "expected_reply_contains_any": ["draft", "schedule", "review", "unsupported", "manual"],
+        "forbidden_status_any": ["accepted"],
+        "fail_on_generic_create_refusal": true,
+        "extract": {
+          "workflow_id": ["n8n.result.workflow.workflow_id", "n8n.result.workflow_id"],
+          "n8n_workflow_id": ["n8n.result.workflow.n8n_workflow_id", "n8n.result.n8n_workflow_id"]
+        },
+        "cleanup": {
+          "cleanup_kria_draft_workflow_ids": true,
+          "workflow_id_vars": ["workflow_id"]
+        }
+      }
+    },
+    {
+      "id": "n8n.prompt_e2e.native.create.slack_credential_blocker",
+      "title": "Native Chat API E2E: Slack workflow requires credential/review gate",
+      "driver": "chat_api",
+      "tags": ["live", "slow", "n8n", "api", "prompt_e2e", "regression", "authoring", "credentials", "hitl"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 180,
+      "inputs": {
+        "prompt": "Create an n8n workflow named KRIA E2E Test Slack Credential ${run_id} that posts a test update to Slack",
+        "expected_reply_contains_any": ["credential", "Slack", "review", "confirm", "draft"],
+        "forbidden_status_any": ["accepted"],
+        "extract": {
+          "workflow_id": ["n8n.result.workflow.workflow_id", "n8n.result.workflow_id"]
+        },
+        "cleanup": {
+          "cleanup_kria_draft_workflow_ids": true,
+          "workflow_id_vars": ["workflow_id"]
+        }
+      }
+    },
+    {
+      "id": "n8n.prompt_e2e.native.run.exact_approved",
+      "title": "Native Chat API E2E: approved disposable workflow can be run from chat",
+      "driver": "chat_api",
+      "tags": ["live", "slow", "n8n", "api", "prompt_e2e", "regression", "invocation"],
+      "required_services": ["kria_api", "n8n"],
+      "timeout_seconds": 420,
+      "inputs": {
+        "steps": [
+          {
+            "prompt": "Create an n8n workflow named KRIA E2E Test Runnable ${run_id} that receives a movie title and fetches movie details using HTTP",
+            "expected_status_any": ["draft_created", "validated"],
+            "expected_n8n_action": "create_authoring_draft",
+            "extract": {
+              "workflow_id": ["n8n.result.workflow.workflow_id", "n8n.result.workflow_id"],
+              "n8n_workflow_id": ["n8n.result.workflow.n8n_workflow_id", "n8n.result.n8n_workflow_id"]
+            }
+          },
+          {
+            "prompt": "Approve draft ${workflow_id}",
+            "expected_status_any": ["approved"],
+            "expected_n8n_action": "approve_authoring_draft",
+            "n8n_verifications": [
+              { "kind": "workflow_active", "var": "n8n_workflow_id" }
+            ]
+          },
+          {
+            "prompt": "Run ${workflow_id} with title Inception",
+            "expected_status_any": ["ready_to_run", "needs_confirmation", "suggest_workflow"],
+            "expected_reply_contains_any": ["Confirm", "workflow", "${workflow_id}"]
+          },
+          {
+            "prompt": "Confirm workflow ${workflow_id}",
+            "expected_status_any": ["accepted"],
+            "expected_reply_contains_any": ["started", "tracking", "accepted"],
+            "forbidden_reply_contains_any": ["changed", "review before running", "refresh and review"],
+            "n8n_verifications": [
+              { "kind": "workflow_still_exists", "var": "n8n_workflow_id" }
+            ]
+          }
+        ],
+        "cleanup": {
+          "cleanup_kria_draft_workflow_ids": true,
+          "workflow_id_vars": ["workflow_id"]
+        }
+      }
+    },
+    {
+      "id": "n8n.prompt_e2e.native.run.draft_blocked",
+      "title": "Native Chat API E2E: draft workflow is not runnable",
+      "driver": "chat_api",
+      "tags": ["live", "slow", "n8n", "api", "prompt_e2e", "regression", "invocation"],
+      "required_services": ["kria_api", "n8n"],
+      "timeout_seconds": 240,
+      "inputs": {
+        "steps": [
+          {
+            "prompt": "Create an n8n workflow named KRIA E2E Test Draft Blocked ${run_id} that receives a movie title and fetches movie details using HTTP",
+            "expected_status_any": ["draft_created", "validated"],
+            "expected_n8n_action": "create_authoring_draft",
+            "extract": {
+              "workflow_id": ["n8n.result.workflow.workflow_id", "n8n.result.workflow_id"],
+              "n8n_workflow_id": ["n8n.result.workflow.n8n_workflow_id", "n8n.result.n8n_workflow_id"]
+            }
+          },
+          {
+            "prompt": "Run ${workflow_id}",
+            "forbidden_status_any": ["ready_to_run", "accepted"],
+            "expected_reply_contains_any": ["not found", "draft", "approve", "review", "workflow"],
+            "n8n_verifications": [
+              { "kind": "workflow_inactive", "var": "n8n_workflow_id" }
+            ]
+          }
+        ],
+        "cleanup": {
+          "cleanup_kria_draft_workflow_ids": true,
+          "workflow_id_vars": ["workflow_id"]
+        }
+      }
+    },
+    {
+      "id": "n8n.prompt_e2e.native.update.ambiguous_clarifies",
+      "title": "Native Chat API E2E: ambiguous update asks for clarification",
+      "driver": "chat_api",
+      "tags": ["live", "slow", "n8n", "api", "prompt_e2e", "regression", "authoring"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "prompt": "Update the workflow so it accepts a title from prompt",
+        "expected_status_any": ["needs_clarification", "suggest_workflow", "update_workflow", "not_found"],
+        "expected_reply_contains_any": ["which", "workflow", "choose", "exact", "not found"],
+        "forbidden_n8n_actions": ["create_updated_copy"]
+      }
+    },
+    {
+      "id": "n8n.prompt_e2e.native.update.direct_original_danger_only",
+      "title": "Native Chat API E2E: direct original update opens review/danger path only",
+      "driver": "chat_api",
+      "tags": ["live", "slow", "n8n", "api", "prompt_e2e", "regression", "authoring"],
+      "required_services": ["kria_api", "n8n"],
+      "timeout_seconds": 300,
+      "inputs": {
+        "steps": [
+          {
+            "prompt": "Create an n8n workflow named KRIA E2E Test Direct Update Guard ${run_id} that receives a movie title and fetches movie details using HTTP",
+            "expected_status_any": ["draft_created", "validated"],
+            "expected_n8n_action": "create_authoring_draft",
+            "extract": {
+              "workflow_id": ["n8n.result.workflow.workflow_id", "n8n.result.workflow_id"],
+              "n8n_workflow_id": ["n8n.result.workflow.n8n_workflow_id", "n8n.result.n8n_workflow_id"]
+            }
+          },
+          {
+            "n8n_actions": [
+              { "kind": "store_workflow_hash", "var": "n8n_workflow_id", "output_var": "original_hash" }
+            ],
+            "prompt": "Apply update directly to original workflow ${workflow_id}",
+            "expected_reply_contains_any": ["backup", "review", "advanced", "confirmation", "copy", "danger"],
+            "forbidden_status_any": ["applied_needs_retest", "accepted"],
+            "n8n_verifications": [
+              { "kind": "workflow_hash_unchanged", "var": "n8n_workflow_id", "hash_var": "original_hash" }
+            ]
+          }
+        ],
+        "cleanup": {
+          "cleanup_kria_draft_workflow_ids": true,
+          "workflow_id_vars": ["workflow_id"]
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,334 @@
+{
+  "scenarios": [
+    {
+      "id": "security_audit.kria_core_tests_api_swap_integration",
+      "title": "Security/audit test: crates/kria-core/tests/api_swap_integration.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test api_swap_integration",
+      "tags": [
+        "live",
+        "security",
+        "audit",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "security_audit.kria_core_tests_behavior_golden_tests",
+      "title": "Security/audit test: crates/kria-core/tests/behavior_golden_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test behavior_golden_tests",
+      "tags": [
+        "destructive",
+        "security",
+        "audit",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "security_audit.kria_core_tests_colab_capabilities_integration",
+      "title": "Security/audit test: crates/kria-core/tests/colab_capabilities_integration.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test colab_capabilities_integration",
+      "tags": [
+        "safe",
+        "security",
+        "audit",
+        "regression"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "security_audit.kria_core_tests_developer_tests",
+      "title": "Security/audit test: crates/kria-core/tests/developer_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test developer_tests",
+      "tags": [
+        "safe",
+        "security",
+        "audit",
+        "regression"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "security_audit.kria_core_tests_integration_desktop",
+      "title": "Security/audit test: crates/kria-core/tests/integration_desktop.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test integration_desktop",
+      "tags": [
+        "safe",
+        "security",
+        "audit",
+        "regression"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "security_audit.kria_core_tests_integration_packages",
+      "title": "Security/audit test: crates/kria-core/tests/integration_packages.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test integration_packages",
+      "tags": [
+        "safe",
+        "security",
+        "audit",
+        "regression"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "security_audit.kria_core_tests_integration_system_config",
+      "title": "Security/audit test: crates/kria-core/tests/integration_system_config.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test integration_system_config",
+      "tags": [
+        "safe",
+        "security",
+        "audit",
+        "regression"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "security_audit.kria_core_tests_openclaw_live_docker",
+      "title": "Security/audit test: crates/kria-core/tests/openclaw_live_docker.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test openclaw_live_docker",
+      "tags": [
+        "live",
+        "security",
+        "audit",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "security_audit.kria_core_tests_openclaw_live_functional",
+      "title": "Security/audit test: crates/kria-core/tests/openclaw_live_functional.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test openclaw_live_functional",
+      "tags": [
+        "live",
+        "security",
+        "audit",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "security_audit.kria_core_tests_phase2_internet_tests",
+      "title": "Security/audit test: crates/kria-core/tests/phase2_internet_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test phase2_internet_tests",
+      "tags": [
+        "live",
+        "security",
+        "audit",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "security_audit.kria_core_tests_phase4_vision_tests",
+      "title": "Security/audit test: crates/kria-core/tests/phase4_vision_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test phase4_vision_tests",
+      "tags": [
+        "safe",
+        "security",
+        "audit",
+        "regression"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "security_audit.kria_core_tests_phase6_tool_index_tests",
+      "title": "Security/audit test: crates/kria-core/tests/phase6_tool_index_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test phase6_tool_index_tests",
+      "tags": [
+        "safe",
+        "security",
+        "audit",
+        "regression"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "security_audit.kria_core_tests_phase8_policy_gate_tests",
+      "title": "Security/audit test: crates/kria-core/tests/phase8_policy_gate_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test phase8_policy_gate_tests",
+      "tags": [
+        "destructive",
+        "security",
+        "audit",
+        "regression",
+        "management",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "security_audit.kria_core_tests_real_world_workflow_evals",
+      "title": "Security/audit test: crates/kria-core/tests/real_world_workflow_evals.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test real_world_workflow_evals",
+      "tags": [
+        "live",
+        "security",
+        "audit",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "security_audit.kria_core_tests_remote_qemu_chaos",
+      "title": "Security/audit test: crates/kria-core/tests/remote_qemu_chaos.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test remote_qemu_chaos",
+      "tags": [
+        "destructive",
+        "security",
+        "audit",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "security_audit.kria_core_tests_test_dev_packages",
+      "title": "Security/audit test: crates/kria-core/tests/test_dev_packages.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test test_dev_packages",
+      "tags": [
+        "destructive",
+        "security",
+        "audit",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "security_audit.kria_core_tests_test_files",
+      "title": "Security/audit test: crates/kria-core/tests/test_files.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test test_files",
+      "tags": [
+        "destructive",
+        "security",
+        "audit",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "security_audit.kria_core_tests_test_gworkspace_mcp",
+      "title": "Security/audit test: crates/kria-core/tests/test_gworkspace_mcp.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test test_gworkspace_mcp",
+      "tags": [
+        "destructive",
+        "security",
+        "audit",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "security_audit.kria_core_tests_test_interaction_desktop",
+      "title": "Security/audit test: crates/kria-core/tests/test_interaction_desktop.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test test_interaction_desktop",
+      "tags": [
+        "live",
+        "security",
+        "audit",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "security_audit.kria_core_tests_test_internet",
+      "title": "Security/audit test: crates/kria-core/tests/test_internet.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test test_internet",
+      "tags": [
+        "live",
+        "security",
+        "audit",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "security_audit.kria_server_tests_intelligence_integration",
+      "title": "Security/audit test: crates/kria-server/tests/intelligence_integration.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-server --test intelligence_integration",
+      "tags": [
+        "live",
+        "security",
+        "audit",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    }
+  ]
+}

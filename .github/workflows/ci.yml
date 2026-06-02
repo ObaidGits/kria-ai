@@ -3,12 +3,13 @@
 #
 # Jobs:
 #   1. rust-check   — cargo fmt, clippy, and workspace build
-#   2. rust-test    — integration + feature tests (kria-core, kria-server)
-#   3. ui-unit-test — Vitest unit/snapshot tests for UI
-#   4. e2e-api      — Playwright API integration tests
-#   5. e2e-browser  — Playwright browser E2E tests (requires UI build)
+#   2. n8n-ci-safe — centralized n8n CI-safe subset
+#   3. rust-test    — integration + feature tests (kria-core, kria-server)
+#   4. ui-unit-test — Vitest unit/snapshot tests for UI
+#   5. e2e-api      — Playwright API integration tests
+#   6. e2e-browser  — Playwright browser E2E tests (requires UI build)
 #
-# NOTE: Jobs 2-5 are temporarily disabled for faster CI iteration.
+# NOTE: Jobs 3-6 are temporarily disabled for faster CI iteration.
 #       Uncomment them when ready for full test suite.
 # ──────────────────────────────────────────────────────────────────────
 
@@ -55,6 +56,67 @@ jobs:
 
       - name: Build workspace
         run: cargo build --workspace
+
+  # ── n8n CI-safe tests ───────────────────────────────────────────
+  n8n-ci-safe:
+    name: "n8n — CI-Safe Tests"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+            libssl-dev libasound2-dev pkg-config ripgrep
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache cargo registry & build
+        uses: Swatinem/rust-cache@v2
+        with:
+          key-prefix: n8n-ci-safe
+
+      - name: Run n8n CI-safe subset
+        run: ./testing/run.sh n8n --profile ci --fail-fast
+
+      - name: Add n8n CI report to job summary
+        if: always()
+        shell: bash
+        run: |
+          report="$(ls -t testing/eval_reports/kria_testing_n8n_ci_*.md 2>/dev/null | head -n 1 || true)"
+          if [ -n "$report" ]; then
+            cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No n8n CI markdown report found." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload n8n CI reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: n8n-ci-safe-reports
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            testing/eval_reports/kria_testing_n8n_ci_*.json
+            testing/eval_reports/kria_testing_n8n_ci_*.md
+            testing/eval_reports/n8n_phase0_contract_*.txt
+            testing/eval_reports/n8n_runtime_modes_*.txt
+            testing/eval_reports/n8n_phase2_ui_*.txt
+            testing/eval_reports/n8n_phase3_progress_*.txt
+            testing/eval_reports/n8n_phase4_management_*.txt
+            testing/eval_reports/n8n_phase5_invocation_*.txt
+            testing/eval_reports/n8n_stage3_routing_eval_*.txt
+            testing/eval_reports/n8n_workflow_authoring_validation_*.txt
 
   # ─────────────────────────────────────────────────────────────────
   # TEMPORARILY DISABLED FOR FASTER CI ITERATION
@@ -156,13 +218,13 @@ jobs:
   #         node-version: 20
   #
   #     - name: Install Playwright deps
-  #       working-directory: tests/e2e
+  #       working-directory: testing/suites/playwright
   #       run: |
   #         npm ci
   #         npx playwright install --with-deps chromium
   #
   #     - name: Run API tests
-  #       working-directory: tests/e2e
+  #       working-directory: testing/suites/playwright
   #       env:
   #         KRIA_BASE_URL: http://127.0.0.1:8088
   #       run: npx playwright test --project=api-integration
@@ -172,7 +234,7 @@ jobs:
   #       if: always()
   #       with:
   #         name: playwright-api-report
-  #         path: tests/e2e/playwright-report/
+  #         path: testing/suites/playwright/playwright-report/
 
   # # ── Playwright browser E2E tests ────────────────────────────────
   # e2e-browser:
@@ -219,13 +281,13 @@ jobs:
   #       run: npx vite preview --port 5173 &
   #
   #     - name: Install Playwright browsers
-  #       working-directory: tests/e2e
+  #       working-directory: testing/suites/playwright
   #       run: |
   #         npm ci
   #         npx playwright install --with-deps chromium firefox
   #
   #     - name: Run browser E2E tests
-  #       working-directory: tests/e2e
+  #       working-directory: testing/suites/playwright
   #       env:
   #         KRIA_BASE_URL: http://127.0.0.1:8088
   #         KRIA_UI_URL: http://localhost:5173
@@ -236,4 +298,4 @@ jobs:
   #       if: always()
   #       with:
   #         name: playwright-browser-report
-  #         path: tests/e2e/playwright-report/
+  #         path: testing/suites/playwright/playwright-report/

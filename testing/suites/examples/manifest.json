@@ -1,0 +1,18 @@
+{
+  "schema_version": "kria.testing.suite.v1",
+  "suite_id": "examples",
+  "name": "KRIA testing spine examples",
+  "scenarios": [
+    {
+      "id": "examples.echo_pass",
+      "title": "Fake passing backend command",
+      "driver": "backend_command",
+      "command": "printf 'example pass\\n'",
+      "tags": ["safe", "smoke"],
+      "required_services": [],
+      "timeout_seconds": 30,
+      "report_artifact_globs": []
+    }
+  ]
+}
+

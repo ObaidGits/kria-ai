@@ -107,6 +107,17 @@ pub fn workflow_registry_records(
 pub fn workflow_registry_workflows(store: &N8nWorkflowRegistryStore) -> Vec<N8nWorkflowConfig> {
     workflow_registry_records(store)
         .into_iter()
+        .filter(|record| !record.workflow.is_archived_or_deleted())
+        .map(|record| record.workflow)
+        .collect()
+}
+
+pub fn workflow_registry_archived_workflows(
+    store: &N8nWorkflowRegistryStore,
+) -> Vec<N8nWorkflowConfig> {
+    workflow_registry_records(store)
+        .into_iter()
+        .filter(|record| record.workflow.is_archived_or_deleted())
         .map(|record| record.workflow)
         .collect()
 }
@@ -381,5 +392,26 @@ mod tests {
         assert_eq!(workflow_registry_workflows(&loaded).len(), 1);
         assert!(delete_workflow_registry_record(&mut loaded, "mail"));
         assert!(workflow_registry_workflows(&loaded).is_empty());
+    }
+
+    #[test]
+    fn archived_registry_workflows_are_hidden_from_runnable_catalog() {
+        let mut store = N8nWorkflowRegistryStore::default();
+        let active = workflow("active");
+        let mut archived = workflow("archived");
+        archived.archived = true;
+        archived.archived_at_ms = now_ms();
+        archived.archived_reason = "test archive".into();
+
+        upsert_workflow_registry_record(&mut store, active, "test").unwrap();
+        upsert_workflow_registry_record(&mut store, archived, "test").unwrap();
+
+        let runnable = workflow_registry_workflows(&store);
+        assert_eq!(runnable.len(), 1);
+        assert_eq!(runnable[0].workflow_id, "active");
+
+        let archived = workflow_registry_archived_workflows(&store);
+        assert_eq!(archived.len(), 1);
+        assert_eq!(archived[0].workflow_id, "archived");
     }
 }

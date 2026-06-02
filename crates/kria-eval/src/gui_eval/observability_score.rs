@@ -12,19 +12,31 @@ pub const OBSERVABILITY_REPLAY_SCOPE: &str = "decision_evidence_reconstruction_o
 
 const DEFAULT_REPORT_PATHS: &[(&str, ObservabilityReportKind)] = &[
     (
-        "tests-logs/eval_reports/gui_latest_run.json",
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../eval_reports/gui_latest_run.json"
+        ),
         ObservabilityReportKind::GuiAutomation,
     ),
     (
-        "tests-logs/eval_reports/hitl_timeline_latest_run.json",
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../eval_reports/hitl_timeline_latest_run.json"
+        ),
         ObservabilityReportKind::HitlTimeline,
     ),
     (
-        "tests-logs/eval_reports/llm_cognition_latest_run.json",
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../eval_reports/llm_cognition_latest_run.json"
+        ),
         ObservabilityReportKind::LlmCognition,
     ),
     (
-        "tests-logs/eval_reports/destructive_safety_latest_run.json",
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../eval_reports/destructive_safety_latest_run.json"
+        ),
         ObservabilityReportKind::DestructiveSafety,
     ),
 ];

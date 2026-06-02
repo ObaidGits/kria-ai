@@ -1,0 +1,26 @@
+{
+  "schema_version": "kria.testing.scenarios.v1",
+  "scenarios": [
+    {
+      "id": "n8n.ui_smoke",
+      "title": "n8n UI smoke wrapper",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_ui_smoke.sh",
+      "tags": [
+        "safe",
+        "n8n",
+        "ui",
+        "smoke",
+        "regression",
+        "slow"
+      ],
+      "required_services": [
+        "browser"
+      ],
+      "timeout_seconds": 600,
+      "report_artifact_globs": [
+        "testing/eval_reports/n8n_ui_smoke_*.txt"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,230 @@
+{
+  "schema_version": "kria.testing.scenarios.v1",
+  "scenarios": [
+    {
+      "id": "n8n.prompt_e2e.desktop_live.crud_archive",
+      "title": "Desktop Live Tauri E2E: n8n CRUD/archive prompts through real send_message",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_desktop_live_crud_archive.sh",
+      "tags": [
+        "live",
+        "slow",
+        "n8n",
+        "ui",
+        "prompt_e2e",
+        "desktop_chat",
+        "tauri_live",
+        "regression"
+      ],
+      "required_services": [
+        "browser",
+        "n8n"
+      ],
+      "timeout_seconds": 1200,
+      "report_artifact_globs": [
+        "testing/eval_reports/n8n_desktop_live_tauri_driver_*.json",
+        "testing/eval_reports/n8n_desktop_live_tauri_driver_*.log",
+        "testing/eval_reports/n8n_desktop_live_ui_dev_*.log",
+        "testing/eval_reports/n8n_desktop_live_*.png",
+        "testing/suites/playwright/playwright-report/index.html"
+      ]
+    },
+    {
+      "id": "n8n.desktop_live.create_http_movie_lookup",
+      "title": "Desktop Live Tauri E2E: create HTTP movie lookup draft through real chat",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_desktop_live_create_http_movie_lookup.sh",
+      "tags": ["live", "slow", "n8n", "ui", "prompt_e2e", "desktop_chat", "tauri_live", "authoring", "regression"],
+      "required_services": ["browser", "n8n"],
+      "timeout_seconds": 900,
+      "report_artifact_globs": [
+        "testing/eval_reports/n8n_desktop_live_tauri_driver_*.json",
+        "testing/eval_reports/n8n_desktop_live_tauri_driver_*.log",
+        "testing/eval_reports/n8n_desktop_live_ui_dev_*.log",
+        "testing/eval_reports/n8n_desktop_live_*.png"
+      ]
+    },
+    {
+      "id": "n8n.desktop_live.list_workflows",
+      "title": "Desktop Live Tauri E2E: list runnable workflows through real chat",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_desktop_live_list_workflows.sh",
+      "tags": ["live", "slow", "n8n", "ui", "prompt_e2e", "desktop_chat", "tauri_live", "routing", "regression"],
+      "required_services": ["browser", "n8n"],
+      "timeout_seconds": 900,
+      "report_artifact_globs": [
+        "testing/eval_reports/n8n_desktop_live_tauri_driver_*.json",
+        "testing/eval_reports/n8n_desktop_live_tauri_driver_*.log",
+        "testing/eval_reports/n8n_desktop_live_ui_dev_*.log",
+        "testing/eval_reports/n8n_desktop_live_*.png"
+      ]
+    },
+    {
+      "id": "n8n.desktop_live.update_exact_copy",
+      "title": "Desktop Live Tauri E2E: update exact workflow ID creates inactive copy",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_desktop_live_update_exact_copy.sh",
+      "tags": ["live", "slow", "n8n", "ui", "prompt_e2e", "desktop_chat", "tauri_live", "authoring", "management", "regression"],
+      "required_services": ["browser", "n8n"],
+      "timeout_seconds": 900,
+      "report_artifact_globs": [
+        "testing/eval_reports/n8n_desktop_live_tauri_driver_*.json",
+        "testing/eval_reports/n8n_desktop_live_tauri_driver_*.log",
+        "testing/eval_reports/n8n_desktop_live_ui_dev_*.log",
+        "testing/eval_reports/n8n_desktop_live_*.png"
+      ]
+    },
+    {
+      "id": "n8n.desktop_live.safe_delete_archive_offer",
+      "title": "Desktop Live Tauri E2E: delete prompt offers archive-safe flow",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_desktop_live_safe_delete_archive_offer.sh",
+      "tags": ["live", "slow", "n8n", "ui", "prompt_e2e", "desktop_chat", "tauri_live", "management", "regression"],
+      "required_services": ["browser", "n8n"],
+      "timeout_seconds": 900,
+      "report_artifact_globs": [
+        "testing/eval_reports/n8n_desktop_live_tauri_driver_*.json",
+        "testing/eval_reports/n8n_desktop_live_tauri_driver_*.log",
+        "testing/eval_reports/n8n_desktop_live_ui_dev_*.log",
+        "testing/eval_reports/n8n_desktop_live_*.png"
+      ]
+    },
+    {
+      "id": "n8n.desktop_live.archive_workflow",
+      "title": "Desktop Live Tauri E2E: archive workflow through real chat",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_desktop_live_archive_workflow.sh",
+      "tags": ["live", "slow", "n8n", "ui", "prompt_e2e", "desktop_chat", "tauri_live", "management", "regression"],
+      "required_services": ["browser", "n8n"],
+      "timeout_seconds": 900,
+      "report_artifact_globs": [
+        "testing/eval_reports/n8n_desktop_live_tauri_driver_*.json",
+        "testing/eval_reports/n8n_desktop_live_tauri_driver_*.log",
+        "testing/eval_reports/n8n_desktop_live_ui_dev_*.log",
+        "testing/eval_reports/n8n_desktop_live_*.png"
+      ]
+    },
+    {
+      "id": "n8n.desktop_live.restore_workflow",
+      "title": "Desktop Live Tauri E2E: restore archived workflow through real chat",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_desktop_live_restore_workflow.sh",
+      "tags": ["live", "slow", "n8n", "ui", "prompt_e2e", "desktop_chat", "tauri_live", "management", "regression"],
+      "required_services": ["browser", "n8n"],
+      "timeout_seconds": 900,
+      "report_artifact_globs": [
+        "testing/eval_reports/n8n_desktop_live_tauri_driver_*.json",
+        "testing/eval_reports/n8n_desktop_live_tauri_driver_*.log",
+        "testing/eval_reports/n8n_desktop_live_ui_dev_*.log",
+        "testing/eval_reports/n8n_desktop_live_*.png"
+      ]
+    },
+    {
+      "id": "n8n.desktop_live.permanent_delete_danger_only",
+      "title": "Desktop Live Tauri E2E: permanent delete prompt shows danger flow only",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_desktop_live_permanent_delete_danger_only.sh",
+      "tags": ["live", "slow", "n8n", "ui", "prompt_e2e", "desktop_chat", "tauri_live", "management", "regression"],
+      "required_services": ["browser", "n8n"],
+      "timeout_seconds": 900,
+      "report_artifact_globs": [
+        "testing/eval_reports/n8n_desktop_live_tauri_driver_*.json",
+        "testing/eval_reports/n8n_desktop_live_tauri_driver_*.log",
+        "testing/eval_reports/n8n_desktop_live_ui_dev_*.log",
+        "testing/eval_reports/n8n_desktop_live_*.png"
+      ]
+    },
+    {
+      "id": "n8n.desktop_live.unregistered_target_blocker",
+      "title": "Desktop Live Tauri E2E: unregistered n8n target returns import/sync blocker",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_desktop_live_unregistered_target_blocker.sh",
+      "tags": ["live", "slow", "n8n", "ui", "prompt_e2e", "desktop_chat", "tauri_live", "routing", "regression"],
+      "required_services": ["browser", "n8n"],
+      "timeout_seconds": 900,
+      "report_artifact_globs": [
+        "testing/eval_reports/n8n_desktop_live_tauri_driver_*.json",
+        "testing/eval_reports/n8n_desktop_live_tauri_driver_*.log",
+        "testing/eval_reports/n8n_desktop_live_ui_dev_*.log",
+        "testing/eval_reports/n8n_desktop_live_*.png"
+      ]
+    },
+    {
+      "id": "n8n.desktop_live.non_n8n_no_hijack",
+      "title": "Desktop Live Tauri E2E: non-n8n prompt is not hijacked",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_desktop_live_non_n8n_no_hijack.sh",
+      "tags": ["live", "slow", "n8n", "ui", "prompt_e2e", "desktop_chat", "tauri_live", "routing", "regression"],
+      "required_services": ["browser", "n8n"],
+      "timeout_seconds": 900,
+      "report_artifact_globs": [
+        "testing/eval_reports/n8n_desktop_live_tauri_driver_*.json",
+        "testing/eval_reports/n8n_desktop_live_tauri_driver_*.log",
+        "testing/eval_reports/n8n_desktop_live_ui_dev_*.log",
+        "testing/eval_reports/n8n_desktop_live_*.png"
+      ]
+    },
+    {
+      "id": "n8n.desktop_live.cleanup_leftover_detector",
+      "title": "Desktop Live Tauri E2E: cleanup run-prefix disposable workflows",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_desktop_live_cleanup_leftover_detector.sh",
+      "tags": ["live", "slow", "n8n", "ui", "prompt_e2e", "desktop_chat", "tauri_live", "cleanup", "regression"],
+      "required_services": ["n8n"],
+      "timeout_seconds": 300,
+      "report_artifact_globs": [
+        "testing/eval_reports/n8n_desktop_live_tauri_driver_*.json"
+      ]
+    },
+    {
+      "id": "n8n.prompt_e2e.desktop_live.unregistered_target",
+      "title": "Desktop Live Tauri E2E: unregistered n8n target does not fuzzy-select",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_desktop_live_unregistered_target.sh",
+      "tags": [
+        "live",
+        "slow",
+        "n8n",
+        "ui",
+        "prompt_e2e",
+        "desktop_chat",
+        "tauri_live",
+        "regression"
+      ],
+      "required_services": [
+        "browser",
+        "n8n"
+      ],
+      "timeout_seconds": 900,
+      "report_artifact_globs": [
+        "testing/eval_reports/n8n_desktop_live_tauri_driver_*.json",
+        "testing/eval_reports/n8n_desktop_live_tauri_driver_*.log",
+        "testing/eval_reports/n8n_desktop_live_ui_dev_*.log",
+        "testing/eval_reports/n8n_desktop_live_*.png",
+        "testing/suites/playwright/playwright-report/index.html"
+      ]
+    },
+    {
+      "id": "n8n.prompt_e2e.desktop_live.cleanup",
+      "title": "Desktop Live Tauri E2E: cleanup disposable n8n workflows",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_desktop_live_cleanup.sh",
+      "tags": [
+        "live",
+        "slow",
+        "n8n",
+        "ui",
+        "prompt_e2e",
+        "desktop_chat",
+        "tauri_live",
+        "cleanup",
+        "regression"
+      ],
+      "required_services": [
+        "n8n"
+      ],
+      "timeout_seconds": 300,
+      "report_artifact_globs": []
+    }
+  ]
+}

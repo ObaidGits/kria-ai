@@ -220,6 +220,8 @@ body {
   border-radius: var(--radius);
   font-size: 14px;
   line-height: 1.6;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .message-user {
@@ -2372,6 +2374,8 @@ details[open] .tool-raw-summary::before {
 
 .message-content p {
   margin: 6px 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .message-content ul,
@@ -2401,6 +2405,9 @@ details[open] .tool-raw-summary::before {
   border: 1px solid var(--border);
   font-family: var(--font-mono);
   font-size: 0.9em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .message-content pre {
@@ -2420,6 +2427,9 @@ details[open] .tool-raw-summary::before {
   padding: 0;
   font-size: 13px;
   line-height: 1.5;
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .code-block-header {

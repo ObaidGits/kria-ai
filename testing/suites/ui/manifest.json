@@ -1,0 +1,10 @@
+{
+  "schema_version": "kria.testing.suite.v1",
+  "suite_id": "ui",
+  "name": "KRIA UI suite",
+  "scenario_files": [
+    "testing/suites/ui/scenarios/curated_ci.json",
+    "testing/suites/ui/scenarios/generated_inventory.json"
+  ],
+  "scenarios": []
+}

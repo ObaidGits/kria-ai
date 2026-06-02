@@ -1,0 +1,135 @@
+{
+  "schema_version": "kria.testing.scenarios.v1",
+  "scenarios": [
+    {
+      "id": "n8n.phase0_contract",
+      "title": "n8n phase 0 contract wrapper",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_phase0_contract.sh",
+      "tags": [
+        "safe",
+        "ci",
+        "n8n",
+        "regression",
+        "phase"
+      ],
+      "required_services": [],
+      "timeout_seconds": 180,
+      "report_artifact_globs": [
+        "testing/eval_reports/n8n_phase0_contract_*.txt"
+      ]
+    },
+    {
+      "id": "n8n.runtime_modes",
+      "title": "n8n runtime modes wrapper",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_runtime_modes.sh",
+      "tags": [
+        "safe",
+        "ci",
+        "n8n",
+        "regression",
+        "phase"
+      ],
+      "required_services": [],
+      "timeout_seconds": 180,
+      "report_artifact_globs": [
+        "testing/eval_reports/n8n_runtime_modes_*.txt"
+      ]
+    },
+    {
+      "id": "n8n.phase2_ui_contract",
+      "title": "n8n phase 2 UI contract wrapper",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_phase2_ui.sh",
+      "tags": [
+        "safe",
+        "ci",
+        "n8n",
+        "regression",
+        "phase",
+        "ui"
+      ],
+      "required_services": [],
+      "timeout_seconds": 180,
+      "report_artifact_globs": [
+        "testing/eval_reports/n8n_phase2_ui_*.txt"
+      ]
+    },
+    {
+      "id": "n8n.phase3_progress",
+      "title": "n8n phase 3 progress wrapper",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_phase3_progress.sh",
+      "tags": [
+        "safe",
+        "ci",
+        "n8n",
+        "regression",
+        "phase"
+      ],
+      "required_services": [],
+      "timeout_seconds": 180,
+      "report_artifact_globs": [
+        "testing/eval_reports/n8n_phase3_progress_*.txt"
+      ]
+    },
+    {
+      "id": "n8n.phase4_management",
+      "title": "n8n phase 4 management wrapper",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_phase4_management.sh",
+      "tags": [
+        "safe",
+        "ci",
+        "n8n",
+        "regression",
+        "phase",
+        "management"
+      ],
+      "required_services": [],
+      "timeout_seconds": 180,
+      "report_artifact_globs": [
+        "testing/eval_reports/n8n_phase4_management_*.txt"
+      ]
+    },
+    {
+      "id": "n8n.phase5_invocation",
+      "title": "n8n phase 5 invocation wrapper",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_phase5_invocation.sh",
+      "tags": [
+        "safe",
+        "ci",
+        "n8n",
+        "regression",
+        "phase",
+        "invocation"
+      ],
+      "required_services": [],
+      "timeout_seconds": 180,
+      "report_artifact_globs": [
+        "testing/eval_reports/n8n_phase5_invocation_*.txt"
+      ]
+    },
+    {
+      "id": "n8n.phase6_readiness_gate",
+      "title": "n8n phase 6 readiness gate wrapper",
+      "driver": "backend_command",
+      "command": "./testing/suites/n8n/commands/run_n8n_phase6_readiness_gate.sh",
+      "tags": [
+        "safe",
+        "n8n",
+        "regression",
+        "phase",
+        "readiness",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 300,
+      "report_artifact_globs": [
+        "testing/eval_reports/n8n_phase6_readiness_*.txt"
+      ]
+    }
+  ]
+}

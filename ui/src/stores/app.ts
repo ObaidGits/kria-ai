@@ -1018,6 +1018,8 @@ export interface AgentStageEvent {
 
 type StreamScope = "assistant" | "prompt_lab";
 
+let backendActiveSessionId: string | null = null;
+
 function scopeFromEnvironment(): StreamScope {
   return currentEnvironment() === "prompt_lab" ? "prompt_lab" : "assistant";
 }
@@ -1042,10 +1044,14 @@ async function ensureScopedSessionActive(scope: StreamScope): Promise<string> {
     const created = await invoke<{ session_id: string }>("create_session");
     sessionId = created.session_id;
     setScopedCurrentSession(scope, sessionId);
+    backendActiveSessionId = sessionId;
     await loadSessions();
   }
 
-  await invoke("switch_session", { sessionId });
+  if (backendActiveSessionId !== sessionId) {
+    await invoke("switch_session", { sessionId });
+    backendActiveSessionId = sessionId;
+  }
   return sessionId;
 }
 
@@ -1057,6 +1063,7 @@ async function syncEnvironmentSession(environment: "assistant" | "prompt_lab") {
   try {
     const hasMessages = scope === "prompt_lab" ? promptLabMessages().length > 0 : assistantMessages().length > 0;
     await invoke("switch_session", { sessionId });
+    backendActiveSessionId = sessionId;
     if (!hasMessages) {
       const mapped = await loadMappedSessionHistory(sessionId);
       updateScopedMessages(scope, () => mapped);
@@ -1108,6 +1115,8 @@ async function cancelScopedTurnIfActive(scope: StreamScope): Promise<void> {
     await invoke("cancel_turn", { sessionId });
   } catch (e) {
     console.warn("Failed to cancel active turn before session change:", e);
+  } finally {
+    setScopedThinking(scope, false);
   }
 }
 
@@ -1176,22 +1185,24 @@ function formatColabDispatchWarning(stage: AgentStageEvent): string {
 // --- Actions ---
 async function sendMessage(text: string) {
   if (!text.trim()) return;
+  if (isScopedThinking("assistant")) return;
 
   setScopedToolChoice("assistant", null);
   const selectedMode = selectedManualToolMode();
 
-  const userMsg: Message = {
-    id: crypto.randomUUID(),
-    role: "user",
-    content: text,
-    timestamp: Date.now(),
-  };
-  appendScopedMessage("assistant", userMsg);
-  setInputText("");
-  setScopedThinking("assistant", true);
-
   try {
     const sessionId = await ensureScopedSessionActive("assistant");
+
+    const userMsg: Message = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: text,
+      timestamp: Date.now(),
+    };
+    appendScopedMessage("assistant", userMsg);
+    setInputText("");
+    setScopedThinking("assistant", true);
+
     void autoRenameSessionFromPrompt(sessionId, text);
     if (selectedMode.id === "auto") {
       await invoke<{ status: string }>(
@@ -1228,19 +1239,9 @@ async function sendMessage(text: string) {
 
 async function sendLabMessage(text: string, profile?: PromptLabProfile) {
   if (!text.trim()) return;
+  if (isScopedThinking("prompt_lab")) return;
 
   setScopedToolChoice("prompt_lab", null);
-
-  const userMsg: Message = {
-    id: crypto.randomUUID(),
-    role: "user",
-    content: text,
-    timestamp: Date.now(),
-  };
-  appendScopedMessage("prompt_lab", userMsg);
-  setInputText("");
-  setScopedThinking("prompt_lab", true);
-  setLastPromptLabProfile(profile);
 
   const payload = {
     message: text,
@@ -1253,6 +1254,18 @@ async function sendLabMessage(text: string, profile?: PromptLabProfile) {
 
   try {
     const sessionId = await ensureScopedSessionActive("prompt_lab");
+
+    const userMsg: Message = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: text,
+      timestamp: Date.now(),
+    };
+    appendScopedMessage("prompt_lab", userMsg);
+    setInputText("");
+    setScopedThinking("prompt_lab", true);
+    setLastPromptLabProfile(profile);
+
     void autoRenameSessionFromPrompt(sessionId, text);
     await invoke<{ status: string }>("send_lab_message", payload);
   } catch (e) {
@@ -1309,28 +1322,29 @@ function clearPendingFiles() {
 
 async function sendDocumentMessage(files: PendingFile[], text?: string) {
   if (files.length === 0) return;
-
-  // Build display info for the message bubble
-  const fileInfos: AttachedFileInfo[] = files.map((f) => ({
-    name: f.name,
-    size: f.size,
-    mime: f.mime,
-  }));
-
-  const userMsg: Message = {
-    id: crypto.randomUUID(),
-    role: "user",
-    content: text?.trim() || `Analyze these files: ${files.map((f) => f.name).join(", ")}`,
-    timestamp: Date.now(),
-    attachedFiles: fileInfos,
-  };
-  appendScopedMessage("assistant", userMsg);
-  setInputText("");
-  clearPendingFiles();
-  setScopedThinking("assistant", true);
+  if (isScopedThinking("assistant")) return;
 
   try {
     const sessionId = await ensureScopedSessionActive("assistant");
+
+    // Build display info for the message bubble
+    const fileInfos: AttachedFileInfo[] = files.map((f) => ({
+      name: f.name,
+      size: f.size,
+      mime: f.mime,
+    }));
+
+    const userMsg: Message = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: text?.trim() || `Analyze these files: ${files.map((f) => f.name).join(", ")}`,
+      timestamp: Date.now(),
+      attachedFiles: fileInfos,
+    };
+    appendScopedMessage("assistant", userMsg);
+    setInputText("");
+    clearPendingFiles();
+    setScopedThinking("assistant", true);
 
     // Read file bytes
     const uploadedFiles = await Promise.all(
@@ -1416,22 +1430,25 @@ async function transcribeUploadedAudio(file: File) {
 }
 
 async function sendImageMessage(imageData: Uint8Array, mimeType: string, text?: string) {
+  if (isScopedThinking("assistant")) return;
+
   const b64 = uint8ToBase64(imageData);
   const dataUrl = `data:${mimeType};base64,${b64}`;
 
-  const userMsg: Message = {
-    id: crypto.randomUUID(),
-    role: "user",
-    content: text || "What's in this image?",
-    timestamp: Date.now(),
-    imageUrl: dataUrl,
-  };
-  appendScopedMessage("assistant", userMsg);
-  setInputText("");
-  setScopedThinking("assistant", true);
-
   try {
     const sessionId = await ensureScopedSessionActive("assistant");
+
+    const userMsg: Message = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: text || "What's in this image?",
+      timestamp: Date.now(),
+      imageUrl: dataUrl,
+    };
+    appendScopedMessage("assistant", userMsg);
+    setInputText("");
+    setScopedThinking("assistant", true);
+
     const promptForTitle = (text || "").trim();
     if (promptForTitle) {
       void autoRenameSessionFromPrompt(sessionId, promptForTitle);
@@ -2414,6 +2431,23 @@ async function loadSessions(): Promise<Session[] | null> {
       turnCount: typeof s.turn_count === "number" ? s.turn_count : 0,
     }));
 
+    const previousById = new Map(sessions().map((session) => [session.id, session]));
+    const activeSessionIds = [
+      assistantCurrentSession(),
+      promptLabCurrentSession(),
+    ].filter((id): id is string => Boolean(id && id.trim()));
+
+    for (const sessionId of activeSessionIds) {
+      if (mapped.some((session) => session.id === sessionId)) continue;
+      const previous = previousById.get(sessionId);
+      mapped.push(previous ?? {
+        id: sessionId,
+        title: "New chat",
+        updatedAt: Date.now(),
+        turnCount: 0,
+      });
+    }
+
     mapped.sort((a, b) => b.updatedAt - a.updatedAt);
     setSessions(mapped);
     return mapped;
@@ -2483,8 +2517,8 @@ async function createSession() {
     await cancelScopedTurnIfActive(scope);
     const result = await invoke<{ session_id: string }>("create_session");
     setScopedCurrentSession(scope, result.session_id);
+    backendActiveSessionId = result.session_id;
     upsertSessionPreview(result.session_id, "New chat");
-    await invoke("switch_session", { sessionId: result.session_id });
     updateScopedMessages(scope, () => []);
     setScopedToolChoice(scope, null);
     setScopedThinking(scope, false);
@@ -2624,16 +2658,60 @@ async function loadMappedSessionHistory(sessionId: string): Promise<Message[]> {
   return mapped;
 }
 
+function messageIdentity(message: Message): string {
+  const toolSignature = (message.toolCalls || [])
+    .map((tool) => {
+      let result = "";
+      try {
+        result = JSON.stringify(tool.result ?? null);
+      } catch {
+        result = String(tool.result ?? "");
+      }
+      return `${tool.name}:${tool.status}:${result}`;
+    })
+    .join("|");
+  return `${message.role}\u0000${message.content}\u0000${toolSignature}`;
+}
+
+function mergeHistoryWithLocalMessages(history: Message[], localMessages: Message[]): Message[] {
+  if (localMessages.length === 0) return history;
+
+  const seenCounts = new Map<string, number>();
+  for (const message of history) {
+    const key = messageIdentity(message);
+    seenCounts.set(key, (seenCounts.get(key) ?? 0) + 1);
+  }
+
+  const missingLocal = localMessages.filter((message) => {
+    const key = messageIdentity(message);
+    const remaining = seenCounts.get(key) ?? 0;
+    if (remaining > 0) {
+      seenCounts.set(key, remaining - 1);
+      return false;
+    }
+    return true;
+  });
+  if (missingLocal.length === 0) return history;
+
+  return [...history, ...missingLocal].sort((a, b) => a.timestamp - b.timestamp);
+}
+
 async function switchSession(sessionId: string) {
   try {
     const scope = scopeFromEnvironment();
     const activeSession = getScopedCurrentSession(scope);
+    const wasAlreadyCurrent = activeSession === sessionId;
+    const localMessages = scope === "prompt_lab" ? promptLabMessages() : assistantMessages();
     if (activeSession && activeSession !== sessionId) {
       await cancelScopedTurnIfActive(scope);
     }
     await invoke("switch_session", { sessionId });
+    backendActiveSessionId = sessionId;
     setScopedCurrentSession(scope, sessionId);
-    const mapped = await loadMappedSessionHistory(sessionId);
+    let mapped = await loadMappedSessionHistory(sessionId);
+    if (wasAlreadyCurrent) {
+      mapped = mergeHistoryWithLocalMessages(mapped, localMessages);
+    }
     updateScopedMessages(scope, () => mapped);
     setScopedThinking(scope, false);
   } catch (e) {
@@ -2681,6 +2759,7 @@ async function deleteSession(sessionId: string) {
       if (!promptLabCurrentSession()) {
         setScopedCurrentSession("prompt_lab", replacementSessionId);
       }
+      backendActiveSessionId = replacementSessionId;
       upsertSessionPreview(replacementSessionId, "New chat");
     }
 

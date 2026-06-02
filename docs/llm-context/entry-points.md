@@ -121,7 +121,7 @@ Use this as a first map. Confirm details in source before changing behavior.
 - Workflow evals: `crates/kria-eval/src/workflow_eval/`.
 - Integration evals: `crates/kria-eval/src/integration_eval/`.
 - Rust integration tests live under `crates/kria-core/tests/`, `crates/kria-server/tests/`, and `crates/kria-connection-control/tests/`.
-- Browser/UI e2e tests live under `tests/e2e/`.
+- Browser/UI e2e tests live under `testing/suites/playwright/`.
 
 ## Test Utilities
 

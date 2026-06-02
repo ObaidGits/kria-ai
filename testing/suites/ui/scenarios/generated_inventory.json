@@ -1,0 +1,148 @@
+{
+  "scenarios": [
+    {
+      "id": "ui.vitest.components_hitlmodal_test",
+      "title": "Vitest file: ui/src/components/HitlModal.test.tsx",
+      "driver": "backend_command",
+      "command": "cd ui && npm run test:run -- HitlModal.test",
+      "tags": [
+        "safe",
+        "ui",
+        "vitest",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "ui.vitest.components_messagebubble_test",
+      "title": "Vitest file: ui/src/components/MessageBubble.test.tsx",
+      "driver": "backend_command",
+      "command": "cd ui && npm run test:run -- MessageBubble.test",
+      "tags": [
+        "live",
+        "ui",
+        "vitest",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "ui.vitest.components_n8nsettings_connection_test",
+      "title": "Vitest file: ui/src/components/N8nSettings.connection.test.tsx",
+      "driver": "backend_command",
+      "command": "cd ui && npm run test:run -- N8nSettings.connection.test",
+      "tags": [
+        "live",
+        "ui",
+        "vitest",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "ui.vitest.components_n8nworkflowhub_smoke_test",
+      "title": "Vitest file: ui/src/components/N8nWorkflowHub.smoke.test.tsx",
+      "driver": "backend_command",
+      "command": "cd ui && npm run test:run -- N8nWorkflowHub.smoke.test",
+      "tags": [
+        "live",
+        "ui",
+        "vitest",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "ui.vitest.components_n8nworkflowmanagementpanel_profile_test",
+      "title": "Vitest file: ui/src/components/N8nWorkflowManagementPanel.profile.test.tsx",
+      "driver": "backend_command",
+      "command": "cd ui && npm run test:run -- N8nWorkflowManagementPanel.profile.test",
+      "tags": [
+        "live",
+        "ui",
+        "vitest",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "ui.vitest.components_settingsmodal_google_test",
+      "title": "Vitest file: ui/src/components/SettingsModal.google.test.tsx",
+      "driver": "backend_command",
+      "command": "cd ui && npm run test:run -- SettingsModal.google.test",
+      "tags": [
+        "live",
+        "ui",
+        "vitest",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "ui.vitest.lib_n8nprogress_test",
+      "title": "Vitest file: ui/src/lib/n8nProgress.test.ts",
+      "driver": "backend_command",
+      "command": "cd ui && npm run test:run -- n8nProgress.test",
+      "tags": [
+        "live",
+        "ui",
+        "vitest",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "ui.vitest.stores_app_tool_choice_test",
+      "title": "Vitest file: ui/src/stores/app.tool-choice.test.ts",
+      "driver": "backend_command",
+      "command": "cd ui && npm run test:run -- app.tool-choice.test",
+      "tags": [
+        "live",
+        "ui",
+        "vitest",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "ui.vitest.stores_n8n_delete_test",
+      "title": "Vitest file: ui/src/stores/n8n.delete.test.ts",
+      "driver": "backend_command",
+      "command": "cd ui && npm run test:run -- n8n.delete.test",
+      "tags": [
+        "live",
+        "ui",
+        "vitest",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    }
+  ]
+}

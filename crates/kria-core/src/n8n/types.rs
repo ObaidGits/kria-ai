@@ -195,6 +195,30 @@ pub struct N8nWorkflowConfig {
     pub test_execution_id: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub test_result_preview: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub archived: bool,
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub archived_at_ms: u64,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub archived_reason: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub archived_by: String,
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub restored_at_ms: u64,
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub remove_from_kria_at_ms: u64,
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub n8n_deleted_at_ms: u64,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub n8n_delete_status: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub backup_path: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub backup_hash: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub crud_lifecycle_status: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub crud_lifecycle_warnings: Vec<String>,
     pub status: N8nWorkflowStatus,
     pub environment: N8nWorkflowEnvironment,
     pub risk_tier: RiskLevel,
@@ -255,6 +279,18 @@ impl Default for N8nWorkflowConfig {
             generated_copy_n8n_verified: false,
             test_execution_id: String::new(),
             test_result_preview: String::new(),
+            archived: false,
+            archived_at_ms: 0,
+            archived_reason: String::new(),
+            archived_by: String::new(),
+            restored_at_ms: 0,
+            remove_from_kria_at_ms: 0,
+            n8n_deleted_at_ms: 0,
+            n8n_delete_status: String::new(),
+            backup_path: String::new(),
+            backup_hash: String::new(),
+            crud_lifecycle_status: String::new(),
+            crud_lifecycle_warnings: Vec::new(),
             status: N8nWorkflowStatus::Draft,
             environment: N8nWorkflowEnvironment::Dev,
             risk_tier: RiskLevel::Yellow,
@@ -280,7 +316,16 @@ impl Default for N8nWorkflowConfig {
 
 impl N8nWorkflowConfig {
     pub fn is_approved_for_execution(&self) -> bool {
-        matches!(self.status, N8nWorkflowStatus::Approved)
+        matches!(self.status, N8nWorkflowStatus::Approved) && !self.is_archived_or_deleted()
+    }
+
+    pub fn is_archived_or_deleted(&self) -> bool {
+        self.archived
+            || self.n8n_deleted_at_ms > 0
+            || matches!(
+                self.n8n_delete_status.trim(),
+                "pending_delete" | "pending_delete_failed" | "deleted"
+            )
     }
 
     pub fn requires_direct_endpoint_path(&self) -> bool {

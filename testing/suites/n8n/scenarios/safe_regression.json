@@ -1,0 +1,15 @@
+{
+  "schema_version": "kria.testing.scenarios.v1",
+  "scenarios": [
+    {
+      "id": "n8n.testing_spine_self_tests",
+      "title": "Testing spine self-tests",
+      "driver": "backend_command",
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover testing/harness/tests",
+      "tags": ["safe", "ci", "n8n", "regression"],
+      "required_services": [],
+      "timeout_seconds": 180,
+      "report_artifact_globs": []
+    }
+  ]
+}

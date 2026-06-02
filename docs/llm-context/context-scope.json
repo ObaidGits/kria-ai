@@ -27,7 +27,7 @@
     "docs/integrations",
     "docs/reference",
     "docs/voice",
-    "tests/e2e"
+    "testing/suites/playwright"
   ],
   "ignore_paths": [
     ".git",
@@ -35,13 +35,13 @@
     ".ruff_cache",
     "__pycache__",
     "docs/llm-context",
-    "eval_reports",
+    "testing/eval_reports",
     "graphify-out",
     "models",
     "target",
     "tests-logs",
-    "tests/e2e/playwright-report",
-    "tests/e2e/test-results",
+    "testing/suites/playwright/playwright-report",
+    "testing/suites/playwright/test-results",
     "tmp",
     "ui/dist",
     "ui/node_modules"

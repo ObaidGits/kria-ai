@@ -71,7 +71,7 @@ KRIA/
   tests/
     e2e/                       Playwright/API/Tauri-style tests
   tests-logs/                  generated eval/test logs
-  eval_reports/                generated eval summaries
+  testing/eval_reports/                generated eval summaries
 ```
 
 ## Main Crate Entry Points
@@ -397,8 +397,8 @@ Rules:
 
 | Need | Where to look |
 |---|---|
-| Playwright/API e2e tests | `tests/e2e/` |
-| General test notes | `tests/testing.md` |
+| Playwright/API e2e tests | `testing/suites/playwright/` |
+| General test notes | `testing/docs/legacy-testing.md` |
 | Core test binary | `crates/kria-core/src/bin/kria-test.rs` |
 | GUI e2e test binary | `crates/kria-core/src/bin/test_gui_e2e.rs` |
 | Eval crate entry | `crates/kria-eval/src/main.rs` |
@@ -407,7 +407,7 @@ Rules:
 | GUI eval suites | `crates/kria-eval/src/gui_eval/` |
 | Workflow eval suites | `crates/kria-eval/src/workflow_eval/` |
 | Integration eval suites | `crates/kria-eval/src/integration_eval/` |
-| Generated reports | `tests-logs/`, `eval_reports/` |
+| Generated reports | `tests-logs/`, `testing/eval_reports/` |
 
 Useful docs:
 - `docs/evaluations/overview.md`

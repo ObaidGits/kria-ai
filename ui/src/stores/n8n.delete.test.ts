@@ -63,7 +63,7 @@ describe("n8n store workflow deletion UX", () => {
       if (command === "get_n8n_status") return statusPayload(workflows);
       if (command === "get_n8n_runtime_status") return null;
       if (command === "list_n8n_executions") return null;
-      if (command === "delete_n8n_workflow") return { status: "deleted" };
+      if (command === "remove_n8n_workflow_from_kria") return { status: "removed_from_kria" };
       return null;
     });
 
@@ -92,7 +92,7 @@ describe("n8n store workflow deletion UX", () => {
       if (command === "get_n8n_status") return statusPayload(workflows);
       if (command === "get_n8n_runtime_status") return null;
       if (command === "list_n8n_executions") return null;
-      if (command === "delete_n8n_workflow") throw new Error("delete failed");
+      if (command === "remove_n8n_workflow_from_kria") throw new Error("delete failed");
       return null;
     });
 
@@ -110,7 +110,7 @@ describe("n8n store workflow deletion UX", () => {
       if (command === "get_n8n_status") return statusPayload(workflows);
       if (command === "get_n8n_runtime_status") return null;
       if (command === "list_n8n_executions") return null;
-      if (command === "delete_n8n_workflow") {
+      if (command === "remove_n8n_workflow_from_kria") {
         throw "workflow 'old_toml_workflow' not found in KRIA workflow registry";
       }
       return null;

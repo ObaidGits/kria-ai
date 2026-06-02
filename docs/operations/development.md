@@ -48,7 +48,7 @@ Useful setup scripts:
 - `scripts/download_models.py`
 - `scripts/fix-inotify-limit.sh`
 - `scripts/setup_google_workspace.sh`
-- `scripts/setup_comfyui.sh`
+- `./testing/run.sh scenario release_live.scripts_setup_comfyui --include-destructive --include-slow`
 
 The local runtime stores user data under `~/.kria`. Use disposable `HOME`, `XDG_CONFIG_HOME`, and `XDG_DATA_HOME` when testing workflows that should not touch your real desktop state.
 
@@ -105,13 +105,13 @@ just build-release
 Desktop release bundle:
 
 ```bash
-scripts/build-release.sh
+./testing/run.sh scenario release_live.scripts_build_release --include-destructive --include-slow
 ```
 
 Release gate:
 
 ```bash
-scripts/run_release_test_gate.sh
+./testing/run.sh scenario release_live.scripts_run_release_test_gate --include-destructive --include-slow
 ```
 
 ## Safe GUI Test Rule

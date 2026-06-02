@@ -1,0 +1,933 @@
+{
+  "scenarios": [
+    {
+      "id": "rust.kria_connection_control_tests_hello_world_vlc_jittered_lease",
+      "title": "Rust test: crates/kria-connection-control/tests/hello_world_vlc_jittered_lease.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-connection-control --test hello_world_vlc_jittered_lease",
+      "tags": [
+        "live",
+        "rust",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_agent_end_to_end_recovery",
+      "title": "Rust test: crates/kria-core/tests/agent_end_to_end_recovery.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test agent_end_to_end_recovery",
+      "tags": [
+        "destructive",
+        "rust",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_api_unload_model_wiremock",
+      "title": "Rust test: crates/kria-core/tests/api_unload_model_wiremock.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test api_unload_model_wiremock",
+      "tags": [
+        "safe",
+        "rust",
+        "regression"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_automation_tests",
+      "title": "Rust test: crates/kria-core/tests/automation_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test automation_tests",
+      "tags": [
+        "safe",
+        "rust",
+        "regression"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_batch1_authority_tests",
+      "title": "Rust test: crates/kria-core/tests/batch1_authority_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test batch1_authority_tests",
+      "tags": [
+        "live",
+        "rust",
+        "regression",
+        "hitl",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_batch2_cognition_tests",
+      "title": "Rust test: crates/kria-core/tests/batch2_cognition_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test batch2_cognition_tests",
+      "tags": [
+        "destructive",
+        "rust",
+        "regression",
+        "memory",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_batch2_evals",
+      "title": "Rust test: crates/kria-core/tests/batch2_evals.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test batch2_evals",
+      "tags": [
+        "live",
+        "rust",
+        "regression",
+        "memory",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_batch2_final_evals",
+      "title": "Rust test: crates/kria-core/tests/batch2_final_evals.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test batch2_final_evals",
+      "tags": [
+        "live",
+        "rust",
+        "regression",
+        "memory",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_batch3_evals",
+      "title": "Rust test: crates/kria-core/tests/batch3_evals.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test batch3_evals",
+      "tags": [
+        "destructive",
+        "rust",
+        "regression",
+        "memory",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_bug_fix_tests",
+      "title": "Rust test: crates/kria-core/tests/bug_fix_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test bug_fix_tests",
+      "tags": [
+        "live",
+        "rust",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_cognitive_e2e_tests",
+      "title": "Rust test: crates/kria-core/tests/cognitive_e2e_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test cognitive_e2e_tests",
+      "tags": [
+        "destructive",
+        "rust",
+        "regression",
+        "memory",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_config_tests",
+      "title": "Rust test: crates/kria-core/tests/config_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test config_tests",
+      "tags": [
+        "live",
+        "rust",
+        "regression",
+        "voice",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_dangerous_live_tests",
+      "title": "Rust test: crates/kria-core/tests/dangerous_live_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test dangerous_live_tests",
+      "tags": [
+        "destructive",
+        "rust",
+        "regression",
+        "hitl",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_desktop_tests",
+      "title": "Rust test: crates/kria-core/tests/desktop_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test desktop_tests",
+      "tags": [
+        "safe",
+        "rust",
+        "regression"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_document_pipeline_test",
+      "title": "Rust test: crates/kria-core/tests/document_pipeline_test.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test document_pipeline_test",
+      "tags": [
+        "safe",
+        "rust",
+        "regression"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_environment_docker_tests",
+      "title": "Rust test: crates/kria-core/tests/environment_docker_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test environment_docker_tests",
+      "tags": [
+        "destructive",
+        "rust",
+        "regression",
+        "memory",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_eval_integration_tests",
+      "title": "Rust test: crates/kria-core/tests/eval_integration_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test eval_integration_tests",
+      "tags": [
+        "live",
+        "rust",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_hardware_tests",
+      "title": "Rust test: crates/kria-core/tests/hardware_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test hardware_tests",
+      "tags": [
+        "safe",
+        "rust",
+        "regression"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_i18n_tests",
+      "title": "Rust test: crates/kria-core/tests/i18n_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test i18n_tests",
+      "tags": [
+        "safe",
+        "rust",
+        "regression"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_image_generation_test",
+      "title": "Rust test: crates/kria-core/tests/image_generation_test.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test image_generation_test",
+      "tags": [
+        "safe",
+        "rust",
+        "regression"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_image_mode_test",
+      "title": "Rust test: crates/kria-core/tests/image_mode_test.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test image_mode_test",
+      "tags": [
+        "safe",
+        "rust",
+        "regression"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_integration_file_ops",
+      "title": "Rust test: crates/kria-core/tests/integration_file_ops.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test integration_file_ops",
+      "tags": [
+        "safe",
+        "rust",
+        "regression",
+        "file"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_integration_internet",
+      "title": "Rust test: crates/kria-core/tests/integration_internet.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test integration_internet",
+      "tags": [
+        "safe",
+        "rust",
+        "regression"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_issue_fix_tests",
+      "title": "Rust test: crates/kria-core/tests/issue_fix_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test issue_fix_tests",
+      "tags": [
+        "destructive",
+        "rust",
+        "regression",
+        "voice",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_live_collision_stress",
+      "title": "Rust test: crates/kria-core/tests/live_collision_stress.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test live_collision_stress",
+      "tags": [
+        "live",
+        "rust",
+        "regression",
+        "memory",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_live_tool_workflows_opt_in",
+      "title": "Rust test: crates/kria-core/tests/live_tool_workflows_opt_in.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test live_tool_workflows_opt_in",
+      "tags": [
+        "live",
+        "rust",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_mcp_prompt_output_integration_tests",
+      "title": "Rust test: crates/kria-core/tests/mcp_prompt_output_integration_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test mcp_prompt_output_integration_tests",
+      "tags": [
+        "live",
+        "rust",
+        "regression",
+        "memory",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_mcp_tests",
+      "title": "Rust test: crates/kria-core/tests/mcp_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test mcp_tests",
+      "tags": [
+        "safe",
+        "rust",
+        "regression"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_memory_tests",
+      "title": "Rust test: crates/kria-core/tests/memory_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test memory_tests",
+      "tags": [
+        "safe",
+        "rust",
+        "regression",
+        "memory"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_ml_orchestrator_e2e_tests",
+      "title": "Rust test: crates/kria-core/tests/ml_orchestrator_e2e_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test ml_orchestrator_e2e_tests",
+      "tags": [
+        "destructive",
+        "rust",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_openclaw_integration",
+      "title": "Rust test: crates/kria-core/tests/openclaw_integration.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test openclaw_integration",
+      "tags": [
+        "safe",
+        "rust",
+        "regression",
+        "memory"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_packages_tests",
+      "title": "Rust test: crates/kria-core/tests/packages_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test packages_tests",
+      "tags": [
+        "safe",
+        "rust",
+        "regression"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_phase05_sidecar_tests",
+      "title": "Rust test: crates/kria-core/tests/phase05_sidecar_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test phase05_sidecar_tests",
+      "tags": [
+        "live",
+        "rust",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_phase0_agent_loop_tests",
+      "title": "Rust test: crates/kria-core/tests/phase0_agent_loop_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test phase0_agent_loop_tests",
+      "tags": [
+        "destructive",
+        "rust",
+        "regression",
+        "memory",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_phase1_memory_tests",
+      "title": "Rust test: crates/kria-core/tests/phase1_memory_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test phase1_memory_tests",
+      "tags": [
+        "safe",
+        "rust",
+        "regression",
+        "memory"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_phase3_file_code_tests",
+      "title": "Rust test: crates/kria-core/tests/phase3_file_code_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test phase3_file_code_tests",
+      "tags": [
+        "destructive",
+        "rust",
+        "regression",
+        "hitl",
+        "file",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_phase5_voice_tests",
+      "title": "Rust test: crates/kria-core/tests/phase5_voice_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test phase5_voice_tests",
+      "tags": [
+        "safe",
+        "rust",
+        "regression",
+        "voice"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_phase6_feedback_tests",
+      "title": "Rust test: crates/kria-core/tests/phase6_feedback_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test phase6_feedback_tests",
+      "tags": [
+        "live",
+        "rust",
+        "regression",
+        "memory",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_phase6_intent_classifier_tests",
+      "title": "Rust test: crates/kria-core/tests/phase6_intent_classifier_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test phase6_intent_classifier_tests",
+      "tags": [
+        "destructive",
+        "rust",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_phase6_routing_context_tests",
+      "title": "Rust test: crates/kria-core/tests/phase6_routing_context_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test phase6_routing_context_tests",
+      "tags": [
+        "destructive",
+        "rust",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_phase6_speculative_tests",
+      "title": "Rust test: crates/kria-core/tests/phase6_speculative_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test phase6_speculative_tests",
+      "tags": [
+        "safe",
+        "rust",
+        "regression",
+        "voice"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_phase8_e2e_intelligence_tests",
+      "title": "Rust test: crates/kria-core/tests/phase8_e2e_intelligence_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test phase8_e2e_intelligence_tests",
+      "tags": [
+        "destructive",
+        "rust",
+        "regression",
+        "voice",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_proactive_tests",
+      "title": "Rust test: crates/kria-core/tests/proactive_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test proactive_tests",
+      "tags": [
+        "safe",
+        "rust",
+        "regression"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_psdg_finalization_tests",
+      "title": "Rust test: crates/kria-core/tests/psdg_finalization_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test psdg_finalization_tests",
+      "tags": [
+        "destructive",
+        "rust",
+        "regression",
+        "memory",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_psdg_integration_tests",
+      "title": "Rust test: crates/kria-core/tests/psdg_integration_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test psdg_integration_tests",
+      "tags": [
+        "live",
+        "rust",
+        "regression",
+        "memory",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_quality_hallucination_tests",
+      "title": "Rust test: crates/kria-core/tests/quality_hallucination_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test quality_hallucination_tests",
+      "tags": [
+        "live",
+        "rust",
+        "regression",
+        "memory",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_rag_tests",
+      "title": "Rust test: crates/kria-core/tests/rag_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test rag_tests",
+      "tags": [
+        "safe",
+        "rust",
+        "regression",
+        "memory"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_report_contract_tests",
+      "title": "Rust test: crates/kria-core/tests/report_contract_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test report_contract_tests",
+      "tags": [
+        "safe",
+        "rust",
+        "regression"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_safety_tests",
+      "title": "Rust test: crates/kria-core/tests/safety_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test safety_tests",
+      "tags": [
+        "destructive",
+        "rust",
+        "regression",
+        "hitl",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_test_chat_regression",
+      "title": "Rust test: crates/kria-core/tests/test_chat_regression.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test test_chat_regression",
+      "tags": [
+        "live",
+        "rust",
+        "regression",
+        "memory",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_test_memory_knowledge",
+      "title": "Rust test: crates/kria-core/tests/test_memory_knowledge.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test test_memory_knowledge",
+      "tags": [
+        "destructive",
+        "rust",
+        "regression",
+        "memory",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_test_multistep",
+      "title": "Rust test: crates/kria-core/tests/test_multistep.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test test_multistep",
+      "tags": [
+        "safe",
+        "rust",
+        "regression",
+        "voice"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_test_safety_routing",
+      "title": "Rust test: crates/kria-core/tests/test_safety_routing.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test test_safety_routing",
+      "tags": [
+        "destructive",
+        "rust",
+        "regression",
+        "voice",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_test_smoke_system",
+      "title": "Rust test: crates/kria-core/tests/test_smoke_system.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test test_smoke_system",
+      "tags": [
+        "destructive",
+        "rust",
+        "regression",
+        "memory",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_test_vision",
+      "title": "Rust test: crates/kria-core/tests/test_vision.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test test_vision",
+      "tags": [
+        "live",
+        "rust",
+        "regression",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_tool_pipeline_integration_tests",
+      "title": "Rust test: crates/kria-core/tests/tool_pipeline_integration_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test tool_pipeline_integration_tests",
+      "tags": [
+        "live",
+        "rust",
+        "regression",
+        "memory",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_tool_registry_smoke_matrix",
+      "title": "Rust test: crates/kria-core/tests/tool_registry_smoke_matrix.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test tool_registry_smoke_matrix",
+      "tags": [
+        "safe",
+        "rust",
+        "regression"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_voice_live_tests",
+      "title": "Rust test: crates/kria-core/tests/voice_live_tests.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test voice_live_tests",
+      "tags": [
+        "destructive",
+        "rust",
+        "regression",
+        "voice",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_core_tests_workflow_multistep_evals",
+      "title": "Rust test: crates/kria-core/tests/workflow_multistep_evals.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-core --test workflow_multistep_evals",
+      "tags": [
+        "safe",
+        "rust",
+        "regression"
+      ],
+      "required_services": [],
+      "timeout_seconds": 600,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_server_tests_integration_api",
+      "title": "Rust test: crates/kria-server/tests/integration_api.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-server --test integration_api",
+      "tags": [
+        "live",
+        "rust",
+        "regression",
+        "voice",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    },
+    {
+      "id": "rust.kria_server_tests_integration_ws",
+      "title": "Rust test: crates/kria-server/tests/integration_ws.rs",
+      "driver": "backend_command",
+      "command": "cargo test -p kria-server --test integration_ws",
+      "tags": [
+        "live",
+        "rust",
+        "regression",
+        "hitl",
+        "slow"
+      ],
+      "required_services": [],
+      "timeout_seconds": 900,
+      "report_artifact_globs": []
+    }
+  ]
+}

@@ -1,0 +1,305 @@
+{
+  "schema_version": "kria.testing.scenarios.v1",
+  "scenarios": [
+    {
+      "id": "n8n.desktop_command.list_workflows",
+      "title": "Desktop Command Prompt E2E: list n8n workflows through send_message",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "n8n", "api", "desktop_chat", "desktop_command", "prompt_e2e", "routing", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "prompt": "Show me all n8n workflows I can run from KRIA",
+        "expected_reply_contains_any": ["workflow", "n8n", "available", "No n8n workflows"],
+        "expected_reply_not_contains_any": ["I don't have access", "I cannot access"],
+        "expected_json_paths": [
+          { "path": "desktop_command.path", "equals": "send_message" },
+          { "path": "desktop_command.ui_opened", "equals": false }
+        ]
+      }
+    },
+    {
+      "id": "n8n.desktop_command.create_http_movie_lookup",
+      "title": "Desktop Command Prompt E2E: create HTTP movie lookup draft",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "n8n", "api", "desktop_chat", "desktop_command", "prompt_e2e", "authoring", "regression"],
+      "required_services": ["kria_api", "n8n"],
+      "timeout_seconds": 180,
+      "inputs": {
+        "disposable_prefix": "KRIA Desktop Command E2E ${run_id}",
+        "prompt": "Create an n8n workflow named KRIA Desktop Command E2E ${run_id} Movie Lookup that receives a movie title and fetches movie details using HTTP",
+        "expected_status_any": ["draft_created", "validated"],
+        "expected_n8n_action": "create_authoring_draft",
+        "fail_on_generic_create_refusal": true,
+        "extract": {
+          "workflow_id": ["n8n.result.workflow.workflow_id", "n8n.result.workflow_id"],
+          "n8n_workflow_id": ["n8n.result.workflow.n8n_workflow_id", "n8n.result.n8n_workflow_id"]
+        },
+        "n8n_verifications": [
+          { "kind": "workflow_inactive", "var": "n8n_workflow_id" },
+          { "kind": "workflow_name_has_prefix", "var": "n8n_workflow_id", "prefix": "KRIA Desktop Command E2E ${run_id}" }
+        ],
+        "cleanup": {
+          "cleanup_kria_draft_workflow_ids": true,
+          "workflow_id_vars": ["workflow_id"]
+        }
+      }
+    },
+    {
+      "id": "n8n.desktop_command.update_exact_copy",
+      "title": "Desktop Command Prompt E2E: update exact workflow ID creates inactive copy",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "n8n", "api", "desktop_chat", "desktop_command", "prompt_e2e", "authoring", "management", "regression"],
+      "required_services": ["kria_api", "n8n"],
+      "timeout_seconds": 300,
+      "inputs": {
+        "disposable_prefix": "KRIA Desktop Command E2E ${run_id}",
+        "steps": [
+          {
+            "prompt": "Create an n8n workflow named KRIA Desktop Command E2E ${run_id} Update Source that receives a movie title and fetches movie details using HTTP",
+            "expected_status_any": ["draft_created", "validated"],
+            "expected_n8n_action": "create_authoring_draft",
+            "fail_on_generic_create_refusal": true,
+            "extract": {
+              "workflow_id": ["n8n.result.workflow.workflow_id", "n8n.result.workflow_id"],
+              "n8n_workflow_id": ["n8n.result.workflow.n8n_workflow_id", "n8n.result.n8n_workflow_id"]
+            },
+            "post_n8n_actions": [
+              { "kind": "store_workflow_hash", "var": "n8n_workflow_id", "output_var": "original_hash" }
+            ]
+          },
+          {
+            "prompt": "Update ${workflow_id} so it accepts title from prompt",
+            "expected_status_any": ["updated_copy_created", "draft_created"],
+            "expected_n8n_action": "create_updated_copy",
+            "forbidden_reply_contains_any": ["validation failed"],
+            "extract": {
+              "copy_workflow_id": ["n8n.result.workflow.workflow_id", "n8n.result.workflow_id"],
+              "copy_n8n_workflow_id": ["n8n.result.workflow.n8n_workflow_id", "n8n.result.n8n_workflow_id"]
+            },
+            "n8n_verifications": [
+              { "kind": "workflow_still_exists", "var": "n8n_workflow_id" },
+              { "kind": "workflow_hash_unchanged", "var": "n8n_workflow_id", "hash_var": "original_hash" },
+              { "kind": "workflow_inactive", "var": "copy_n8n_workflow_id" }
+            ]
+          }
+        ],
+        "cleanup": {
+          "cleanup_kria_draft_workflow_ids": true,
+          "workflow_id_vars": ["copy_workflow_id", "workflow_id"]
+        }
+      }
+    },
+    {
+      "id": "n8n.desktop_command.safe_delete_archive_offer",
+      "title": "Desktop Command Prompt E2E: delete prompt offers archive-safe flow",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "n8n", "api", "desktop_chat", "desktop_command", "prompt_e2e", "management", "regression"],
+      "required_services": ["kria_api", "n8n"],
+      "timeout_seconds": 240,
+      "inputs": {
+        "disposable_prefix": "KRIA Desktop Command E2E ${run_id}",
+        "steps": [
+          {
+            "prompt": "Create an n8n workflow named KRIA Desktop Command E2E ${run_id} Safe Delete Guard that receives a movie title and fetches movie details using HTTP",
+            "expected_status_any": ["draft_created", "validated"],
+            "expected_n8n_action": "create_authoring_draft",
+            "extract": {
+              "workflow_id": ["n8n.result.workflow.workflow_id", "n8n.result.workflow_id"],
+              "n8n_workflow_id": ["n8n.result.workflow.n8n_workflow_id", "n8n.result.n8n_workflow_id"]
+            }
+          },
+          {
+            "prompt": "Delete workflow ${workflow_id}",
+            "expected_status_any": ["offer_archive"],
+            "expected_reply_contains_any": ["Archive", "Danger"],
+            "n8n_verifications": [{ "kind": "workflow_still_exists", "var": "n8n_workflow_id" }]
+          }
+        ],
+        "cleanup": {
+          "cleanup_kria_draft_workflow_ids": true,
+          "workflow_id_vars": ["workflow_id"]
+        }
+      }
+    },
+    {
+      "id": "n8n.desktop_command.archive_workflow",
+      "title": "Desktop Command Prompt E2E: archive workflow through send_message",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "n8n", "api", "desktop_chat", "desktop_command", "prompt_e2e", "management", "regression"],
+      "required_services": ["kria_api", "n8n"],
+      "timeout_seconds": 240,
+      "inputs": {
+        "disposable_prefix": "KRIA Desktop Command E2E ${run_id}",
+        "steps": [
+          {
+            "prompt": "Create an n8n workflow named KRIA Desktop Command E2E ${run_id} Archive Target that receives a movie title and fetches movie details using HTTP",
+            "expected_status_any": ["draft_created", "validated"],
+            "expected_n8n_action": "create_authoring_draft",
+            "extract": {
+              "workflow_id": ["n8n.result.workflow.workflow_id", "n8n.result.workflow_id"],
+              "n8n_workflow_id": ["n8n.result.workflow.n8n_workflow_id", "n8n.result.n8n_workflow_id"]
+            }
+          },
+          {
+            "prompt": "Archive workflow ${workflow_id}",
+            "expected_status_any": ["archived"],
+            "expected_n8n_action": "archive_workflow",
+            "n8n_verifications": [{ "kind": "workflow_still_exists", "var": "n8n_workflow_id" }]
+          }
+        ],
+        "cleanup": {
+          "cleanup_kria_draft_workflow_ids": true,
+          "workflow_id_vars": ["workflow_id"]
+        }
+      }
+    },
+    {
+      "id": "n8n.desktop_command.restore_workflow",
+      "title": "Desktop Command Prompt E2E: restore archived workflow through send_message",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "n8n", "api", "desktop_chat", "desktop_command", "prompt_e2e", "management", "regression"],
+      "required_services": ["kria_api", "n8n"],
+      "timeout_seconds": 300,
+      "inputs": {
+        "disposable_prefix": "KRIA Desktop Command E2E ${run_id}",
+        "steps": [
+          {
+            "prompt": "Create an n8n workflow named KRIA Desktop Command E2E ${run_id} Restore Target that receives a movie title and fetches movie details using HTTP",
+            "expected_status_any": ["draft_created", "validated"],
+            "expected_n8n_action": "create_authoring_draft",
+            "extract": {
+              "workflow_id": ["n8n.result.workflow.workflow_id", "n8n.result.workflow_id"],
+              "n8n_workflow_id": ["n8n.result.workflow.n8n_workflow_id", "n8n.result.n8n_workflow_id"]
+            }
+          },
+          {
+            "prompt": "Archive workflow ${workflow_id}",
+            "expected_status_any": ["archived"],
+            "expected_n8n_action": "archive_workflow"
+          },
+          {
+            "prompt": "Restore workflow ${workflow_id}",
+            "expected_status_any": ["restored", "restored_needs_review"],
+            "expected_n8n_action": "restore_workflow",
+            "n8n_verifications": [{ "kind": "workflow_still_exists", "var": "n8n_workflow_id" }]
+          }
+        ],
+        "cleanup": {
+          "cleanup_kria_draft_workflow_ids": true,
+          "workflow_id_vars": ["workflow_id"]
+        }
+      }
+    },
+    {
+      "id": "n8n.desktop_command.permanent_delete_danger_only",
+      "title": "Desktop Command Prompt E2E: permanent delete shows danger flow only",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "n8n", "api", "desktop_chat", "desktop_command", "prompt_e2e", "management", "regression"],
+      "required_services": ["kria_api", "n8n"],
+      "timeout_seconds": 240,
+      "inputs": {
+        "disposable_prefix": "KRIA Desktop Command E2E ${run_id}",
+        "steps": [
+          {
+            "prompt": "Create an n8n workflow named KRIA Desktop Command E2E ${run_id} Danger Guard that receives a movie title and fetches movie details using HTTP",
+            "expected_status_any": ["draft_created", "validated"],
+            "expected_n8n_action": "create_authoring_draft",
+            "extract": {
+              "workflow_id": ["n8n.result.workflow.workflow_id", "n8n.result.workflow_id"],
+              "n8n_workflow_id": ["n8n.result.workflow.n8n_workflow_id", "n8n.result.n8n_workflow_id"]
+            },
+            "post_n8n_actions": [
+              { "kind": "store_workflow_hash", "var": "n8n_workflow_id", "output_var": "original_hash" }
+            ]
+          },
+          {
+            "prompt": "Permanently delete workflow ${workflow_id} from n8n",
+            "expected_status_any": ["danger_delete_requested"],
+            "expected_reply_contains_any": ["Danger", "permanent", "delete"],
+            "n8n_verifications": [
+              { "kind": "workflow_still_exists", "var": "n8n_workflow_id" },
+              { "kind": "workflow_hash_unchanged", "var": "n8n_workflow_id", "hash_var": "original_hash" }
+            ]
+          }
+        ],
+        "cleanup": {
+          "cleanup_kria_draft_workflow_ids": true,
+          "workflow_id_vars": ["workflow_id"]
+        }
+      }
+    },
+    {
+      "id": "n8n.desktop_command.unregistered_target_blocker",
+      "title": "Desktop Command Prompt E2E: unregistered n8n target does not fuzzy-select",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "n8n", "api", "desktop_chat", "desktop_command", "prompt_e2e", "routing", "regression"],
+      "required_services": ["kria_api", "n8n"],
+      "timeout_seconds": 180,
+      "inputs": {
+        "disposable_prefix": "KRIA Desktop Command E2E ${run_id}",
+        "steps": [
+          {
+            "prompt": "Update the ${n8n_workflow_name} workflow so it sends a weekly summary email",
+            "n8n_actions": [
+              {
+                "kind": "create_disposable_workflow",
+                "name": "KRIA Desktop Command E2E ${run_id} Unregistered Target",
+                "output_var": "n8n_workflow_id",
+                "name_output_var": "n8n_workflow_name"
+              }
+            ],
+            "expected_reply_contains_any": ["sync", "import", "not registered", "register", "review"],
+            "forbidden_n8n_actions": ["create_updated_copy", "archive_workflow", "restore_workflow"],
+            "n8n_verifications": [{ "kind": "workflow_still_exists", "var": "n8n_workflow_id" }]
+          }
+        ],
+        "cleanup": {
+          "delete_disposable_n8n_workflow_ids": true,
+          "n8n_workflow_id_vars": ["n8n_workflow_id"]
+        }
+      }
+    },
+    {
+      "id": "n8n.desktop_command.non_n8n_no_hijack",
+      "title": "Desktop Command Prompt E2E: non-n8n prompt is not hijacked",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "n8n", "api", "desktop_chat", "desktop_command", "prompt_e2e", "routing", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "prompt": "Search the web for Inception",
+        "expected_status_any": ["not_handled"],
+        "forbidden_json_paths": ["n8n.action", "n8n.routing.status"],
+        "forbidden_n8n_actions": ["create_authoring_draft", "create_updated_copy", "archive_workflow", "restore_workflow"]
+      }
+    },
+    {
+      "id": "n8n.desktop_command.cleanup_leftover_detector",
+      "title": "Desktop Command Prompt E2E: cleanup run-prefix disposable workflows",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "n8n", "api", "desktop_chat", "desktop_command", "prompt_e2e", "cleanup", "regression"],
+      "required_services": ["kria_api", "n8n"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "disposable_prefix": "KRIA Desktop Command E2E ${run_id}",
+        "steps": [
+          {
+            "prompt": "Search the web for Inception",
+            "expected_status_any": ["not_handled"],
+            "n8n_actions": [
+              { "kind": "delete_disposable_workflows_by_prefix", "prefix": "${run_prefix}" }
+            ],
+            "n8n_verifications": [
+              { "kind": "no_workflows_with_run_prefix" }
+            ]
+          }
+        ],
+        "cleanup": {
+          "delete_disposable_n8n_run_prefix": true,
+          "prefix": "${run_prefix}"
+        }
+      }
+    }
+  ]
+}

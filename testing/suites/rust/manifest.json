@@ -1,0 +1,10 @@
+{
+  "schema_version": "kria.testing.suite.v1",
+  "suite_id": "rust",
+  "name": "KRIA Rust suite",
+  "scenario_files": [
+    "testing/suites/rust/scenarios/curated_ci.json",
+    "testing/suites/rust/scenarios/generated_inventory.json"
+  ],
+  "scenarios": []
+}

@@ -1,0 +1,10 @@
+{
+  "schema_version": "kria.testing.suite.v1",
+  "suite_id": "eval_engine",
+  "name": "KRIA eval engine suite",
+  "scenario_files": [
+    "testing/suites/eval_engine/scenarios/curated_ci.json",
+    "testing/suites/eval_engine/scenarios/generated_inventory.json"
+  ],
+  "scenarios": []
+}

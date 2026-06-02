@@ -9,6 +9,7 @@ import WorkflowSuggestionCard from "./WorkflowSuggestionCard";
 import {
   friendlyN8nError,
   n8nStore,
+  type N8nAuditFinding,
   type N8nPreparedWorkflowInput,
   type N8nRunState,
   type N8nWorkflow,
@@ -17,7 +18,7 @@ import {
   type WorkflowCandidate,
 } from "../stores/n8n";
 
-type N8nDashboardTab = "connect" | "workflows" | "add_workflow" | "runs";
+type N8nDashboardTab = "connect" | "health" | "workflows" | "add_workflow" | "runs";
 
 function normalize(value?: string): string {
   return String(value ?? "").trim().toLowerCase();
@@ -51,6 +52,20 @@ function durationLabel(ms?: number | null): string {
   const minutes = Math.floor(seconds / 60);
   const rest = seconds % 60;
   return rest ? `${minutes}m ${rest}s` : `${minutes}m`;
+}
+
+function auditTone(status?: string): string {
+  const value = normalize(status);
+  if (["ready", "ok"].includes(value)) return "ok";
+  if (["blocked", "critical"].includes(value)) return "danger";
+  if (["needs_fix", "high", "degraded", "warning", "needs_setup"].includes(value)) return "warn";
+  return "neutral";
+}
+
+function auditStatusLabel(status?: string): string {
+  const value = normalize(status);
+  if (!value) return "not checked";
+  return value.replace(/_/g, " ");
 }
 
 function compactValue(value: unknown): string {
@@ -97,6 +112,8 @@ const N8nWorkflowHub: Component = () => {
   const [historyLoading, setHistoryLoading] = createSignal(false);
   const [historyError, setHistoryError] = createSignal("");
   const [hitlActionMessage, setHitlActionMessage] = createSignal("");
+  const [auditMessage, setAuditMessage] = createSignal("");
+  const [confirmingAuditExport, setConfirmingAuditExport] = createSignal(false);
   const status = n8nStore.status;
   const sampleCount = createMemo(() => n8nStore.sampleWorkflows().length);
   const removingSamples = createMemo(() => n8nStore.managementBusyKey() === "samples:remove");
@@ -119,6 +136,10 @@ const N8nWorkflowHub: Component = () => {
   const runCount = createMemo(() => n8nStore.runs().length);
   const terminalCount = createMemo(() => n8nStore.terminalRuns().length);
   const activeCount = createMemo(() => n8nStore.runningRuns().length);
+  const audit = createMemo(() => n8nStore.productionAudit());
+  const auditBlockingCount = createMemo(
+    () => (audit()?.summary_counts?.critical ?? 0) + (audit()?.summary_counts?.high ?? 0)
+  );
   const apiKeyPresent = createMemo(() => Boolean(n8nStore.runtimeStatus()?.secret_sources?.api_key?.present));
   const lastConnection = createMemo(() => n8nStore.runtimeStatus()?.runtime?.last_connection);
   const runnerLabel = createMemo(() => {
@@ -137,6 +158,13 @@ const N8nWorkflowHub: Component = () => {
     return Object.entries(payload)
       .filter(([key]) => key !== "confirmed_by_user")
       .slice(0, 10);
+  });
+
+  const topAuditFindings = createMemo(() => {
+    const severityRank: Record<string, number> = { critical: 0, high: 1, warning: 2, info: 3 };
+    return [...(audit()?.findings ?? [])]
+      .sort((a, b) => (severityRank[normalize(a.severity)] ?? 9) - (severityRank[normalize(b.severity)] ?? 9))
+      .slice(0, 8);
   });
 
   onMount(() => {
@@ -223,6 +251,78 @@ const N8nWorkflowHub: Component = () => {
     await prepareWorkflowRunInput(workflow, prompt, candidate.suggested_input_payload ?? {});
   }
 
+  async function createDraftFromRoutePrompt() {
+    const prompt = n8nStore.workflowSuggestion()?.prompt || routePrompt();
+    if (!prompt.trim()) {
+      setRunError("Enter a workflow request before creating a draft.");
+      return;
+    }
+    setRunError("");
+    try {
+      await n8nStore.createWorkflowDraftFromPrompt(prompt);
+    } catch (err) {
+      setRunError(friendlyN8nError(err));
+    }
+  }
+
+  async function createUpdatedCopyFromRoutePrompt(candidate?: WorkflowCandidate) {
+    const prompt = n8nStore.workflowSuggestion()?.prompt || routePrompt();
+    const workflowId = candidate?.workflow_id;
+    if (!prompt.trim() || !workflowId) {
+      setRunError("Choose the workflow KRIA should update before creating a draft copy.");
+      return;
+    }
+    setRunError("");
+    try {
+      await n8nStore.createWorkflowUpdatedCopy(workflowId, prompt);
+    } catch (err) {
+      setRunError(friendlyN8nError(err));
+    }
+  }
+
+  function credentialFamily(value: string): string {
+    const lower = normalize(value);
+    if (lower.includes("gmail")) return "gmail";
+    if (lower.includes("sheets") || lower.includes("google")) return "google_sheets";
+    if (lower.includes("slack")) return "slack";
+    if (lower.includes("http") || lower.includes("header") || lower.includes("api")) return "http";
+    return "unknown";
+  }
+
+  async function autoMapAuthoringCredentials(workflow: N8nWorkflow) {
+    const requirements = (workflow.credential_requirements ?? []).filter((value) => {
+      const normalized = normalize(value);
+      return normalized && normalized !== "none";
+    });
+    if (!requirements.length) {
+      setRunError("This draft does not require n8n credentials.");
+      return;
+    }
+    setRunError("");
+    try {
+      const credentials = await n8nStore.loadCredentialSummaries();
+      const mappings = requirements.map((requirement) => {
+        const exact = credentials.filter((credential) => normalize(credential.credential_type) === normalize(requirement));
+        const family = credentialFamily(requirement);
+        const familyMatches = credentials.filter((credential) => normalize(credential.node_family) === family);
+        const matches = exact.length ? exact : familyMatches;
+        if (matches.length !== 1) return null;
+        return {
+          credentialType: requirement,
+          credentialId: matches[0].credential_id,
+          credentialName: matches[0].credential_name,
+        };
+      });
+      if (mappings.some((mapping) => !mapping)) {
+        setRunError("KRIA could not auto-map credentials. Open n8n credentials, make sure exactly one matching credential exists, then retry.");
+        return;
+      }
+      await n8nStore.saveAuthoringCredentialMapping(workflow.workflow_id, mappings as Array<{ credentialType: string; credentialId: string; credentialName?: string }>);
+    } catch (err) {
+      setRunError(friendlyN8nError(err));
+    }
+  }
+
   async function runPreparedInput() {
     const workflow = preparedWorkflow();
     const prepared = preparedInput();
@@ -297,6 +397,41 @@ const N8nWorkflowHub: Component = () => {
     );
   }
 
+  async function runProductionAudit() {
+    setAuditMessage("");
+    try {
+      const result = await n8nStore.runProductionAudit();
+      setAuditMessage(
+        result.stale_reason
+          ? `Audit completed, but result is stale: ${result.stale_reason}`
+          : `Audit completed: ${auditStatusLabel(result.overall_status)}.`
+      );
+    } catch (err) {
+      setAuditMessage(friendlyN8nError(err));
+    }
+  }
+
+  async function exportAuditBundle() {
+    setAuditMessage("");
+    setConfirmingAuditExport(false);
+    try {
+      const result = await n8nStore.exportProductionAuditBundle(false);
+      setAuditMessage(result?.message || `Audit bundle exported to ${result?.bundle_path || "eval reports"}.`);
+    } catch (err) {
+      setAuditMessage(friendlyN8nError(err));
+    }
+  }
+
+  async function repairAuditFinding(finding: N8nAuditFinding) {
+    setAuditMessage("");
+    try {
+      const result = await n8nStore.repairAuditFinding(finding);
+      setAuditMessage(result?.message || "Safe repair completed.");
+    } catch (err) {
+      setAuditMessage(friendlyN8nError(err));
+    }
+  }
+
   async function run(workflow: N8nWorkflow) {
     setRunError("");
     if (normalize(workflow.result_mode) === "monitor_only") {
@@ -314,8 +449,22 @@ const N8nWorkflowHub: Component = () => {
     }
   }
 
+  async function archive(workflow: N8nWorkflow) {
+    setRunError("");
+    const confirmed = window.confirm(
+      `Archive "${workflow.display_name || workflow.workflow_id}" in KRIA?\n\nThe workflow stays in n8n, but KRIA will hide it and stop chat routing to it.`
+    );
+    if (!confirmed) return;
+    try {
+      await n8nStore.archiveWorkflow(workflow.workflow_id);
+    } catch (err) {
+      setRunError(friendlyN8nError(err));
+    }
+  }
+
   const tabs: { id: N8nDashboardTab; label: string; summary: () => string }[] = [
     { id: "connect", label: "Connect n8n", summary: () => apiKeyPresent() ? "API key saved" : "setup" },
+    { id: "health", label: "Health", summary: () => audit()?.overall_status ? auditStatusLabel(audit()?.overall_status) : "audit" },
     { id: "workflows", label: "Ready to Run", summary: () => `${approvedCount()} approved` },
     { id: "add_workflow", label: "Add from n8n", summary: () => `${n8nStore.savedRuntimeProfiles().length} saved` },
     { id: "runs", label: "Run History", summary: () => `${runCount()} runs` },
@@ -364,6 +513,11 @@ const N8nWorkflowHub: Component = () => {
           <small>{approvedCount()} approved</small>
         </div>
         <div>
+          <span>Audit</span>
+          <strong>{auditStatusLabel(audit()?.overall_status)}</strong>
+          <small>{auditBlockingCount()} blocker{auditBlockingCount() === 1 ? "" : "s"}</small>
+        </div>
+        <div>
           <span>Runs</span>
           <strong>{runCount()} total</strong>
           <small>{activeCount()} active · {terminalCount()} completed</small>
@@ -394,6 +548,145 @@ const N8nWorkflowHub: Component = () => {
       <Show when={activeTab() === "connect"}>
         <section class="n8n-tab-panel">
           <N8nSettings />
+        </section>
+      </Show>
+
+      <Show when={activeTab() === "health"}>
+        <section class="n8n-tab-panel">
+          <div class="n8n-audit-hero">
+            <div>
+              <span class="n8n-hub-eyebrow">Production Audit</span>
+              <h4>Security and reliability check</h4>
+              <p>KRIA checks n8n connection, secrets, workflow setup, lifecycle, adapters, and output safety without running workflows.</p>
+            </div>
+            <div class="n8n-audit-actions">
+              <button
+                type="button"
+                class="btn-primary"
+                disabled={n8nStore.managementBusyKey() === "production-audit:run"}
+                onClick={() => void runProductionAudit()}
+              >
+                {n8nStore.managementBusyKey() === "production-audit:run" ? "Checking..." : "Run audit"}
+              </button>
+              <Show
+                when={confirmingAuditExport()}
+                fallback={
+                  <button type="button" class="btn-secondary" onClick={() => setConfirmingAuditExport(true)}>
+                    Export redacted bundle
+                  </button>
+                }
+              >
+                <button
+                  type="button"
+                  class="btn-secondary"
+                  disabled={n8nStore.managementBusyKey() === "production-audit:export"}
+                  onClick={() => void exportAuditBundle()}
+                >
+                  {n8nStore.managementBusyKey() === "production-audit:export" ? "Exporting..." : "Confirm export"}
+                </button>
+                <button type="button" class="btn-secondary" onClick={() => setConfirmingAuditExport(false)}>
+                  Cancel
+                </button>
+              </Show>
+            </div>
+          </div>
+
+          <Show when={auditMessage()}>
+            <div class="n8n-management-message" role="status">{auditMessage()}</div>
+          </Show>
+
+          <Show
+            when={audit()}
+            fallback={<div class="n8n-empty">Run an audit to check production readiness. No workflow will be executed.</div>}
+          >
+            {(report) => (
+              <>
+                <div class="n8n-audit-summary-grid">
+                  <div class={`n8n-audit-summary-card ${auditTone(report().overall_status)}`}>
+                    <span>n8n Health</span>
+                    <strong>{auditStatusLabel(report().overall_status)}</strong>
+                    <small>{report().stale_reason || `${report().findings.length} finding${report().findings.length === 1 ? "" : "s"}`}</small>
+                  </div>
+                  <div class={`n8n-audit-summary-card ${auditTone(report().security_status)}`}>
+                    <span>Security</span>
+                    <strong>{auditStatusLabel(report().security_status)}</strong>
+                    <small>{report().summary_counts.critical ?? 0} critical · {report().summary_counts.high ?? 0} high</small>
+                  </div>
+                  <div class={`n8n-audit-summary-card ${auditTone(report().reliability_status)}`}>
+                    <span>Reliability</span>
+                    <strong>{auditStatusLabel(report().reliability_status)}</strong>
+                    <small>Last checked {shortTime(report().generated_at_ms)}</small>
+                  </div>
+                </div>
+
+                <section class="n8n-audit-section">
+                  <div class="n8n-section-head">
+                    <h4>Adapter readiness</h4>
+                    <span>{report().adapter_readiness.length}</span>
+                  </div>
+                  <div class="n8n-audit-adapter-grid">
+                    <For each={report().adapter_readiness}>
+                      {(adapter) => (
+                        <div class={`n8n-audit-adapter-card ${auditTone(adapter.status)}`}>
+                          <strong>{adapter.adapter.replace(/_/g, " ")}</strong>
+                          <span>{auditStatusLabel(adapter.status)}</span>
+                          <small>{adapter.reason}</small>
+                        </div>
+                      )}
+                    </For>
+                  </div>
+                </section>
+
+                <section class="n8n-audit-section">
+                  <div class="n8n-section-head">
+                    <h4>Findings</h4>
+                    <span>{topAuditFindings().length}</span>
+                  </div>
+                  <Show
+                    when={topAuditFindings().length > 0}
+                    fallback={<div class="n8n-empty">No production audit findings. KRIA n8n is ready from this audit's point of view.</div>}
+                  >
+                    <div class="n8n-audit-finding-list">
+                      <For each={topAuditFindings()}>
+                        {(finding) => (
+                          <div class={`n8n-audit-finding ${auditTone(finding.severity)}`}>
+                            <div>
+                              <span>{finding.category} · {finding.severity}</span>
+                              <strong>{finding.title}</strong>
+                              <small>{finding.message}</small>
+                              <small>{finding.next_action}</small>
+                            </div>
+                            <div class="n8n-audit-finding-actions">
+                              <Show when={finding.affected_adapter}>
+                                <span class="n8n-badge">{finding.affected_adapter}</span>
+                              </Show>
+                              <Show when={finding.affected_workflow_id}>
+                                <span class="n8n-badge">{finding.affected_workflow_id}</span>
+                              </Show>
+                              <Show when={finding.safe_to_auto_fix && finding.repair_kind}>
+                                <button
+                                  type="button"
+                                  class="btn-secondary"
+                                  disabled={n8nStore.managementBusyKey() === `production-audit:repair:${finding.id}`}
+                                  onClick={() => void repairAuditFinding(finding)}
+                                >
+                                  {finding.repair_kind?.replace(/_/g, " ")}
+                                </button>
+                              </Show>
+                            </div>
+                            <details class="n8n-technical-details">
+                              <summary>Advanced finding details</summary>
+                              <pre>{JSON.stringify(finding, null, 2)}</pre>
+                            </details>
+                          </div>
+                        )}
+                      </For>
+                    </div>
+                  </Show>
+                </section>
+              </>
+            )}
+          </Show>
         </section>
       </Show>
 
@@ -450,8 +743,67 @@ const N8nWorkflowHub: Component = () => {
                   suggestion={suggestion()}
                   busy={n8nStore.runningWorkflowId() != null || inputMappingBusy()}
                   onConfirm={(candidate) => void confirmCandidate(candidate)}
+                  onCreateDraft={() => void createDraftFromRoutePrompt()}
+                  onCreateUpdatedCopy={(candidate) => void createUpdatedCopyFromRoutePrompt(candidate)}
                   onCancel={() => n8nStore.clearWorkflowSuggestion()}
                 />
+              )}
+            </Show>
+            <Show when={n8nStore.workflowAuthoringResult()}>
+              {(result) => (
+                <div class="n8n-input-preview">
+                  <div class="n8n-input-preview-head">
+                    <div>
+                      <strong>{result().workflow?.display_name || result().plan?.display_name || "KRIA-authored draft"}</strong>
+                      <span>{result().message || "Workflow authoring action completed."}</span>
+                    </div>
+                    <span class="n8n-status-pill ok">{result().status}</span>
+                  </div>
+                  <Show when={(result().workflow?.credential_requirements ?? result().plan?.credential_requirements ?? []).filter((item: string) => normalize(item) && normalize(item) !== "none").length > 0}>
+                    <div class="n8n-input-meta">
+                      <span>Credentials needed: {(result().workflow?.credential_requirements ?? result().plan?.credential_requirements ?? []).join(", ")}</span>
+                      <span>{result().plan?.credential_mapping_status || "map before test/approval"}</span>
+                    </div>
+                  </Show>
+                  <Show when={result().plan?.template_label || result().plan?.preferred_output_node}>
+                    <div class="n8n-input-meta">
+                      <span>Template: {result().plan?.template_label || result().plan?.template_id}</span>
+                      <span>Output: {result().plan?.preferred_output_node || "Prepare Result"}</span>
+                    </div>
+                  </Show>
+                  <Show when={result().workflow}>
+                    {(workflow) => (
+                      <div class="n8n-suggestion-actions">
+                        <Show when={(workflow().credential_requirements ?? []).filter((item) => normalize(item) && normalize(item) !== "none").length > 0}>
+                          <button
+                            type="button"
+                            class="btn-secondary"
+                            disabled={n8nStore.managementBusyKey() === `credentials:map:${workflow().workflow_id}`}
+                            onClick={() => void autoMapAuthoringCredentials(workflow())}
+                          >
+                            {n8nStore.managementBusyKey() === `credentials:map:${workflow().workflow_id}` ? "Mapping..." : "Auto-map credentials"}
+                          </button>
+                        </Show>
+                        <button
+                          type="button"
+                          class="btn-secondary"
+                          disabled={n8nStore.managementBusyKey() === `authoring:test:${workflow().workflow_id}`}
+                          onClick={() => void n8nStore.testWorkflowDraft(workflow().workflow_id, { source_prompt: routePrompt(), confirmed_by_user: true })}
+                        >
+                          Test draft
+                        </button>
+                        <button
+                          type="button"
+                          class="btn-primary"
+                          disabled={n8nStore.managementBusyKey() === `authoring:approve:${workflow().workflow_id}`}
+                          onClick={() => void n8nStore.approveWorkflowDraft(workflow().workflow_id)}
+                        >
+                          Approve draft
+                        </button>
+                      </div>
+                    )}
+                  </Show>
+                </div>
               )}
             </Show>
             <Show when={inputMappingBusy()}>
@@ -601,6 +953,7 @@ const N8nWorkflowHub: Component = () => {
                     isSample={n8nStore.workflowIsSample(workflow.workflow_id)}
                     onRun={run}
                     onRunNow={runNow}
+                    onArchive={archive}
                   />
                 )}
               </For>

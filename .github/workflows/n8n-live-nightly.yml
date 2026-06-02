@@ -1,0 +1,135 @@
+name: n8n Live Nightly
+
+on:
+  workflow_dispatch:
+    inputs:
+      cleanup_only:
+        description: "Run only n8n E2E cleanup scenario"
+        required: false
+        default: false
+        type: boolean
+      tauri_live_only:
+        description: "Run only the real Tauri Desktop n8n live E2E scenario"
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    - cron: "17 2 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: n8n-live-nightly
+  cancel-in-progress: false
+
+jobs:
+  n8n-live-prompt-e2e:
+    name: n8n live prompt E2E
+    runs-on: [self-hosted, linux, kria-n8n-live]
+    timeout-minutes: 75
+    env:
+      KRIA_API: http://127.0.0.1:3001
+      KRIA_API_BASE_URL: http://127.0.0.1:3001
+      N8N_BASE_URL: http://127.0.0.1:5678
+      KRIA_N8N_BASE_URL: http://127.0.0.1:5678
+      KRIA_N8N_API_KEY: ${{ secrets.KRIA_N8N_API_KEY }}
+      KRIA_DESKTOP_LIVE_E2E_DRIVER: tauri_driver
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install UI test dependencies
+        run: |
+          cd ui && npm ci
+          cd ../testing/suites/playwright && npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Preflight KRIA and n8n
+        shell: bash
+        run: |
+          curl -sf "$KRIA_API/api/health"
+          curl -sf "$N8N_BASE_URL/healthz" || curl -sf "$N8N_BASE_URL/"
+
+          if [ -z "${KRIA_N8N_API_KEY:-}" ] && [ -f "$HOME/.kria/secrets/n8n_api_key" ]; then
+            KRIA_N8N_API_KEY="$(tr -d '\r\n' < "$HOME/.kria/secrets/n8n_api_key")"
+            echo "::add-mask::$KRIA_N8N_API_KEY"
+            {
+              echo "KRIA_N8N_API_KEY<<EOF"
+              echo "$KRIA_N8N_API_KEY"
+              echo "EOF"
+            } >> "$GITHUB_ENV"
+          fi
+
+          test -n "${KRIA_N8N_API_KEY:-}"
+          curl -sf \
+            -H "X-N8N-API-KEY: $KRIA_N8N_API_KEY" \
+            "$N8N_BASE_URL/api/v1/workflows?limit=1" >/dev/null
+
+      - name: Preflight native Tauri driver
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.cleanup_only) }}
+        shell: bash
+        run: |
+          command -v tauri-driver
+          tauri-driver --version
+          if [ -n "${KRIA_TAURI_NATIVE_DRIVER_PATH:-}" ]; then
+            test -x "$KRIA_TAURI_NATIVE_DRIVER_PATH"
+          else
+            command -v WebKitWebDriver
+          fi
+          if [ -n "${KRIA_TAURI_APP_PATH:-}" ]; then
+            test -x "$KRIA_TAURI_APP_PATH"
+          else
+            command -v cargo
+            cargo tauri --version
+          fi
+
+      - name: Run cleanup-only scenario
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.cleanup_only }}
+        run: ./testing/run.sh scenario n8n.prompt_e2e.native.cleanup.cleanup_only --include-live --include-slow
+
+      - name: Run full n8n live prompt E2E
+        if: ${{ github.event_name != 'workflow_dispatch' || (!inputs.cleanup_only && !inputs.tauri_live_only) }}
+        run: ./testing/run.sh n8n --tag prompt_e2e --include-live --include-slow
+
+      - name: Run real Tauri Desktop n8n live E2E
+        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.cleanup_only }}
+        run: ./testing/run.sh n8n --tag tauri_live --include-live --include-slow
+
+      - name: Add n8n live report to job summary
+        if: always()
+        shell: bash
+        run: |
+          report="$(ls -t testing/eval_reports/kria_testing_n8n_*.md 2>/dev/null | grep -v '_ci_' | head -n 1 || true)"
+          if [ -n "$report" ]; then
+            cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No n8n live markdown report found." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload n8n live reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: n8n-live-nightly-reports
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            testing/eval_reports/kria_testing_n8n_*.json
+            testing/eval_reports/kria_testing_n8n_*.md
+            !testing/eval_reports/kria_testing_n8n_ci_*.json
+            !testing/eval_reports/kria_testing_n8n_ci_*.md
+            testing/eval_reports/n8n_desktop_live_tauri_driver_*.json
+            testing/eval_reports/n8n_desktop_live_tauri_driver_*.log
+            testing/eval_reports/n8n_prompt_e2e_*.txt
+            testing/eval_reports/n8n_ui_smoke_*.txt

@@ -443,6 +443,7 @@ vi.mock("../stores/n8n", () => ({
         allowed_actions: [],
       },
     ],
+    archivedWorkflows: () => [],
     discoveredWorkflows: () => [],
     executionHistory: () => null,
     runtimeProfileDrafts: () => [
@@ -464,6 +465,10 @@ vi.mock("../stores/n8n", () => ({
     saveProfileAsWorkflowDraft: saveProfileAsWorkflowDraftMock,
     approveWorkflow: vi.fn(async () => ({})),
     disableWorkflow: vi.fn(async () => ({})),
+    archiveWorkflow: vi.fn(async () => ({})),
+    restoreWorkflow: vi.fn(async () => ({})),
+    removeWorkflowFromKria: vi.fn(async () => ({})),
+    permanentlyDeleteWorkflow: vi.fn(async () => ({})),
     deleteWorkflow: vi.fn(async () => ({})),
     archiveLegacyTomlWorkflows: vi.fn(async () => ({})),
     refreshExecutionHistory: vi.fn(async () => ({})),

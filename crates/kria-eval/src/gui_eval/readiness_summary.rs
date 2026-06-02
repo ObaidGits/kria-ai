@@ -9,12 +9,27 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-const REPORT_DIR: &str = "tests-logs/eval_reports";
-const GUI_REPORT_PATH: &str = "tests-logs/eval_reports/gui_latest_run.json";
-const HITL_REPORT_PATH: &str = "tests-logs/eval_reports/hitl_timeline_latest_run.json";
-const LLM_REPORT_PATH: &str = "tests-logs/eval_reports/llm_cognition_latest_run.json";
-const DESTRUCTIVE_REPORT_PATH: &str = "tests-logs/eval_reports/destructive_safety_latest_run.json";
-const OBSERVABILITY_REPORT_PATH: &str = "tests-logs/eval_reports/observability_latest_run.json";
+const REPORT_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../eval_reports");
+const GUI_REPORT_PATH: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../eval_reports/gui_latest_run.json"
+);
+const HITL_REPORT_PATH: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../eval_reports/hitl_timeline_latest_run.json"
+);
+const LLM_REPORT_PATH: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../eval_reports/llm_cognition_latest_run.json"
+);
+const DESTRUCTIVE_REPORT_PATH: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../eval_reports/destructive_safety_latest_run.json"
+);
+const OBSERVABILITY_REPORT_PATH: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../eval_reports/observability_latest_run.json"
+);
 const TREND_LIMIT: usize = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

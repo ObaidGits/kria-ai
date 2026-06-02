@@ -10,12 +10,94 @@ const {
   listWorkflowExecutionsMock,
   viewWorkflowExecutionMock,
   resumeWaitingExecutionMock,
+  runProductionAuditMock,
+  loadProductionAuditSummaryMock,
+  exportProductionAuditBundleMock,
+  repairAuditFindingMock,
+  createWorkflowDraftFromPromptMock,
+  createWorkflowUpdatedCopyMock,
+  testWorkflowDraftMock,
+  approveWorkflowDraftMock,
   n8nMockState,
 } = vi.hoisted(() => {
-  const n8nMockState = { workflowSuggestion: null as any, runs: [] as any[] };
+  const productionAudit = {
+    schema_version: "kria.n8n.production_audit.v1",
+    generated_at_ms: 1780000000000,
+    expires_at_ms: 1780000300000,
+    overall_status: "degraded",
+    security_status: "ready",
+    reliability_status: "degraded",
+    adapter_readiness: [
+      {
+        adapter: "callback",
+        status: "ready",
+        affected_workflow_ids: ["test_workflow"],
+        reason: "Callback workflows have a signing secret.",
+      },
+      {
+        adapter: "webhook_polling",
+        status: "blocked",
+        affected_workflow_ids: ["daily_digest"],
+        reason: "Polling adapters need a valid n8n API key.",
+      },
+    ],
+    summary_counts: { critical: 0, high: 1, warning: 1, info: 0, total: 2 },
+    findings: [
+      {
+        id: "api_key_invalid",
+        category: "connection",
+        severity: "high",
+        title: "n8n API key is invalid or expired",
+        message: "KRIA can reach n8n, but API authentication failed.",
+        affected_workflow_id: null,
+        affected_adapter: "webhook_polling",
+        blocks_execution: true,
+        blocks_approval: true,
+        safe_to_auto_fix: false,
+        repair_kind: null,
+        next_action: "Refresh the n8n API key and test the connection.",
+      },
+    ],
+    recommended_actions: ["Refresh the n8n API key and test the connection."],
+    stale_reason: "",
+  };
+  const n8nMockState = {
+    workflowSuggestion: null as any,
+    workflowAuthoringResult: null as any,
+    runs: [] as any[],
+    productionAudit,
+  };
   return {
     n8nMockState,
     runWorkflowMock: vi.fn(async () => ({ correlation_id: "corr-smoke-1" })),
+    runProductionAuditMock: vi.fn(async () => n8nMockState.productionAudit),
+    loadProductionAuditSummaryMock: vi.fn(async () => n8nMockState.productionAudit),
+    exportProductionAuditBundleMock: vi.fn(async () => ({
+      status: "exported",
+      message: "Audit bundle exported.",
+    })),
+    repairAuditFindingMock: vi.fn(async () => ({
+      status: "repaired",
+      message: "Safe repair completed.",
+    })),
+    createWorkflowDraftFromPromptMock: vi.fn(async () => {
+      n8nMockState.workflowAuthoringResult = {
+        status: "draft_created",
+        message: "Inactive n8n draft created.",
+        workflow: { workflow_id: "authored_draft", workflow_version: "v1", display_name: "Authored Draft" },
+      };
+      return n8nMockState.workflowAuthoringResult;
+    }),
+    createWorkflowUpdatedCopyMock: vi.fn(async () => {
+      n8nMockState.workflowAuthoringResult = {
+        status: "updated_copy_created",
+        message: "Updated copy created.",
+        workflow: { workflow_id: "updated_draft", workflow_version: "v1", display_name: "Updated Draft" },
+      };
+      return n8nMockState.workflowAuthoringResult;
+    }),
+    testWorkflowDraftMock: vi.fn(async () => ({ status: "test_started" })),
+    approveWorkflowDraftMock: vi.fn(async () => ({ status: "approved" })),
     prepareWorkflowInputMock: vi.fn(async () => ({
       status: "ready",
       workflow_id: "test_workflow",
@@ -182,11 +264,22 @@ vi.mock("../stores/n8n", () => {
       runningWorkflowId: () => null,
       resumingHitlCorrelationId: () => null,
       workflowSuggestion: () => n8nMockState.workflowSuggestion,
+      workflowAuthoringResult: () => n8nMockState.workflowAuthoringResult,
+      productionAudit: () => n8nMockState.productionAudit,
       initialize: initializeMock,
       refresh: refreshMock,
+      runProductionAudit: runProductionAuditMock,
+      loadProductionAuditSummary: loadProductionAuditSummaryMock,
+      exportProductionAuditBundle: exportProductionAuditBundleMock,
+      repairAuditFinding: repairAuditFindingMock,
       suggestWorkflows: suggestWorkflowsMock,
+      createWorkflowDraftFromPrompt: createWorkflowDraftFromPromptMock,
+      createWorkflowUpdatedCopy: createWorkflowUpdatedCopyMock,
+      testWorkflowDraft: testWorkflowDraftMock,
+      approveWorkflowDraft: approveWorkflowDraftMock,
       clearWorkflowSuggestion: vi.fn(() => {
         n8nMockState.workflowSuggestion = null;
+        n8nMockState.workflowAuthoringResult = null;
       }),
       preparedWorkflowInput: () => null,
       prepareWorkflowInput: prepareWorkflowInputMock,
@@ -208,11 +301,20 @@ describe("N8nWorkflowHub smoke", () => {
     refreshMock.mockClear();
     initializeMock.mockClear();
     suggestWorkflowsMock.mockClear();
+    createWorkflowDraftFromPromptMock.mockClear();
+    createWorkflowUpdatedCopyMock.mockClear();
+    testWorkflowDraftMock.mockClear();
+    approveWorkflowDraftMock.mockClear();
     prepareWorkflowInputMock.mockClear();
     listWorkflowExecutionsMock.mockClear();
     viewWorkflowExecutionMock.mockClear();
     resumeWaitingExecutionMock.mockClear();
+    runProductionAuditMock.mockClear();
+    loadProductionAuditSummaryMock.mockClear();
+    exportProductionAuditBundleMock.mockClear();
+    repairAuditFindingMock.mockClear();
     n8nMockState.workflowSuggestion = null;
+    n8nMockState.workflowAuthoringResult = null;
     n8nMockState.runs = [];
   });
 
@@ -263,7 +365,7 @@ describe("N8nWorkflowHub smoke", () => {
     };
     render(() => <N8nWorkflowHub />);
 
-    await fireEvent.click(screen.getByRole("button", { name: /Confirm/i }));
+    await fireEvent.click(screen.getByRole("button", { name: "Review first" }));
 
     expect(prepareWorkflowInputMock).toHaveBeenCalledWith(
       expect.objectContaining({ workflow_id: "test_workflow" }),
@@ -293,6 +395,21 @@ describe("N8nWorkflowHub smoke", () => {
     await fireEvent.click(screen.getByRole("button", { name: /Add from n8n/i }));
     expect(screen.getByTestId("n8n-management-profiles-smoke")).toBeInTheDocument();
     expect(screen.queryByTestId("n8n-diagnostics-smoke")).not.toBeInTheDocument();
+  });
+
+  it("shows production audit readiness and runs a fresh audit from the Health tab", async () => {
+    render(() => <N8nWorkflowHub />);
+
+    await fireEvent.click(screen.getByRole("button", { name: /Health/i }));
+
+    expect(screen.getByText("Production Audit")).toBeInTheDocument();
+    expect(screen.getByText("n8n API key is invalid or expired")).toBeInTheDocument();
+    expect(screen.getByText("webhook polling")).toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole("button", { name: "Run audit" }));
+
+    expect(runProductionAuditMock).toHaveBeenCalled();
+    expect(await screen.findByText("Audit completed: degraded.")).toBeInTheDocument();
   });
 
   it("opens monitor execution history instead of workflow suggestion confirmation", async () => {

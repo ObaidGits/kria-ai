@@ -1,0 +1,14 @@
+{"id":"CR001","category":"inventory","prompt":"List of n8n workflows I have","expected_status":"list_workflows","expected_can_auto_run":false}
+{"id":"CR002","category":"inventory","prompt":"all workflows list","expected_status":"list_workflows","expected_can_auto_run":false}
+{"id":"CR003","category":"exact_positive","prompt":"Run fetch_movies","expected_status":"suggest_workflow","expected_top":"fetch_movies","expected_can_auto_run":false}
+{"id":"CR004","category":"manual_safe_auto_run","prompt":"Run fetch_movies","manual_n8n_mode":true,"expected_status":"ready_to_run","expected_top":"fetch_movies","expected_can_auto_run":true}
+{"id":"CR005","category":"natural_positive","prompt":"Find movie Inception","expected_status":"suggest_workflow","expected_top":"fetch_movies","expected_can_auto_run":false}
+{"id":"CR006","category":"yellow_confirmation","prompt":"Post update to Slack","expected_status":"confirm_required","expected_top":"slack_post_update","expected_can_auto_run":false}
+{"id":"CR007","category":"ambiguous","prompt":"email","expected_status":"ask_clarification","expected_can_auto_run":false}
+{"id":"CR008","category":"non_n8n_tool","prompt":"Search the web for Inception reviews","expected_status":"use_other_tool","expected_can_auto_run":false}
+{"id":"CR009","category":"non_n8n_tool","prompt":"Create file at /tmp/example.txt with contents 'hello'","expected_status":"use_other_tool","expected_can_auto_run":false}
+{"id":"CR010","category":"non_n8n_tool","prompt":"Open GitHub and search issues","expected_status":"use_other_tool","expected_can_auto_run":false}
+{"id":"CR011","category":"no_match","prompt":"Run totally_unknown_workflow","expected_status":"no_match","expected_can_auto_run":false}
+{"id":"CR012","category":"natural_positive","prompt":"What did I miss in email this morning","expected_status":"suggest_workflow","expected_top":"gmail_inbox_digest","expected_can_auto_run":false}
+{"id":"CR013","category":"authoring_create","prompt":"Create an n8n workflow that receives a movie title and returns details","expected_status":"create_workflow","expected_can_auto_run":false}
+{"id":"CR014","category":"authoring_update","prompt":"Update fetch_movies workflow so it accepts movie title from prompt","expected_status":"update_workflow","expected_top":"fetch_movies","expected_can_auto_run":false}

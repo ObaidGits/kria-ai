@@ -5,6 +5,8 @@ interface Props {
   suggestion: WorkflowSuggestionResponse;
   busy?: boolean;
   onConfirm: (candidate: WorkflowCandidate) => void;
+  onCreateDraft?: () => void;
+  onCreateUpdatedCopy?: (candidate?: WorkflowCandidate) => void;
   onCancel: () => void;
 }
 
@@ -23,6 +25,8 @@ function riskTone(risk?: string): string {
 }
 
 const WorkflowSuggestionCard: Component<Props> = (props) => {
+  const authoringStatus = () => ["create_workflow", "create_from_template", "update_workflow"].includes(props.suggestion.status);
+  const isUpdate = () => props.suggestion.status === "update_workflow";
   return (
     <section class="n8n-suggestion-card">
       <div class="n8n-suggestion-head">
@@ -35,13 +39,39 @@ const WorkflowSuggestionCard: Component<Props> = (props) => {
           <span class={`n8n-badge ${props.suggestion.hard_prompt ? "warn" : "neutral"}`}>
             {props.suggestion.hard_prompt ? "confirmation required" : "bounded"}
           </span>
-          <span class="n8n-badge danger">no auto-run</span>
+          <span class={`n8n-badge ${props.suggestion.can_auto_run ? "ok" : "danger"}`}>
+            {props.suggestion.can_auto_run ? "safe auto-run eligible" : "no silent auto-run"}
+          </span>
         </div>
       </div>
 
+      <Show when={authoringStatus()}>
+        <div class="n8n-authoring-card">
+          <strong>{isUpdate() ? "Create updated draft copy" : "Create inactive n8n draft"}</strong>
+          <p>
+            {isUpdate()
+              ? "KRIA will keep the original workflow unchanged and create an updated draft copy for review."
+              : "KRIA will create an inactive n8n draft first. Test and approval are required before normal routing."}
+          </p>
+          <div class="n8n-suggestion-actions">
+            <button
+              type="button"
+              class="btn-primary"
+              disabled={props.busy}
+              onClick={() => {
+                if (isUpdate()) props.onCreateUpdatedCopy?.(props.suggestion.candidates[0]);
+                else props.onCreateDraft?.();
+              }}
+            >
+              {isUpdate() ? "Create updated copy" : "Create draft"}
+            </button>
+          </div>
+        </div>
+      </Show>
+
       <Show
-        when={props.suggestion.candidates.length > 0}
-        fallback={<div class="n8n-empty">No approved workflow candidates matched this prompt.</div>}
+        when={!authoringStatus() && props.suggestion.candidates.length > 0}
+        fallback={!authoringStatus() ? <div class="n8n-empty">No approved workflow candidates matched this prompt.</div> : null}
       >
         <div class="n8n-candidate-list">
           <For each={props.suggestion.candidates}>
@@ -61,6 +91,16 @@ const WorkflowSuggestionCard: Component<Props> = (props) => {
                       Missing input: {candidate.missing_inputs?.slice(0, 3).join(", ")}
                     </p>
                   </Show>
+                  <Show when={(candidate.blockers?.length ?? 0) > 0}>
+                    <p class="n8n-candidate-warning">
+                      Blocked: {candidate.blockers?.slice(0, 2).join("; ")}
+                    </p>
+                  </Show>
+                  <Show when={(candidate.next_actions?.length ?? 0) > 0}>
+                    <p class="n8n-candidate-next">
+                      Next: {candidate.next_actions?.slice(0, 2).join(" · ")}
+                    </p>
+                  </Show>
                 </div>
                 <div class="n8n-candidate-side">
                   <span class={`n8n-badge ${badgeTone(candidate)}`}>
@@ -72,10 +112,10 @@ const WorkflowSuggestionCard: Component<Props> = (props) => {
                   <button
                     type="button"
                     class="btn-primary"
-                    disabled={props.busy || (candidate.missing_inputs?.length ?? 0) > 0}
+                    disabled={props.busy || (candidate.missing_inputs?.length ?? 0) > 0 || (candidate.blockers?.length ?? 0) > 0}
                     onClick={() => props.onConfirm(candidate)}
                   >
-                    Confirm
+                    {props.suggestion.can_auto_run && !candidate.requires_confirmation ? "Run" : "Review first"}
                   </button>
                 </div>
               </article>

@@ -61,10 +61,10 @@ lerna-debug.log*
 # ── UI & E2E build artifacts ──────────────────────────────────────
 /ui/dist/
 /ui/node_modules/
-/tests/e2e/node_modules/
-/tests/e2e/test-results/
-/tests/e2e/playwright-report/
-/tests/e2e/blob-report/
+/testing/suites/playwright/node_modules/
+/testing/suites/playwright/test-results/
+/testing/suites/playwright/playwright-report/
+/testing/suites/playwright/blob-report/
 
 # ── Logs ──────────────────────────────────────────────────────────
 *.log
@@ -105,7 +105,7 @@ test.png
 /target/test-sandbox/
 /target/quality-report.json
 /target-tests/
-/eval_reports/
+/testing/eval_reports/
 
 # ── IDE ──────────────────────────────────────────────────────────
 .idea/

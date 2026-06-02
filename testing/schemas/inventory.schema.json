@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kria.testing.inventory.v1",
+  "type": "object",
+  "required": ["schema_version", "generated_by", "entry_count", "summary", "entries"],
+  "properties": {
+    "schema_version": { "const": "kria.testing.inventory.v1" },
+    "generated_by": { "const": "testing/tools/collect_test_inventory.py" },
+    "entry_count": { "type": "integer", "minimum": 0 },
+    "summary": { "type": "object" },
+    "entries": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/inventory_entry" }
+    }
+  },
+  "$defs": {
+    "inventory_entry": {
+      "type": "object",
+      "required": [
+        "path",
+        "kind",
+        "suite_guess",
+        "suite_group",
+        "runner",
+        "safety",
+        "framework_native",
+        "current_command",
+        "central_command",
+        "centralized_status",
+        "migration_recommendation",
+        "delete_allowed_phase1",
+        "notes"
+      ],
+      "properties": {
+        "path": { "type": "string" },
+        "kind": {
+          "enum": [
+            "shell_script",
+            "rust_test",
+            "vitest_test",
+            "playwright_test",
+            "python_test",
+            "docs",
+            "workflow",
+            "harness_test",
+            "eval_engine"
+          ]
+        },
+        "suite_guess": {
+          "enum": [
+            "n8n",
+            "ui",
+            "rust",
+            "hitl",
+            "memory",
+            "voice",
+            "security_audit",
+            "release_gate",
+            "docs",
+            "unknown"
+          ]
+        },
+        "suite_group": {
+          "enum": [
+            "n8n",
+            "rust",
+            "ui_vitest",
+            "ui_playwright",
+            "hitl",
+            "memory",
+            "voice",
+            "security_audit",
+            "release_gate",
+            "docs",
+            "harness",
+            "eval_engine",
+            "unknown"
+          ]
+        },
+        "runner": {
+          "enum": [
+            "bash",
+            "cargo",
+            "vitest",
+            "playwright",
+            "python_unittest",
+            "pytest",
+            "github_actions",
+            "docs_only",
+            "cargo_eval",
+            "unknown"
+          ]
+        },
+        "safety": { "enum": ["safe", "live", "destructive", "unknown"] },
+        "framework_native": { "type": "boolean" },
+        "current_command": { "type": "string" },
+        "central_command": { "type": "string" },
+        "centralized_status": {
+          "enum": [
+            "native",
+            "registered_wrapper",
+            "legacy_unregistered",
+            "framework_native_unregistered",
+            "docs_only"
+          ]
+        },
+        "migration_recommendation": {
+          "enum": [
+            "keep_native",
+            "register_only",
+            "move_body_to_testing",
+            "move_directory",
+            "wrapper_later",
+            "remove_later"
+          ]
+        },
+        "delete_allowed_phase1": { "const": false },
+        "notes": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}

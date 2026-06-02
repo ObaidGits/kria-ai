@@ -39,6 +39,18 @@ export interface N8nWorkflow {
   generated_copy_n8n_verified?: boolean;
   test_execution_id?: string;
   test_result_preview?: string;
+  archived?: boolean;
+  archived_at_ms?: number;
+  archived_reason?: string;
+  archived_by?: string;
+  restored_at_ms?: number;
+  remove_from_kria_at_ms?: number;
+  n8n_deleted_at_ms?: number;
+  n8n_delete_status?: string;
+  backup_path?: string;
+  backup_hash?: string;
+  crud_lifecycle_status?: string;
+  crud_lifecycle_warnings?: string[];
   status: string;
   environment: string;
   risk_tier: string;
@@ -75,6 +87,8 @@ export interface WorkflowCandidate {
   requires_confirmation: boolean;
   suggested_input_payload?: any;
   missing_inputs?: string[];
+  blockers?: string[];
+  next_actions?: string[];
   reason: string;
 }
 
@@ -90,6 +104,64 @@ export interface WorkflowSuggestionResponse {
   hard_prompt: boolean;
   message: string;
   confirmation_hint?: string | null;
+}
+
+export interface N8nChatRouteDecision {
+  schema_version: string;
+  prompt: string;
+  reference: string;
+  status:
+    | "list_workflows"
+    | "ready_to_run"
+    | "confirm_required"
+    | "suggest_workflow"
+    | "ask_clarification"
+    | "blocked"
+    | "offer_archive"
+    | "danger_delete_requested"
+    | "create_workflow"
+    | "update_workflow"
+    | "create_from_template"
+    | "test_authoring_draft"
+    | "approve_authoring_draft"
+    | "cleanup_authoring_draft"
+    | "use_other_tool"
+    | "no_match";
+  selected_workflow?: WorkflowCandidate | null;
+  candidates: WorkflowCandidate[];
+  inventory?: Array<{ workflow_id: string; display_name: string; status: string; matched_on?: string[] }>;
+  input_payload_preview?: any;
+  missing_inputs?: string[];
+  blockers?: string[];
+  next_actions?: string[];
+  confidence: number;
+  reason: string;
+  message: string;
+  can_auto_run: boolean;
+  requires_confirmation: boolean;
+  ambiguous: boolean;
+  hard_prompt: boolean;
+  trace?: string[];
+}
+
+export interface N8nWorkflowAuthoringResult {
+  status: string;
+  message?: string;
+  plan?: any;
+  route?: N8nChatRouteDecision;
+  workflow?: N8nWorkflow;
+  operation?: any;
+  validation_report?: any;
+  workflow_json?: any;
+  result?: any;
+}
+
+export interface N8nCredentialSummary {
+  credential_id: string;
+  credential_name: string;
+  credential_type: string;
+  node_family: string;
+  redacted: boolean;
 }
 
 export interface N8nPreparedWorkflowInput {
@@ -191,6 +263,42 @@ export interface N8nStage3ReadinessReport {
   first_slice: string[];
 }
 
+export interface N8nAuditFinding {
+  id: string;
+  category: string;
+  severity: "info" | "warning" | "high" | "critical" | string;
+  title: string;
+  message: string;
+  affected_workflow_id?: string | null;
+  affected_adapter?: string | null;
+  blocks_execution: boolean;
+  blocks_approval: boolean;
+  safe_to_auto_fix: boolean;
+  repair_kind?: string | null;
+  next_action: string;
+}
+
+export interface N8nAuditAdapterReadiness {
+  adapter: string;
+  status: "ready" | "needs_setup" | "degraded" | "blocked" | "not_configured" | string;
+  affected_workflow_ids: string[];
+  reason: string;
+}
+
+export interface N8nProductionAuditReport {
+  schema_version: string;
+  generated_at_ms: number;
+  expires_at_ms: number;
+  overall_status: "ready" | "needs_fix" | "blocked" | "degraded" | string;
+  security_status: string;
+  reliability_status: string;
+  adapter_readiness: N8nAuditAdapterReadiness[];
+  summary_counts: Record<string, number>;
+  findings: N8nAuditFinding[];
+  recommended_actions: string[];
+  stale_reason?: string | null;
+}
+
 export interface N8nStatusPayload {
   enabled: boolean;
   mode?: string;
@@ -214,6 +322,7 @@ export interface N8nStatusPayload {
     workflow_count?: number;
     records?: any[];
     workflows?: N8nWorkflow[];
+    archived_workflows?: N8nWorkflow[];
   };
   legacy_toml_workflows?: {
     status: string;
@@ -309,6 +418,13 @@ export interface N8nRuntimeProfileDraft {
   last_lifecycle_checked_at_ms?: number;
   last_lifecycle_action?: string;
   generated_copy_n8n_verified?: boolean;
+  archived?: boolean;
+  archived_at_ms?: number;
+  archived_reason?: string;
+  archived_by?: string;
+  restored_at_ms?: number;
+  crud_lifecycle_status?: string;
+  crud_lifecycle_warnings?: string[];
   enrichment?: {
     schema_version: string;
     source: string;
@@ -584,6 +700,7 @@ const [savedRuntimeProfiles, setSavedRuntimeProfiles] = createSignal<N8nRuntimeP
 const [runtimeProfileStorePath, setRuntimeProfileStorePath] = createSignal<string>("");
 const [workflowLifecycleReports, setWorkflowLifecycleReports] = createSignal<N8nLifecycleReport[]>([]);
 const [copyLifecycleOperations, setCopyLifecycleOperations] = createSignal<N8nCopyLifecycleOperation[]>([]);
+const [productionAudit, setProductionAudit] = createSignal<N8nProductionAuditReport | null>(null);
 const [lastProfileSyncAt, setLastProfileSyncAt] = createSignal<number | null>(null);
 const [loading, setLoading] = createSignal(false);
 const [error, setError] = createSignal<string | null>(null);
@@ -599,7 +716,11 @@ const [runningWorkflowId, setRunningWorkflowId] = createSignal<string | null>(nu
 const [resumingHitlCorrelationId, setResumingHitlCorrelationId] = createSignal<string | null>(null);
 const [pendingRuns, setPendingRuns] = createSignal<N8nRunState[]>([]);
 const [workflowSuggestion, setWorkflowSuggestion] = createSignal<WorkflowSuggestionResponse | null>(null);
+const [chatRouteDecision, setChatRouteDecision] = createSignal<N8nChatRouteDecision | null>(null);
 const [preparedWorkflowInput, setPreparedWorkflowInput] = createSignal<N8nPreparedWorkflowInput | null>(null);
+const [workflowAuthoringResult, setWorkflowAuthoringResult] = createSignal<N8nWorkflowAuthoringResult | null>(null);
+const [workflowAuthoringSessions, setWorkflowAuthoringSessions] = createSignal<any[]>([]);
+const [credentialSummaries, setCredentialSummaries] = createSignal<N8nCredentialSummary[]>([]);
 let initialized = false;
 let unlisteners: Array<() => void> = [];
 let refreshPromise: Promise<N8nStatusPayload | null> | null = null;
@@ -758,6 +879,15 @@ export function isDeletingWorkflow(workflowId: string): boolean {
 export const configuredWorkflows = createMemo(() =>
   (status()?.configured_workflows ?? []).filter((workflow) => !workflowIsHidden(workflow.workflow_id))
 );
+
+export const archivedWorkflows = createMemo(() => {
+  const direct = status()?.workflow_registry?.archived_workflows ?? [];
+  if (direct.length > 0) return direct;
+  const records = (status()?.workflow_registry?.records ?? []) as any[];
+  return records
+    .map((record) => record?.workflow ?? record)
+    .filter((workflow) => workflow?.archived || workflow?.n8n_deleted_at_ms || workflow?.n8n_delete_status);
+});
 
 export const approvedWorkflows = createMemo(() =>
   configuredWorkflows().filter((workflow) => normalize(workflow.status) === "approved")
@@ -1452,6 +1582,74 @@ export async function continuePendingCopyOperation(operationId: string): Promise
   }
 }
 
+export async function runProductionAudit(): Promise<N8nProductionAuditReport> {
+  setManagementBusyKey("production-audit:run");
+  setManagementError(null);
+  try {
+    const result = await invoke<N8nProductionAuditReport>("run_n8n_production_audit");
+    setProductionAudit(result);
+    return result;
+  } catch (err) {
+    const message = friendlyN8nError(err);
+    setManagementError(message);
+    throw err;
+  } finally {
+    setManagementBusyKey(null);
+  }
+}
+
+export async function loadProductionAuditSummary(): Promise<N8nProductionAuditReport | null> {
+  try {
+    const result = await invoke<N8nProductionAuditReport>("get_n8n_production_audit_summary");
+    setProductionAudit(result);
+    return result;
+  } catch {
+    return null;
+  }
+}
+
+export async function exportProductionAuditBundle(includeWorkflowLabels = false): Promise<any> {
+  setManagementBusyKey("production-audit:export");
+  setManagementError(null);
+  try {
+    return await invoke<any>("export_n8n_production_audit_bundle", {
+      request: { privacyMode: "private", includeWorkflowLabels },
+    });
+  } catch (err) {
+    const message = friendlyN8nError(err);
+    setManagementError(message);
+    throw err;
+  } finally {
+    setManagementBusyKey(null);
+  }
+}
+
+export async function repairAuditFinding(finding: N8nAuditFinding): Promise<any> {
+  if (!finding.repair_kind) throw new Error("This finding does not have a safe repair.");
+  const key = `production-audit:repair:${finding.id}`;
+  setManagementBusyKey(key);
+  setManagementError(null);
+  try {
+    const result = await invoke<any>("repair_n8n_audit_finding", {
+      request: {
+        findingId: finding.id,
+        repairKind: finding.repair_kind,
+        confirmed: true,
+        workflowId: finding.affected_workflow_id || undefined,
+      },
+    });
+    await runProductionAudit();
+    await refreshN8nStatus();
+    return result;
+  } catch (err) {
+    const message = friendlyN8nError(err);
+    setManagementError(message);
+    throw err;
+  } finally {
+    setManagementBusyKey(null);
+  }
+}
+
 export async function createCodeInputAwareCopy(
   profile: N8nRuntimeProfileDraft,
   patches: N8nCodePatchReview[] = [],
@@ -1555,9 +1753,50 @@ export async function disableWorkflow(workflowId: string): Promise<any> {
   }
 }
 
-export async function deleteWorkflow(workflowId: string): Promise<any> {
+export async function archiveWorkflow(workflowId: string, reason = "Archived from KRIA Dashboard"): Promise<any> {
   const cleanWorkflowId = workflowId.trim();
-  const key = `delete:${cleanWorkflowId}`;
+  const key = `archive:${cleanWorkflowId}`;
+  setManagementBusyKey(key);
+  setManagementError(null);
+  hideWorkflowLocally(cleanWorkflowId);
+  try {
+    const result = await invoke<any>("archive_n8n_workflow", {
+      request: { workflowId: cleanWorkflowId, reason, requestedBy: "kria-ui" },
+    });
+    await refreshN8nStatus();
+    return result;
+  } catch (err) {
+    setManagementError(String(err));
+    restoreHiddenWorkflow(cleanWorkflowId);
+    await refreshN8nStatus();
+    throw err;
+  } finally {
+    setManagementBusyKey(null);
+  }
+}
+
+export async function restoreWorkflow(workflowId: string): Promise<any> {
+  const cleanWorkflowId = workflowId.trim();
+  const key = `restore:${cleanWorkflowId}`;
+  setManagementBusyKey(key);
+  setManagementError(null);
+  try {
+    const result = await invoke<any>("restore_n8n_workflow", {
+      request: { workflowId: cleanWorkflowId },
+    });
+    await refreshN8nStatus();
+    return result;
+  } catch (err) {
+    setManagementError(String(err));
+    throw err;
+  } finally {
+    setManagementBusyKey(null);
+  }
+}
+
+export async function removeWorkflowFromKria(workflowId: string): Promise<any> {
+  const cleanWorkflowId = workflowId.trim();
+  const key = `remove:${cleanWorkflowId}`;
   if (isDeletingWorkflow(cleanWorkflowId)) {
     return { status: "pending", workflow_id: cleanWorkflowId };
   }
@@ -1568,7 +1807,9 @@ export async function deleteWorkflow(workflowId: string): Promise<any> {
   );
   hideWorkflowLocally(cleanWorkflowId);
   try {
-    const result = await invoke<any>("delete_n8n_workflow", { workflowId: cleanWorkflowId });
+    const result = await invoke<any>("remove_n8n_workflow_from_kria", {
+      request: { workflowId: cleanWorkflowId, confirmed: true },
+    });
     await refreshN8nStatus();
     return result;
   } catch (err) {
@@ -1587,6 +1828,56 @@ export async function deleteWorkflow(workflowId: string): Promise<any> {
     throw err;
   } finally {
     setDeletingWorkflowIds((previous) => previous.filter((id) => id !== cleanWorkflowId));
+    setManagementBusyKey(null);
+  }
+}
+
+export async function deleteWorkflow(workflowId: string): Promise<any> {
+  return removeWorkflowFromKria(workflowId);
+}
+
+export async function permanentlyDeleteWorkflow(
+  workflowId: string,
+  typedConfirmation: string,
+  understandCheckbox: boolean,
+): Promise<any> {
+  const cleanWorkflowId = workflowId.trim();
+  const key = `danger-delete:${cleanWorkflowId}`;
+  setManagementBusyKey(key);
+  setManagementError(null);
+  try {
+    const result = await invoke<any>("delete_n8n_workflow_permanently", {
+      request: { workflowId: cleanWorkflowId, typedConfirmation, understandCheckbox },
+    });
+    await refreshN8nStatus();
+    return result;
+  } catch (err) {
+    setManagementError(String(err));
+    await refreshN8nStatus();
+    throw err;
+  } finally {
+    setManagementBusyKey(null);
+  }
+}
+
+export async function listArchivedWorkflows(): Promise<N8nWorkflow[]> {
+  const result = await invoke<any>("list_archived_n8n_workflows");
+  return Array.isArray(result?.workflows) ? result.workflows : [];
+}
+
+export async function restoreWorkflowFromBackup(backupPath: string): Promise<any> {
+  setManagementBusyKey("restore-backup");
+  setManagementError(null);
+  try {
+    const result = await invoke<any>("restore_n8n_workflow_from_backup", {
+      request: { backupPath, restoreMode: "new_draft_copy" },
+    });
+    await refreshN8nStatus();
+    return result;
+  } catch (err) {
+    setManagementError(String(err));
+    throw err;
+  } finally {
     setManagementBusyKey(null);
   }
 }
@@ -1652,8 +1943,205 @@ export async function suggestWorkflows(prompt: string): Promise<WorkflowSuggesti
   return result;
 }
 
+export async function routeChatPrompt(
+  prompt: string,
+  options: {
+    previousUserPrompt?: string | null;
+    manualN8nMode?: boolean;
+    safeAutoRunEnabled?: boolean;
+  } = {},
+): Promise<N8nChatRouteDecision> {
+  const cleanPrompt = prompt.trim();
+  if (!cleanPrompt) {
+    throw new Error("Enter a workflow request before routing.");
+  }
+  setError(null);
+  const result = await invoke<N8nChatRouteDecision>("route_n8n_chat_prompt", {
+    request: {
+      prompt: cleanPrompt,
+      previousUserPrompt: options.previousUserPrompt ?? null,
+      manualN8nMode: Boolean(options.manualN8nMode),
+      safeAutoRunEnabled: Boolean(options.safeAutoRunEnabled),
+    },
+  });
+  setChatRouteDecision(result);
+  return result;
+}
+
+export async function analyzeWorkflowAuthoringRequest(prompt: string, workflowId?: string): Promise<N8nWorkflowAuthoringResult> {
+  const cleanPrompt = prompt.trim();
+  if (!cleanPrompt) {
+    throw new Error("Enter a workflow request before authoring.");
+  }
+  setError(null);
+  const result = await invoke<N8nWorkflowAuthoringResult>("analyze_n8n_workflow_authoring_request", {
+    request: {
+      prompt: cleanPrompt,
+      workflowId: workflowId || null,
+    },
+  });
+  setWorkflowAuthoringResult(result);
+  return result;
+}
+
+export async function generateWorkflowDraftPlan(prompt: string, workflowId?: string): Promise<N8nWorkflowAuthoringResult> {
+  const cleanPrompt = prompt.trim();
+  if (!cleanPrompt) {
+    throw new Error("Enter a workflow request before generating a draft.");
+  }
+  setError(null);
+  const result = await invoke<N8nWorkflowAuthoringResult>("generate_n8n_workflow_draft_plan", {
+    request: {
+      prompt: cleanPrompt,
+      workflowId: workflowId || null,
+    },
+  });
+  setWorkflowAuthoringResult(result);
+  return result;
+}
+
+export async function createWorkflowDraftFromPrompt(prompt: string, workflowId?: string, displayName?: string): Promise<N8nWorkflowAuthoringResult> {
+  const cleanPrompt = prompt.trim();
+  if (!cleanPrompt) {
+    throw new Error("Enter a workflow request before creating a draft.");
+  }
+  setManagementBusyKey("authoring:create");
+  setError(null);
+  try {
+    const result = await invoke<N8nWorkflowAuthoringResult>("create_n8n_workflow_draft_in_n8n", {
+      request: {
+        prompt: cleanPrompt,
+        workflowId: workflowId || null,
+        displayName: displayName || null,
+      },
+    });
+    setWorkflowAuthoringResult(result);
+    await refreshN8nStatus();
+    return result;
+  } catch (err) {
+    setError(friendlyN8nError(err));
+    throw err;
+  } finally {
+    setManagementBusyKey(null);
+  }
+}
+
+export async function previewWorkflowUpdateDiff(sourceWorkflowId: string, prompt: string): Promise<N8nWorkflowAuthoringResult> {
+  const result = await invoke<N8nWorkflowAuthoringResult>("preview_n8n_workflow_update_diff", {
+    request: { sourceWorkflowId, prompt },
+  });
+  setWorkflowAuthoringResult(result);
+  return result;
+}
+
+export async function createWorkflowUpdatedCopy(sourceWorkflowId: string, prompt: string): Promise<N8nWorkflowAuthoringResult> {
+  setManagementBusyKey(`authoring:update:${sourceWorkflowId}`);
+  setError(null);
+  try {
+    const result = await invoke<N8nWorkflowAuthoringResult>("create_n8n_workflow_updated_copy", {
+      request: { sourceWorkflowId, prompt },
+    });
+    setWorkflowAuthoringResult(result);
+    await refreshN8nStatus();
+    return result;
+  } catch (err) {
+    setError(friendlyN8nError(err));
+    throw err;
+  } finally {
+    setManagementBusyKey(null);
+  }
+}
+
+export async function testWorkflowDraft(workflowId: string, inputPayload: any = {}): Promise<N8nWorkflowAuthoringResult> {
+  setManagementBusyKey(`authoring:test:${workflowId}`);
+  try {
+    const result = await invoke<N8nWorkflowAuthoringResult>("test_n8n_workflow_draft", {
+      request: { workflowId, inputPayload, confirmed: true },
+    });
+    setWorkflowAuthoringResult(result);
+    await refreshN8nStatus();
+    return result;
+  } finally {
+    setManagementBusyKey(null);
+  }
+}
+
+export async function approveWorkflowDraft(workflowId: string): Promise<N8nWorkflowAuthoringResult> {
+  setManagementBusyKey(`authoring:approve:${workflowId}`);
+  try {
+    const result = await invoke<N8nWorkflowAuthoringResult>("approve_n8n_workflow_draft", {
+      request: { workflowId, confirmed: true },
+    });
+    setWorkflowAuthoringResult(result);
+    await refreshN8nStatus();
+    return result;
+  } finally {
+    setManagementBusyKey(null);
+  }
+}
+
+export async function cleanupWorkflowDraft(workflowId: string, deleteN8nDraft = false): Promise<N8nWorkflowAuthoringResult> {
+  setManagementBusyKey(`authoring:cleanup:${workflowId}`);
+  try {
+    const result = await invoke<N8nWorkflowAuthoringResult>("cleanup_n8n_workflow_draft", {
+      request: { workflowId, deleteN8nDraft },
+    });
+    setWorkflowAuthoringResult(result);
+    await refreshN8nStatus();
+    return result;
+  } finally {
+    setManagementBusyKey(null);
+  }
+}
+
+export async function loadWorkflowAuthoringSessions(): Promise<any[]> {
+  const result = await invoke<any>("get_n8n_workflow_authoring_sessions");
+  const operations = result?.operations ?? [];
+  setWorkflowAuthoringSessions(operations);
+  return operations;
+}
+
+export async function loadCredentialSummaries(): Promise<N8nCredentialSummary[]> {
+  setManagementBusyKey("credentials:list");
+  setError(null);
+  try {
+    const result = await invoke<any>("list_n8n_credential_summaries");
+    const credentials = (result?.credentials ?? []) as N8nCredentialSummary[];
+    setCredentialSummaries(credentials);
+    return credentials;
+  } catch (err) {
+    setError(friendlyN8nError(err));
+    throw err;
+  } finally {
+    setManagementBusyKey(null);
+  }
+}
+
+export async function saveAuthoringCredentialMapping(
+  workflowId: string,
+  mappings: Array<{ credentialType: string; credentialId: string; credentialName?: string }>,
+): Promise<N8nWorkflowAuthoringResult> {
+  setManagementBusyKey(`credentials:map:${workflowId}`);
+  setError(null);
+  try {
+    const result = await invoke<N8nWorkflowAuthoringResult>("save_n8n_authoring_credential_mapping", {
+      request: { workflowId, mappings },
+    });
+    setWorkflowAuthoringResult(result);
+    await refreshN8nStatus();
+    return result;
+  } catch (err) {
+    setError(friendlyN8nError(err));
+    throw err;
+  } finally {
+    setManagementBusyKey(null);
+  }
+}
+
 export function clearWorkflowSuggestion() {
   setWorkflowSuggestion(null);
+  setChatRouteDecision(null);
+  setWorkflowAuthoringResult(null);
 }
 
 export async function prepareWorkflowInput(
@@ -1846,11 +2334,11 @@ export async function reconcileRun(correlationId: string) {
 
 export async function initializeN8nStore() {
   if (initialized) {
-    await Promise.all([refreshN8nStatus(), loadRuntimeProfiles().catch(() => [])]);
+    await Promise.all([refreshN8nStatus(), loadRuntimeProfiles().catch(() => []), loadProductionAuditSummary()]);
     return;
   }
   initialized = true;
-  await Promise.all([refreshN8nStatus(), loadRuntimeProfiles().catch(() => [])]);
+  await Promise.all([refreshN8nStatus(), loadRuntimeProfiles().catch(() => []), loadProductionAuditSummary()]);
   unlisteners = await Promise.all([
     listen("n8n:callback", () => {
       void refreshN8nStatus();
@@ -1903,6 +2391,7 @@ export const n8nStore = {
   runtimeProfileStorePath,
   workflowLifecycleReports,
   copyLifecycleOperations,
+  productionAudit,
   lastProfileSyncAt,
   loading,
   error,
@@ -1921,8 +2410,13 @@ export const n8nStore = {
   runningWorkflowId,
   resumingHitlCorrelationId,
   workflowSuggestion,
+  chatRouteDecision,
   preparedWorkflowInput,
+  workflowAuthoringResult,
+  workflowAuthoringSessions,
+  credentialSummaries,
   configuredWorkflows,
+  archivedWorkflows,
   approvedWorkflows,
   sampleWorkflowIds,
   sampleWorkflows,
@@ -1964,13 +2458,35 @@ export const n8nStore = {
   refreshLifecycleItem,
   continuePendingCopyOperation,
   cleanupGeneratedCopy,
+  runProductionAudit,
+  loadProductionAuditSummary,
+  exportProductionAuditBundle,
+  repairAuditFinding,
   approveWorkflow,
   disableWorkflow,
+  archiveWorkflow,
+  restoreWorkflow,
+  removeWorkflowFromKria,
+  permanentlyDeleteWorkflow,
+  listArchivedWorkflows,
+  restoreWorkflowFromBackup,
   deleteWorkflow,
   removeSampleWorkflows,
   archiveLegacyTomlWorkflows,
   refreshExecutionHistory,
   suggestWorkflows,
+  routeChatPrompt,
+  analyzeWorkflowAuthoringRequest,
+  generateWorkflowDraftPlan,
+  createWorkflowDraftFromPrompt,
+  previewWorkflowUpdateDiff,
+  createWorkflowUpdatedCopy,
+  testWorkflowDraft,
+  approveWorkflowDraft,
+  cleanupWorkflowDraft,
+  loadWorkflowAuthoringSessions,
+  loadCredentialSummaries,
+  saveAuthoringCredentialMapping,
   clearWorkflowSuggestion,
   prepareWorkflowInput,
   clearPreparedWorkflowInput,

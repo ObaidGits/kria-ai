@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kria.testing.report.v1",
+  "type": "object",
+  "required": ["schema_version", "run_id", "suite_id", "started_at_ms", "ended_at_ms", "status", "summary", "scenarios"],
+  "properties": {
+    "schema_version": { "const": "kria.testing.report.v1" },
+    "run_id": { "type": "string" },
+    "suite_id": { "type": "string" },
+    "profile": { "type": "string" },
+    "selection": { "type": "object" },
+    "started_at_ms": { "type": "integer" },
+    "ended_at_ms": { "type": "integer" },
+    "status": {
+      "enum": ["passed", "failed", "blocked", "skipped", "infra_failed", "flaky", "cleanup_failed"]
+    },
+    "summary": { "type": "object" },
+    "scenarios": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/scenario_result" }
+    }
+  },
+  "$defs": {
+    "scenario_result": {
+      "type": "object",
+      "required": ["scenario_id", "status", "verdict", "started_at_ms", "ended_at_ms", "duration_ms", "tags", "required_services", "evidence", "artifacts", "cleanup"],
+      "properties": {
+        "scenario_id": { "type": "string" },
+        "status": {
+          "enum": ["passed", "failed", "blocked", "skipped", "infra_failed", "flaky", "cleanup_failed"]
+        },
+        "verdict": { "type": "string" },
+        "failure_class": {
+          "type": ["string", "null"],
+          "enum": ["product", "environment", "harness", "assertion", "cleanup", "unknown", null]
+        },
+        "started_at_ms": { "type": "integer" },
+        "ended_at_ms": { "type": "integer" },
+        "duration_ms": { "type": "integer" },
+        "tags": { "type": "array" },
+        "required_services": { "type": "array" },
+        "evidence": { "type": "array" },
+        "artifacts": { "type": "array" },
+        "skip_reason": { "type": ["string", "null"] },
+        "failure": { "type": ["object", "null"] },
+        "cleanup": { "type": "object" }
+      }
+    }
+  }
+}

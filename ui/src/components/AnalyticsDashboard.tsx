@@ -180,25 +180,40 @@ const AnalyticsDashboard: Component = () => {
   const [error, setError] = createSignal<string | null>(null);
   const [activeTab, setActiveTab] = createSignal("overview");
   const [autoRefresh, setAutoRefresh] = createSignal(true);
+  let disposed = false;
+  let fetchInFlight = false;
 
   const fetchData = async () => {
+    if (fetchInFlight) return;
+    fetchInFlight = true;
     setLoading(true);
     setError(null);
     try {
       const payload = await invoke<DashboardPayload>("get_analytics_dashboard");
+      if (disposed) return;
       setData(payload);
     } catch (e) {
+      if (disposed) return;
       setError(String(e));
     } finally {
-      setLoading(false);
+      fetchInFlight = false;
+      if (!disposed) {
+        setLoading(false);
+      }
     }
   };
 
   onMount(() => void fetchData());
+  onCleanup(() => {
+    disposed = true;
+  });
 
   createEffect(() => {
     if (!autoRefresh()) return;
-    const timer = setInterval(() => void fetchData(), 8000);
+    const timer = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      void fetchData();
+    }, 10000);
     onCleanup(() => clearInterval(timer));
   });
 
@@ -215,7 +230,7 @@ const AnalyticsDashboard: Component = () => {
           </span>
         </Show>
         <div style="margin-left:auto;display:flex;gap:8px;">
-          <button class="btn-small" onClick={() => void fetchData()} disabled={loading()}>
+          <button type="button" class="btn-small" onClick={() => void fetchData()} disabled={loading()}>
             {loading() ? "…" : "↻ Refresh"}
           </button>
           <label style="font-size:11px;color:#888;display:flex;align-items:center;gap:4px;">

@@ -56,7 +56,7 @@ For eval work:
 - `../evaluations/overview.md`
 - `crates/kria-eval/src/`
 - `crates/kria-core/tests/`
-- `tests/e2e/`
+- `testing/suites/playwright/`
 
 ## Rules
 
