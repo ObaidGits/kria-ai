@@ -73,7 +73,7 @@ function normalizeFontScaleValue(value: unknown): string {
 }
 
 const SettingsModal: Component = () => {
-  const { setShowSettings, settings, loadSettings, saveSettings, models, loadModels, audioDevices, loadAudioDevices, theme, applyTheme, mcpServers, loadMcpServers, addMcpServer, removeMcpServer, toggleMcpServer, healthInfo, loadHealth, scheduledTasks, loadScheduledTasks, addScheduledTask, removeScheduledTask, macros, loadMacros, deleteMacro, workflows, loadWorkflows, deleteWorkflow, hardwareInfo, loadHardwareInfo, knowledgeBase, loadKnowledgeBase, telegramConfig, telegramBotInfo, loadTelegramConfig, saveTelegramConfig, testTelegramConnection, startTelegramMcp, stopTelegramMcp, googleStatus, loadGoogleStatus, setGoogleAccount, connectGoogle, disconnectGoogle, colabStatus, loadColabStatus, connectColab, disconnectColab, setColabNotebook, reconcileMcpRuntime, restartMcpServerRuntime, ironcladStatus, loadIroncladStatus, getIroncladConfig, updateIroncladConfig, requestIroncladSoftReset, requestIroncladHardReset, loadIroncladForensics, ironcladForensicsTotal } = appStore;
+  const { setShowSettings, settings, loadSettings, saveSettings, models, loadModels, audioDevices, loadAudioDevices, theme, applyTheme, mcpServers, loadMcpServers, addMcpServer, removeMcpServer, toggleMcpServer, healthInfo, loadHealth, scheduledTasks, loadScheduledTasks, addScheduledTask, removeScheduledTask, macros, loadMacros, deleteMacro, workflows, loadWorkflows, deleteWorkflow, hardwareInfo, loadHardwareInfo, knowledgeBase, loadKnowledgeBase, sessions, clearAllChatSessions, telegramConfig, telegramBotInfo, loadTelegramConfig, saveTelegramConfig, testTelegramConnection, startTelegramMcp, stopTelegramMcp, googleStatus, loadGoogleStatus, setGoogleAccount, connectGoogle, disconnectGoogle, colabStatus, loadColabStatus, connectColab, disconnectColab, setColabNotebook, reconcileMcpRuntime, restartMcpServerRuntime, ironcladStatus, loadIroncladStatus, getIroncladConfig, updateIroncladConfig, requestIroncladSoftReset, requestIroncladHardReset, loadIroncladForensics, ironcladForensicsTotal } = appStore;
 
   const [activeTab, setActiveTab] = createSignal<Tab>("llm");
   const [activeLayer, setActiveLayer] = createSignal<SettingsLayer>("basic");
@@ -81,6 +81,8 @@ const SettingsModal: Component = () => {
   const [saving, setSaving] = createSignal(false);
   const [error, setError] = createSignal("");
   const [success, setSuccess] = createSignal("");
+  const [clearChatsBusy, setClearChatsBusy] = createSignal(false);
+  const [clearChatsConfirm, setClearChatsConfirm] = createSignal(false);
   let dialogEl: HTMLDivElement | undefined;
 
   // MCP add server form
@@ -124,10 +126,24 @@ const SettingsModal: Component = () => {
     uinput_daemon: string;
     automation_enabled: boolean;
     global_halt_engaged: boolean;
+    halt_kind: string;
     halt_reason: string | null;
+    release_conditions: string[];
     vision_pid: number | null;
     uinput_pid: number | null;
     orchestrator_available: boolean;
+    session_type: string;
+    selected_backend: string;
+    backend_selection_reason: string;
+    backend_probe_status: string;
+    backend_probe_errors: string[];
+    xdotool_available: boolean;
+    xdotool_usable_for_actions: boolean;
+    ydotool_available: boolean;
+    ydotool_usable_for_actions: boolean;
+    uinput_socket_path: string | null;
+    uinput_socket_accessible: boolean;
+    can_execute_actions: boolean;
   };
   const [guiAutomationStatus, setGuiAutomationStatus] = createSignal<GuiAutomationStatus | null>(null);
   const [guiAutomationBusy, setGuiAutomationBusy] = createSignal(false);
@@ -912,6 +928,30 @@ const SettingsModal: Component = () => {
   const selectTab = (tab: SettingsTabDefinition) => {
     setActiveLayer(tab.layer);
     setActiveTab(tab.id);
+  };
+
+  const handleClearAllChats = async () => {
+    if (!clearChatsConfirm()) {
+      setError("");
+      setSuccess("Click Clear all chat sessions again to permanently delete all chat history.");
+      setClearChatsConfirm(true);
+      return;
+    }
+
+    setClearChatsBusy(true);
+    setError("");
+    setSuccess("");
+    try {
+      const result = await clearAllChatSessions();
+      setSuccess(
+        `Cleared ${result.deletedSessionCount} chat session${result.deletedSessionCount === 1 ? "" : "s"} and ${result.deletedTurnCount} stored turn${result.deletedTurnCount === 1 ? "" : "s"}.`
+      );
+      setClearChatsConfirm(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to clear chat sessions.");
+    } finally {
+      setClearChatsBusy(false);
+    }
   };
 
   return (
@@ -2087,14 +2127,14 @@ const SettingsModal: Component = () => {
                 </label>
                 <Show when={guiAutomationStatus()?.global_halt_engaged}>
                   <span style={{
-                    "background": "#5a2020",
-                    "color": "#ff9090",
+                    "background": guiAutomationStatus()?.halt_kind === "startup_warming" ? "#4b3b16" : "#5a2020",
+                    "color": guiAutomationStatus()?.halt_kind === "startup_warming" ? "#ffd86b" : "#ff9090",
                     "padding": "4px 10px",
                     "border-radius": "12px",
                     "font-size": "12px",
                     "font-weight": "600",
                   }}>
-                    🛑 SAFETY HALT ENGAGED
+                    {guiAutomationStatus()?.halt_kind === "startup_warming" ? "STARTING GUI AUTOMATION" : "🛑 SAFETY HALT ENGAGED"}
                   </span>
                 </Show>
               </div>
@@ -2111,6 +2151,11 @@ const SettingsModal: Component = () => {
                 }}>
                   <strong style={{ "color": "#ff8080" }}>Halt reason:</strong>{" "}
                   {guiAutomationStatus()?.halt_reason}
+                  <Show when={(guiAutomationStatus()?.release_conditions.length ?? 0) > 0}>
+                    <div style={{ "margin-top": "6px" }}>
+                      {guiAutomationStatus()?.release_conditions.join(" ")}
+                    </div>
+                  </Show>
                 </div>
               </Show>
 
@@ -2119,6 +2164,39 @@ const SettingsModal: Component = () => {
                   Error: {guiAutomationError()}
                 </div>
               </Show>
+
+              <div class="settings-field" style={{
+                "padding": "10px 14px",
+                "background": "#101820",
+                "border": "1px solid #2a4055",
+                "border-radius": "6px",
+                "font-size": "13px",
+              }}>
+                <div>
+                  <strong>Action backend:</strong>{" "}
+                  {guiAutomationStatus()?.can_execute_actions ? "ready" : "blocked"} ·{" "}
+                  {guiAutomationStatus()?.selected_backend ?? "unknown"}
+                </div>
+                <div style={{ "margin-top": "4px", "color": "#b8c7d6" }}>
+                  Session {guiAutomationStatus()?.session_type ?? "unknown"} · probe{" "}
+                  {guiAutomationStatus()?.backend_probe_status ?? "unknown"}
+                </div>
+                <div style={{ "margin-top": "4px", "color": "#b8c7d6" }}>
+                  uinput socket {guiAutomationStatus()?.uinput_socket_accessible ? "accessible" : "unavailable"} ·
+                  ydotool actions {guiAutomationStatus()?.ydotool_usable_for_actions ? "usable" : "unusable"} ·
+                  xdotool actions {guiAutomationStatus()?.xdotool_usable_for_actions ? "usable" : "unusable"}
+                </div>
+                <Show when={guiAutomationStatus()?.session_type === "wayland" && guiAutomationStatus()?.xdotool_available && !guiAutomationStatus()?.xdotool_usable_for_actions}>
+                  <div style={{ "margin-top": "6px", "color": "#ffd86b" }}>
+                    xdotool is detected but not usable for Wayland GUI actions.
+                  </div>
+                </Show>
+                <Show when={guiAutomationStatus()?.backend_selection_reason}>
+                  <div style={{ "margin-top": "6px", "color": "#b8c7d6" }}>
+                    {guiAutomationStatus()?.backend_selection_reason}
+                  </div>
+                </Show>
+              </div>
 
               <h3 style={{ "margin-top": "24px" }}>Service Status</h3>
               <div class="settings-field">
@@ -2964,6 +3042,39 @@ const SettingsModal: Component = () => {
                 </table>
               </Show>
               <p class="settings-hint">{knowledgeBase().length} document(s) in knowledge base</p>
+              <div class="settings-section-heading" style={{ "margin-top": "1.2rem" }}>
+                <div>
+                  <h3>Chat Sessions</h3>
+                  <p class="settings-hint">
+                    Permanently delete saved assistant and prompt lab chat history. This does not remove ingested knowledge-base documents.
+                  </p>
+                </div>
+              </div>
+              <div class="settings-row">
+                <div class="settings-field">
+                  <label>Stored chat sessions</label>
+                  <input type="text" value={`${sessions().length}`} disabled />
+                  <span class="field-hint">A fresh empty chat is created after clearing so KRIA remains ready.</span>
+                </div>
+                <div class="settings-field">
+                  <label>Clear history</label>
+                  <button
+                    type="button"
+                    class={clearChatsConfirm() ? "btn-danger" : "btn-secondary"}
+                    disabled={clearChatsBusy() || sessions().length === 0}
+                    onClick={handleClearAllChats}
+                  >
+                    {clearChatsBusy()
+                      ? "Clearing..."
+                      : clearChatsConfirm()
+                        ? "Confirm clear all chats"
+                        : "Clear all chat sessions"}
+                  </button>
+                  <span class="field-hint">
+                    This action deletes saved conversation turns and cannot be undone.
+                  </span>
+                </div>
+              </div>
             </section>
           </Show>
 

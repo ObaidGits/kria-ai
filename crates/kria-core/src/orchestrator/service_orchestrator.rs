@@ -31,6 +31,15 @@ impl ServiceLiveness {
     pub fn is_healthy(self) -> bool {
         matches!(self, ServiceLiveness::Running)
     }
+
+    fn halt_word(self) -> &'static str {
+        match self {
+            ServiceLiveness::Running => "ok",
+            ServiceLiveness::Starting => "starting",
+            ServiceLiveness::Failed => "FAILED",
+            ServiceLiveness::Stopped => "stopped",
+        }
+    }
 }
 
 /// Combined status snapshot for both managed services.
@@ -173,8 +182,9 @@ impl ServiceOrchestrator {
     pub async fn start(self: &Arc<Self>) -> Result<()> {
         tracing::info!(target: "orchestrator", "🚀 Starting KRIA service orchestrator");
 
-        // Engage halt until both services are healthy
-        crate::safety::engage_halt("orchestrator startup");
+        // Engage halt until both services are healthy. This is a temporary
+        // startup guard, not an actionable long-lived reason.
+        crate::safety::engage_halt("service warming up (vision=starting, uinput=starting)");
 
         // RFC v2 (F4): Probe display server type.
         Self::probe_display_server();
@@ -200,6 +210,10 @@ impl ServiceOrchestrator {
             let mut state = self.state.write().await;
             state.uinput_status = ServiceLiveness::Failed;
         }
+
+        // Run one health reconciliation immediately so the global halt reason
+        // does not remain a vague startup placeholder until the first interval.
+        self.run_health_check().await;
 
         // Always spawn the health monitor regardless of spawn outcomes.
         // This is what drives the bounded auto-restart for both services.
@@ -533,35 +547,16 @@ impl ServiceOrchestrator {
             state.vision_status = vision_live;
             state.uinput_status = uinput_live;
 
-            // Update GlobalSafetyHalt based on combined health + user toggle
+            // Update GlobalSafetyHalt based on combined health + user toggle.
             let user_wants_enabled = state.automation_enabled;
-            let both_healthy = vision_live.is_healthy() && uinput_live.is_healthy();
-
-            match (user_wants_enabled, both_healthy) {
-                (true, true) => {
-                    crate::safety::release_halt("services healthy");
-                    // Reset restart counter whenever both services are healthy.
-                    state.uinput_restart_attempts = 0;
-                }
-                (true, false) => {
-                    // Build a granular reason that names which service is not ready
-                    let vision_word = match vision_live {
-                        ServiceLiveness::Running => "ok",
-                        ServiceLiveness::Starting => "starting",
-                        ServiceLiveness::Failed => "FAILED",
-                        ServiceLiveness::Stopped => "stopped",
-                    };
-                    let uinput_word = match uinput_live {
-                        ServiceLiveness::Running => "ok",
-                        ServiceLiveness::Starting => "starting",
-                        ServiceLiveness::Failed => "FAILED",
-                        ServiceLiveness::Stopped => "stopped",
-                    };
-                    crate::safety::engage_halt(&format!(
-                        "service not ready (vision={vision_word}, uinput={uinput_word})"
-                    ));
-                }
-                (false, _) => crate::safety::engage_halt("user disabled automation via UI"),
+            let services_healthy = update_global_halt_from_service_health(
+                user_wants_enabled,
+                vision_live,
+                uinput_live,
+            );
+            if services_healthy {
+                // Reset restart counter whenever both services are healthy.
+                state.uinput_restart_attempts = 0;
             }
 
             // ── Bounded uinput daemon auto-restart ───────────────────────────
@@ -622,7 +617,7 @@ impl ServiceOrchestrator {
             }
 
             // Reset restart counters when both become healthy
-            if both_healthy {
+            if services_healthy {
                 state.vision_restart_attempts = 0;
                 state.vision_last_restart_epoch_secs = 0;
             }
@@ -787,17 +782,22 @@ impl ServiceOrchestrator {
         }
 
         if !enabled {
-            crate::safety::engage_halt("user disabled automation via UI");
             self.kill_children().await;
+            crate::safety::engage_halt("user disabled automation via UI");
         } else {
             // Re-spawn services. Halt stays engaged until health check passes.
-            crate::safety::engage_halt("re-spawning services");
+            crate::safety::engage_halt("service warming up (vision=starting, uinput=starting)");
             if let Err(e) = self.spawn_vision_sidecar().await {
                 tracing::error!(target: "orchestrator", error = %e, "vision respawn failed");
+                let mut state = self.state.write().await;
+                state.vision_status = ServiceLiveness::Failed;
             }
             if let Err(e) = self.spawn_uinput_daemon().await {
                 tracing::error!(target: "orchestrator", error = %e, "uinput respawn failed");
+                let mut state = self.state.write().await;
+                state.uinput_status = ServiceLiveness::Failed;
             }
+            self.run_health_check().await;
         }
 
         Ok(())
@@ -839,6 +839,41 @@ impl ServiceOrchestrator {
         self.cancellation.cancel();
         self.kill_children().await;
     }
+}
+
+/// Update the process-wide global halt from GUI service health.
+///
+/// Returns `true` when both services are healthy and automation can be enabled.
+/// This helper keeps the halt reason precise after startup instead of leaving a
+/// stale generic "orchestrator startup" reason.
+pub fn update_global_halt_from_service_health(
+    automation_enabled: bool,
+    vision_live: ServiceLiveness,
+    uinput_live: ServiceLiveness,
+) -> bool {
+    if !automation_enabled {
+        crate::safety::engage_halt("user disabled automation via UI");
+        return false;
+    }
+
+    if vision_live.is_healthy() && uinput_live.is_healthy() {
+        crate::safety::release_halt("services healthy");
+        return true;
+    }
+
+    let reason_prefix = if matches!(vision_live, ServiceLiveness::Starting)
+        || matches!(uinput_live, ServiceLiveness::Starting)
+    {
+        "service warming up"
+    } else {
+        "service not ready"
+    };
+    crate::safety::engage_halt(&format!(
+        "{reason_prefix} (vision={}, uinput={})",
+        vision_live.halt_word(),
+        uinput_live.halt_word()
+    ));
+    false
 }
 
 impl Drop for ServiceOrchestrator {
@@ -1105,6 +1140,7 @@ fn detect_uinput_binary(workspace_root: &Path) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[test]
     fn service_liveness_serde() {
@@ -1152,5 +1188,66 @@ mod tests {
                 "/tmp/other.sock".to_string(),
             ]
         ));
+    }
+
+    #[test]
+    #[serial]
+    fn halt_update_releases_when_services_are_healthy() {
+        crate::safety::engage_halt("service warming up (vision=starting, uinput=starting)");
+        assert!(update_global_halt_from_service_health(
+            true,
+            ServiceLiveness::Running,
+            ServiceLiveness::Running
+        ));
+        assert!(!crate::safety::is_halted());
+        assert!(crate::safety::halt_reason().is_none());
+    }
+
+    #[test]
+    #[serial]
+    fn halt_update_marks_startup_warming() {
+        crate::safety::release_halt("test reset");
+        assert!(!update_global_halt_from_service_health(
+            true,
+            ServiceLiveness::Starting,
+            ServiceLiveness::Starting
+        ));
+        assert!(crate::safety::is_halted());
+        assert_eq!(
+            crate::safety::halt_reason().as_deref(),
+            Some("service warming up (vision=starting, uinput=starting)")
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn halt_update_marks_service_not_ready() {
+        crate::safety::release_halt("test reset");
+        assert!(!update_global_halt_from_service_health(
+            true,
+            ServiceLiveness::Running,
+            ServiceLiveness::Failed
+        ));
+        assert!(crate::safety::is_halted());
+        assert_eq!(
+            crate::safety::halt_reason().as_deref(),
+            Some("service not ready (vision=ok, uinput=FAILED)")
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn halt_update_keeps_user_disabled_halted() {
+        crate::safety::release_halt("test reset");
+        assert!(!update_global_halt_from_service_health(
+            false,
+            ServiceLiveness::Running,
+            ServiceLiveness::Running
+        ));
+        assert!(crate::safety::is_halted());
+        assert_eq!(
+            crate::safety::halt_reason().as_deref(),
+            Some("user disabled automation via UI")
+        );
     }
 }

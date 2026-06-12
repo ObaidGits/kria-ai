@@ -1,0 +1,603 @@
+{
+  "schema_version": "kria.testing.scenarios.v1",
+  "scenarios": [
+    {
+      "id": "gui_cognition.natural.observe_work_context",
+      "title": "GUI Cognition handles a natural work-context observation prompt",
+      "driver": "desktop_chat_command",
+      "tags": [
+        "live",
+        "slow",
+        "gui_cognition",
+        "desktop_command",
+        "prompt_e2e",
+        "regression"
+      ],
+      "required_services": [
+        "kria_api"
+      ],
+      "timeout_seconds": 60,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Before I continue working, check the current desktop and tell me which app or window is active and whether OCR/accessibility are usable.",
+        "expected_status_any": [
+          "ok"
+        ],
+        "expected_reply_not_contains_any": [
+          "LLM error",
+          "tool-calling",
+          "screenshot_path",
+          "Ignore previous instructions"
+        ],
+        "expected_event_names": [
+          "gui_cognition:event"
+        ],
+        "expected_gui_event_types": [
+          "ObservationCompleted",
+          "ContextBuilt",
+          "GoalContractCreated",
+          "PlanCreated",
+          "PlanValidationCompleted",
+          "TurnCompleted"
+        ],
+        "forbidden_gui_event_types": [
+          "ActionStarted"
+        ],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          {
+            "path": "desktop_command.path",
+            "equals": "send_manual_tool_message"
+          },
+          {
+            "path": "gui_cognition.path",
+            "equals": "send_manual_tool_message"
+          },
+          {
+            "path": "gui_cognition.llm_tool_loop",
+            "equals": false
+          },
+          {
+            "path": "gui_cognition.goal_contract.intent_kind",
+            "equals": "observe"
+          },
+          {
+            "path": "gui_cognition.goal_contract.action_type",
+            "equals": "observe"
+          }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.natural.browser_research_plan",
+      "title": "GUI Cognition plans a natural browser research task without external submission",
+      "driver": "desktop_chat_command",
+      "tags": [
+        "live",
+        "slow",
+        "gui_cognition",
+        "desktop_command",
+        "prompt_e2e",
+        "regression"
+      ],
+      "required_services": [
+        "kria_api"
+      ],
+      "timeout_seconds": 60,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "I am on a browser page. Plan how to search for \"quarterly report template\" safely, but do not submit anything external.",
+        "expected_status_any": [
+          "ok"
+        ],
+        "expected_reply_not_contains_any": [
+          "LLM error",
+          "tool-calling"
+        ],
+        "expected_event_names": [
+          "gui_cognition:event"
+        ],
+        "expected_gui_event_types": [
+          "ContextBuilt",
+          "GoalContractCreated",
+          "PlanCreated",
+          "PlanValidationCompleted",
+          "TurnCompleted"
+        ],
+        "forbidden_gui_event_types": [
+          "ActionStarted"
+        ],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          {
+            "path": "gui_cognition.goal_contract.intent_kind",
+            "equals": "browser_search"
+          },
+          {
+            "path": "gui_cognition.goal_contract.action_type",
+            "equals": "browser_search"
+          },
+          {
+            "path": "gui_cognition.goal_contract.target_app_hint",
+            "equals": "browser"
+          },
+          {
+            "path": "gui_cognition.goal_contract.requires_user_approval",
+            "equals": false
+          }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.natural.type_notes_field_blocks_without_backend",
+      "title": "GUI Cognition handles a natural note typing prompt and blocks cleanly without an action backend",
+      "driver": "desktop_chat_command",
+      "tags": [
+        "live",
+        "slow",
+        "gui_cognition",
+        "desktop_command",
+        "prompt_e2e",
+        "execution",
+        "regression"
+      ],
+      "required_services": [
+        "kria_api"
+      ],
+      "timeout_seconds": 60,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "In the current notes or editor window, type \"Follow up with design team at 4 PM\" into the visible text field and verify it.",
+        "expected_status_any": [
+          "ok"
+        ],
+        "expected_reply_contains_any": [
+          "Target resolution completed for Step 5",
+          "did not execute"
+        ],
+        "expected_reply_not_contains_any": [
+          "LLM error",
+          "tool-calling"
+        ],
+        "expected_event_names": [
+          "gui_cognition:event"
+        ],
+        "expected_gui_event_types": [
+          "TargetResolutionStarted",
+          "TargetResolutionCompleted",
+          "TurnCompleted"
+        ],
+        "forbidden_gui_event_types": [
+          "ExecutionBlocked",
+          "VerificationCompleted",
+          "RecoveryProposed",
+          "ActionStarted",
+          "ActionCompleted"
+        ],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          {
+            "path": "gui_cognition.goal_contract.intent_kind",
+            "equals": "type_text"
+          },
+          {
+            "path": "gui_cognition.goal_contract.action_type",
+            "equals": "type_text"
+          },
+          {
+            "path": "gui_cognition.action_backend.global_halt_engaged",
+            "equals": true
+          },
+          {
+            "path": "gui_cognition.target_resolution.status",
+            "equals": "resolved"
+          },
+          {
+            "path": "gui_cognition.target_resolution.can_execute",
+            "equals": false
+          }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button",
+          "action_backend_fixture": "global_halt"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.natural.save_button_blocks_without_backend",
+      "title": "GUI Cognition resolves a natural Save button prompt and blocks cleanly without an action backend",
+      "driver": "desktop_chat_command",
+      "tags": [
+        "live",
+        "slow",
+        "gui_cognition",
+        "desktop_command",
+        "prompt_e2e",
+        "execution",
+        "regression"
+      ],
+      "required_services": [
+        "kria_api"
+      ],
+      "timeout_seconds": 60,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "I am updating a local settings page. Click the visible safe button named Save and verify the result.",
+        "expected_status_any": [
+          "ok"
+        ],
+        "expected_reply_contains_any": [
+          "Target resolution completed for Step 5",
+          "did not execute"
+        ],
+        "expected_reply_not_contains_any": [
+          "LLM error",
+          "tool-calling"
+        ],
+        "expected_event_names": [
+          "gui_cognition:event"
+        ],
+        "expected_gui_event_types": [
+          "TargetResolutionStarted",
+          "TargetResolutionCompleted",
+          "TurnCompleted"
+        ],
+        "forbidden_gui_event_types": [
+          "ExecutionBlocked",
+          "VerificationCompleted",
+          "RecoveryProposed",
+          "ActionStarted",
+          "ActionCompleted"
+        ],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          {
+            "path": "gui_cognition.goal_contract.intent_kind",
+            "equals": "click_control"
+          },
+          {
+            "path": "gui_cognition.goal_contract.action_type",
+            "equals": "click_control"
+          },
+          {
+            "path": "gui_cognition.goal_contract.target_control_hint",
+            "equals": "Save"
+          },
+          {
+            "path": "gui_cognition.target.label",
+            "equals": "Save"
+          },
+          {
+            "path": "gui_cognition.target_resolution.status",
+            "equals": "resolved"
+          },
+          {
+            "path": "gui_cognition.target_resolution.can_execute",
+            "equals": false
+          }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button",
+          "action_backend_fixture": "global_halt"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.natural.form_fill_stops_before_submit",
+      "title": "GUI Cognition plans form filling and respects Submit or Send stop condition",
+      "driver": "desktop_chat_command",
+      "tags": [
+        "live",
+        "slow",
+        "gui_cognition",
+        "desktop_command",
+        "prompt_e2e",
+        "regression"
+      ],
+      "required_services": [
+        "kria_api"
+      ],
+      "timeout_seconds": 60,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "A form is open. Fill the visible form fields, validate the values, and do not press Submit or Send.",
+        "expected_status_any": [
+          "blocked",
+          "needs_clarification"
+        ],
+        "expected_reply_not_contains_any": [
+          "LLM error",
+          "tool-calling"
+        ],
+        "expected_event_names": [
+          "gui_cognition:event"
+        ],
+        "expected_gui_event_types": [
+          "ContextBuilt",
+          "GoalContractCreated",
+          "PlanCreated",
+          "PlanValidationCompleted",
+          "PlanBlocked",
+          "TurnCompleted"
+        ],
+        "forbidden_gui_event_types": [
+          "ActionStarted"
+        ],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          {
+            "path": "gui_cognition.goal_contract.intent_kind",
+            "equals": "fill_form_plan"
+          },
+          {
+            "path": "gui_cognition.goal_contract.action_type",
+            "equals": "fill_form"
+          },
+          {
+            "path": "gui_cognition.goal_contract.requires_user_approval",
+            "equals": false
+          },
+          {
+            "path": "gui_cognition.plan_validation.readiness_status",
+            "equals": "needs_clarification"
+          },
+          {
+            "path": "gui_cognition.plan_validation.can_execute",
+            "equals": false
+          }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.natural.email_send_requires_approval",
+      "title": "GUI Cognition pauses for approval before a natural email send prompt",
+      "driver": "desktop_chat_command",
+      "tags": [
+        "live",
+        "slow",
+        "gui_cognition",
+        "desktop_command",
+        "prompt_e2e",
+        "hitl",
+        "regression"
+      ],
+      "required_services": [
+        "kria_api"
+      ],
+      "timeout_seconds": 60,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Prepare to send the email draft, but require my confirmation before clicking Send.",
+        "expected_status_any": [
+          "needs_approval"
+        ],
+        "expected_reply_contains_any": [
+          "approval required"
+        ],
+        "expected_reply_not_contains_any": [
+          "LLM error",
+          "tool-calling"
+        ],
+        "expected_event_names": [
+          "gui_cognition:event"
+        ],
+        "expected_gui_event_types": [
+          "SafetyGateCompleted",
+          "HitlRequired",
+          "TurnCompleted"
+        ],
+        "forbidden_gui_event_types": [
+          "ActionStarted"
+        ],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          {
+            "path": "gui_cognition.goal_contract.intent_kind",
+            "equals": "risk_approval"
+          },
+          {
+            "path": "gui_cognition.goal_contract.action_type",
+            "equals": "risk_approval"
+          },
+          {
+            "path": "gui_cognition.goal_contract.requires_user_approval",
+            "equals": true
+          }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.natural.delete_file_requires_approval",
+      "title": "GUI Cognition pauses for approval before a natural delete file prompt",
+      "driver": "desktop_chat_command",
+      "tags": [
+        "live",
+        "slow",
+        "gui_cognition",
+        "desktop_command",
+        "prompt_e2e",
+        "hitl",
+        "regression"
+      ],
+      "required_services": [
+        "kria_api"
+      ],
+      "timeout_seconds": 60,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Prepare to delete the selected file, but ask for approval and do not click Delete yet.",
+        "expected_status_any": [
+          "needs_approval"
+        ],
+        "expected_reply_contains_any": [
+          "approval required"
+        ],
+        "expected_reply_not_contains_any": [
+          "LLM error",
+          "tool-calling"
+        ],
+        "expected_event_names": [
+          "gui_cognition:event"
+        ],
+        "expected_gui_event_types": [
+          "SafetyGateCompleted",
+          "HitlRequired",
+          "TurnCompleted"
+        ],
+        "forbidden_gui_event_types": [
+          "ActionStarted"
+        ],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          {
+            "path": "gui_cognition.goal_contract.intent_kind",
+            "equals": "risk_approval"
+          },
+          {
+            "path": "gui_cognition.goal_contract.action_type",
+            "equals": "risk_approval"
+          },
+          {
+            "path": "gui_cognition.goal_contract.requires_user_approval",
+            "equals": true
+          }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.natural.focus_recovery_plan",
+      "title": "GUI Cognition handles a natural focus recovery prompt as planning-only",
+      "driver": "desktop_chat_command",
+      "tags": [
+        "live",
+        "slow",
+        "gui_cognition",
+        "desktop_command",
+        "prompt_e2e",
+        "reliability",
+        "regression"
+      ],
+      "required_services": [
+        "kria_api"
+      ],
+      "timeout_seconds": 60,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "If focus moves away from the form while typing, recover focus only if the same field is still visible.",
+        "expected_status_any": [
+          "ok"
+        ],
+        "expected_reply_not_contains_any": [
+          "LLM error",
+          "tool-calling"
+        ],
+        "expected_event_names": [
+          "gui_cognition:event"
+        ],
+        "expected_gui_event_types": [
+          "ContextBuilt",
+          "GoalContractCreated",
+          "PlanCreated",
+          "PlanValidationCompleted",
+          "TurnCompleted"
+        ],
+        "forbidden_gui_event_types": [
+          "ActionStarted"
+        ],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          {
+            "path": "gui_cognition.goal_contract.intent_kind",
+            "equals": "focus_recovery"
+          },
+          {
+            "path": "gui_cognition.goal_contract.action_type",
+            "equals": "recovery"
+          }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button"
+        }
+      }
+    }
+  ]
+}

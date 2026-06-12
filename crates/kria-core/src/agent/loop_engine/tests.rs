@@ -1444,6 +1444,29 @@ fn manual_tool_profile_exact_lock_blocks_other_tools() {
 }
 
 #[test]
+fn manual_tool_profile_detects_gui_cognition_aliases() {
+    for alias in ["gui", "gui_cognition", "gui-cognition", "desktop_gui"] {
+        let profile = TurnExecutionProfile::manual_tool(
+            Some(alias.into()),
+            None,
+            PromptLabToolSelectionStrategy::RoutedWithinLock,
+        );
+
+        assert!(
+            profile.is_gui_cognition_override(),
+            "alias {alias} must route to GUI Cognition selected mode"
+        );
+    }
+
+    let n8n_profile = TurnExecutionProfile::manual_tool(
+        None,
+        Some("n8n_invoke_workflow".into()),
+        PromptLabToolSelectionStrategy::DirectLockedTool,
+    );
+    assert!(!n8n_profile.is_gui_cognition_override());
+}
+
+#[test]
 fn manual_n8n_mode_directly_dispatches_exact_green_workflow() {
     let _guard = set_test_n8n_workflows_for_dispatch(n8n_dispatch_fixture_workflows());
     let profile = TurnExecutionProfile::manual_tool(

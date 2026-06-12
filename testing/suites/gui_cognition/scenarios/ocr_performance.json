@@ -1,0 +1,47 @@
+{
+  "schema_version": "kria.testing.scenarios.v1",
+  "scenarios": [
+    {
+      "id": "gui_cognition.ocr.fixture_fast_path",
+      "title": "Fast OCR pipeline reports cache and ROI metrics",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "ocr_performance", "perception"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 90,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Report OCR status and timing for my screen.",
+        "expected_status_any": ["ok"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["ObservationCompleted", "ContextBuilt", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "desktop_command.path", "equals": "send_manual_tool_message" },
+          { "path": "gui_cognition.perception.ocr_available", "equals": true },
+          { "path": "gui_cognition.perception.ocr_fast_path", "exists": true },
+          { "path": "gui_cognition.perception.ocr_cache_hit", "exists": true },
+          { "path": "gui_cognition.perception.ocr_roi_count", "exists": true },
+          { "path": "gui_cognition.perception.ocr_changed_region_count", "exists": true },
+          { "path": "gui_cognition.perception.ocr_benchmark_summary", "exists": true },
+          { "path": "gui_cognition.context.ocr_performance.fast_path", "exists": true }
+        ],
+        "forbidden_json_paths": [
+          "gui_cognition.perception.ocr_blocks.0.text",
+          "gui_cognition.perception.screenshot"
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button"
+        }
+      }
+    }
+  ]
+}

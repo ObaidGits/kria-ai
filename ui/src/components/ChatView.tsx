@@ -5,6 +5,12 @@ import MessageBubble from "./MessageBubble";
 import ExportDropdown from "./ExportDropdown";
 import ImageProgressChip from "./ImageProgressChip";
 import { WorkflowProgress } from "./WorkflowProgress";
+import GuiCognitionPanel from "./GuiCognitionPanel";
+import {
+  activeGuiCognitionSession,
+  clearGuiCognitionSession,
+  guiCognitionRoutingStatus,
+} from "../stores/guiCognitionSession";
 import {
   activeSession as activeWorkflowSession,
   respondToHitl,
@@ -65,6 +71,9 @@ const ChatView: Component = () => {
   const [isDragOver, setIsDragOver] = createSignal(false);
   const [showSlash, setShowSlash] = createSignal(false);
   const [slashIndex, setSlashIndex] = createSignal(0);
+  const showGuiCognitionRouteState = createMemo(
+    () => manualToolMode() === "gui_cognition" || (manualToolMode() === "auto" && Boolean(activeGuiCognitionSession()))
+  );
 
   const clearPendingImage = () => {
     const img = pendingImage();
@@ -371,6 +380,15 @@ const ChatView: Component = () => {
           </div>
         </Show>
 
+        <Show when={activeGuiCognitionSession()}>
+          {(session) => (
+            <GuiCognitionPanel
+              session={session()}
+              onDismiss={() => clearGuiCognitionSession()}
+            />
+          )}
+        </Show>
+
         {isThinking() && (
           <div class="thinking-row">
             <div class="thinking-avatar">K</div>
@@ -378,6 +396,8 @@ const ChatView: Component = () => {
               <span class="thinking-label">
                 {manualToolMode() === "n8n"
                   ? "Waiting for n8n workflow result"
+                  : manualToolMode() === "gui_cognition"
+                    ? "Running GUI cognition workflow"
                   : "KRIA is preparing a response"}
               </span>
               <span class="thinking-dots" aria-hidden="true">
@@ -412,13 +432,24 @@ const ChatView: Component = () => {
           </label>
 
           <Show
-            when={manualToolMode() !== "auto"}
+            when={manualToolMode() !== "auto" || showGuiCognitionRouteState()}
             fallback={<span class="manual-tool-mode-copy">Routing: Auto</span>}
           >
             <div class="manual-tool-mode-banner" role="status" aria-live="polite">
-              <span>Tool Mode: {selectedManualToolMode().label}</span>
-              <span>Routing: Manual</span>
-              <span>Selection Source: User</span>
+              <Show
+                when={showGuiCognitionRouteState()}
+                fallback={
+                  <>
+                    <span>Tool Mode: {selectedManualToolMode().label}</span>
+                    <span>Routing: Manual</span>
+                    <span>Selection Source: User</span>
+                  </>
+                }
+              >
+                <span>Tool Mode: GUI Cognition</span>
+                <span>Route: Manual</span>
+                <span>State: {guiCognitionRoutingStatus() || "Selected"}</span>
+              </Show>
             </div>
           </Show>
         </div>

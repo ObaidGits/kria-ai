@@ -1,0 +1,32 @@
+{
+  "schema_version": "kria.testing.suite.v1",
+  "suite_id": "gui_cognition",
+  "name": "KRIA GUI Cognition suite",
+  "scenario_files": [
+    "testing/suites/gui_cognition/scenarios/ci_contracts.json",
+    "testing/suites/gui_cognition/scenarios/backend_route_modularization.json",
+    "testing/suites/gui_cognition/scenarios/observation_perception.json",
+    "testing/suites/gui_cognition/scenarios/active_window_authority.json",
+    "testing/suites/gui_cognition/scenarios/focus_authority.json",
+    "testing/suites/gui_cognition/scenarios/control_fusion.json",
+    "testing/suites/gui_cognition/scenarios/visual_controls.json",
+    "testing/suites/gui_cognition/scenarios/accessibility_health.json",
+    "testing/suites/gui_cognition/scenarios/ocr_performance.json",
+    "testing/suites/gui_cognition/scenarios/perception_completion.json",
+    "testing/suites/gui_cognition/scenarios/context_builder.json",
+    "testing/suites/gui_cognition/scenarios/goal_intent_understanding.json",
+    "testing/suites/gui_cognition/scenarios/llm_gui_planner.json",
+    "testing/suites/gui_cognition/scenarios/plan_validator.json",
+    "testing/suites/gui_cognition/scenarios/target_resolver.json",
+    "testing/suites/gui_cognition/scenarios/safety_gate_hitl.json",
+    "testing/suites/gui_cognition/scenarios/executor.json",
+    "testing/suites/gui_cognition/scenarios/post_action_verification.json",
+    "testing/suites/gui_cognition/scenarios/recovery.json",
+    "testing/suites/gui_cognition/scenarios/workflow_runtime.json",
+    "testing/suites/gui_cognition/scenarios/checkpoint_resume.json",
+    "testing/suites/gui_cognition/scenarios/real_task_eval.json",
+    "testing/suites/gui_cognition/scenarios/live_execution_hardening.json",
+    "testing/suites/gui_cognition/scenarios/natural_work_prompts.json"
+  ],
+  "scenarios": []
+}

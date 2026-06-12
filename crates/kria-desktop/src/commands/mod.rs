@@ -14,6 +14,7 @@ pub(crate) mod device_tools;
 pub(crate) mod document_chat;
 pub(crate) mod google_workspace;
 pub(crate) mod gui_automation_control;
+pub(crate) mod gui_cognition;
 pub(crate) mod history_helpers;
 pub(crate) mod image_chat;
 pub(crate) mod local_api;
@@ -167,8 +168,8 @@ pub use runtime_status::{
 };
 #[allow(unused_imports)]
 pub use sessions::{
-    auto_rename_session, create_session, delete_session, get_session_history, list_sessions,
-    rename_session, search_sessions, switch_session,
+    auto_rename_session, clear_all_chat_sessions, create_session, delete_session,
+    get_session_history, list_sessions, rename_session, search_sessions, switch_session,
 };
 #[allow(unused_imports)]
 pub use telegram::{

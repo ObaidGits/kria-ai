@@ -1,0 +1,663 @@
+{
+  "schema_version": "kria.testing.scenarios.v1",
+  "scenarios": [
+    {
+      "id": "gui_cognition.backend.global_halt_blocks_action",
+      "title": "GUI Cognition global safety halt blocks action before execution",
+      "driver": "desktop_chat_command",
+      "tags": [
+        "live",
+        "slow",
+        "gui_cognition",
+        "desktop_command",
+        "action_backend",
+        "execution",
+        "regression"
+      ],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 60,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Focus the visible search/input field on the current screen and verify it is focused.",
+        "expected_status_any": ["ok"],
+        "expected_reply_contains_any": ["Target resolution completed for Step 5", "did not execute"],
+        "expected_reply_not_contains_any": ["LLM error", "tool-calling"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": [
+          "ActionBackendStatus",
+          "TargetResolutionCompleted",
+          "TurnCompleted"
+        ],
+        "forbidden_gui_event_types": ["ExecutionBlocked", "VerificationCompleted", "ActionStarted", "ActionCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "desktop_command.path", "equals": "send_manual_tool_message" },
+          { "path": "gui_cognition.path", "equals": "send_manual_tool_message" },
+          { "path": "gui_cognition.llm_tool_loop", "equals": false },
+          { "path": "gui_cognition.action_backend.global_halt_engaged", "equals": true },
+          { "path": "gui_cognition.action_backend.can_execute_actions", "equals": false },
+          { "path": "gui_cognition.action_backend.selected_backend", "equals": "blocked_global_halt" },
+          { "path": "gui_cognition.target_resolution.status", "equals": "resolved" },
+          { "path": "gui_cognition.target_resolution.can_execute", "equals": false }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button",
+          "action_backend_fixture": "global_halt"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.executor.wayland_no_backend_blocks",
+      "title": "GUI Cognition reports unavailable Wayland action backend",
+      "driver": "desktop_chat_command",
+      "tags": [
+        "live",
+        "slow",
+        "gui_cognition",
+        "desktop_command",
+        "action_backend",
+        "execution",
+        "regression"
+      ],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 60,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Observe my current screen and report GUI action backend status.",
+        "expected_status_any": ["ok"],
+        "expected_reply_not_contains_any": ["LLM error", "tool-calling"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["ActionBackendStatus", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.action_backend.session_type", "equals": "wayland" },
+          { "path": "gui_cognition.action_backend.selected_backend", "equals": "unavailable" },
+          { "path": "gui_cognition.action_backend.can_execute_actions", "equals": false },
+          { "path": "gui_cognition.action_backend.uinput_available", "equals": false }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button",
+          "action_backend_fixture": "wayland_no_backend"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.executor.wayland_uinput_reports_backend",
+      "title": "GUI Cognition reports Wayland uinput backend",
+      "driver": "desktop_chat_command",
+      "tags": [
+        "live",
+        "slow",
+        "gui_cognition",
+        "desktop_command",
+        "action_backend",
+        "execution",
+        "regression"
+      ],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 60,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Observe my current screen and report GUI action backend status.",
+        "expected_status_any": ["ok"],
+        "expected_reply_not_contains_any": ["LLM error", "tool-calling"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["ActionBackendStatus", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.action_backend.session_type", "equals": "wayland" },
+          { "path": "gui_cognition.action_backend.selected_backend", "equals": "uinput_accessibility" },
+          { "path": "gui_cognition.action_backend.can_execute_actions", "equals": true },
+          { "path": "gui_cognition.action_backend.uinput_available", "equals": true }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button",
+          "action_backend_fixture": "wayland_uinput"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.executor.x11_xdotool_reports_backend",
+      "title": "GUI Cognition reports X11 xdotool backend",
+      "driver": "desktop_chat_command",
+      "tags": [
+        "live",
+        "slow",
+        "gui_cognition",
+        "desktop_command",
+        "action_backend",
+        "execution",
+        "regression"
+      ],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 60,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Observe my current screen and report GUI action backend status.",
+        "expected_status_any": ["ok"],
+        "expected_reply_not_contains_any": ["LLM error", "tool-calling"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["ActionBackendStatus", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.action_backend.session_type", "equals": "x11" },
+          { "path": "gui_cognition.action_backend.selected_backend", "equals": "xdotool_accessibility" },
+          { "path": "gui_cognition.action_backend.can_execute_actions", "equals": true },
+          { "path": "gui_cognition.action_backend.xdotool_available", "equals": true }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button",
+          "action_backend_fixture": "x11_xdotool"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.halt.startup_warming_observe_ok",
+      "title": "GUI Cognition observe works while GUI action backend is warming up",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "action_backend", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 60,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Observe my current screen and report GUI action backend status.",
+        "expected_status_any": ["ok"],
+        "expected_reply_not_contains_any": ["LLM error", "tool-calling"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["ActionBackendStatus", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ExecutionBlocked", "ActionStarted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.action_backend.halt_kind", "equals": "startup_warming" },
+          { "path": "gui_cognition.action_backend.can_observe", "equals": true },
+          { "path": "gui_cognition.action_backend.can_plan", "equals": true },
+          { "path": "gui_cognition.action_backend.can_execute_actions", "equals": false }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button",
+          "action_backend_fixture": "startup_warming"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.halt.startup_warming_action_blocks",
+      "title": "GUI Cognition action blocks while GUI action backend is warming up",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "action_backend", "execution", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 60,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Focus the visible search/input field on the current screen and verify it is focused.",
+        "expected_status_any": ["ok"],
+        "expected_reply_contains_any": ["Target resolution completed for Step 5", "did not execute"],
+        "expected_reply_not_contains_any": ["LLM error", "tool-calling"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["ActionBackendStatus", "TargetResolutionCompleted", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ExecutionBlocked", "VerificationCompleted", "RecoveryProposed", "ActionStarted", "ActionCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.action_backend.halt_kind", "equals": "startup_warming" },
+          { "path": "gui_cognition.action_backend.can_execute_actions", "equals": false },
+          { "path": "gui_cognition.target_resolution.status", "equals": "resolved" },
+          { "path": "gui_cognition.target_resolution.can_execute", "equals": false }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button",
+          "action_backend_fixture": "startup_warming"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.halt.services_healthy_releases",
+      "title": "GUI Cognition reports ready action backend when services are healthy",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "action_backend", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 60,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Observe my current screen and report GUI action backend status.",
+        "expected_status_any": ["ok"],
+        "expected_reply_not_contains_any": ["LLM error", "tool-calling"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["ActionBackendStatus", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.action_backend.halt_kind", "equals": "none" },
+          { "path": "gui_cognition.action_backend.global_halt_engaged", "equals": false },
+          { "path": "gui_cognition.action_backend.can_execute_actions", "equals": true },
+          { "path": "gui_cognition.action_backend.selected_backend", "equals": "uinput_accessibility" }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button",
+          "action_backend_fixture": "services_healthy"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.halt.vision_failed_blocks_action",
+      "title": "GUI Cognition blocks action when vision sidecar failed",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "action_backend", "execution", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 60,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Focus the visible search/input field on the current screen and verify it is focused.",
+        "expected_status_any": ["ok"],
+        "expected_reply_not_contains_any": ["LLM error", "tool-calling"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["ActionBackendStatus", "TargetResolutionCompleted", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ExecutionBlocked", "RecoveryProposed", "ActionStarted", "ActionCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.action_backend.halt_kind", "equals": "service_not_ready" },
+          { "path": "gui_cognition.action_backend.vision_sidecar", "equals": "failed" },
+          { "path": "gui_cognition.target_resolution.status", "equals": "resolved" },
+          { "path": "gui_cognition.target_resolution.can_execute", "equals": false }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button",
+          "action_backend_fixture": "vision_failed"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.halt.uinput_failed_blocks_action",
+      "title": "GUI Cognition blocks action when uinput daemon failed",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "action_backend", "execution", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 60,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Focus the visible search/input field on the current screen and verify it is focused.",
+        "expected_status_any": ["ok"],
+        "expected_reply_not_contains_any": ["LLM error", "tool-calling"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["ActionBackendStatus", "TargetResolutionCompleted", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ExecutionBlocked", "RecoveryProposed", "ActionStarted", "ActionCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.action_backend.halt_kind", "equals": "service_not_ready" },
+          { "path": "gui_cognition.action_backend.uinput_daemon", "equals": "failed" },
+          { "path": "gui_cognition.target_resolution.status", "equals": "resolved" },
+          { "path": "gui_cognition.target_resolution.can_execute", "equals": false }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button",
+          "action_backend_fixture": "uinput_failed"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.halt.user_disabled_blocks_action",
+      "title": "GUI Cognition blocks action when user disabled GUI automation",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "action_backend", "execution", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 60,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Focus the visible search/input field on the current screen and verify it is focused.",
+        "expected_status_any": ["ok"],
+        "expected_reply_contains_any": ["Target resolution completed for Step 5", "did not execute"],
+        "expected_reply_not_contains_any": ["LLM error", "tool-calling"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["ActionBackendStatus", "TargetResolutionCompleted", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ExecutionBlocked", "RecoveryProposed", "ActionStarted", "ActionCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.action_backend.halt_kind", "equals": "user_disabled" },
+          { "path": "gui_cognition.action_backend.selected_backend", "equals": "automation_disabled" },
+          { "path": "gui_cognition.target_resolution.status", "equals": "resolved" },
+          { "path": "gui_cognition.target_resolution.can_execute", "equals": false }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button",
+          "action_backend_fixture": "user_disabled"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.halt.wayland_uinput_ready_executes_or_reports_ready",
+      "title": "GUI Cognition reports Wayland uinput backend ready for actions",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "action_backend", "execution", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 60,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Observe my current screen and report GUI action backend status.",
+        "expected_status_any": ["ok"],
+        "expected_reply_not_contains_any": ["LLM error", "tool-calling"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["ActionBackendStatus", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ExecutionBlocked"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.action_backend.halt_kind", "equals": "none" },
+          { "path": "gui_cognition.action_backend.session_type", "equals": "wayland" },
+          { "path": "gui_cognition.action_backend.selected_backend", "equals": "uinput_accessibility" },
+          { "path": "gui_cognition.action_backend.can_execute_actions", "equals": true }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button",
+          "action_backend_fixture": "wayland_uinput"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.executor.wayland_xdotool_only_blocks",
+      "title": "GUI Cognition blocks Wayland action readiness when only xdotool is present",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "action_backend", "execution", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 60,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Observe my current screen and report GUI action backend status.",
+        "expected_status_any": ["ok"],
+        "expected_reply_not_contains_any": ["LLM error", "tool-calling"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["ActionBackendStatus", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.action_backend.session_type", "equals": "wayland" },
+          { "path": "gui_cognition.action_backend.xdotool_available", "equals": true },
+          { "path": "gui_cognition.action_backend.xdotool_usable_for_actions", "equals": false },
+          { "path": "gui_cognition.action_backend.selected_backend", "equals": "unavailable" },
+          { "path": "gui_cognition.action_backend.backend_probe_status", "equals": "wayland_no_input_backend" },
+          { "path": "gui_cognition.action_backend.can_execute_actions", "equals": false }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button",
+          "action_backend_fixture": "wayland_xdotool_only"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.executor.wayland_uinput_socket_denied_blocks",
+      "title": "GUI Cognition blocks Wayland action backend when uinput socket is denied",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "action_backend", "execution", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 60,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Observe my current screen and report GUI action backend status.",
+        "expected_status_any": ["ok"],
+        "expected_reply_not_contains_any": ["LLM error", "tool-calling"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["ActionBackendStatus", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.action_backend.session_type", "equals": "wayland" },
+          { "path": "gui_cognition.action_backend.uinput_available", "equals": true },
+          { "path": "gui_cognition.action_backend.uinput_socket_accessible", "equals": false },
+          { "path": "gui_cognition.action_backend.selected_backend", "equals": "unavailable" },
+          { "path": "gui_cognition.action_backend.can_execute_actions", "equals": false }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button",
+          "action_backend_fixture": "wayland_uinput_socket_denied"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.executor.wayland_ydotool_permission_denied_blocks",
+      "title": "GUI Cognition blocks ydotool backend when usability probe is denied",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "action_backend", "execution", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 60,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Observe my current screen and report GUI action backend status.",
+        "expected_status_any": ["ok"],
+        "expected_reply_not_contains_any": ["LLM error", "tool-calling"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["ActionBackendStatus", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.action_backend.ydotool_available", "equals": true },
+          { "path": "gui_cognition.action_backend.ydotool_usable_for_actions", "equals": false },
+          { "path": "gui_cognition.action_backend.selected_backend", "equals": "unavailable" },
+          { "path": "gui_cognition.action_backend.can_execute_actions", "equals": false }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button",
+          "action_backend_fixture": "wayland_ydotool_permission_denied"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.executor.wayland_ydotool_ready_reports_backend",
+      "title": "GUI Cognition reports ydotool backend ready only after usability probe",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "action_backend", "execution", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 60,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Observe my current screen and report GUI action backend status.",
+        "expected_status_any": ["ok"],
+        "expected_reply_not_contains_any": ["LLM error", "tool-calling"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["ActionBackendStatus", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.action_backend.ydotool_usable_for_actions", "equals": true },
+          { "path": "gui_cognition.action_backend.selected_backend", "equals": "ydotool_accessibility" },
+          { "path": "gui_cognition.action_backend.backend_probe_status", "equals": "wayland_ydotool_ready" },
+          { "path": "gui_cognition.action_backend.can_execute_actions", "equals": true }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button",
+          "action_backend_fixture": "wayland_ydotool_ready"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.executor.x11_xdotool_display_failed_blocks",
+      "title": "GUI Cognition blocks X11 xdotool backend when DISPLAY probe fails",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "action_backend", "execution", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 60,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Observe my current screen and report GUI action backend status.",
+        "expected_status_any": ["ok"],
+        "expected_reply_not_contains_any": ["LLM error", "tool-calling"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["ActionBackendStatus", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.action_backend.session_type", "equals": "x11" },
+          { "path": "gui_cognition.action_backend.xdotool_usable_for_actions", "equals": false },
+          { "path": "gui_cognition.action_backend.selected_backend", "equals": "unavailable" },
+          { "path": "gui_cognition.action_backend.backend_probe_status", "equals": "x11_no_xdotool" }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button",
+          "action_backend_fixture": "x11_xdotool_display_failed"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.executor.unknown_session_blocks",
+      "title": "GUI Cognition blocks action backend when session type is unknown",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "action_backend", "execution", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 60,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Observe my current screen and report GUI action backend status.",
+        "expected_status_any": ["ok"],
+        "expected_reply_not_contains_any": ["LLM error", "tool-calling"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["ActionBackendStatus", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.action_backend.session_type", "equals": "unknown" },
+          { "path": "gui_cognition.action_backend.selected_backend", "equals": "unavailable" },
+          { "path": "gui_cognition.action_backend.backend_probe_status", "equals": "unknown_session_blocked" },
+          { "path": "gui_cognition.action_backend.can_execute_actions", "equals": false }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button",
+          "action_backend_fixture": "unknown_session"
+        }
+      }
+    }
+  ]
+}

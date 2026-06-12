@@ -4094,6 +4094,7 @@ dependencies = [
  "chrono",
  "dirs 5.0.1",
  "futures",
+ "image 0.25.10",
  "kria-connection-control",
  "kria-core",
  "rand 0.8.5",

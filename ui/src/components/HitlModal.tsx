@@ -1,5 +1,6 @@
 import { Component, Show, createEffect, createMemo, onCleanup } from "solid-js";
 import { appStore } from "../stores/app";
+import type { GuiCognitionHitlMetadata } from "../types/guiCognition";
 
 const HitlModal: Component = () => {
   const { hitlRequest, approveAction, denyAction } = appStore;
@@ -13,9 +14,47 @@ const HitlModal: Component = () => {
     return "warning";
   });
 
+  const guiMetadata = createMemo<GuiCognitionHitlMetadata | null>(() => {
+    const value = hitlRequest()?.args?.gui_cognition;
+    if (!value || typeof value !== "object") return null;
+    return value as GuiCognitionHitlMetadata;
+  });
+
+  const hashPreview = (value?: string) => {
+    if (!value) return "not provided";
+    return value.length > 16 ? `${value.slice(0, 8)}...${value.slice(-6)}` : value;
+  };
+
   const argsPreview = createMemo(() => {
     const req = hitlRequest();
     if (!req) return "";
+
+    const gui = guiMetadata();
+    if (gui) {
+      return JSON.stringify(
+        {
+          gui_cognition: {
+            proposal_id: gui.proposal_id,
+            proposal_hash: hashPreview(gui.proposal_hash),
+            workflow_id: gui.workflow_id,
+            action_kind: gui.action_kind,
+            target_label: gui.target_label,
+            target_role: gui.target_role,
+            active_window: gui.active_window,
+            risk_level: gui.risk_level,
+            consequence: gui.consequence,
+            evidence_summary: gui.evidence_summary,
+            action_hash: hashPreview(gui.action_hash),
+            target_hash: hashPreview(gui.target_hash),
+            expires_at_ms: gui.expires_at_ms,
+            can_execute: gui.can_execute,
+          },
+        },
+        null,
+        2
+      );
+    }
+
     return JSON.stringify(req.args ?? {}, null, 2);
   });
 
@@ -77,12 +116,12 @@ const HitlModal: Component = () => {
               <div id="hitl-summary" class="hitl-summary">
                 <div>
                   <span class="hitl-summary-label">Requested action</span>
-                  <strong>{req().toolName}</strong>
+                  <strong>{guiMetadata()?.action_kind || req().toolName}</strong>
                 </div>
                 <div>
                   <span class="hitl-summary-label">Risk level</span>
                   <span class={`risk-badge risk-${riskTone()}`}>
-                    {req().riskLevel}
+                    {guiMetadata()?.risk_level || req().riskLevel}
                   </span>
                 </div>
                 <div>
@@ -98,18 +137,73 @@ const HitlModal: Component = () => {
 
               <div class="hitl-explanation">
                 <strong>What approval allows</strong>
-                <p>KRIA will execute this one proposed action with the arguments shown below.</p>
+                <p>
+                  <Show
+                    when={guiMetadata()}
+                    fallback="KRIA will execute this one proposed action with the arguments shown below."
+                  >
+                    Approval authorizes this bound GUI proposal for the executor after freshness checks. Step 6 will not execute it.
+                  </Show>
+                </p>
               </div>
 
-              <div class="hitl-args">
-                <div class="hitl-args-header">
-                  <strong>Arguments</strong>
-                  <Show when={argKeys().length > 0}>
-                    <span>{argKeys().length} field{argKeys().length === 1 ? "" : "s"}</span>
-                  </Show>
+              <Show when={guiMetadata()}>
+                {(meta) => (
+                  <div class="hitl-gui-details">
+                    <div>
+                      <span class="hitl-summary-label">Target</span>
+                      <strong>{meta().target_label || "not provided"}</strong>
+                      <small>{meta().target_role || "control"}</small>
+                    </div>
+                    <div>
+                      <span class="hitl-summary-label">Active window</span>
+                      <strong>{meta().active_window || "unknown"}</strong>
+                    </div>
+                    <div>
+                      <span class="hitl-summary-label">Consequence</span>
+                      <strong>{meta().consequence || req().reason}</strong>
+                    </div>
+                    <div>
+                      <span class="hitl-summary-label">Evidence</span>
+                      <strong>{meta().evidence_summary || "Bound to current GUI proposal"}</strong>
+                    </div>
+                    <div>
+                      <span class="hitl-summary-label">Proposal hash</span>
+                      <code>{hashPreview(meta().proposal_hash || meta().action_hash)}</code>
+                    </div>
+                    <div>
+                      <span class="hitl-summary-label">Action hash</span>
+                      <code>{hashPreview(meta().action_hash)}</code>
+                    </div>
+                    <div>
+                      <span class="hitl-summary-label">Target hash</span>
+                      <code>{hashPreview(meta().target_hash)}</code>
+                    </div>
+                    <div>
+                      <span class="hitl-summary-label">Step 6 execution</span>
+                      <strong>{meta().can_execute ? "enabled" : "disabled"}</strong>
+                    </div>
+                    <Show when={meta().expires_at_ms}>
+                      <div>
+                        <span class="hitl-summary-label">Expires</span>
+                        <strong>{new Date(Number(meta().expires_at_ms)).toLocaleTimeString()}</strong>
+                      </div>
+                    </Show>
+                  </div>
+                )}
+              </Show>
+
+              <Show when={!guiMetadata()}>
+                <div class="hitl-args">
+                  <div class="hitl-args-header">
+                    <strong>Arguments</strong>
+                    <Show when={argKeys().length > 0}>
+                      <span>{argKeys().length} field{argKeys().length === 1 ? "" : "s"}</span>
+                    </Show>
+                  </div>
+                  <pre>{argsPreview()}</pre>
                 </div>
-                <pre>{argsPreview()}</pre>
-              </div>
+              </Show>
             </div>
 
             <div class="modal-footer hitl-actions">
@@ -125,7 +219,7 @@ const HitlModal: Component = () => {
                 class="btn-approve"
                 onClick={approveCurrentRequest}
               >
-                Approve this action
+                {guiMetadata() ? "Approve this GUI action" : "Approve this action"}
               </button>
             </div>
           </div>

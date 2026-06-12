@@ -4,6 +4,7 @@ import json
 import time
 import urllib.error
 import urllib.request
+from socket import timeout as SocketTimeout
 from typing import Any
 
 from testing.harness.assertions.chat_response import assert_chat_response
@@ -47,14 +48,25 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _progress(message: str) -> None:
+    print(f"[desktop_chat_command] {message}", flush=True)
+
+
 def send_desktop_chat_command(
     *,
     base_url: str,
     message: str,
     session_id: str,
+    manual_profile: dict[str, Any] | None = None,
+    gui_cognition_test: dict[str, Any] | None = None,
     timeout_seconds: int = 120,
 ) -> dict[str, Any]:
-    body = json.dumps({"message": message, "session_id": session_id}).encode("utf-8")
+    payload: dict[str, Any] = {"message": message, "session_id": session_id}
+    if manual_profile is not None:
+        payload["manual_profile"] = manual_profile
+    if gui_cognition_test is not None:
+        payload["gui_cognition_test"] = gui_cognition_test
+    body = json.dumps(payload).encode("utf-8")
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
     token = _read_token(base_url)
     if token:
@@ -91,12 +103,25 @@ def send_desktop_chat_command(
             "duration_ms": int((time.time() - started) * 1000),
             "response": redact_json(parsed),
         }
-    except OSError as error:
+    except (TimeoutError, SocketTimeout) as error:
         return {
             "ok": False,
             "status_code": None,
             "duration_ms": int((time.time() - started) * 1000),
-            "response": {"error": str(error)},
+            "timed_out": True,
+            "timeout_seconds": timeout_seconds,
+            "response": {"error": f"desktop command request timed out: {error}"},
+        }
+    except OSError as error:
+        error_text = str(error)
+        timed_out = "timed out" in error_text.lower() or "timeout" in error_text.lower()
+        return {
+            "ok": False,
+            "status_code": None,
+            "duration_ms": int((time.time() - started) * 1000),
+            "timed_out": timed_out,
+            "timeout_seconds": timeout_seconds,
+            "response": {"error": error_text},
         }
 
 
@@ -176,22 +201,64 @@ def run_desktop_chat_command_scenario(scenario: Scenario, context: RunContext) -
             str(step.get("session_id") or inputs.get("session_id") or f"{scenario.id}-{context.run_id}-{index}"),
             variables,
         )
+        manual_profile = step.get("manual_profile", inputs.get("manual_profile"))
+        if manual_profile is not None:
+            manual_profile = _substitute_value(manual_profile, variables)
+            if not isinstance(manual_profile, dict):
+                failures.append(f"step {index}: manual_profile must be an object when provided")
+                continue
+        gui_cognition_test = step.get("gui_cognition_test", inputs.get("gui_cognition_test"))
+        if gui_cognition_test is not None:
+            gui_cognition_test = _substitute_value(gui_cognition_test, variables)
+            if not isinstance(gui_cognition_test, dict):
+                failures.append(f"step {index}: gui_cognition_test must be an object when provided")
+                continue
+        step_timeout_seconds = int(step.get("timeout_seconds") or scenario.timeout_seconds)
+        step_started_at_ms = _now_ms()
+        manual_profile_mode_id = (
+            str(manual_profile.get("mode_id"))
+            if isinstance(manual_profile, dict) and manual_profile.get("mode_id") is not None
+            else None
+        )
+        fixture_name = _gui_cognition_fixture_name(gui_cognition_test)
+        _progress(
+            f"{scenario.id} step {index}/{len(steps)} POST {base_url} "
+            f"timeout={step_timeout_seconds}s mode={manual_profile_mode_id or 'auto'} "
+            f"fixture={fixture_name or 'none'} prompt={prompt[:120]!r}"
+        )
         response = send_desktop_chat_command(
             base_url=base_url,
             message=prompt,
             session_id=session_id,
-            timeout_seconds=int(step.get("timeout_seconds") or scenario.timeout_seconds),
+            manual_profile=manual_profile,
+            gui_cognition_test=gui_cognition_test,
+            timeout_seconds=step_timeout_seconds,
+        )
+        _progress(
+            f"{scenario.id} step {index}/{len(steps)} completed "
+            f"status={response.get('status_code')} ok={response.get('ok')} "
+            f"elapsed_ms={response.get('duration_ms')}"
         )
         parsed_response = response.get("response")
         event_names = _event_names(parsed_response)
+        gui_event_types = _gui_event_types(parsed_response)
+        observation_timing = _gui_observation_timing(parsed_response)
         evidence.append(
             {
                 "type": "desktop_chat_command_step",
                 "step": index,
+                "step_started_at_ms": step_started_at_ms,
+                "step_timeout_seconds": step_timeout_seconds,
+                "base_url": base_url,
+                "manual_profile_mode_id": manual_profile_mode_id,
+                "gui_cognition_test": redact_json(gui_cognition_test),
                 "prompt_preview": prompt[:240],
                 "status_code": response.get("status_code"),
                 "duration_ms": response.get("duration_ms"),
+                "timed_out": bool(response.get("timed_out")),
                 "event_names": event_names,
+                "gui_event_types": gui_event_types,
+                "observation_timing": observation_timing,
                 "response": _desktop_response_evidence_preview(parsed_response),
             }
         )
@@ -200,20 +267,50 @@ def run_desktop_chat_command_scenario(scenario: Scenario, context: RunContext) -
         http_status_allowed = response.get("status_code") in expected_http_statuses
         if not response.get("ok") and not http_status_allowed:
             status_code = response.get("status_code")
-            failure_class = "environment" if status_code is None else "product"
-            failures.append(f"step {index} desktop chat command failed with status {status_code}")
+            if response.get("timed_out"):
+                failure_class = "harness"
+                failures.append(
+                    f"step {index} desktop command request timed out after {step_timeout_seconds}s"
+                )
+            else:
+                failure_class = "environment" if status_code is None else "product"
+                failures.append(f"step {index} desktop chat command failed with status {status_code}")
             continue
         if not isinstance(parsed_response, dict):
             failures.append(f"step {index} response was not a JSON object")
             continue
 
         desktop_meta = parsed_response.get("desktop_command") if isinstance(parsed_response.get("desktop_command"), dict) else {}
-        if desktop_meta.get("path") != "send_message" or desktop_meta.get("ui_opened") is not False:
-            failures.append("desktop command response did not prove non-UI send_message path")
+        expected_desktop_path = str(
+            step.get("expected_desktop_path")
+            or inputs.get("expected_desktop_path")
+            or "send_message"
+        )
+        if desktop_meta.get("path") != expected_desktop_path or desktop_meta.get("ui_opened") is not False:
+            failures.append(
+                "desktop command response did not prove non-UI "
+                f"{expected_desktop_path} path"
+            )
         if parsed_response.get("status") != "not_handled":
             for required in ("agent:thinking", "agent:token", "agent:tool_result", "agent:done"):
                 if required not in event_names:
                     failures.append(f"step {index}: missing Desktop chat event {required}")
+        for required in _string_list(step.get("expected_event_names", inputs.get("expected_event_names", []))):
+            if required not in event_names:
+                failures.append(f"step {index}: missing expected Desktop chat event {required}")
+        for forbidden in _string_list(step.get("forbidden_event_names", inputs.get("forbidden_event_names", []))):
+            if forbidden in event_names:
+                failures.append(f"step {index}: forbidden Desktop chat event appeared: {forbidden}")
+        for required in _string_list(step.get("expected_gui_event_types", inputs.get("expected_gui_event_types", []))):
+            if required not in gui_event_types:
+                failures.append(f"step {index}: missing GUI cognition event type {required}")
+        for forbidden in _string_list(step.get("forbidden_gui_event_types", inputs.get("forbidden_gui_event_types", []))):
+            if forbidden in gui_event_types:
+                failures.append(f"step {index}: forbidden GUI cognition event type appeared: {forbidden}")
+        if bool(step.get("assert_gui_event_sequence_monotonic", inputs.get("assert_gui_event_sequence_monotonic", False))):
+            sequences = _gui_event_sequences(parsed_response)
+            if sequences != sorted(sequences) or len(sequences) != len(set(sequences)):
+                failures.append(f"step {index}: GUI cognition event sequence is not monotonic")
 
         generic_refusal = _generic_refusal(parsed_response)
         if generic_refusal:
@@ -321,6 +418,97 @@ def _event_names(response: Any) -> list[str]:
         if isinstance(event, dict) and isinstance(event.get("name"), str):
             names.append(event["name"])
     return names
+
+
+def _gui_event_types(response: Any) -> list[str]:
+    events = _gui_events(response)
+    types: list[str] = []
+    for event in events:
+        payload = event.get("payload") if isinstance(event, dict) else None
+        inner = payload.get("event") if isinstance(payload, dict) else None
+        event_type = inner.get("type") if isinstance(inner, dict) else None
+        if isinstance(event_type, str):
+            types.append(event_type)
+    return types
+
+
+def _gui_event_sequences(response: Any) -> list[int]:
+    events = _gui_events(response)
+    sequences: list[int] = []
+    for event in events:
+        payload = event.get("payload") if isinstance(event, dict) else None
+        sequence = payload.get("sequence") if isinstance(payload, dict) else None
+        if isinstance(sequence, int):
+            sequences.append(sequence)
+    return sequences
+
+
+def _gui_observation_timing(response: Any) -> dict[str, Any]:
+    if not isinstance(response, dict):
+        return {}
+    assertion_response = _assertion_response(response)
+    gui = assertion_response.get("gui_cognition")
+    if isinstance(gui, dict):
+        perception = gui.get("perception")
+        if isinstance(perception, dict) and isinstance(perception.get("observation_total_ms"), (int, float)):
+            return {
+                "observation_total_ms": perception.get("observation_total_ms"),
+                "slowest_probe": perception.get("slowest_probe"),
+                "slowest_probe_ms": perception.get("slowest_probe_ms"),
+                "probe_timeout_count": perception.get("probe_timeout_count"),
+                "cache_hit": perception.get("cache_hit"),
+                "cache_age_ms": perception.get("cache_age_ms"),
+            }
+    for event in _gui_events(response):
+        payload = event.get("payload") if isinstance(event, dict) else None
+        inner = payload.get("event") if isinstance(payload, dict) else None
+        if isinstance(inner, dict) and inner.get("type") == "ObservationCompleted":
+            return {
+                "observation_total_ms": inner.get("observation_total_ms"),
+                "slowest_probe": inner.get("slowest_probe"),
+                "slowest_probe_ms": inner.get("slowest_probe_ms"),
+                "probe_timeout_count": inner.get("probe_timeout_count"),
+                "cache_hit": inner.get("cache_hit"),
+                "cache_age_ms": inner.get("cache_age_ms"),
+            }
+    return {}
+
+
+def _gui_events(response: Any) -> list[dict[str, Any]]:
+    if not isinstance(response, dict):
+        return []
+    events = response.get("events")
+    if not isinstance(events, list):
+        return []
+    return [
+        event
+        for event in events
+        if isinstance(event, dict) and event.get("name") == "gui_cognition:event"
+    ]
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if isinstance(item, str)]
+
+
+def _gui_cognition_fixture_name(value: Any) -> str | None:
+    if not isinstance(value, dict):
+        return None
+    for key in (
+        "llm_planner_fixture",
+        "planner_fixture",
+        "perception_fixture",
+        "action_backend_fixture",
+        "verifier_fixture",
+        "recovery_fixture",
+        "resume_fixture",
+    ):
+        fixture = value.get(key)
+        if isinstance(fixture, str) and fixture:
+            return f"{key}={fixture}"
+    return "custom" if value else None
 
 
 def _assertion_response(response: dict[str, Any]) -> dict[str, Any]:

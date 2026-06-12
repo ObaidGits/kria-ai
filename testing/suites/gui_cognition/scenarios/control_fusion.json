@@ -1,0 +1,49 @@
+{
+  "schema_version": "kria.testing.scenarios.v1",
+  "scenarios": [
+    {
+      "id": "gui_cognition.controls.fused_executable_surface",
+      "title": "Control fusion exposes executable confidence for fixture controls",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "control_fusion", "perception"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 90,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "What controls are visible on my screen?",
+        "expected_status_any": ["ok"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["ObservationCompleted", "ContextBuilt", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "desktop_command.path", "equals": "send_manual_tool_message" },
+          { "path": "gui_cognition.perception.text_field_count", "exists": true },
+          { "path": "gui_cognition.perception.button_count", "exists": true },
+          { "path": "gui_cognition.perception.executable_control_count", "exists": true },
+          { "path": "gui_cognition.perception.control_quality_summary.executable", "exists": true },
+          { "path": "gui_cognition.perception.control_samples.0.identity_confidence", "exists": true },
+          { "path": "gui_cognition.perception.control_samples.0.bounds_confidence", "exists": true },
+          { "path": "gui_cognition.perception.control_samples.0.state_confidence", "exists": true },
+          { "path": "gui_cognition.perception.control_samples.0.executable_confidence", "exists": true },
+          { "path": "gui_cognition.context.executable_control_count", "exists": true }
+        ],
+        "forbidden_json_paths": [
+          "gui_cognition.perception.screenshot",
+          "gui_cognition.perception.raw_accessibility_tree"
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button"
+        }
+      }
+    }
+  ]
+}

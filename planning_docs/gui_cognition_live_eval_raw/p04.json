@@ -1,0 +1,4786 @@
+{
+  "status": "processing",
+  "reply": "Workflow stopped safely: deterministic action backend failed",
+  "events": [
+    {
+      "name": "agent:thinking",
+      "payload": {
+        "status": "processing",
+        "mode": "gui_cognition"
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p04-1781259816",
+        "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+        "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+        "sequence": 1,
+        "timestamp_ms": 1781259836947,
+        "event": {
+          "type": "TurnStarted",
+          "mode_id": "gui_cognition"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p04-1781259816",
+        "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+        "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+        "sequence": 2,
+        "timestamp_ms": 1781259836947,
+        "event": {
+          "type": "RouteConfirmed",
+          "path": "send_manual_tool_message",
+          "llm_tool_loop": false
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p04-1781259816",
+        "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+        "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+        "sequence": 3,
+        "timestamp_ms": 1781259836947,
+        "event": {
+          "type": "ObservationStarted",
+          "cache_policy": "observe_plan_ttl_750ms",
+          "sources": [
+            "get_active_window",
+            "get_desktop_state",
+            "get_accessibility_capabilities",
+            "accessibility_tree_summary",
+            "capture_screenshot",
+            "ocr",
+            "monitor_layout",
+            "cursor_focus",
+            "find_ui_elements"
+          ]
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p04-1781259816",
+        "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+        "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+        "sequence": 4,
+        "timestamp_ms": 1781259836947,
+        "event": {
+          "type": "ObservationCompleted",
+          "observation_id": "25f9ee45-62d8-4d11-991c-7abc737d6e40",
+          "active_window": "KRIA (Workspace) - Kiro",
+          "active_window_source": "kria_gnome_shell_bridge",
+          "active_window_confidence": 0.98,
+          "active_window_reliability": "reliable",
+          "active_window_blocker": null,
+          "active_window_authority_source": "kria_gnome_shell_bridge",
+          "active_window_authority_confidence": 0.98,
+          "active_window_authority_status": "available",
+          "gnome_bridge_status": "available",
+          "active_window_app": "Kiro",
+          "active_window_app_id": "kiro.desktop",
+          "active_window_pid": 5633,
+          "active_window_workspace": 0,
+          "active_window_monitor": 0,
+          "active_window_fullscreen": false,
+          "active_window_minimized": false,
+          "active_window_observed_at_ms": 1781259816346,
+          "active_window_fallback_chain": [
+            {
+              "source": "kria_gnome_shell_bridge",
+              "status": "matched",
+              "reliability": "reliable",
+              "reason": null
+            }
+          ],
+          "active_window_failure_chain": [],
+          "visible_app_count": 5,
+          "visible_control_count": 8,
+          "visible_accessible_control_count": 8,
+          "disabled_control_count": 8,
+          "hidden_control_count": 0,
+          "trusted_control_count": 0,
+          "partial_control_count": 0,
+          "not_executable_control_count": 8,
+          "text_field_count": 7,
+          "button_count": 1,
+          "dialog_count": 0,
+          "other_control_count": 0,
+          "ocr_available": true,
+          "ocr_block_count": 1,
+          "ocr_trust": "untrusted",
+          "ocr_wait_for_screenshot_ms": 1314,
+          "ocr_engine_selected": "tesseract_cli",
+          "ocr_engine_status": "completed",
+          "ocr_image_status": "downscaled_1920x1200_to_1000x625",
+          "ocr_total_ms": 3405,
+          "ocr_fast_path": "full_screen_tesseract",
+          "ocr_cache_hit": false,
+          "ocr_roi_count": 0,
+          "ocr_changed_region_count": 0,
+          "ocr_cold_start_ms": 3405,
+          "ocr_warm_start_ms": null,
+          "ocr_benchmark_summary": "rapidocr/paddleocr optional adapters not configured; tesseract fallback used",
+          "ocr_injection_count": 0,
+          "ocr_blocker": null,
+          "accessibility_available": true,
+          "accessibility_source_status": "degraded",
+          "accessibility_overall_status": "degraded",
+          "accessibility_overall_confidence": 0.6599999999999999,
+          "accessibility_app_scores": [
+            {
+              "app_label": ":1.0",
+              "bus_name_hash": "6ae115a23a8787ac",
+              "node_count": 71,
+              "control_count": 16,
+              "timeout_count": 1,
+              "stale_node_count": 0,
+              "score": 0.6599999999999999,
+              "status": "degraded"
+            },
+            {
+              "app_label": ":1.4",
+              "bus_name_hash": "1890e0c9307bad0a",
+              "node_count": 71,
+              "control_count": 16,
+              "timeout_count": 1,
+              "stale_node_count": 0,
+              "score": 0.6599999999999999,
+              "status": "degraded"
+            },
+            {
+              "app_label": ":1.6",
+              "bus_name_hash": "cdaa122c19a646a6",
+              "node_count": 71,
+              "control_count": 16,
+              "timeout_count": 1,
+              "stale_node_count": 0,
+              "score": 0.6599999999999999,
+              "status": "degraded"
+            },
+            {
+              "app_label": ":1.5",
+              "bus_name_hash": "305f121ff554bda2",
+              "node_count": 71,
+              "control_count": 16,
+              "timeout_count": 1,
+              "stale_node_count": 0,
+              "score": 0.6599999999999999,
+              "status": "degraded"
+            },
+            {
+              "app_label": ":1.3",
+              "bus_name_hash": "e0312de4bce4c374",
+              "node_count": 71,
+              "control_count": 16,
+              "timeout_count": 1,
+              "stale_node_count": 0,
+              "score": 0.6599999999999999,
+              "status": "degraded"
+            }
+          ],
+          "accessibility_stale_node_count": 0,
+          "accessibility_timeout_count": 1,
+          "accessibility_cache_hit_count": 0,
+          "accessibility_stale_cache_rejected_count": 0,
+          "accessibility_node_count": 71,
+          "accessibility_control_count": 8,
+          "atspi_snapshot_total_ms": 128,
+          "atspi_skipped_app_count": 1,
+          "atspi_omitted_node_count": 109,
+          "accessibility_remediation": [],
+          "screenshot_available": true,
+          "screenshot_status": "available",
+          "screenshot_capture_ms": 1314,
+          "screenshot_duration_ms": 1314,
+          "screen_hash_prefix": "665b91d809e59049",
+          "monitor_count": 1,
+          "dpi_available": true,
+          "cursor_focus_known": true,
+          "focused_window": "KRIA (Workspace) - Kiro",
+          "focused_app": "Kiro",
+          "focused_control_id": "gnome_bridge:focused_window",
+          "focused_control_label": "Focused window",
+          "focused_control_role": "window",
+          "focused_control_bounds": null,
+          "text_cursor_known": false,
+          "editable_target_known": false,
+          "terminal_like": false,
+          "focus_source": "gnome_bridge_focus",
+          "focus_confidence": 0.72,
+          "focus_reliability": "best_effort",
+          "focus_adapter_status": "available",
+          "focus_latency_ms": 17,
+          "focus_failure_chain": [
+            {
+              "source": "gnome_bridge_focus",
+              "status": "matched",
+              "reliability": "best_effort",
+              "reason": null
+            },
+            {
+              "source": "chrome_cdp_active_element",
+              "status": "unavailable",
+              "reliability": "unavailable",
+              "reason": "Chrome CDP skipped because the current focused app/window is not Chrome-like"
+            },
+            {
+              "source": "firefox_bidi_active_element",
+              "status": "unavailable",
+              "reliability": "unavailable",
+              "reason": "Firefox BiDi skipped because the current focused app/window is not Firefox-like"
+            },
+            {
+              "source": "vscode_extension",
+              "status": "unavailable",
+              "reliability": "unavailable",
+              "reason": "VS Code extension skipped because the current focused app/window is not VS Code-like"
+            },
+            {
+              "source": "gnome_terminal_adapter",
+              "status": "unavailable",
+              "reliability": "unavailable",
+              "reason": "active/focused window is not terminal-like"
+            },
+            {
+              "source": "atspi_focused_object",
+              "status": "unavailable",
+              "reliability": "unavailable",
+              "reason": "AT-SPI snapshot did not expose focused object, window, or app"
+            }
+          ],
+          "active_window_probe_ok": true,
+          "desktop_state_probe_ok": true,
+          "capabilities_probe_ok": true,
+          "observation_total_ms": 3407,
+          "slowest_probe": "run_ocr",
+          "slowest_probe_ms": 3405,
+          "probe_timeout_count": 1,
+          "probe_timings": [
+            {
+              "probe_name": "capture_screenshot",
+              "duration_ms": 1314,
+              "status": "ok",
+              "source": "xcap",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "detect_visual_controls",
+              "duration_ms": 2056,
+              "status": "timeout",
+              "source": "detect_visual_controls",
+              "cache_hit": false,
+              "blocker_kind": "timeout"
+            },
+            {
+              "probe_name": "find_ui_elements:check_box",
+              "duration_ms": 129,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "find_ui_elements:dialog",
+              "duration_ms": 129,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "find_ui_elements:link",
+              "duration_ms": 130,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "find_ui_elements:page_tab",
+              "duration_ms": 130,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "find_ui_elements:push_button",
+              "duration_ms": 129,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "find_ui_elements:text",
+              "duration_ms": 129,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "focused_window_title",
+              "duration_ms": 130,
+              "status": "blocked",
+              "source": "focused_window_title",
+              "cache_hit": false,
+              "blocker_kind": "unavailable"
+            },
+            {
+              "probe_name": "get_accessibility_capabilities",
+              "duration_ms": 128,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "get_accessibility_tree_summary",
+              "duration_ms": 128,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "get_active_window",
+              "duration_ms": 30,
+              "status": "ok",
+              "source": "kria_gnome_shell_bridge",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "get_cursor_focus_state",
+              "duration_ms": 146,
+              "status": "ok",
+              "source": "gnome_bridge_focus",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "get_desktop_state",
+              "duration_ms": 128,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "get_monitor_layout",
+              "duration_ms": 0,
+              "status": "ok",
+              "source": "get_monitor_layout",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "run_ocr",
+              "duration_ms": 3405,
+              "status": "ok",
+              "source": "tesseract_cli",
+              "cache_hit": false,
+              "blocker_kind": null
+            }
+          ],
+          "cache_hit": false,
+          "cache_age_ms": null,
+          "cache_policy": "observe_plan_ttl_750ms",
+          "freshness": "fresh",
+          "source_blockers": {
+            "active_window": null,
+            "desktop_state": null,
+            "accessibility": null,
+            "screenshot": null,
+            "ocr": null,
+            "monitor": null,
+            "cursor_focus": null
+          },
+          "control_samples": [
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1004:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1008:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1012:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1016:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1020:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1024:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/516:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/491:push button",
+              "role": "push button",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            }
+          ],
+          "executable_control_count": 0,
+          "visual_control_count": 0,
+          "visual_control_summary": {
+            "detected": 0,
+            "matched": 0,
+            "unmatched": 0,
+            "button_like": 0,
+            "false_positive_risk": "supporting_visual_only"
+          }
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p04-1781259816",
+        "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+        "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+        "sequence": 5,
+        "timestamp_ms": 1781259836948,
+        "event": {
+          "context_id": "d98ba3a2-7594-4fdf-b97c-e0f11ed58f4d",
+          "observation_id": "25f9ee45-62d8-4d11-991c-7abc737d6e40",
+          "trusted_control_count": 0,
+          "executable_control_count": 0,
+          "disabled_or_hidden_count": 8,
+          "ocr_untrusted": true,
+          "ocr_injection_count": 0,
+          "redaction_count": 0,
+          "freshness": "fresh",
+          "status": "ready",
+          "previous_context_id": null,
+          "previous_observation_id": null,
+          "delta": {
+            "active_window_changed": false,
+            "screen_hash_changed": false,
+            "monitor_layout_changed": false,
+            "control_count_changed": false,
+            "focused_control_changed": false,
+            "stale_action_risk": false,
+            "changed_summary": []
+          },
+          "source_confidence": {
+            "active_window": 0.98,
+            "accessibility": 0.6599999999999999,
+            "screenshot": 0.85,
+            "ocr": 0.45,
+            "monitor": 0.82,
+            "focus": 0.75
+          },
+          "screen_hash_prefix": "665b91d809e59049",
+          "focus": {
+            "source": "gnome_bridge_focus",
+            "confidence": 0.72,
+            "reliability": "best_effort",
+            "keyboard_focus_known": true,
+            "editable_target_known": false,
+            "terminal_like": false,
+            "adapter_status": "available",
+            "latency_ms": 17,
+            "focused_window": "KRIA (Workspace) - Kiro",
+            "focused_app": "Kiro",
+            "focused_control_label": "Focused window",
+            "focused_control_role": "window",
+            "focused_control_bounds": null
+          },
+          "accessibility_health": {
+            "status": "degraded",
+            "confidence": 0.6599999999999999,
+            "app_scores": [
+              {
+                "app_label": ":1.0",
+                "bus_name_hash": "6ae115a23a8787ac",
+                "node_count": 71,
+                "control_count": 16,
+                "timeout_count": 1,
+                "stale_node_count": 0,
+                "score": 0.6599999999999999,
+                "status": "degraded"
+              },
+              {
+                "app_label": ":1.4",
+                "bus_name_hash": "1890e0c9307bad0a",
+                "node_count": 71,
+                "control_count": 16,
+                "timeout_count": 1,
+                "stale_node_count": 0,
+                "score": 0.6599999999999999,
+                "status": "degraded"
+              },
+              {
+                "app_label": ":1.6",
+                "bus_name_hash": "cdaa122c19a646a6",
+                "node_count": 71,
+                "control_count": 16,
+                "timeout_count": 1,
+                "stale_node_count": 0,
+                "score": 0.6599999999999999,
+                "status": "degraded"
+              },
+              {
+                "app_label": ":1.5",
+                "bus_name_hash": "305f121ff554bda2",
+                "node_count": 71,
+                "control_count": 16,
+                "timeout_count": 1,
+                "stale_node_count": 0,
+                "score": 0.6599999999999999,
+                "status": "degraded"
+              },
+              {
+                "app_label": ":1.3",
+                "bus_name_hash": "e0312de4bce4c374",
+                "node_count": 71,
+                "control_count": 16,
+                "timeout_count": 1,
+                "stale_node_count": 0,
+                "score": 0.6599999999999999,
+                "status": "degraded"
+              }
+            ],
+            "stale_node_count": 0,
+            "timeout_count": 1,
+            "cache_hit_count": 0,
+            "stale_cache_rejected_count": 0
+          },
+          "visual_controls": {
+            "detected": 0,
+            "supporting_only": true
+          },
+          "ocr_performance": {
+            "fast_path": "full_screen_tesseract",
+            "cache_hit": false,
+            "roi_count": 0,
+            "changed_region_count": 0,
+            "cold_start_ms": 3405,
+            "warm_start_ms": null
+          },
+          "source_blockers": [],
+          "warnings": [],
+          "type": "ContextBuilt",
+          "active_window": "KRIA (Workspace) - Kiro",
+          "control_summary": {
+            "text_fields": 7,
+            "buttons": 1,
+            "dialogs": 0
+          },
+          "safety": {
+            "llm_native_tool_loop": false,
+            "raw_ocr_trusted": false,
+            "ocr_trust_level": "untrusted_text",
+            "accessibility_is_executable_authority": true,
+            "screenshot_is_freshness_evidence": true
+          },
+          "source_trust": {
+            "accessibility": "trusted_executable",
+            "ocr": "untrusted_text",
+            "visual": "supporting_visual"
+          }
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p04-1781259816",
+        "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+        "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+        "sequence": 6,
+        "timestamp_ms": 1781259836948,
+        "event": {
+          "type": "ActionBackendStatus",
+          "global_halt_engaged": false,
+          "halt_kind": "none",
+          "halt_reason": null,
+          "release_conditions": [],
+          "startup_elapsed_ms": null,
+          "can_observe": true,
+          "can_plan": true,
+          "automation_enabled": true,
+          "vision_sidecar": "running",
+          "uinput_daemon": "running",
+          "orchestrator_available": true,
+          "session_type": "wayland",
+          "xdotool_available": true,
+          "ydotool_available": false,
+          "uinput_available": true,
+          "selected_backend": "uinput_accessibility",
+          "backend_selection_reason": "Wayland session selected uinput because the daemon and socket are healthy.",
+          "backend_probe_status": "wayland_uinput_ready",
+          "backend_probe_errors": [
+            "xdotool detected but not usable for Wayland GUI actions"
+          ],
+          "input_backend_kind": "uinput",
+          "focus_supported": true,
+          "typing_supported": true,
+          "click_supported": true,
+          "verification_supported": true,
+          "xdotool_usable_for_actions": false,
+          "ydotool_usable_for_actions": false,
+          "uinput_socket_path": "/run/user/1000/kria-uinput.sock",
+          "uinput_socket_accessible": true,
+          "can_execute_actions": true,
+          "blockers": [],
+          "capabilities": {
+            "observe": true,
+            "focus_field": true,
+            "fill_field": true,
+            "click_control": true,
+            "post_action_observe": true,
+            "verify": true,
+            "recovery_focus": true,
+            "recovery_modal": true
+          }
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p04-1781259816",
+        "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+        "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+        "sequence": 7,
+        "timestamp_ms": 1781259836948,
+        "event": {
+          "type": "GoalContractCreated",
+          "contract_id": "8a2e0d9d65c59ea425edac8d32e089a73ef72dc20d5ec9e43cc84650bf4c75ed",
+          "observation_id": "25f9ee45-62d8-4d11-991c-7abc737d6e40",
+          "context_id": "d98ba3a2-7594-4fdf-b97c-e0f11ed58f4d",
+          "goal_summary": "Open terminal",
+          "intent_kind": "analyze_plan",
+          "action_type": "open_app",
+          "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3",
+          "target_app_kind": "terminal",
+          "target_app_hint": "terminal",
+          "target_window_hint": "KRIA (Workspace) - Kiro",
+          "target_control_hint": null,
+          "query_summary": null,
+          "query_hash": null,
+          "text_payload_summary": null,
+          "text_payload_hash": null,
+          "desired_final_state": "target application is opened or blocker is explained",
+          "risk_level": "low",
+          "requires_user_approval": false,
+          "ambiguity_count": 0,
+          "ambiguities": [],
+          "source_evidence": [
+            {
+              "source": "user_prompt",
+              "field": "action_type",
+              "summary": "matched action open_app",
+              "confidence": 0.9
+            },
+            {
+              "source": "user_prompt",
+              "field": "target_app_kind",
+              "summary": "terminal",
+              "confidence": 0.86
+            },
+            {
+              "source": "user_prompt",
+              "field": "target_app_hint",
+              "summary": "terminal",
+              "confidence": 0.86
+            }
+          ],
+          "extraction_confidence": 0.76,
+          "extractor_mode": "deterministic"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p04-1781259816",
+        "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+        "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+        "sequence": 8,
+        "timestamp_ms": 1781259836948,
+        "event": {
+          "type": "LlmPlanningStarted",
+          "planner_mode": "llm_schema",
+          "context_id": "d98ba3a2-7594-4fdf-b97c-e0f11ed58f4d",
+          "observation_id": "25f9ee45-62d8-4d11-991c-7abc737d6e40"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p04-1781259816",
+        "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+        "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+        "sequence": 9,
+        "timestamp_ms": 1781259836948,
+        "event": {
+          "type": "LlmPlanningFailed",
+          "status": "rejected",
+          "reason": "LLM planner returned prose or non-object content"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p04-1781259816",
+        "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+        "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+        "sequence": 10,
+        "timestamp_ms": 1781259836948,
+        "event": {
+          "plan_id": "a30a3c09-ad86-4810-a240-25d785a04513",
+          "goal_contract_id": "8a2e0d9d65c59ea425edac8d32e089a73ef72dc20d5ec9e43cc84650bf4c75ed",
+          "context_id": "d98ba3a2-7594-4fdf-b97c-e0f11ed58f4d",
+          "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3",
+          "goal_action_type": "open_app",
+          "summary": "open_app GUI plan",
+          "planner_mode": "llm_rejected_fallback",
+          "plan_status": "valid",
+          "step_count": 2,
+          "risk_level": "low",
+          "requires_user_approval": false,
+          "ambiguity_count": 0,
+          "confidence": 0.62,
+          "validation_errors": [],
+          "source_evidence": [
+            {
+              "source": "user_prompt",
+              "field": "action_type",
+              "summary": "matched action open_app",
+              "confidence": 0.9
+            },
+            {
+              "source": "user_prompt",
+              "field": "target_app_kind",
+              "summary": "terminal",
+              "confidence": 0.86
+            },
+            {
+              "source": "user_prompt",
+              "field": "target_app_hint",
+              "summary": "terminal",
+              "confidence": 0.86
+            }
+          ],
+          "steps": [
+            "Open or switch to the requested app",
+            "Verify requested app window is visible"
+          ],
+          "typed_steps": [
+            {
+              "step_id": "det-1",
+              "step_type": "OpenApp",
+              "summary": "Open or switch to the requested app",
+              "target_app_hint": "terminal",
+              "target_window_hint": "KRIA (Workspace) - Kiro",
+              "target_control_hint": null,
+              "text_payload_summary": null,
+              "text_payload_hash": null,
+              "expected_precondition": "requested app is not guaranteed visible",
+              "expected_postcondition": "requested app window is visible",
+              "verification_strategy": "window_visible",
+              "risk_level": "low",
+              "requires_approval": false,
+              "allowed_to_execute": false,
+              "confidence": 0.76,
+              "reason": "analyze_plan"
+            },
+            {
+              "step_id": "det-2",
+              "step_type": "WaitForState",
+              "summary": "Verify requested app window is visible",
+              "target_app_hint": "terminal",
+              "target_window_hint": "KRIA (Workspace) - Kiro",
+              "target_control_hint": null,
+              "text_payload_summary": null,
+              "text_payload_hash": null,
+              "expected_precondition": "OpenApp step has been planned",
+              "expected_postcondition": "window visible or safe blocker reported",
+              "verification_strategy": "window_visible",
+              "risk_level": "low",
+              "requires_approval": false,
+              "allowed_to_execute": false,
+              "confidence": 0.76,
+              "reason": "analyze_plan"
+            }
+          ],
+          "type": "PlanCreated"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p04-1781259816",
+        "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+        "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+        "sequence": 11,
+        "timestamp_ms": 1781259836948,
+        "event": {
+          "type": "PlanValidationCompleted",
+          "validation_id": "validation-a30a3c09-ad86-4810-a240-25d785a04513",
+          "plan_id": "a30a3c09-ad86-4810-a240-25d785a04513",
+          "goal_contract_id": "8a2e0d9d65c59ea425edac8d32e089a73ef72dc20d5ec9e43cc84650bf4c75ed",
+          "context_id": "d98ba3a2-7594-4fdf-b97c-e0f11ed58f4d",
+          "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3",
+          "status": "valid",
+          "readiness_status": "valid_for_resolution",
+          "risk_level": "low",
+          "requires_user_approval": false,
+          "can_proceed_to_target_resolution": true,
+          "can_execute": false,
+          "blocker_count": 0,
+          "warning_count": 0,
+          "blocked_reasons": [],
+          "warnings": [],
+          "validation_errors": [],
+          "source_evidence": [
+            {
+              "source": "user_prompt",
+              "field": "action_type",
+              "summary": "matched action open_app",
+              "confidence": 0.9
+            },
+            {
+              "source": "user_prompt",
+              "field": "target_app_kind",
+              "summary": "terminal",
+              "confidence": 0.86
+            },
+            {
+              "source": "user_prompt",
+              "field": "target_app_hint",
+              "summary": "terminal",
+              "confidence": 0.86
+            }
+          ],
+          "step_results": [
+            {
+              "step_id": "det-1",
+              "step_type": "OpenApp",
+              "status": "valid_for_resolution",
+              "risk_level": "low",
+              "requires_approval": false,
+              "target_resolution_required": false,
+              "target_available": false,
+              "verification_present": true,
+              "precondition_status": "present",
+              "postcondition_status": "present",
+              "blocker": null,
+              "confidence": 0.76
+            },
+            {
+              "step_id": "det-2",
+              "step_type": "WaitForState",
+              "status": "valid_for_resolution",
+              "risk_level": "low",
+              "requires_approval": false,
+              "target_resolution_required": false,
+              "target_available": false,
+              "verification_present": true,
+              "precondition_status": "present",
+              "postcondition_status": "present",
+              "blocker": null,
+              "confidence": 0.76
+            }
+          ],
+          "confidence": 0.62
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p04-1781259816",
+        "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+        "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+        "sequence": 12,
+        "timestamp_ms": 1781259836948,
+        "event": {
+          "type": "WorkflowRunStarted",
+          "workflow_run_id": "workflow-run-93e231776bd38f852ecc8042c6f8e776a15c895531b546d2fe36f82ceab48804",
+          "plan_id": "a30a3c09-ad86-4810-a240-25d785a04513",
+          "goal_contract_id": "8a2e0d9d65c59ea425edac8d32e089a73ef72dc20d5ec9e43cc84650bf4c75ed",
+          "step_count": 2,
+          "current_step_index": 0,
+          "risk_level": "low",
+          "requires_user_approval": false,
+          "execution_mode": "execute_live",
+          "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p04-1781259816",
+        "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+        "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+        "sequence": 13,
+        "timestamp_ms": 1781259836948,
+        "event": {
+          "type": "WorkflowStepStarted",
+          "workflow_run_id": "workflow-run-93e231776bd38f852ecc8042c6f8e776a15c895531b546d2fe36f82ceab48804",
+          "plan_id": "a30a3c09-ad86-4810-a240-25d785a04513",
+          "goal_contract_id": "8a2e0d9d65c59ea425edac8d32e089a73ef72dc20d5ec9e43cc84650bf4c75ed",
+          "step_id": "det-1",
+          "step_index": 0,
+          "step_type": "OpenApp",
+          "status": "started",
+          "current_step_index": 0,
+          "step_count": 2,
+          "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p04-1781259816",
+        "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+        "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+        "sequence": 14,
+        "timestamp_ms": 1781259836948,
+        "event": {
+          "type": "TargetResolutionStarted",
+          "plan_id": "a30a3c09-ad86-4810-a240-25d785a04513-s0",
+          "validation_id": "validation-a30a3c09-ad86-4810-a240-25d785a04513",
+          "mode": "step10_workflow_step"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p04-1781259816",
+        "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+        "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+        "sequence": 15,
+        "timestamp_ms": 1781259836948,
+        "event": {
+          "type": "TargetResolutionCompleted",
+          "resolution_id": "resolution-a30a3c09-ad86-4810-a240-25d785a04513-s0",
+          "plan_id": "a30a3c09-ad86-4810-a240-25d785a04513-s0",
+          "validation_id": "validation-a30a3c09-ad86-4810-a240-25d785a04513",
+          "goal_contract_id": "8a2e0d9d65c59ea425edac8d32e089a73ef72dc20d5ec9e43cc84650bf4c75ed",
+          "context_id": "d98ba3a2-7594-4fdf-b97c-e0f11ed58f4d",
+          "observation_id": "25f9ee45-62d8-4d11-991c-7abc737d6e40",
+          "status": "resolved",
+          "results": [],
+          "resolved_target": null,
+          "candidates": [],
+          "confidence": 0.76,
+          "ambiguity_count": 0,
+          "ambiguity_reasons": [],
+          "blocker_count": 0,
+          "blockers": [],
+          "can_proceed_to_safety_gate": true,
+          "can_execute": false,
+          "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p04-1781259816",
+        "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+        "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+        "sequence": 16,
+        "timestamp_ms": 1781259836948,
+        "event": {
+          "type": "SafetyGateStarted",
+          "plan_id": "a30a3c09-ad86-4810-a240-25d785a04513-s0",
+          "resolution_id": "resolution-a30a3c09-ad86-4810-a240-25d785a04513-s0",
+          "mode": "step6_safety_hitl",
+          "can_execute": false,
+          "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p04-1781259816",
+        "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+        "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+        "sequence": 17,
+        "timestamp_ms": 1781259836948,
+        "event": {
+          "type": "SafetyGateCompleted",
+          "safety_gate_id": "safety-gui-proposal-acfba57927fbbbf7b8eafcf0228f92cc02b0443498be7123e14ce1b7c7e80cdf",
+          "proposal_id": "gui-proposal-acfba57927fbbbf7b8eafcf0228f92cc02b0443498be7123e14ce1b7c7e80cdf",
+          "request_id": "gui-hitl-eb608b2b06f65e6b480f9e602d26340d975640eff1fd77394895bd89dd66b585",
+          "proposal_hash": "2250ef1c9bcfbca2c54b7db0d6c8969f8db86e59dfe87280c42ff10e1bb15550",
+          "target_hash": "6bfed6f9afe8867b828ff3a037d45c39762df96d3de82f046de12c83e4b4b0dc",
+          "status": "Allowed",
+          "safety_status": "safe_no_approval_required",
+          "risk_level": "low",
+          "reasons": [
+            "risk level: low"
+          ],
+          "risk_reasons": [
+            "risk level: low"
+          ],
+          "requires_user_approval": false,
+          "approval_reason": null,
+          "blockers": [],
+          "warnings": [],
+          "can_request_hitl": false,
+          "can_authorize_step7": true,
+          "can_execute": false,
+          "source_evidence": [
+            "gui_goal_contract",
+            "plan_validation",
+            "target_resolution"
+          ],
+          "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3",
+          "action_type": "OpenApp",
+          "target_label": null,
+          "target_role": null,
+          "expected_postcondition": "requested app window is visible",
+          "expires_at_ms": 1781259894858,
+          "proposal": {
+            "proposal_schema_version": 1,
+            "proposal_id": "gui-proposal-acfba57927fbbbf7b8eafcf0228f92cc02b0443498be7123e14ce1b7c7e80cdf",
+            "request_id": "gui-hitl-eb608b2b06f65e6b480f9e602d26340d975640eff1fd77394895bd89dd66b585",
+            "goal_contract_id": "8a2e0d9d65c59ea425edac8d32e089a73ef72dc20d5ec9e43cc84650bf4c75ed",
+            "plan_id": "a30a3c09-ad86-4810-a240-25d785a04513-s0",
+            "validation_id": "validation-a30a3c09-ad86-4810-a240-25d785a04513",
+            "resolution_id": "resolution-a30a3c09-ad86-4810-a240-25d785a04513-s0",
+            "context_id": "d98ba3a2-7594-4fdf-b97c-e0f11ed58f4d",
+            "observation_id": "25f9ee45-62d8-4d11-991c-7abc737d6e40",
+            "step_id": "det-1",
+            "action_type": "OpenApp",
+            "target_hash": "6bfed6f9afe8867b828ff3a037d45c39762df96d3de82f046de12c83e4b4b0dc",
+            "target_control_id": null,
+            "target_label": null,
+            "target_role": null,
+            "target_bounds": null,
+            "text_payload_summary": null,
+            "text_payload_hash": null,
+            "expected_precondition": "requested app is not guaranteed visible",
+            "expected_postcondition": "requested app window is visible",
+            "risk_level": "low",
+            "risk_reasons": [
+              "risk level: low"
+            ],
+            "requires_user_approval": false,
+            "created_at_ms": 1781259834858,
+            "expires_at_ms": 1781259894858,
+            "proposal_hash": "2250ef1c9bcfbca2c54b7db0d6c8969f8db86e59dfe87280c42ff10e1bb15550",
+            "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3",
+            "can_execute": false
+          }
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p04-1781259816",
+        "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+        "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+        "sequence": 18,
+        "timestamp_ms": 1781259836948,
+        "event": {
+          "type": "ActionStarted",
+          "execution_id": "execution-1a2d486071b7ecb1e19c2be131879c6a912588f8e506b27412ded94e4cfc7c17",
+          "proposal_id": "gui-proposal-acfba57927fbbbf7b8eafcf0228f92cc02b0443498be7123e14ce1b7c7e80cdf",
+          "proposal_hash": "2250ef1c9bcfbca2c54b7db0d6c8969f8db86e59dfe87280c42ff10e1bb15550",
+          "target_hash": "6bfed6f9afe8867b828ff3a037d45c39762df96d3de82f046de12c83e4b4b0dc",
+          "action_kind": "OpenApp",
+          "target": "OpenApp",
+          "backend_used": "uinput_accessibility",
+          "authorization_source": "safe_no_approval_required",
+          "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p04-1781259816",
+        "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+        "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+        "sequence": 19,
+        "timestamp_ms": 1781259836948,
+        "event": {
+          "type": "ObservationStarted",
+          "cache_policy": "observe_plan_ttl_750ms",
+          "sources": [
+            "get_active_window",
+            "get_desktop_state",
+            "get_accessibility_capabilities",
+            "accessibility_tree_summary",
+            "capture_screenshot",
+            "ocr",
+            "monitor_layout",
+            "cursor_focus",
+            "find_ui_elements"
+          ]
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p04-1781259816",
+        "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+        "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+        "sequence": 20,
+        "timestamp_ms": 1781259836948,
+        "event": {
+          "type": "ObservationCompleted",
+          "observation_id": "dc98cdd1-eb27-4323-b394-6a207d33cb76",
+          "active_window": "KRIA (Workspace) - Kiro",
+          "active_window_source": "kria_gnome_shell_bridge",
+          "active_window_confidence": 0.98,
+          "active_window_reliability": "reliable",
+          "active_window_blocker": null,
+          "active_window_authority_source": "kria_gnome_shell_bridge",
+          "active_window_authority_confidence": 0.98,
+          "active_window_authority_status": "available",
+          "gnome_bridge_status": "available",
+          "active_window_app": "Kiro",
+          "active_window_app_id": "kiro.desktop",
+          "active_window_pid": 5633,
+          "active_window_workspace": 0,
+          "active_window_monitor": 0,
+          "active_window_fullscreen": false,
+          "active_window_minimized": false,
+          "active_window_observed_at_ms": 1781259835612,
+          "active_window_fallback_chain": [
+            {
+              "source": "kria_gnome_shell_bridge",
+              "status": "matched",
+              "reliability": "reliable",
+              "reason": null
+            }
+          ],
+          "active_window_failure_chain": [],
+          "visible_app_count": 5,
+          "visible_control_count": 12,
+          "visible_accessible_control_count": 12,
+          "disabled_control_count": 8,
+          "hidden_control_count": 0,
+          "trusted_control_count": 0,
+          "partial_control_count": 0,
+          "not_executable_control_count": 12,
+          "text_field_count": 9,
+          "button_count": 3,
+          "dialog_count": 0,
+          "other_control_count": 0,
+          "ocr_available": true,
+          "ocr_block_count": 1,
+          "ocr_trust": "untrusted",
+          "ocr_wait_for_screenshot_ms": 0,
+          "ocr_engine_selected": "tesseract_cli",
+          "ocr_engine_status": "completed",
+          "ocr_image_status": "downscaled_1920x1200_to_1000x625",
+          "ocr_total_ms": 2077,
+          "ocr_fast_path": "full_screen_tesseract",
+          "ocr_cache_hit": false,
+          "ocr_roi_count": 0,
+          "ocr_changed_region_count": 0,
+          "ocr_cold_start_ms": 2077,
+          "ocr_warm_start_ms": null,
+          "ocr_benchmark_summary": "rapidocr/paddleocr optional adapters not configured; tesseract fallback used",
+          "ocr_injection_count": 0,
+          "ocr_blocker": null,
+          "accessibility_available": true,
+          "accessibility_source_status": "degraded",
+          "accessibility_overall_status": "degraded",
+          "accessibility_overall_confidence": 0.6599999999999999,
+          "accessibility_app_scores": [
+            {
+              "app_label": ":1.0",
+              "bus_name_hash": "6ae115a23a8787ac",
+              "node_count": 71,
+              "control_count": 16,
+              "timeout_count": 1,
+              "stale_node_count": 0,
+              "score": 0.6599999999999999,
+              "status": "degraded"
+            },
+            {
+              "app_label": ":1.4",
+              "bus_name_hash": "1890e0c9307bad0a",
+              "node_count": 71,
+              "control_count": 16,
+              "timeout_count": 1,
+              "stale_node_count": 0,
+              "score": 0.6599999999999999,
+              "status": "degraded"
+            },
+            {
+              "app_label": ":1.6",
+              "bus_name_hash": "cdaa122c19a646a6",
+              "node_count": 71,
+              "control_count": 16,
+              "timeout_count": 1,
+              "stale_node_count": 0,
+              "score": 0.6599999999999999,
+              "status": "degraded"
+            },
+            {
+              "app_label": ":1.5",
+              "bus_name_hash": "305f121ff554bda2",
+              "node_count": 71,
+              "control_count": 16,
+              "timeout_count": 1,
+              "stale_node_count": 0,
+              "score": 0.6599999999999999,
+              "status": "degraded"
+            },
+            {
+              "app_label": ":1.3",
+              "bus_name_hash": "e0312de4bce4c374",
+              "node_count": 71,
+              "control_count": 16,
+              "timeout_count": 1,
+              "stale_node_count": 0,
+              "score": 0.6599999999999999,
+              "status": "degraded"
+            }
+          ],
+          "accessibility_stale_node_count": 0,
+          "accessibility_timeout_count": 1,
+          "accessibility_cache_hit_count": 0,
+          "accessibility_stale_cache_rejected_count": 0,
+          "accessibility_node_count": 71,
+          "accessibility_control_count": 12,
+          "atspi_snapshot_total_ms": 128,
+          "atspi_skipped_app_count": 1,
+          "atspi_omitted_node_count": 109,
+          "accessibility_remediation": [],
+          "screenshot_available": true,
+          "screenshot_status": "available",
+          "screenshot_capture_ms": 7,
+          "screenshot_duration_ms": 7,
+          "screen_hash_prefix": "665b91d809e59049",
+          "monitor_count": 1,
+          "dpi_available": true,
+          "cursor_focus_known": true,
+          "focused_window": "KRIA (Workspace) - Kiro",
+          "focused_app": "Kiro",
+          "focused_control_id": "gnome_bridge:focused_window",
+          "focused_control_label": "Focused window",
+          "focused_control_role": "window",
+          "focused_control_bounds": null,
+          "text_cursor_known": false,
+          "editable_target_known": false,
+          "terminal_like": false,
+          "focus_source": "gnome_bridge_focus",
+          "focus_confidence": 0.72,
+          "focus_reliability": "best_effort",
+          "focus_adapter_status": "available",
+          "focus_latency_ms": 30,
+          "focus_failure_chain": [
+            {
+              "source": "gnome_bridge_focus",
+              "status": "matched",
+              "reliability": "best_effort",
+              "reason": null
+            },
+            {
+              "source": "chrome_cdp_active_element",
+              "status": "unavailable",
+              "reliability": "unavailable",
+              "reason": "Chrome CDP skipped because the current focused app/window is not Chrome-like"
+            },
+            {
+              "source": "firefox_bidi_active_element",
+              "status": "unavailable",
+              "reliability": "unavailable",
+              "reason": "Firefox BiDi skipped because the current focused app/window is not Firefox-like"
+            },
+            {
+              "source": "vscode_extension",
+              "status": "unavailable",
+              "reliability": "unavailable",
+              "reason": "VS Code extension skipped because the current focused app/window is not VS Code-like"
+            },
+            {
+              "source": "gnome_terminal_adapter",
+              "status": "unavailable",
+              "reliability": "unavailable",
+              "reason": "active/focused window is not terminal-like"
+            },
+            {
+              "source": "atspi_focused_object",
+              "status": "unavailable",
+              "reliability": "unavailable",
+              "reason": "AT-SPI snapshot did not expose focused object, window, or app"
+            }
+          ],
+          "active_window_probe_ok": true,
+          "desktop_state_probe_ok": true,
+          "capabilities_probe_ok": true,
+          "observation_total_ms": 2086,
+          "slowest_probe": "run_ocr",
+          "slowest_probe_ms": 2077,
+          "probe_timeout_count": 0,
+          "probe_timings": [
+            {
+              "probe_name": "capture_screenshot",
+              "duration_ms": 7,
+              "status": "ok",
+              "source": "xcap",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "detect_visual_controls",
+              "duration_ms": 65,
+              "status": "ok",
+              "source": "vision_sidecar",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "find_ui_elements:check_box",
+              "duration_ms": 0,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "find_ui_elements:dialog",
+              "duration_ms": 0,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "find_ui_elements:link",
+              "duration_ms": 0,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "find_ui_elements:page_tab",
+              "duration_ms": 0,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "find_ui_elements:push_button",
+              "duration_ms": 0,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "find_ui_elements:text",
+              "duration_ms": 0,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "focused_window_title",
+              "duration_ms": 0,
+              "status": "blocked",
+              "source": "focused_window_title",
+              "cache_hit": false,
+              "blocker_kind": "unavailable"
+            },
+            {
+              "probe_name": "get_accessibility_capabilities",
+              "duration_ms": 0,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "get_accessibility_tree_summary",
+              "duration_ms": 0,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "get_active_window",
+              "duration_ms": 753,
+              "status": "ok",
+              "source": "kria_gnome_shell_bridge",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "get_cursor_focus_state",
+              "duration_ms": 30,
+              "status": "ok",
+              "source": "gnome_bridge_focus",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "get_desktop_state",
+              "duration_ms": 0,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "get_monitor_layout",
+              "duration_ms": 30,
+              "status": "ok",
+              "source": "get_monitor_layout",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "run_ocr",
+              "duration_ms": 2077,
+              "status": "ok",
+              "source": "tesseract_cli",
+              "cache_hit": false,
+              "blocker_kind": null
+            }
+          ],
+          "cache_hit": false,
+          "cache_age_ms": null,
+          "cache_policy": "observe_plan_ttl_750ms",
+          "freshness": "fresh",
+          "source_blockers": {
+            "active_window": null,
+            "desktop_state": null,
+            "accessibility": null,
+            "screenshot": null,
+            "ocr": null,
+            "monitor": null,
+            "cursor_focus": null
+          },
+          "control_samples": [
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1004:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1008:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1012:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1016:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1020:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1024:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/516:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": "b54f607450c426fdfdc2e15e4c15ed262bf6465cbcc714c2b9c86fa6ff1a1f75",
+              "role": "text",
+              "label": "Main text area",
+              "bounds": {
+                "x": 50,
+                "y": 50,
+                "width": 700,
+                "height": 450
+              },
+              "enabled": true,
+              "visible": true,
+              "focused": false,
+              "source": "vision_sidecar",
+              "confidence": 0.949999988079071,
+              "quality": "not_executable",
+              "label_source": "visual_label_untrusted",
+              "state_source": "visual_inferred",
+              "rejection_reason": "visual_only_supporting_evidence",
+              "identity_confidence": 0.74,
+              "bounds_confidence": 0.72,
+              "state_confidence": 0.45,
+              "executable_confidence": 0.0,
+              "sources": [
+                "vision_sidecar"
+              ]
+            },
+            {
+              "id": "2a5230d4e23f53523682149af0d18221bdd92f157a4b0bd1bdae7fe481208b96",
+              "role": "text",
+              "label": "Filename input field",
+              "bounds": {
+                "x": 100,
+                "y": 100,
+                "width": 300,
+                "height": 40
+              },
+              "enabled": true,
+              "visible": true,
+              "focused": false,
+              "source": "vision_sidecar",
+              "confidence": 0.8799999952316284,
+              "quality": "not_executable",
+              "label_source": "visual_label_untrusted",
+              "state_source": "visual_inferred",
+              "rejection_reason": "visual_only_supporting_evidence",
+              "identity_confidence": 0.74,
+              "bounds_confidence": 0.72,
+              "state_confidence": 0.45,
+              "executable_confidence": 0.0,
+              "sources": [
+                "vision_sidecar"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/491:push button",
+              "role": "push button",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": "fb6eb591c1bbc1f519f95e7e65ac1d208910f114a2cb34ed89166f4eae46b5a5",
+              "role": "push button",
+              "label": "Save Document",
+              "bounds": {
+                "x": 100,
+                "y": 200,
+                "width": 100,
+                "height": 50
+              },
+              "enabled": true,
+              "visible": true,
+              "focused": false,
+              "source": "vision_sidecar",
+              "confidence": 0.949999988079071,
+              "quality": "not_executable",
+              "label_source": "visual_label_untrusted",
+              "state_source": "visual_inferred",
+              "rejection_reason": "visual_only_supporting_evidence",
+              "identity_confidence": 0.74,
+              "bounds_confidence": 0.72,
+              "state_confidence": 0.45,
+              "executable_confidence": 0.0,
+              "sources": [
+                "vision_sidecar"
+              ]
+            },
+            {
+              "id": "86bb967d904652a7c695c09418ab06313b7b22b4b5e7c3ca781d54f12fdd96ea",
+              "role": "push button",
+              "label": "Cancel",
+              "bounds": {
+                "x": 220,
+                "y": 200,
+                "width": 100,
+                "height": 50
+              },
+              "enabled": true,
+              "visible": true,
+              "focused": false,
+              "source": "vision_sidecar",
+              "confidence": 0.9200000166893005,
+              "quality": "not_executable",
+              "label_source": "visual_label_untrusted",
+              "state_source": "visual_inferred",
+              "rejection_reason": "visual_only_supporting_evidence",
+              "identity_confidence": 0.74,
+              "bounds_confidence": 0.72,
+              "state_confidence": 0.45,
+              "executable_confidence": 0.0,
+              "sources": [
+                "vision_sidecar"
+              ]
+            }
+          ],
+          "executable_control_count": 0,
+          "visual_control_count": 4,
+          "visual_control_summary": {
+            "detected": 4,
+            "matched": 0,
+            "unmatched": 4,
+            "button_like": 2,
+            "false_positive_risk": "supporting_visual_only"
+          }
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p04-1781259816",
+        "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+        "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+        "sequence": 21,
+        "timestamp_ms": 1781259836948,
+        "event": {
+          "type": "ActionFailed",
+          "execution_id": "execution-1a2d486071b7ecb1e19c2be131879c6a912588f8e506b27412ded94e4cfc7c17",
+          "proposal_id": "gui-proposal-acfba57927fbbbf7b8eafcf0228f92cc02b0443498be7123e14ce1b7c7e80cdf",
+          "proposal_hash": "2250ef1c9bcfbca2c54b7db0d6c8969f8db86e59dfe87280c42ff10e1bb15550",
+          "target_hash": "6bfed6f9afe8867b828ff3a037d45c39762df96d3de82f046de12c83e4b4b0dc",
+          "action_kind": "OpenApp",
+          "status": "failed",
+          "backend_used": "open_application",
+          "safe_error_summary": "application 'OpenApp' is not found in the installed app registry",
+          "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p04-1781259816",
+        "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+        "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+        "sequence": 22,
+        "timestamp_ms": 1781259836948,
+        "event": {
+          "verification_id": "verification-e2c9f831a203158a0a41ff9c9d3d402a72b15cae630e9be0f8b5f4ae022d41b8",
+          "execution_id": "execution-1a2d486071b7ecb1e19c2be131879c6a912588f8e506b27412ded94e4cfc7c17",
+          "proposal_id": "gui-proposal-acfba57927fbbbf7b8eafcf0228f92cc02b0443498be7123e14ce1b7c7e80cdf",
+          "status": "blocked",
+          "verification_strategy": "active_window_match",
+          "evidence": [
+            "backend action did not complete; no state to verify"
+          ],
+          "pre_state_summary": "app=Kiro; controls=8; dialogs=0; focus_role=window; screen=665b91d8",
+          "post_state_summary": "app=Kiro; controls=12; dialogs=0; focus_role=window; screen=665b91d8",
+          "matched_expected_state": false,
+          "target_still_present": false,
+          "target_identity_matches": true,
+          "confidence": 0.2,
+          "safe_error_summary": "Backend action failed before verification.",
+          "recovery_hint": "Re-observe the screen and resolve a fresh target before any retry.",
+          "can_retry": false,
+          "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3",
+          "type": "ExecutionVerificationCompleted"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p04-1781259816",
+        "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+        "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+        "sequence": 23,
+        "timestamp_ms": 1781259836948,
+        "event": {
+          "recovery_id": "recovery-f536f77dafdfdb0974906273a158ce39d2d2404f840bf881fdd3d4cb49c26d5c",
+          "execution_id": "execution-1a2d486071b7ecb1e19c2be131879c6a912588f8e506b27412ded94e4cfc7c17",
+          "verification_id": "verification-e2c9f831a203158a0a41ff9c9d3d402a72b15cae630e9be0f8b5f4ae022d41b8",
+          "proposal_id": "gui-proposal-acfba57927fbbbf7b8eafcf0228f92cc02b0443498be7123e14ce1b7c7e80cdf",
+          "proposal_hash": "2250ef1c9bcfbca2c54b7db0d6c8969f8db86e59dfe87280c42ff10e1bb15550",
+          "target_hash": "6bfed6f9afe8867b828ff3a037d45c39762df96d3de82f046de12c83e4b4b0dc",
+          "action_type": "OpenApp",
+          "failure_kind": "backend_failed",
+          "status": "blocked",
+          "proposed_recovery_step": "Stop",
+          "recovery_action_kind": "Stop",
+          "requires_user_approval": false,
+          "can_recover": false,
+          "can_execute_recovery": false,
+          "retry_count": 0,
+          "max_retry_count": 1,
+          "blockers": [
+            "deterministic action backend failed"
+          ],
+          "warnings": [],
+          "safe_explanation": "The action backend failed, so KRIA stops instead of blind-retrying.",
+          "recovery_hint": "Re-observe and confirm a safe target before any manual retry; KRIA will not blind-retry.",
+          "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3",
+          "type": "RecoveryAssessmentCompleted"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p04-1781259816",
+        "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+        "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+        "sequence": 24,
+        "timestamp_ms": 1781259836948,
+        "event": {
+          "type": "RecoveryBlocked",
+          "recovery_id": "recovery-f536f77dafdfdb0974906273a158ce39d2d2404f840bf881fdd3d4cb49c26d5c",
+          "execution_id": "execution-1a2d486071b7ecb1e19c2be131879c6a912588f8e506b27412ded94e4cfc7c17",
+          "failure_kind": "backend_failed",
+          "status": "blocked",
+          "recovery_action_kind": "Stop",
+          "requires_user_approval": false,
+          "blockers": [
+            "deterministic action backend failed"
+          ],
+          "safe_explanation": "The action backend failed, so KRIA stops instead of blind-retrying.",
+          "recovery_hint": "Re-observe and confirm a safe target before any manual retry; KRIA will not blind-retry.",
+          "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p04-1781259816",
+        "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+        "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+        "sequence": 25,
+        "timestamp_ms": 1781259836948,
+        "event": {
+          "type": "WorkflowStepBlocked",
+          "workflow_run_id": "workflow-run-93e231776bd38f852ecc8042c6f8e776a15c895531b546d2fe36f82ceab48804",
+          "plan_id": "a30a3c09-ad86-4810-a240-25d785a04513",
+          "goal_contract_id": "8a2e0d9d65c59ea425edac8d32e089a73ef72dc20d5ec9e43cc84650bf4c75ed",
+          "step_id": "det-1",
+          "step_index": 0,
+          "step_type": "OpenApp",
+          "status": "blocked",
+          "current_step_index": 0,
+          "step_count": 2,
+          "blockers": [
+            "deterministic action backend failed"
+          ],
+          "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p04-1781259816",
+        "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+        "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+        "sequence": 26,
+        "timestamp_ms": 1781259836948,
+        "event": {
+          "type": "WorkflowCheckpointSaved",
+          "checkpoint_id": "checkpoint-435a21b82fd0cf815a3b4ab7b5732ee18a4969ecb8642d90a22a420660127a42",
+          "checkpoint_hash_prefix": "40e9d65e0d45",
+          "workflow_run_id": "workflow-run-93e231776bd38f852ecc8042c6f8e776a15c895531b546d2fe36f82ceab48804",
+          "current_step_index": 0,
+          "step_count": 2,
+          "completed_step_count": 0,
+          "pending_step_id": "det-1",
+          "requires_user_approval": false,
+          "can_resume": false,
+          "can_execute": false,
+          "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p04-1781259816",
+        "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+        "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+        "sequence": 27,
+        "timestamp_ms": 1781259836948,
+        "event": {
+          "type": "WorkflowRunBlocked",
+          "workflow_run_id": "workflow-run-93e231776bd38f852ecc8042c6f8e776a15c895531b546d2fe36f82ceab48804",
+          "plan_id": "a30a3c09-ad86-4810-a240-25d785a04513",
+          "goal_contract_id": "8a2e0d9d65c59ea425edac8d32e089a73ef72dc20d5ec9e43cc84650bf4c75ed",
+          "status": "blocked",
+          "current_step_index": 0,
+          "step_count": 2,
+          "completed_step_count": 0,
+          "blocked_reason": "deterministic action backend failed",
+          "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p04-1781259816",
+        "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+        "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+        "sequence": 28,
+        "timestamp_ms": 1781259836948,
+        "event": {
+          "type": "TurnCompleted",
+          "status": "blocked"
+        }
+      }
+    },
+    {
+      "name": "agent:stage",
+      "payload": {
+        "step": "gui_cognition_mode_handled",
+        "message": "GUI Cognition prompt handled by dedicated selected-mode route",
+        "detail": {
+          "path": "send_manual_tool_message",
+          "llm_tool_loop": false,
+          "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117"
+        },
+        "ts": "2026-06-12T10:23:56.988910762+00:00"
+      }
+    },
+    {
+      "name": "agent:token",
+      "payload": {
+        "text": "Workflow stopped safely: deterministic action backend failed"
+      }
+    },
+    {
+      "name": "agent:tool_result",
+      "payload": {
+        "tool": "gui_cognition",
+        "result": {
+          "status": "blocked",
+          "reply": "Workflow stopped safely: deterministic action backend failed",
+          "gui_cognition": {
+            "mode_id": "gui_cognition",
+            "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+            "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+            "observation_id": "25f9ee45-62d8-4d11-991c-7abc737d6e40",
+            "context_id": "d98ba3a2-7594-4fdf-b97c-e0f11ed58f4d",
+            "path": "send_manual_tool_message",
+            "llm_tool_loop": false,
+            "intent": "analyze_plan",
+            "risk_level": "low",
+            "requires_approval": false,
+            "risk_reasons": [],
+            "perception": {
+              "visual_control_summary": {
+                "detected": 0,
+                "matched": 0,
+                "unmatched": 0,
+                "button_like": 0,
+                "false_positive_risk": "supporting_visual_only"
+              },
+              "observation_id": "25f9ee45-62d8-4d11-991c-7abc737d6e40",
+              "active_window": "KRIA (Workspace) - Kiro",
+              "active_window_source": "kria_gnome_shell_bridge",
+              "active_window_confidence": 0.98,
+              "active_window_reliability": "reliable",
+              "active_window_blocker": null,
+              "active_window_authority_source": "kria_gnome_shell_bridge",
+              "active_window_authority_confidence": 0.98,
+              "active_window_authority_status": "available",
+              "gnome_bridge_status": "available",
+              "active_window_app": "Kiro",
+              "active_window_app_id": "kiro.desktop",
+              "active_window_pid": 5633,
+              "active_window_workspace": 0,
+              "active_window_monitor": 0,
+              "active_window_fullscreen": false,
+              "active_window_minimized": false,
+              "active_window_observed_at_ms": 1781259816346,
+              "active_window_fallback_chain": [
+                {
+                  "source": "kria_gnome_shell_bridge",
+                  "status": "matched",
+                  "reliability": "reliable",
+                  "reason": null
+                }
+              ],
+              "active_window_failure_chain": [],
+              "visible_app_count": 5,
+              "visible_control_count": 8,
+              "visible_accessible_control_count": 8,
+              "disabled_control_count": 8,
+              "hidden_control_count": 0,
+              "trusted_control_count": 0,
+              "partial_control_count": 0,
+              "not_executable_control_count": 8,
+              "text_field_count": 7,
+              "button_count": 1,
+              "dialog_count": 0,
+              "other_control_count": 0,
+              "ocr_available": true,
+              "ocr_block_count": 1,
+              "ocr_trust": "untrusted",
+              "ocr_wait_for_screenshot_ms": 1314,
+              "ocr_engine_selected": "tesseract_cli",
+              "ocr_engine_status": "completed",
+              "ocr_image_status": "downscaled_1920x1200_to_1000x625",
+              "ocr_total_ms": 3405,
+              "ocr_fast_path": "full_screen_tesseract",
+              "ocr_cache_hit": false,
+              "ocr_roi_count": 0,
+              "ocr_changed_region_count": 0,
+              "ocr_cold_start_ms": 3405,
+              "ocr_warm_start_ms": null,
+              "ocr_benchmark_summary": "rapidocr/paddleocr optional adapters not configured; tesseract fallback used",
+              "ocr_injection_count": 0,
+              "ocr_blocker": null,
+              "accessibility_available": true,
+              "accessibility_source_status": "degraded",
+              "accessibility_overall_status": "degraded",
+              "accessibility_overall_confidence": 0.6599999999999999,
+              "accessibility_app_scores": [
+                {
+                  "app_label": ":1.0",
+                  "bus_name_hash": "6ae115a23a8787ac",
+                  "node_count": 71,
+                  "control_count": 16,
+                  "timeout_count": 1,
+                  "stale_node_count": 0,
+                  "score": 0.6599999999999999,
+                  "status": "degraded"
+                },
+                {
+                  "app_label": ":1.4",
+                  "bus_name_hash": "1890e0c9307bad0a",
+                  "node_count": 71,
+                  "control_count": 16,
+                  "timeout_count": 1,
+                  "stale_node_count": 0,
+                  "score": 0.6599999999999999,
+                  "status": "degraded"
+                },
+                {
+                  "app_label": ":1.6",
+                  "bus_name_hash": "cdaa122c19a646a6",
+                  "node_count": 71,
+                  "control_count": 16,
+                  "timeout_count": 1,
+                  "stale_node_count": 0,
+                  "score": 0.6599999999999999,
+                  "status": "degraded"
+                },
+                {
+                  "app_label": ":1.5",
+                  "bus_name_hash": "305f121ff554bda2",
+                  "node_count": 71,
+                  "control_count": 16,
+                  "timeout_count": 1,
+                  "stale_node_count": 0,
+                  "score": 0.6599999999999999,
+                  "status": "degraded"
+                },
+                {
+                  "app_label": ":1.3",
+                  "bus_name_hash": "e0312de4bce4c374",
+                  "node_count": 71,
+                  "control_count": 16,
+                  "timeout_count": 1,
+                  "stale_node_count": 0,
+                  "score": 0.6599999999999999,
+                  "status": "degraded"
+                }
+              ],
+              "accessibility_stale_node_count": 0,
+              "accessibility_timeout_count": 1,
+              "accessibility_cache_hit_count": 0,
+              "accessibility_stale_cache_rejected_count": 0,
+              "accessibility_node_count": 71,
+              "accessibility_control_count": 8,
+              "atspi_snapshot_total_ms": 128,
+              "atspi_skipped_app_count": 1,
+              "atspi_omitted_node_count": 109,
+              "accessibility_remediation": [],
+              "screenshot_available": true,
+              "screenshot_status": "available",
+              "screenshot_capture_ms": 1314,
+              "screenshot_duration_ms": 1314,
+              "screen_hash_prefix": "665b91d809e59049",
+              "monitor_count": 1,
+              "dpi_available": true,
+              "cursor_focus_known": true,
+              "focused_window": "KRIA (Workspace) - Kiro",
+              "focused_app": "Kiro",
+              "focused_control_id": "gnome_bridge:focused_window",
+              "focused_control_label": "Focused window",
+              "focused_control_role": "window",
+              "focused_control_bounds": null,
+              "text_cursor_known": false,
+              "editable_target_known": false,
+              "terminal_like": false,
+              "focus_source": "gnome_bridge_focus",
+              "focus_confidence": 0.72,
+              "focus_reliability": "best_effort",
+              "focus_adapter_status": "available",
+              "focus_latency_ms": 17,
+              "focus_failure_chain": [
+                {
+                  "source": "gnome_bridge_focus",
+                  "status": "matched",
+                  "reliability": "best_effort",
+                  "reason": null
+                },
+                {
+                  "source": "chrome_cdp_active_element",
+                  "status": "unavailable",
+                  "reliability": "unavailable",
+                  "reason": "Chrome CDP skipped because the current focused app/window is not Chrome-like"
+                },
+                {
+                  "source": "firefox_bidi_active_element",
+                  "status": "unavailable",
+                  "reliability": "unavailable",
+                  "reason": "Firefox BiDi skipped because the current focused app/window is not Firefox-like"
+                },
+                {
+                  "source": "vscode_extension",
+                  "status": "unavailable",
+                  "reliability": "unavailable",
+                  "reason": "VS Code extension skipped because the current focused app/window is not VS Code-like"
+                },
+                {
+                  "source": "gnome_terminal_adapter",
+                  "status": "unavailable",
+                  "reliability": "unavailable",
+                  "reason": "active/focused window is not terminal-like"
+                },
+                {
+                  "source": "atspi_focused_object",
+                  "status": "unavailable",
+                  "reliability": "unavailable",
+                  "reason": "AT-SPI snapshot did not expose focused object, window, or app"
+                }
+              ],
+              "active_window_probe_ok": true,
+              "desktop_state_probe_ok": true,
+              "capabilities_probe_ok": true,
+              "observation_total_ms": 3407,
+              "slowest_probe": "run_ocr",
+              "slowest_probe_ms": 3405,
+              "probe_timeout_count": 1,
+              "probe_timings": [
+                {
+                  "probe_name": "capture_screenshot",
+                  "duration_ms": 1314,
+                  "status": "ok",
+                  "source": "xcap",
+                  "cache_hit": false,
+                  "blocker_kind": null
+                },
+                {
+                  "probe_name": "detect_visual_controls",
+                  "duration_ms": 2056,
+                  "status": "timeout",
+                  "source": "detect_visual_controls",
+                  "cache_hit": false,
+                  "blocker_kind": "timeout"
+                },
+                {
+                  "probe_name": "find_ui_elements:check_box",
+                  "duration_ms": 129,
+                  "status": "ok",
+                  "source": "atspi_snapshot",
+                  "cache_hit": false,
+                  "blocker_kind": null
+                },
+                {
+                  "probe_name": "find_ui_elements:dialog",
+                  "duration_ms": 129,
+                  "status": "ok",
+                  "source": "atspi_snapshot",
+                  "cache_hit": false,
+                  "blocker_kind": null
+                },
+                {
+                  "probe_name": "find_ui_elements:link",
+                  "duration_ms": 130,
+                  "status": "ok",
+                  "source": "atspi_snapshot",
+                  "cache_hit": false,
+                  "blocker_kind": null
+                },
+                {
+                  "probe_name": "find_ui_elements:page_tab",
+                  "duration_ms": 130,
+                  "status": "ok",
+                  "source": "atspi_snapshot",
+                  "cache_hit": false,
+                  "blocker_kind": null
+                },
+                {
+                  "probe_name": "find_ui_elements:push_button",
+                  "duration_ms": 129,
+                  "status": "ok",
+                  "source": "atspi_snapshot",
+                  "cache_hit": false,
+                  "blocker_kind": null
+                },
+                {
+                  "probe_name": "find_ui_elements:text",
+                  "duration_ms": 129,
+                  "status": "ok",
+                  "source": "atspi_snapshot",
+                  "cache_hit": false,
+                  "blocker_kind": null
+                },
+                {
+                  "probe_name": "focused_window_title",
+                  "duration_ms": 130,
+                  "status": "blocked",
+                  "source": "focused_window_title",
+                  "cache_hit": false,
+                  "blocker_kind": "unavailable"
+                },
+                {
+                  "probe_name": "get_accessibility_capabilities",
+                  "duration_ms": 128,
+                  "status": "ok",
+                  "source": "atspi_snapshot",
+                  "cache_hit": false,
+                  "blocker_kind": null
+                },
+                {
+                  "probe_name": "get_accessibility_tree_summary",
+                  "duration_ms": 128,
+                  "status": "ok",
+                  "source": "atspi_snapshot",
+                  "cache_hit": false,
+                  "blocker_kind": null
+                },
+                {
+                  "probe_name": "get_active_window",
+                  "duration_ms": 30,
+                  "status": "ok",
+                  "source": "kria_gnome_shell_bridge",
+                  "cache_hit": false,
+                  "blocker_kind": null
+                },
+                {
+                  "probe_name": "get_cursor_focus_state",
+                  "duration_ms": 146,
+                  "status": "ok",
+                  "source": "gnome_bridge_focus",
+                  "cache_hit": false,
+                  "blocker_kind": null
+                },
+                {
+                  "probe_name": "get_desktop_state",
+                  "duration_ms": 128,
+                  "status": "ok",
+                  "source": "atspi_snapshot",
+                  "cache_hit": false,
+                  "blocker_kind": null
+                },
+                {
+                  "probe_name": "get_monitor_layout",
+                  "duration_ms": 0,
+                  "status": "ok",
+                  "source": "get_monitor_layout",
+                  "cache_hit": false,
+                  "blocker_kind": null
+                },
+                {
+                  "probe_name": "run_ocr",
+                  "duration_ms": 3405,
+                  "status": "ok",
+                  "source": "tesseract_cli",
+                  "cache_hit": false,
+                  "blocker_kind": null
+                }
+              ],
+              "cache_hit": false,
+              "cache_age_ms": null,
+              "cache_policy": "observe_plan_ttl_750ms",
+              "freshness": "fresh",
+              "source_blockers": {
+                "active_window": null,
+                "desktop_state": null,
+                "accessibility": null,
+                "screenshot": null,
+                "ocr": null,
+                "monitor": null,
+                "cursor_focus": null
+              },
+              "control_samples": [
+                {
+                  "id": ":1.0:/org/a11y/atspi/accessible/1004:text",
+                  "role": "text",
+                  "label": "",
+                  "bounds": null,
+                  "enabled": false,
+                  "visible": true,
+                  "focused": false,
+                  "source": "accessibility",
+                  "confidence": 1.0,
+                  "quality": "not_executable",
+                  "label_source": "missing",
+                  "state_source": "accessibility_state",
+                  "rejection_reason": "disabled",
+                  "identity_confidence": 0.35,
+                  "bounds_confidence": 0.0,
+                  "state_confidence": 0.86,
+                  "executable_confidence": 0.0,
+                  "sources": [
+                    "accessibility"
+                  ]
+                },
+                {
+                  "id": ":1.0:/org/a11y/atspi/accessible/1008:text",
+                  "role": "text",
+                  "label": "",
+                  "bounds": null,
+                  "enabled": false,
+                  "visible": true,
+                  "focused": false,
+                  "source": "accessibility",
+                  "confidence": 1.0,
+                  "quality": "not_executable",
+                  "label_source": "missing",
+                  "state_source": "accessibility_state",
+                  "rejection_reason": "disabled",
+                  "identity_confidence": 0.35,
+                  "bounds_confidence": 0.0,
+                  "state_confidence": 0.86,
+                  "executable_confidence": 0.0,
+                  "sources": [
+                    "accessibility"
+                  ]
+                },
+                {
+                  "id": ":1.0:/org/a11y/atspi/accessible/1012:text",
+                  "role": "text",
+                  "label": "",
+                  "bounds": null,
+                  "enabled": false,
+                  "visible": true,
+                  "focused": false,
+                  "source": "accessibility",
+                  "confidence": 1.0,
+                  "quality": "not_executable",
+                  "label_source": "missing",
+                  "state_source": "accessibility_state",
+                  "rejection_reason": "disabled",
+                  "identity_confidence": 0.35,
+                  "bounds_confidence": 0.0,
+                  "state_confidence": 0.86,
+                  "executable_confidence": 0.0,
+                  "sources": [
+                    "accessibility"
+                  ]
+                },
+                {
+                  "id": ":1.0:/org/a11y/atspi/accessible/1016:text",
+                  "role": "text",
+                  "label": "",
+                  "bounds": null,
+                  "enabled": false,
+                  "visible": true,
+                  "focused": false,
+                  "source": "accessibility",
+                  "confidence": 1.0,
+                  "quality": "not_executable",
+                  "label_source": "missing",
+                  "state_source": "accessibility_state",
+                  "rejection_reason": "disabled",
+                  "identity_confidence": 0.35,
+                  "bounds_confidence": 0.0,
+                  "state_confidence": 0.86,
+                  "executable_confidence": 0.0,
+                  "sources": [
+                    "accessibility"
+                  ]
+                },
+                {
+                  "id": ":1.0:/org/a11y/atspi/accessible/1020:text",
+                  "role": "text",
+                  "label": "",
+                  "bounds": null,
+                  "enabled": false,
+                  "visible": true,
+                  "focused": false,
+                  "source": "accessibility",
+                  "confidence": 1.0,
+                  "quality": "not_executable",
+                  "label_source": "missing",
+                  "state_source": "accessibility_state",
+                  "rejection_reason": "disabled",
+                  "identity_confidence": 0.35,
+                  "bounds_confidence": 0.0,
+                  "state_confidence": 0.86,
+                  "executable_confidence": 0.0,
+                  "sources": [
+                    "accessibility"
+                  ]
+                },
+                {
+                  "id": ":1.0:/org/a11y/atspi/accessible/1024:text",
+                  "role": "text",
+                  "label": "",
+                  "bounds": null,
+                  "enabled": false,
+                  "visible": true,
+                  "focused": false,
+                  "source": "accessibility",
+                  "confidence": 1.0,
+                  "quality": "not_executable",
+                  "label_source": "missing",
+                  "state_source": "accessibility_state",
+                  "rejection_reason": "disabled",
+                  "identity_confidence": 0.35,
+                  "bounds_confidence": 0.0,
+                  "state_confidence": 0.86,
+                  "executable_confidence": 0.0,
+                  "sources": [
+                    "accessibility"
+                  ]
+                },
+                {
+                  "id": ":1.0:/org/a11y/atspi/accessible/516:text",
+                  "role": "text",
+                  "label": "",
+                  "bounds": null,
+                  "enabled": false,
+                  "visible": true,
+                  "focused": false,
+                  "source": "accessibility",
+                  "confidence": 1.0,
+                  "quality": "not_executable",
+                  "label_source": "missing",
+                  "state_source": "accessibility_state",
+                  "rejection_reason": "disabled",
+                  "identity_confidence": 0.35,
+                  "bounds_confidence": 0.0,
+                  "state_confidence": 0.86,
+                  "executable_confidence": 0.0,
+                  "sources": [
+                    "accessibility"
+                  ]
+                },
+                {
+                  "id": ":1.0:/org/a11y/atspi/accessible/491:push button",
+                  "role": "push button",
+                  "label": "",
+                  "bounds": null,
+                  "enabled": false,
+                  "visible": true,
+                  "focused": false,
+                  "source": "accessibility",
+                  "confidence": 1.0,
+                  "quality": "not_executable",
+                  "label_source": "missing",
+                  "state_source": "accessibility_state",
+                  "rejection_reason": "disabled",
+                  "identity_confidence": 0.35,
+                  "bounds_confidence": 0.0,
+                  "state_confidence": 0.86,
+                  "executable_confidence": 0.0,
+                  "sources": [
+                    "accessibility"
+                  ]
+                }
+              ],
+              "executable_control_count": 0,
+              "visual_control_count": 0,
+              "capabilities": {
+                "active_window": {
+                  "available": true,
+                  "detail": "active_window:kria_gnome_shell_bridge",
+                  "blocker": null,
+                  "remediation": []
+                },
+                "desktop_state": {
+                  "available": true,
+                  "detail": "desktop_state",
+                  "blocker": null,
+                  "remediation": []
+                },
+                "accessibility": {
+                  "available": true,
+                  "detail": "accessibility operational",
+                  "blocker": null,
+                  "remediation": []
+                },
+                "screenshot": {
+                  "available": true,
+                  "detail": "screenshot",
+                  "blocker": null,
+                  "remediation": []
+                },
+                "ocr": {
+                  "available": true,
+                  "detail": "ocr",
+                  "blocker": null,
+                  "remediation": []
+                },
+                "monitor": {
+                  "available": true,
+                  "detail": "monitor",
+                  "blocker": null,
+                  "remediation": []
+                },
+                "cursor_focus": {
+                  "available": true,
+                  "detail": "cursor_focus",
+                  "blocker": null,
+                  "remediation": []
+                }
+              },
+              "text_field_sample": [],
+              "button_sample": [],
+              "control_quality_summary": {
+                "trusted": 0,
+                "partial": 0,
+                "not_executable": 8,
+                "executable": 0
+              }
+            },
+            "context": {
+              "context_id": "d98ba3a2-7594-4fdf-b97c-e0f11ed58f4d",
+              "observation_id": "25f9ee45-62d8-4d11-991c-7abc737d6e40",
+              "trusted_control_count": 0,
+              "executable_control_count": 0,
+              "disabled_or_hidden_count": 8,
+              "ocr_untrusted": true,
+              "ocr_injection_count": 0,
+              "redaction_count": 0,
+              "freshness": "fresh",
+              "status": "ready",
+              "previous_context_id": null,
+              "previous_observation_id": null,
+              "delta": {
+                "active_window_changed": false,
+                "screen_hash_changed": false,
+                "monitor_layout_changed": false,
+                "control_count_changed": false,
+                "focused_control_changed": false,
+                "stale_action_risk": false,
+                "changed_summary": []
+              },
+              "source_confidence": {
+                "active_window": 0.98,
+                "accessibility": 0.6599999999999999,
+                "screenshot": 0.85,
+                "ocr": 0.45,
+                "monitor": 0.82,
+                "focus": 0.75
+              },
+              "screen_hash_prefix": "665b91d809e59049",
+              "focus": {
+                "source": "gnome_bridge_focus",
+                "confidence": 0.72,
+                "reliability": "best_effort",
+                "keyboard_focus_known": true,
+                "editable_target_known": false,
+                "terminal_like": false,
+                "adapter_status": "available",
+                "latency_ms": 17,
+                "focused_window": "KRIA (Workspace) - Kiro",
+                "focused_app": "Kiro",
+                "focused_control_label": "Focused window",
+                "focused_control_role": "window",
+                "focused_control_bounds": null
+              },
+              "accessibility_health": {
+                "status": "degraded",
+                "confidence": 0.6599999999999999,
+                "app_scores": [
+                  {
+                    "app_label": ":1.0",
+                    "bus_name_hash": "6ae115a23a8787ac",
+                    "node_count": 71,
+                    "control_count": 16,
+                    "timeout_count": 1,
+                    "stale_node_count": 0,
+                    "score": 0.6599999999999999,
+                    "status": "degraded"
+                  },
+                  {
+                    "app_label": ":1.4",
+                    "bus_name_hash": "1890e0c9307bad0a",
+                    "node_count": 71,
+                    "control_count": 16,
+                    "timeout_count": 1,
+                    "stale_node_count": 0,
+                    "score": 0.6599999999999999,
+                    "status": "degraded"
+                  },
+                  {
+                    "app_label": ":1.6",
+                    "bus_name_hash": "cdaa122c19a646a6",
+                    "node_count": 71,
+                    "control_count": 16,
+                    "timeout_count": 1,
+                    "stale_node_count": 0,
+                    "score": 0.6599999999999999,
+                    "status": "degraded"
+                  },
+                  {
+                    "app_label": ":1.5",
+                    "bus_name_hash": "305f121ff554bda2",
+                    "node_count": 71,
+                    "control_count": 16,
+                    "timeout_count": 1,
+                    "stale_node_count": 0,
+                    "score": 0.6599999999999999,
+                    "status": "degraded"
+                  },
+                  {
+                    "app_label": ":1.3",
+                    "bus_name_hash": "e0312de4bce4c374",
+                    "node_count": 71,
+                    "control_count": 16,
+                    "timeout_count": 1,
+                    "stale_node_count": 0,
+                    "score": 0.6599999999999999,
+                    "status": "degraded"
+                  }
+                ],
+                "stale_node_count": 0,
+                "timeout_count": 1,
+                "cache_hit_count": 0,
+                "stale_cache_rejected_count": 0
+              },
+              "visual_controls": {
+                "detected": 0,
+                "supporting_only": true
+              },
+              "ocr_performance": {
+                "fast_path": "full_screen_tesseract",
+                "cache_hit": false,
+                "roi_count": 0,
+                "changed_region_count": 0,
+                "cold_start_ms": 3405,
+                "warm_start_ms": null
+              },
+              "source_blockers": [],
+              "warnings": []
+            },
+            "goal_contract": {
+              "contract_id": "8a2e0d9d65c59ea425edac8d32e089a73ef72dc20d5ec9e43cc84650bf4c75ed",
+              "observation_id": "25f9ee45-62d8-4d11-991c-7abc737d6e40",
+              "context_id": "d98ba3a2-7594-4fdf-b97c-e0f11ed58f4d",
+              "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3",
+              "goal_summary": "Open terminal",
+              "intent_kind": "analyze_plan",
+              "action_type": "open_app",
+              "target_app_kind": "terminal",
+              "target_app_hint": "terminal",
+              "target_window_hint": "KRIA (Workspace) - Kiro",
+              "target_control_hint": null,
+              "query_summary": null,
+              "query_hash": null,
+              "text_payload_summary": null,
+              "text_payload_hash": null,
+              "desired_final_state": "target application is opened or blocker is explained",
+              "risk_level": "low",
+              "requires_user_approval": false,
+              "ambiguity_count": 0,
+              "ambiguities": [],
+              "source_evidence": [
+                {
+                  "source": "user_prompt",
+                  "field": "action_type",
+                  "summary": "matched action open_app",
+                  "confidence": 0.9
+                },
+                {
+                  "source": "user_prompt",
+                  "field": "target_app_kind",
+                  "summary": "terminal",
+                  "confidence": 0.86
+                },
+                {
+                  "source": "user_prompt",
+                  "field": "target_app_hint",
+                  "summary": "terminal",
+                  "confidence": 0.86
+                }
+              ],
+              "extraction_confidence": 0.76,
+              "extractor_mode": "deterministic"
+            },
+            "planner": {
+              "mode": "llm_rejected_fallback",
+              "llm_attempted": true,
+              "llm_status": "rejected",
+              "llm_failure_reason": "LLM planner returned prose or non-object content",
+              "model": null,
+              "validation_status": "valid",
+              "plan_status": "valid",
+              "blocked_reasons": [],
+              "warnings": [],
+              "confidence": 0.62
+            },
+            "plan": {
+              "plan_id": "a30a3c09-ad86-4810-a240-25d785a04513",
+              "goal_contract_id": "8a2e0d9d65c59ea425edac8d32e089a73ef72dc20d5ec9e43cc84650bf4c75ed",
+              "context_id": "d98ba3a2-7594-4fdf-b97c-e0f11ed58f4d",
+              "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3",
+              "goal_action_type": "open_app",
+              "summary": "open_app GUI plan",
+              "planner_mode": "llm_rejected_fallback",
+              "plan_status": "valid",
+              "step_count": 2,
+              "risk_level": "low",
+              "requires_user_approval": false,
+              "ambiguity_count": 0,
+              "confidence": 0.62,
+              "validation_errors": [],
+              "source_evidence": [
+                {
+                  "source": "user_prompt",
+                  "field": "action_type",
+                  "summary": "matched action open_app",
+                  "confidence": 0.9
+                },
+                {
+                  "source": "user_prompt",
+                  "field": "target_app_kind",
+                  "summary": "terminal",
+                  "confidence": 0.86
+                },
+                {
+                  "source": "user_prompt",
+                  "field": "target_app_hint",
+                  "summary": "terminal",
+                  "confidence": 0.86
+                }
+              ],
+              "steps": [
+                "Open or switch to the requested app",
+                "Verify requested app window is visible"
+              ],
+              "typed_steps": [
+                {
+                  "step_id": "det-1",
+                  "step_type": "OpenApp",
+                  "summary": "Open or switch to the requested app",
+                  "target_app_hint": "terminal",
+                  "target_window_hint": "KRIA (Workspace) - Kiro",
+                  "target_control_hint": null,
+                  "text_payload_summary": null,
+                  "text_payload_hash": null,
+                  "expected_precondition": "requested app is not guaranteed visible",
+                  "expected_postcondition": "requested app window is visible",
+                  "verification_strategy": "window_visible",
+                  "risk_level": "low",
+                  "requires_approval": false,
+                  "allowed_to_execute": false,
+                  "confidence": 0.76,
+                  "reason": "analyze_plan"
+                },
+                {
+                  "step_id": "det-2",
+                  "step_type": "WaitForState",
+                  "summary": "Verify requested app window is visible",
+                  "target_app_hint": "terminal",
+                  "target_window_hint": "KRIA (Workspace) - Kiro",
+                  "target_control_hint": null,
+                  "text_payload_summary": null,
+                  "text_payload_hash": null,
+                  "expected_precondition": "OpenApp step has been planned",
+                  "expected_postcondition": "window visible or safe blocker reported",
+                  "verification_strategy": "window_visible",
+                  "risk_level": "low",
+                  "requires_approval": false,
+                  "allowed_to_execute": false,
+                  "confidence": 0.76,
+                  "reason": "analyze_plan"
+                }
+              ]
+            },
+            "plan_validation": {
+              "confidence": 0.62,
+              "validation_id": "validation-a30a3c09-ad86-4810-a240-25d785a04513",
+              "plan_id": "a30a3c09-ad86-4810-a240-25d785a04513",
+              "goal_contract_id": "8a2e0d9d65c59ea425edac8d32e089a73ef72dc20d5ec9e43cc84650bf4c75ed",
+              "context_id": "d98ba3a2-7594-4fdf-b97c-e0f11ed58f4d",
+              "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3",
+              "status": "valid",
+              "readiness_status": "valid_for_resolution",
+              "risk_level": "low",
+              "requires_user_approval": false,
+              "can_proceed_to_target_resolution": true,
+              "can_execute": false,
+              "blocker_count": 0,
+              "warning_count": 0,
+              "blocked_reasons": [],
+              "warnings": [],
+              "validation_errors": [],
+              "source_evidence": [
+                {
+                  "source": "user_prompt",
+                  "field": "action_type",
+                  "summary": "matched action open_app",
+                  "confidence": 0.9
+                },
+                {
+                  "source": "user_prompt",
+                  "field": "target_app_kind",
+                  "summary": "terminal",
+                  "confidence": 0.86
+                },
+                {
+                  "source": "user_prompt",
+                  "field": "target_app_hint",
+                  "summary": "terminal",
+                  "confidence": 0.86
+                }
+              ],
+              "step_results": [
+                {
+                  "step_id": "det-1",
+                  "step_type": "OpenApp",
+                  "status": "valid_for_resolution",
+                  "risk_level": "low",
+                  "requires_approval": false,
+                  "target_resolution_required": false,
+                  "target_available": false,
+                  "verification_present": true,
+                  "precondition_status": "present",
+                  "postcondition_status": "present",
+                  "blocker": null,
+                  "confidence": 0.76
+                },
+                {
+                  "step_id": "det-2",
+                  "step_type": "WaitForState",
+                  "status": "valid_for_resolution",
+                  "risk_level": "low",
+                  "requires_approval": false,
+                  "target_resolution_required": false,
+                  "target_available": false,
+                  "verification_present": true,
+                  "precondition_status": "present",
+                  "postcondition_status": "present",
+                  "blocker": null,
+                  "confidence": 0.76
+                }
+              ]
+            },
+            "target_resolution": {
+              "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3",
+              "resolution_id": "resolution-a30a3c09-ad86-4810-a240-25d785a04513-s0",
+              "plan_id": "a30a3c09-ad86-4810-a240-25d785a04513-s0",
+              "validation_id": "validation-a30a3c09-ad86-4810-a240-25d785a04513",
+              "goal_contract_id": "8a2e0d9d65c59ea425edac8d32e089a73ef72dc20d5ec9e43cc84650bf4c75ed",
+              "context_id": "d98ba3a2-7594-4fdf-b97c-e0f11ed58f4d",
+              "observation_id": "25f9ee45-62d8-4d11-991c-7abc737d6e40",
+              "status": "resolved",
+              "results": [],
+              "resolved_target": null,
+              "candidates": [],
+              "confidence": 0.76,
+              "ambiguity_count": 0,
+              "ambiguity_reasons": [],
+              "blocker_count": 0,
+              "blockers": [],
+              "can_proceed_to_safety_gate": true,
+              "can_execute": false
+            },
+            "target": null,
+            "safety_gate": {
+              "proposal": {
+                "proposal_schema_version": 1,
+                "proposal_id": "gui-proposal-acfba57927fbbbf7b8eafcf0228f92cc02b0443498be7123e14ce1b7c7e80cdf",
+                "request_id": "gui-hitl-eb608b2b06f65e6b480f9e602d26340d975640eff1fd77394895bd89dd66b585",
+                "goal_contract_id": "8a2e0d9d65c59ea425edac8d32e089a73ef72dc20d5ec9e43cc84650bf4c75ed",
+                "plan_id": "a30a3c09-ad86-4810-a240-25d785a04513-s0",
+                "validation_id": "validation-a30a3c09-ad86-4810-a240-25d785a04513",
+                "resolution_id": "resolution-a30a3c09-ad86-4810-a240-25d785a04513-s0",
+                "context_id": "d98ba3a2-7594-4fdf-b97c-e0f11ed58f4d",
+                "observation_id": "25f9ee45-62d8-4d11-991c-7abc737d6e40",
+                "step_id": "det-1",
+                "action_type": "OpenApp",
+                "target_hash": "6bfed6f9afe8867b828ff3a037d45c39762df96d3de82f046de12c83e4b4b0dc",
+                "target_control_id": null,
+                "target_label": null,
+                "target_role": null,
+                "target_bounds": null,
+                "text_payload_summary": null,
+                "text_payload_hash": null,
+                "expected_precondition": "requested app is not guaranteed visible",
+                "expected_postcondition": "requested app window is visible",
+                "risk_level": "low",
+                "risk_reasons": [
+                  "risk level: low"
+                ],
+                "requires_user_approval": false,
+                "created_at_ms": 1781259834858,
+                "expires_at_ms": 1781259894858,
+                "proposal_hash": "2250ef1c9bcfbca2c54b7db0d6c8969f8db86e59dfe87280c42ff10e1bb15550",
+                "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3",
+                "can_execute": false
+              },
+              "safety_gate_id": "safety-gui-proposal-acfba57927fbbbf7b8eafcf0228f92cc02b0443498be7123e14ce1b7c7e80cdf",
+              "proposal_id": "gui-proposal-acfba57927fbbbf7b8eafcf0228f92cc02b0443498be7123e14ce1b7c7e80cdf",
+              "request_id": "gui-hitl-eb608b2b06f65e6b480f9e602d26340d975640eff1fd77394895bd89dd66b585",
+              "proposal_hash": "2250ef1c9bcfbca2c54b7db0d6c8969f8db86e59dfe87280c42ff10e1bb15550",
+              "target_hash": "6bfed6f9afe8867b828ff3a037d45c39762df96d3de82f046de12c83e4b4b0dc",
+              "status": "Allowed",
+              "safety_status": "safe_no_approval_required",
+              "risk_level": "low",
+              "reasons": [
+                "risk level: low"
+              ],
+              "risk_reasons": [
+                "risk level: low"
+              ],
+              "requires_user_approval": false,
+              "approval_reason": null,
+              "blockers": [],
+              "warnings": [],
+              "can_request_hitl": false,
+              "can_authorize_step7": true,
+              "can_execute": false,
+              "source_evidence": [
+                "gui_goal_contract",
+                "plan_validation",
+                "target_resolution"
+              ],
+              "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3",
+              "action_type": "OpenApp",
+              "target_label": null,
+              "target_role": null,
+              "expected_postcondition": "requested app window is visible",
+              "expires_at_ms": 1781259894858
+            },
+            "hitl_decision": null,
+            "action": {
+              "execution_id": "execution-1a2d486071b7ecb1e19c2be131879c6a912588f8e506b27412ded94e4cfc7c17",
+              "proposal_id": "gui-proposal-acfba57927fbbbf7b8eafcf0228f92cc02b0443498be7123e14ce1b7c7e80cdf",
+              "proposal_hash": "2250ef1c9bcfbca2c54b7db0d6c8969f8db86e59dfe87280c42ff10e1bb15550",
+              "action_type": "OpenApp",
+              "status": "failed",
+              "started_at_ms": 1781259834858,
+              "completed_at_ms": 1781259834858,
+              "backend_used": "open_application",
+              "precondition_check": {
+                "status": "valid",
+                "can_start_action": true,
+                "blockers": [],
+                "warnings": [],
+                "checked_at_ms": 1781259834858
+              },
+              "postcondition_check": "requested app window is visible",
+              "verification_result": "blocked",
+              "error_code": "backend_failed",
+              "safe_error_summary": "application 'OpenApp' is not found in the installed app registry",
+              "can_retry": false,
+              "recovery_hint": "Re-observe the screen and resolve a fresh target before any retry.",
+              "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3"
+            },
+            "execution": {
+              "execution_id": "execution-1a2d486071b7ecb1e19c2be131879c6a912588f8e506b27412ded94e4cfc7c17",
+              "proposal_id": "gui-proposal-acfba57927fbbbf7b8eafcf0228f92cc02b0443498be7123e14ce1b7c7e80cdf",
+              "proposal_hash": "2250ef1c9bcfbca2c54b7db0d6c8969f8db86e59dfe87280c42ff10e1bb15550",
+              "action_type": "OpenApp",
+              "status": "failed",
+              "started_at_ms": 1781259834858,
+              "completed_at_ms": 1781259834858,
+              "backend_used": "open_application",
+              "precondition_check": {
+                "status": "valid",
+                "can_start_action": true,
+                "blockers": [],
+                "warnings": [],
+                "checked_at_ms": 1781259834858
+              },
+              "postcondition_check": "requested app window is visible",
+              "verification_result": "blocked",
+              "error_code": "backend_failed",
+              "safe_error_summary": "application 'OpenApp' is not found in the installed app registry",
+              "can_retry": false,
+              "recovery_hint": "Re-observe the screen and resolve a fresh target before any retry.",
+              "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3"
+            },
+            "action_backend": {
+              "global_halt_engaged": false,
+              "halt_kind": "none",
+              "halt_reason": null,
+              "release_conditions": [],
+              "startup_elapsed_ms": null,
+              "can_observe": true,
+              "can_plan": true,
+              "automation_enabled": true,
+              "vision_sidecar": "running",
+              "uinput_daemon": "running",
+              "orchestrator_available": true,
+              "session_type": "wayland",
+              "xdotool_available": true,
+              "ydotool_available": false,
+              "uinput_available": true,
+              "selected_backend": "uinput_accessibility",
+              "backend_selection_reason": "Wayland session selected uinput because the daemon and socket are healthy.",
+              "backend_probe_status": "wayland_uinput_ready",
+              "backend_probe_errors": [
+                "xdotool detected but not usable for Wayland GUI actions"
+              ],
+              "input_backend_kind": "uinput",
+              "focus_supported": true,
+              "typing_supported": true,
+              "click_supported": true,
+              "verification_supported": true,
+              "xdotool_usable_for_actions": false,
+              "ydotool_usable_for_actions": false,
+              "uinput_socket_path": "/run/user/1000/kria-uinput.sock",
+              "uinput_socket_accessible": true,
+              "can_execute_actions": true,
+              "blockers": [],
+              "capabilities": {
+                "observe": true,
+                "focus_field": true,
+                "fill_field": true,
+                "click_control": true,
+                "post_action_observe": true,
+                "verify": true,
+                "recovery_focus": true,
+                "recovery_modal": true
+              }
+            },
+            "execution_blocker": null,
+            "verification": {
+              "verification_id": "verification-e2c9f831a203158a0a41ff9c9d3d402a72b15cae630e9be0f8b5f4ae022d41b8",
+              "execution_id": "execution-1a2d486071b7ecb1e19c2be131879c6a912588f8e506b27412ded94e4cfc7c17",
+              "proposal_id": "gui-proposal-acfba57927fbbbf7b8eafcf0228f92cc02b0443498be7123e14ce1b7c7e80cdf",
+              "status": "blocked",
+              "verification_strategy": "active_window_match",
+              "evidence": [
+                "backend action did not complete; no state to verify"
+              ],
+              "pre_state_summary": "app=Kiro; controls=8; dialogs=0; focus_role=window; screen=665b91d8",
+              "post_state_summary": "app=Kiro; controls=12; dialogs=0; focus_role=window; screen=665b91d8",
+              "matched_expected_state": false,
+              "target_still_present": false,
+              "target_identity_matches": true,
+              "confidence": 0.2,
+              "safe_error_summary": "Backend action failed before verification.",
+              "recovery_hint": "Re-observe the screen and resolve a fresh target before any retry.",
+              "can_retry": false,
+              "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3"
+            },
+            "recovery_assessment": {
+              "recovery_id": "recovery-f536f77dafdfdb0974906273a158ce39d2d2404f840bf881fdd3d4cb49c26d5c",
+              "execution_id": "execution-1a2d486071b7ecb1e19c2be131879c6a912588f8e506b27412ded94e4cfc7c17",
+              "verification_id": "verification-e2c9f831a203158a0a41ff9c9d3d402a72b15cae630e9be0f8b5f4ae022d41b8",
+              "proposal_id": "gui-proposal-acfba57927fbbbf7b8eafcf0228f92cc02b0443498be7123e14ce1b7c7e80cdf",
+              "proposal_hash": "2250ef1c9bcfbca2c54b7db0d6c8969f8db86e59dfe87280c42ff10e1bb15550",
+              "target_hash": "6bfed6f9afe8867b828ff3a037d45c39762df96d3de82f046de12c83e4b4b0dc",
+              "action_type": "OpenApp",
+              "failure_kind": "backend_failed",
+              "status": "blocked",
+              "proposed_recovery_step": "Stop",
+              "recovery_action_kind": "Stop",
+              "requires_user_approval": false,
+              "can_recover": false,
+              "can_execute_recovery": false,
+              "retry_count": 0,
+              "max_retry_count": 1,
+              "blockers": [
+                "deterministic action backend failed"
+              ],
+              "warnings": [],
+              "safe_explanation": "The action backend failed, so KRIA stops instead of blind-retrying.",
+              "recovery_hint": "Re-observe and confirm a safe target before any manual retry; KRIA will not blind-retry.",
+              "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3"
+            },
+            "recovery": null,
+            "workflow_run": {
+              "workflow_run_id": "workflow-run-93e231776bd38f852ecc8042c6f8e776a15c895531b546d2fe36f82ceab48804",
+              "session_id": "live-eval-p04-1781259816",
+              "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+              "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+              "goal_contract_id": "8a2e0d9d65c59ea425edac8d32e089a73ef72dc20d5ec9e43cc84650bf4c75ed",
+              "plan_id": "a30a3c09-ad86-4810-a240-25d785a04513",
+              "initial_context_id": "d98ba3a2-7594-4fdf-b97c-e0f11ed58f4d",
+              "current_context_id": "d98ba3a2-7594-4fdf-b97c-e0f11ed58f4d",
+              "status": "blocked",
+              "current_step_index": 0,
+              "step_count": 2,
+              "step_states": [
+                {
+                  "step_id": "det-1",
+                  "step_index": 0,
+                  "step_type": "OpenApp",
+                  "summary": "Open or switch to the requested app",
+                  "status": "blocked",
+                  "target_resolution_id": "resolution-a30a3c09-ad86-4810-a240-25d785a04513-s0",
+                  "proposal_id": "gui-proposal-acfba57927fbbbf7b8eafcf0228f92cc02b0443498be7123e14ce1b7c7e80cdf",
+                  "proposal_hash": "2250ef1c9bcfbca2c54b7db0d6c8969f8db86e59dfe87280c42ff10e1bb15550",
+                  "hitl_decision_id": null,
+                  "execution_id": "execution-1a2d486071b7ecb1e19c2be131879c6a912588f8e506b27412ded94e4cfc7c17",
+                  "verification_id": "verification-e2c9f831a203158a0a41ff9c9d3d402a72b15cae630e9be0f8b5f4ae022d41b8",
+                  "recovery_id": "recovery-f536f77dafdfdb0974906273a158ce39d2d2404f840bf881fdd3d4cb49c26d5c",
+                  "started_at_ms": 1781259834858,
+                  "completed_at_ms": 1781259836946,
+                  "blockers": [
+                    "deterministic action backend failed"
+                  ],
+                  "warnings": [],
+                  "can_continue": false,
+                  "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3"
+                },
+                {
+                  "step_id": "det-2",
+                  "step_index": 1,
+                  "step_type": "WaitForState",
+                  "summary": "Verify requested app window is visible",
+                  "status": "pending",
+                  "target_resolution_id": null,
+                  "proposal_id": null,
+                  "proposal_hash": null,
+                  "hitl_decision_id": null,
+                  "execution_id": null,
+                  "verification_id": null,
+                  "recovery_id": null,
+                  "started_at_ms": 0,
+                  "completed_at_ms": 0,
+                  "blockers": [],
+                  "warnings": [],
+                  "can_continue": false,
+                  "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3"
+                }
+              ],
+              "completed_step_receipts": [],
+              "blocked_reason": "deterministic action backend failed",
+              "recovery_summary": null,
+              "risk_level": "low",
+              "requires_user_approval": false,
+              "execution_mode": "execute_live",
+              "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3"
+            },
+            "workflow_checkpoint": {
+              "checkpoint_schema_version": 1,
+              "checkpoint_id": "checkpoint-435a21b82fd0cf815a3b4ab7b5732ee18a4969ecb8642d90a22a420660127a42",
+              "workflow_run_id": "workflow-run-93e231776bd38f852ecc8042c6f8e776a15c895531b546d2fe36f82ceab48804",
+              "session_id": "live-eval-p04-1781259816",
+              "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+              "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+              "goal_contract_id": "8a2e0d9d65c59ea425edac8d32e089a73ef72dc20d5ec9e43cc84650bf4c75ed",
+              "plan_id": "a30a3c09-ad86-4810-a240-25d785a04513",
+              "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3",
+              "current_step_index": 0,
+              "step_count": 2,
+              "step_states": [
+                {
+                  "step_id": "det-1",
+                  "step_index": 0,
+                  "step_type": "OpenApp",
+                  "summary": "Open or switch to the requested app",
+                  "status": "blocked",
+                  "target_resolution_id": "resolution-a30a3c09-ad86-4810-a240-25d785a04513-s0",
+                  "proposal_id": "gui-proposal-acfba57927fbbbf7b8eafcf0228f92cc02b0443498be7123e14ce1b7c7e80cdf",
+                  "proposal_hash": "2250ef1c9bcfbca2c54b7db0d6c8969f8db86e59dfe87280c42ff10e1bb15550",
+                  "hitl_decision_id": null,
+                  "execution_id": "execution-1a2d486071b7ecb1e19c2be131879c6a912588f8e506b27412ded94e4cfc7c17",
+                  "verification_id": "verification-e2c9f831a203158a0a41ff9c9d3d402a72b15cae630e9be0f8b5f4ae022d41b8",
+                  "recovery_id": "recovery-f536f77dafdfdb0974906273a158ce39d2d2404f840bf881fdd3d4cb49c26d5c",
+                  "started_at_ms": 1781259834858,
+                  "completed_at_ms": 1781259836946,
+                  "blockers": [
+                    "deterministic action backend failed"
+                  ],
+                  "warnings": [],
+                  "can_continue": false,
+                  "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3"
+                },
+                {
+                  "step_id": "det-2",
+                  "step_index": 1,
+                  "step_type": "WaitForState",
+                  "summary": "Verify requested app window is visible",
+                  "status": "pending",
+                  "target_resolution_id": null,
+                  "proposal_id": null,
+                  "proposal_hash": null,
+                  "hitl_decision_id": null,
+                  "execution_id": null,
+                  "verification_id": null,
+                  "recovery_id": null,
+                  "started_at_ms": 0,
+                  "completed_at_ms": 0,
+                  "blockers": [],
+                  "warnings": [],
+                  "can_continue": false,
+                  "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3"
+                }
+              ],
+              "completed_step_receipts": [],
+              "pending_step_id": "det-1",
+              "pending_proposal_id": "gui-proposal-acfba57927fbbbf7b8eafcf0228f92cc02b0443498be7123e14ce1b7c7e80cdf",
+              "pending_proposal_hash": "2250ef1c9bcfbca2c54b7db0d6c8969f8db86e59dfe87280c42ff10e1bb15550",
+              "pending_target_hash": null,
+              "pending_stable_target_identity_hash": null,
+              "pending_hitl_request_id": "gui-hitl-eb608b2b06f65e6b480f9e602d26340d975640eff1fd77394895bd89dd66b585",
+              "approved_decision_id": null,
+              "approved_decision_hash": null,
+              "last_observation_id": "25f9ee45-62d8-4d11-991c-7abc737d6e40",
+              "last_context_id": "d98ba3a2-7594-4fdf-b97c-e0f11ed58f4d",
+              "last_screen_hash_prefix": "665b91d809e59049",
+              "last_active_window_hash": null,
+              "created_at_ms": 1781259836946,
+              "expires_at_ms": 1781260436946,
+              "risk_level": "low",
+              "requires_user_approval": false,
+              "checkpoint_hash": "40e9d65e0d451434cea1725a29acf968ea0fb8874e5f6404686b48a14ae770c9",
+              "source_evidence": [
+                "gui_workflow_run",
+                "completed_step_receipts",
+                "last_observation"
+              ],
+              "can_resume": false,
+              "can_execute": false
+            },
+            "blocker": {
+              "kind": "recovery",
+              "reason": "deterministic action backend failed",
+              "candidate_count": null,
+              "target_name": null,
+              "options": [],
+              "clarification_question": null
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "agent:done",
+      "payload": {}
+    }
+  ],
+  "desktop_command": {
+    "path": "send_manual_tool_message",
+    "ui_opened": false,
+    "source": "desktop_chat",
+    "mode_id": "gui_cognition"
+  },
+  "response": {
+    "status": "blocked",
+    "reply": "Workflow stopped safely: deterministic action backend failed",
+    "gui_cognition": {
+      "mode_id": "gui_cognition",
+      "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+      "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+      "observation_id": "25f9ee45-62d8-4d11-991c-7abc737d6e40",
+      "context_id": "d98ba3a2-7594-4fdf-b97c-e0f11ed58f4d",
+      "path": "send_manual_tool_message",
+      "llm_tool_loop": false,
+      "intent": "analyze_plan",
+      "risk_level": "low",
+      "requires_approval": false,
+      "risk_reasons": [],
+      "perception": {
+        "visual_control_summary": {
+          "detected": 0,
+          "matched": 0,
+          "unmatched": 0,
+          "button_like": 0,
+          "false_positive_risk": "supporting_visual_only"
+        },
+        "observation_id": "25f9ee45-62d8-4d11-991c-7abc737d6e40",
+        "active_window": "KRIA (Workspace) - Kiro",
+        "active_window_source": "kria_gnome_shell_bridge",
+        "active_window_confidence": 0.98,
+        "active_window_reliability": "reliable",
+        "active_window_blocker": null,
+        "active_window_authority_source": "kria_gnome_shell_bridge",
+        "active_window_authority_confidence": 0.98,
+        "active_window_authority_status": "available",
+        "gnome_bridge_status": "available",
+        "active_window_app": "Kiro",
+        "active_window_app_id": "kiro.desktop",
+        "active_window_pid": 5633,
+        "active_window_workspace": 0,
+        "active_window_monitor": 0,
+        "active_window_fullscreen": false,
+        "active_window_minimized": false,
+        "active_window_observed_at_ms": 1781259816346,
+        "active_window_fallback_chain": [
+          {
+            "source": "kria_gnome_shell_bridge",
+            "status": "matched",
+            "reliability": "reliable",
+            "reason": null
+          }
+        ],
+        "active_window_failure_chain": [],
+        "visible_app_count": 5,
+        "visible_control_count": 8,
+        "visible_accessible_control_count": 8,
+        "disabled_control_count": 8,
+        "hidden_control_count": 0,
+        "trusted_control_count": 0,
+        "partial_control_count": 0,
+        "not_executable_control_count": 8,
+        "text_field_count": 7,
+        "button_count": 1,
+        "dialog_count": 0,
+        "other_control_count": 0,
+        "ocr_available": true,
+        "ocr_block_count": 1,
+        "ocr_trust": "untrusted",
+        "ocr_wait_for_screenshot_ms": 1314,
+        "ocr_engine_selected": "tesseract_cli",
+        "ocr_engine_status": "completed",
+        "ocr_image_status": "downscaled_1920x1200_to_1000x625",
+        "ocr_total_ms": 3405,
+        "ocr_fast_path": "full_screen_tesseract",
+        "ocr_cache_hit": false,
+        "ocr_roi_count": 0,
+        "ocr_changed_region_count": 0,
+        "ocr_cold_start_ms": 3405,
+        "ocr_warm_start_ms": null,
+        "ocr_benchmark_summary": "rapidocr/paddleocr optional adapters not configured; tesseract fallback used",
+        "ocr_injection_count": 0,
+        "ocr_blocker": null,
+        "accessibility_available": true,
+        "accessibility_source_status": "degraded",
+        "accessibility_overall_status": "degraded",
+        "accessibility_overall_confidence": 0.6599999999999999,
+        "accessibility_app_scores": [
+          {
+            "app_label": ":1.0",
+            "bus_name_hash": "6ae115a23a8787ac",
+            "node_count": 71,
+            "control_count": 16,
+            "timeout_count": 1,
+            "stale_node_count": 0,
+            "score": 0.6599999999999999,
+            "status": "degraded"
+          },
+          {
+            "app_label": ":1.4",
+            "bus_name_hash": "1890e0c9307bad0a",
+            "node_count": 71,
+            "control_count": 16,
+            "timeout_count": 1,
+            "stale_node_count": 0,
+            "score": 0.6599999999999999,
+            "status": "degraded"
+          },
+          {
+            "app_label": ":1.6",
+            "bus_name_hash": "cdaa122c19a646a6",
+            "node_count": 71,
+            "control_count": 16,
+            "timeout_count": 1,
+            "stale_node_count": 0,
+            "score": 0.6599999999999999,
+            "status": "degraded"
+          },
+          {
+            "app_label": ":1.5",
+            "bus_name_hash": "305f121ff554bda2",
+            "node_count": 71,
+            "control_count": 16,
+            "timeout_count": 1,
+            "stale_node_count": 0,
+            "score": 0.6599999999999999,
+            "status": "degraded"
+          },
+          {
+            "app_label": ":1.3",
+            "bus_name_hash": "e0312de4bce4c374",
+            "node_count": 71,
+            "control_count": 16,
+            "timeout_count": 1,
+            "stale_node_count": 0,
+            "score": 0.6599999999999999,
+            "status": "degraded"
+          }
+        ],
+        "accessibility_stale_node_count": 0,
+        "accessibility_timeout_count": 1,
+        "accessibility_cache_hit_count": 0,
+        "accessibility_stale_cache_rejected_count": 0,
+        "accessibility_node_count": 71,
+        "accessibility_control_count": 8,
+        "atspi_snapshot_total_ms": 128,
+        "atspi_skipped_app_count": 1,
+        "atspi_omitted_node_count": 109,
+        "accessibility_remediation": [],
+        "screenshot_available": true,
+        "screenshot_status": "available",
+        "screenshot_capture_ms": 1314,
+        "screenshot_duration_ms": 1314,
+        "screen_hash_prefix": "665b91d809e59049",
+        "monitor_count": 1,
+        "dpi_available": true,
+        "cursor_focus_known": true,
+        "focused_window": "KRIA (Workspace) - Kiro",
+        "focused_app": "Kiro",
+        "focused_control_id": "gnome_bridge:focused_window",
+        "focused_control_label": "Focused window",
+        "focused_control_role": "window",
+        "focused_control_bounds": null,
+        "text_cursor_known": false,
+        "editable_target_known": false,
+        "terminal_like": false,
+        "focus_source": "gnome_bridge_focus",
+        "focus_confidence": 0.72,
+        "focus_reliability": "best_effort",
+        "focus_adapter_status": "available",
+        "focus_latency_ms": 17,
+        "focus_failure_chain": [
+          {
+            "source": "gnome_bridge_focus",
+            "status": "matched",
+            "reliability": "best_effort",
+            "reason": null
+          },
+          {
+            "source": "chrome_cdp_active_element",
+            "status": "unavailable",
+            "reliability": "unavailable",
+            "reason": "Chrome CDP skipped because the current focused app/window is not Chrome-like"
+          },
+          {
+            "source": "firefox_bidi_active_element",
+            "status": "unavailable",
+            "reliability": "unavailable",
+            "reason": "Firefox BiDi skipped because the current focused app/window is not Firefox-like"
+          },
+          {
+            "source": "vscode_extension",
+            "status": "unavailable",
+            "reliability": "unavailable",
+            "reason": "VS Code extension skipped because the current focused app/window is not VS Code-like"
+          },
+          {
+            "source": "gnome_terminal_adapter",
+            "status": "unavailable",
+            "reliability": "unavailable",
+            "reason": "active/focused window is not terminal-like"
+          },
+          {
+            "source": "atspi_focused_object",
+            "status": "unavailable",
+            "reliability": "unavailable",
+            "reason": "AT-SPI snapshot did not expose focused object, window, or app"
+          }
+        ],
+        "active_window_probe_ok": true,
+        "desktop_state_probe_ok": true,
+        "capabilities_probe_ok": true,
+        "observation_total_ms": 3407,
+        "slowest_probe": "run_ocr",
+        "slowest_probe_ms": 3405,
+        "probe_timeout_count": 1,
+        "probe_timings": [
+          {
+            "probe_name": "capture_screenshot",
+            "duration_ms": 1314,
+            "status": "ok",
+            "source": "xcap",
+            "cache_hit": false,
+            "blocker_kind": null
+          },
+          {
+            "probe_name": "detect_visual_controls",
+            "duration_ms": 2056,
+            "status": "timeout",
+            "source": "detect_visual_controls",
+            "cache_hit": false,
+            "blocker_kind": "timeout"
+          },
+          {
+            "probe_name": "find_ui_elements:check_box",
+            "duration_ms": 129,
+            "status": "ok",
+            "source": "atspi_snapshot",
+            "cache_hit": false,
+            "blocker_kind": null
+          },
+          {
+            "probe_name": "find_ui_elements:dialog",
+            "duration_ms": 129,
+            "status": "ok",
+            "source": "atspi_snapshot",
+            "cache_hit": false,
+            "blocker_kind": null
+          },
+          {
+            "probe_name": "find_ui_elements:link",
+            "duration_ms": 130,
+            "status": "ok",
+            "source": "atspi_snapshot",
+            "cache_hit": false,
+            "blocker_kind": null
+          },
+          {
+            "probe_name": "find_ui_elements:page_tab",
+            "duration_ms": 130,
+            "status": "ok",
+            "source": "atspi_snapshot",
+            "cache_hit": false,
+            "blocker_kind": null
+          },
+          {
+            "probe_name": "find_ui_elements:push_button",
+            "duration_ms": 129,
+            "status": "ok",
+            "source": "atspi_snapshot",
+            "cache_hit": false,
+            "blocker_kind": null
+          },
+          {
+            "probe_name": "find_ui_elements:text",
+            "duration_ms": 129,
+            "status": "ok",
+            "source": "atspi_snapshot",
+            "cache_hit": false,
+            "blocker_kind": null
+          },
+          {
+            "probe_name": "focused_window_title",
+            "duration_ms": 130,
+            "status": "blocked",
+            "source": "focused_window_title",
+            "cache_hit": false,
+            "blocker_kind": "unavailable"
+          },
+          {
+            "probe_name": "get_accessibility_capabilities",
+            "duration_ms": 128,
+            "status": "ok",
+            "source": "atspi_snapshot",
+            "cache_hit": false,
+            "blocker_kind": null
+          },
+          {
+            "probe_name": "get_accessibility_tree_summary",
+            "duration_ms": 128,
+            "status": "ok",
+            "source": "atspi_snapshot",
+            "cache_hit": false,
+            "blocker_kind": null
+          },
+          {
+            "probe_name": "get_active_window",
+            "duration_ms": 30,
+            "status": "ok",
+            "source": "kria_gnome_shell_bridge",
+            "cache_hit": false,
+            "blocker_kind": null
+          },
+          {
+            "probe_name": "get_cursor_focus_state",
+            "duration_ms": 146,
+            "status": "ok",
+            "source": "gnome_bridge_focus",
+            "cache_hit": false,
+            "blocker_kind": null
+          },
+          {
+            "probe_name": "get_desktop_state",
+            "duration_ms": 128,
+            "status": "ok",
+            "source": "atspi_snapshot",
+            "cache_hit": false,
+            "blocker_kind": null
+          },
+          {
+            "probe_name": "get_monitor_layout",
+            "duration_ms": 0,
+            "status": "ok",
+            "source": "get_monitor_layout",
+            "cache_hit": false,
+            "blocker_kind": null
+          },
+          {
+            "probe_name": "run_ocr",
+            "duration_ms": 3405,
+            "status": "ok",
+            "source": "tesseract_cli",
+            "cache_hit": false,
+            "blocker_kind": null
+          }
+        ],
+        "cache_hit": false,
+        "cache_age_ms": null,
+        "cache_policy": "observe_plan_ttl_750ms",
+        "freshness": "fresh",
+        "source_blockers": {
+          "active_window": null,
+          "desktop_state": null,
+          "accessibility": null,
+          "screenshot": null,
+          "ocr": null,
+          "monitor": null,
+          "cursor_focus": null
+        },
+        "control_samples": [
+          {
+            "id": ":1.0:/org/a11y/atspi/accessible/1004:text",
+            "role": "text",
+            "label": "",
+            "bounds": null,
+            "enabled": false,
+            "visible": true,
+            "focused": false,
+            "source": "accessibility",
+            "confidence": 1.0,
+            "quality": "not_executable",
+            "label_source": "missing",
+            "state_source": "accessibility_state",
+            "rejection_reason": "disabled",
+            "identity_confidence": 0.35,
+            "bounds_confidence": 0.0,
+            "state_confidence": 0.86,
+            "executable_confidence": 0.0,
+            "sources": [
+              "accessibility"
+            ]
+          },
+          {
+            "id": ":1.0:/org/a11y/atspi/accessible/1008:text",
+            "role": "text",
+            "label": "",
+            "bounds": null,
+            "enabled": false,
+            "visible": true,
+            "focused": false,
+            "source": "accessibility",
+            "confidence": 1.0,
+            "quality": "not_executable",
+            "label_source": "missing",
+            "state_source": "accessibility_state",
+            "rejection_reason": "disabled",
+            "identity_confidence": 0.35,
+            "bounds_confidence": 0.0,
+            "state_confidence": 0.86,
+            "executable_confidence": 0.0,
+            "sources": [
+              "accessibility"
+            ]
+          },
+          {
+            "id": ":1.0:/org/a11y/atspi/accessible/1012:text",
+            "role": "text",
+            "label": "",
+            "bounds": null,
+            "enabled": false,
+            "visible": true,
+            "focused": false,
+            "source": "accessibility",
+            "confidence": 1.0,
+            "quality": "not_executable",
+            "label_source": "missing",
+            "state_source": "accessibility_state",
+            "rejection_reason": "disabled",
+            "identity_confidence": 0.35,
+            "bounds_confidence": 0.0,
+            "state_confidence": 0.86,
+            "executable_confidence": 0.0,
+            "sources": [
+              "accessibility"
+            ]
+          },
+          {
+            "id": ":1.0:/org/a11y/atspi/accessible/1016:text",
+            "role": "text",
+            "label": "",
+            "bounds": null,
+            "enabled": false,
+            "visible": true,
+            "focused": false,
+            "source": "accessibility",
+            "confidence": 1.0,
+            "quality": "not_executable",
+            "label_source": "missing",
+            "state_source": "accessibility_state",
+            "rejection_reason": "disabled",
+            "identity_confidence": 0.35,
+            "bounds_confidence": 0.0,
+            "state_confidence": 0.86,
+            "executable_confidence": 0.0,
+            "sources": [
+              "accessibility"
+            ]
+          },
+          {
+            "id": ":1.0:/org/a11y/atspi/accessible/1020:text",
+            "role": "text",
+            "label": "",
+            "bounds": null,
+            "enabled": false,
+            "visible": true,
+            "focused": false,
+            "source": "accessibility",
+            "confidence": 1.0,
+            "quality": "not_executable",
+            "label_source": "missing",
+            "state_source": "accessibility_state",
+            "rejection_reason": "disabled",
+            "identity_confidence": 0.35,
+            "bounds_confidence": 0.0,
+            "state_confidence": 0.86,
+            "executable_confidence": 0.0,
+            "sources": [
+              "accessibility"
+            ]
+          },
+          {
+            "id": ":1.0:/org/a11y/atspi/accessible/1024:text",
+            "role": "text",
+            "label": "",
+            "bounds": null,
+            "enabled": false,
+            "visible": true,
+            "focused": false,
+            "source": "accessibility",
+            "confidence": 1.0,
+            "quality": "not_executable",
+            "label_source": "missing",
+            "state_source": "accessibility_state",
+            "rejection_reason": "disabled",
+            "identity_confidence": 0.35,
+            "bounds_confidence": 0.0,
+            "state_confidence": 0.86,
+            "executable_confidence": 0.0,
+            "sources": [
+              "accessibility"
+            ]
+          },
+          {
+            "id": ":1.0:/org/a11y/atspi/accessible/516:text",
+            "role": "text",
+            "label": "",
+            "bounds": null,
+            "enabled": false,
+            "visible": true,
+            "focused": false,
+            "source": "accessibility",
+            "confidence": 1.0,
+            "quality": "not_executable",
+            "label_source": "missing",
+            "state_source": "accessibility_state",
+            "rejection_reason": "disabled",
+            "identity_confidence": 0.35,
+            "bounds_confidence": 0.0,
+            "state_confidence": 0.86,
+            "executable_confidence": 0.0,
+            "sources": [
+              "accessibility"
+            ]
+          },
+          {
+            "id": ":1.0:/org/a11y/atspi/accessible/491:push button",
+            "role": "push button",
+            "label": "",
+            "bounds": null,
+            "enabled": false,
+            "visible": true,
+            "focused": false,
+            "source": "accessibility",
+            "confidence": 1.0,
+            "quality": "not_executable",
+            "label_source": "missing",
+            "state_source": "accessibility_state",
+            "rejection_reason": "disabled",
+            "identity_confidence": 0.35,
+            "bounds_confidence": 0.0,
+            "state_confidence": 0.86,
+            "executable_confidence": 0.0,
+            "sources": [
+              "accessibility"
+            ]
+          }
+        ],
+        "executable_control_count": 0,
+        "visual_control_count": 0,
+        "capabilities": {
+          "active_window": {
+            "available": true,
+            "detail": "active_window:kria_gnome_shell_bridge",
+            "blocker": null,
+            "remediation": []
+          },
+          "desktop_state": {
+            "available": true,
+            "detail": "desktop_state",
+            "blocker": null,
+            "remediation": []
+          },
+          "accessibility": {
+            "available": true,
+            "detail": "accessibility operational",
+            "blocker": null,
+            "remediation": []
+          },
+          "screenshot": {
+            "available": true,
+            "detail": "screenshot",
+            "blocker": null,
+            "remediation": []
+          },
+          "ocr": {
+            "available": true,
+            "detail": "ocr",
+            "blocker": null,
+            "remediation": []
+          },
+          "monitor": {
+            "available": true,
+            "detail": "monitor",
+            "blocker": null,
+            "remediation": []
+          },
+          "cursor_focus": {
+            "available": true,
+            "detail": "cursor_focus",
+            "blocker": null,
+            "remediation": []
+          }
+        },
+        "text_field_sample": [],
+        "button_sample": [],
+        "control_quality_summary": {
+          "trusted": 0,
+          "partial": 0,
+          "not_executable": 8,
+          "executable": 0
+        }
+      },
+      "context": {
+        "context_id": "d98ba3a2-7594-4fdf-b97c-e0f11ed58f4d",
+        "observation_id": "25f9ee45-62d8-4d11-991c-7abc737d6e40",
+        "trusted_control_count": 0,
+        "executable_control_count": 0,
+        "disabled_or_hidden_count": 8,
+        "ocr_untrusted": true,
+        "ocr_injection_count": 0,
+        "redaction_count": 0,
+        "freshness": "fresh",
+        "status": "ready",
+        "previous_context_id": null,
+        "previous_observation_id": null,
+        "delta": {
+          "active_window_changed": false,
+          "screen_hash_changed": false,
+          "monitor_layout_changed": false,
+          "control_count_changed": false,
+          "focused_control_changed": false,
+          "stale_action_risk": false,
+          "changed_summary": []
+        },
+        "source_confidence": {
+          "active_window": 0.98,
+          "accessibility": 0.6599999999999999,
+          "screenshot": 0.85,
+          "ocr": 0.45,
+          "monitor": 0.82,
+          "focus": 0.75
+        },
+        "screen_hash_prefix": "665b91d809e59049",
+        "focus": {
+          "source": "gnome_bridge_focus",
+          "confidence": 0.72,
+          "reliability": "best_effort",
+          "keyboard_focus_known": true,
+          "editable_target_known": false,
+          "terminal_like": false,
+          "adapter_status": "available",
+          "latency_ms": 17,
+          "focused_window": "KRIA (Workspace) - Kiro",
+          "focused_app": "Kiro",
+          "focused_control_label": "Focused window",
+          "focused_control_role": "window",
+          "focused_control_bounds": null
+        },
+        "accessibility_health": {
+          "status": "degraded",
+          "confidence": 0.6599999999999999,
+          "app_scores": [
+            {
+              "app_label": ":1.0",
+              "bus_name_hash": "6ae115a23a8787ac",
+              "node_count": 71,
+              "control_count": 16,
+              "timeout_count": 1,
+              "stale_node_count": 0,
+              "score": 0.6599999999999999,
+              "status": "degraded"
+            },
+            {
+              "app_label": ":1.4",
+              "bus_name_hash": "1890e0c9307bad0a",
+              "node_count": 71,
+              "control_count": 16,
+              "timeout_count": 1,
+              "stale_node_count": 0,
+              "score": 0.6599999999999999,
+              "status": "degraded"
+            },
+            {
+              "app_label": ":1.6",
+              "bus_name_hash": "cdaa122c19a646a6",
+              "node_count": 71,
+              "control_count": 16,
+              "timeout_count": 1,
+              "stale_node_count": 0,
+              "score": 0.6599999999999999,
+              "status": "degraded"
+            },
+            {
+              "app_label": ":1.5",
+              "bus_name_hash": "305f121ff554bda2",
+              "node_count": 71,
+              "control_count": 16,
+              "timeout_count": 1,
+              "stale_node_count": 0,
+              "score": 0.6599999999999999,
+              "status": "degraded"
+            },
+            {
+              "app_label": ":1.3",
+              "bus_name_hash": "e0312de4bce4c374",
+              "node_count": 71,
+              "control_count": 16,
+              "timeout_count": 1,
+              "stale_node_count": 0,
+              "score": 0.6599999999999999,
+              "status": "degraded"
+            }
+          ],
+          "stale_node_count": 0,
+          "timeout_count": 1,
+          "cache_hit_count": 0,
+          "stale_cache_rejected_count": 0
+        },
+        "visual_controls": {
+          "detected": 0,
+          "supporting_only": true
+        },
+        "ocr_performance": {
+          "fast_path": "full_screen_tesseract",
+          "cache_hit": false,
+          "roi_count": 0,
+          "changed_region_count": 0,
+          "cold_start_ms": 3405,
+          "warm_start_ms": null
+        },
+        "source_blockers": [],
+        "warnings": []
+      },
+      "goal_contract": {
+        "contract_id": "8a2e0d9d65c59ea425edac8d32e089a73ef72dc20d5ec9e43cc84650bf4c75ed",
+        "observation_id": "25f9ee45-62d8-4d11-991c-7abc737d6e40",
+        "context_id": "d98ba3a2-7594-4fdf-b97c-e0f11ed58f4d",
+        "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3",
+        "goal_summary": "Open terminal",
+        "intent_kind": "analyze_plan",
+        "action_type": "open_app",
+        "target_app_kind": "terminal",
+        "target_app_hint": "terminal",
+        "target_window_hint": "KRIA (Workspace) - Kiro",
+        "target_control_hint": null,
+        "query_summary": null,
+        "query_hash": null,
+        "text_payload_summary": null,
+        "text_payload_hash": null,
+        "desired_final_state": "target application is opened or blocker is explained",
+        "risk_level": "low",
+        "requires_user_approval": false,
+        "ambiguity_count": 0,
+        "ambiguities": [],
+        "source_evidence": [
+          {
+            "source": "user_prompt",
+            "field": "action_type",
+            "summary": "matched action open_app",
+            "confidence": 0.9
+          },
+          {
+            "source": "user_prompt",
+            "field": "target_app_kind",
+            "summary": "terminal",
+            "confidence": 0.86
+          },
+          {
+            "source": "user_prompt",
+            "field": "target_app_hint",
+            "summary": "terminal",
+            "confidence": 0.86
+          }
+        ],
+        "extraction_confidence": 0.76,
+        "extractor_mode": "deterministic"
+      },
+      "planner": {
+        "mode": "llm_rejected_fallback",
+        "llm_attempted": true,
+        "llm_status": "rejected",
+        "llm_failure_reason": "LLM planner returned prose or non-object content",
+        "model": null,
+        "validation_status": "valid",
+        "plan_status": "valid",
+        "blocked_reasons": [],
+        "warnings": [],
+        "confidence": 0.62
+      },
+      "plan": {
+        "plan_id": "a30a3c09-ad86-4810-a240-25d785a04513",
+        "goal_contract_id": "8a2e0d9d65c59ea425edac8d32e089a73ef72dc20d5ec9e43cc84650bf4c75ed",
+        "context_id": "d98ba3a2-7594-4fdf-b97c-e0f11ed58f4d",
+        "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3",
+        "goal_action_type": "open_app",
+        "summary": "open_app GUI plan",
+        "planner_mode": "llm_rejected_fallback",
+        "plan_status": "valid",
+        "step_count": 2,
+        "risk_level": "low",
+        "requires_user_approval": false,
+        "ambiguity_count": 0,
+        "confidence": 0.62,
+        "validation_errors": [],
+        "source_evidence": [
+          {
+            "source": "user_prompt",
+            "field": "action_type",
+            "summary": "matched action open_app",
+            "confidence": 0.9
+          },
+          {
+            "source": "user_prompt",
+            "field": "target_app_kind",
+            "summary": "terminal",
+            "confidence": 0.86
+          },
+          {
+            "source": "user_prompt",
+            "field": "target_app_hint",
+            "summary": "terminal",
+            "confidence": 0.86
+          }
+        ],
+        "steps": [
+          "Open or switch to the requested app",
+          "Verify requested app window is visible"
+        ],
+        "typed_steps": [
+          {
+            "step_id": "det-1",
+            "step_type": "OpenApp",
+            "summary": "Open or switch to the requested app",
+            "target_app_hint": "terminal",
+            "target_window_hint": "KRIA (Workspace) - Kiro",
+            "target_control_hint": null,
+            "text_payload_summary": null,
+            "text_payload_hash": null,
+            "expected_precondition": "requested app is not guaranteed visible",
+            "expected_postcondition": "requested app window is visible",
+            "verification_strategy": "window_visible",
+            "risk_level": "low",
+            "requires_approval": false,
+            "allowed_to_execute": false,
+            "confidence": 0.76,
+            "reason": "analyze_plan"
+          },
+          {
+            "step_id": "det-2",
+            "step_type": "WaitForState",
+            "summary": "Verify requested app window is visible",
+            "target_app_hint": "terminal",
+            "target_window_hint": "KRIA (Workspace) - Kiro",
+            "target_control_hint": null,
+            "text_payload_summary": null,
+            "text_payload_hash": null,
+            "expected_precondition": "OpenApp step has been planned",
+            "expected_postcondition": "window visible or safe blocker reported",
+            "verification_strategy": "window_visible",
+            "risk_level": "low",
+            "requires_approval": false,
+            "allowed_to_execute": false,
+            "confidence": 0.76,
+            "reason": "analyze_plan"
+          }
+        ]
+      },
+      "plan_validation": {
+        "confidence": 0.62,
+        "validation_id": "validation-a30a3c09-ad86-4810-a240-25d785a04513",
+        "plan_id": "a30a3c09-ad86-4810-a240-25d785a04513",
+        "goal_contract_id": "8a2e0d9d65c59ea425edac8d32e089a73ef72dc20d5ec9e43cc84650bf4c75ed",
+        "context_id": "d98ba3a2-7594-4fdf-b97c-e0f11ed58f4d",
+        "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3",
+        "status": "valid",
+        "readiness_status": "valid_for_resolution",
+        "risk_level": "low",
+        "requires_user_approval": false,
+        "can_proceed_to_target_resolution": true,
+        "can_execute": false,
+        "blocker_count": 0,
+        "warning_count": 0,
+        "blocked_reasons": [],
+        "warnings": [],
+        "validation_errors": [],
+        "source_evidence": [
+          {
+            "source": "user_prompt",
+            "field": "action_type",
+            "summary": "matched action open_app",
+            "confidence": 0.9
+          },
+          {
+            "source": "user_prompt",
+            "field": "target_app_kind",
+            "summary": "terminal",
+            "confidence": 0.86
+          },
+          {
+            "source": "user_prompt",
+            "field": "target_app_hint",
+            "summary": "terminal",
+            "confidence": 0.86
+          }
+        ],
+        "step_results": [
+          {
+            "step_id": "det-1",
+            "step_type": "OpenApp",
+            "status": "valid_for_resolution",
+            "risk_level": "low",
+            "requires_approval": false,
+            "target_resolution_required": false,
+            "target_available": false,
+            "verification_present": true,
+            "precondition_status": "present",
+            "postcondition_status": "present",
+            "blocker": null,
+            "confidence": 0.76
+          },
+          {
+            "step_id": "det-2",
+            "step_type": "WaitForState",
+            "status": "valid_for_resolution",
+            "risk_level": "low",
+            "requires_approval": false,
+            "target_resolution_required": false,
+            "target_available": false,
+            "verification_present": true,
+            "precondition_status": "present",
+            "postcondition_status": "present",
+            "blocker": null,
+            "confidence": 0.76
+          }
+        ]
+      },
+      "target_resolution": {
+        "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3",
+        "resolution_id": "resolution-a30a3c09-ad86-4810-a240-25d785a04513-s0",
+        "plan_id": "a30a3c09-ad86-4810-a240-25d785a04513-s0",
+        "validation_id": "validation-a30a3c09-ad86-4810-a240-25d785a04513",
+        "goal_contract_id": "8a2e0d9d65c59ea425edac8d32e089a73ef72dc20d5ec9e43cc84650bf4c75ed",
+        "context_id": "d98ba3a2-7594-4fdf-b97c-e0f11ed58f4d",
+        "observation_id": "25f9ee45-62d8-4d11-991c-7abc737d6e40",
+        "status": "resolved",
+        "results": [],
+        "resolved_target": null,
+        "candidates": [],
+        "confidence": 0.76,
+        "ambiguity_count": 0,
+        "ambiguity_reasons": [],
+        "blocker_count": 0,
+        "blockers": [],
+        "can_proceed_to_safety_gate": true,
+        "can_execute": false
+      },
+      "target": null,
+      "safety_gate": {
+        "proposal": {
+          "proposal_schema_version": 1,
+          "proposal_id": "gui-proposal-acfba57927fbbbf7b8eafcf0228f92cc02b0443498be7123e14ce1b7c7e80cdf",
+          "request_id": "gui-hitl-eb608b2b06f65e6b480f9e602d26340d975640eff1fd77394895bd89dd66b585",
+          "goal_contract_id": "8a2e0d9d65c59ea425edac8d32e089a73ef72dc20d5ec9e43cc84650bf4c75ed",
+          "plan_id": "a30a3c09-ad86-4810-a240-25d785a04513-s0",
+          "validation_id": "validation-a30a3c09-ad86-4810-a240-25d785a04513",
+          "resolution_id": "resolution-a30a3c09-ad86-4810-a240-25d785a04513-s0",
+          "context_id": "d98ba3a2-7594-4fdf-b97c-e0f11ed58f4d",
+          "observation_id": "25f9ee45-62d8-4d11-991c-7abc737d6e40",
+          "step_id": "det-1",
+          "action_type": "OpenApp",
+          "target_hash": "6bfed6f9afe8867b828ff3a037d45c39762df96d3de82f046de12c83e4b4b0dc",
+          "target_control_id": null,
+          "target_label": null,
+          "target_role": null,
+          "target_bounds": null,
+          "text_payload_summary": null,
+          "text_payload_hash": null,
+          "expected_precondition": "requested app is not guaranteed visible",
+          "expected_postcondition": "requested app window is visible",
+          "risk_level": "low",
+          "risk_reasons": [
+            "risk level: low"
+          ],
+          "requires_user_approval": false,
+          "created_at_ms": 1781259834858,
+          "expires_at_ms": 1781259894858,
+          "proposal_hash": "2250ef1c9bcfbca2c54b7db0d6c8969f8db86e59dfe87280c42ff10e1bb15550",
+          "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3",
+          "can_execute": false
+        },
+        "safety_gate_id": "safety-gui-proposal-acfba57927fbbbf7b8eafcf0228f92cc02b0443498be7123e14ce1b7c7e80cdf",
+        "proposal_id": "gui-proposal-acfba57927fbbbf7b8eafcf0228f92cc02b0443498be7123e14ce1b7c7e80cdf",
+        "request_id": "gui-hitl-eb608b2b06f65e6b480f9e602d26340d975640eff1fd77394895bd89dd66b585",
+        "proposal_hash": "2250ef1c9bcfbca2c54b7db0d6c8969f8db86e59dfe87280c42ff10e1bb15550",
+        "target_hash": "6bfed6f9afe8867b828ff3a037d45c39762df96d3de82f046de12c83e4b4b0dc",
+        "status": "Allowed",
+        "safety_status": "safe_no_approval_required",
+        "risk_level": "low",
+        "reasons": [
+          "risk level: low"
+        ],
+        "risk_reasons": [
+          "risk level: low"
+        ],
+        "requires_user_approval": false,
+        "approval_reason": null,
+        "blockers": [],
+        "warnings": [],
+        "can_request_hitl": false,
+        "can_authorize_step7": true,
+        "can_execute": false,
+        "source_evidence": [
+          "gui_goal_contract",
+          "plan_validation",
+          "target_resolution"
+        ],
+        "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3",
+        "action_type": "OpenApp",
+        "target_label": null,
+        "target_role": null,
+        "expected_postcondition": "requested app window is visible",
+        "expires_at_ms": 1781259894858
+      },
+      "hitl_decision": null,
+      "action": {
+        "execution_id": "execution-1a2d486071b7ecb1e19c2be131879c6a912588f8e506b27412ded94e4cfc7c17",
+        "proposal_id": "gui-proposal-acfba57927fbbbf7b8eafcf0228f92cc02b0443498be7123e14ce1b7c7e80cdf",
+        "proposal_hash": "2250ef1c9bcfbca2c54b7db0d6c8969f8db86e59dfe87280c42ff10e1bb15550",
+        "action_type": "OpenApp",
+        "status": "failed",
+        "started_at_ms": 1781259834858,
+        "completed_at_ms": 1781259834858,
+        "backend_used": "open_application",
+        "precondition_check": {
+          "status": "valid",
+          "can_start_action": true,
+          "blockers": [],
+          "warnings": [],
+          "checked_at_ms": 1781259834858
+        },
+        "postcondition_check": "requested app window is visible",
+        "verification_result": "blocked",
+        "error_code": "backend_failed",
+        "safe_error_summary": "application 'OpenApp' is not found in the installed app registry",
+        "can_retry": false,
+        "recovery_hint": "Re-observe the screen and resolve a fresh target before any retry.",
+        "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3"
+      },
+      "execution": {
+        "execution_id": "execution-1a2d486071b7ecb1e19c2be131879c6a912588f8e506b27412ded94e4cfc7c17",
+        "proposal_id": "gui-proposal-acfba57927fbbbf7b8eafcf0228f92cc02b0443498be7123e14ce1b7c7e80cdf",
+        "proposal_hash": "2250ef1c9bcfbca2c54b7db0d6c8969f8db86e59dfe87280c42ff10e1bb15550",
+        "action_type": "OpenApp",
+        "status": "failed",
+        "started_at_ms": 1781259834858,
+        "completed_at_ms": 1781259834858,
+        "backend_used": "open_application",
+        "precondition_check": {
+          "status": "valid",
+          "can_start_action": true,
+          "blockers": [],
+          "warnings": [],
+          "checked_at_ms": 1781259834858
+        },
+        "postcondition_check": "requested app window is visible",
+        "verification_result": "blocked",
+        "error_code": "backend_failed",
+        "safe_error_summary": "application 'OpenApp' is not found in the installed app registry",
+        "can_retry": false,
+        "recovery_hint": "Re-observe the screen and resolve a fresh target before any retry.",
+        "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3"
+      },
+      "action_backend": {
+        "global_halt_engaged": false,
+        "halt_kind": "none",
+        "halt_reason": null,
+        "release_conditions": [],
+        "startup_elapsed_ms": null,
+        "can_observe": true,
+        "can_plan": true,
+        "automation_enabled": true,
+        "vision_sidecar": "running",
+        "uinput_daemon": "running",
+        "orchestrator_available": true,
+        "session_type": "wayland",
+        "xdotool_available": true,
+        "ydotool_available": false,
+        "uinput_available": true,
+        "selected_backend": "uinput_accessibility",
+        "backend_selection_reason": "Wayland session selected uinput because the daemon and socket are healthy.",
+        "backend_probe_status": "wayland_uinput_ready",
+        "backend_probe_errors": [
+          "xdotool detected but not usable for Wayland GUI actions"
+        ],
+        "input_backend_kind": "uinput",
+        "focus_supported": true,
+        "typing_supported": true,
+        "click_supported": true,
+        "verification_supported": true,
+        "xdotool_usable_for_actions": false,
+        "ydotool_usable_for_actions": false,
+        "uinput_socket_path": "/run/user/1000/kria-uinput.sock",
+        "uinput_socket_accessible": true,
+        "can_execute_actions": true,
+        "blockers": [],
+        "capabilities": {
+          "observe": true,
+          "focus_field": true,
+          "fill_field": true,
+          "click_control": true,
+          "post_action_observe": true,
+          "verify": true,
+          "recovery_focus": true,
+          "recovery_modal": true
+        }
+      },
+      "execution_blocker": null,
+      "verification": {
+        "verification_id": "verification-e2c9f831a203158a0a41ff9c9d3d402a72b15cae630e9be0f8b5f4ae022d41b8",
+        "execution_id": "execution-1a2d486071b7ecb1e19c2be131879c6a912588f8e506b27412ded94e4cfc7c17",
+        "proposal_id": "gui-proposal-acfba57927fbbbf7b8eafcf0228f92cc02b0443498be7123e14ce1b7c7e80cdf",
+        "status": "blocked",
+        "verification_strategy": "active_window_match",
+        "evidence": [
+          "backend action did not complete; no state to verify"
+        ],
+        "pre_state_summary": "app=Kiro; controls=8; dialogs=0; focus_role=window; screen=665b91d8",
+        "post_state_summary": "app=Kiro; controls=12; dialogs=0; focus_role=window; screen=665b91d8",
+        "matched_expected_state": false,
+        "target_still_present": false,
+        "target_identity_matches": true,
+        "confidence": 0.2,
+        "safe_error_summary": "Backend action failed before verification.",
+        "recovery_hint": "Re-observe the screen and resolve a fresh target before any retry.",
+        "can_retry": false,
+        "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3"
+      },
+      "recovery_assessment": {
+        "recovery_id": "recovery-f536f77dafdfdb0974906273a158ce39d2d2404f840bf881fdd3d4cb49c26d5c",
+        "execution_id": "execution-1a2d486071b7ecb1e19c2be131879c6a912588f8e506b27412ded94e4cfc7c17",
+        "verification_id": "verification-e2c9f831a203158a0a41ff9c9d3d402a72b15cae630e9be0f8b5f4ae022d41b8",
+        "proposal_id": "gui-proposal-acfba57927fbbbf7b8eafcf0228f92cc02b0443498be7123e14ce1b7c7e80cdf",
+        "proposal_hash": "2250ef1c9bcfbca2c54b7db0d6c8969f8db86e59dfe87280c42ff10e1bb15550",
+        "target_hash": "6bfed6f9afe8867b828ff3a037d45c39762df96d3de82f046de12c83e4b4b0dc",
+        "action_type": "OpenApp",
+        "failure_kind": "backend_failed",
+        "status": "blocked",
+        "proposed_recovery_step": "Stop",
+        "recovery_action_kind": "Stop",
+        "requires_user_approval": false,
+        "can_recover": false,
+        "can_execute_recovery": false,
+        "retry_count": 0,
+        "max_retry_count": 1,
+        "blockers": [
+          "deterministic action backend failed"
+        ],
+        "warnings": [],
+        "safe_explanation": "The action backend failed, so KRIA stops instead of blind-retrying.",
+        "recovery_hint": "Re-observe and confirm a safe target before any manual retry; KRIA will not blind-retry.",
+        "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3"
+      },
+      "recovery": null,
+      "workflow_run": {
+        "workflow_run_id": "workflow-run-93e231776bd38f852ecc8042c6f8e776a15c895531b546d2fe36f82ceab48804",
+        "session_id": "live-eval-p04-1781259816",
+        "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+        "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+        "goal_contract_id": "8a2e0d9d65c59ea425edac8d32e089a73ef72dc20d5ec9e43cc84650bf4c75ed",
+        "plan_id": "a30a3c09-ad86-4810-a240-25d785a04513",
+        "initial_context_id": "d98ba3a2-7594-4fdf-b97c-e0f11ed58f4d",
+        "current_context_id": "d98ba3a2-7594-4fdf-b97c-e0f11ed58f4d",
+        "status": "blocked",
+        "current_step_index": 0,
+        "step_count": 2,
+        "step_states": [
+          {
+            "step_id": "det-1",
+            "step_index": 0,
+            "step_type": "OpenApp",
+            "summary": "Open or switch to the requested app",
+            "status": "blocked",
+            "target_resolution_id": "resolution-a30a3c09-ad86-4810-a240-25d785a04513-s0",
+            "proposal_id": "gui-proposal-acfba57927fbbbf7b8eafcf0228f92cc02b0443498be7123e14ce1b7c7e80cdf",
+            "proposal_hash": "2250ef1c9bcfbca2c54b7db0d6c8969f8db86e59dfe87280c42ff10e1bb15550",
+            "hitl_decision_id": null,
+            "execution_id": "execution-1a2d486071b7ecb1e19c2be131879c6a912588f8e506b27412ded94e4cfc7c17",
+            "verification_id": "verification-e2c9f831a203158a0a41ff9c9d3d402a72b15cae630e9be0f8b5f4ae022d41b8",
+            "recovery_id": "recovery-f536f77dafdfdb0974906273a158ce39d2d2404f840bf881fdd3d4cb49c26d5c",
+            "started_at_ms": 1781259834858,
+            "completed_at_ms": 1781259836946,
+            "blockers": [
+              "deterministic action backend failed"
+            ],
+            "warnings": [],
+            "can_continue": false,
+            "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3"
+          },
+          {
+            "step_id": "det-2",
+            "step_index": 1,
+            "step_type": "WaitForState",
+            "summary": "Verify requested app window is visible",
+            "status": "pending",
+            "target_resolution_id": null,
+            "proposal_id": null,
+            "proposal_hash": null,
+            "hitl_decision_id": null,
+            "execution_id": null,
+            "verification_id": null,
+            "recovery_id": null,
+            "started_at_ms": 0,
+            "completed_at_ms": 0,
+            "blockers": [],
+            "warnings": [],
+            "can_continue": false,
+            "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3"
+          }
+        ],
+        "completed_step_receipts": [],
+        "blocked_reason": "deterministic action backend failed",
+        "recovery_summary": null,
+        "risk_level": "low",
+        "requires_user_approval": false,
+        "execution_mode": "execute_live",
+        "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3"
+      },
+      "workflow_checkpoint": {
+        "checkpoint_schema_version": 1,
+        "checkpoint_id": "checkpoint-435a21b82fd0cf815a3b4ab7b5732ee18a4969ecb8642d90a22a420660127a42",
+        "workflow_run_id": "workflow-run-93e231776bd38f852ecc8042c6f8e776a15c895531b546d2fe36f82ceab48804",
+        "session_id": "live-eval-p04-1781259816",
+        "workflow_id": "66ed8ac8-cef7-419e-9abe-7fbd0208d117",
+        "turn_id": "be315c8f-f22d-4818-b773-02890f07ec3b",
+        "goal_contract_id": "8a2e0d9d65c59ea425edac8d32e089a73ef72dc20d5ec9e43cc84650bf4c75ed",
+        "plan_id": "a30a3c09-ad86-4810-a240-25d785a04513",
+        "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3",
+        "current_step_index": 0,
+        "step_count": 2,
+        "step_states": [
+          {
+            "step_id": "det-1",
+            "step_index": 0,
+            "step_type": "OpenApp",
+            "summary": "Open or switch to the requested app",
+            "status": "blocked",
+            "target_resolution_id": "resolution-a30a3c09-ad86-4810-a240-25d785a04513-s0",
+            "proposal_id": "gui-proposal-acfba57927fbbbf7b8eafcf0228f92cc02b0443498be7123e14ce1b7c7e80cdf",
+            "proposal_hash": "2250ef1c9bcfbca2c54b7db0d6c8969f8db86e59dfe87280c42ff10e1bb15550",
+            "hitl_decision_id": null,
+            "execution_id": "execution-1a2d486071b7ecb1e19c2be131879c6a912588f8e506b27412ded94e4cfc7c17",
+            "verification_id": "verification-e2c9f831a203158a0a41ff9c9d3d402a72b15cae630e9be0f8b5f4ae022d41b8",
+            "recovery_id": "recovery-f536f77dafdfdb0974906273a158ce39d2d2404f840bf881fdd3d4cb49c26d5c",
+            "started_at_ms": 1781259834858,
+            "completed_at_ms": 1781259836946,
+            "blockers": [
+              "deterministic action backend failed"
+            ],
+            "warnings": [],
+            "can_continue": false,
+            "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3"
+          },
+          {
+            "step_id": "det-2",
+            "step_index": 1,
+            "step_type": "WaitForState",
+            "summary": "Verify requested app window is visible",
+            "status": "pending",
+            "target_resolution_id": null,
+            "proposal_id": null,
+            "proposal_hash": null,
+            "hitl_decision_id": null,
+            "execution_id": null,
+            "verification_id": null,
+            "recovery_id": null,
+            "started_at_ms": 0,
+            "completed_at_ms": 0,
+            "blockers": [],
+            "warnings": [],
+            "can_continue": false,
+            "prompt_hash": "b5098e437d67f78823853265344d5a691b79aa5dde51caf32fb290be0051ffd3"
+          }
+        ],
+        "completed_step_receipts": [],
+        "pending_step_id": "det-1",
+        "pending_proposal_id": "gui-proposal-acfba57927fbbbf7b8eafcf0228f92cc02b0443498be7123e14ce1b7c7e80cdf",
+        "pending_proposal_hash": "2250ef1c9bcfbca2c54b7db0d6c8969f8db86e59dfe87280c42ff10e1bb15550",
+        "pending_target_hash": null,
+        "pending_stable_target_identity_hash": null,
+        "pending_hitl_request_id": "gui-hitl-eb608b2b06f65e6b480f9e602d26340d975640eff1fd77394895bd89dd66b585",
+        "approved_decision_id": null,
+        "approved_decision_hash": null,
+        "last_observation_id": "25f9ee45-62d8-4d11-991c-7abc737d6e40",
+        "last_context_id": "d98ba3a2-7594-4fdf-b97c-e0f11ed58f4d",
+        "last_screen_hash_prefix": "665b91d809e59049",
+        "last_active_window_hash": null,
+        "created_at_ms": 1781259836946,
+        "expires_at_ms": 1781260436946,
+        "risk_level": "low",
+        "requires_user_approval": false,
+        "checkpoint_hash": "40e9d65e0d451434cea1725a29acf968ea0fb8874e5f6404686b48a14ae770c9",
+        "source_evidence": [
+          "gui_workflow_run",
+          "completed_step_receipts",
+          "last_observation"
+        ],
+        "can_resume": false,
+        "can_execute": false
+      },
+      "blocker": {
+        "kind": "recovery",
+        "reason": "deterministic action backend failed",
+        "candidate_count": null,
+        "target_name": null,
+        "options": [],
+        "clarification_question": null
+      }
+    }
+  }
+}

@@ -59,6 +59,7 @@ fn main() {
             commands::sessions::list_sessions,
             commands::sessions::switch_session,
             commands::sessions::delete_session,
+            commands::sessions::clear_all_chat_sessions,
             commands::sessions::rename_session,
             commands::sessions::auto_rename_session,
             commands::sessions::search_sessions,

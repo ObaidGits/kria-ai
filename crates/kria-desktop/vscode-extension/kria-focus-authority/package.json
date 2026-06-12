@@ -1,0 +1,24 @@
+{
+  "name": "kria-focus-authority",
+  "displayName": "KRIA Focus Authority",
+  "description": "Metadata-only focus authority bridge for KRIA GUI Cognition.",
+  "version": "0.1.0",
+  "publisher": "kria",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kria-ai/kria.git"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./extension.js",
+  "files": [
+    "extension.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "contributes": {}
+}

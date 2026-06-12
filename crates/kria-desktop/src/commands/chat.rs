@@ -90,7 +90,7 @@ pub(super) struct DesktopChatCommandCapture {
     pub events: Vec<DesktopChatCommandEvent>,
 }
 
-fn desktop_chat_event(
+pub(super) fn desktop_chat_event(
     name: impl Into<String>,
     payload: serde_json::Value,
 ) -> DesktopChatCommandEvent {
@@ -100,7 +100,7 @@ fn desktop_chat_event(
     }
 }
 
-fn desktop_chat_stage_event(
+pub(super) fn desktop_chat_stage_event(
     step: &str,
     message: &str,
     detail: Option<serde_json::Value>,
@@ -302,6 +302,66 @@ async fn send_message_with_profile(
     let ev_approval_required = format!("{event_scope_prefix}:approval_required");
     let ev_approval_result = format!("{event_scope_prefix}:approval_result");
     let ev_tool_choice_required = format!("{event_scope_prefix}:tool_choice_required");
+
+    if execution_profile.is_gui_cognition_override() {
+        // Interactive GUI Cognition: the user selected the tool and expects the
+        // action to actually run. Opt into live execution + the multi-step
+        // workflow runtime. The Step 6 safety gate + HITL still gate every risky
+        // action (require_approval), so this does not bypass any safety contract.
+        // Programmatic/test callers (local API with explicit gui_cognition_test)
+        // keep the conservative safety_only default.
+        //
+        // The turn is run in a spawned task (like the normal agent path) so the
+        // command returns immediately and does NOT block the IPC for the whole
+        // execute_live turn (which can take many seconds). Events are emitted as
+        // soon as the turn completes; the `{prefix}:done` event clears the UI
+        // thinking state so the next prompt is accepted.
+        use tauri::Manager as _;
+        let app_for_task = app.clone();
+        let prefix = event_scope_prefix.to_string();
+        tauri::async_runtime::spawn(async move {
+            let cell = app_for_task.state::<AppStateCell>();
+            let Some(task_state) = cell.get() else {
+                let _ = app_for_task.emit(
+                    &format!("{prefix}:token"),
+                    serde_json::json!({ "text": "GUI Cognition is still initializing — please try again in a moment." }),
+                );
+                let _ = app_for_task.emit(&format!("{prefix}:done"), serde_json::json!({}));
+                return;
+            };
+            let result = super::gui_cognition::desktop_gui_cognition_command_capture(
+                message,
+                task_state,
+                None,
+                &prefix,
+                Some(super::gui_cognition::GuiCognitionCommandOptions {
+                    execution_mode:
+                        kria_core::agent::gui_cognition::executor::GuiExecutionMode::ExecuteLive,
+                    workflow_enabled: true,
+                    ..Default::default()
+                }),
+            )
+            .await;
+            match result {
+                Ok(capture) => {
+                    for event in &capture.events {
+                        let _ = app_for_task.emit(&event.name, event.payload.clone());
+                    }
+                }
+                Err(error) => {
+                    let _ = app_for_task.emit(
+                        &format!("{prefix}:token"),
+                        serde_json::json!({ "text": format!("GUI Cognition error: {error}") }),
+                    );
+                    let _ = app_for_task.emit(&format!("{prefix}:done"), serde_json::json!({}));
+                }
+            }
+        });
+        return Ok(serde_json::json!({
+            "status": "processing",
+            "mode": "gui_cognition",
+        }));
+    }
 
     if let Some(capture) = desktop_n8n_pre_fallback_command_capture(
         message.clone(),
@@ -1506,7 +1566,7 @@ pub async fn send_manual_tool_message(
             .collect::<Vec<_>>()
     };
 
-    if matched_tools.is_empty() {
+    if matched_tools.is_empty() && !execution_profile.is_gui_cognition_override() {
         return Err(format!(
             "Manual tool mode '{}' has no available tools for this runtime",
             selected_tool

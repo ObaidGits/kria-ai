@@ -70,6 +70,7 @@ pub mod execution_interpreter;
 pub mod execution_mode_reasoner;
 pub mod executive;
 pub mod failure_analyzer;
+pub mod gui_cognition;
 pub mod gui_wiring;
 pub mod htn_executor;
 pub mod htn_integration;

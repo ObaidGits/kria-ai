@@ -41,6 +41,7 @@ dirs = { workspace = true }
 axum = { version = "0.8", features = ["json", "ws"] }
 async-stream = "0.3"
 tower-http = { version = "0.6", features = ["cors"] }
+image = { workspace = true, features = ["png", "jpeg"] }
 
 [features]
 nvidia = ["kria-core/nvidia"]

@@ -1,0 +1,214 @@
+{
+  "schema_version": "kria.testing.scenarios.v1",
+  "scenarios": [
+    {
+      "id": "step4.validate.browser_search_valid",
+      "title": "Step 4 validates browser search plan for target resolution only",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step4_validator", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button",
+          "action_backend_fixture": "global_halt"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Open Chrome and search for weather",
+        "expected_status_any": ["ok", "blocked"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["ObservationCompleted", "ContextBuilt", "GoalContractCreated", "PlanCreated", "PlanValidationCompleted", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "desktop_command.path", "equals": "send_manual_tool_message" },
+          { "path": "gui_cognition.plan_validation.readiness_status", "equals": "valid_for_resolution" },
+          { "path": "gui_cognition.plan_validation.can_proceed_to_target_resolution", "equals": true },
+          { "path": "gui_cognition.plan_validation.can_execute", "equals": false },
+          { "path": "gui_cognition.plan_validation.step_results.0.status", "exists": true }
+        ]
+      }
+    },
+    {
+      "id": "step4.validate.open_app_valid",
+      "title": "Step 4 allows OpenApp to proceed to target resolution without visible app",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step4_validator", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button",
+          "action_backend_fixture": "global_halt"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Open Chrome",
+        "expected_status_any": ["ok", "blocked"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["GoalContractCreated", "PlanCreated", "PlanValidationCompleted", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.plan.typed_steps.0.step_type", "equals": "OpenApp" },
+          { "path": "gui_cognition.plan_validation.readiness_status", "equals": "valid_for_resolution" },
+          { "path": "gui_cognition.plan_validation.can_execute", "equals": false }
+        ]
+      }
+    },
+    {
+      "id": "step4.validate.click_delete_requires_approval",
+      "title": "Step 4 requires approval for delete-and-confirm prompt",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step4_validator", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button",
+          "action_backend_fixture": "global_halt"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Click delete and confirm",
+        "expected_status_any": ["needs_approval", "blocked"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["GoalContractCreated", "PlanCreated", "PlanValidationCompleted", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.goal_contract.requires_user_approval", "equals": true },
+          { "path": "gui_cognition.plan_validation.readiness_status", "equals": "approval_required" },
+          { "path": "gui_cognition.plan_validation.requires_user_approval", "equals": true },
+          { "path": "gui_cognition.plan_validation.can_execute", "equals": false }
+        ]
+      }
+    },
+    {
+      "id": "step4.validate.missing_target_clarifies",
+      "title": "Step 4 clarifies instead of guessing missing click target",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step4_validator", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button",
+          "action_backend_fixture": "global_halt"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Click the button",
+        "expected_status_any": ["blocked", "needs_clarification"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["GoalContractCreated", "PlanCreated", "PlanValidationCompleted", "TargetResolutionCompleted", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.plan_validation.readiness_status", "equals": "needs_clarification" },
+          { "path": "gui_cognition.plan_validation.can_execute", "equals": false },
+          { "path": "gui_cognition.target_resolution.status", "equals": "skipped" },
+          { "path": "gui_cognition.target_resolution.can_execute", "equals": false }
+        ]
+      }
+    },
+    {
+      "id": "step4.validate.raw_coordinates_rejected",
+      "title": "Step 4 rejects raw coordinate style GUI requests",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step4_validator", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "llm_planner_fixture": "raw_coordinates",
+          "perception_fixture": "text_field_and_button",
+          "action_backend_fixture": "global_halt"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Click at x=100 y=200",
+        "expected_status_any": ["blocked", "needs_clarification"],
+        "expected_reply_not_contains_any": ["x=100", "y=200", "screenshot_path"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["PlanValidationCompleted", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.plan_validation.can_execute", "equals": false },
+          { "path": "gui_cognition.plan_validation.readiness_status", "exists": true }
+        ]
+      }
+    },
+    {
+      "id": "step4.validate.no_raw_secret_leakage",
+      "title": "Step 4 validation response does not leak secret-like prompt text",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step4_validator", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button",
+          "action_backend_fixture": "global_halt"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Search for api_key=abc123 in Chrome",
+        "expected_status_any": ["ok", "blocked"],
+        "expected_reply_not_contains_any": ["abc123", "screenshot_path", "clipboard"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["GoalContractCreated", "PlanCreated", "PlanValidationCompleted", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.plan_validation.can_execute", "equals": false },
+          { "path": "gui_cognition.goal_contract.query_summary", "exists": true }
+        ]
+      }
+    }
+  ]
+}

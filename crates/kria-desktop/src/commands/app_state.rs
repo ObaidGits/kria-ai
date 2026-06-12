@@ -148,10 +148,16 @@ pub struct AppState {
     pub n8n_governance_log: Arc<RwLock<Vec<kria_core::n8n::N8nGovernanceDecision>>>,
     /// n8n HITL responses that external workflows can poll after KRIA user approval.
     pub n8n_hitl_responses: Arc<RwLock<HashMap<String, serde_json::Value>>>,
+    /// Pending GUI Cognition HITL proposals keyed by approval request id/session.
+    pub gui_cognition_hitl_proposals:
+        Arc<RwLock<kria_core::agent::gui_cognition::safety_hitl::GuiHitlProposalStore>>,
     /// RFC 008 Service Orchestrator — manages vision sidecar + uinput daemon lifecycle.
     /// `None` if orchestrator failed to start (e.g. missing binaries); automation will
     /// be globally halted in that case.
     pub gui_orchestrator: Option<Arc<kria_core::orchestrator::ServiceOrchestrator>>,
+    /// Short-lived GUI Cognition observation cache for repeated observe/plan prompts.
+    pub gui_cognition_observation_cache:
+        Arc<tokio::sync::Mutex<Option<super::gui_cognition::DesktopGuiObservationCacheEntry>>>,
     /// Batch 1: PSDG handle — persistent semantic desktop cognition graph.
     ///
     /// Provides access to `WorldModelStore` (SQLite-backed Bayesian (s,p,o) triple store)

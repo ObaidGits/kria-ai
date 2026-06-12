@@ -271,6 +271,593 @@ export async function installTauriMockBridge(page: Page, options: TauriMockOptio
         }, 0);
       };
 
+      const emitGuiCognitionEnvelope = (
+        sessionId: string,
+        turnId: string,
+        workflowId: string,
+        sequence: number,
+        event: any,
+      ) => {
+        emitEvent("gui_cognition:event", {
+          version: 1,
+          session_id: sessionId,
+          turn_id: turnId,
+          workflow_id: workflowId,
+          sequence,
+          timestamp_ms: Date.now() + sequence,
+          event,
+        });
+      };
+
+      const emitGuiCognitionSequence = (message: string) => {
+        const lower = message.toLowerCase();
+        const sessionId = "mock-gui-session";
+        const turnId = `mock-gui-turn-${Date.now()}`;
+        const workflowId = `mock-gui-workflow-${Date.now()}`;
+        let seq = 1;
+        const emitGui = (event: any) => emitGuiCognitionEnvelope(sessionId, turnId, workflowId, seq++, event);
+
+        emitGui({ type: "TurnStarted", mode_id: "gui_cognition" });
+        emitGui({
+          type: "RouteConfirmed",
+          path: "send_manual_tool_message",
+          llm_tool_loop: false,
+        });
+        const observationSummary = (overrides: Record<string, unknown> = {}) => ({
+          type: "ObservationCompleted",
+          observation_id: "mock-observation",
+          active_window: "Mock Browser",
+          active_window_source: "get_active_window",
+          active_window_confidence: 0.95,
+          active_window_reliability: "reliable",
+          active_window_blocker: null,
+          active_window_fallback_chain: [
+            { source: "get_active_window", status: "matched", reliability: "reliable", reason: null },
+          ],
+          active_window_failure_chain: [],
+          visible_control_count: 6,
+          visible_accessible_control_count: 6,
+          disabled_control_count: 0,
+          hidden_control_count: 0,
+          trusted_control_count: 6,
+          partial_control_count: 0,
+          not_executable_control_count: 0,
+          text_field_count: 1,
+          button_count: 3,
+          dialog_count: 0,
+          other_control_count: 2,
+          screenshot_available: true,
+          screenshot_status: "available",
+          screenshot_capture_ms: 96,
+          screenshot_duration_ms: 96,
+          ocr_available: true,
+          ocr_block_count: 2,
+          ocr_trust: "untrusted",
+          ocr_wait_for_screenshot_ms: 96,
+          ocr_engine_selected: "tesseract_cli",
+          ocr_engine_status: "completed",
+          ocr_image_status: "downscaled_2560x1440_to_1600x900",
+          ocr_total_ms: 310,
+          ocr_injection_count: lower.includes("ocr injection") ? 1 : 0,
+          ocr_blocker: lower.includes("ocr unavailable") ? "ocr unavailable" : null,
+          accessibility_available: true,
+          accessibility_source_status: lower.includes("atspi degraded")
+            ? "degraded"
+            : lower.includes("atspi unavailable")
+              ? "unavailable"
+              : "healthy",
+          accessibility_node_count: 42,
+          accessibility_control_count: 6,
+          atspi_snapshot_total_ms: lower.includes("atspi degraded") ? 760 : 118,
+          atspi_skipped_app_count: lower.includes("atspi degraded") ? 1 : 0,
+          atspi_omitted_node_count: lower.includes("atspi degraded") ? 24 : 0,
+          accessibility_remediation: lower.includes("atspi unavailable")
+            ? ["Enable desktop accessibility", "Relaunch apps with accessibility enabled"]
+            : [],
+          screen_hash_prefix: "abcdef0123456789",
+          monitor_count: 1,
+          dpi_available: true,
+          cursor_focus_known: true,
+          focused_window: "Mock Browser",
+          source_blockers: {},
+          control_samples: [
+            {
+              id: "mock-text-search",
+              role: "text",
+              label: "Search KRIA",
+              bounds: { x: 10, y: 20, width: 240, height: 32 },
+              enabled: true,
+              visible: true,
+              focused: false,
+              source: "accessibility",
+              confidence: 0.94,
+              quality: "trusted",
+            },
+            {
+              id: "mock-submit-test",
+              role: "push button",
+              label: "Submit Test",
+              bounds: { x: 260, y: 20, width: 112, height: 32 },
+              enabled: true,
+              visible: true,
+              focused: false,
+              source: "accessibility",
+              confidence: 0.9,
+              quality: "trusted",
+            },
+            {
+              id: "mock-enable-option",
+              role: "check box",
+              label: "Enable option",
+              bounds: { x: 10, y: 64, width: 160, height: 28 },
+              enabled: true,
+              visible: true,
+              focused: false,
+              source: "accessibility",
+              confidence: 0.88,
+              quality: "trusted",
+            },
+          ],
+          observation_total_ms: 420,
+          slowest_probe: "run_ocr",
+          slowest_probe_ms: 310,
+          probe_timeout_count: 0,
+          probe_timings: [
+            {
+              probe_name: "capture_screenshot",
+              duration_ms: 96,
+              status: "ok",
+              source: "screenshot",
+              cache_hit: false,
+            },
+            {
+              probe_name: "run_ocr",
+              duration_ms: 310,
+              status: "ok",
+              source: "ocr",
+              cache_hit: false,
+            },
+          ],
+          cache_hit: false,
+          cache_age_ms: null,
+          cache_policy: "observe_plan_short",
+          freshness: "fresh",
+          ...overrides,
+        });
+        const contextSummary = (overrides: Record<string, unknown> = {}) => ({
+          type: "ContextBuilt",
+          context_id: "mock-context",
+          observation_id: "mock-observation",
+          previous_context_id: lower.includes("context stale") ? "mock-context-prev" : null,
+          active_window: "Mock Browser",
+          screen_hash_prefix: "abcdef0123456789",
+          source_confidence: {
+            active_window: 0.95,
+            accessibility: 0.9,
+            screenshot: 0.85,
+            ocr: 0.45,
+            monitor: 0.82,
+            focus: 0.75,
+          },
+          source_trust: {
+            accessibility: "trusted_executable",
+            ocr: "untrusted_text",
+            visual: "supporting_visual",
+          },
+          trusted_control_count: 6,
+          executable_control_count: lower.includes("disabled hidden") ? 4 : 6,
+          disabled_or_hidden_count: lower.includes("disabled hidden") ? 2 : 0,
+          ocr_untrusted: true,
+          ocr_injection_count: lower.includes("ocr injection") ? 1 : 0,
+          redaction_count: lower.includes("ocr injection") ? 1 : 0,
+          freshness: lower.includes("context stale") ? "stale" : "fresh",
+          status: lower.includes("context stale") ? "stale" : "ready",
+          delta: lower.includes("context stale")
+            ? {
+                active_window_changed: true,
+                screen_hash_changed: true,
+                changed_summary: ["active_window_changed", "screen_hash_changed"],
+              }
+            : { changed_summary: [] },
+          source_blockers: lower.includes("ocr unavailable") ? ["ocr: ocr unavailable"] : [],
+          warnings: lower.includes("ocr injection")
+            ? ["OCR injection text was detected and treated as untrusted evidence."]
+            : [],
+          ...overrides,
+        });
+        const goalContractSummary = (overrides: Record<string, unknown> = {}) => {
+          const risky = lower.includes("risky") || lower.includes("submit");
+          const typing = lower.includes("type");
+          const clicking = lower.includes("click") || lower.includes("submit");
+          const ambiguous = lower.includes("missing") || lower.includes("ambiguous");
+          return {
+            type: "GoalContractCreated",
+            contract_id: "mock-goal-contract",
+            observation_id: "mock-observation",
+            context_id: "mock-context",
+            goal_summary: typing
+              ? "Type requested text"
+              : clicking
+                ? "Click requested control"
+                : "mock GUI task",
+            intent_kind: typing ? "type_text" : clicking ? "click_control" : "observe",
+            action_type: typing ? "type_text" : clicking ? "click_control" : "observe",
+            target_app_hint: "Browser",
+            target_window_hint: "Mock Browser",
+            target_control_hint: clicking ? "Search" : typing ? "visible text input" : null,
+            desired_final_state: typing
+              ? "requested text is present in the resolved field"
+              : clicking
+                ? "button/control clicked and screen change verified"
+                : "desktop state observed and summarized",
+            risk_level: risky ? "high" : typing ? "medium" : "low",
+            requires_user_approval: risky,
+            ambiguity_count: ambiguous ? 1 : 0,
+            ambiguities: ambiguous
+              ? [
+                  {
+                    kind: "missing_target_control",
+                    field: "target_control_hint",
+                    message: "The requested target is missing or ambiguous.",
+                  },
+                ]
+              : [],
+            extraction_confidence: ambiguous ? 0.62 : 0.9,
+            extractor_mode: "deterministic",
+            ...overrides,
+          };
+        };
+        const emitPlannerEvents = (overrides: Record<string, unknown> = {}) => {
+          const invalidLlm = lower.includes("invalid llm") || lower.includes("llm fallback");
+          emitGui({
+            type: "LlmPlanningStarted",
+            planner_mode: "llm_assisted",
+            context_id: "mock-context",
+            observation_id: "mock-observation",
+          });
+          if (invalidLlm) {
+            emitGui({
+              type: "LlmPlanningFailed",
+              status: "rejected",
+              reason: "LLM planner output was rejected; deterministic fallback used.",
+            });
+            emitGui({
+              type: "PlanCreated",
+              summary: "deterministic fallback GUI plan",
+              plan_id: "mock-plan",
+              planner_mode: "deterministic_fallback",
+              step_count: 2,
+              risk_level: lower.includes("risky") || lower.includes("submit") ? "high" : "low",
+              requires_user_approval: lower.includes("risky") || lower.includes("submit"),
+              confidence: 0.62,
+              steps: ["Fallback observe current GUI", "Resolve target deterministically"],
+              ...overrides,
+            });
+            emitGui({
+              type: "PlanValidationCompleted",
+              plan_id: "mock-plan",
+              status: "valid",
+              blocked_reasons: [],
+              warnings: ["Rejected LLM plan was not executed."],
+            });
+            return;
+          }
+
+          emitGui({
+            type: "LlmPlanningCompleted",
+            status: "completed",
+            model: "fixture::valid_plan",
+            confidence: 0.86,
+            step_count: 2,
+            risk_level: lower.includes("risky") || lower.includes("submit") ? "high" : "low",
+          });
+          emitGui({
+            type: "PlanCreated",
+            summary: "LLM assisted GUI plan",
+            plan_id: "mock-plan",
+            planner_mode: "llm_assisted",
+            step_count: 2,
+            risk_level: lower.includes("risky") || lower.includes("submit") ? "high" : "low",
+            requires_user_approval: lower.includes("risky") || lower.includes("submit"),
+            confidence: 0.86,
+            steps: ["Observe current GUI", "Resolve target safely"],
+            ...overrides,
+          });
+          emitGui({
+            type: "PlanValidationCompleted",
+            plan_id: "mock-plan",
+            status: "valid",
+            blocked_reasons: [],
+            warnings: lower.includes("ocr injection")
+              ? ["Untrusted OCR injection evidence was excluded from planner instructions."]
+              : [],
+          });
+        };
+        const actionBackendStatus = (overrides: Record<string, unknown> = {}) => ({
+          type: "ActionBackendStatus",
+          global_halt_engaged: false,
+          halt_kind: "none",
+          halt_reason: null,
+          release_conditions: [],
+          startup_elapsed_ms: null,
+          can_observe: true,
+          can_plan: true,
+          automation_enabled: true,
+          vision_sidecar: "running",
+          uinput_daemon: "running",
+          orchestrator_available: true,
+          session_type: "wayland",
+          xdotool_available: true,
+          ydotool_available: false,
+          uinput_available: true,
+          selected_backend: "uinput_accessibility",
+          backend_selection_reason: "Wayland session selected uinput because the daemon and socket are healthy.",
+          backend_probe_status: "wayland_uinput_ready",
+          backend_probe_errors: ["xdotool detected but not usable for Wayland GUI actions"],
+          input_backend_kind: "uinput",
+          focus_supported: true,
+          typing_supported: true,
+          click_supported: true,
+          verification_supported: true,
+          xdotool_usable_for_actions: false,
+          ydotool_usable_for_actions: false,
+          uinput_socket_path: "/run/user/1000/kria-uinput.sock",
+          uinput_socket_accessible: true,
+          can_execute_actions: true,
+          blockers: [],
+          capabilities: {
+            observe: true,
+            focus_field: true,
+            fill_field: true,
+            click_control: true,
+            post_action_observe: true,
+            verify: true,
+            recovery_focus: true,
+            recovery_modal: true,
+          },
+          ...overrides,
+        });
+
+        emitGui({
+          type: "ObservationStarted",
+          sources: [
+            "get_active_window",
+            "get_desktop_state",
+            "get_accessibility_capabilities",
+            "accessibility_tree_summary",
+            "capture_screenshot",
+            "ocr",
+            "monitor_layout",
+            "cursor_focus",
+            "find_ui_elements",
+          ],
+        });
+
+        if (lower.includes("slow gui routing")) {
+          emitEvent("agent:token", { text: "GUI Cognition routing is running." });
+          setTimeout(() => {
+            emitGui(observationSummary());
+            emitGui(contextSummary());
+            emitGui({ type: "TurnCompleted", status: "ok" });
+            emitEvent("agent:done", {});
+          }, 5000);
+          return;
+        }
+
+        if (lower.includes("observation blocked")) {
+          emitGui({
+            type: "ObservationBlocked",
+            reason: "no_useful_perception_source",
+            blockers: {
+              screenshot: "screen capture denied",
+              accessibility: "accessibility unavailable",
+            },
+          });
+          emitGui({ type: "TurnCompleted", status: "blocked" });
+          emitEvent("agent:token", { text: "Observation was blocked by unavailable perception sources." });
+          emitEvent("agent:done", {});
+          return;
+        }
+
+        emitGui(observationSummary());
+        emitGui(contextSummary());
+        if (lower.includes("startup warming")) {
+          emitGui(actionBackendStatus({
+            global_halt_engaged: true,
+            halt_kind: "startup_warming",
+            halt_reason: "service warming up (vision=starting, uinput=starting)",
+            release_conditions: ["Wait for vision sidecar and uinput daemon to report running."],
+            startup_elapsed_ms: 1200,
+            vision_sidecar: "starting",
+            uinput_daemon: "starting",
+            uinput_available: false,
+            selected_backend: "blocked_global_halt",
+            backend_selection_reason: "service warming up (vision=starting, uinput=starting)",
+            backend_probe_status: "global_halt_blocked",
+            backend_probe_errors: ["xdotool detected but not usable for Wayland GUI actions"],
+            input_backend_kind: "none",
+            xdotool_usable_for_actions: false,
+            ydotool_usable_for_actions: false,
+            uinput_socket_accessible: false,
+            can_execute_actions: false,
+            blockers: ["service warming up (vision=starting, uinput=starting)"],
+            capabilities: { observe: true, focus_field: false, fill_field: false, click_control: false, post_action_observe: true, verify: true, recovery_focus: false, recovery_modal: true },
+          }));
+        } else if (lower.includes("service failed")) {
+          emitGui(actionBackendStatus({
+            global_halt_engaged: true,
+            halt_kind: "service_not_ready",
+            halt_reason: "service not ready (vision=ok, uinput=FAILED)",
+            release_conditions: ["Start or repair the uinput daemon and sudoers/socket permissions."],
+            uinput_daemon: "failed",
+            uinput_available: false,
+            selected_backend: "blocked_global_halt",
+            backend_selection_reason: "service not ready (vision=ok, uinput=FAILED)",
+            backend_probe_status: "global_halt_blocked",
+            backend_probe_errors: ["uinput daemon reported running but socket is not accessible"],
+            input_backend_kind: "none",
+            xdotool_usable_for_actions: false,
+            ydotool_usable_for_actions: false,
+            uinput_socket_accessible: false,
+            can_execute_actions: false,
+            blockers: ["service not ready (vision=ok, uinput=FAILED)"],
+            capabilities: { observe: true, focus_field: false, fill_field: false, click_control: false, post_action_observe: true, verify: true, recovery_focus: false, recovery_modal: true },
+          }));
+        } else if (lower.includes("user disabled")) {
+          emitGui(actionBackendStatus({
+            global_halt_engaged: true,
+            halt_kind: "user_disabled",
+            halt_reason: "user disabled automation via UI",
+            release_conditions: ["Enable GUI automation in Settings."],
+            automation_enabled: false,
+            selected_backend: "automation_disabled",
+            backend_selection_reason: "GUI automation is disabled by user setting.",
+            backend_probe_status: "automation_disabled",
+            backend_probe_errors: [],
+            input_backend_kind: "none",
+            xdotool_usable_for_actions: false,
+            ydotool_usable_for_actions: false,
+            uinput_socket_accessible: true,
+            can_execute_actions: false,
+            blockers: ["GUI automation is disabled by user setting."],
+            capabilities: { observe: true, focus_field: false, fill_field: false, click_control: false, post_action_observe: true, verify: true, recovery_focus: false, recovery_modal: true },
+          }));
+        } else if (lower.includes("wayland no backend")) {
+          emitGui(actionBackendStatus({
+            session_type: "wayland",
+            uinput_daemon: "stopped",
+            uinput_available: false,
+            ydotool_available: false,
+            selected_backend: "unavailable",
+            backend_selection_reason: "Wayland session has no usable uinput socket or validated ydotool backend.",
+            backend_probe_status: "wayland_no_input_backend",
+            backend_probe_errors: ["xdotool detected but not usable for Wayland GUI actions"],
+            input_backend_kind: "none",
+            xdotool_usable_for_actions: false,
+            ydotool_usable_for_actions: false,
+            uinput_socket_accessible: false,
+            can_execute_actions: false,
+            blockers: ["Wayland session has no usable uinput socket or validated ydotool backend."],
+            capabilities: { observe: true, focus_field: false, fill_field: false, click_control: false, post_action_observe: true, verify: true, recovery_focus: false, recovery_modal: true },
+          }));
+        } else if (lower.includes("ydotool ready")) {
+          emitGui(actionBackendStatus({
+            session_type: "wayland",
+            uinput_daemon: "stopped",
+            uinput_available: false,
+            ydotool_available: true,
+            selected_backend: "ydotool_accessibility",
+            backend_selection_reason: "Wayland session selected ydotool because its usability probe passed.",
+            backend_probe_status: "wayland_ydotool_ready",
+            backend_probe_errors: ["xdotool detected but not usable for Wayland GUI actions"],
+            input_backend_kind: "ydotool",
+            xdotool_usable_for_actions: false,
+            ydotool_usable_for_actions: true,
+            uinput_socket_accessible: false,
+            can_execute_actions: true,
+          }));
+        } else if (lower.includes("x11 xdotool")) {
+          emitGui(actionBackendStatus({
+            session_type: "x11",
+            uinput_daemon: "stopped",
+            uinput_available: false,
+            xdotool_available: true,
+            xdotool_usable_for_actions: true,
+            selected_backend: "xdotool_accessibility",
+            backend_selection_reason: "X11 session selected xdotool because DISPLAY and active-window probe passed.",
+            backend_probe_status: "x11_xdotool_ready",
+            backend_probe_errors: [],
+            input_backend_kind: "xdotool",
+            can_execute_actions: true,
+          }));
+        } else {
+          emitGui(actionBackendStatus());
+        }
+        emitGui(goalContractSummary());
+        emitPlannerEvents();
+
+        if (lower.includes("missing") || lower.includes("ambiguous") || lower.includes("blocked routing")) {
+          emitGui({ type: "TargetResolutionStarted", action_kind: "ClickControl", query: "Search" });
+          emitGui({
+            type: "TargetResolutionBlocked",
+            reason: "No matching accessible button/control was found.",
+            candidate_count: 0,
+            target_name: "Search",
+          });
+          emitGui({ type: "TurnCompleted", status: "blocked" });
+          emitEvent("agent:token", { text: "No matching accessible button/control was found. I did not click anything." });
+          emitEvent("agent:done", {});
+          return;
+        }
+
+        if (lower.includes("recovery")) {
+          emitGui({ type: "TargetResolved", target_type: "button", label: "Search", confidence: 0.91 });
+          emitGui({ type: "SafetyGateCompleted", status: "Allowed", risk_level: "low", reasons: [] });
+          emitGui({ type: "ActionStarted", action_kind: "ClickControl", target: "Search" });
+          emitGui({ type: "ActionCompleted", action_kind: "ClickControl", status: "completed" });
+          emitGui({ type: "VerificationCompleted", status: "failed", confidence: 0.28 });
+          emitGui({ type: "RecoveryProposed", reason: "Focus changed before verification.", options: ["Re-observe screen", "Ask for clarification"] });
+          emitEvent("agent:token", { text: "Verification failed. Recovery options are available." });
+          emitEvent("agent:done", {});
+          return;
+        }
+
+        if (lower.includes("submit") || lower.includes("risky") || lower.includes("paused approval")) {
+          emitGui({ type: "SafetyGateCompleted", status: "RequiresApproval", risk_level: "high", reasons: ["external submit action"] });
+          emitGui({ type: "HitlRequired", reason: "Submit requires approval.", risk_level: "high" });
+          emitEvent("agent:approval_required", {
+            requestId: "mock-gui-approval",
+            toolName: "gui_cognition",
+            args: {
+              gui_cognition: {
+                proposal_id: "proposal-1",
+                workflow_id: workflowId,
+                action_kind: "ClickControl",
+                target_label: "Submit",
+                target_role: "push button",
+                active_window: "Mock Browser",
+                risk_level: "high",
+                consequence: "This can submit data externally.",
+                action_hash: "actionhash1234567890",
+                target_hash: "targethash1234567890",
+                evidence_summary: "Single matching button in active window",
+              },
+            },
+            riskLevel: "RED",
+            reason: "Submit requires approval.",
+          });
+          emitEvent("agent:token", { text: "Approval required before this GUI action." });
+          emitEvent("agent:done", {});
+          return;
+        }
+
+        if (lower.includes("safe execution") || lower.includes("click") || lower.includes("type")) {
+          emitGui({ type: "TargetResolutionStarted", action_kind: "ClickControl", query: "Search" });
+          emitGui({ type: "TargetResolved", target_type: "button", label: "Search", confidence: 0.91 });
+          emitGui({ type: "SafetyGateCompleted", status: "Allowed", risk_level: "low", reasons: [] });
+          emitGui({ type: "ActionStarted", action_kind: "ClickControl", target: "Search" });
+          emitGui({ type: "ActionCompleted", action_kind: "ClickControl", status: "completed" });
+          emitGui({
+            ...observationSummary({
+              observation_id: "mock-post-observation",
+              visible_control_count: 7,
+              accessibility_control_count: 7,
+            }),
+          });
+          emitGui({ type: "VerificationCompleted", status: "completed", confidence: 0.82 });
+          emitGui({ type: "TurnCompleted", status: "ok" });
+          emitEvent("agent:token", { text: "Safe GUI action completed and verified." });
+          emitEvent("agent:done", {});
+          return;
+        }
+
+        emitGui({ type: "TurnCompleted", status: "ok" });
+        emitEvent("agent:token", {
+          text: "GUI Cognition mode is active. I used the dedicated GUI Cognition path, not the legacy LLM native tool loop.",
+        });
+        emitEvent("agent:done", {});
+      };
+
       const invoke = async (cmd: string, args: any = {}) => {
         commandLog.push({ cmd, args: clone(args) });
 
@@ -540,6 +1127,16 @@ export async function installTauriMockBridge(page: Page, options: TauriMockOptio
               routing: "manual_override",
               semantic_routing: "bypassed",
             });
+            if (args?.profile?.mode_id === "gui_cognition") {
+              setTimeout(() => emitGuiCognitionSequence(String(args?.message ?? "")), 0);
+            } else {
+              setTimeout(() => {
+                emitEvent("agent:token", {
+                  text: `Manual ${args?.profile?.mode_id ?? "tool"} mode accepted.`,
+                });
+                emitEvent("agent:done", {});
+              }, 0);
+            }
             return { status: "ok" };
           case "send_image_message":
             return { status: "ok", attachment: "mock" };

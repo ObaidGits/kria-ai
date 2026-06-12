@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import signal
 import sys
 import time
 import uuid
@@ -33,6 +34,10 @@ from testing.harness.models import (
 )
 from testing.harness.reporting.human_summary import write_markdown_summary
 from testing.harness.reporting.json_report import make_report, write_json_report
+
+
+class ScenarioWatchdogTimeout(RuntimeError):
+    pass
 
 
 def now_ms() -> int:
@@ -243,6 +248,62 @@ def dry_run_result(scenario: Scenario) -> ScenarioResult:
     )
 
 
+def watchdog_timeout_result(
+    scenario: Scenario,
+    *,
+    started_at_ms: int,
+    timeout_seconds: int,
+) -> ScenarioResult:
+    ended_at_ms = now_ms()
+    message = (
+        f"scenario exceeded hard watchdog after {timeout_seconds}s; "
+        "check per-step desktop_chat_command progress evidence for the last request"
+    )
+    return ScenarioResult(
+        scenario_id=scenario.id,
+        title=scenario.title,
+        status="failed",
+        verdict="failed",
+        failure_class="harness",
+        started_at_ms=started_at_ms,
+        ended_at_ms=ended_at_ms,
+        duration_ms=ended_at_ms - started_at_ms,
+        tags=scenario.tags,
+        required_services=scenario.required_services,
+        evidence=[
+            {
+                "type": "scenario_watchdog_timeout",
+                "timeout_seconds": timeout_seconds,
+                "scenario_timeout_seconds": scenario.timeout_seconds,
+            }
+        ],
+        failure={"message": message},
+    )
+
+
+def execute_scenario_with_watchdog(scenario: Scenario, context: RunContext) -> ScenarioResult:
+    started_at_ms = now_ms()
+    timeout_seconds = scenario.timeout_seconds + 15
+    previous_handler = signal.getsignal(signal.SIGALRM)
+
+    def _handle_timeout(_signum: int, _frame: Any) -> None:
+        raise ScenarioWatchdogTimeout()
+
+    signal.signal(signal.SIGALRM, _handle_timeout)
+    signal.setitimer(signal.ITIMER_REAL, timeout_seconds)
+    try:
+        return execute_scenario(scenario, context)
+    except ScenarioWatchdogTimeout:
+        return watchdog_timeout_result(
+            scenario,
+            started_at_ms=started_at_ms,
+            timeout_seconds=timeout_seconds,
+        )
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+
+
 def execute_scenario(scenario: Scenario, context: RunContext) -> ScenarioResult:
     skip_reason = should_skip(scenario, context)
     if skip_reason:
@@ -424,13 +485,13 @@ def main(argv: list[str]) -> int:
     started_at_ms = now_ms()
     results: list[ScenarioResult] = []
     for scenario in scenarios:
-        print(f"[{scenario.id}] {scenario.title}")
-        result = execute_scenario(scenario, context)
-        print(f"  -> {result.status}")
+        print(f"[{scenario.id}] {scenario.title}", flush=True)
+        result = execute_scenario_with_watchdog(scenario, context)
+        print(f"  -> {result.status}", flush=True)
         if result.failure:
-            print(f"     {result.failure.get('message')}")
+            print(f"     {result.failure.get('message')}", flush=True)
         if result.skip_reason:
-            print(f"     {result.skip_reason}")
+            print(f"     {result.skip_reason}", flush=True)
         results.append(result)
         if args.fail_fast and result.status in {"failed", "blocked", "infra_failed", "cleanup_failed"}:
             break

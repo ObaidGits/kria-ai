@@ -14,8 +14,16 @@ const { invokeMock, listenMock, listenerMap, setSessionHistory } = vi.hoisted(()
         return { session_id: "mock-created-session" };
       case "list_sessions":
         return [];
+      case "clear_all_chat_sessions":
+        return {
+          deleted_session_count: 2,
+          deleted_turn_count: 5,
+          replacement_session_id: "mock-cleared-session",
+        };
       case "switch_session":
         return { session_id: args?.sessionId ?? "mock-session", messages: [] };
+      case "delete_session":
+        return { deleted_session_id: args?.sessionId, replacement_session_id: null };
       case "get_session_history":
         return sessionHistory;
       case "cancel_turn":
@@ -81,6 +89,10 @@ vi.mock("highlight.js/styles/github-dark.css?url", () => ({ default: "dark.css" 
 vi.mock("highlight.js/styles/github.css?url", () => ({ default: "light.css" }));
 
 import { appStore } from "./app";
+import {
+  __resetGuiCognitionSessionForTests,
+  activeGuiCognitionSession,
+} from "./guiCognitionSession";
 
 function emit(eventName: string, payload: any) {
   const callback = listenerMap.get(eventName);
@@ -102,6 +114,7 @@ describe("appStore low-confidence tool choice flow", () => {
     setSessionHistory([]);
     appStore.dismissToolChoice();
     appStore.setManualToolMode("auto");
+    __resetGuiCognitionSessionForTests();
   });
 
   it("captures tool-choice event and clears thinking state", () => {
@@ -177,7 +190,26 @@ describe("appStore manual tool selection mode", () => {
     emit("agent:done", {});
     appStore.dismissToolChoice();
     appStore.setManualToolMode("auto");
+    __resetGuiCognitionSessionForTests();
     window.localStorage.clear();
+  });
+
+  it("builds manual profiles directly from the manual mode catalog", () => {
+    for (const mode of appStore.manualToolModes) {
+      const profile = appStore.buildManualToolProfile(mode.id);
+
+      if (mode.id === "auto") {
+        expect(profile).toBeNull();
+      } else {
+        expect(profile).toEqual({
+          mode_id: mode.id,
+          label: mode.label,
+          app_lock: mode.appLock,
+          tool_lock: mode.toolLock,
+          strategy: mode.strategy,
+        });
+      }
+    }
   });
 
   it("keeps auto mode on the normal assistant command path", async () => {
@@ -265,6 +297,55 @@ describe("appStore manual tool selection mode", () => {
     ).toBe(true);
   });
 
+  it("renders sequential GUI Cognition prompts and replies in the active chat", async () => {
+    appStore.setCurrentEnvironment("assistant");
+    appStore.setManualToolMode("gui_cognition");
+    await appStore.switchSession("gui-cognition-seq-session");
+    await flushAsync(4);
+
+    // ── Turn 1 ──────────────────────────────────────────────────────────
+    await appStore.sendMessage("Open the Calculator");
+    await flushAsync(8);
+    // Backend (gui_cognition path) emits this batch once the turn completes.
+    emit("agent:thinking", { status: "processing", mode: "gui_cognition" });
+    emit("agent:token", { text: "Workflow completed 2 verified step(s) safely." });
+    emit("agent:done", {});
+    await flushAsync(4);
+
+    expect(appStore.isThinking()).toBe(false);
+    expect(
+      appStore.messages().some(
+        (m) => m.role === "user" && m.content === "Open the Calculator",
+      ),
+    ).toBe(true);
+    expect(
+      appStore.messages().some(
+        (m) => m.role === "assistant" && m.content.includes("Workflow completed"),
+      ),
+    ).toBe(true);
+
+    // ── Turn 2 (same chat) ──────────────────────────────────────────────
+    await appStore.sendMessage("Open the Screenshot tool");
+    await flushAsync(8);
+    emit("agent:thinking", { status: "processing", mode: "gui_cognition" });
+    emit("agent:token", { text: "Screenshot tool opened and verified." });
+    emit("agent:done", {});
+    await flushAsync(4);
+
+    expect(appStore.isThinking()).toBe(false);
+    const userContents = appStore
+      .messages()
+      .filter((m) => m.role === "user")
+      .map((m) => m.content);
+    expect(userContents).toContain("Open the Calculator");
+    expect(userContents).toContain("Open the Screenshot tool");
+    expect(
+      appStore.messages().some(
+        (m) => m.role === "assistant" && m.content.includes("Screenshot tool opened"),
+      ),
+    ).toBe(true);
+  });
+
   it("does not submit or clear a new prompt while the assistant turn is still active", async () => {
     emit("agent:thinking", { status: "processing" });
 
@@ -336,6 +417,24 @@ describe("appStore manual tool selection mode", () => {
     ).toBe(true);
   });
 
+  it("clears all chat sessions and switches to the replacement session", async () => {
+    appStore.setCurrentEnvironment("assistant");
+    await appStore.switchSession("old-session");
+    await flushAsync(4);
+
+    await appStore.sendMessage("local prompt before clear");
+    await flushAsync(4);
+
+    const result = await appStore.clearAllChatSessions();
+    await flushAsync(8);
+
+    expect(invokeMock).toHaveBeenCalledWith("clear_all_chat_sessions");
+    expect(result).toEqual({ deletedSessionCount: 2, deletedTurnCount: 5 });
+    expect(appStore.currentSession()).toBe("mock-cleared-session");
+    expect(appStore.messages()).toEqual([]);
+    expect(appStore.sessions().some((session) => session.id === "mock-cleared-session")).toBe(true);
+  });
+
   it("sends manual n8n mode through the manual profile command", async () => {
     appStore.setManualToolMode("n8n");
 
@@ -355,6 +454,143 @@ describe("appStore manual tool selection mode", () => {
     expect(invokeMock).not.toHaveBeenCalledWith("send_message", {
       message: "run test_workflow",
     });
+  });
+
+  it("sends GUI Cognition mode through the dedicated manual profile command", async () => {
+    appStore.setManualToolMode("gui_cognition");
+
+    await appStore.sendMessage("observe the current screen");
+    await flushAsync(8);
+
+    expect(invokeMock).toHaveBeenCalledWith("send_manual_tool_message", {
+      message: "observe the current screen",
+      profile: {
+        mode_id: "gui_cognition",
+        label: "GUI Cognition",
+        app_lock: "gui_cognition",
+        tool_lock: null,
+        strategy: "routed_within_lock",
+      },
+    });
+    expect(invokeMock).not.toHaveBeenCalledWith("send_message", {
+      message: "observe the current screen",
+    });
+  });
+
+  it("sends every non-auto manual mode through the manual profile command", async () => {
+    const manualModes = appStore.manualToolModes.filter((mode) => mode.id !== "auto");
+
+    for (const mode of manualModes) {
+      invokeMock.mockClear();
+      emit("agent:done", {});
+      appStore.setManualToolMode(mode.id);
+
+      await appStore.sendMessage(`route through ${mode.id}`);
+      await flushAsync(8);
+
+      expect(invokeMock).toHaveBeenCalledWith("send_manual_tool_message", {
+        message: `route through ${mode.id}`,
+        profile: {
+          mode_id: mode.id,
+          label: mode.label,
+          app_lock: mode.appLock,
+          tool_lock: mode.toolLock,
+          strategy: mode.strategy,
+        },
+      });
+      expect(invokeMock).not.toHaveBeenCalledWith("send_message", {
+        message: `route through ${mode.id}`,
+      });
+    }
+  });
+
+  it("uses the latest selected manual profile when modes switch", async () => {
+    const sequence = [
+      { mode: "n8n" as const, message: "n8n route check" },
+      { mode: "gui_cognition" as const, message: "gui route check" },
+      { mode: "browser" as const, message: "browser route check" },
+    ];
+
+    for (const item of sequence) {
+      appStore.setManualToolMode(item.mode);
+      await appStore.sendMessage(item.message);
+      await flushAsync(8);
+      emit("agent:done", {});
+    }
+
+    const manualCalls = invokeMock.mock.calls.filter(
+      ([command]) => command === "send_manual_tool_message"
+    );
+    expect(manualCalls.map(([, args]) => (args as any)?.profile?.mode_id)).toEqual([
+      "n8n",
+      "gui_cognition",
+      "browser",
+    ]);
+    expect(manualCalls[1]?.[1]).toEqual({
+      message: "gui route check",
+      profile: {
+        mode_id: "gui_cognition",
+        label: "GUI Cognition",
+        app_lock: "gui_cognition",
+        tool_lock: null,
+        strategy: "routed_within_lock",
+      },
+    });
+  });
+
+  it("normalizes unknown manual mode values back to auto", () => {
+    appStore.setManualToolMode("not-a-real-mode" as any);
+
+    expect(appStore.manualToolMode()).toBe("auto");
+    expect(window.localStorage.getItem("kria_manual_tool_mode")).toBeNull();
+    expect(appStore.buildManualToolProfile(appStore.manualToolMode())).toBeNull();
+  });
+
+  it("does not send another message while the assistant route is already thinking", async () => {
+    appStore.setManualToolMode("gui_cognition");
+
+    await appStore.sendMessage("first gui prompt");
+    await flushAsync(8);
+    await appStore.sendMessage("second gui prompt should be ignored");
+    await flushAsync(4);
+
+    const manualCalls = invokeMock.mock.calls.filter(
+      ([command]) => command === "send_manual_tool_message"
+    );
+    expect(manualCalls).toHaveLength(1);
+    expect(manualCalls[0]?.[1]?.message).toBe("first gui prompt");
+  });
+
+  it("updates GUI Cognition session state from canonical events", () => {
+    appStore.setManualToolMode("gui_cognition");
+    emit("gui_cognition:event", {
+      version: 1,
+      session_id: "session-1",
+      turn_id: "turn-1",
+      workflow_id: "workflow-1",
+      sequence: 1,
+      timestamp_ms: Date.now(),
+      event: { type: "TurnStarted", mode_id: "gui_cognition" },
+    });
+    emit("gui_cognition:event", {
+      version: 1,
+      session_id: "session-1",
+      turn_id: "turn-1",
+      workflow_id: "workflow-1",
+      sequence: 2,
+      timestamp_ms: Date.now(),
+      event: {
+        type: "ObservationCompleted",
+        active_window: "Kria",
+        visible_control_count: 4,
+        ocr_available: false,
+        accessibility_available: true,
+      },
+    });
+
+    expect(activeGuiCognitionSession()?.observation.activeWindow).toBe("Kria");
+    expect(activeGuiCognitionSession()?.observation.visibleControlCount).toBe(4);
+    expect(appStore.manualToolMode()).toBe("gui_cognition");
   });
 
   it("persists the last selected manual mode", () => {

@@ -1,0 +1,237 @@
+{
+  "schema_version": "kria.testing.scenarios.v1",
+  "scenarios": [
+    {
+      "id": "gui_cognition.active_window.gnome_bridge_reliable",
+      "title": "GUI Cognition active window uses KRIA GNOME bridge as reliable authority",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "gui_cognition", "desktop_command", "active_window", "perception", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 60,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "What is on my screen? Report active window.",
+        "expected_status_any": ["ok"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["RouteConfirmed", "ObservationStarted", "ObservationCompleted", "ContextBuilt", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "desktop_command.path", "equals": "send_manual_tool_message" },
+          { "path": "gui_cognition.llm_tool_loop", "equals": false },
+          { "path": "gui_cognition.perception.active_window", "equals": "Visual Studio Code - KRIA" },
+          { "path": "gui_cognition.perception.active_window_source", "equals": "kria_gnome_shell_bridge" },
+          { "path": "gui_cognition.perception.active_window_authority_source", "equals": "kria_gnome_shell_bridge" },
+          { "path": "gui_cognition.perception.active_window_authority_status", "equals": "available" },
+          { "path": "gui_cognition.perception.active_window_authority_confidence", "equals": 0.98 },
+          { "path": "gui_cognition.perception.active_window_reliability", "equals": "reliable" },
+          { "path": "gui_cognition.perception.gnome_bridge_status", "equals": "available" },
+          { "path": "gui_cognition.perception.active_window_pid", "equals": 4242 },
+          { "path": "gui_cognition.perception.active_window_fallback_chain.0.source", "equals": "kria_gnome_shell_bridge" },
+          { "path": "gui_cognition.perception.active_window_fallback_chain.0.status", "equals": "matched" }
+        ],
+        "forbidden_json_paths": [
+          "gui_cognition.perception.ocr_blocks.0.text",
+          "gui_cognition.perception.screenshot_path",
+          "gui_cognition.perception.screenshot"
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "gnome_bridge_reliable"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.active_window.bridge_missing_fallback",
+      "title": "GUI Cognition active window falls back when KRIA GNOME bridge is missing",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "gui_cognition", "desktop_command", "active_window", "perception", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 60,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "What is on my screen? Report active window.",
+        "expected_status_any": ["ok"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["RouteConfirmed", "ObservationCompleted", "ContextBuilt", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "desktop_command.path", "equals": "send_manual_tool_message" },
+          { "path": "gui_cognition.perception.active_window", "equals": "Firefox - KRIA" },
+          { "path": "gui_cognition.perception.active_window_source", "equals": "gnome_shell_focus_window" },
+          { "path": "gui_cognition.perception.active_window_authority_status", "equals": "available" },
+          { "path": "gui_cognition.perception.active_window_reliability", "equals": "reliable" },
+          { "path": "gui_cognition.perception.gnome_bridge_status", "equals": "missing" }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "gnome_eval_fallback"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.active_window.atspi_fallback",
+      "title": "GUI Cognition active window falls back to AT-SPI focused window",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "gui_cognition", "desktop_command", "active_window", "perception", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 60,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "What is on my screen? Report active window.",
+        "expected_status_any": ["ok"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["RouteConfirmed", "ObservationCompleted", "ContextBuilt", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "desktop_command.path", "equals": "send_manual_tool_message" },
+          { "path": "gui_cognition.perception.active_window", "equals": "Terminal - KRIA" },
+          { "path": "gui_cognition.perception.active_window_source", "equals": "atspi.focused_window_title" },
+          { "path": "gui_cognition.perception.active_window_reliability", "equals": "reliable" },
+          { "path": "gui_cognition.perception.active_window_confidence", "equals": 0.72 },
+          { "path": "gui_cognition.perception.gnome_bridge_status", "equals": "missing" }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "atspi_fallback"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.active_window.single_window_best_effort",
+      "title": "GUI Cognition single visible window fallback remains best-effort",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "gui_cognition", "desktop_command", "active_window", "perception", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 60,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "What is on my screen? Report active window.",
+        "expected_status_any": ["ok"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["RouteConfirmed", "ObservationCompleted", "ContextBuilt", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "desktop_command.path", "equals": "send_manual_tool_message" },
+          { "path": "gui_cognition.perception.active_window", "equals": "Only Visible App" },
+          { "path": "gui_cognition.perception.active_window_source", "equals": "desktop_state.single_application" },
+          { "path": "gui_cognition.perception.active_window_reliability", "equals": "best_effort" },
+          { "path": "gui_cognition.perception.active_window_confidence", "equals": 0.42 },
+          { "path": "gui_cognition.perception.gnome_bridge_status", "equals": "missing" }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "single_window_best_effort"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.active_window.failure_chain_precise",
+      "title": "GUI Cognition active window unavailable includes precise failure chain",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "gui_cognition", "desktop_command", "active_window", "perception", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 60,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "What is on my screen? Report active window.",
+        "expected_status_any": ["ok"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["RouteConfirmed", "ObservationCompleted", "ContextBuilt", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "desktop_command.path", "equals": "send_manual_tool_message" },
+          { "path": "gui_cognition.perception.active_window", "equals": "unknown" },
+          { "path": "gui_cognition.perception.active_window_source", "equals": "unavailable" },
+          { "path": "gui_cognition.perception.active_window_authority_status", "equals": "unavailable" },
+          { "path": "gui_cognition.perception.active_window_reliability", "equals": "unavailable" },
+          { "path": "gui_cognition.perception.active_window_failure_chain.0.source", "equals": "kria_gnome_shell_bridge" },
+          { "path": "gui_cognition.perception.active_window_failure_chain.1.source", "equals": "desktop_state.focused_window" },
+          { "path": "gui_cognition.perception.gnome_bridge_status", "equals": "missing" }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "failure_chain_precise"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.active_window.no_raw_secret_leakage",
+      "title": "GUI Cognition active window redacts secrets from titles",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "gui_cognition", "desktop_command", "active_window", "perception", "regression", "security"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 60,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "What is on my screen? Report active window.",
+        "expected_status_any": ["ok"],
+        "expected_reply_not_contains_any": ["secret-value", "token=secret-value"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["RouteConfirmed", "ObservationCompleted", "ContextBuilt", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "desktop_command.path", "equals": "send_manual_tool_message" },
+          { "path": "gui_cognition.perception.active_window_source", "equals": "kria_gnome_shell_bridge" },
+          { "path": "gui_cognition.perception.active_window_reliability", "equals": "reliable" }
+        ],
+        "forbidden_json_paths": [
+          "gui_cognition.perception.ocr_blocks.0.text",
+          "gui_cognition.perception.screenshot_path",
+          "gui_cognition.perception.screenshot"
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "secret_active_window"
+        }
+      }
+    }
+  ]
+}

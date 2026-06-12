@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import hljsDarkThemeUrl from "highlight.js/styles/github-dark.css?url";
 import hljsLightThemeUrl from "highlight.js/styles/github.css?url";
+import { handleGuiCognitionEvent } from "./guiCognitionSession";
 
 const STORAGE_KEYS = {
   theme: "kria_theme",
@@ -55,6 +56,14 @@ export interface ManualToolModeOption {
   label: string;
   appLock: string | null;
   toolLock: string | null;
+  strategy: "direct" | "routed_within_lock";
+}
+
+export interface ManualToolProfile {
+  mode_id: ManualToolModeId;
+  label: string;
+  app_lock: string | null;
+  tool_lock: string | null;
   strategy: "direct" | "routed_within_lock";
 }
 
@@ -1164,6 +1173,19 @@ function selectedManualToolMode(): ManualToolModeOption {
   return manualToolModes.find((mode) => mode.id === manualToolMode()) ?? manualToolModes[0];
 }
 
+function buildManualToolProfile(modeId: ManualToolModeId): ManualToolProfile | null {
+  const mode = manualToolModes.find((candidate) => candidate.id === modeId);
+  if (!mode || mode.id === "auto") return null;
+
+  return {
+    mode_id: mode.id,
+    label: mode.label,
+    app_lock: mode.appLock,
+    tool_lock: mode.toolLock,
+    strategy: mode.strategy,
+  };
+}
+
 function setManualToolMode(mode: ManualToolModeId) {
   const normalized = normalizeManualToolMode(mode);
   setManualToolModeSignal(normalized);
@@ -1189,6 +1211,7 @@ async function sendMessage(text: string) {
 
   setScopedToolChoice("assistant", null);
   const selectedMode = selectedManualToolMode();
+  const manualProfile = buildManualToolProfile(selectedMode.id);
 
   try {
     const sessionId = await ensureScopedSessionActive("assistant");
@@ -1204,7 +1227,7 @@ async function sendMessage(text: string) {
     setScopedThinking("assistant", true);
 
     void autoRenameSessionFromPrompt(sessionId, text);
-    if (selectedMode.id === "auto") {
+    if (!manualProfile) {
       await invoke<{ status: string }>(
         "send_message",
         { message: text }
@@ -1214,13 +1237,7 @@ async function sendMessage(text: string) {
         "send_manual_tool_message",
         {
           message: text,
-          profile: {
-            mode_id: selectedMode.id,
-            label: selectedMode.label,
-            app_lock: selectedMode.appLock,
-            tool_lock: selectedMode.toolLock,
-            strategy: selectedMode.strategy,
-          },
+          profile: manualProfile,
         }
       );
     }
@@ -2776,6 +2793,66 @@ async function deleteSession(sessionId: string) {
   }
 }
 
+async function clearAllChatSessions(): Promise<{ deletedSessionCount: number; deletedTurnCount: number }> {
+  const previousSessions = sessions();
+  const previousAssistantSession = assistantCurrentSession();
+  const previousPromptLabSession = promptLabCurrentSession();
+  const previousAssistantMessages = assistantMessages();
+  const previousPromptLabMessages = promptLabMessages();
+  const previousAssistantThinking = assistantIsThinking();
+  const previousPromptLabThinking = promptLabIsThinking();
+
+  try {
+    await cancelScopedTurnIfActive("assistant");
+    await cancelScopedTurnIfActive("prompt_lab");
+
+    setSessions([]);
+    setAssistantMessages([]);
+    setPromptLabMessages([]);
+    setAssistantIsThinking(false);
+    setPromptLabIsThinking(false);
+    setScopedToolChoice("assistant", null);
+    setScopedToolChoice("prompt_lab", null);
+    setScopedHitl("assistant", null, false);
+    setScopedHitl("prompt_lab", null, false);
+
+    const result = await invoke<{
+      deleted_session_count?: number;
+      deleted_turn_count?: number;
+      replacement_session_id?: string | null;
+    }>("clear_all_chat_sessions");
+
+    const replacementSessionId = result.replacement_session_id || null;
+    if (replacementSessionId) {
+      setScopedCurrentSession("assistant", replacementSessionId);
+      setScopedCurrentSession("prompt_lab", replacementSessionId);
+      backendActiveSessionId = replacementSessionId;
+      upsertSessionPreview(replacementSessionId, "New chat");
+    } else {
+      setScopedCurrentSession("assistant", null);
+      setScopedCurrentSession("prompt_lab", null);
+      backendActiveSessionId = null;
+    }
+
+    await loadSessions();
+
+    return {
+      deletedSessionCount: result.deleted_session_count ?? previousSessions.length,
+      deletedTurnCount: result.deleted_turn_count ?? 0,
+    };
+  } catch (e) {
+    console.error("Failed to clear chat sessions:", e);
+    setSessions(previousSessions);
+    setScopedCurrentSession("assistant", previousAssistantSession);
+    setScopedCurrentSession("prompt_lab", previousPromptLabSession);
+    setAssistantMessages(previousAssistantMessages);
+    setPromptLabMessages(previousPromptLabMessages);
+    setAssistantIsThinking(previousAssistantThinking);
+    setPromptLabIsThinking(previousPromptLabThinking);
+    throw e;
+  }
+}
+
 async function renameSession(sessionId: string, title: string) {
   const normalizedTitle = normalizeSessionTitleFromPrompt(title);
   if (!normalizedTitle) return;
@@ -3122,6 +3199,14 @@ function initListeners() {
       });
     } catch (e) {
       console.warn("[WorkflowTelemetry] Failed to process telemetry event:", e);
+    }
+  });
+
+  listen("gui_cognition:event", (event) => {
+    try {
+      handleGuiCognitionEvent(event.payload as any);
+    } catch (e) {
+      console.warn("[GuiCognition] Failed to process event:", e);
     }
   });
 
@@ -3743,6 +3828,7 @@ export const appStore = {
   createSession,
   switchSession,
   deleteSession,
+  clearAllChatSessions,
   renameSession,
   loadSettings,
   loadAudioDevices,
@@ -3821,6 +3907,7 @@ export const appStore = {
   manualToolModes,
   manualToolMode,
   selectedManualToolMode,
+  buildManualToolProfile,
   setManualToolMode,
 
   // Intelligence Enhancement (Phase A-F)

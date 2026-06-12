@@ -44,6 +44,12 @@
       "default_profile": "safe"
     },
     {
+      "id": "gui_cognition",
+      "name": "GUI Cognition",
+      "manifest": "testing/suites/gui_cognition/manifest.json",
+      "default_profile": "safe"
+    },
+    {
       "id": "examples",
       "name": "examples",
       "manifest": "testing/suites/examples/manifest.json",

@@ -232,6 +232,58 @@ pub async fn delete_session(
 }
 
 #[tauri::command]
+pub async fn clear_all_chat_sessions(
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    let state = state
+        .get()
+        .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
+    let sessions = state
+        .memory_store
+        .list_sessions()
+        .map_err(|e| e.to_string())?;
+    let deleted_session_count = sessions.len();
+    let mut deleted_turn_count = 0_usize;
+
+    for (session_id, _, _) in sessions {
+        deleted_turn_count += state
+            .memory_store
+            .delete_session(&session_id)
+            .map_err(|e| e.to_string())?;
+    }
+
+    let new_id = uuid::Uuid::new_v4().to_string();
+    *state.current_session_id.write().await = new_id.clone();
+
+    let memory_writer: Arc<dyn MemoryManager> = state.memory_store.clone();
+    let _ = memory_writer.set_preference(&preference_record(
+        format!("session_title:{}", new_id),
+        "New chat",
+    ));
+    let _ = memory_writer.set_preference(&preference_record(
+        format!("session_title_manual:{}", new_id),
+        "0",
+    ));
+    let _ = memory_writer.set_preference(&preference_record(
+        format!("session_created_at:{}", new_id),
+        Utc::now().to_rfc3339(),
+    ));
+
+    tracing::info!(
+        deleted_session_count,
+        deleted_turn_count,
+        replacement_session_id = %new_id,
+        "all chat sessions cleared"
+    );
+
+    Ok(serde_json::json!({
+        "deleted_session_count": deleted_session_count,
+        "deleted_turn_count": deleted_turn_count,
+        "replacement_session_id": new_id,
+    }))
+}
+
+#[tauri::command]
 pub async fn rename_session(
     session_id: String,
     title: String,

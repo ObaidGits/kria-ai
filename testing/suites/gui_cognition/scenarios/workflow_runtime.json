@@ -1,0 +1,273 @@
+{
+  "schema_version": "kria.testing.scenarios.v1",
+  "scenarios": [
+    {
+      "id": "step10.workflow.open_focus_completes",
+      "title": "Step 10 runs an OpenApp + FocusField workflow one verified step at a time",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step10_workflow_runtime", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "focused_search_field",
+          "action_backend_fixture": "services_healthy",
+          "execution_mode": "execute_fixture",
+          "workflow": true
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Open KRIA Perception Test and focus the visible search field",
+        "expected_status_any": ["completed"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["GoalContractCreated", "PlanCreated", "PlanValidationCompleted", "WorkflowRunStarted", "WorkflowStepStarted", "ActionStarted", "ActionCompleted", "ExecutionVerificationCompleted", "WorkflowStepCompleted", "WorkflowRunCompleted", "TurnCompleted"],
+        "forbidden_gui_event_types": ["WorkflowRunBlocked", "ExecutionBlocked", "ActionFailed"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "desktop_command.path", "equals": "send_manual_tool_message" },
+          { "path": "gui_cognition.workflow_run.status", "equals": "completed" },
+          { "path": "gui_cognition.workflow_run.step_count", "exists": true },
+          { "path": "gui_cognition.workflow_run.completed_step_receipts.0.receipt_id", "exists": true }
+        ],
+        "forbidden_json_paths": [
+          "gui_cognition.raw_prompt",
+          "gui_cognition.perception.ocr_blocks.0.text",
+          "gui_cognition.perception.screenshot"
+        ]
+      }
+    },
+    {
+      "id": "step10.workflow.verify_each_step_before_next",
+      "title": "Step 10 verifies each step (ExecutionVerificationCompleted) before completing the workflow",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step10_workflow_runtime", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "focused_search_field",
+          "action_backend_fixture": "services_healthy",
+          "execution_mode": "execute_fixture",
+          "workflow": true
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Open KRIA Perception Test and focus the visible search field",
+        "expected_status_any": ["completed"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["WorkflowStepStarted", "ExecutionVerificationCompleted", "WorkflowStepCompleted", "WorkflowRunCompleted"],
+        "forbidden_gui_event_types": ["ActionFailed", "WorkflowRunBlocked"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.workflow_run.status", "equals": "completed" },
+          { "path": "gui_cognition.verification.status", "equals": "verified" }
+        ],
+        "forbidden_json_paths": [
+          "gui_cognition.raw_prompt",
+          "gui_cognition.perception.screenshot"
+        ]
+      }
+    },
+    {
+      "id": "step10.workflow.safety_only_no_action_started",
+      "title": "Step 10 workflow in safety_only mode creates run/step state but never starts an action",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step10_workflow_runtime", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "focused_search_field",
+          "action_backend_fixture": "services_healthy",
+          "execution_mode": "safety_only",
+          "workflow": true
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Open KRIA Perception Test and focus the visible search field",
+        "expected_status_any": ["paused"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["WorkflowRunStarted", "WorkflowStepStarted", "WorkflowRunPaused", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted", "ActionFailed"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.workflow_run.status", "equals": "paused" }
+        ],
+        "forbidden_json_paths": [
+          "gui_cognition.raw_prompt",
+          "gui_cognition.perception.screenshot"
+        ]
+      }
+    },
+    {
+      "id": "step10.workflow.ambiguous_target_pauses",
+      "title": "Step 10 workflow pauses on an ambiguous target instead of guessing",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step10_workflow_runtime", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "duplicate_search_buttons",
+          "action_backend_fixture": "services_healthy",
+          "execution_mode": "execute_fixture",
+          "workflow": true
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Click the Search button and verify the screen changed",
+        "expected_status_any": ["paused", "blocked"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["WorkflowRunStarted", "WorkflowStepStarted", "WorkflowStepBlocked", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted", "WorkflowRunCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.workflow_run.status", "equals": "paused" }
+        ],
+        "forbidden_json_paths": [
+          "gui_cognition.raw_prompt",
+          "gui_cognition.perception.screenshot"
+        ]
+      }
+    },
+    {
+      "id": "step10.workflow.risky_submit_requires_approval",
+      "title": "Step 10 workflow pauses a risky submit for approval and never auto-executes",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step10_workflow_runtime", "hitl", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button",
+          "action_backend_fixture": "services_healthy",
+          "execution_mode": "execute_fixture",
+          "workflow": true
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Click the Submit Test button and submit this form",
+        "expected_status_any": ["paused", "blocked", "needs_approval"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["WorkflowRunStarted", "WorkflowStepStarted", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted", "WorkflowRunCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.workflow_run.requires_user_approval", "exists": true }
+        ],
+        "forbidden_json_paths": [
+          "gui_cognition.raw_prompt",
+          "gui_cognition.perception.screenshot"
+        ]
+      }
+    },
+    {
+      "id": "step10.workflow.denied_hitl_no_execution",
+      "title": "Step 10 workflow with a denied decision never starts an action",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step10_workflow_runtime", "hitl", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button",
+          "action_backend_fixture": "services_healthy",
+          "hitl_decision_fixture": "deny",
+          "execution_mode": "execute_fixture",
+          "workflow": true
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Click the Submit Test button and submit this form",
+        "expected_status_any": ["paused", "blocked"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["WorkflowRunStarted", "WorkflowStepStarted", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted", "WorkflowRunCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "forbidden_json_paths": [
+          "gui_cognition.raw_prompt",
+          "gui_cognition.perception.screenshot"
+        ]
+      }
+    },
+    {
+      "id": "step10.workflow.no_raw_secret_leakage",
+      "title": "Step 10 workflow events never expose raw prompt, OCR, screenshot, or secrets",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step10_workflow_runtime", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "focused_search_field",
+          "action_backend_fixture": "services_healthy",
+          "execution_mode": "execute_fixture",
+          "workflow": true
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Open KRIA Perception Test and focus the visible search field",
+        "expected_status_any": ["completed"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["WorkflowRunStarted", "WorkflowRunCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "forbidden_json_paths": [
+          "gui_cognition.raw_prompt",
+          "gui_cognition.perception.ocr_blocks.0.text",
+          "gui_cognition.perception.screenshot",
+          "gui_cognition.perception.clipboard",
+          "gui_cognition.workflow_run.raw_prompt"
+        ]
+      }
+    }
+  ]
+}

@@ -186,6 +186,15 @@ impl ToolHandler for FindElements {
                 "role": e.role,
                 "name": e.name,
                 "path": e.path,
+                "control_id": format!("{}:{}:{}", e.bus_name, e.path, e.role),
+                "focused": e.focused,
+                "enabled": e.enabled,
+                "visible": e.visible,
+                "in_active_window": e.in_active_window,
+                "bounds": e.bounds,
+                "depth": e.depth,
+                "score": e.score,
+                "source": "accessibility",
             })).collect::<Vec<_>>(),
         }))
     }

@@ -5,6 +5,7 @@
 //!   - `set_gui_automation_enabled(enabled: bool)` → master kill switch
 
 use super::AppStateCell;
+use kria_core::agent::gui_cognition::executor::{select_gui_action_backend, GuiBackendProbeInput};
 use kria_core::orchestrator::ServiceStatus;
 use tauri::{AppHandle, Manager};
 
@@ -19,14 +20,116 @@ pub struct GuiAutomationStatus {
     pub automation_enabled: bool,
     /// `true` iff the GlobalSafetyHalt flag is set (any reason).
     pub global_halt_engaged: bool,
+    /// Machine-readable halt classification for UI copy.
+    pub halt_kind: String,
     /// Human-readable reason the halt is currently engaged (if any).
     pub halt_reason: Option<String>,
+    /// Short remediation hints required before GUI actions can run.
+    pub release_conditions: Vec<String>,
     /// PID of vision sidecar process, if running.
     pub vision_pid: Option<u32>,
     /// PID of uinput daemon process, if running.
     pub uinput_pid: Option<u32>,
     /// `true` if the ServiceOrchestrator initialized successfully at boot.
     pub orchestrator_available: bool,
+    pub session_type: String,
+    pub selected_backend: String,
+    pub backend_selection_reason: String,
+    pub backend_probe_status: String,
+    pub backend_probe_errors: Vec<String>,
+    pub xdotool_available: bool,
+    pub xdotool_usable_for_actions: bool,
+    pub ydotool_available: bool,
+    pub ydotool_usable_for_actions: bool,
+    pub uinput_socket_path: Option<String>,
+    pub uinput_socket_accessible: bool,
+    pub can_execute_actions: bool,
+}
+
+fn command_available(name: &str) -> bool {
+    std::env::var_os("PATH")
+        .and_then(|paths| {
+            std::env::split_paths(&paths)
+                .map(|path| path.join(name))
+                .find(|candidate| candidate.is_file())
+        })
+        .is_some()
+}
+
+fn current_gui_session_type() -> String {
+    let explicit = std::env::var("XDG_SESSION_TYPE")
+        .unwrap_or_default()
+        .trim()
+        .to_lowercase();
+    if !explicit.is_empty() {
+        return explicit;
+    }
+    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        return "wayland".into();
+    }
+    if std::env::var_os("DISPLAY").is_some() {
+        return "x11".into();
+    }
+    "unknown".into()
+}
+
+fn gui_halt_kind(
+    orchestrator_available: bool,
+    automation_enabled: bool,
+    global_halt_engaged: bool,
+    halt_reason: Option<&str>,
+    vision_sidecar: &str,
+    uinput_daemon: &str,
+) -> String {
+    if !orchestrator_available {
+        return "orchestrator_unavailable".into();
+    }
+    if !automation_enabled || halt_reason.is_some_and(|reason| reason.contains("user disabled")) {
+        return "user_disabled".into();
+    }
+    if !global_halt_engaged {
+        return "none".into();
+    }
+    if vision_sidecar == "starting"
+        || uinput_daemon == "starting"
+        || halt_reason.is_some_and(|reason| {
+            reason.contains("warming")
+                || reason.contains("startup")
+                || reason.contains("re-spawning")
+        })
+    {
+        return "startup_warming".into();
+    }
+    if vision_sidecar == "failed"
+        || uinput_daemon == "failed"
+        || vision_sidecar == "stopped"
+        || uinput_daemon == "stopped"
+        || halt_reason.is_some_and(|reason| reason.contains("service not ready"))
+    {
+        return "service_not_ready".into();
+    }
+    "emergency".into()
+}
+
+fn gui_release_conditions(
+    automation_enabled: bool,
+    vision_sidecar: &str,
+    uinput_daemon: &str,
+) -> Vec<String> {
+    if !automation_enabled {
+        return vec!["Enable GUI automation in Settings.".into()];
+    }
+    let mut conditions = Vec::new();
+    if vision_sidecar == "starting" || uinput_daemon == "starting" {
+        conditions.push("Wait for vision sidecar and uinput daemon to report running.".into());
+    }
+    if vision_sidecar != "running" && vision_sidecar != "starting" {
+        conditions.push("Start or repair the vision sidecar.".into());
+    }
+    if uinput_daemon != "running" && uinput_daemon != "starting" {
+        conditions.push("Start or repair the uinput daemon and sudoers/socket permissions.".into());
+    }
+    conditions
 }
 
 impl From<ServiceStatus> for GuiAutomationStatus {
@@ -41,16 +144,115 @@ impl From<ServiceStatus> for GuiAutomationStatus {
             }
             .to_string()
         }
-        Self {
-            vision_sidecar: label(s.vision_sidecar),
-            uinput_daemon: label(s.uinput_daemon),
+        let vision_sidecar = label(s.vision_sidecar);
+        let uinput_daemon = label(s.uinput_daemon);
+        let session_type = current_gui_session_type();
+        let xdotool_available = command_available("xdotool");
+        let ydotool_available = command_available("ydotool");
+        let uinput_socket_path = kria_core::agent::gui_services::default_uinput_socket_path();
+        let uinput_socket_accessible = uinput_socket_path.exists();
+        let global_halt_engaged = kria_core::safety::is_halted();
+        let halt_reason = kria_core::safety::halt_reason();
+        let backend_selection = select_gui_action_backend(&GuiBackendProbeInput {
+            global_halt_engaged,
+            halt_reason: halt_reason.clone(),
             automation_enabled: s.automation_enabled,
-            global_halt_engaged: kria_core::safety::is_halted(),
-            halt_reason: kria_core::safety::halt_reason(),
+            orchestrator_available: true,
+            session_type: session_type.clone(),
+            vision_sidecar: vision_sidecar.clone(),
+            uinput_daemon: uinput_daemon.clone(),
+            xdotool_available,
+            xdotool_display_usable: session_type == "x11"
+                && xdotool_available
+                && std::env::var_os("DISPLAY").is_some(),
+            ydotool_available,
+            ydotool_permission_ok: false,
+            uinput_available: uinput_daemon == "running",
+            uinput_socket_path: Some(uinput_socket_path.display().to_string()),
+            uinput_socket_accessible,
+        });
+        Self {
+            vision_sidecar: vision_sidecar.clone(),
+            uinput_daemon: uinput_daemon.clone(),
+            automation_enabled: s.automation_enabled,
+            global_halt_engaged,
+            halt_kind: gui_halt_kind(
+                true,
+                s.automation_enabled,
+                global_halt_engaged,
+                halt_reason.as_deref(),
+                vision_sidecar.as_str(),
+                uinput_daemon.as_str(),
+            ),
+            halt_reason,
+            release_conditions: gui_release_conditions(
+                s.automation_enabled,
+                vision_sidecar.as_str(),
+                uinput_daemon.as_str(),
+            ),
             vision_pid: s.vision_pid,
             uinput_pid: s.uinput_pid,
             orchestrator_available: true,
+            session_type,
+            selected_backend: backend_selection.selected_backend,
+            backend_selection_reason: backend_selection.backend_selection_reason,
+            backend_probe_status: backend_selection.backend_probe_status,
+            backend_probe_errors: backend_selection.backend_probe_errors,
+            xdotool_available,
+            xdotool_usable_for_actions: backend_selection.xdotool_usable_for_actions,
+            ydotool_available,
+            ydotool_usable_for_actions: backend_selection.ydotool_usable_for_actions,
+            uinput_socket_path: Some(uinput_socket_path.display().to_string()),
+            uinput_socket_accessible,
+            can_execute_actions: backend_selection.can_execute_actions,
         }
+    }
+}
+
+fn orchestrator_unavailable_status() -> GuiAutomationStatus {
+    let session_type = current_gui_session_type();
+    let xdotool_available = command_available("xdotool");
+    let ydotool_available = command_available("ydotool");
+    let halt_reason = kria_core::safety::halt_reason();
+    let backend_selection = select_gui_action_backend(&GuiBackendProbeInput {
+        global_halt_engaged: kria_core::safety::is_halted(),
+        halt_reason: halt_reason.clone(),
+        automation_enabled: false,
+        orchestrator_available: false,
+        session_type: session_type.clone(),
+        vision_sidecar: "stopped".into(),
+        uinput_daemon: "stopped".into(),
+        xdotool_available,
+        xdotool_display_usable: false,
+        ydotool_available,
+        ydotool_permission_ok: false,
+        uinput_available: false,
+        uinput_socket_path: None,
+        uinput_socket_accessible: false,
+    });
+    GuiAutomationStatus {
+        vision_sidecar: "stopped".to_string(),
+        uinput_daemon: "stopped".to_string(),
+        automation_enabled: false,
+        global_halt_engaged: kria_core::safety::is_halted(),
+        halt_kind: "orchestrator_unavailable".into(),
+        halt_reason,
+        release_conditions: vec!["Restart KRIA with the GUI service orchestrator available.".into()],
+        vision_pid: None,
+        uinput_pid: None,
+        orchestrator_available: false,
+        session_type,
+        selected_backend: backend_selection.selected_backend,
+        backend_selection_reason: backend_selection.backend_selection_reason,
+        backend_probe_status: backend_selection.backend_probe_status,
+        backend_probe_errors: backend_selection.backend_probe_errors,
+        xdotool_available,
+        xdotool_usable_for_actions: backend_selection.xdotool_usable_for_actions,
+        ydotool_available,
+        ydotool_usable_for_actions: backend_selection.ydotool_usable_for_actions,
+        uinput_socket_path: None,
+        uinput_socket_accessible: false,
+        can_execute_actions: backend_selection.can_execute_actions,
     }
 }
 
@@ -59,30 +261,12 @@ impl From<ServiceStatus> for GuiAutomationStatus {
 pub async fn get_gui_automation_status(handle: AppHandle) -> Result<GuiAutomationStatus, String> {
     let cell: tauri::State<'_, AppStateCell> = handle.state();
     let Some(state) = cell.get() else {
-        return Ok(GuiAutomationStatus {
-            vision_sidecar: "stopped".to_string(),
-            uinput_daemon: "stopped".to_string(),
-            automation_enabled: false,
-            global_halt_engaged: kria_core::safety::is_halted(),
-            halt_reason: kria_core::safety::halt_reason(),
-            vision_pid: None,
-            uinput_pid: None,
-            orchestrator_available: false,
-        });
+        return Ok(orchestrator_unavailable_status());
     };
 
     match state.gui_orchestrator.as_ref() {
         Some(orch) => Ok(orch.status().await.into()),
-        None => Ok(GuiAutomationStatus {
-            vision_sidecar: "stopped".to_string(),
-            uinput_daemon: "stopped".to_string(),
-            automation_enabled: false,
-            global_halt_engaged: kria_core::safety::is_halted(),
-            halt_reason: kria_core::safety::halt_reason(),
-            vision_pid: None,
-            uinput_pid: None,
-            orchestrator_available: false,
-        }),
+        None => Ok(orchestrator_unavailable_status()),
     }
 }
 

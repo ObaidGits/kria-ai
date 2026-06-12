@@ -140,6 +140,32 @@ struct LocalApiDesktopChatCommandRequest {
     message: String,
     #[serde(default)]
     session_id: Option<String>,
+    #[serde(default)]
+    manual_profile: Option<super::chat::ManualToolProfileInput>,
+    #[serde(default)]
+    gui_cognition_test: Option<LocalApiGuiCognitionTestOptions>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct LocalApiGuiCognitionTestOptions {
+    #[serde(default)]
+    llm_planner_fixture: Option<kria_core::agent::gui_cognition::llm_planner::GuiLlmPlannerFixture>,
+    #[serde(default)]
+    disable_live_llm_planner: Option<bool>,
+    #[serde(default)]
+    action_backend_fixture: Option<super::gui_cognition::GuiActionBackendFixture>,
+    #[serde(default)]
+    perception_fixture: Option<super::gui_cognition::GuiPerceptionFixture>,
+    #[serde(default)]
+    hitl_decision_fixture: Option<kria_core::agent::gui_cognition::safety_hitl::GuiHitlDecisionFixture>,
+    #[serde(default)]
+    execution_mode: Option<kria_core::agent::gui_cognition::executor::GuiExecutionMode>,
+    #[serde(default)]
+    workflow: Option<bool>,
+    #[serde(default)]
+    workflow_resume: Option<bool>,
+    #[serde(default)]
+    resume_reason: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -369,6 +395,71 @@ async fn local_api_desktop_chat_command(
         );
     };
 
+    if request.manual_profile.as_ref().is_some_and(|profile| {
+        profile.mode_id.trim().eq_ignore_ascii_case("gui_cognition")
+            || profile
+                .app_lock
+                .as_deref()
+                .map(|value| value.trim().to_ascii_lowercase())
+                .is_some_and(|value| {
+                    matches!(
+                        value.as_str(),
+                        "gui" | "gui_cognition" | "gui-cognition" | "desktop_gui"
+                    )
+                })
+    }) {
+        match super::gui_cognition::desktop_gui_cognition_command_capture(
+            request.message,
+            app_state,
+            request.session_id,
+            "agent",
+            request.gui_cognition_test.map(|options| {
+                super::gui_cognition::GuiCognitionCommandOptions {
+                    llm_planner_fixture: options.llm_planner_fixture,
+                    disable_live_llm_planner: options.disable_live_llm_planner.unwrap_or(false),
+                    action_backend_fixture: options.action_backend_fixture,
+                    perception_fixture: options.perception_fixture,
+                    hitl_decision_fixture: options.hitl_decision_fixture,
+                    execution_mode: options.execution_mode.unwrap_or_default(),
+                    workflow_enabled: options.workflow.unwrap_or(false),
+                    workflow_resume: options.workflow_resume.unwrap_or(false),
+                    resume_reason: options.resume_reason,
+                }
+            }),
+        )
+        .await
+        {
+            Ok(capture) => {
+                let status = StatusCode::from_u16(capture.status_code).unwrap_or(StatusCode::OK);
+                return (
+                    status,
+                    Json(serde_json::json!({
+                        "status": capture.status,
+                        "reply": capture.reply,
+                        "events": capture.events,
+                        "desktop_command": {
+                            "path": "send_manual_tool_message",
+                            "ui_opened": false,
+                            "source": "desktop_chat",
+                            "mode_id": "gui_cognition"
+                        },
+                        "response": capture.response,
+                    })),
+                );
+            }
+            Err(error) => {
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    Json(serde_json::json!({
+                        "status": "error",
+                        "message": error,
+                        "reply": error,
+                    })),
+                );
+            }
+        }
+    }
+
     match super::chat::desktop_n8n_pre_fallback_command_capture(
         request.message,
         app_state,
@@ -417,6 +508,77 @@ async fn local_api_desktop_chat_command(
             })),
         ),
     }
+}
+
+async fn local_api_gui_automation_status(
+    AxumState(state): AxumState<LocalApiBridgeState>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let state_cell = match local_api_app_state(&state) {
+        Ok(state_cell) => state_cell,
+        Err(error) => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "status": "error",
+                    "message": error,
+                })),
+            )
+        }
+    };
+    let Some(app_state) = state_cell.get() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "status": "error",
+                "message": "KRIA is still initializing — please try again in a moment",
+            })),
+        );
+    };
+
+    let action_backend =
+        super::gui_cognition::build_gui_action_backend_status(app_state, None).await;
+    let capabilities = serde_json::to_value(&action_backend.capabilities)
+        .unwrap_or_else(|_| serde_json::json!({}));
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "status": "ok",
+            "gui_automation": {
+                "global_halt_engaged": action_backend.global_halt_engaged,
+                "halt_kind": action_backend.halt_kind,
+                "halt_reason": action_backend.halt_reason,
+                "release_conditions": action_backend.release_conditions,
+                "startup_elapsed_ms": action_backend.startup_elapsed_ms,
+                "can_observe": action_backend.can_observe,
+                "can_plan": action_backend.can_plan,
+                "automation_enabled": action_backend.automation_enabled,
+                "vision_sidecar": action_backend.vision_sidecar,
+                "uinput_daemon": action_backend.uinput_daemon,
+                "orchestrator_available": action_backend.orchestrator_available,
+                "session_type": action_backend.session_type,
+                "xdotool_available": action_backend.xdotool_available,
+                "ydotool_available": action_backend.ydotool_available,
+                "uinput_available": action_backend.uinput_available,
+                "selected_backend": action_backend.selected_backend,
+                "backend_selection_reason": action_backend.backend_selection_reason,
+                "backend_probe_status": action_backend.backend_probe_status,
+                "backend_probe_errors": action_backend.backend_probe_errors,
+                "input_backend_kind": action_backend.input_backend_kind,
+                "focus_supported": action_backend.focus_supported,
+                "typing_supported": action_backend.typing_supported,
+                "click_supported": action_backend.click_supported,
+                "verification_supported": action_backend.verification_supported,
+                "xdotool_usable_for_actions": action_backend.xdotool_usable_for_actions,
+                "ydotool_usable_for_actions": action_backend.ydotool_usable_for_actions,
+                "uinput_socket_path": action_backend.uinput_socket_path,
+                "uinput_socket_accessible": action_backend.uinput_socket_accessible,
+                "can_execute_actions": action_backend.can_execute_actions,
+                "blockers": action_backend.blockers,
+                "capabilities": capabilities,
+            }
+        })),
+    )
 }
 
 pub(super) async fn local_api_n8n_pre_fallback_response_from_app_state(
@@ -3192,6 +3354,10 @@ pub(super) fn start_local_api_bridge(
                     .route(
                         "/api/testing/desktop-chat-command",
                         post(local_api_desktop_chat_command),
+                    )
+                    .route(
+                        "/api/testing/gui-automation-status",
+                        get(local_api_gui_automation_status),
                     )
                     .route("/api/n8n/route", post(local_api_n8n_route_prompt))
                     .route(

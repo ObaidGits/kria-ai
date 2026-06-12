@@ -1,0 +1,597 @@
+{
+  "schema_version": "kria.testing.scenarios.v1",
+  "scenarios": [
+    {
+      "id": "gui_cognition.perception.healthy_snapshot",
+      "title": "GUI Cognition perception snapshot exposes safe source summaries",
+      "driver": "desktop_chat_command",
+      "tags": [
+        "live",
+        "slow",
+        "gui_cognition",
+        "desktop_command",
+        "perception",
+        "regression"
+      ],
+      "required_services": [
+        "kria_api"
+      ],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Observe my current screen and report active window, OCR, accessibility, monitor, and visible control status.",
+        "expected_status_any": [
+          "ok"
+        ],
+        "expected_reply_not_contains_any": [
+          "LLM error",
+          "tool-calling",
+          "Ignore previous instructions",
+          "screenshot_path"
+        ],
+        "expected_event_names": [
+          "gui_cognition:event"
+        ],
+        "expected_gui_event_types": [
+          "TurnStarted",
+          "RouteConfirmed",
+          "ObservationStarted",
+          "ObservationCompleted",
+          "ContextBuilt",
+          "TurnCompleted"
+        ],
+        "forbidden_gui_event_types": [
+          "ActionStarted"
+        ],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          {
+            "path": "desktop_command.path",
+            "equals": "send_manual_tool_message"
+          },
+          {
+            "path": "desktop_command.mode_id",
+            "equals": "gui_cognition"
+          },
+          {
+            "path": "gui_cognition.path",
+            "equals": "send_manual_tool_message"
+          },
+          {
+            "path": "gui_cognition.llm_tool_loop",
+            "equals": false
+          },
+          {
+            "path": "gui_cognition.perception.active_window_source",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.active_window_confidence",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.screenshot_available",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.ocr_available",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.accessibility_available",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.accessibility_source_status",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.atspi_snapshot_total_ms",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.atspi_skipped_app_count",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.atspi_omitted_node_count",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.monitor_count",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.cursor_focus_known",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.observation_total_ms",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.slowest_probe",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.probe_timeout_count",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.cache_hit",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.cache_policy",
+            "exists": true
+          }
+        ],
+        "forbidden_json_paths": [
+          "gui_cognition.perception.ocr_blocks.0.text",
+          "gui_cognition.perception.screenshot_path",
+          "gui_cognition.perception.screenshot"
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.perception.no_llm_tool_loop",
+      "title": "GUI Cognition perception route does not fall into native LLM tool loop",
+      "driver": "desktop_chat_command",
+      "tags": [
+        "live",
+        "slow",
+        "gui_cognition",
+        "desktop_command",
+        "perception",
+        "routing",
+        "regression"
+      ],
+      "required_services": [
+        "kria_api"
+      ],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Observe the current screen and tell me the active window.",
+        "expected_status_any": [
+          "ok"
+        ],
+        "expected_reply_not_contains_any": [
+          "LLM error",
+          "get_active_window()",
+          "tool-calling"
+        ],
+        "expected_event_names": [
+          "gui_cognition:event"
+        ],
+        "expected_gui_event_types": [
+          "RouteConfirmed",
+          "ObservationStarted",
+          "ObservationCompleted",
+          "TurnCompleted"
+        ],
+        "forbidden_gui_event_types": [
+          "ActionStarted"
+        ],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          {
+            "path": "gui_cognition.path",
+            "equals": "send_manual_tool_message"
+          },
+          {
+            "path": "gui_cognition.llm_tool_loop",
+            "equals": false
+          },
+          {
+            "path": "gui_cognition.perception.active_window_source",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.accessibility_source_status",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.atspi_snapshot_total_ms",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.observation_total_ms",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.slowest_probe",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.probe_timeout_count",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.cache_hit",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.cache_policy",
+            "exists": true
+          }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.perception.fixture_latency_metadata",
+      "title": "GUI Cognition fixture observation emits latency and cache metadata",
+      "driver": "desktop_chat_command",
+      "tags": [
+        "live",
+        "gui_cognition",
+        "desktop_command",
+        "perception",
+        "smoke",
+        "regression"
+      ],
+      "required_services": [
+        "kria_api"
+      ],
+      "timeout_seconds": 60,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Observe my current screen and report perception latency status.",
+        "expected_status_any": [
+          "ok"
+        ],
+        "expected_reply_not_contains_any": [
+          "LLM error",
+          "tool-calling",
+          "Ignore previous instructions",
+          "screenshot_path"
+        ],
+        "expected_event_names": [
+          "gui_cognition:event"
+        ],
+        "expected_gui_event_types": [
+          "TurnStarted",
+          "RouteConfirmed",
+          "ObservationStarted",
+          "ObservationCompleted",
+          "ContextBuilt",
+          "TurnCompleted"
+        ],
+        "forbidden_gui_event_types": [
+          "ActionStarted"
+        ],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          {
+            "path": "desktop_command.path",
+            "equals": "send_manual_tool_message"
+          },
+          {
+            "path": "gui_cognition.path",
+            "equals": "send_manual_tool_message"
+          },
+          {
+            "path": "gui_cognition.llm_tool_loop",
+            "equals": false
+          },
+          {
+            "path": "gui_cognition.perception.observation_total_ms",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.slowest_probe",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.probe_timeout_count",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.cache_hit",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.cache_policy",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.ocr_available",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.accessibility_available",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.accessibility_source_status",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.atspi_skipped_app_count",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.atspi_omitted_node_count",
+            "exists": true
+          }
+        ],
+        "forbidden_json_paths": [
+          "gui_cognition.perception.ocr_blocks.0.text",
+          "gui_cognition.perception.screenshot_path",
+          "gui_cognition.perception.screenshot"
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.perception.controlled_surface_accuracy",
+      "title": "GUI Cognition controlled perception surface reports expected fields accurately",
+      "driver": "desktop_chat_command",
+      "tags": [
+        "live",
+        "gui_cognition",
+        "desktop_command",
+        "perception",
+        "regression"
+      ],
+      "required_services": [
+        "kria_api"
+      ],
+      "timeout_seconds": 60,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "What is on my screen?",
+        "expected_status_any": [
+          "ok"
+        ],
+        "expected_reply_contains_all": [
+          "KRIA Perception Test",
+          "Search KRIA",
+          "Submit Test"
+        ],
+        "expected_reply_not_contains_any": [
+          "LLM error",
+          "tool-calling",
+          "Ignore previous instructions",
+          "screenshot_path",
+          "ActionStarted"
+        ],
+        "expected_event_names": [
+          "gui_cognition:event"
+        ],
+        "expected_gui_event_types": [
+          "TurnStarted",
+          "RouteConfirmed",
+          "ObservationStarted",
+          "ObservationCompleted",
+          "ContextBuilt",
+          "GoalContractCreated",
+          "PlanCreated",
+          "TurnCompleted"
+        ],
+        "forbidden_gui_event_types": [
+          "ActionStarted",
+          "ActionCompleted"
+        ],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          {
+            "path": "desktop_command.path",
+            "equals": "send_manual_tool_message"
+          },
+          {
+            "path": "desktop_command.mode_id",
+            "equals": "gui_cognition"
+          },
+          {
+            "path": "gui_cognition.llm_tool_loop",
+            "equals": false
+          },
+          {
+            "path": "gui_cognition.intent",
+            "equals": "observe"
+          },
+          {
+            "path": "gui_cognition.perception.active_window",
+            "equals": "KRIA Perception Test"
+          },
+          {
+            "path": "gui_cognition.perception.active_window_reliability",
+            "equals": "reliable"
+          },
+          {
+            "path": "gui_cognition.perception.active_window_fallback_chain.0.source",
+            "equals": "gui_cognition_test_fixture"
+          },
+          {
+            "path": "gui_cognition.perception.active_window_fallback_chain.0.status",
+            "equals": "matched"
+          },
+          {
+            "path": "gui_cognition.perception.screenshot_available",
+            "equals": true
+          },
+          {
+            "path": "gui_cognition.perception.screenshot_status",
+            "equals": "available"
+          },
+          {
+            "path": "gui_cognition.perception.screenshot_capture_ms",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.screen_hash_prefix",
+            "equals": "fixture-screen-h"
+          },
+          {
+            "path": "gui_cognition.perception.ocr_available",
+            "equals": true
+          },
+          {
+            "path": "gui_cognition.perception.ocr_trust",
+            "equals": "untrusted"
+          },
+          {
+            "path": "gui_cognition.perception.ocr_engine_status",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.ocr_image_status",
+            "equals": "fixture_original"
+          },
+          {
+            "path": "gui_cognition.perception.ocr_total_ms",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.perception.ocr_block_count",
+            "equals": 1
+          },
+          {
+            "path": "gui_cognition.perception.ocr_injection_count",
+            "equals": 0
+          },
+          {
+            "path": "gui_cognition.perception.accessibility_available",
+            "equals": true
+          },
+          {
+            "path": "gui_cognition.perception.accessibility_source_status",
+            "equals": "healthy"
+          },
+          {
+            "path": "gui_cognition.perception.accessibility_node_count",
+            "equals": 87
+          },
+          {
+            "path": "gui_cognition.perception.accessibility_control_count",
+            "equals": 7
+          },
+          {
+            "path": "gui_cognition.perception.visible_control_count",
+            "equals": 7
+          },
+          {
+            "path": "gui_cognition.perception.text_field_count",
+            "equals": 1
+          },
+          {
+            "path": "gui_cognition.perception.button_count",
+            "equals": 3
+          },
+          {
+            "path": "gui_cognition.perception.other_control_count",
+            "equals": 3
+          },
+          {
+            "path": "gui_cognition.perception.trusted_control_count",
+            "equals": 7
+          },
+          {
+            "path": "gui_cognition.perception.not_executable_control_count",
+            "equals": 0
+          },
+          {
+            "path": "gui_cognition.perception.control_samples.0.label",
+            "equals": "Search KRIA"
+          },
+          {
+            "path": "gui_cognition.perception.control_samples.0.bounds.width",
+            "equals": 240
+          },
+          {
+            "path": "gui_cognition.perception.control_samples.1.label",
+            "equals": "Submit Test"
+          },
+          {
+            "path": "gui_cognition.perception.control_samples.2.label",
+            "equals": "Search"
+          },
+          {
+            "path": "gui_cognition.perception.control_samples.3.label",
+            "equals": "Save"
+          },
+          {
+            "path": "gui_cognition.perception.control_samples.4.label",
+            "equals": "Enable option"
+          },
+          {
+            "path": "gui_cognition.perception.control_samples.5.label",
+            "equals": "Learn more"
+          },
+          {
+            "path": "gui_cognition.perception.control_samples.6.label",
+            "equals": "Overview"
+          },
+          {
+            "path": "gui_cognition.perception.monitor_count",
+            "equals": 1
+          },
+          {
+            "path": "gui_cognition.perception.dpi_available",
+            "equals": true
+          },
+          {
+            "path": "gui_cognition.perception.cursor_focus_known",
+            "equals": true
+          },
+          {
+            "path": "gui_cognition.perception.observation_total_ms",
+            "exists": true
+          },
+          {
+            "path": "gui_cognition.context.ocr_untrusted",
+            "equals": true
+          }
+        ],
+        "forbidden_json_paths": [
+          "gui_cognition.perception.ocr_blocks.0.text",
+          "gui_cognition.perception.screenshot_path",
+          "gui_cognition.perception.screenshot",
+          "gui_cognition.perception.raw_accessibility_tree"
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button"
+        }
+      }
+    }
+  ]
+}

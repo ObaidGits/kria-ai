@@ -1,0 +1,230 @@
+{
+  "schema_version": "kria.testing.scenarios.v1",
+  "scenarios": [
+    {
+      "id": "step7.execute.focus_search_box_fixture",
+      "title": "Step 7 executes a low-risk FocusField proposal through the fixture executor",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step7_executor", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "focused_search_field",
+          "action_backend_fixture": "services_healthy",
+          "execution_mode": "execute_fixture"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Focus the search box",
+        "expected_status_any": ["completed"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["ObservationCompleted", "ContextBuilt", "GoalContractCreated", "PlanCreated", "PlanValidationCompleted", "TargetResolutionCompleted", "SafetyGateCompleted", "ActionStarted", "ActionCompleted", "ExecutionVerificationCompleted", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionFailed", "ExecutionBlocked"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "desktop_command.path", "equals": "send_manual_tool_message" },
+          { "path": "gui_cognition.safety_gate.safety_status", "equals": "safe_no_approval_required" },
+          { "path": "gui_cognition.execution.status", "equals": "completed" },
+          { "path": "gui_cognition.execution.backend_used", "equals": "fixture_executor" },
+          { "path": "gui_cognition.execution.proposal_hash", "exists": true },
+          { "path": "gui_cognition.target_resolution.resolved_target.target_hash", "exists": true }
+        ],
+        "forbidden_json_paths": [
+          "gui_cognition.raw_prompt",
+          "gui_cognition.perception.ocr_blocks.0.text",
+          "gui_cognition.perception.screenshot"
+        ]
+      }
+    },
+    {
+      "id": "step7.execute.click_search_button_fixture",
+      "title": "Step 7 executes a resolved Search button click through the fixture executor",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step7_executor", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "step8_click_result_changes",
+          "action_backend_fixture": "services_healthy",
+          "execution_mode": "execute_fixture"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Click the Search button",
+        "expected_status_any": ["completed"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["TargetResolutionCompleted", "SafetyGateCompleted", "ActionStarted", "ActionCompleted", "ExecutionVerificationCompleted", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionFailed", "ExecutionBlocked"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.target_resolution.status", "equals": "resolved" },
+          { "path": "gui_cognition.target_resolution.resolved_target.label", "equals": "Search" },
+          { "path": "gui_cognition.execution.action_type", "equals": "ClickControl" },
+          { "path": "gui_cognition.execution.status", "equals": "completed" },
+          { "path": "gui_cognition.execution.backend_used", "equals": "fixture_executor" },
+          { "path": "gui_cognition.verification.status", "equals": "verified" }
+        ]
+      }
+    },
+    {
+      "id": "step7.execute.no_execution_in_safety_only_mode",
+      "title": "Step 7 execution mode boundary keeps safety-only turns from starting actions",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step7_executor", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "focused_search_field",
+          "action_backend_fixture": "services_healthy",
+          "execution_mode": "safety_only"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Focus the search box",
+        "expected_status_any": ["ok"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["TargetResolutionCompleted", "SafetyGateCompleted", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted", "ActionFailed", "ExecutionBlocked"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.safety_gate.safety_status", "equals": "safe_no_approval_required" },
+          { "path": "gui_cognition.safety_gate.can_authorize_step7", "equals": true },
+          { "path": "gui_cognition.execution", "exists": false }
+        ]
+      }
+    },
+    {
+      "id": "step7.execute.backend_blocked_no_action_started",
+      "title": "Step 7 blocks before ActionStarted when the deterministic backend is unavailable",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step7_executor", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "focused_search_field",
+          "action_backend_fixture": "global_halt",
+          "execution_mode": "execute_fixture"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Focus the search box",
+        "expected_status_any": ["blocked"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["TargetResolutionCompleted", "SafetyGateCompleted", "ExecutionBlocked", "ExecutionVerificationCompleted", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted", "ActionFailed"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.execution.status", "equals": "blocked" },
+          { "path": "gui_cognition.execution.backend_used", "equals": "blocked_global_halt" },
+          { "path": "gui_cognition.execution.safe_error_summary", "contains": "global safety halt" }
+        ]
+      }
+    },
+    {
+      "id": "step7.execute.approved_submit_executes_bound_target_fixture",
+      "title": "Step 7 executes an approved risky proposal only after matching HITL approval",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step7_executor", "hitl", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "step8_click_result_changes",
+          "action_backend_fixture": "services_healthy",
+          "hitl_decision_fixture": "approve",
+          "execution_mode": "execute_fixture"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Click the Submit Test button and submit this form",
+        "expected_status_any": ["completed"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["SafetyGateCompleted", "HitlRequired", "HitlDecisionRecorded", "ActionStarted", "ActionCompleted", "ExecutionVerificationCompleted", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionFailed", "ExecutionBlocked"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.hitl_decision.decision", "equals": "approved" },
+          { "path": "gui_cognition.hitl_decision.can_authorize_step7", "equals": true },
+          { "path": "gui_cognition.execution.status", "equals": "completed" },
+          { "path": "gui_cognition.execution.backend_used", "equals": "fixture_executor" },
+          { "path": "gui_cognition.execution.proposal_hash", "exists": true }
+        ]
+      }
+    },
+    {
+      "id": "step7.execute.denied_approval_blocked",
+      "title": "Step 7 never starts execution after a denied risky approval",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step7_executor", "hitl", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button",
+          "action_backend_fixture": "services_healthy",
+          "hitl_decision_fixture": "deny",
+          "execution_mode": "execute_fixture"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Click the Submit Test button and submit this form",
+        "expected_status_any": ["blocked"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["SafetyGateCompleted", "HitlRequired", "HitlDecisionRecorded", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted", "ActionFailed"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.hitl_decision.decision", "equals": "denied" },
+          { "path": "gui_cognition.hitl_decision.can_authorize_step7", "equals": false },
+          { "path": "gui_cognition.execution", "exists": false }
+        ]
+      }
+    }
+  ]
+}

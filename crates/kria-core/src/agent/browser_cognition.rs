@@ -588,6 +588,199 @@ impl BrowserCognitionEngine {
         }
     }
 
+    /// Read safe focus metadata from the active Chrome/Chromium page via CDP.
+    ///
+    /// This intentionally returns only element metadata: role/label/bounds/editable
+    /// state and a safe page title/origin summary. It does not return page text.
+    pub async fn get_chrome_focus_snapshot(&self) -> BrowserResult {
+        let expr = browser_focus_expression("chrome");
+        match self
+            .execute_cdp_command(
+                "Runtime.evaluate",
+                serde_json::json!({
+                    "expression": expr,
+                    "returnByValue": true,
+                    "awaitPromise": false
+                }),
+            )
+            .await
+        {
+            Ok(res) => {
+                let value = res["result"]["result"]["value"].clone();
+                if value.get("status").and_then(serde_json::Value::as_str) == Some("ok") {
+                    BrowserResult::ok_with_data("Chrome CDP active element focus metadata", value)
+                } else {
+                    BrowserResult::err(
+                        value
+                            .get("reason")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("Chrome CDP did not expose an active element")
+                            .to_string(),
+                    )
+                }
+            }
+            Err(error) => BrowserResult::err(format!("Chrome CDP focus probe failed: {error}")),
+        }
+    }
+
+    /// Read safe focus metadata from Firefox through WebDriver BiDi.
+    ///
+    /// Firefox must be launched with `--remote-debugging-port=<port>`. The probe
+    /// creates a temporary BiDi session, gets the first top-level browsing
+    /// context, and evaluates the same metadata-only active element script.
+    pub async fn get_firefox_bidi_focus_snapshot(port: u16) -> BrowserResult {
+        let ws_url = format!("ws://127.0.0.1:{port}/session");
+        let connected = tokio::time::timeout(
+            std::time::Duration::from_millis(220),
+            tokio_tungstenite::connect_async(&ws_url),
+        )
+        .await;
+        let (ws_stream, _) = match connected {
+            Ok(Ok(stream)) => stream,
+            Ok(Err(error)) => {
+                return BrowserResult::err(format!("Firefox BiDi unavailable: {error}"));
+            }
+            Err(_) => return BrowserResult::err("Firefox BiDi unavailable: connection timeout"),
+        };
+        let (mut write, mut read) = ws_stream.split();
+
+        async fn send_bidi(
+            write: &mut futures::stream::SplitSink<
+                tokio_tungstenite::WebSocketStream<
+                    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+                >,
+                Message,
+            >,
+            read: &mut futures::stream::SplitStream<
+                tokio_tungstenite::WebSocketStream<
+                    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+                >,
+            >,
+            id: u64,
+            method: &str,
+            params: serde_json::Value,
+        ) -> Result<serde_json::Value, String> {
+            let req = serde_json::json!({
+                "id": id,
+                "method": method,
+                "params": params,
+            });
+            write
+                .send(Message::Text(req.to_string().into()))
+                .await
+                .map_err(|error| format!("Firefox BiDi send failed: {error}"))?;
+            while let Some(msg) =
+                tokio::time::timeout(std::time::Duration::from_millis(220), read.next())
+                    .await
+                    .map_err(|_| "Firefox BiDi response timeout".to_string())?
+            {
+                let msg = msg.map_err(|error| format!("Firefox BiDi read failed: {error}"))?;
+                if let Message::Text(text) = msg {
+                    let parsed: serde_json::Value =
+                        serde_json::from_str(&text).map_err(|error| error.to_string())?;
+                    if parsed.get("id").and_then(serde_json::Value::as_u64) == Some(id) {
+                        return Ok(parsed);
+                    }
+                }
+            }
+            Err("Firefox BiDi connection closed".into())
+        }
+
+        if let Err(error) = send_bidi(
+            &mut write,
+            &mut read,
+            1,
+            "session.new",
+            serde_json::json!({"capabilities": {}}),
+        )
+        .await
+        {
+            return BrowserResult::err(error);
+        }
+
+        let tree = match send_bidi(
+            &mut write,
+            &mut read,
+            2,
+            "browsingContext.getTree",
+            serde_json::json!({}),
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(error) => {
+                let _ = send_bidi(
+                    &mut write,
+                    &mut read,
+                    99,
+                    "session.end",
+                    serde_json::json!({}),
+                )
+                .await;
+                return BrowserResult::err(error);
+            }
+        };
+        let context = tree["result"]["contexts"]
+            .as_array()
+            .and_then(|contexts| contexts.first())
+            .and_then(|context| context.get("context"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+        let Some(context) = context else {
+            return BrowserResult::err("Firefox BiDi did not expose a browsing context");
+        };
+
+        let evaluated = match send_bidi(
+            &mut write,
+            &mut read,
+            3,
+            "script.evaluate",
+            serde_json::json!({
+                "expression": browser_focus_expression("firefox"),
+                "target": { "context": context },
+                "awaitPromise": false,
+                "resultOwnership": "none",
+                "serializationOptions": { "maxObjectDepth": 4 }
+            }),
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(error) => {
+                let _ = send_bidi(
+                    &mut write,
+                    &mut read,
+                    99,
+                    "session.end",
+                    serde_json::json!({}),
+                )
+                .await;
+                return BrowserResult::err(error);
+            }
+        };
+
+        let value = webdriver_bidi_local_value_to_json(&evaluated["result"]["result"]);
+        let _ = send_bidi(
+            &mut write,
+            &mut read,
+            4,
+            "session.end",
+            serde_json::json!({}),
+        )
+        .await;
+        if value.get("status").and_then(serde_json::Value::as_str) == Some("ok") {
+            BrowserResult::ok_with_data("Firefox BiDi active element focus metadata", value)
+        } else {
+            BrowserResult::err(
+                value
+                    .get("reason")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("Firefox BiDi did not expose an active element")
+                    .to_string(),
+            )
+        }
+    }
+
     /// Click an element on the page by CSS selector or text content.
     pub async fn click_element(&self, selector: &str) -> BrowserResult {
         let sel_json = serde_json::to_string(selector).unwrap_or_else(|_| "\"\"".to_string());
@@ -685,5 +878,146 @@ impl BrowserCognitionEngine {
 impl Default for BrowserCognitionEngine {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+fn browser_focus_expression(browser: &str) -> String {
+    let browser_json = serde_json::to_string(browser).unwrap_or_else(|_| "\"browser\"".into());
+    format!(
+        r#"(function() {{
+            const browser = {browser_json};
+            const el = document.activeElement;
+            const redact = (value, limit = 160) => {{
+                if (value === null || value === undefined) return null;
+                const text = String(value)
+                    .replace(/[\u0000-\u001f\u007f]/g, " ")
+                    .replace(/((?:api[_-]?key|token|password|passwd|secret|credential|authorization|bearer)\s*[:=]\s*)[^\s,;]+/gi, "$1[REDACTED]")
+                    .trim();
+                return text ? text.slice(0, limit) : null;
+            }};
+            const hash = (value) => {{
+                const text = String(value || "");
+                let h = 2166136261;
+                for (let i = 0; i < text.length; i++) {{
+                    h ^= text.charCodeAt(i);
+                    h = Math.imul(h, 16777619);
+                }}
+                return "h" + (h >>> 0).toString(16);
+            }};
+            if (!el) {{
+                return {{ status: "unavailable", browser, reason: "document.activeElement is unavailable" }};
+            }}
+            const tag = (el.tagName || "").toLowerCase();
+            const type = (el.getAttribute("type") || "").toLowerCase();
+            const explicitRole = el.getAttribute("role");
+            const role = explicitRole || (
+                tag === "textarea" ? "textbox" :
+                tag === "select" ? "combobox" :
+                tag === "button" ? "button" :
+                tag === "a" ? "link" :
+                tag === "input" && type === "search" ? "searchbox" :
+                tag === "input" && ["button", "submit", "reset"].includes(type) ? "button" :
+                tag === "input" ? "textbox" :
+                el.isContentEditable ? "textbox" :
+                tag || "unknown"
+            );
+            const disabled = Boolean(el.disabled || el.getAttribute("aria-disabled") === "true");
+            const readonly = Boolean(el.readOnly || el.getAttribute("aria-readonly") === "true");
+            const editable = !disabled && !readonly && (
+                el.isContentEditable ||
+                tag === "textarea" ||
+                tag === "select" ||
+                (tag === "input" && !["button", "submit", "reset", "checkbox", "radio", "file", "hidden"].includes(type))
+            );
+            const rect = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+            const label = redact(
+                el.getAttribute("aria-label") ||
+                el.getAttribute("placeholder") ||
+                el.getAttribute("name") ||
+                el.getAttribute("title") ||
+                el.getAttribute("value") ||
+                el.id ||
+                role,
+                140
+            );
+            return {{
+                status: "ok",
+                browser,
+                tag,
+                role,
+                label,
+                id_hash: hash(el.id),
+                class_hash: hash(el.className),
+                input_type: redact(type, 40),
+                editable,
+                disabled,
+                readonly,
+                is_content_editable: Boolean(el.isContentEditable),
+                bounds: rect ? {{
+                    x: Math.round(rect.left + window.screenX),
+                    y: Math.round(rect.top + window.screenY),
+                    width: Math.round(rect.width),
+                    height: Math.round(rect.height)
+                }} : null,
+                page_title: redact(document.title, 160),
+                url_origin: redact(location.origin, 160),
+                document_has_focus: Boolean(document.hasFocus && document.hasFocus()),
+                observed_at_ms: Date.now()
+            }};
+        }})()"#
+    )
+}
+
+fn webdriver_bidi_local_value_to_json(value: &serde_json::Value) -> serde_json::Value {
+    let Some(kind) = value.get("type").and_then(serde_json::Value::as_str) else {
+        return value.clone();
+    };
+    match kind {
+        "object" => {
+            let mut map = serde_json::Map::new();
+            if let Some(entries) = value.get("value").and_then(serde_json::Value::as_array) {
+                for entry in entries {
+                    let Some(pair) = entry.as_array() else {
+                        continue;
+                    };
+                    if pair.len() != 2 {
+                        continue;
+                    }
+                    let key = pair[0]
+                        .get("value")
+                        .and_then(serde_json::Value::as_str)
+                        .or_else(|| pair[0].as_str());
+                    if let Some(key) = key {
+                        map.insert(
+                            key.to_string(),
+                            webdriver_bidi_local_value_to_json(&pair[1]),
+                        );
+                    }
+                }
+            }
+            serde_json::Value::Object(map)
+        }
+        "array" => serde_json::Value::Array(
+            value
+                .get("value")
+                .and_then(serde_json::Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .map(webdriver_bidi_local_value_to_json)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default(),
+        ),
+        "string" => value
+            .get("value")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
+        "number" | "boolean" => value
+            .get("value")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
+        "null" | "undefined" => serde_json::Value::Null,
+        _ => value.get("value").cloned().unwrap_or_else(|| value.clone()),
     }
 }

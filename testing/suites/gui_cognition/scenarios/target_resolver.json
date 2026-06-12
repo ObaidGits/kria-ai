@@ -1,0 +1,251 @@
+{
+  "schema_version": "kria.testing.scenarios.v1",
+  "scenarios": [
+    {
+      "id": "step5.resolve.search_button",
+      "title": "Step 5 resolves a unique Search button and stops before execution",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step5_target_resolver", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button",
+          "action_backend_fixture": "global_halt"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Click the Search button",
+        "expected_status_any": ["ok"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["ObservationCompleted", "ContextBuilt", "GoalContractCreated", "PlanCreated", "PlanValidationCompleted", "TargetResolutionStarted", "TargetResolutionCompleted", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted", "ExecutionStarted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "desktop_command.path", "equals": "send_manual_tool_message" },
+          { "path": "gui_cognition.target_resolution.status", "equals": "resolved" },
+          { "path": "gui_cognition.target_resolution.can_execute", "equals": false },
+          { "path": "gui_cognition.target_resolution.can_proceed_to_safety_gate", "equals": true },
+          { "path": "gui_cognition.target_resolution.resolved_target.label", "equals": "Search" },
+          { "path": "gui_cognition.target_resolution.resolved_target.role", "equals": "push button" },
+          { "path": "gui_cognition.target_resolution.resolved_target.control_id", "exists": true },
+          { "path": "gui_cognition.target_resolution.resolved_target.bounds.x", "exists": true },
+          { "path": "gui_cognition.target_resolution.resolved_target.target_hash", "exists": true }
+        ]
+      }
+    },
+    {
+      "id": "step5.resolve.search_input",
+      "title": "Step 5 resolves a Search input as editable",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step5_target_resolver", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "focused_search_field",
+          "action_backend_fixture": "global_halt"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Focus the search box",
+        "expected_status_any": ["ok"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["GoalContractCreated", "PlanCreated", "PlanValidationCompleted", "TargetResolutionCompleted", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.target_resolution.status", "equals": "resolved" },
+          { "path": "gui_cognition.target_resolution.resolved_target.label", "equals": "Search" },
+          { "path": "gui_cognition.target_resolution.resolved_target.target_kind", "equals": "text_field" },
+          { "path": "gui_cognition.target_resolution.can_execute", "equals": false }
+        ]
+      }
+    },
+    {
+      "id": "step5.resolve.multiple_search_buttons_ambiguous",
+      "title": "Step 5 refuses to guess between duplicate Search buttons",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step5_target_resolver", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "duplicate_search_buttons",
+          "action_backend_fixture": "global_halt"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Click the Search button",
+        "expected_status_any": ["blocked"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["PlanValidationCompleted", "TargetResolutionCompleted", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.target_resolution.status", "equals": "ambiguous" },
+          { "path": "gui_cognition.target_resolution.ambiguity_count", "exists": true },
+          { "path": "gui_cognition.target_resolution.can_proceed_to_safety_gate", "equals": false },
+          { "path": "gui_cognition.target_resolution.can_execute", "equals": false }
+        ]
+      }
+    },
+    {
+      "id": "step5.resolve.generic_button_clarifies",
+      "title": "Step 5 skips target resolution when Step 4 clarifies a generic button",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step5_target_resolver", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button",
+          "action_backend_fixture": "global_halt"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Click the button",
+        "expected_status_any": ["blocked"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["PlanValidationCompleted", "TargetResolutionCompleted", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.plan_validation.readiness_status", "equals": "needs_clarification" },
+          { "path": "gui_cognition.target_resolution.status", "equals": "skipped" },
+          { "path": "gui_cognition.target_resolution.can_execute", "equals": false }
+        ]
+      }
+    },
+    {
+      "id": "step5.resolve.hidden_disabled_rejected",
+      "title": "Step 5 blocks hidden or disabled Search controls",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step5_target_resolver", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "hidden_disabled_controls",
+          "action_backend_fixture": "global_halt"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Click the Search button",
+        "expected_status_any": ["blocked"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["PlanValidationCompleted", "TargetResolutionCompleted", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.target_resolution.status", "equals": "blocked" },
+          { "path": "gui_cognition.target_resolution.can_execute", "equals": false },
+          { "path": "gui_cognition.target_resolution.blockers.0", "contains": "hidden or disabled" }
+        ]
+      }
+    },
+    {
+      "id": "step5.resolve.ocr_only_not_executable",
+      "title": "Step 5 blocks OCR-only target authority",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step5_target_resolver", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "ocr_only_control",
+          "action_backend_fixture": "global_halt"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Click the Search button",
+        "expected_status_any": ["blocked"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["PlanValidationCompleted", "TargetResolutionCompleted", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.target_resolution.status", "equals": "blocked" },
+          { "path": "gui_cognition.target_resolution.can_execute", "equals": false },
+          { "path": "gui_cognition.target_resolution.blockers.0", "contains": "ocr_only" }
+        ]
+      }
+    },
+    {
+      "id": "step5.resolve.visual_only_not_executable",
+      "title": "Step 5 blocks visual-only target authority",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step5_target_resolver", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "visual_only_button",
+          "action_backend_fixture": "global_halt"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Click the Search button",
+        "expected_status_any": ["blocked"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["PlanValidationCompleted", "TargetResolutionCompleted", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.target_resolution.status", "equals": "blocked" },
+          { "path": "gui_cognition.target_resolution.can_execute", "equals": false },
+          { "path": "gui_cognition.target_resolution.blockers.0", "contains": "visual-only" }
+        ]
+      }
+    }
+  ]
+}

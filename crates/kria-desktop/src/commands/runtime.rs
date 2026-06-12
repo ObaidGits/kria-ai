@@ -1571,7 +1571,11 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         n8n_audit_path: n8n_audit_path.clone(),
         n8n_governance_log: n8n_governance_log.clone(),
         n8n_hitl_responses: n8n_hitl_responses.clone(),
+        gui_cognition_hitl_proposals: Arc::new(RwLock::new(
+            kria_core::agent::gui_cognition::safety_hitl::GuiHitlProposalStore::default(),
+        )),
         gui_orchestrator,
+        gui_cognition_observation_cache: Arc::new(tokio::sync::Mutex::new(None)),
         world_model,
     };
 

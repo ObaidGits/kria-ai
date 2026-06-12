@@ -6,11 +6,11 @@ Phase 1 is inventory-only: no test, script, or documentation path is moved or de
 
 ## Summary
 
-- Total entries: 237
-- by_kind: docs: 45, eval_engine: 61, harness_test: 13, playwright_test: 7, python_test: 1, rust_test: 83, shell_script: 10, vitest_test: 10, workflow: 7
-- by_safety: destructive: 40, live: 82, safe: 111, unknown: 4
-- by_suite_group: docs: 11, eval_engine: 44, harness: 13, hitl: 23, memory: 22, n8n: 37, release_gate: 4, rust: 26, security_audit: 22, ui_playwright: 7, ui_vitest: 10, unknown: 8, voice: 10
-- by_centralized_status: docs_only: 52, framework_native_unregistered: 3, legacy_unregistered: 11, registered_wrapper: 171
+- Total entries: 253
+- by_kind: docs: 45, eval_engine: 61, harness_test: 14, playwright_test: 8, python_test: 1, rust_test: 95, shell_script: 10, vitest_test: 12, workflow: 7
+- by_safety: destructive: 43, live: 90, safe: 116, unknown: 4
+- by_suite_group: docs: 11, eval_engine: 44, harness: 14, hitl: 29, memory: 22, n8n: 37, release_gate: 4, rust: 31, security_audit: 23, ui_playwright: 8, ui_vitest: 12, unknown: 8, voice: 10
+- by_centralized_status: docs_only: 52, framework_native_unregistered: 17, legacy_unregistered: 12, registered_wrapper: 172
 
 ## Groups
 
@@ -68,6 +68,11 @@ Phase 1 is inventory-only: no test, script, or documentation path is moved or de
 | `crates/kria-core/tests/desktop_tests.rs` | `cargo test -p kria-core --test desktop_tests` | `./testing/run.sh scenario rust.kria_core_tests_desktop_tests` | safe | yes | keep_native | no |
 | `crates/kria-core/tests/document_pipeline_test.rs` | `cargo test -p kria-core --test document_pipeline_test` | `./testing/run.sh scenario rust.kria_core_tests_document_pipeline_test` | safe | yes | keep_native | no |
 | `crates/kria-core/tests/eval_integration_tests.rs` | `cargo test -p kria-core --test eval_integration_tests` | `./testing/run.sh scenario rust.kria_core_tests_eval_integration_tests --include-live --include-slow` | live | yes | keep_native | no |
+| `crates/kria-core/tests/gui_cognition_context_builder_tests.rs` | `cargo test -p kria-core --test gui_cognition_context_builder_tests` | `pending central suite for rust` | live | yes | keep_native | no |
+| `crates/kria-core/tests/gui_cognition_goal_contract_tests.rs` | `cargo test -p kria-core --test gui_cognition_goal_contract_tests` | `pending central suite for rust` | destructive | yes | keep_native | no |
+| `crates/kria-core/tests/gui_cognition_llm_planner_tests.rs` | `cargo test -p kria-core --test gui_cognition_llm_planner_tests` | `pending central suite for rust` | live | yes | keep_native | no |
+| `crates/kria-core/tests/gui_cognition_observation_perception_tests.rs` | `cargo test -p kria-core --test gui_cognition_observation_perception_tests` | `pending central suite for rust` | live | yes | keep_native | no |
+| `crates/kria-core/tests/gui_cognition_verification_tests.rs` | `cargo test -p kria-core --test gui_cognition_verification_tests` | `pending central suite for rust` | safe | yes | keep_native | no |
 | `crates/kria-core/tests/hardware_tests.rs` | `cargo test -p kria-core --test hardware_tests` | `./testing/run.sh scenario rust.kria_core_tests_hardware_tests` | safe | yes | keep_native | no |
 | `crates/kria-core/tests/i18n_tests.rs` | `cargo test -p kria-core --test i18n_tests` | `./testing/run.sh scenario rust.kria_core_tests_i18n_tests` | safe | yes | keep_native | no |
 | `crates/kria-core/tests/image_generation_test.rs` | `cargo test -p kria-core --test image_generation_test` | `./testing/run.sh scenario rust.kria_core_tests_image_generation_test` | safe | yes | keep_native | no |
@@ -91,6 +96,7 @@ Phase 1 is inventory-only: no test, script, or documentation path is moved or de
 
 | Path | Current command | Central command | Safety | Native | Recommendation | Delete in Phase 1 |
 | --- | --- | --- | --- | ---: | --- | ---: |
+| `ui/src/components/GuiCognitionPanel.test.tsx` | `cd ui && npm run test:run -- GuiCognitionPanel.test` | `pending central suite for ui_vitest` | live | yes | keep_native | no |
 | `ui/src/components/HitlModal.test.tsx` | `cd ui && npm run test:run -- HitlModal.test` | `./testing/run.sh scenario ui.vitest.components_hitlmodal_test --include-slow` | safe | yes | keep_native | no |
 | `ui/src/components/MessageBubble.test.tsx` | `cd ui && npm run test:run -- MessageBubble.test` | `./testing/run.sh scenario ui.vitest.components_messagebubble_test --include-live --include-slow` | live | yes | keep_native | no |
 | `ui/src/components/N8nSettings.connection.test.tsx` | `cd ui && npm run test:run -- N8nSettings.connection.test` | `./testing/run.sh scenario ui.vitest.components_n8nsettings_connection_test --include-live --include-slow` | live | yes | keep_native | no |
@@ -100,6 +106,7 @@ Phase 1 is inventory-only: no test, script, or documentation path is moved or de
 | `ui/src/components/__snapshots__/MessageBubble.test.tsx.snap` | `cd ui && npm run test:run -- MessageBubble.test.tsx` | `pending central suite for ui_vitest` | safe | yes | keep_native | no |
 | `ui/src/lib/n8nProgress.test.ts` | `cd ui && npm run test:run -- n8nProgress.test` | `./testing/run.sh scenario ui.vitest.lib_n8nprogress_test --include-live --include-slow` | live | yes | keep_native | no |
 | `ui/src/stores/app.tool-choice.test.ts` | `cd ui && npm run test:run -- app.tool-choice.test` | `./testing/run.sh scenario ui.vitest.stores_app_tool_choice_test --include-live --include-slow` | live | yes | keep_native | no |
+| `ui/src/stores/guiCognitionSession.test.ts` | `cd ui && npm run test:run -- guiCognitionSession.test` | `pending central suite for ui_vitest` | live | yes | keep_native | no |
 | `ui/src/stores/n8n.delete.test.ts` | `cd ui && npm run test:run -- n8n.delete.test` | `./testing/run.sh scenario ui.vitest.stores_n8n_delete_test --include-live --include-slow` | live | yes | keep_native | no |
 
 ### ui_playwright
@@ -107,6 +114,7 @@ Phase 1 is inventory-only: no test, script, or documentation path is moved or de
 | Path | Current command | Central command | Safety | Native | Recommendation | Delete in Phase 1 |
 | --- | --- | --- | --- | ---: | --- | ---: |
 | `testing/suites/playwright/tests/chat.e2e.spec.ts` | `cd testing/suites/playwright && npx playwright test tests/chat.e2e.spec.ts` | `./testing/run.sh scenario playwright.tests_chat_e2e_spec --include-live --include-slow` | live | no | keep_native | no |
+| `testing/suites/playwright/tests/gui-cognition-tool-mode.tauri-mock.e2e.spec.ts` | `cd testing/suites/playwright && npx playwright test tests/gui-cognition-tool-mode.tauri-mock.e2e.spec.ts` | `pending: ./testing/run.sh suite ui --tag playwright` | live | no | keep_native | no |
 | `testing/suites/playwright/tests/n8n-chat-prompt.tauri-live.e2e.spec.ts` | `cd testing/suites/playwright && npx playwright test tests/n8n-chat-prompt.tauri-live.e2e.spec.ts` | `pending: ./testing/run.sh suite ui --tag playwright` | live | no | keep_native | no |
 | `testing/suites/playwright/tests/n8n-chat-prompt.tauri-mock.e2e.spec.ts` | `cd testing/suites/playwright && npx playwright test tests/n8n-chat-prompt.tauri-mock.e2e.spec.ts` | `./testing/run.sh scenario playwright.tests_n8n_chat_prompt_tauri_mock_e2e_spec --include-live --include-slow` | live | no | keep_native | no |
 | `testing/suites/playwright/tests/n8n-workflow-hub.tauri-mock.e2e.spec.ts` | `cd testing/suites/playwright && npx playwright test tests/n8n-workflow-hub.tauri-mock.e2e.spec.ts` | `./testing/run.sh scenario playwright.tests_n8n_workflow_hub_tauri_mock_e2e_spec --include-live --include-slow` | live | no | keep_native | no |
@@ -120,6 +128,12 @@ Phase 1 is inventory-only: no test, script, or documentation path is moved or de
 | --- | --- | --- | --- | ---: | --- | ---: |
 | `crates/kria-core/tests/batch1_authority_tests.rs` | `cargo test -p kria-core --test batch1_authority_tests` | `./testing/run.sh scenario rust.kria_core_tests_batch1_authority_tests --include-live --include-slow` | live | yes | keep_native | no |
 | `crates/kria-core/tests/dangerous_live_tests.rs` | `cargo test -p kria-core --test dangerous_live_tests` | `./testing/run.sh scenario rust.kria_core_tests_dangerous_live_tests --include-slow --include-destructive` | destructive | yes | keep_native | no |
+| `crates/kria-core/tests/gui_cognition_backend_route_tests.rs` | `cargo test -p kria-core --test gui_cognition_backend_route_tests` | `pending central suite for hitl` | destructive | yes | keep_native | no |
+| `crates/kria-core/tests/gui_cognition_checkpoint_resume_tests.rs` | `cargo test -p kria-core --test gui_cognition_checkpoint_resume_tests` | `pending central suite for hitl` | destructive | yes | keep_native | no |
+| `crates/kria-core/tests/gui_cognition_executor_tests.rs` | `cargo test -p kria-core --test gui_cognition_executor_tests` | `pending central suite for hitl` | safe | yes | keep_native | no |
+| `crates/kria-core/tests/gui_cognition_recovery_tests.rs` | `cargo test -p kria-core --test gui_cognition_recovery_tests` | `pending central suite for hitl` | safe | yes | keep_native | no |
+| `crates/kria-core/tests/gui_cognition_safety_hitl_tests.rs` | `cargo test -p kria-core --test gui_cognition_safety_hitl_tests` | `pending central suite for hitl` | safe | yes | keep_native | no |
+| `crates/kria-core/tests/gui_cognition_workflow_runtime_tests.rs` | `cargo test -p kria-core --test gui_cognition_workflow_runtime_tests` | `pending central suite for hitl` | live | yes | keep_native | no |
 | `crates/kria-core/tests/phase3_file_code_tests.rs` | `cargo test -p kria-core --test phase3_file_code_tests` | `./testing/run.sh scenario rust.kria_core_tests_phase3_file_code_tests --include-slow --include-destructive` | destructive | yes | keep_native | no |
 | `crates/kria-core/tests/safety_tests.rs` | `cargo test -p kria-core --test safety_tests` | `./testing/run.sh scenario rust.kria_core_tests_safety_tests --include-slow --include-destructive` | destructive | yes | keep_native | no |
 | `crates/kria-eval/src/gui_cognition_ops/failure_classifier.rs` | `cargo test -p kria-eval` | `./testing/run.sh scenario eval_engine.kria_eval_test --include-slow` | safe | yes | keep_native | no |
@@ -192,6 +206,7 @@ Phase 1 is inventory-only: no test, script, or documentation path is moved or de
 | `crates/kria-core/tests/behavior_golden_tests.rs` | `cargo test -p kria-core --test behavior_golden_tests` | `./testing/run.sh scenario security_audit.kria_core_tests_behavior_golden_tests --include-slow --include-destructive` | destructive | yes | keep_native | no |
 | `crates/kria-core/tests/colab_capabilities_integration.rs` | `cargo test -p kria-core --test colab_capabilities_integration` | `./testing/run.sh scenario security_audit.kria_core_tests_colab_capabilities_integration` | safe | yes | keep_native | no |
 | `crates/kria-core/tests/developer_tests.rs` | `cargo test -p kria-core --test developer_tests` | `./testing/run.sh scenario security_audit.kria_core_tests_developer_tests` | safe | yes | keep_native | no |
+| `crates/kria-core/tests/gui_cognition_target_resolver_tests.rs` | `cargo test -p kria-core --test gui_cognition_target_resolver_tests` | `pending central suite for security_audit` | live | yes | keep_native | no |
 | `crates/kria-core/tests/integration_desktop.rs` | `cargo test -p kria-core --test integration_desktop` | `./testing/run.sh scenario security_audit.kria_core_tests_integration_desktop` | safe | yes | keep_native | no |
 | `crates/kria-core/tests/integration_packages.rs` | `cargo test -p kria-core --test integration_packages` | `./testing/run.sh scenario security_audit.kria_core_tests_integration_packages` | safe | yes | keep_native | no |
 | `crates/kria-core/tests/integration_system_config.rs` | `cargo test -p kria-core --test integration_system_config` | `./testing/run.sh scenario security_audit.kria_core_tests_integration_system_config` | safe | yes | keep_native | no |
@@ -243,6 +258,7 @@ Phase 1 is inventory-only: no test, script, or documentation path is moved or de
 | `testing/harness/tests/__init__.py` | `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover testing/harness/tests` | `./testing/run.sh scenario n8n.testing_spine_self_tests` | safe | yes | register_only | no |
 | `testing/harness/tests/test_chat_api_driver.py` | `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover testing/harness/tests` | `./testing/run.sh scenario n8n.testing_spine_self_tests` | safe | yes | register_only | no |
 | `testing/harness/tests/test_cleanup_hooks.py` | `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover testing/harness/tests` | `./testing/run.sh scenario n8n.testing_spine_self_tests` | safe | yes | register_only | no |
+| `testing/harness/tests/test_desktop_chat_command_timeout.py` | `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover testing/harness/tests` | `./testing/run.sh scenario n8n.testing_spine_self_tests` | safe | yes | register_only | no |
 | `testing/harness/tests/test_inventory.py` | `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover testing/harness/tests` | `./testing/run.sh scenario n8n.testing_spine_self_tests` | safe | yes | register_only | no |
 | `testing/harness/tests/test_manifest_validation.py` | `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover testing/harness/tests` | `./testing/run.sh scenario n8n.testing_spine_self_tests` | safe | yes | register_only | no |
 | `testing/harness/tests/test_n8n_desktop_chat_parity.py` | `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover testing/harness/tests` | `./testing/run.sh scenario n8n.testing_spine_self_tests` | safe | yes | register_only | no |
@@ -258,6 +274,7 @@ Unknown/review-required entries:
 - `testing/harness/tests/__init__.py`
 - `testing/harness/tests/test_chat_api_driver.py`
 - `testing/harness/tests/test_cleanup_hooks.py`
+- `testing/harness/tests/test_desktop_chat_command_timeout.py`
 - `testing/harness/tests/test_inventory.py`
 - `testing/harness/tests/test_manifest_validation.py`
 - `testing/harness/tests/test_n8n_desktop_chat_parity.py`

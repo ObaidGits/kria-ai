@@ -1,0 +1,168 @@
+{
+  "schema_version": "kria.testing.scenarios.v1",
+  "scenarios": [
+    {
+      "id": "step8.verify.focus_field_focused_control",
+      "title": "Step 8 verifies a FocusField action through focused_control evidence",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step8_verification", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "focused_search_field",
+          "action_backend_fixture": "services_healthy",
+          "execution_mode": "execute_fixture"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Focus the visible search field and verify it is focused",
+        "expected_status_any": ["completed"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["TargetResolutionCompleted", "SafetyGateCompleted", "ActionStarted", "ActionCompleted", "ExecutionVerificationCompleted", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionFailed", "ExecutionBlocked"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "desktop_command.path", "equals": "send_manual_tool_message" },
+          { "path": "gui_cognition.execution.action_type", "equals": "FocusField" },
+          { "path": "gui_cognition.execution.status", "equals": "completed" },
+          { "path": "gui_cognition.verification.status", "equals": "verified" },
+          { "path": "gui_cognition.verification.verification_strategy", "equals": "focused_control" },
+          { "path": "gui_cognition.verification.matched_expected_state", "equals": true }
+        ],
+        "forbidden_json_paths": [
+          "gui_cognition.raw_prompt",
+          "gui_cognition.perception.ocr_blocks.0.text",
+          "gui_cognition.perception.screenshot"
+        ]
+      }
+    },
+    {
+      "id": "step8.verify.open_app_active_window_match",
+      "title": "Step 8 verifies an OpenApp action through active_window_match evidence",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step8_verification", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "focused_search_field",
+          "action_backend_fixture": "services_healthy",
+          "execution_mode": "execute_fixture"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Focus the search box",
+        "expected_status_any": ["completed"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["TargetResolutionCompleted", "SafetyGateCompleted", "ActionStarted", "ActionCompleted", "ExecutionVerificationCompleted", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionFailed", "ExecutionBlocked"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.execution.action_type", "equals": "OpenApp" },
+          { "path": "gui_cognition.execution.status", "equals": "completed" },
+          { "path": "gui_cognition.verification.status", "equals": "verified" },
+          { "path": "gui_cognition.verification.verification_strategy", "equals": "active_window_match" }
+        ],
+        "forbidden_json_paths": [
+          "gui_cognition.raw_prompt",
+          "gui_cognition.perception.screenshot"
+        ]
+      }
+    },
+    {
+      "id": "step8.verify.click_screen_changed",
+      "title": "Step 8 verifies a ClickControl action when the screen changes",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step8_verification", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "step8_click_result_changes",
+          "action_backend_fixture": "services_healthy",
+          "execution_mode": "execute_fixture"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Click the Search button",
+        "expected_status_any": ["completed"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["TargetResolutionCompleted", "SafetyGateCompleted", "ActionStarted", "ActionCompleted", "ExecutionVerificationCompleted", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionFailed", "ExecutionBlocked"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.execution.action_type", "equals": "ClickControl" },
+          { "path": "gui_cognition.execution.status", "equals": "completed" },
+          { "path": "gui_cognition.verification.status", "equals": "verified" },
+          { "path": "gui_cognition.verification.verification_strategy", "equals": "result_visible" }
+        ],
+        "forbidden_json_paths": [
+          "gui_cognition.raw_prompt",
+          "gui_cognition.perception.screenshot"
+        ]
+      }
+    },
+    {
+      "id": "step8.verify.verification_failed_no_blind_success",
+      "title": "Step 8 reports verification_failed when the screen does not change after a click",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step8_verification", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "step8_click_no_change",
+          "action_backend_fixture": "services_healthy",
+          "execution_mode": "execute_fixture"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Click the Search button",
+        "expected_status_any": ["verification_failed"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["TargetResolutionCompleted", "SafetyGateCompleted", "ActionStarted", "ActionCompleted", "ExecutionVerificationCompleted", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ExecutionBlocked"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.execution.status", "equals": "completed" },
+          { "path": "gui_cognition.verification.status", "equals": "verification_failed" },
+          { "path": "gui_cognition.verification.matched_expected_state", "equals": false },
+          { "path": "gui_cognition.verification.recovery_hint", "exists": true }
+        ],
+        "forbidden_json_paths": [
+          "gui_cognition.raw_prompt",
+          "gui_cognition.perception.screenshot"
+        ]
+      }
+    }
+  ]
+}

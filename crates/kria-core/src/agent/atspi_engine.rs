@@ -29,6 +29,29 @@ use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
+const ATSPI_STATE_ENABLED: u8 = 8;
+const ATSPI_STATE_FOCUSED: u8 = 12;
+const ATSPI_STATE_SENSITIVE: u8 = 24;
+const ATSPI_STATE_SHOWING: u8 = 25;
+const ATSPI_STATE_VISIBLE: u8 = 30;
+
+fn elapsed_ms(started: Instant) -> u64 {
+    started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
+}
+
+fn atspi_state_enabled(state_bits: u64) -> bool {
+    ((state_bits >> ATSPI_STATE_ENABLED) & 1 == 1)
+        || ((state_bits >> ATSPI_STATE_SENSITIVE) & 1 == 1)
+}
+
+fn atspi_state_visible(state_bits: u64) -> bool {
+    ((state_bits >> ATSPI_STATE_VISIBLE) & 1 == 1) || ((state_bits >> ATSPI_STATE_SHOWING) & 1 == 1)
+}
+
+fn atspi_state_focused(state_bits: u64) -> bool {
+    (state_bits >> ATSPI_STATE_FOCUSED) & 1 == 1
+}
+
 // ─── Capability Detection ─────────────────────────────────────────────────────
 
 /// Structured accessibility capability state.
@@ -239,6 +262,109 @@ impl AccessibleElement {
     }
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AtSpiSnapshotRequest {
+    pub roles: Vec<String>,
+    pub max_depth: usize,
+    pub max_nodes: usize,
+    pub max_apps: usize,
+    pub total_budget_ms: u64,
+    pub dbus_call_budget_ms: u64,
+    pub focused_app_budget_ms: u64,
+    pub background_app_budget_ms: u64,
+}
+
+impl Default for AtSpiSnapshotRequest {
+    fn default() -> Self {
+        Self {
+            roles: vec![
+                "text".into(),
+                "entry".into(),
+                "push button".into(),
+                "button".into(),
+                "check box".into(),
+                "toggle button".into(),
+                "link".into(),
+                "page tab".into(),
+                "menu".into(),
+                "combo box".into(),
+                "dialog".into(),
+            ],
+            max_depth: 8,
+            max_nodes: 400,
+            max_apps: 5,
+            total_budget_ms: 900,
+            dbus_call_budget_ms: 80,
+            focused_app_budget_ms: 250,
+            background_app_budget_ms: 120,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct AtSpiSnapshotTiming {
+    pub connection_ms: u64,
+    pub apps_ms: u64,
+    pub focused_app_ms: u64,
+    pub scan_ms: u64,
+    pub total_ms: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AtSpiSnapshot {
+    pub status: String,
+    pub applications: Vec<String>,
+    pub application_labels: Vec<String>,
+    pub focused_app: Option<String>,
+    pub focused_app_label: Option<String>,
+    pub focused_window: Option<String>,
+    pub elements: Vec<AccessibleElement>,
+    pub dialog_visible: bool,
+    pub node_count: usize,
+    pub omitted_node_count: usize,
+    pub skipped_apps: Vec<String>,
+    pub source_blockers: Vec<String>,
+    pub remediation: Vec<String>,
+    pub roles: Vec<String>,
+    pub timing: AtSpiSnapshotTiming,
+}
+
+impl AtSpiSnapshot {
+    fn unavailable(reason: impl Into<String>, timing: AtSpiSnapshotTiming) -> Self {
+        Self {
+            status: "unavailable".into(),
+            applications: Vec::new(),
+            application_labels: Vec::new(),
+            focused_app: None,
+            focused_app_label: None,
+            focused_window: None,
+            elements: Vec::new(),
+            dialog_visible: false,
+            node_count: 0,
+            omitted_node_count: 0,
+            skipped_apps: Vec::new(),
+            source_blockers: vec![reason.into()],
+            remediation: vec![
+                "gsettings set org.gnome.desktop.interface toolkit-accessibility true".into(),
+                "Restart or relaunch apps with accessibility enabled".into(),
+            ],
+            roles: AtSpiSnapshotRequest::default().roles,
+            timing,
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct AtSpiAppScan {
+    elements: Vec<AccessibleElement>,
+    node_count: usize,
+    omitted_node_count: usize,
+    focused_window: Option<String>,
+    timed_out: bool,
+    blocker: Option<String>,
+    duration_ms: u64,
+}
+
 /// Result of an AT-SPI interaction with structured failure reason.
 #[derive(Debug, Clone)]
 pub struct AtSpiResult {
@@ -307,6 +433,7 @@ impl AppSnapshot {
 /// Reduces redundant D-Bus round-trips during multi-step interactions.
 pub struct AtSpiCache {
     snapshots: Arc<RwLock<HashMap<String, AppSnapshot>>>,
+    unresponsive_apps: Arc<RwLock<HashMap<String, Instant>>>,
     generation: Arc<std::sync::atomic::AtomicU64>,
 }
 
@@ -314,6 +441,7 @@ impl AtSpiCache {
     pub fn new() -> Self {
         Self {
             snapshots: Arc::new(RwLock::new(HashMap::new())),
+            unresponsive_apps: Arc::new(RwLock::new(HashMap::new())),
             generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         }
     }
@@ -324,6 +452,8 @@ impl AtSpiCache {
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let mut cache = self.snapshots.write().await;
         cache.clear();
+        let mut unresponsive = self.unresponsive_apps.write().await;
+        unresponsive.clear();
     }
 
     /// Get cached elements for an app, or None if stale/missing.
@@ -348,6 +478,23 @@ impl AtSpiCache {
                 _generation: gen,
             },
         );
+    }
+
+    pub async fn is_unresponsive(&self, bus_name: &str) -> bool {
+        let mut cache = self.unresponsive_apps.write().await;
+        let Some(marked_at) = cache.get(bus_name).copied() else {
+            return false;
+        };
+        if marked_at.elapsed() < Duration::from_secs(5) {
+            return true;
+        }
+        cache.remove(bus_name);
+        false
+    }
+
+    pub async fn mark_unresponsive(&self, bus_name: String) {
+        let mut cache = self.unresponsive_apps.write().await;
+        cache.insert(bus_name, Instant::now());
     }
 }
 
@@ -439,8 +586,12 @@ impl AtSpiEngine {
     }
 
     /// Get element state flags from AT-SPI StateSet.
-    async fn get_element_states(conn: &zbus::Connection, bus: &str, path: &str) -> (bool, bool) {
-        // Returns (enabled, visible)
+    async fn get_element_states(
+        conn: &zbus::Connection,
+        bus: &str,
+        path: &str,
+    ) -> (bool, bool, bool) {
+        // Returns (enabled, visible, focused)
         let result: Result<(Vec<u32>,), _> = conn
             .call_method(
                 Some(bus),
@@ -454,7 +605,6 @@ impl AtSpiEngine {
 
         match result {
             Ok((states,)) => {
-                // AT-SPI state bits: bit 14 = enabled, bit 16 = visible, bit 17 = showing
                 let state_bits: u64 = if states.len() >= 2 {
                     (states[0] as u64) | ((states[1] as u64) << 32)
                 } else if !states.is_empty() {
@@ -462,11 +612,508 @@ impl AtSpiEngine {
                 } else {
                     0
                 };
-                let enabled = (state_bits >> 14) & 1 == 1;
-                let visible = ((state_bits >> 16) & 1 == 1) || ((state_bits >> 17) & 1 == 1);
-                (enabled, visible)
+                let enabled = atspi_state_enabled(state_bits);
+                let visible = atspi_state_visible(state_bits);
+                let focused = atspi_state_focused(state_bits);
+                (enabled, visible, focused)
             }
-            Err(_) => (true, true), // Assume enabled/visible if we can't check
+            Err(_) => (true, true, false), // Assume enabled/visible if we can't check
+        }
+    }
+
+    async fn get_children_bounded(
+        conn: &zbus::Connection,
+        bus: &str,
+        path: &str,
+        budget: Duration,
+    ) -> Result<Vec<(String, zbus::zvariant::OwnedObjectPath)>, String> {
+        tokio::time::timeout(
+            budget,
+            conn.call_method(
+                Some(bus),
+                path,
+                Some("org.a11y.atspi.Accessible"),
+                "GetChildren",
+                &(),
+            ),
+        )
+        .await
+        .map_err(|_| "GetChildren timed out".to_string())?
+        .map_err(|err| err.to_string())?
+        .body()
+        .deserialize::<(Vec<(String, zbus::zvariant::OwnedObjectPath)>,)>()
+        .map(|(children,)| children)
+        .map_err(|err| err.to_string())
+    }
+
+    async fn get_role_bounded(
+        conn: &zbus::Connection,
+        bus: &str,
+        path: &str,
+        budget: Duration,
+    ) -> Result<u32, String> {
+        tokio::time::timeout(
+            budget,
+            conn.call_method(
+                Some(bus),
+                path,
+                Some("org.a11y.atspi.Accessible"),
+                "GetRole",
+                &(),
+            ),
+        )
+        .await
+        .map_err(|_| "GetRole timed out".to_string())?
+        .map_err(|err| err.to_string())?
+        .body()
+        .deserialize::<(u32,)>()
+        .map(|(role,)| role)
+        .map_err(|err| err.to_string())
+    }
+
+    async fn get_name_bounded(
+        conn: &zbus::Connection,
+        bus: &str,
+        path: &str,
+        budget: Duration,
+    ) -> Result<String, String> {
+        tokio::time::timeout(
+            budget,
+            conn.call_method(
+                Some(bus),
+                path,
+                Some("org.a11y.atspi.Accessible"),
+                "GetName",
+                &(),
+            ),
+        )
+        .await
+        .map_err(|_| "GetName timed out".to_string())?
+        .map_err(|err| err.to_string())?
+        .body()
+        .deserialize::<(String,)>()
+        .map(|(name,)| name)
+        .map_err(|err| err.to_string())
+    }
+
+    async fn get_element_states_bounded(
+        conn: &zbus::Connection,
+        bus: &str,
+        path: &str,
+        budget: Duration,
+    ) -> (bool, bool, bool) {
+        let result = tokio::time::timeout(
+            budget,
+            conn.call_method(
+                Some(bus),
+                path,
+                Some("org.a11y.atspi.Accessible"),
+                "GetState",
+                &(),
+            ),
+        )
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .and_then(|msg| msg.body().deserialize::<(Vec<u32>,)>().ok());
+
+        match result {
+            Some((states,)) => {
+                let state_bits: u64 = if states.len() >= 2 {
+                    (states[0] as u64) | ((states[1] as u64) << 32)
+                } else if !states.is_empty() {
+                    states[0] as u64
+                } else {
+                    0
+                };
+                let enabled = atspi_state_enabled(state_bits);
+                let visible = atspi_state_visible(state_bits);
+                let focused = atspi_state_focused(state_bits);
+                (enabled, visible, focused)
+            }
+            None => (true, true, false),
+        }
+    }
+
+    async fn get_focused_app_bus_bounded(
+        conn: &zbus::Connection,
+        budget: Duration,
+    ) -> Option<String> {
+        tokio::time::timeout(
+            budget,
+            conn.call_method(
+                Some("org.a11y.atspi.Registry"),
+                "/org/a11y/atspi/registry",
+                Some("org.a11y.atspi.Registry"),
+                "GetFocusedObject",
+                &(),
+            ),
+        )
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .and_then(|msg| {
+            msg.body()
+                .deserialize::<(String, zbus::zvariant::OwnedObjectPath)>()
+                .ok()
+        })
+        .map(|(bus, _)| bus)
+    }
+
+    fn snapshot_role_matches(role_name: &str, roles: &[String]) -> bool {
+        let role_name = role_name.to_ascii_lowercase();
+        roles
+            .iter()
+            .map(|role| role.to_ascii_lowercase())
+            .any(|role| role_name.contains(&role))
+    }
+
+    async fn scan_app_snapshot(
+        conn: &zbus::Connection,
+        app_bus: &str,
+        is_focused_app: bool,
+        request: &AtSpiSnapshotRequest,
+        app_budget: Duration,
+    ) -> AtSpiAppScan {
+        let started = Instant::now();
+        let call_budget = Duration::from_millis(request.dbus_call_budget_ms);
+        let mut scan = AtSpiAppScan::default();
+        let children = match Self::get_children_bounded(
+            conn,
+            app_bus,
+            "/org/a11y/atspi/accessible/root",
+            call_budget,
+        )
+        .await
+        {
+            Ok(children) => children,
+            Err(error) => {
+                scan.blocker = Some(format!("root children unavailable: {error}"));
+                scan.timed_out = error.contains("timed out");
+                scan.duration_ms = elapsed_ms(started);
+                return scan;
+            }
+        };
+
+        let mut visited = HashSet::new();
+        let mut stack = children
+            .into_iter()
+            .map(|(bus, path)| (bus, path.to_string(), 0usize))
+            .collect::<Vec<_>>();
+
+        while let Some((bus, path, depth)) = stack.pop() {
+            if started.elapsed() >= app_budget {
+                scan.timed_out = true;
+                scan.blocker = Some("app scan budget exceeded".into());
+                scan.omitted_node_count += stack.len() + 1;
+                break;
+            }
+            if depth > request.max_depth {
+                scan.omitted_node_count += 1;
+                continue;
+            }
+            if scan.node_count >= request.max_nodes {
+                scan.omitted_node_count += stack.len() + 1;
+                break;
+            }
+            let key = format!("{bus}:{path}");
+            if !visited.insert(key) {
+                continue;
+            }
+
+            let role_num = match Self::get_role_bounded(conn, &bus, &path, call_budget).await {
+                Ok(role) => role,
+                Err(error) => {
+                    if error.contains("timed out") {
+                        scan.timed_out = true;
+                        scan.blocker = Some("node role query timed out".into());
+                    }
+                    continue;
+                }
+            };
+            scan.node_count += 1;
+            let role_name = atspi_role_to_string(role_num);
+            let name = Self::get_name_bounded(conn, &bus, &path, call_budget)
+                .await
+                .unwrap_or_default();
+
+            if is_focused_app && scan.focused_window.is_none() && !name.trim().is_empty() {
+                let role_lower = role_name.to_ascii_lowercase();
+                if depth <= 1
+                    && (role_lower.contains("frame")
+                        || role_lower.contains("window")
+                        || role_lower.contains("dialog"))
+                {
+                    scan.focused_window = Some(name.clone());
+                }
+            }
+
+            if Self::snapshot_role_matches(&role_name, &request.roles) {
+                let (enabled, visible, focused) =
+                    Self::get_element_states_bounded(conn, &bus, &path, call_budget).await;
+                let score = compute_element_score(
+                    is_focused_app,
+                    visible,
+                    enabled,
+                    depth,
+                    &role_name,
+                    &role_name,
+                    &name,
+                    None,
+                );
+                scan.elements.push(AccessibleElement {
+                    path: path.clone(),
+                    bus_name: bus.clone(),
+                    role: role_name.clone(),
+                    name,
+                    focused,
+                    enabled,
+                    visible,
+                    in_active_window: is_focused_app,
+                    bounds: None,
+                    depth,
+                    score,
+                    children: Vec::new(),
+                });
+            }
+
+            if depth < request.max_depth {
+                match Self::get_children_bounded(conn, &bus, &path, call_budget).await {
+                    Ok(children) => {
+                        for (child_bus, child_path) in children {
+                            stack.push((child_bus, child_path.to_string(), depth + 1));
+                        }
+                    }
+                    Err(error) if error.contains("timed out") => {
+                        scan.timed_out = true;
+                        scan.blocker = Some("node children query timed out".into());
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+
+        scan.duration_ms = elapsed_ms(started);
+        scan
+    }
+
+    pub async fn capture_snapshot(&self, request: AtSpiSnapshotRequest) -> AtSpiSnapshot {
+        let started = Instant::now();
+        let mut timing = AtSpiSnapshotTiming::default();
+        if !Self::is_available().await {
+            timing.total_ms = elapsed_ms(started);
+            return AtSpiSnapshot::unavailable("AT-SPI bus unavailable", timing);
+        }
+
+        let connection_started = Instant::now();
+        let Some(conn) = Self::get_atspi_connection().await else {
+            timing.connection_ms = elapsed_ms(connection_started);
+            timing.total_ms = elapsed_ms(started);
+            let mut snapshot = AtSpiSnapshot::unavailable("AT-SPI connection unavailable", timing);
+            snapshot.status = "source_unresponsive".into();
+            return snapshot;
+        };
+        timing.connection_ms = elapsed_ms(connection_started);
+
+        let call_budget = Duration::from_millis(request.dbus_call_budget_ms);
+        let apps_started = Instant::now();
+        let app_children = match Self::get_children_bounded(
+            &conn,
+            "org.a11y.atspi.Registry",
+            "/org/a11y/atspi/accessible/root",
+            call_budget,
+        )
+        .await
+        {
+            Ok(children) => children,
+            Err(error) => {
+                timing.apps_ms = elapsed_ms(apps_started);
+                timing.total_ms = elapsed_ms(started);
+                let mut snapshot = AtSpiSnapshot::unavailable(
+                    format!("accessible apps unavailable: {error}"),
+                    timing,
+                );
+                snapshot.status = if error.contains("timed out") {
+                    "source_unresponsive".into()
+                } else {
+                    "unavailable".into()
+                };
+                return snapshot;
+            }
+        };
+        let mut apps = app_children
+            .into_iter()
+            .map(|(bus, _)| bus)
+            .filter(|bus| !bus.trim().is_empty())
+            .collect::<Vec<_>>();
+        timing.apps_ms = elapsed_ms(apps_started);
+
+        let focused_started = Instant::now();
+        let focused_bus = Self::get_focused_app_bus_bounded(&conn, call_budget).await;
+        timing.focused_app_ms = elapsed_ms(focused_started);
+        if let Some(ref focused) = focused_bus {
+            if let Some(pos) = apps.iter().position(|app| app == focused) {
+                apps.remove(pos);
+            }
+            apps.insert(0, focused.clone());
+        }
+        apps.truncate(request.max_apps.max(1));
+
+        if apps.is_empty() {
+            timing.total_ms = elapsed_ms(started);
+            let mut snapshot = AtSpiSnapshot::unavailable("No accessible apps detected", timing);
+            snapshot.status = "unavailable".into();
+            snapshot.roles = request.roles;
+            return snapshot;
+        }
+
+        let mut application_labels = apps.clone();
+        let focused_app_label = if let Some(focused) = focused_bus.as_deref() {
+            if let Some(index) = apps.iter().position(|app| app == focused) {
+                let label = Self::get_name_bounded(
+                    &conn,
+                    focused,
+                    "/org/a11y/atspi/accessible/root",
+                    call_budget,
+                )
+                .await
+                .ok()
+                .map(|name| name.trim().to_string())
+                .filter(|name| !name.is_empty() && name != "unknown");
+                if let Some(label) = label {
+                    application_labels[index] = label.clone();
+                    Some(label)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else if apps.len() == 1 {
+            let label = Self::get_name_bounded(
+                &conn,
+                &apps[0],
+                "/org/a11y/atspi/accessible/root",
+                call_budget,
+            )
+            .await
+            .ok()
+            .map(|name| name.trim().to_string())
+            .filter(|name| !name.is_empty() && name != "unknown");
+            if let Some(label) = label {
+                application_labels[0] = label.clone();
+                Some(label)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let scan_started = Instant::now();
+        let mut elements = Vec::new();
+        let mut node_count = 0usize;
+        let mut omitted_node_count = 0usize;
+        let mut focused_window = None;
+        let mut skipped_apps = Vec::new();
+        let mut source_blockers = Vec::new();
+
+        for app_bus in &apps {
+            if elapsed_ms(started) >= request.total_budget_ms {
+                skipped_apps.push(app_bus.clone());
+                source_blockers.push("AT-SPI snapshot total budget exceeded".into());
+                break;
+            }
+            if ATSPI_CACHE.is_unresponsive(app_bus).await {
+                skipped_apps.push(app_bus.clone());
+                source_blockers.push(format!("Skipped recently unresponsive app {}", app_bus));
+                continue;
+            }
+            let is_focused = focused_bus.as_deref() == Some(app_bus.as_str());
+            if let Some(cached) = ATSPI_CACHE.get(app_bus).await {
+                if is_focused && focused_window.is_none() {
+                    focused_window = cached
+                        .iter()
+                        .find(|element| !element.name.trim().is_empty())
+                        .map(|element| element.name.clone());
+                }
+                node_count += cached.len();
+                elements.extend(
+                    cached.into_iter().filter(|element| {
+                        Self::snapshot_role_matches(&element.role, &request.roles)
+                    }),
+                );
+                continue;
+            }
+
+            let app_budget = if is_focused {
+                Duration::from_millis(request.focused_app_budget_ms)
+            } else {
+                Duration::from_millis(request.background_app_budget_ms)
+            };
+            let scan =
+                Self::scan_app_snapshot(&conn, app_bus, is_focused, &request, app_budget).await;
+            if is_focused && focused_window.is_none() {
+                focused_window = scan.focused_window.clone();
+            }
+            node_count += scan.node_count;
+            omitted_node_count += scan.omitted_node_count;
+            if scan.timed_out {
+                ATSPI_CACHE.mark_unresponsive(app_bus.clone()).await;
+                skipped_apps.push(app_bus.clone());
+                source_blockers.push(format!(
+                    "{}: {}",
+                    app_bus,
+                    scan.blocker
+                        .clone()
+                        .unwrap_or_else(|| "source_unresponsive".into())
+                ));
+            }
+            ATSPI_CACHE
+                .put(app_bus.clone(), scan.elements.clone())
+                .await;
+            elements.extend(scan.elements);
+        }
+        timing.scan_ms = elapsed_ms(scan_started);
+        timing.total_ms = elapsed_ms(started);
+
+        elements.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let dialog_visible = elements.iter().any(|element| {
+            element.visible && {
+                let role = element.role.to_ascii_lowercase();
+                role.contains("dialog") || role.contains("alert")
+            }
+        });
+        let status = if !source_blockers.is_empty() || omitted_node_count > 0 {
+            if elements.is_empty() {
+                "source_unresponsive"
+            } else {
+                "degraded"
+            }
+        } else {
+            "healthy"
+        };
+
+        AtSpiSnapshot {
+            status: status.into(),
+            applications: apps,
+            application_labels,
+            focused_app: focused_bus,
+            focused_app_label,
+            focused_window,
+            elements,
+            dialog_visible,
+            node_count,
+            omitted_node_count,
+            skipped_apps,
+            source_blockers,
+            remediation: Vec::new(),
+            roles: request.roles,
+            timing,
         }
     }
 
@@ -494,6 +1141,9 @@ impl AtSpiEngine {
         let mut results = Vec::new();
 
         for app_bus in &apps {
+            if ATSPI_CACHE.is_unresponsive(app_bus).await {
+                continue;
+            }
             let is_focused_app = focused_bus.as_deref() == Some(app_bus.as_str());
 
             // Check cache first
@@ -539,6 +1189,8 @@ impl AtSpiEngine {
                     // If we found elements in the prioritized app(s), return early to save D-Bus round-trips
                     break;
                 }
+            } else {
+                ATSPI_CACHE.mark_unresponsive(app_bus.clone()).await;
             }
         }
 
@@ -642,7 +1294,7 @@ impl AtSpiEngine {
             .unwrap_or(true);
 
         if role_matches && name_matches {
-            let (enabled, visible) = Self::get_element_states(conn, bus, path).await;
+            let (enabled, visible, focused) = Self::get_element_states(conn, bus, path).await;
 
             // Compute weighted score for ranking
             let score = compute_element_score(
@@ -661,7 +1313,7 @@ impl AtSpiEngine {
                 bus_name: bus.to_string(),
                 role: role_name.clone(),
                 name: name.clone(),
-                focused: false,
+                focused,
                 enabled,
                 visible,
                 in_active_window: is_focused_app,
@@ -735,7 +1387,7 @@ impl AtSpiEngine {
                     .unwrap_or(true);
 
                 if cr_matches && cn_matches {
-                    let (enabled, visible) =
+                    let (enabled, visible, focused) =
                         Self::get_element_states(conn, cb.as_str(), cp.as_str()).await;
                     let score = compute_element_score(
                         is_focused_app,
@@ -752,7 +1404,7 @@ impl AtSpiEngine {
                         bus_name: cb.clone(),
                         role: crole,
                         name: cn,
-                        focused: false,
+                        focused,
                         enabled,
                         visible,
                         in_active_window: is_focused_app,
@@ -1481,4 +2133,99 @@ fn atspi_role_to_string(role: u32) -> String {
         _ => "unknown",
     }
     .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn element(role: &str, name: &str) -> AccessibleElement {
+        AccessibleElement {
+            path: "/org/a11y/atspi/test".into(),
+            bus_name: "org.test.App".into(),
+            role: role.into(),
+            name: name.into(),
+            focused: false,
+            enabled: true,
+            visible: true,
+            in_active_window: true,
+            bounds: None,
+            depth: 1,
+            score: 1.0,
+            children: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn atspi_snapshot_request_defaults_are_bounded_for_gui_cognition() {
+        let request = AtSpiSnapshotRequest::default();
+
+        assert_eq!(request.roles, vec!["text", "push button", "dialog"]);
+        assert_eq!(request.max_depth, 8);
+        assert_eq!(request.max_nodes, 400);
+        assert_eq!(request.max_apps, 5);
+        assert_eq!(request.total_budget_ms, 900);
+        assert_eq!(request.dbus_call_budget_ms, 80);
+        assert_eq!(request.focused_app_budget_ms, 250);
+        assert_eq!(request.background_app_budget_ms, 120);
+    }
+
+    #[test]
+    fn atspi_snapshot_role_matching_is_case_insensitive_and_role_based() {
+        let roles = vec!["text".to_string(), "push button".to_string()];
+
+        assert!(AtSpiEngine::snapshot_role_matches("Password Text", &roles));
+        assert!(AtSpiEngine::snapshot_role_matches("push button", &roles));
+        assert!(!AtSpiEngine::snapshot_role_matches("dialog", &roles));
+    }
+
+    #[test]
+    fn unavailable_snapshot_reports_structured_blocker_without_raw_tree() {
+        let snapshot = AtSpiSnapshot::unavailable(
+            "AT-SPI connection unavailable",
+            AtSpiSnapshotTiming {
+                connection_ms: 81,
+                total_ms: 82,
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(snapshot.status, "unavailable");
+        assert_eq!(snapshot.timing.connection_ms, 81);
+        assert_eq!(snapshot.timing.total_ms, 82);
+        assert_eq!(
+            snapshot.source_blockers,
+            vec!["AT-SPI connection unavailable"]
+        );
+        assert!(snapshot.elements.is_empty());
+        assert!(snapshot
+            .remediation
+            .iter()
+            .any(|line| line.contains("accessibility")));
+    }
+
+    #[tokio::test]
+    async fn atspi_cache_reuses_fresh_app_snapshot_and_invalidates_cleanly() {
+        let cache = AtSpiCache::new();
+        cache
+            .put("org.test.App".into(), vec![element("text", "Search")])
+            .await;
+
+        let cached = cache.get("org.test.App").await.expect("fresh cache entry");
+        assert_eq!(cached.len(), 1);
+        assert_eq!(cached[0].name, "Search");
+
+        cache.invalidate().await;
+        assert!(cache.get("org.test.App").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn atspi_cache_marks_unresponsive_apps_until_invalidation() {
+        let cache = AtSpiCache::new();
+        cache.mark_unresponsive("org.test.SlowApp".into()).await;
+
+        assert!(cache.is_unresponsive("org.test.SlowApp").await);
+        cache.invalidate().await;
+        assert!(!cache.is_unresponsive("org.test.SlowApp").await);
+    }
 }

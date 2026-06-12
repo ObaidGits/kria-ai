@@ -1,0 +1,392 @@
+{
+  "schema_version": "kria.testing.scenarios.v1",
+  "scenarios": [
+    {
+      "id": "gui_cognition.backend.observe_route",
+      "title": "GUI Cognition backend route observes through manual selected mode",
+      "driver": "desktop_chat_command",
+      "tags": [
+        "live",
+        "slow",
+        "gui_cognition",
+        "desktop_command",
+        "backend_route",
+        "routing",
+        "regression"
+      ],
+      "required_services": [
+        "kria_api"
+      ],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Observe my current screen.",
+        "expected_status_any": [
+          "ok"
+        ],
+        "expected_reply_not_contains_any": [
+          "LLM error",
+          "tool-calling"
+        ],
+        "expected_event_names": [
+          "gui_cognition:event"
+        ],
+        "expected_gui_event_types": [
+          "TurnStarted",
+          "RouteConfirmed",
+          "ObservationStarted",
+          "ObservationCompleted",
+          "ContextBuilt",
+          "GoalContractCreated",
+          "PlanCreated",
+          "TurnCompleted"
+        ],
+        "forbidden_gui_event_types": [
+          "ActionStarted"
+        ],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          {
+            "path": "desktop_command.path",
+            "equals": "send_manual_tool_message"
+          },
+          {
+            "path": "desktop_command.mode_id",
+            "equals": "gui_cognition"
+          },
+          {
+            "path": "gui_cognition.path",
+            "equals": "send_manual_tool_message"
+          },
+          {
+            "path": "gui_cognition.llm_tool_loop",
+            "equals": false
+          }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.backend.plan_only_route",
+      "title": "GUI Cognition backend route plan-only prompt does not execute actions",
+      "driver": "desktop_chat_command",
+      "tags": [
+        "live",
+        "slow",
+        "gui_cognition",
+        "desktop_command",
+        "backend_route",
+        "routing",
+        "regression"
+      ],
+      "required_services": [
+        "kria_api"
+      ],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Analyze the current GUI and create a plan for what can be done safely. Do not do risky actions.",
+        "expected_status_any": [
+          "ok"
+        ],
+        "expected_reply_contains_any": [
+          "Target resolution completed for Step 5",
+          "did not execute"
+        ],
+        "expected_event_names": [
+          "gui_cognition:event"
+        ],
+        "expected_gui_event_types": [
+          "RouteConfirmed",
+          "PlanCreated",
+          "TargetResolutionCompleted",
+          "TurnCompleted"
+        ],
+        "forbidden_gui_event_types": [
+          "ActionStarted",
+          "ActionCompleted"
+        ],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          {
+            "path": "desktop_command.path",
+            "equals": "send_manual_tool_message"
+          },
+          {
+            "path": "gui_cognition.llm_tool_loop",
+            "equals": false
+          }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.backend.missing_target_blocks",
+      "title": "GUI Cognition backend route missing target blocks safely",
+      "driver": "desktop_chat_command",
+      "tags": [
+        "live",
+        "slow",
+        "gui_cognition",
+        "desktop_command",
+        "backend_route",
+        "routing",
+        "regression"
+      ],
+      "required_services": [
+        "kria_api"
+      ],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "If the target is missing or ambiguous, stop safely and explain the blocker.",
+        "expected_status_any": [
+          "ok"
+        ],
+        "expected_reply_contains_any": [
+          "Target resolution completed for Step 5",
+          "did not execute"
+        ],
+        "expected_event_names": [
+          "gui_cognition:event"
+        ],
+        "expected_gui_event_types": [
+          "PlanCreated",
+          "PlanValidationCompleted",
+          "TargetResolutionCompleted",
+          "TurnCompleted"
+        ],
+        "forbidden_gui_event_types": [
+          "ActionStarted",
+          "ActionCompleted"
+        ],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          {
+            "path": "desktop_command.path",
+            "equals": "send_manual_tool_message"
+          },
+          {
+            "path": "gui_cognition.target_resolution.status",
+            "equals": "resolved"
+          },
+          {
+            "path": "gui_cognition.target_resolution.can_execute",
+            "equals": false
+          }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.backend.risky_submit_requires_approval",
+      "title": "GUI Cognition backend route risky submit requires approval and does not execute",
+      "driver": "desktop_chat_command",
+      "tags": [
+        "live",
+        "slow",
+        "gui_cognition",
+        "desktop_command",
+        "backend_route",
+        "routing",
+        "hitl",
+        "regression"
+      ],
+      "required_services": [
+        "kria_api"
+      ],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Prepare to click a Submit button, but ask for approval before executing.",
+        "expected_status_any": [
+          "needs_approval"
+        ],
+        "expected_reply_contains_any": [
+          "approval required"
+        ],
+        "expected_event_names": [
+          "gui_cognition:event"
+        ],
+        "expected_gui_event_types": [
+          "SafetyGateCompleted",
+          "HitlRequired",
+          "TurnCompleted"
+        ],
+        "forbidden_gui_event_types": [
+          "ActionStarted"
+        ],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          {
+            "path": "desktop_command.path",
+            "equals": "send_manual_tool_message"
+          },
+          {
+            "path": "gui_cognition.requires_approval",
+            "equals": true
+          }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.backend.no_llm_tool_loop",
+      "title": "GUI Cognition backend route never enters legacy LLM native tool loop",
+      "driver": "desktop_chat_command",
+      "tags": [
+        "live",
+        "slow",
+        "gui_cognition",
+        "desktop_command",
+        "backend_route",
+        "routing",
+        "regression"
+      ],
+      "required_services": [
+        "kria_api"
+      ],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Observe the current screen and tell me the active window.",
+        "expected_status_any": [
+          "ok"
+        ],
+        "expected_reply_not_contains_any": [
+          "LLM error",
+          "get_active_window()"
+        ],
+        "expected_event_names": [
+          "gui_cognition:event"
+        ],
+        "expected_gui_event_types": [
+          "RouteConfirmed",
+          "TurnCompleted"
+        ],
+        "forbidden_gui_event_types": [
+          "ActionStarted"
+        ],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          {
+            "path": "gui_cognition.path",
+            "equals": "send_manual_tool_message"
+          },
+          {
+            "path": "gui_cognition.llm_tool_loop",
+            "equals": false
+          }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.backend.event_sequence_monotonic",
+      "title": "GUI Cognition backend route emits monotonic canonical event sequence",
+      "driver": "desktop_chat_command",
+      "tags": [
+        "live",
+        "slow",
+        "gui_cognition",
+        "desktop_command",
+        "backend_route",
+        "routing",
+        "regression"
+      ],
+      "required_services": [
+        "kria_api"
+      ],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "If multiple buttons look similar, ask me for clarification instead of guessing.",
+        "expected_status_any": [
+          "ok"
+        ],
+        "expected_event_names": [
+          "gui_cognition:event"
+        ],
+        "expected_gui_event_types": [
+          "TurnStarted",
+          "RouteConfirmed",
+          "ObservationStarted",
+          "ObservationCompleted",
+          "ContextBuilt",
+          "GoalContractCreated",
+          "PlanCreated",
+          "TurnCompleted"
+        ],
+        "forbidden_gui_event_types": [
+          "ActionStarted"
+        ],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          {
+            "path": "desktop_command.path",
+            "equals": "send_manual_tool_message"
+          },
+          {
+            "path": "gui_cognition.llm_tool_loop",
+            "equals": false
+          }
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true
+        }
+      }
+    }
+  ]
+}

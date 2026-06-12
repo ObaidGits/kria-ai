@@ -1,0 +1,50 @@
+{
+  "schema_version": "kria.testing.scenarios.v1",
+  "scenarios": [
+    {
+      "id": "gui_cognition.ci.backend_route_contracts",
+      "title": "GUI Cognition CI backend route contracts",
+      "driver": "backend_command",
+      "tags": ["ci", "safe", "gui_cognition", "backend_route", "rust", "regression"],
+      "required_services": [],
+      "timeout_seconds": 240,
+      "command": "cargo test -p kria-core --test gui_cognition_backend_route_tests --quiet"
+    },
+    {
+      "id": "gui_cognition.ci.observation_perception_contracts",
+      "title": "GUI Cognition CI observation and perception contracts",
+      "driver": "backend_command",
+      "tags": ["ci", "safe", "gui_cognition", "perception", "rust", "regression"],
+      "required_services": [],
+      "timeout_seconds": 240,
+      "command": "cargo test -p kria-core --test gui_cognition_observation_perception_tests --quiet"
+    },
+    {
+      "id": "gui_cognition.ci.context_builder_contracts",
+      "title": "GUI Cognition CI context builder contracts",
+      "driver": "backend_command",
+      "tags": ["ci", "safe", "gui_cognition", "context_builder", "rust", "regression"],
+      "required_services": [],
+      "timeout_seconds": 240,
+      "command": "cargo test -p kria-core --test gui_cognition_context_builder_tests --quiet"
+    },
+    {
+      "id": "gui_cognition.ci.goal_contracts",
+      "title": "GUI Cognition CI goal and intent contracts",
+      "driver": "backend_command",
+      "tags": ["ci", "safe", "gui_cognition", "goal_intent", "rust", "regression"],
+      "required_services": [],
+      "timeout_seconds": 240,
+      "command": "cargo test -p kria-core --test gui_cognition_goal_contract_tests --quiet"
+    },
+    {
+      "id": "gui_cognition.ci.llm_planner_contracts",
+      "title": "GUI Cognition CI LLM planner contracts",
+      "driver": "backend_command",
+      "tags": ["ci", "safe", "gui_cognition", "llm_planner", "rust", "regression"],
+      "required_services": [],
+      "timeout_seconds": 240,
+      "command": "cargo test -p kria-core --test gui_cognition_llm_planner_tests --quiet"
+    }
+  ]
+}

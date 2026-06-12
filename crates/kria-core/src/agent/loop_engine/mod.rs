@@ -4106,6 +4106,22 @@ impl TurnExecutionProfile {
             && (self.app_lock.is_some() || self.tool_lock.is_some())
     }
 
+    pub fn is_gui_cognition_override(&self) -> bool {
+        if !self.is_manual_tool_override() {
+            return false;
+        }
+
+        self.app_lock
+            .as_deref()
+            .map(|value| value.trim().to_ascii_lowercase())
+            .is_some_and(|value| {
+                matches!(
+                    value.as_str(),
+                    "gui" | "gui_cognition" | "gui-cognition" | "desktop_gui"
+                )
+            })
+    }
+
     fn uses_direct_strategy(&self) -> bool {
         (self.is_prompt_lab() || self.is_manual_tool_override())
             && matches!(

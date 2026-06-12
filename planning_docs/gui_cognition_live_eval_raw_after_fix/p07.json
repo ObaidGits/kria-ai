@@ -1,0 +1,4915 @@
+{
+  "status": "processing",
+  "reply": "Workflow stopped safely: the resolved target is no longer present",
+  "events": [
+    {
+      "name": "agent:thinking",
+      "payload": {
+        "status": "processing",
+        "mode": "gui_cognition"
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p07-1781266656",
+        "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+        "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+        "sequence": 1,
+        "timestamp_ms": 1781266673268,
+        "event": {
+          "type": "TurnStarted",
+          "mode_id": "gui_cognition"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p07-1781266656",
+        "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+        "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+        "sequence": 2,
+        "timestamp_ms": 1781266673268,
+        "event": {
+          "type": "RouteConfirmed",
+          "path": "send_manual_tool_message",
+          "llm_tool_loop": false
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p07-1781266656",
+        "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+        "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+        "sequence": 3,
+        "timestamp_ms": 1781266673268,
+        "event": {
+          "type": "ObservationStarted",
+          "cache_policy": "observe_plan_ttl_750ms",
+          "sources": [
+            "get_active_window",
+            "get_desktop_state",
+            "get_accessibility_capabilities",
+            "accessibility_tree_summary",
+            "capture_screenshot",
+            "ocr",
+            "monitor_layout",
+            "cursor_focus",
+            "find_ui_elements"
+          ]
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p07-1781266656",
+        "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+        "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+        "sequence": 4,
+        "timestamp_ms": 1781266673268,
+        "event": {
+          "type": "ObservationCompleted",
+          "observation_id": "709bc6df-5286-4e71-b439-82fb92129828",
+          "active_window": "obaid@obaid-ubuntu: /media/obaid/SSD/KRIA",
+          "active_window_source": "kria_gnome_shell_bridge",
+          "active_window_confidence": 0.98,
+          "active_window_reliability": "reliable",
+          "active_window_blocker": null,
+          "active_window_authority_source": "kria_gnome_shell_bridge",
+          "active_window_authority_confidence": 0.98,
+          "active_window_authority_status": "available",
+          "gnome_bridge_status": "available",
+          "active_window_app": "Terminal",
+          "active_window_app_id": "org.gnome.Terminal.desktop",
+          "active_window_pid": 396009,
+          "active_window_workspace": 0,
+          "active_window_monitor": 0,
+          "active_window_fullscreen": false,
+          "active_window_minimized": false,
+          "active_window_observed_at_ms": 1781266656088,
+          "active_window_fallback_chain": [
+            {
+              "source": "kria_gnome_shell_bridge",
+              "status": "matched",
+              "reliability": "reliable",
+              "reason": null
+            }
+          ],
+          "active_window_failure_chain": [],
+          "visible_app_count": 5,
+          "visible_control_count": 13,
+          "visible_accessible_control_count": 13,
+          "disabled_control_count": 11,
+          "hidden_control_count": 0,
+          "trusted_control_count": 0,
+          "partial_control_count": 0,
+          "not_executable_control_count": 13,
+          "text_field_count": 11,
+          "button_count": 2,
+          "dialog_count": 0,
+          "other_control_count": 0,
+          "ocr_available": true,
+          "ocr_block_count": 1,
+          "ocr_trust": "untrusted",
+          "ocr_wait_for_screenshot_ms": 1280,
+          "ocr_engine_selected": "tesseract_cli",
+          "ocr_engine_status": "completed",
+          "ocr_image_status": "downscaled_1920x1200_to_1000x625",
+          "ocr_total_ms": 2259,
+          "ocr_fast_path": "full_screen_tesseract",
+          "ocr_cache_hit": false,
+          "ocr_roi_count": 0,
+          "ocr_changed_region_count": 0,
+          "ocr_cold_start_ms": 2259,
+          "ocr_warm_start_ms": null,
+          "ocr_benchmark_summary": "rapidocr/paddleocr optional adapters not configured; tesseract fallback used",
+          "ocr_injection_count": 0,
+          "ocr_blocker": null,
+          "accessibility_available": true,
+          "accessibility_source_status": "degraded",
+          "accessibility_overall_status": "degraded",
+          "accessibility_overall_confidence": 0.6599999999999999,
+          "accessibility_app_scores": [
+            {
+              "app_label": ":1.0",
+              "bus_name_hash": "6ae115a23a8787ac",
+              "node_count": 91,
+              "control_count": 24,
+              "timeout_count": 1,
+              "stale_node_count": 0,
+              "score": 0.6599999999999999,
+              "status": "degraded"
+            },
+            {
+              "app_label": ":1.4",
+              "bus_name_hash": "1890e0c9307bad0a",
+              "node_count": 91,
+              "control_count": 24,
+              "timeout_count": 1,
+              "stale_node_count": 0,
+              "score": 0.6599999999999999,
+              "status": "degraded"
+            },
+            {
+              "app_label": ":1.6",
+              "bus_name_hash": "cdaa122c19a646a6",
+              "node_count": 91,
+              "control_count": 24,
+              "timeout_count": 1,
+              "stale_node_count": 0,
+              "score": 0.6599999999999999,
+              "status": "degraded"
+            },
+            {
+              "app_label": ":1.5",
+              "bus_name_hash": "305f121ff554bda2",
+              "node_count": 91,
+              "control_count": 24,
+              "timeout_count": 1,
+              "stale_node_count": 0,
+              "score": 0.6599999999999999,
+              "status": "degraded"
+            },
+            {
+              "app_label": ":1.3",
+              "bus_name_hash": "e0312de4bce4c374",
+              "node_count": 91,
+              "control_count": 24,
+              "timeout_count": 1,
+              "stale_node_count": 0,
+              "score": 0.6599999999999999,
+              "status": "degraded"
+            }
+          ],
+          "accessibility_stale_node_count": 0,
+          "accessibility_timeout_count": 1,
+          "accessibility_cache_hit_count": 0,
+          "accessibility_stale_cache_rejected_count": 0,
+          "accessibility_node_count": 91,
+          "accessibility_control_count": 13,
+          "atspi_snapshot_total_ms": 126,
+          "atspi_skipped_app_count": 1,
+          "atspi_omitted_node_count": 112,
+          "accessibility_remediation": [],
+          "screenshot_available": true,
+          "screenshot_status": "available",
+          "screenshot_capture_ms": 1280,
+          "screenshot_duration_ms": 1280,
+          "screen_hash_prefix": "ea9c63d60c01be6b",
+          "monitor_count": 1,
+          "dpi_available": true,
+          "cursor_focus_known": true,
+          "focused_window": "obaid@obaid-ubuntu: /media/obaid/SSD/KRIA",
+          "focused_app": "Terminal",
+          "focused_control_id": "gnome_bridge:terminal_window",
+          "focused_control_label": "Terminal focus",
+          "focused_control_role": "terminal",
+          "focused_control_bounds": null,
+          "text_cursor_known": false,
+          "editable_target_known": false,
+          "terminal_like": true,
+          "focus_source": "gnome_bridge_focus",
+          "focus_confidence": 0.86,
+          "focus_reliability": "reliable",
+          "focus_adapter_status": "available",
+          "focus_latency_ms": 5,
+          "focus_failure_chain": [
+            {
+              "source": "gnome_bridge_focus",
+              "status": "matched",
+              "reliability": "reliable",
+              "reason": null
+            }
+          ],
+          "active_window_probe_ok": true,
+          "desktop_state_probe_ok": true,
+          "capabilities_probe_ok": true,
+          "observation_total_ms": 2261,
+          "slowest_probe": "run_ocr",
+          "slowest_probe_ms": 2259,
+          "probe_timeout_count": 1,
+          "probe_timings": [
+            {
+              "probe_name": "capture_screenshot",
+              "duration_ms": 1280,
+              "status": "ok",
+              "source": "xcap",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "detect_visual_controls",
+              "duration_ms": 1977,
+              "status": "timeout",
+              "source": "detect_visual_controls",
+              "cache_hit": false,
+              "blocker_kind": "timeout"
+            },
+            {
+              "probe_name": "find_ui_elements:check_box",
+              "duration_ms": 127,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "find_ui_elements:dialog",
+              "duration_ms": 127,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "find_ui_elements:link",
+              "duration_ms": 127,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "find_ui_elements:page_tab",
+              "duration_ms": 127,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "find_ui_elements:push_button",
+              "duration_ms": 127,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "find_ui_elements:text",
+              "duration_ms": 127,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "focused_window_title",
+              "duration_ms": 127,
+              "status": "blocked",
+              "source": "focused_window_title",
+              "cache_hit": false,
+              "blocker_kind": "unavailable"
+            },
+            {
+              "probe_name": "get_accessibility_capabilities",
+              "duration_ms": 126,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "get_accessibility_tree_summary",
+              "duration_ms": 127,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "get_active_window",
+              "duration_ms": 5,
+              "status": "ok",
+              "source": "kria_gnome_shell_bridge",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "get_cursor_focus_state",
+              "duration_ms": 133,
+              "status": "ok",
+              "source": "gnome_bridge_focus",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "get_desktop_state",
+              "duration_ms": 126,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "get_monitor_layout",
+              "duration_ms": 1,
+              "status": "ok",
+              "source": "get_monitor_layout",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "run_ocr",
+              "duration_ms": 2259,
+              "status": "ok",
+              "source": "tesseract_cli",
+              "cache_hit": false,
+              "blocker_kind": null
+            }
+          ],
+          "cache_hit": false,
+          "cache_age_ms": null,
+          "cache_policy": "observe_plan_ttl_750ms",
+          "freshness": "fresh",
+          "source_blockers": {
+            "active_window": null,
+            "desktop_state": null,
+            "accessibility": null,
+            "screenshot": null,
+            "ocr": null,
+            "monitor": null,
+            "cursor_focus": null
+          },
+          "control_samples": [
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1141:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1145:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1149:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1153:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1157:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1161:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1172:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1176:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1180:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1184:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1199:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1197:push button",
+              "role": "push button",
+              "label": "",
+              "bounds": null,
+              "enabled": true,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "bounds_missing",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            }
+          ],
+          "executable_control_count": 0,
+          "visual_control_count": 0,
+          "visual_control_summary": {
+            "detected": 0,
+            "matched": 0,
+            "unmatched": 0,
+            "button_like": 0,
+            "false_positive_risk": "supporting_visual_only"
+          }
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p07-1781266656",
+        "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+        "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+        "sequence": 5,
+        "timestamp_ms": 1781266673268,
+        "event": {
+          "context_id": "4d3ee558-a74f-42ef-a2d0-d8e3260abb85",
+          "observation_id": "709bc6df-5286-4e71-b439-82fb92129828",
+          "trusted_control_count": 0,
+          "executable_control_count": 0,
+          "disabled_or_hidden_count": 11,
+          "ocr_untrusted": true,
+          "ocr_injection_count": 0,
+          "redaction_count": 0,
+          "freshness": "fresh",
+          "status": "ready",
+          "previous_context_id": null,
+          "previous_observation_id": null,
+          "delta": {
+            "active_window_changed": false,
+            "screen_hash_changed": false,
+            "monitor_layout_changed": false,
+            "control_count_changed": false,
+            "focused_control_changed": false,
+            "stale_action_risk": false,
+            "changed_summary": []
+          },
+          "source_confidence": {
+            "active_window": 0.98,
+            "accessibility": 0.6599999999999999,
+            "screenshot": 0.85,
+            "ocr": 0.45,
+            "monitor": 0.82,
+            "focus": 0.86
+          },
+          "screen_hash_prefix": "ea9c63d60c01be6b",
+          "focus": {
+            "source": "gnome_bridge_focus",
+            "confidence": 0.86,
+            "reliability": "reliable",
+            "keyboard_focus_known": true,
+            "editable_target_known": false,
+            "terminal_like": true,
+            "adapter_status": "available",
+            "latency_ms": 5,
+            "focused_window": "obaid@obaid-ubuntu: /media/obaid/SSD/KRIA",
+            "focused_app": "Terminal",
+            "focused_control_label": "Terminal focus",
+            "focused_control_role": "terminal",
+            "focused_control_bounds": null
+          },
+          "accessibility_health": {
+            "status": "degraded",
+            "confidence": 0.6599999999999999,
+            "app_scores": [
+              {
+                "app_label": ":1.0",
+                "bus_name_hash": "6ae115a23a8787ac",
+                "node_count": 91,
+                "control_count": 24,
+                "timeout_count": 1,
+                "stale_node_count": 0,
+                "score": 0.6599999999999999,
+                "status": "degraded"
+              },
+              {
+                "app_label": ":1.4",
+                "bus_name_hash": "1890e0c9307bad0a",
+                "node_count": 91,
+                "control_count": 24,
+                "timeout_count": 1,
+                "stale_node_count": 0,
+                "score": 0.6599999999999999,
+                "status": "degraded"
+              },
+              {
+                "app_label": ":1.6",
+                "bus_name_hash": "cdaa122c19a646a6",
+                "node_count": 91,
+                "control_count": 24,
+                "timeout_count": 1,
+                "stale_node_count": 0,
+                "score": 0.6599999999999999,
+                "status": "degraded"
+              },
+              {
+                "app_label": ":1.5",
+                "bus_name_hash": "305f121ff554bda2",
+                "node_count": 91,
+                "control_count": 24,
+                "timeout_count": 1,
+                "stale_node_count": 0,
+                "score": 0.6599999999999999,
+                "status": "degraded"
+              },
+              {
+                "app_label": ":1.3",
+                "bus_name_hash": "e0312de4bce4c374",
+                "node_count": 91,
+                "control_count": 24,
+                "timeout_count": 1,
+                "stale_node_count": 0,
+                "score": 0.6599999999999999,
+                "status": "degraded"
+              }
+            ],
+            "stale_node_count": 0,
+            "timeout_count": 1,
+            "cache_hit_count": 0,
+            "stale_cache_rejected_count": 0
+          },
+          "visual_controls": {
+            "detected": 0,
+            "supporting_only": true
+          },
+          "ocr_performance": {
+            "fast_path": "full_screen_tesseract",
+            "cache_hit": false,
+            "roi_count": 0,
+            "changed_region_count": 0,
+            "cold_start_ms": 2259,
+            "warm_start_ms": null
+          },
+          "source_blockers": [],
+          "warnings": [],
+          "type": "ContextBuilt",
+          "active_window": "obaid@obaid-ubuntu: /media/obaid/SSD/KRIA",
+          "control_summary": {
+            "text_fields": 11,
+            "buttons": 2,
+            "dialogs": 0
+          },
+          "safety": {
+            "llm_native_tool_loop": false,
+            "raw_ocr_trusted": false,
+            "ocr_trust_level": "untrusted_text",
+            "accessibility_is_executable_authority": true,
+            "screenshot_is_freshness_evidence": true
+          },
+          "source_trust": {
+            "accessibility": "trusted_executable",
+            "ocr": "untrusted_text",
+            "visual": "supporting_visual"
+          }
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p07-1781266656",
+        "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+        "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+        "sequence": 6,
+        "timestamp_ms": 1781266673268,
+        "event": {
+          "type": "ActionBackendStatus",
+          "global_halt_engaged": false,
+          "halt_kind": "none",
+          "halt_reason": null,
+          "release_conditions": [],
+          "startup_elapsed_ms": null,
+          "can_observe": true,
+          "can_plan": true,
+          "automation_enabled": true,
+          "vision_sidecar": "running",
+          "uinput_daemon": "running",
+          "orchestrator_available": true,
+          "session_type": "wayland",
+          "xdotool_available": true,
+          "ydotool_available": false,
+          "uinput_available": true,
+          "selected_backend": "uinput_accessibility",
+          "backend_selection_reason": "Wayland session selected uinput because the daemon and socket are healthy.",
+          "backend_probe_status": "wayland_uinput_ready",
+          "backend_probe_errors": [
+            "xdotool detected but not usable for Wayland GUI actions"
+          ],
+          "input_backend_kind": "uinput",
+          "focus_supported": true,
+          "typing_supported": true,
+          "click_supported": true,
+          "verification_supported": true,
+          "xdotool_usable_for_actions": false,
+          "ydotool_usable_for_actions": false,
+          "uinput_socket_path": "/run/user/1000/kria-uinput.sock",
+          "uinput_socket_accessible": true,
+          "can_execute_actions": true,
+          "blockers": [],
+          "capabilities": {
+            "observe": true,
+            "focus_field": true,
+            "fill_field": true,
+            "click_control": true,
+            "post_action_observe": true,
+            "verify": true,
+            "recovery_focus": true,
+            "recovery_modal": true
+          }
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p07-1781266656",
+        "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+        "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+        "sequence": 7,
+        "timestamp_ms": 1781266673268,
+        "event": {
+          "type": "GoalContractCreated",
+          "contract_id": "4b960acdaa907da81426d3bc38996df58e4bfa526ac853cc7f664bd0bd9d3c96",
+          "observation_id": "709bc6df-5286-4e71-b439-82fb92129828",
+          "context_id": "4d3ee558-a74f-42ef-a2d0-d8e3260abb85",
+          "goal_summary": "Open Firefox",
+          "intent_kind": "analyze_plan",
+          "action_type": "open_app",
+          "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b",
+          "target_app_kind": "browser",
+          "target_app_hint": "Firefox",
+          "target_window_hint": "obaid@obaid-ubuntu: /media/obaid/SSD/KRIA",
+          "target_control_hint": null,
+          "query_summary": null,
+          "query_hash": null,
+          "text_payload_summary": null,
+          "text_payload_hash": null,
+          "desired_final_state": "target application is opened or blocker is explained",
+          "risk_level": "low",
+          "requires_user_approval": false,
+          "ambiguity_count": 0,
+          "ambiguities": [],
+          "source_evidence": [
+            {
+              "source": "user_prompt",
+              "field": "action_type",
+              "summary": "matched action open_app",
+              "confidence": 0.9
+            },
+            {
+              "source": "user_prompt",
+              "field": "target_app_kind",
+              "summary": "browser",
+              "confidence": 0.86
+            },
+            {
+              "source": "user_prompt",
+              "field": "target_app_hint",
+              "summary": "Firefox",
+              "confidence": 0.86
+            }
+          ],
+          "extraction_confidence": 0.76,
+          "extractor_mode": "deterministic"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p07-1781266656",
+        "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+        "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+        "sequence": 8,
+        "timestamp_ms": 1781266673268,
+        "event": {
+          "type": "LlmPlanningStarted",
+          "planner_mode": "llm_schema",
+          "context_id": "4d3ee558-a74f-42ef-a2d0-d8e3260abb85",
+          "observation_id": "709bc6df-5286-4e71-b439-82fb92129828"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p07-1781266656",
+        "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+        "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+        "sequence": 9,
+        "timestamp_ms": 1781266673268,
+        "event": {
+          "type": "LlmPlanningFailed",
+          "status": "rejected",
+          "reason": "LLM planner returned prose or non-object content"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p07-1781266656",
+        "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+        "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+        "sequence": 10,
+        "timestamp_ms": 1781266673268,
+        "event": {
+          "plan_id": "cdcac5eb-b950-41ee-9db2-99ac6d4f271e",
+          "goal_contract_id": "4b960acdaa907da81426d3bc38996df58e4bfa526ac853cc7f664bd0bd9d3c96",
+          "context_id": "4d3ee558-a74f-42ef-a2d0-d8e3260abb85",
+          "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b",
+          "goal_action_type": "open_app",
+          "summary": "open_app GUI plan",
+          "planner_mode": "llm_rejected_fallback",
+          "plan_status": "valid",
+          "step_count": 2,
+          "risk_level": "low",
+          "requires_user_approval": false,
+          "ambiguity_count": 0,
+          "confidence": 0.62,
+          "validation_errors": [],
+          "source_evidence": [
+            {
+              "source": "user_prompt",
+              "field": "action_type",
+              "summary": "matched action open_app",
+              "confidence": 0.9
+            },
+            {
+              "source": "user_prompt",
+              "field": "target_app_kind",
+              "summary": "browser",
+              "confidence": 0.86
+            },
+            {
+              "source": "user_prompt",
+              "field": "target_app_hint",
+              "summary": "Firefox",
+              "confidence": 0.86
+            }
+          ],
+          "steps": [
+            "Open or switch to the requested app",
+            "Verify requested app window is visible"
+          ],
+          "typed_steps": [
+            {
+              "step_id": "det-1",
+              "step_type": "OpenApp",
+              "summary": "Open or switch to the requested app",
+              "target_app_hint": "Firefox",
+              "target_window_hint": "obaid@obaid-ubuntu: /media/obaid/SSD/KRIA",
+              "target_control_hint": null,
+              "text_payload_summary": null,
+              "text_payload_hash": null,
+              "expected_precondition": "requested app is not guaranteed visible",
+              "expected_postcondition": "requested app window is visible",
+              "verification_strategy": "window_visible",
+              "risk_level": "low",
+              "requires_approval": false,
+              "allowed_to_execute": false,
+              "confidence": 0.76,
+              "reason": "analyze_plan"
+            },
+            {
+              "step_id": "det-2",
+              "step_type": "WaitForState",
+              "summary": "Verify requested app window is visible",
+              "target_app_hint": "Firefox",
+              "target_window_hint": "obaid@obaid-ubuntu: /media/obaid/SSD/KRIA",
+              "target_control_hint": null,
+              "text_payload_summary": null,
+              "text_payload_hash": null,
+              "expected_precondition": "OpenApp step has been planned",
+              "expected_postcondition": "window visible or safe blocker reported",
+              "verification_strategy": "window_visible",
+              "risk_level": "low",
+              "requires_approval": false,
+              "allowed_to_execute": false,
+              "confidence": 0.76,
+              "reason": "analyze_plan"
+            }
+          ],
+          "type": "PlanCreated"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p07-1781266656",
+        "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+        "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+        "sequence": 11,
+        "timestamp_ms": 1781266673268,
+        "event": {
+          "type": "PlanValidationCompleted",
+          "validation_id": "validation-cdcac5eb-b950-41ee-9db2-99ac6d4f271e",
+          "plan_id": "cdcac5eb-b950-41ee-9db2-99ac6d4f271e",
+          "goal_contract_id": "4b960acdaa907da81426d3bc38996df58e4bfa526ac853cc7f664bd0bd9d3c96",
+          "context_id": "4d3ee558-a74f-42ef-a2d0-d8e3260abb85",
+          "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b",
+          "status": "valid",
+          "readiness_status": "valid_for_resolution",
+          "risk_level": "low",
+          "requires_user_approval": false,
+          "can_proceed_to_target_resolution": true,
+          "can_execute": false,
+          "blocker_count": 0,
+          "warning_count": 0,
+          "blocked_reasons": [],
+          "warnings": [],
+          "validation_errors": [],
+          "source_evidence": [
+            {
+              "source": "user_prompt",
+              "field": "action_type",
+              "summary": "matched action open_app",
+              "confidence": 0.9
+            },
+            {
+              "source": "user_prompt",
+              "field": "target_app_kind",
+              "summary": "browser",
+              "confidence": 0.86
+            },
+            {
+              "source": "user_prompt",
+              "field": "target_app_hint",
+              "summary": "Firefox",
+              "confidence": 0.86
+            }
+          ],
+          "step_results": [
+            {
+              "step_id": "det-1",
+              "step_type": "OpenApp",
+              "status": "valid_for_resolution",
+              "risk_level": "low",
+              "requires_approval": false,
+              "target_resolution_required": false,
+              "target_available": false,
+              "verification_present": true,
+              "precondition_status": "present",
+              "postcondition_status": "present",
+              "blocker": null,
+              "confidence": 0.76
+            },
+            {
+              "step_id": "det-2",
+              "step_type": "WaitForState",
+              "status": "valid_for_resolution",
+              "risk_level": "low",
+              "requires_approval": false,
+              "target_resolution_required": false,
+              "target_available": false,
+              "verification_present": true,
+              "precondition_status": "present",
+              "postcondition_status": "present",
+              "blocker": null,
+              "confidence": 0.76
+            }
+          ],
+          "confidence": 0.62
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p07-1781266656",
+        "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+        "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+        "sequence": 12,
+        "timestamp_ms": 1781266673268,
+        "event": {
+          "type": "WorkflowRunStarted",
+          "workflow_run_id": "workflow-run-df749f8f5f829b86f2419b88895588964724b179ba4ef90ed3155e03576dd275",
+          "plan_id": "cdcac5eb-b950-41ee-9db2-99ac6d4f271e",
+          "goal_contract_id": "4b960acdaa907da81426d3bc38996df58e4bfa526ac853cc7f664bd0bd9d3c96",
+          "step_count": 2,
+          "current_step_index": 0,
+          "risk_level": "low",
+          "requires_user_approval": false,
+          "execution_mode": "execute_live",
+          "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p07-1781266656",
+        "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+        "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+        "sequence": 13,
+        "timestamp_ms": 1781266673268,
+        "event": {
+          "type": "WorkflowStepStarted",
+          "workflow_run_id": "workflow-run-df749f8f5f829b86f2419b88895588964724b179ba4ef90ed3155e03576dd275",
+          "plan_id": "cdcac5eb-b950-41ee-9db2-99ac6d4f271e",
+          "goal_contract_id": "4b960acdaa907da81426d3bc38996df58e4bfa526ac853cc7f664bd0bd9d3c96",
+          "step_id": "det-1",
+          "step_index": 0,
+          "step_type": "OpenApp",
+          "status": "started",
+          "current_step_index": 0,
+          "step_count": 2,
+          "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p07-1781266656",
+        "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+        "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+        "sequence": 14,
+        "timestamp_ms": 1781266673268,
+        "event": {
+          "type": "TargetResolutionStarted",
+          "plan_id": "cdcac5eb-b950-41ee-9db2-99ac6d4f271e-s0",
+          "validation_id": "validation-cdcac5eb-b950-41ee-9db2-99ac6d4f271e",
+          "mode": "step10_workflow_step"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p07-1781266656",
+        "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+        "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+        "sequence": 15,
+        "timestamp_ms": 1781266673268,
+        "event": {
+          "type": "TargetResolutionCompleted",
+          "resolution_id": "resolution-cdcac5eb-b950-41ee-9db2-99ac6d4f271e-s0",
+          "plan_id": "cdcac5eb-b950-41ee-9db2-99ac6d4f271e-s0",
+          "validation_id": "validation-cdcac5eb-b950-41ee-9db2-99ac6d4f271e",
+          "goal_contract_id": "4b960acdaa907da81426d3bc38996df58e4bfa526ac853cc7f664bd0bd9d3c96",
+          "context_id": "4d3ee558-a74f-42ef-a2d0-d8e3260abb85",
+          "observation_id": "709bc6df-5286-4e71-b439-82fb92129828",
+          "status": "resolved",
+          "results": [],
+          "resolved_target": null,
+          "candidates": [],
+          "confidence": 0.76,
+          "ambiguity_count": 0,
+          "ambiguity_reasons": [],
+          "blocker_count": 0,
+          "blockers": [],
+          "can_proceed_to_safety_gate": true,
+          "can_execute": false,
+          "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p07-1781266656",
+        "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+        "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+        "sequence": 16,
+        "timestamp_ms": 1781266673268,
+        "event": {
+          "type": "SafetyGateStarted",
+          "plan_id": "cdcac5eb-b950-41ee-9db2-99ac6d4f271e-s0",
+          "resolution_id": "resolution-cdcac5eb-b950-41ee-9db2-99ac6d4f271e-s0",
+          "mode": "step6_safety_hitl",
+          "can_execute": false,
+          "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p07-1781266656",
+        "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+        "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+        "sequence": 17,
+        "timestamp_ms": 1781266673268,
+        "event": {
+          "type": "SafetyGateCompleted",
+          "safety_gate_id": "safety-gui-proposal-6e3310f0261e57013a67553391eb3b6dcfd89566633569a32cf46ba2c074bd24",
+          "proposal_id": "gui-proposal-6e3310f0261e57013a67553391eb3b6dcfd89566633569a32cf46ba2c074bd24",
+          "request_id": "gui-hitl-fc5e9c8443b983138a5ffbe9ce0e1fdbf75196256f93ea5830a2277e80742e62",
+          "proposal_hash": "a59b906bfbaab96ccf76ccf05264c0807c3dbc4a3efb32aa08e43fd9b131cb49",
+          "target_hash": "1c150bbeb0469615cffa76ca9c2c56b9eb26d8c711825d7255635ed4e2260ded",
+          "status": "Allowed",
+          "safety_status": "safe_no_approval_required",
+          "risk_level": "low",
+          "reasons": [
+            "risk level: low"
+          ],
+          "risk_reasons": [
+            "risk level: low"
+          ],
+          "requires_user_approval": false,
+          "approval_reason": null,
+          "blockers": [],
+          "warnings": [],
+          "can_request_hitl": false,
+          "can_authorize_step7": true,
+          "can_execute": false,
+          "source_evidence": [
+            "gui_goal_contract",
+            "plan_validation",
+            "target_resolution"
+          ],
+          "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b",
+          "action_type": "OpenApp",
+          "target_label": "Firefox",
+          "target_role": null,
+          "expected_postcondition": "requested app window is visible",
+          "expires_at_ms": 1781266732235,
+          "proposal": {
+            "proposal_schema_version": 1,
+            "proposal_id": "gui-proposal-6e3310f0261e57013a67553391eb3b6dcfd89566633569a32cf46ba2c074bd24",
+            "request_id": "gui-hitl-fc5e9c8443b983138a5ffbe9ce0e1fdbf75196256f93ea5830a2277e80742e62",
+            "goal_contract_id": "4b960acdaa907da81426d3bc38996df58e4bfa526ac853cc7f664bd0bd9d3c96",
+            "plan_id": "cdcac5eb-b950-41ee-9db2-99ac6d4f271e-s0",
+            "validation_id": "validation-cdcac5eb-b950-41ee-9db2-99ac6d4f271e",
+            "resolution_id": "resolution-cdcac5eb-b950-41ee-9db2-99ac6d4f271e-s0",
+            "context_id": "4d3ee558-a74f-42ef-a2d0-d8e3260abb85",
+            "observation_id": "709bc6df-5286-4e71-b439-82fb92129828",
+            "step_id": "det-1",
+            "action_type": "OpenApp",
+            "target_hash": "1c150bbeb0469615cffa76ca9c2c56b9eb26d8c711825d7255635ed4e2260ded",
+            "target_control_id": null,
+            "target_label": "Firefox",
+            "target_role": null,
+            "target_bounds": null,
+            "text_payload_summary": null,
+            "text_payload_hash": null,
+            "expected_precondition": "requested app is not guaranteed visible",
+            "expected_postcondition": "requested app window is visible",
+            "risk_level": "low",
+            "risk_reasons": [
+              "risk level: low"
+            ],
+            "requires_user_approval": false,
+            "created_at_ms": 1781266672235,
+            "expires_at_ms": 1781266732235,
+            "proposal_hash": "a59b906bfbaab96ccf76ccf05264c0807c3dbc4a3efb32aa08e43fd9b131cb49",
+            "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b",
+            "can_execute": false
+          }
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p07-1781266656",
+        "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+        "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+        "sequence": 18,
+        "timestamp_ms": 1781266673268,
+        "event": {
+          "type": "ActionStarted",
+          "execution_id": "execution-8724dac33384f820ffcccdc73c4834173d9f973c959e0b70974b05af367ef2b2",
+          "proposal_id": "gui-proposal-6e3310f0261e57013a67553391eb3b6dcfd89566633569a32cf46ba2c074bd24",
+          "proposal_hash": "a59b906bfbaab96ccf76ccf05264c0807c3dbc4a3efb32aa08e43fd9b131cb49",
+          "target_hash": "1c150bbeb0469615cffa76ca9c2c56b9eb26d8c711825d7255635ed4e2260ded",
+          "action_kind": "OpenApp",
+          "target": "Firefox",
+          "backend_used": "uinput_accessibility",
+          "authorization_source": "safe_no_approval_required",
+          "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p07-1781266656",
+        "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+        "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+        "sequence": 19,
+        "timestamp_ms": 1781266673268,
+        "event": {
+          "type": "ObservationStarted",
+          "cache_policy": "observe_plan_ttl_750ms",
+          "sources": [
+            "get_active_window",
+            "get_desktop_state",
+            "get_accessibility_capabilities",
+            "accessibility_tree_summary",
+            "capture_screenshot",
+            "ocr",
+            "monitor_layout",
+            "cursor_focus",
+            "find_ui_elements"
+          ]
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p07-1781266656",
+        "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+        "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+        "sequence": 20,
+        "timestamp_ms": 1781266673268,
+        "event": {
+          "type": "ObservationCompleted",
+          "observation_id": "81fec272-1e10-4ccf-b351-666205ac5e0c",
+          "active_window": "obaid@obaid-ubuntu: /media/obaid/SSD/KRIA",
+          "active_window_source": "kria_gnome_shell_bridge",
+          "active_window_confidence": 0.98,
+          "active_window_reliability": "reliable",
+          "active_window_blocker": null,
+          "active_window_authority_source": "kria_gnome_shell_bridge",
+          "active_window_authority_confidence": 0.98,
+          "active_window_authority_status": "available",
+          "gnome_bridge_status": "available",
+          "active_window_app": "Terminal",
+          "active_window_app_id": "org.gnome.Terminal.desktop",
+          "active_window_pid": 396009,
+          "active_window_workspace": 0,
+          "active_window_monitor": 0,
+          "active_window_fullscreen": false,
+          "active_window_minimized": false,
+          "active_window_observed_at_ms": 1781266672973,
+          "active_window_fallback_chain": [
+            {
+              "source": "kria_gnome_shell_bridge",
+              "status": "matched",
+              "reliability": "reliable",
+              "reason": null
+            }
+          ],
+          "active_window_failure_chain": [],
+          "visible_app_count": 5,
+          "visible_control_count": 17,
+          "visible_accessible_control_count": 17,
+          "disabled_control_count": 11,
+          "hidden_control_count": 0,
+          "trusted_control_count": 0,
+          "partial_control_count": 0,
+          "not_executable_control_count": 17,
+          "text_field_count": 13,
+          "button_count": 4,
+          "dialog_count": 0,
+          "other_control_count": 0,
+          "ocr_available": true,
+          "ocr_block_count": 1,
+          "ocr_trust": "untrusted",
+          "ocr_wait_for_screenshot_ms": 0,
+          "ocr_engine_selected": "tesseract_cli",
+          "ocr_engine_status": "completed",
+          "ocr_image_status": "downscaled_1920x1200_to_1000x625",
+          "ocr_total_ms": 1021,
+          "ocr_fast_path": "full_screen_tesseract",
+          "ocr_cache_hit": false,
+          "ocr_roi_count": 0,
+          "ocr_changed_region_count": 0,
+          "ocr_cold_start_ms": 1021,
+          "ocr_warm_start_ms": null,
+          "ocr_benchmark_summary": "rapidocr/paddleocr optional adapters not configured; tesseract fallback used",
+          "ocr_injection_count": 0,
+          "ocr_blocker": null,
+          "accessibility_available": true,
+          "accessibility_source_status": "degraded",
+          "accessibility_overall_status": "degraded",
+          "accessibility_overall_confidence": 0.6599999999999999,
+          "accessibility_app_scores": [
+            {
+              "app_label": ":1.0",
+              "bus_name_hash": "6ae115a23a8787ac",
+              "node_count": 91,
+              "control_count": 24,
+              "timeout_count": 1,
+              "stale_node_count": 0,
+              "score": 0.6599999999999999,
+              "status": "degraded"
+            },
+            {
+              "app_label": ":1.4",
+              "bus_name_hash": "1890e0c9307bad0a",
+              "node_count": 91,
+              "control_count": 24,
+              "timeout_count": 1,
+              "stale_node_count": 0,
+              "score": 0.6599999999999999,
+              "status": "degraded"
+            },
+            {
+              "app_label": ":1.6",
+              "bus_name_hash": "cdaa122c19a646a6",
+              "node_count": 91,
+              "control_count": 24,
+              "timeout_count": 1,
+              "stale_node_count": 0,
+              "score": 0.6599999999999999,
+              "status": "degraded"
+            },
+            {
+              "app_label": ":1.5",
+              "bus_name_hash": "305f121ff554bda2",
+              "node_count": 91,
+              "control_count": 24,
+              "timeout_count": 1,
+              "stale_node_count": 0,
+              "score": 0.6599999999999999,
+              "status": "degraded"
+            },
+            {
+              "app_label": ":1.3",
+              "bus_name_hash": "e0312de4bce4c374",
+              "node_count": 91,
+              "control_count": 24,
+              "timeout_count": 1,
+              "stale_node_count": 0,
+              "score": 0.6599999999999999,
+              "status": "degraded"
+            }
+          ],
+          "accessibility_stale_node_count": 0,
+          "accessibility_timeout_count": 1,
+          "accessibility_cache_hit_count": 0,
+          "accessibility_stale_cache_rejected_count": 0,
+          "accessibility_node_count": 91,
+          "accessibility_control_count": 17,
+          "atspi_snapshot_total_ms": 126,
+          "atspi_skipped_app_count": 1,
+          "atspi_omitted_node_count": 112,
+          "accessibility_remediation": [],
+          "screenshot_available": true,
+          "screenshot_status": "available",
+          "screenshot_capture_ms": 2,
+          "screenshot_duration_ms": 2,
+          "screen_hash_prefix": "ea9c63d60c01be6b",
+          "monitor_count": 1,
+          "dpi_available": true,
+          "cursor_focus_known": true,
+          "focused_window": "obaid@obaid-ubuntu: /media/obaid/SSD/KRIA",
+          "focused_app": "Terminal",
+          "focused_control_id": "gnome_bridge:terminal_window",
+          "focused_control_label": "Terminal focus",
+          "focused_control_role": "terminal",
+          "focused_control_bounds": null,
+          "text_cursor_known": false,
+          "editable_target_known": false,
+          "terminal_like": true,
+          "focus_source": "gnome_bridge_focus",
+          "focus_confidence": 0.86,
+          "focus_reliability": "reliable",
+          "focus_adapter_status": "available",
+          "focus_latency_ms": 30,
+          "focus_failure_chain": [
+            {
+              "source": "gnome_bridge_focus",
+              "status": "matched",
+              "reliability": "reliable",
+              "reason": null
+            }
+          ],
+          "active_window_probe_ok": true,
+          "desktop_state_probe_ok": true,
+          "capabilities_probe_ok": true,
+          "observation_total_ms": 1025,
+          "slowest_probe": "run_ocr",
+          "slowest_probe_ms": 1021,
+          "probe_timeout_count": 0,
+          "probe_timings": [
+            {
+              "probe_name": "capture_screenshot",
+              "duration_ms": 2,
+              "status": "ok",
+              "source": "xcap",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "detect_visual_controls",
+              "duration_ms": 57,
+              "status": "ok",
+              "source": "vision_sidecar",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "find_ui_elements:check_box",
+              "duration_ms": 0,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "find_ui_elements:dialog",
+              "duration_ms": 0,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "find_ui_elements:link",
+              "duration_ms": 0,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "find_ui_elements:page_tab",
+              "duration_ms": 0,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "find_ui_elements:push_button",
+              "duration_ms": 0,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "find_ui_elements:text",
+              "duration_ms": 0,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "focused_window_title",
+              "duration_ms": 0,
+              "status": "blocked",
+              "source": "focused_window_title",
+              "cache_hit": false,
+              "blocker_kind": "unavailable"
+            },
+            {
+              "probe_name": "get_accessibility_capabilities",
+              "duration_ms": 0,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "get_accessibility_tree_summary",
+              "duration_ms": 0,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "get_active_window",
+              "duration_ms": 733,
+              "status": "ok",
+              "source": "kria_gnome_shell_bridge",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "get_cursor_focus_state",
+              "duration_ms": 30,
+              "status": "ok",
+              "source": "gnome_bridge_focus",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "get_desktop_state",
+              "duration_ms": 0,
+              "status": "ok",
+              "source": "atspi_snapshot",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "get_monitor_layout",
+              "duration_ms": 30,
+              "status": "ok",
+              "source": "get_monitor_layout",
+              "cache_hit": false,
+              "blocker_kind": null
+            },
+            {
+              "probe_name": "run_ocr",
+              "duration_ms": 1021,
+              "status": "ok",
+              "source": "tesseract_cli",
+              "cache_hit": false,
+              "blocker_kind": null
+            }
+          ],
+          "cache_hit": false,
+          "cache_age_ms": null,
+          "cache_policy": "observe_plan_ttl_750ms",
+          "freshness": "fresh",
+          "source_blockers": {
+            "active_window": null,
+            "desktop_state": null,
+            "accessibility": null,
+            "screenshot": null,
+            "ocr": null,
+            "monitor": null,
+            "cursor_focus": null
+          },
+          "control_samples": [
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1141:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1145:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1149:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1153:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1157:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1161:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1172:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1176:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1180:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1184:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": ":1.0:/org/a11y/atspi/accessible/1199:text",
+              "role": "text",
+              "label": "",
+              "bounds": null,
+              "enabled": false,
+              "visible": true,
+              "focused": false,
+              "source": "accessibility",
+              "confidence": 1.0,
+              "quality": "not_executable",
+              "label_source": "missing",
+              "state_source": "accessibility_state",
+              "rejection_reason": "disabled",
+              "identity_confidence": 0.35,
+              "bounds_confidence": 0.0,
+              "state_confidence": 0.86,
+              "executable_confidence": 0.0,
+              "sources": [
+                "accessibility"
+              ]
+            },
+            {
+              "id": "b54f607450c426fdfdc2e15e4c15ed262bf6465cbcc714c2b9c86fa6ff1a1f75",
+              "role": "text",
+              "label": "Main text area",
+              "bounds": {
+                "x": 50,
+                "y": 50,
+                "width": 700,
+                "height": 450
+              },
+              "enabled": true,
+              "visible": true,
+              "focused": false,
+              "source": "vision_sidecar",
+              "confidence": 0.949999988079071,
+              "quality": "not_executable",
+              "label_source": "visual_label_untrusted",
+              "state_source": "visual_inferred",
+              "rejection_reason": "visual_only_supporting_evidence",
+              "identity_confidence": 0.74,
+              "bounds_confidence": 0.72,
+              "state_confidence": 0.45,
+              "executable_confidence": 0.0,
+              "sources": [
+                "vision_sidecar"
+              ]
+            }
+          ],
+          "executable_control_count": 0,
+          "visual_control_count": 4,
+          "visual_control_summary": {
+            "detected": 4,
+            "matched": 0,
+            "unmatched": 4,
+            "button_like": 2,
+            "false_positive_risk": "supporting_visual_only"
+          }
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p07-1781266656",
+        "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+        "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+        "sequence": 21,
+        "timestamp_ms": 1781266673269,
+        "event": {
+          "type": "ActionCompleted",
+          "execution_id": "execution-8724dac33384f820ffcccdc73c4834173d9f973c959e0b70974b05af367ef2b2",
+          "proposal_id": "gui-proposal-6e3310f0261e57013a67553391eb3b6dcfd89566633569a32cf46ba2c074bd24",
+          "proposal_hash": "a59b906bfbaab96ccf76ccf05264c0807c3dbc4a3efb32aa08e43fd9b131cb49",
+          "target_hash": "1c150bbeb0469615cffa76ca9c2c56b9eb26d8c711825d7255635ed4e2260ded",
+          "action_kind": "OpenApp",
+          "status": "completed",
+          "backend_used": "open_application",
+          "result_summary": "Deterministic GUI action backend reported success.",
+          "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p07-1781266656",
+        "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+        "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+        "sequence": 22,
+        "timestamp_ms": 1781266673269,
+        "event": {
+          "verification_id": "verification-a255ab48d2ffceb2d1aeead254b28e5237aec53f0d7d73c00e0a4bb75c24ecbd",
+          "execution_id": "execution-8724dac33384f820ffcccdc73c4834173d9f973c959e0b70974b05af367ef2b2",
+          "proposal_id": "gui-proposal-6e3310f0261e57013a67553391eb3b6dcfd89566633569a32cf46ba2c074bd24",
+          "status": "verification_failed",
+          "verification_strategy": "active_window_match",
+          "evidence": [
+            "active window did not match expected app/window hint (Firefox)"
+          ],
+          "pre_state_summary": "app=Terminal; controls=13; dialogs=0; focus_role=terminal; screen=ea9c63d6",
+          "post_state_summary": "app=Terminal; controls=17; dialogs=0; focus_role=terminal; screen=ea9c63d6",
+          "matched_expected_state": false,
+          "target_still_present": false,
+          "target_identity_matches": true,
+          "confidence": 0.2,
+          "safe_error_summary": "Expected post-action state was not verified for OpenApp.",
+          "recovery_hint": "Re-observe and confirm the expected state before retrying; do not blind-retry.",
+          "can_retry": true,
+          "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b",
+          "type": "ExecutionVerificationCompleted"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p07-1781266656",
+        "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+        "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+        "sequence": 23,
+        "timestamp_ms": 1781266673269,
+        "event": {
+          "recovery_id": "recovery-c3de0636d4b1f3e3e56a7342f6ffb41be712981260cc04ca03d7b0b6375d05ba",
+          "execution_id": "execution-8724dac33384f820ffcccdc73c4834173d9f973c959e0b70974b05af367ef2b2",
+          "verification_id": "verification-a255ab48d2ffceb2d1aeead254b28e5237aec53f0d7d73c00e0a4bb75c24ecbd",
+          "proposal_id": "gui-proposal-6e3310f0261e57013a67553391eb3b6dcfd89566633569a32cf46ba2c074bd24",
+          "proposal_hash": "a59b906bfbaab96ccf76ccf05264c0807c3dbc4a3efb32aa08e43fd9b131cb49",
+          "target_hash": "1c150bbeb0469615cffa76ca9c2c56b9eb26d8c711825d7255635ed4e2260ded",
+          "action_type": "OpenApp",
+          "failure_kind": "target_missing",
+          "status": "blocked",
+          "proposed_recovery_step": "Stop",
+          "recovery_action_kind": "Stop",
+          "requires_user_approval": false,
+          "can_recover": false,
+          "can_execute_recovery": false,
+          "retry_count": 0,
+          "max_retry_count": 1,
+          "blockers": [
+            "the resolved target is no longer present"
+          ],
+          "warnings": [],
+          "safe_explanation": "The target is no longer on screen and cannot be re-resolved safely, so KRIA stops.",
+          "recovery_hint": "Re-observe and confirm a safe target before any manual retry; KRIA will not blind-retry.",
+          "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b",
+          "type": "RecoveryAssessmentCompleted"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p07-1781266656",
+        "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+        "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+        "sequence": 24,
+        "timestamp_ms": 1781266673269,
+        "event": {
+          "type": "RecoveryBlocked",
+          "recovery_id": "recovery-c3de0636d4b1f3e3e56a7342f6ffb41be712981260cc04ca03d7b0b6375d05ba",
+          "execution_id": "execution-8724dac33384f820ffcccdc73c4834173d9f973c959e0b70974b05af367ef2b2",
+          "failure_kind": "target_missing",
+          "status": "blocked",
+          "recovery_action_kind": "Stop",
+          "requires_user_approval": false,
+          "blockers": [
+            "the resolved target is no longer present"
+          ],
+          "safe_explanation": "The target is no longer on screen and cannot be re-resolved safely, so KRIA stops.",
+          "recovery_hint": "Re-observe and confirm a safe target before any manual retry; KRIA will not blind-retry.",
+          "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p07-1781266656",
+        "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+        "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+        "sequence": 25,
+        "timestamp_ms": 1781266673269,
+        "event": {
+          "type": "WorkflowStepBlocked",
+          "workflow_run_id": "workflow-run-df749f8f5f829b86f2419b88895588964724b179ba4ef90ed3155e03576dd275",
+          "plan_id": "cdcac5eb-b950-41ee-9db2-99ac6d4f271e",
+          "goal_contract_id": "4b960acdaa907da81426d3bc38996df58e4bfa526ac853cc7f664bd0bd9d3c96",
+          "step_id": "det-1",
+          "step_index": 0,
+          "step_type": "OpenApp",
+          "status": "blocked",
+          "current_step_index": 0,
+          "step_count": 2,
+          "blockers": [
+            "the resolved target is no longer present"
+          ],
+          "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p07-1781266656",
+        "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+        "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+        "sequence": 26,
+        "timestamp_ms": 1781266673269,
+        "event": {
+          "type": "WorkflowCheckpointSaved",
+          "checkpoint_id": "checkpoint-d028fa452842e4b96c692eb3c0de9971195d18750ae371982b9e5d54b9259305",
+          "checkpoint_hash_prefix": "71f7c2943f13",
+          "workflow_run_id": "workflow-run-df749f8f5f829b86f2419b88895588964724b179ba4ef90ed3155e03576dd275",
+          "current_step_index": 0,
+          "step_count": 2,
+          "completed_step_count": 0,
+          "pending_step_id": "det-1",
+          "requires_user_approval": false,
+          "can_resume": false,
+          "can_execute": false,
+          "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p07-1781266656",
+        "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+        "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+        "sequence": 27,
+        "timestamp_ms": 1781266673269,
+        "event": {
+          "type": "WorkflowRunBlocked",
+          "workflow_run_id": "workflow-run-df749f8f5f829b86f2419b88895588964724b179ba4ef90ed3155e03576dd275",
+          "plan_id": "cdcac5eb-b950-41ee-9db2-99ac6d4f271e",
+          "goal_contract_id": "4b960acdaa907da81426d3bc38996df58e4bfa526ac853cc7f664bd0bd9d3c96",
+          "status": "blocked",
+          "current_step_index": 0,
+          "step_count": 2,
+          "completed_step_count": 0,
+          "blocked_reason": "the resolved target is no longer present",
+          "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b"
+        }
+      }
+    },
+    {
+      "name": "gui_cognition:event",
+      "payload": {
+        "version": 1,
+        "session_id": "live-eval-p07-1781266656",
+        "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+        "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+        "sequence": 28,
+        "timestamp_ms": 1781266673269,
+        "event": {
+          "type": "TurnCompleted",
+          "status": "blocked"
+        }
+      }
+    },
+    {
+      "name": "agent:stage",
+      "payload": {
+        "step": "gui_cognition_mode_handled",
+        "message": "GUI Cognition prompt handled by dedicated selected-mode route",
+        "detail": {
+          "path": "send_manual_tool_message",
+          "llm_tool_loop": false,
+          "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214"
+        },
+        "ts": "2026-06-12T12:17:53.276734553+00:00"
+      }
+    },
+    {
+      "name": "agent:token",
+      "payload": {
+        "text": "Workflow stopped safely: the resolved target is no longer present"
+      }
+    },
+    {
+      "name": "agent:tool_result",
+      "payload": {
+        "tool": "gui_cognition",
+        "result": {
+          "status": "blocked",
+          "reply": "Workflow stopped safely: the resolved target is no longer present",
+          "gui_cognition": {
+            "mode_id": "gui_cognition",
+            "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+            "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+            "observation_id": "709bc6df-5286-4e71-b439-82fb92129828",
+            "context_id": "4d3ee558-a74f-42ef-a2d0-d8e3260abb85",
+            "path": "send_manual_tool_message",
+            "llm_tool_loop": false,
+            "intent": "analyze_plan",
+            "risk_level": "low",
+            "requires_approval": false,
+            "risk_reasons": [],
+            "perception": {
+              "visual_control_summary": {
+                "detected": 0,
+                "matched": 0,
+                "unmatched": 0,
+                "button_like": 0,
+                "false_positive_risk": "supporting_visual_only"
+              },
+              "observation_id": "709bc6df-5286-4e71-b439-82fb92129828",
+              "active_window": "obaid@obaid-ubuntu: /media/obaid/SSD/KRIA",
+              "active_window_source": "kria_gnome_shell_bridge",
+              "active_window_confidence": 0.98,
+              "active_window_reliability": "reliable",
+              "active_window_blocker": null,
+              "active_window_authority_source": "kria_gnome_shell_bridge",
+              "active_window_authority_confidence": 0.98,
+              "active_window_authority_status": "available",
+              "gnome_bridge_status": "available",
+              "active_window_app": "Terminal",
+              "active_window_app_id": "org.gnome.Terminal.desktop",
+              "active_window_pid": 396009,
+              "active_window_workspace": 0,
+              "active_window_monitor": 0,
+              "active_window_fullscreen": false,
+              "active_window_minimized": false,
+              "active_window_observed_at_ms": 1781266656088,
+              "active_window_fallback_chain": [
+                {
+                  "source": "kria_gnome_shell_bridge",
+                  "status": "matched",
+                  "reliability": "reliable",
+                  "reason": null
+                }
+              ],
+              "active_window_failure_chain": [],
+              "visible_app_count": 5,
+              "visible_control_count": 13,
+              "visible_accessible_control_count": 13,
+              "disabled_control_count": 11,
+              "hidden_control_count": 0,
+              "trusted_control_count": 0,
+              "partial_control_count": 0,
+              "not_executable_control_count": 13,
+              "text_field_count": 11,
+              "button_count": 2,
+              "dialog_count": 0,
+              "other_control_count": 0,
+              "ocr_available": true,
+              "ocr_block_count": 1,
+              "ocr_trust": "untrusted",
+              "ocr_wait_for_screenshot_ms": 1280,
+              "ocr_engine_selected": "tesseract_cli",
+              "ocr_engine_status": "completed",
+              "ocr_image_status": "downscaled_1920x1200_to_1000x625",
+              "ocr_total_ms": 2259,
+              "ocr_fast_path": "full_screen_tesseract",
+              "ocr_cache_hit": false,
+              "ocr_roi_count": 0,
+              "ocr_changed_region_count": 0,
+              "ocr_cold_start_ms": 2259,
+              "ocr_warm_start_ms": null,
+              "ocr_benchmark_summary": "rapidocr/paddleocr optional adapters not configured; tesseract fallback used",
+              "ocr_injection_count": 0,
+              "ocr_blocker": null,
+              "accessibility_available": true,
+              "accessibility_source_status": "degraded",
+              "accessibility_overall_status": "degraded",
+              "accessibility_overall_confidence": 0.6599999999999999,
+              "accessibility_app_scores": [
+                {
+                  "app_label": ":1.0",
+                  "bus_name_hash": "6ae115a23a8787ac",
+                  "node_count": 91,
+                  "control_count": 24,
+                  "timeout_count": 1,
+                  "stale_node_count": 0,
+                  "score": 0.6599999999999999,
+                  "status": "degraded"
+                },
+                {
+                  "app_label": ":1.4",
+                  "bus_name_hash": "1890e0c9307bad0a",
+                  "node_count": 91,
+                  "control_count": 24,
+                  "timeout_count": 1,
+                  "stale_node_count": 0,
+                  "score": 0.6599999999999999,
+                  "status": "degraded"
+                },
+                {
+                  "app_label": ":1.6",
+                  "bus_name_hash": "cdaa122c19a646a6",
+                  "node_count": 91,
+                  "control_count": 24,
+                  "timeout_count": 1,
+                  "stale_node_count": 0,
+                  "score": 0.6599999999999999,
+                  "status": "degraded"
+                },
+                {
+                  "app_label": ":1.5",
+                  "bus_name_hash": "305f121ff554bda2",
+                  "node_count": 91,
+                  "control_count": 24,
+                  "timeout_count": 1,
+                  "stale_node_count": 0,
+                  "score": 0.6599999999999999,
+                  "status": "degraded"
+                },
+                {
+                  "app_label": ":1.3",
+                  "bus_name_hash": "e0312de4bce4c374",
+                  "node_count": 91,
+                  "control_count": 24,
+                  "timeout_count": 1,
+                  "stale_node_count": 0,
+                  "score": 0.6599999999999999,
+                  "status": "degraded"
+                }
+              ],
+              "accessibility_stale_node_count": 0,
+              "accessibility_timeout_count": 1,
+              "accessibility_cache_hit_count": 0,
+              "accessibility_stale_cache_rejected_count": 0,
+              "accessibility_node_count": 91,
+              "accessibility_control_count": 13,
+              "atspi_snapshot_total_ms": 126,
+              "atspi_skipped_app_count": 1,
+              "atspi_omitted_node_count": 112,
+              "accessibility_remediation": [],
+              "screenshot_available": true,
+              "screenshot_status": "available",
+              "screenshot_capture_ms": 1280,
+              "screenshot_duration_ms": 1280,
+              "screen_hash_prefix": "ea9c63d60c01be6b",
+              "monitor_count": 1,
+              "dpi_available": true,
+              "cursor_focus_known": true,
+              "focused_window": "obaid@obaid-ubuntu: /media/obaid/SSD/KRIA",
+              "focused_app": "Terminal",
+              "focused_control_id": "gnome_bridge:terminal_window",
+              "focused_control_label": "Terminal focus",
+              "focused_control_role": "terminal",
+              "focused_control_bounds": null,
+              "text_cursor_known": false,
+              "editable_target_known": false,
+              "terminal_like": true,
+              "focus_source": "gnome_bridge_focus",
+              "focus_confidence": 0.86,
+              "focus_reliability": "reliable",
+              "focus_adapter_status": "available",
+              "focus_latency_ms": 5,
+              "focus_failure_chain": [
+                {
+                  "source": "gnome_bridge_focus",
+                  "status": "matched",
+                  "reliability": "reliable",
+                  "reason": null
+                }
+              ],
+              "active_window_probe_ok": true,
+              "desktop_state_probe_ok": true,
+              "capabilities_probe_ok": true,
+              "observation_total_ms": 2261,
+              "slowest_probe": "run_ocr",
+              "slowest_probe_ms": 2259,
+              "probe_timeout_count": 1,
+              "probe_timings": [
+                {
+                  "probe_name": "capture_screenshot",
+                  "duration_ms": 1280,
+                  "status": "ok",
+                  "source": "xcap",
+                  "cache_hit": false,
+                  "blocker_kind": null
+                },
+                {
+                  "probe_name": "detect_visual_controls",
+                  "duration_ms": 1977,
+                  "status": "timeout",
+                  "source": "detect_visual_controls",
+                  "cache_hit": false,
+                  "blocker_kind": "timeout"
+                },
+                {
+                  "probe_name": "find_ui_elements:check_box",
+                  "duration_ms": 127,
+                  "status": "ok",
+                  "source": "atspi_snapshot",
+                  "cache_hit": false,
+                  "blocker_kind": null
+                },
+                {
+                  "probe_name": "find_ui_elements:dialog",
+                  "duration_ms": 127,
+                  "status": "ok",
+                  "source": "atspi_snapshot",
+                  "cache_hit": false,
+                  "blocker_kind": null
+                },
+                {
+                  "probe_name": "find_ui_elements:link",
+                  "duration_ms": 127,
+                  "status": "ok",
+                  "source": "atspi_snapshot",
+                  "cache_hit": false,
+                  "blocker_kind": null
+                },
+                {
+                  "probe_name": "find_ui_elements:page_tab",
+                  "duration_ms": 127,
+                  "status": "ok",
+                  "source": "atspi_snapshot",
+                  "cache_hit": false,
+                  "blocker_kind": null
+                },
+                {
+                  "probe_name": "find_ui_elements:push_button",
+                  "duration_ms": 127,
+                  "status": "ok",
+                  "source": "atspi_snapshot",
+                  "cache_hit": false,
+                  "blocker_kind": null
+                },
+                {
+                  "probe_name": "find_ui_elements:text",
+                  "duration_ms": 127,
+                  "status": "ok",
+                  "source": "atspi_snapshot",
+                  "cache_hit": false,
+                  "blocker_kind": null
+                },
+                {
+                  "probe_name": "focused_window_title",
+                  "duration_ms": 127,
+                  "status": "blocked",
+                  "source": "focused_window_title",
+                  "cache_hit": false,
+                  "blocker_kind": "unavailable"
+                },
+                {
+                  "probe_name": "get_accessibility_capabilities",
+                  "duration_ms": 126,
+                  "status": "ok",
+                  "source": "atspi_snapshot",
+                  "cache_hit": false,
+                  "blocker_kind": null
+                },
+                {
+                  "probe_name": "get_accessibility_tree_summary",
+                  "duration_ms": 127,
+                  "status": "ok",
+                  "source": "atspi_snapshot",
+                  "cache_hit": false,
+                  "blocker_kind": null
+                },
+                {
+                  "probe_name": "get_active_window",
+                  "duration_ms": 5,
+                  "status": "ok",
+                  "source": "kria_gnome_shell_bridge",
+                  "cache_hit": false,
+                  "blocker_kind": null
+                },
+                {
+                  "probe_name": "get_cursor_focus_state",
+                  "duration_ms": 133,
+                  "status": "ok",
+                  "source": "gnome_bridge_focus",
+                  "cache_hit": false,
+                  "blocker_kind": null
+                },
+                {
+                  "probe_name": "get_desktop_state",
+                  "duration_ms": 126,
+                  "status": "ok",
+                  "source": "atspi_snapshot",
+                  "cache_hit": false,
+                  "blocker_kind": null
+                },
+                {
+                  "probe_name": "get_monitor_layout",
+                  "duration_ms": 1,
+                  "status": "ok",
+                  "source": "get_monitor_layout",
+                  "cache_hit": false,
+                  "blocker_kind": null
+                },
+                {
+                  "probe_name": "run_ocr",
+                  "duration_ms": 2259,
+                  "status": "ok",
+                  "source": "tesseract_cli",
+                  "cache_hit": false,
+                  "blocker_kind": null
+                }
+              ],
+              "cache_hit": false,
+              "cache_age_ms": null,
+              "cache_policy": "observe_plan_ttl_750ms",
+              "freshness": "fresh",
+              "source_blockers": {
+                "active_window": null,
+                "desktop_state": null,
+                "accessibility": null,
+                "screenshot": null,
+                "ocr": null,
+                "monitor": null,
+                "cursor_focus": null
+              },
+              "control_samples": [
+                {
+                  "id": ":1.0:/org/a11y/atspi/accessible/1141:text",
+                  "role": "text",
+                  "label": "",
+                  "bounds": null,
+                  "enabled": false,
+                  "visible": true,
+                  "focused": false,
+                  "source": "accessibility",
+                  "confidence": 1.0,
+                  "quality": "not_executable",
+                  "label_source": "missing",
+                  "state_source": "accessibility_state",
+                  "rejection_reason": "disabled",
+                  "identity_confidence": 0.35,
+                  "bounds_confidence": 0.0,
+                  "state_confidence": 0.86,
+                  "executable_confidence": 0.0,
+                  "sources": [
+                    "accessibility"
+                  ]
+                },
+                {
+                  "id": ":1.0:/org/a11y/atspi/accessible/1145:text",
+                  "role": "text",
+                  "label": "",
+                  "bounds": null,
+                  "enabled": false,
+                  "visible": true,
+                  "focused": false,
+                  "source": "accessibility",
+                  "confidence": 1.0,
+                  "quality": "not_executable",
+                  "label_source": "missing",
+                  "state_source": "accessibility_state",
+                  "rejection_reason": "disabled",
+                  "identity_confidence": 0.35,
+                  "bounds_confidence": 0.0,
+                  "state_confidence": 0.86,
+                  "executable_confidence": 0.0,
+                  "sources": [
+                    "accessibility"
+                  ]
+                },
+                {
+                  "id": ":1.0:/org/a11y/atspi/accessible/1149:text",
+                  "role": "text",
+                  "label": "",
+                  "bounds": null,
+                  "enabled": false,
+                  "visible": true,
+                  "focused": false,
+                  "source": "accessibility",
+                  "confidence": 1.0,
+                  "quality": "not_executable",
+                  "label_source": "missing",
+                  "state_source": "accessibility_state",
+                  "rejection_reason": "disabled",
+                  "identity_confidence": 0.35,
+                  "bounds_confidence": 0.0,
+                  "state_confidence": 0.86,
+                  "executable_confidence": 0.0,
+                  "sources": [
+                    "accessibility"
+                  ]
+                },
+                {
+                  "id": ":1.0:/org/a11y/atspi/accessible/1153:text",
+                  "role": "text",
+                  "label": "",
+                  "bounds": null,
+                  "enabled": false,
+                  "visible": true,
+                  "focused": false,
+                  "source": "accessibility",
+                  "confidence": 1.0,
+                  "quality": "not_executable",
+                  "label_source": "missing",
+                  "state_source": "accessibility_state",
+                  "rejection_reason": "disabled",
+                  "identity_confidence": 0.35,
+                  "bounds_confidence": 0.0,
+                  "state_confidence": 0.86,
+                  "executable_confidence": 0.0,
+                  "sources": [
+                    "accessibility"
+                  ]
+                },
+                {
+                  "id": ":1.0:/org/a11y/atspi/accessible/1157:text",
+                  "role": "text",
+                  "label": "",
+                  "bounds": null,
+                  "enabled": false,
+                  "visible": true,
+                  "focused": false,
+                  "source": "accessibility",
+                  "confidence": 1.0,
+                  "quality": "not_executable",
+                  "label_source": "missing",
+                  "state_source": "accessibility_state",
+                  "rejection_reason": "disabled",
+                  "identity_confidence": 0.35,
+                  "bounds_confidence": 0.0,
+                  "state_confidence": 0.86,
+                  "executable_confidence": 0.0,
+                  "sources": [
+                    "accessibility"
+                  ]
+                },
+                {
+                  "id": ":1.0:/org/a11y/atspi/accessible/1161:text",
+                  "role": "text",
+                  "label": "",
+                  "bounds": null,
+                  "enabled": false,
+                  "visible": true,
+                  "focused": false,
+                  "source": "accessibility",
+                  "confidence": 1.0,
+                  "quality": "not_executable",
+                  "label_source": "missing",
+                  "state_source": "accessibility_state",
+                  "rejection_reason": "disabled",
+                  "identity_confidence": 0.35,
+                  "bounds_confidence": 0.0,
+                  "state_confidence": 0.86,
+                  "executable_confidence": 0.0,
+                  "sources": [
+                    "accessibility"
+                  ]
+                },
+                {
+                  "id": ":1.0:/org/a11y/atspi/accessible/1172:text",
+                  "role": "text",
+                  "label": "",
+                  "bounds": null,
+                  "enabled": false,
+                  "visible": true,
+                  "focused": false,
+                  "source": "accessibility",
+                  "confidence": 1.0,
+                  "quality": "not_executable",
+                  "label_source": "missing",
+                  "state_source": "accessibility_state",
+                  "rejection_reason": "disabled",
+                  "identity_confidence": 0.35,
+                  "bounds_confidence": 0.0,
+                  "state_confidence": 0.86,
+                  "executable_confidence": 0.0,
+                  "sources": [
+                    "accessibility"
+                  ]
+                },
+                {
+                  "id": ":1.0:/org/a11y/atspi/accessible/1176:text",
+                  "role": "text",
+                  "label": "",
+                  "bounds": null,
+                  "enabled": false,
+                  "visible": true,
+                  "focused": false,
+                  "source": "accessibility",
+                  "confidence": 1.0,
+                  "quality": "not_executable",
+                  "label_source": "missing",
+                  "state_source": "accessibility_state",
+                  "rejection_reason": "disabled",
+                  "identity_confidence": 0.35,
+                  "bounds_confidence": 0.0,
+                  "state_confidence": 0.86,
+                  "executable_confidence": 0.0,
+                  "sources": [
+                    "accessibility"
+                  ]
+                },
+                {
+                  "id": ":1.0:/org/a11y/atspi/accessible/1180:text",
+                  "role": "text",
+                  "label": "",
+                  "bounds": null,
+                  "enabled": false,
+                  "visible": true,
+                  "focused": false,
+                  "source": "accessibility",
+                  "confidence": 1.0,
+                  "quality": "not_executable",
+                  "label_source": "missing",
+                  "state_source": "accessibility_state",
+                  "rejection_reason": "disabled",
+                  "identity_confidence": 0.35,
+                  "bounds_confidence": 0.0,
+                  "state_confidence": 0.86,
+                  "executable_confidence": 0.0,
+                  "sources": [
+                    "accessibility"
+                  ]
+                },
+                {
+                  "id": ":1.0:/org/a11y/atspi/accessible/1184:text",
+                  "role": "text",
+                  "label": "",
+                  "bounds": null,
+                  "enabled": false,
+                  "visible": true,
+                  "focused": false,
+                  "source": "accessibility",
+                  "confidence": 1.0,
+                  "quality": "not_executable",
+                  "label_source": "missing",
+                  "state_source": "accessibility_state",
+                  "rejection_reason": "disabled",
+                  "identity_confidence": 0.35,
+                  "bounds_confidence": 0.0,
+                  "state_confidence": 0.86,
+                  "executable_confidence": 0.0,
+                  "sources": [
+                    "accessibility"
+                  ]
+                },
+                {
+                  "id": ":1.0:/org/a11y/atspi/accessible/1199:text",
+                  "role": "text",
+                  "label": "",
+                  "bounds": null,
+                  "enabled": false,
+                  "visible": true,
+                  "focused": false,
+                  "source": "accessibility",
+                  "confidence": 1.0,
+                  "quality": "not_executable",
+                  "label_source": "missing",
+                  "state_source": "accessibility_state",
+                  "rejection_reason": "disabled",
+                  "identity_confidence": 0.35,
+                  "bounds_confidence": 0.0,
+                  "state_confidence": 0.86,
+                  "executable_confidence": 0.0,
+                  "sources": [
+                    "accessibility"
+                  ]
+                },
+                {
+                  "id": ":1.0:/org/a11y/atspi/accessible/1197:push button",
+                  "role": "push button",
+                  "label": "",
+                  "bounds": null,
+                  "enabled": true,
+                  "visible": true,
+                  "focused": false,
+                  "source": "accessibility",
+                  "confidence": 1.0,
+                  "quality": "not_executable",
+                  "label_source": "missing",
+                  "state_source": "accessibility_state",
+                  "rejection_reason": "bounds_missing",
+                  "identity_confidence": 0.35,
+                  "bounds_confidence": 0.0,
+                  "state_confidence": 0.86,
+                  "executable_confidence": 0.0,
+                  "sources": [
+                    "accessibility"
+                  ]
+                }
+              ],
+              "executable_control_count": 0,
+              "visual_control_count": 0,
+              "capabilities": {
+                "active_window": {
+                  "available": true,
+                  "detail": "active_window:kria_gnome_shell_bridge",
+                  "blocker": null,
+                  "remediation": []
+                },
+                "desktop_state": {
+                  "available": true,
+                  "detail": "desktop_state",
+                  "blocker": null,
+                  "remediation": []
+                },
+                "accessibility": {
+                  "available": true,
+                  "detail": "accessibility operational",
+                  "blocker": null,
+                  "remediation": []
+                },
+                "screenshot": {
+                  "available": true,
+                  "detail": "screenshot",
+                  "blocker": null,
+                  "remediation": []
+                },
+                "ocr": {
+                  "available": true,
+                  "detail": "ocr",
+                  "blocker": null,
+                  "remediation": []
+                },
+                "monitor": {
+                  "available": true,
+                  "detail": "monitor",
+                  "blocker": null,
+                  "remediation": []
+                },
+                "cursor_focus": {
+                  "available": true,
+                  "detail": "cursor_focus",
+                  "blocker": null,
+                  "remediation": []
+                }
+              },
+              "text_field_sample": [],
+              "button_sample": [],
+              "control_quality_summary": {
+                "trusted": 0,
+                "partial": 0,
+                "not_executable": 13,
+                "executable": 0
+              }
+            },
+            "context": {
+              "context_id": "4d3ee558-a74f-42ef-a2d0-d8e3260abb85",
+              "observation_id": "709bc6df-5286-4e71-b439-82fb92129828",
+              "trusted_control_count": 0,
+              "executable_control_count": 0,
+              "disabled_or_hidden_count": 11,
+              "ocr_untrusted": true,
+              "ocr_injection_count": 0,
+              "redaction_count": 0,
+              "freshness": "fresh",
+              "status": "ready",
+              "previous_context_id": null,
+              "previous_observation_id": null,
+              "delta": {
+                "active_window_changed": false,
+                "screen_hash_changed": false,
+                "monitor_layout_changed": false,
+                "control_count_changed": false,
+                "focused_control_changed": false,
+                "stale_action_risk": false,
+                "changed_summary": []
+              },
+              "source_confidence": {
+                "active_window": 0.98,
+                "accessibility": 0.6599999999999999,
+                "screenshot": 0.85,
+                "ocr": 0.45,
+                "monitor": 0.82,
+                "focus": 0.86
+              },
+              "screen_hash_prefix": "ea9c63d60c01be6b",
+              "focus": {
+                "source": "gnome_bridge_focus",
+                "confidence": 0.86,
+                "reliability": "reliable",
+                "keyboard_focus_known": true,
+                "editable_target_known": false,
+                "terminal_like": true,
+                "adapter_status": "available",
+                "latency_ms": 5,
+                "focused_window": "obaid@obaid-ubuntu: /media/obaid/SSD/KRIA",
+                "focused_app": "Terminal",
+                "focused_control_label": "Terminal focus",
+                "focused_control_role": "terminal",
+                "focused_control_bounds": null
+              },
+              "accessibility_health": {
+                "status": "degraded",
+                "confidence": 0.6599999999999999,
+                "app_scores": [
+                  {
+                    "app_label": ":1.0",
+                    "bus_name_hash": "6ae115a23a8787ac",
+                    "node_count": 91,
+                    "control_count": 24,
+                    "timeout_count": 1,
+                    "stale_node_count": 0,
+                    "score": 0.6599999999999999,
+                    "status": "degraded"
+                  },
+                  {
+                    "app_label": ":1.4",
+                    "bus_name_hash": "1890e0c9307bad0a",
+                    "node_count": 91,
+                    "control_count": 24,
+                    "timeout_count": 1,
+                    "stale_node_count": 0,
+                    "score": 0.6599999999999999,
+                    "status": "degraded"
+                  },
+                  {
+                    "app_label": ":1.6",
+                    "bus_name_hash": "cdaa122c19a646a6",
+                    "node_count": 91,
+                    "control_count": 24,
+                    "timeout_count": 1,
+                    "stale_node_count": 0,
+                    "score": 0.6599999999999999,
+                    "status": "degraded"
+                  },
+                  {
+                    "app_label": ":1.5",
+                    "bus_name_hash": "305f121ff554bda2",
+                    "node_count": 91,
+                    "control_count": 24,
+                    "timeout_count": 1,
+                    "stale_node_count": 0,
+                    "score": 0.6599999999999999,
+                    "status": "degraded"
+                  },
+                  {
+                    "app_label": ":1.3",
+                    "bus_name_hash": "e0312de4bce4c374",
+                    "node_count": 91,
+                    "control_count": 24,
+                    "timeout_count": 1,
+                    "stale_node_count": 0,
+                    "score": 0.6599999999999999,
+                    "status": "degraded"
+                  }
+                ],
+                "stale_node_count": 0,
+                "timeout_count": 1,
+                "cache_hit_count": 0,
+                "stale_cache_rejected_count": 0
+              },
+              "visual_controls": {
+                "detected": 0,
+                "supporting_only": true
+              },
+              "ocr_performance": {
+                "fast_path": "full_screen_tesseract",
+                "cache_hit": false,
+                "roi_count": 0,
+                "changed_region_count": 0,
+                "cold_start_ms": 2259,
+                "warm_start_ms": null
+              },
+              "source_blockers": [],
+              "warnings": []
+            },
+            "goal_contract": {
+              "contract_id": "4b960acdaa907da81426d3bc38996df58e4bfa526ac853cc7f664bd0bd9d3c96",
+              "observation_id": "709bc6df-5286-4e71-b439-82fb92129828",
+              "context_id": "4d3ee558-a74f-42ef-a2d0-d8e3260abb85",
+              "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b",
+              "goal_summary": "Open Firefox",
+              "intent_kind": "analyze_plan",
+              "action_type": "open_app",
+              "target_app_kind": "browser",
+              "target_app_hint": "Firefox",
+              "target_window_hint": "obaid@obaid-ubuntu: /media/obaid/SSD/KRIA",
+              "target_control_hint": null,
+              "query_summary": null,
+              "query_hash": null,
+              "text_payload_summary": null,
+              "text_payload_hash": null,
+              "desired_final_state": "target application is opened or blocker is explained",
+              "risk_level": "low",
+              "requires_user_approval": false,
+              "ambiguity_count": 0,
+              "ambiguities": [],
+              "source_evidence": [
+                {
+                  "source": "user_prompt",
+                  "field": "action_type",
+                  "summary": "matched action open_app",
+                  "confidence": 0.9
+                },
+                {
+                  "source": "user_prompt",
+                  "field": "target_app_kind",
+                  "summary": "browser",
+                  "confidence": 0.86
+                },
+                {
+                  "source": "user_prompt",
+                  "field": "target_app_hint",
+                  "summary": "Firefox",
+                  "confidence": 0.86
+                }
+              ],
+              "extraction_confidence": 0.76,
+              "extractor_mode": "deterministic"
+            },
+            "planner": {
+              "mode": "llm_rejected_fallback",
+              "llm_attempted": true,
+              "llm_status": "rejected",
+              "llm_failure_reason": "LLM planner returned prose or non-object content",
+              "model": null,
+              "validation_status": "valid",
+              "plan_status": "valid",
+              "blocked_reasons": [],
+              "warnings": [],
+              "confidence": 0.62
+            },
+            "plan": {
+              "plan_id": "cdcac5eb-b950-41ee-9db2-99ac6d4f271e",
+              "goal_contract_id": "4b960acdaa907da81426d3bc38996df58e4bfa526ac853cc7f664bd0bd9d3c96",
+              "context_id": "4d3ee558-a74f-42ef-a2d0-d8e3260abb85",
+              "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b",
+              "goal_action_type": "open_app",
+              "summary": "open_app GUI plan",
+              "planner_mode": "llm_rejected_fallback",
+              "plan_status": "valid",
+              "step_count": 2,
+              "risk_level": "low",
+              "requires_user_approval": false,
+              "ambiguity_count": 0,
+              "confidence": 0.62,
+              "validation_errors": [],
+              "source_evidence": [
+                {
+                  "source": "user_prompt",
+                  "field": "action_type",
+                  "summary": "matched action open_app",
+                  "confidence": 0.9
+                },
+                {
+                  "source": "user_prompt",
+                  "field": "target_app_kind",
+                  "summary": "browser",
+                  "confidence": 0.86
+                },
+                {
+                  "source": "user_prompt",
+                  "field": "target_app_hint",
+                  "summary": "Firefox",
+                  "confidence": 0.86
+                }
+              ],
+              "steps": [
+                "Open or switch to the requested app",
+                "Verify requested app window is visible"
+              ],
+              "typed_steps": [
+                {
+                  "step_id": "det-1",
+                  "step_type": "OpenApp",
+                  "summary": "Open or switch to the requested app",
+                  "target_app_hint": "Firefox",
+                  "target_window_hint": "obaid@obaid-ubuntu: /media/obaid/SSD/KRIA",
+                  "target_control_hint": null,
+                  "text_payload_summary": null,
+                  "text_payload_hash": null,
+                  "expected_precondition": "requested app is not guaranteed visible",
+                  "expected_postcondition": "requested app window is visible",
+                  "verification_strategy": "window_visible",
+                  "risk_level": "low",
+                  "requires_approval": false,
+                  "allowed_to_execute": false,
+                  "confidence": 0.76,
+                  "reason": "analyze_plan"
+                },
+                {
+                  "step_id": "det-2",
+                  "step_type": "WaitForState",
+                  "summary": "Verify requested app window is visible",
+                  "target_app_hint": "Firefox",
+                  "target_window_hint": "obaid@obaid-ubuntu: /media/obaid/SSD/KRIA",
+                  "target_control_hint": null,
+                  "text_payload_summary": null,
+                  "text_payload_hash": null,
+                  "expected_precondition": "OpenApp step has been planned",
+                  "expected_postcondition": "window visible or safe blocker reported",
+                  "verification_strategy": "window_visible",
+                  "risk_level": "low",
+                  "requires_approval": false,
+                  "allowed_to_execute": false,
+                  "confidence": 0.76,
+                  "reason": "analyze_plan"
+                }
+              ]
+            },
+            "plan_validation": {
+              "confidence": 0.62,
+              "validation_id": "validation-cdcac5eb-b950-41ee-9db2-99ac6d4f271e",
+              "plan_id": "cdcac5eb-b950-41ee-9db2-99ac6d4f271e",
+              "goal_contract_id": "4b960acdaa907da81426d3bc38996df58e4bfa526ac853cc7f664bd0bd9d3c96",
+              "context_id": "4d3ee558-a74f-42ef-a2d0-d8e3260abb85",
+              "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b",
+              "status": "valid",
+              "readiness_status": "valid_for_resolution",
+              "risk_level": "low",
+              "requires_user_approval": false,
+              "can_proceed_to_target_resolution": true,
+              "can_execute": false,
+              "blocker_count": 0,
+              "warning_count": 0,
+              "blocked_reasons": [],
+              "warnings": [],
+              "validation_errors": [],
+              "source_evidence": [
+                {
+                  "source": "user_prompt",
+                  "field": "action_type",
+                  "summary": "matched action open_app",
+                  "confidence": 0.9
+                },
+                {
+                  "source": "user_prompt",
+                  "field": "target_app_kind",
+                  "summary": "browser",
+                  "confidence": 0.86
+                },
+                {
+                  "source": "user_prompt",
+                  "field": "target_app_hint",
+                  "summary": "Firefox",
+                  "confidence": 0.86
+                }
+              ],
+              "step_results": [
+                {
+                  "step_id": "det-1",
+                  "step_type": "OpenApp",
+                  "status": "valid_for_resolution",
+                  "risk_level": "low",
+                  "requires_approval": false,
+                  "target_resolution_required": false,
+                  "target_available": false,
+                  "verification_present": true,
+                  "precondition_status": "present",
+                  "postcondition_status": "present",
+                  "blocker": null,
+                  "confidence": 0.76
+                },
+                {
+                  "step_id": "det-2",
+                  "step_type": "WaitForState",
+                  "status": "valid_for_resolution",
+                  "risk_level": "low",
+                  "requires_approval": false,
+                  "target_resolution_required": false,
+                  "target_available": false,
+                  "verification_present": true,
+                  "precondition_status": "present",
+                  "postcondition_status": "present",
+                  "blocker": null,
+                  "confidence": 0.76
+                }
+              ]
+            },
+            "target_resolution": {
+              "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b",
+              "resolution_id": "resolution-cdcac5eb-b950-41ee-9db2-99ac6d4f271e-s0",
+              "plan_id": "cdcac5eb-b950-41ee-9db2-99ac6d4f271e-s0",
+              "validation_id": "validation-cdcac5eb-b950-41ee-9db2-99ac6d4f271e",
+              "goal_contract_id": "4b960acdaa907da81426d3bc38996df58e4bfa526ac853cc7f664bd0bd9d3c96",
+              "context_id": "4d3ee558-a74f-42ef-a2d0-d8e3260abb85",
+              "observation_id": "709bc6df-5286-4e71-b439-82fb92129828",
+              "status": "resolved",
+              "results": [],
+              "resolved_target": null,
+              "candidates": [],
+              "confidence": 0.76,
+              "ambiguity_count": 0,
+              "ambiguity_reasons": [],
+              "blocker_count": 0,
+              "blockers": [],
+              "can_proceed_to_safety_gate": true,
+              "can_execute": false
+            },
+            "target": null,
+            "safety_gate": {
+              "proposal": {
+                "proposal_schema_version": 1,
+                "proposal_id": "gui-proposal-6e3310f0261e57013a67553391eb3b6dcfd89566633569a32cf46ba2c074bd24",
+                "request_id": "gui-hitl-fc5e9c8443b983138a5ffbe9ce0e1fdbf75196256f93ea5830a2277e80742e62",
+                "goal_contract_id": "4b960acdaa907da81426d3bc38996df58e4bfa526ac853cc7f664bd0bd9d3c96",
+                "plan_id": "cdcac5eb-b950-41ee-9db2-99ac6d4f271e-s0",
+                "validation_id": "validation-cdcac5eb-b950-41ee-9db2-99ac6d4f271e",
+                "resolution_id": "resolution-cdcac5eb-b950-41ee-9db2-99ac6d4f271e-s0",
+                "context_id": "4d3ee558-a74f-42ef-a2d0-d8e3260abb85",
+                "observation_id": "709bc6df-5286-4e71-b439-82fb92129828",
+                "step_id": "det-1",
+                "action_type": "OpenApp",
+                "target_hash": "1c150bbeb0469615cffa76ca9c2c56b9eb26d8c711825d7255635ed4e2260ded",
+                "target_control_id": null,
+                "target_label": "Firefox",
+                "target_role": null,
+                "target_bounds": null,
+                "text_payload_summary": null,
+                "text_payload_hash": null,
+                "expected_precondition": "requested app is not guaranteed visible",
+                "expected_postcondition": "requested app window is visible",
+                "risk_level": "low",
+                "risk_reasons": [
+                  "risk level: low"
+                ],
+                "requires_user_approval": false,
+                "created_at_ms": 1781266672235,
+                "expires_at_ms": 1781266732235,
+                "proposal_hash": "a59b906bfbaab96ccf76ccf05264c0807c3dbc4a3efb32aa08e43fd9b131cb49",
+                "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b",
+                "can_execute": false
+              },
+              "safety_gate_id": "safety-gui-proposal-6e3310f0261e57013a67553391eb3b6dcfd89566633569a32cf46ba2c074bd24",
+              "proposal_id": "gui-proposal-6e3310f0261e57013a67553391eb3b6dcfd89566633569a32cf46ba2c074bd24",
+              "request_id": "gui-hitl-fc5e9c8443b983138a5ffbe9ce0e1fdbf75196256f93ea5830a2277e80742e62",
+              "proposal_hash": "a59b906bfbaab96ccf76ccf05264c0807c3dbc4a3efb32aa08e43fd9b131cb49",
+              "target_hash": "1c150bbeb0469615cffa76ca9c2c56b9eb26d8c711825d7255635ed4e2260ded",
+              "status": "Allowed",
+              "safety_status": "safe_no_approval_required",
+              "risk_level": "low",
+              "reasons": [
+                "risk level: low"
+              ],
+              "risk_reasons": [
+                "risk level: low"
+              ],
+              "requires_user_approval": false,
+              "approval_reason": null,
+              "blockers": [],
+              "warnings": [],
+              "can_request_hitl": false,
+              "can_authorize_step7": true,
+              "can_execute": false,
+              "source_evidence": [
+                "gui_goal_contract",
+                "plan_validation",
+                "target_resolution"
+              ],
+              "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b",
+              "action_type": "OpenApp",
+              "target_label": "Firefox",
+              "target_role": null,
+              "expected_postcondition": "requested app window is visible",
+              "expires_at_ms": 1781266732235
+            },
+            "hitl_decision": null,
+            "action": {
+              "execution_id": "execution-8724dac33384f820ffcccdc73c4834173d9f973c959e0b70974b05af367ef2b2",
+              "proposal_id": "gui-proposal-6e3310f0261e57013a67553391eb3b6dcfd89566633569a32cf46ba2c074bd24",
+              "proposal_hash": "a59b906bfbaab96ccf76ccf05264c0807c3dbc4a3efb32aa08e43fd9b131cb49",
+              "action_type": "OpenApp",
+              "status": "completed",
+              "started_at_ms": 1781266672235,
+              "completed_at_ms": 1781266672239,
+              "backend_used": "open_application",
+              "precondition_check": {
+                "status": "valid",
+                "can_start_action": true,
+                "blockers": [],
+                "warnings": [],
+                "checked_at_ms": 1781266672235
+              },
+              "postcondition_check": "requested app window is visible",
+              "verification_result": "verification_failed",
+              "error_code": null,
+              "safe_error_summary": null,
+              "can_retry": true,
+              "recovery_hint": "Re-observe and confirm the expected state before retrying; do not blind-retry.",
+              "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b"
+            },
+            "execution": {
+              "execution_id": "execution-8724dac33384f820ffcccdc73c4834173d9f973c959e0b70974b05af367ef2b2",
+              "proposal_id": "gui-proposal-6e3310f0261e57013a67553391eb3b6dcfd89566633569a32cf46ba2c074bd24",
+              "proposal_hash": "a59b906bfbaab96ccf76ccf05264c0807c3dbc4a3efb32aa08e43fd9b131cb49",
+              "action_type": "OpenApp",
+              "status": "completed",
+              "started_at_ms": 1781266672235,
+              "completed_at_ms": 1781266672239,
+              "backend_used": "open_application",
+              "precondition_check": {
+                "status": "valid",
+                "can_start_action": true,
+                "blockers": [],
+                "warnings": [],
+                "checked_at_ms": 1781266672235
+              },
+              "postcondition_check": "requested app window is visible",
+              "verification_result": "verification_failed",
+              "error_code": null,
+              "safe_error_summary": null,
+              "can_retry": true,
+              "recovery_hint": "Re-observe and confirm the expected state before retrying; do not blind-retry.",
+              "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b"
+            },
+            "action_backend": {
+              "global_halt_engaged": false,
+              "halt_kind": "none",
+              "halt_reason": null,
+              "release_conditions": [],
+              "startup_elapsed_ms": null,
+              "can_observe": true,
+              "can_plan": true,
+              "automation_enabled": true,
+              "vision_sidecar": "running",
+              "uinput_daemon": "running",
+              "orchestrator_available": true,
+              "session_type": "wayland",
+              "xdotool_available": true,
+              "ydotool_available": false,
+              "uinput_available": true,
+              "selected_backend": "uinput_accessibility",
+              "backend_selection_reason": "Wayland session selected uinput because the daemon and socket are healthy.",
+              "backend_probe_status": "wayland_uinput_ready",
+              "backend_probe_errors": [
+                "xdotool detected but not usable for Wayland GUI actions"
+              ],
+              "input_backend_kind": "uinput",
+              "focus_supported": true,
+              "typing_supported": true,
+              "click_supported": true,
+              "verification_supported": true,
+              "xdotool_usable_for_actions": false,
+              "ydotool_usable_for_actions": false,
+              "uinput_socket_path": "/run/user/1000/kria-uinput.sock",
+              "uinput_socket_accessible": true,
+              "can_execute_actions": true,
+              "blockers": [],
+              "capabilities": {
+                "observe": true,
+                "focus_field": true,
+                "fill_field": true,
+                "click_control": true,
+                "post_action_observe": true,
+                "verify": true,
+                "recovery_focus": true,
+                "recovery_modal": true
+              }
+            },
+            "execution_blocker": null,
+            "verification": {
+              "verification_id": "verification-a255ab48d2ffceb2d1aeead254b28e5237aec53f0d7d73c00e0a4bb75c24ecbd",
+              "execution_id": "execution-8724dac33384f820ffcccdc73c4834173d9f973c959e0b70974b05af367ef2b2",
+              "proposal_id": "gui-proposal-6e3310f0261e57013a67553391eb3b6dcfd89566633569a32cf46ba2c074bd24",
+              "status": "verification_failed",
+              "verification_strategy": "active_window_match",
+              "evidence": [
+                "active window did not match expected app/window hint (Firefox)"
+              ],
+              "pre_state_summary": "app=Terminal; controls=13; dialogs=0; focus_role=terminal; screen=ea9c63d6",
+              "post_state_summary": "app=Terminal; controls=17; dialogs=0; focus_role=terminal; screen=ea9c63d6",
+              "matched_expected_state": false,
+              "target_still_present": false,
+              "target_identity_matches": true,
+              "confidence": 0.2,
+              "safe_error_summary": "Expected post-action state was not verified for OpenApp.",
+              "recovery_hint": "Re-observe and confirm the expected state before retrying; do not blind-retry.",
+              "can_retry": true,
+              "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b"
+            },
+            "recovery_assessment": {
+              "recovery_id": "recovery-c3de0636d4b1f3e3e56a7342f6ffb41be712981260cc04ca03d7b0b6375d05ba",
+              "execution_id": "execution-8724dac33384f820ffcccdc73c4834173d9f973c959e0b70974b05af367ef2b2",
+              "verification_id": "verification-a255ab48d2ffceb2d1aeead254b28e5237aec53f0d7d73c00e0a4bb75c24ecbd",
+              "proposal_id": "gui-proposal-6e3310f0261e57013a67553391eb3b6dcfd89566633569a32cf46ba2c074bd24",
+              "proposal_hash": "a59b906bfbaab96ccf76ccf05264c0807c3dbc4a3efb32aa08e43fd9b131cb49",
+              "target_hash": "1c150bbeb0469615cffa76ca9c2c56b9eb26d8c711825d7255635ed4e2260ded",
+              "action_type": "OpenApp",
+              "failure_kind": "target_missing",
+              "status": "blocked",
+              "proposed_recovery_step": "Stop",
+              "recovery_action_kind": "Stop",
+              "requires_user_approval": false,
+              "can_recover": false,
+              "can_execute_recovery": false,
+              "retry_count": 0,
+              "max_retry_count": 1,
+              "blockers": [
+                "the resolved target is no longer present"
+              ],
+              "warnings": [],
+              "safe_explanation": "The target is no longer on screen and cannot be re-resolved safely, so KRIA stops.",
+              "recovery_hint": "Re-observe and confirm a safe target before any manual retry; KRIA will not blind-retry.",
+              "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b"
+            },
+            "recovery": null,
+            "workflow_run": {
+              "workflow_run_id": "workflow-run-df749f8f5f829b86f2419b88895588964724b179ba4ef90ed3155e03576dd275",
+              "session_id": "live-eval-p07-1781266656",
+              "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+              "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+              "goal_contract_id": "4b960acdaa907da81426d3bc38996df58e4bfa526ac853cc7f664bd0bd9d3c96",
+              "plan_id": "cdcac5eb-b950-41ee-9db2-99ac6d4f271e",
+              "initial_context_id": "4d3ee558-a74f-42ef-a2d0-d8e3260abb85",
+              "current_context_id": "4d3ee558-a74f-42ef-a2d0-d8e3260abb85",
+              "status": "blocked",
+              "current_step_index": 0,
+              "step_count": 2,
+              "step_states": [
+                {
+                  "step_id": "det-1",
+                  "step_index": 0,
+                  "step_type": "OpenApp",
+                  "summary": "Open or switch to the requested app",
+                  "status": "blocked",
+                  "target_resolution_id": "resolution-cdcac5eb-b950-41ee-9db2-99ac6d4f271e-s0",
+                  "proposal_id": "gui-proposal-6e3310f0261e57013a67553391eb3b6dcfd89566633569a32cf46ba2c074bd24",
+                  "proposal_hash": "a59b906bfbaab96ccf76ccf05264c0807c3dbc4a3efb32aa08e43fd9b131cb49",
+                  "hitl_decision_id": null,
+                  "execution_id": "execution-8724dac33384f820ffcccdc73c4834173d9f973c959e0b70974b05af367ef2b2",
+                  "verification_id": "verification-a255ab48d2ffceb2d1aeead254b28e5237aec53f0d7d73c00e0a4bb75c24ecbd",
+                  "recovery_id": "recovery-c3de0636d4b1f3e3e56a7342f6ffb41be712981260cc04ca03d7b0b6375d05ba",
+                  "started_at_ms": 1781266672235,
+                  "completed_at_ms": 1781266673266,
+                  "blockers": [
+                    "the resolved target is no longer present"
+                  ],
+                  "warnings": [],
+                  "can_continue": false,
+                  "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b"
+                },
+                {
+                  "step_id": "det-2",
+                  "step_index": 1,
+                  "step_type": "WaitForState",
+                  "summary": "Verify requested app window is visible",
+                  "status": "pending",
+                  "target_resolution_id": null,
+                  "proposal_id": null,
+                  "proposal_hash": null,
+                  "hitl_decision_id": null,
+                  "execution_id": null,
+                  "verification_id": null,
+                  "recovery_id": null,
+                  "started_at_ms": 0,
+                  "completed_at_ms": 0,
+                  "blockers": [],
+                  "warnings": [],
+                  "can_continue": false,
+                  "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b"
+                }
+              ],
+              "completed_step_receipts": [],
+              "blocked_reason": "the resolved target is no longer present",
+              "recovery_summary": null,
+              "risk_level": "low",
+              "requires_user_approval": false,
+              "execution_mode": "execute_live",
+              "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b"
+            },
+            "workflow_checkpoint": {
+              "checkpoint_schema_version": 1,
+              "checkpoint_id": "checkpoint-d028fa452842e4b96c692eb3c0de9971195d18750ae371982b9e5d54b9259305",
+              "workflow_run_id": "workflow-run-df749f8f5f829b86f2419b88895588964724b179ba4ef90ed3155e03576dd275",
+              "session_id": "live-eval-p07-1781266656",
+              "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+              "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+              "goal_contract_id": "4b960acdaa907da81426d3bc38996df58e4bfa526ac853cc7f664bd0bd9d3c96",
+              "plan_id": "cdcac5eb-b950-41ee-9db2-99ac6d4f271e",
+              "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b",
+              "current_step_index": 0,
+              "step_count": 2,
+              "step_states": [
+                {
+                  "step_id": "det-1",
+                  "step_index": 0,
+                  "step_type": "OpenApp",
+                  "summary": "Open or switch to the requested app",
+                  "status": "blocked",
+                  "target_resolution_id": "resolution-cdcac5eb-b950-41ee-9db2-99ac6d4f271e-s0",
+                  "proposal_id": "gui-proposal-6e3310f0261e57013a67553391eb3b6dcfd89566633569a32cf46ba2c074bd24",
+                  "proposal_hash": "a59b906bfbaab96ccf76ccf05264c0807c3dbc4a3efb32aa08e43fd9b131cb49",
+                  "hitl_decision_id": null,
+                  "execution_id": "execution-8724dac33384f820ffcccdc73c4834173d9f973c959e0b70974b05af367ef2b2",
+                  "verification_id": "verification-a255ab48d2ffceb2d1aeead254b28e5237aec53f0d7d73c00e0a4bb75c24ecbd",
+                  "recovery_id": "recovery-c3de0636d4b1f3e3e56a7342f6ffb41be712981260cc04ca03d7b0b6375d05ba",
+                  "started_at_ms": 1781266672235,
+                  "completed_at_ms": 1781266673266,
+                  "blockers": [
+                    "the resolved target is no longer present"
+                  ],
+                  "warnings": [],
+                  "can_continue": false,
+                  "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b"
+                },
+                {
+                  "step_id": "det-2",
+                  "step_index": 1,
+                  "step_type": "WaitForState",
+                  "summary": "Verify requested app window is visible",
+                  "status": "pending",
+                  "target_resolution_id": null,
+                  "proposal_id": null,
+                  "proposal_hash": null,
+                  "hitl_decision_id": null,
+                  "execution_id": null,
+                  "verification_id": null,
+                  "recovery_id": null,
+                  "started_at_ms": 0,
+                  "completed_at_ms": 0,
+                  "blockers": [],
+                  "warnings": [],
+                  "can_continue": false,
+                  "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b"
+                }
+              ],
+              "completed_step_receipts": [],
+              "pending_step_id": "det-1",
+              "pending_proposal_id": "gui-proposal-6e3310f0261e57013a67553391eb3b6dcfd89566633569a32cf46ba2c074bd24",
+              "pending_proposal_hash": "a59b906bfbaab96ccf76ccf05264c0807c3dbc4a3efb32aa08e43fd9b131cb49",
+              "pending_target_hash": null,
+              "pending_stable_target_identity_hash": null,
+              "pending_hitl_request_id": "gui-hitl-fc5e9c8443b983138a5ffbe9ce0e1fdbf75196256f93ea5830a2277e80742e62",
+              "approved_decision_id": null,
+              "approved_decision_hash": null,
+              "last_observation_id": "709bc6df-5286-4e71-b439-82fb92129828",
+              "last_context_id": "4d3ee558-a74f-42ef-a2d0-d8e3260abb85",
+              "last_screen_hash_prefix": "ea9c63d60c01be6b",
+              "last_active_window_hash": null,
+              "created_at_ms": 1781266673266,
+              "expires_at_ms": 1781267273266,
+              "risk_level": "low",
+              "requires_user_approval": false,
+              "checkpoint_hash": "71f7c2943f131c5b6f20fba4550e72c42b514806bd088b80ec4f46329814bbfc",
+              "source_evidence": [
+                "gui_workflow_run",
+                "completed_step_receipts",
+                "last_observation"
+              ],
+              "can_resume": false,
+              "can_execute": false
+            },
+            "blocker": {
+              "kind": "recovery",
+              "reason": "the resolved target is no longer present",
+              "candidate_count": null,
+              "target_name": null,
+              "options": [],
+              "clarification_question": null
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "agent:done",
+      "payload": {}
+    }
+  ],
+  "desktop_command": {
+    "path": "send_manual_tool_message",
+    "ui_opened": false,
+    "source": "desktop_chat",
+    "mode_id": "gui_cognition"
+  },
+  "response": {
+    "status": "blocked",
+    "reply": "Workflow stopped safely: the resolved target is no longer present",
+    "gui_cognition": {
+      "mode_id": "gui_cognition",
+      "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+      "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+      "observation_id": "709bc6df-5286-4e71-b439-82fb92129828",
+      "context_id": "4d3ee558-a74f-42ef-a2d0-d8e3260abb85",
+      "path": "send_manual_tool_message",
+      "llm_tool_loop": false,
+      "intent": "analyze_plan",
+      "risk_level": "low",
+      "requires_approval": false,
+      "risk_reasons": [],
+      "perception": {
+        "visual_control_summary": {
+          "detected": 0,
+          "matched": 0,
+          "unmatched": 0,
+          "button_like": 0,
+          "false_positive_risk": "supporting_visual_only"
+        },
+        "observation_id": "709bc6df-5286-4e71-b439-82fb92129828",
+        "active_window": "obaid@obaid-ubuntu: /media/obaid/SSD/KRIA",
+        "active_window_source": "kria_gnome_shell_bridge",
+        "active_window_confidence": 0.98,
+        "active_window_reliability": "reliable",
+        "active_window_blocker": null,
+        "active_window_authority_source": "kria_gnome_shell_bridge",
+        "active_window_authority_confidence": 0.98,
+        "active_window_authority_status": "available",
+        "gnome_bridge_status": "available",
+        "active_window_app": "Terminal",
+        "active_window_app_id": "org.gnome.Terminal.desktop",
+        "active_window_pid": 396009,
+        "active_window_workspace": 0,
+        "active_window_monitor": 0,
+        "active_window_fullscreen": false,
+        "active_window_minimized": false,
+        "active_window_observed_at_ms": 1781266656088,
+        "active_window_fallback_chain": [
+          {
+            "source": "kria_gnome_shell_bridge",
+            "status": "matched",
+            "reliability": "reliable",
+            "reason": null
+          }
+        ],
+        "active_window_failure_chain": [],
+        "visible_app_count": 5,
+        "visible_control_count": 13,
+        "visible_accessible_control_count": 13,
+        "disabled_control_count": 11,
+        "hidden_control_count": 0,
+        "trusted_control_count": 0,
+        "partial_control_count": 0,
+        "not_executable_control_count": 13,
+        "text_field_count": 11,
+        "button_count": 2,
+        "dialog_count": 0,
+        "other_control_count": 0,
+        "ocr_available": true,
+        "ocr_block_count": 1,
+        "ocr_trust": "untrusted",
+        "ocr_wait_for_screenshot_ms": 1280,
+        "ocr_engine_selected": "tesseract_cli",
+        "ocr_engine_status": "completed",
+        "ocr_image_status": "downscaled_1920x1200_to_1000x625",
+        "ocr_total_ms": 2259,
+        "ocr_fast_path": "full_screen_tesseract",
+        "ocr_cache_hit": false,
+        "ocr_roi_count": 0,
+        "ocr_changed_region_count": 0,
+        "ocr_cold_start_ms": 2259,
+        "ocr_warm_start_ms": null,
+        "ocr_benchmark_summary": "rapidocr/paddleocr optional adapters not configured; tesseract fallback used",
+        "ocr_injection_count": 0,
+        "ocr_blocker": null,
+        "accessibility_available": true,
+        "accessibility_source_status": "degraded",
+        "accessibility_overall_status": "degraded",
+        "accessibility_overall_confidence": 0.6599999999999999,
+        "accessibility_app_scores": [
+          {
+            "app_label": ":1.0",
+            "bus_name_hash": "6ae115a23a8787ac",
+            "node_count": 91,
+            "control_count": 24,
+            "timeout_count": 1,
+            "stale_node_count": 0,
+            "score": 0.6599999999999999,
+            "status": "degraded"
+          },
+          {
+            "app_label": ":1.4",
+            "bus_name_hash": "1890e0c9307bad0a",
+            "node_count": 91,
+            "control_count": 24,
+            "timeout_count": 1,
+            "stale_node_count": 0,
+            "score": 0.6599999999999999,
+            "status": "degraded"
+          },
+          {
+            "app_label": ":1.6",
+            "bus_name_hash": "cdaa122c19a646a6",
+            "node_count": 91,
+            "control_count": 24,
+            "timeout_count": 1,
+            "stale_node_count": 0,
+            "score": 0.6599999999999999,
+            "status": "degraded"
+          },
+          {
+            "app_label": ":1.5",
+            "bus_name_hash": "305f121ff554bda2",
+            "node_count": 91,
+            "control_count": 24,
+            "timeout_count": 1,
+            "stale_node_count": 0,
+            "score": 0.6599999999999999,
+            "status": "degraded"
+          },
+          {
+            "app_label": ":1.3",
+            "bus_name_hash": "e0312de4bce4c374",
+            "node_count": 91,
+            "control_count": 24,
+            "timeout_count": 1,
+            "stale_node_count": 0,
+            "score": 0.6599999999999999,
+            "status": "degraded"
+          }
+        ],
+        "accessibility_stale_node_count": 0,
+        "accessibility_timeout_count": 1,
+        "accessibility_cache_hit_count": 0,
+        "accessibility_stale_cache_rejected_count": 0,
+        "accessibility_node_count": 91,
+        "accessibility_control_count": 13,
+        "atspi_snapshot_total_ms": 126,
+        "atspi_skipped_app_count": 1,
+        "atspi_omitted_node_count": 112,
+        "accessibility_remediation": [],
+        "screenshot_available": true,
+        "screenshot_status": "available",
+        "screenshot_capture_ms": 1280,
+        "screenshot_duration_ms": 1280,
+        "screen_hash_prefix": "ea9c63d60c01be6b",
+        "monitor_count": 1,
+        "dpi_available": true,
+        "cursor_focus_known": true,
+        "focused_window": "obaid@obaid-ubuntu: /media/obaid/SSD/KRIA",
+        "focused_app": "Terminal",
+        "focused_control_id": "gnome_bridge:terminal_window",
+        "focused_control_label": "Terminal focus",
+        "focused_control_role": "terminal",
+        "focused_control_bounds": null,
+        "text_cursor_known": false,
+        "editable_target_known": false,
+        "terminal_like": true,
+        "focus_source": "gnome_bridge_focus",
+        "focus_confidence": 0.86,
+        "focus_reliability": "reliable",
+        "focus_adapter_status": "available",
+        "focus_latency_ms": 5,
+        "focus_failure_chain": [
+          {
+            "source": "gnome_bridge_focus",
+            "status": "matched",
+            "reliability": "reliable",
+            "reason": null
+          }
+        ],
+        "active_window_probe_ok": true,
+        "desktop_state_probe_ok": true,
+        "capabilities_probe_ok": true,
+        "observation_total_ms": 2261,
+        "slowest_probe": "run_ocr",
+        "slowest_probe_ms": 2259,
+        "probe_timeout_count": 1,
+        "probe_timings": [
+          {
+            "probe_name": "capture_screenshot",
+            "duration_ms": 1280,
+            "status": "ok",
+            "source": "xcap",
+            "cache_hit": false,
+            "blocker_kind": null
+          },
+          {
+            "probe_name": "detect_visual_controls",
+            "duration_ms": 1977,
+            "status": "timeout",
+            "source": "detect_visual_controls",
+            "cache_hit": false,
+            "blocker_kind": "timeout"
+          },
+          {
+            "probe_name": "find_ui_elements:check_box",
+            "duration_ms": 127,
+            "status": "ok",
+            "source": "atspi_snapshot",
+            "cache_hit": false,
+            "blocker_kind": null
+          },
+          {
+            "probe_name": "find_ui_elements:dialog",
+            "duration_ms": 127,
+            "status": "ok",
+            "source": "atspi_snapshot",
+            "cache_hit": false,
+            "blocker_kind": null
+          },
+          {
+            "probe_name": "find_ui_elements:link",
+            "duration_ms": 127,
+            "status": "ok",
+            "source": "atspi_snapshot",
+            "cache_hit": false,
+            "blocker_kind": null
+          },
+          {
+            "probe_name": "find_ui_elements:page_tab",
+            "duration_ms": 127,
+            "status": "ok",
+            "source": "atspi_snapshot",
+            "cache_hit": false,
+            "blocker_kind": null
+          },
+          {
+            "probe_name": "find_ui_elements:push_button",
+            "duration_ms": 127,
+            "status": "ok",
+            "source": "atspi_snapshot",
+            "cache_hit": false,
+            "blocker_kind": null
+          },
+          {
+            "probe_name": "find_ui_elements:text",
+            "duration_ms": 127,
+            "status": "ok",
+            "source": "atspi_snapshot",
+            "cache_hit": false,
+            "blocker_kind": null
+          },
+          {
+            "probe_name": "focused_window_title",
+            "duration_ms": 127,
+            "status": "blocked",
+            "source": "focused_window_title",
+            "cache_hit": false,
+            "blocker_kind": "unavailable"
+          },
+          {
+            "probe_name": "get_accessibility_capabilities",
+            "duration_ms": 126,
+            "status": "ok",
+            "source": "atspi_snapshot",
+            "cache_hit": false,
+            "blocker_kind": null
+          },
+          {
+            "probe_name": "get_accessibility_tree_summary",
+            "duration_ms": 127,
+            "status": "ok",
+            "source": "atspi_snapshot",
+            "cache_hit": false,
+            "blocker_kind": null
+          },
+          {
+            "probe_name": "get_active_window",
+            "duration_ms": 5,
+            "status": "ok",
+            "source": "kria_gnome_shell_bridge",
+            "cache_hit": false,
+            "blocker_kind": null
+          },
+          {
+            "probe_name": "get_cursor_focus_state",
+            "duration_ms": 133,
+            "status": "ok",
+            "source": "gnome_bridge_focus",
+            "cache_hit": false,
+            "blocker_kind": null
+          },
+          {
+            "probe_name": "get_desktop_state",
+            "duration_ms": 126,
+            "status": "ok",
+            "source": "atspi_snapshot",
+            "cache_hit": false,
+            "blocker_kind": null
+          },
+          {
+            "probe_name": "get_monitor_layout",
+            "duration_ms": 1,
+            "status": "ok",
+            "source": "get_monitor_layout",
+            "cache_hit": false,
+            "blocker_kind": null
+          },
+          {
+            "probe_name": "run_ocr",
+            "duration_ms": 2259,
+            "status": "ok",
+            "source": "tesseract_cli",
+            "cache_hit": false,
+            "blocker_kind": null
+          }
+        ],
+        "cache_hit": false,
+        "cache_age_ms": null,
+        "cache_policy": "observe_plan_ttl_750ms",
+        "freshness": "fresh",
+        "source_blockers": {
+          "active_window": null,
+          "desktop_state": null,
+          "accessibility": null,
+          "screenshot": null,
+          "ocr": null,
+          "monitor": null,
+          "cursor_focus": null
+        },
+        "control_samples": [
+          {
+            "id": ":1.0:/org/a11y/atspi/accessible/1141:text",
+            "role": "text",
+            "label": "",
+            "bounds": null,
+            "enabled": false,
+            "visible": true,
+            "focused": false,
+            "source": "accessibility",
+            "confidence": 1.0,
+            "quality": "not_executable",
+            "label_source": "missing",
+            "state_source": "accessibility_state",
+            "rejection_reason": "disabled",
+            "identity_confidence": 0.35,
+            "bounds_confidence": 0.0,
+            "state_confidence": 0.86,
+            "executable_confidence": 0.0,
+            "sources": [
+              "accessibility"
+            ]
+          },
+          {
+            "id": ":1.0:/org/a11y/atspi/accessible/1145:text",
+            "role": "text",
+            "label": "",
+            "bounds": null,
+            "enabled": false,
+            "visible": true,
+            "focused": false,
+            "source": "accessibility",
+            "confidence": 1.0,
+            "quality": "not_executable",
+            "label_source": "missing",
+            "state_source": "accessibility_state",
+            "rejection_reason": "disabled",
+            "identity_confidence": 0.35,
+            "bounds_confidence": 0.0,
+            "state_confidence": 0.86,
+            "executable_confidence": 0.0,
+            "sources": [
+              "accessibility"
+            ]
+          },
+          {
+            "id": ":1.0:/org/a11y/atspi/accessible/1149:text",
+            "role": "text",
+            "label": "",
+            "bounds": null,
+            "enabled": false,
+            "visible": true,
+            "focused": false,
+            "source": "accessibility",
+            "confidence": 1.0,
+            "quality": "not_executable",
+            "label_source": "missing",
+            "state_source": "accessibility_state",
+            "rejection_reason": "disabled",
+            "identity_confidence": 0.35,
+            "bounds_confidence": 0.0,
+            "state_confidence": 0.86,
+            "executable_confidence": 0.0,
+            "sources": [
+              "accessibility"
+            ]
+          },
+          {
+            "id": ":1.0:/org/a11y/atspi/accessible/1153:text",
+            "role": "text",
+            "label": "",
+            "bounds": null,
+            "enabled": false,
+            "visible": true,
+            "focused": false,
+            "source": "accessibility",
+            "confidence": 1.0,
+            "quality": "not_executable",
+            "label_source": "missing",
+            "state_source": "accessibility_state",
+            "rejection_reason": "disabled",
+            "identity_confidence": 0.35,
+            "bounds_confidence": 0.0,
+            "state_confidence": 0.86,
+            "executable_confidence": 0.0,
+            "sources": [
+              "accessibility"
+            ]
+          },
+          {
+            "id": ":1.0:/org/a11y/atspi/accessible/1157:text",
+            "role": "text",
+            "label": "",
+            "bounds": null,
+            "enabled": false,
+            "visible": true,
+            "focused": false,
+            "source": "accessibility",
+            "confidence": 1.0,
+            "quality": "not_executable",
+            "label_source": "missing",
+            "state_source": "accessibility_state",
+            "rejection_reason": "disabled",
+            "identity_confidence": 0.35,
+            "bounds_confidence": 0.0,
+            "state_confidence": 0.86,
+            "executable_confidence": 0.0,
+            "sources": [
+              "accessibility"
+            ]
+          },
+          {
+            "id": ":1.0:/org/a11y/atspi/accessible/1161:text",
+            "role": "text",
+            "label": "",
+            "bounds": null,
+            "enabled": false,
+            "visible": true,
+            "focused": false,
+            "source": "accessibility",
+            "confidence": 1.0,
+            "quality": "not_executable",
+            "label_source": "missing",
+            "state_source": "accessibility_state",
+            "rejection_reason": "disabled",
+            "identity_confidence": 0.35,
+            "bounds_confidence": 0.0,
+            "state_confidence": 0.86,
+            "executable_confidence": 0.0,
+            "sources": [
+              "accessibility"
+            ]
+          },
+          {
+            "id": ":1.0:/org/a11y/atspi/accessible/1172:text",
+            "role": "text",
+            "label": "",
+            "bounds": null,
+            "enabled": false,
+            "visible": true,
+            "focused": false,
+            "source": "accessibility",
+            "confidence": 1.0,
+            "quality": "not_executable",
+            "label_source": "missing",
+            "state_source": "accessibility_state",
+            "rejection_reason": "disabled",
+            "identity_confidence": 0.35,
+            "bounds_confidence": 0.0,
+            "state_confidence": 0.86,
+            "executable_confidence": 0.0,
+            "sources": [
+              "accessibility"
+            ]
+          },
+          {
+            "id": ":1.0:/org/a11y/atspi/accessible/1176:text",
+            "role": "text",
+            "label": "",
+            "bounds": null,
+            "enabled": false,
+            "visible": true,
+            "focused": false,
+            "source": "accessibility",
+            "confidence": 1.0,
+            "quality": "not_executable",
+            "label_source": "missing",
+            "state_source": "accessibility_state",
+            "rejection_reason": "disabled",
+            "identity_confidence": 0.35,
+            "bounds_confidence": 0.0,
+            "state_confidence": 0.86,
+            "executable_confidence": 0.0,
+            "sources": [
+              "accessibility"
+            ]
+          },
+          {
+            "id": ":1.0:/org/a11y/atspi/accessible/1180:text",
+            "role": "text",
+            "label": "",
+            "bounds": null,
+            "enabled": false,
+            "visible": true,
+            "focused": false,
+            "source": "accessibility",
+            "confidence": 1.0,
+            "quality": "not_executable",
+            "label_source": "missing",
+            "state_source": "accessibility_state",
+            "rejection_reason": "disabled",
+            "identity_confidence": 0.35,
+            "bounds_confidence": 0.0,
+            "state_confidence": 0.86,
+            "executable_confidence": 0.0,
+            "sources": [
+              "accessibility"
+            ]
+          },
+          {
+            "id": ":1.0:/org/a11y/atspi/accessible/1184:text",
+            "role": "text",
+            "label": "",
+            "bounds": null,
+            "enabled": false,
+            "visible": true,
+            "focused": false,
+            "source": "accessibility",
+            "confidence": 1.0,
+            "quality": "not_executable",
+            "label_source": "missing",
+            "state_source": "accessibility_state",
+            "rejection_reason": "disabled",
+            "identity_confidence": 0.35,
+            "bounds_confidence": 0.0,
+            "state_confidence": 0.86,
+            "executable_confidence": 0.0,
+            "sources": [
+              "accessibility"
+            ]
+          },
+          {
+            "id": ":1.0:/org/a11y/atspi/accessible/1199:text",
+            "role": "text",
+            "label": "",
+            "bounds": null,
+            "enabled": false,
+            "visible": true,
+            "focused": false,
+            "source": "accessibility",
+            "confidence": 1.0,
+            "quality": "not_executable",
+            "label_source": "missing",
+            "state_source": "accessibility_state",
+            "rejection_reason": "disabled",
+            "identity_confidence": 0.35,
+            "bounds_confidence": 0.0,
+            "state_confidence": 0.86,
+            "executable_confidence": 0.0,
+            "sources": [
+              "accessibility"
+            ]
+          },
+          {
+            "id": ":1.0:/org/a11y/atspi/accessible/1197:push button",
+            "role": "push button",
+            "label": "",
+            "bounds": null,
+            "enabled": true,
+            "visible": true,
+            "focused": false,
+            "source": "accessibility",
+            "confidence": 1.0,
+            "quality": "not_executable",
+            "label_source": "missing",
+            "state_source": "accessibility_state",
+            "rejection_reason": "bounds_missing",
+            "identity_confidence": 0.35,
+            "bounds_confidence": 0.0,
+            "state_confidence": 0.86,
+            "executable_confidence": 0.0,
+            "sources": [
+              "accessibility"
+            ]
+          }
+        ],
+        "executable_control_count": 0,
+        "visual_control_count": 0,
+        "capabilities": {
+          "active_window": {
+            "available": true,
+            "detail": "active_window:kria_gnome_shell_bridge",
+            "blocker": null,
+            "remediation": []
+          },
+          "desktop_state": {
+            "available": true,
+            "detail": "desktop_state",
+            "blocker": null,
+            "remediation": []
+          },
+          "accessibility": {
+            "available": true,
+            "detail": "accessibility operational",
+            "blocker": null,
+            "remediation": []
+          },
+          "screenshot": {
+            "available": true,
+            "detail": "screenshot",
+            "blocker": null,
+            "remediation": []
+          },
+          "ocr": {
+            "available": true,
+            "detail": "ocr",
+            "blocker": null,
+            "remediation": []
+          },
+          "monitor": {
+            "available": true,
+            "detail": "monitor",
+            "blocker": null,
+            "remediation": []
+          },
+          "cursor_focus": {
+            "available": true,
+            "detail": "cursor_focus",
+            "blocker": null,
+            "remediation": []
+          }
+        },
+        "text_field_sample": [],
+        "button_sample": [],
+        "control_quality_summary": {
+          "trusted": 0,
+          "partial": 0,
+          "not_executable": 13,
+          "executable": 0
+        }
+      },
+      "context": {
+        "context_id": "4d3ee558-a74f-42ef-a2d0-d8e3260abb85",
+        "observation_id": "709bc6df-5286-4e71-b439-82fb92129828",
+        "trusted_control_count": 0,
+        "executable_control_count": 0,
+        "disabled_or_hidden_count": 11,
+        "ocr_untrusted": true,
+        "ocr_injection_count": 0,
+        "redaction_count": 0,
+        "freshness": "fresh",
+        "status": "ready",
+        "previous_context_id": null,
+        "previous_observation_id": null,
+        "delta": {
+          "active_window_changed": false,
+          "screen_hash_changed": false,
+          "monitor_layout_changed": false,
+          "control_count_changed": false,
+          "focused_control_changed": false,
+          "stale_action_risk": false,
+          "changed_summary": []
+        },
+        "source_confidence": {
+          "active_window": 0.98,
+          "accessibility": 0.6599999999999999,
+          "screenshot": 0.85,
+          "ocr": 0.45,
+          "monitor": 0.82,
+          "focus": 0.86
+        },
+        "screen_hash_prefix": "ea9c63d60c01be6b",
+        "focus": {
+          "source": "gnome_bridge_focus",
+          "confidence": 0.86,
+          "reliability": "reliable",
+          "keyboard_focus_known": true,
+          "editable_target_known": false,
+          "terminal_like": true,
+          "adapter_status": "available",
+          "latency_ms": 5,
+          "focused_window": "obaid@obaid-ubuntu: /media/obaid/SSD/KRIA",
+          "focused_app": "Terminal",
+          "focused_control_label": "Terminal focus",
+          "focused_control_role": "terminal",
+          "focused_control_bounds": null
+        },
+        "accessibility_health": {
+          "status": "degraded",
+          "confidence": 0.6599999999999999,
+          "app_scores": [
+            {
+              "app_label": ":1.0",
+              "bus_name_hash": "6ae115a23a8787ac",
+              "node_count": 91,
+              "control_count": 24,
+              "timeout_count": 1,
+              "stale_node_count": 0,
+              "score": 0.6599999999999999,
+              "status": "degraded"
+            },
+            {
+              "app_label": ":1.4",
+              "bus_name_hash": "1890e0c9307bad0a",
+              "node_count": 91,
+              "control_count": 24,
+              "timeout_count": 1,
+              "stale_node_count": 0,
+              "score": 0.6599999999999999,
+              "status": "degraded"
+            },
+            {
+              "app_label": ":1.6",
+              "bus_name_hash": "cdaa122c19a646a6",
+              "node_count": 91,
+              "control_count": 24,
+              "timeout_count": 1,
+              "stale_node_count": 0,
+              "score": 0.6599999999999999,
+              "status": "degraded"
+            },
+            {
+              "app_label": ":1.5",
+              "bus_name_hash": "305f121ff554bda2",
+              "node_count": 91,
+              "control_count": 24,
+              "timeout_count": 1,
+              "stale_node_count": 0,
+              "score": 0.6599999999999999,
+              "status": "degraded"
+            },
+            {
+              "app_label": ":1.3",
+              "bus_name_hash": "e0312de4bce4c374",
+              "node_count": 91,
+              "control_count": 24,
+              "timeout_count": 1,
+              "stale_node_count": 0,
+              "score": 0.6599999999999999,
+              "status": "degraded"
+            }
+          ],
+          "stale_node_count": 0,
+          "timeout_count": 1,
+          "cache_hit_count": 0,
+          "stale_cache_rejected_count": 0
+        },
+        "visual_controls": {
+          "detected": 0,
+          "supporting_only": true
+        },
+        "ocr_performance": {
+          "fast_path": "full_screen_tesseract",
+          "cache_hit": false,
+          "roi_count": 0,
+          "changed_region_count": 0,
+          "cold_start_ms": 2259,
+          "warm_start_ms": null
+        },
+        "source_blockers": [],
+        "warnings": []
+      },
+      "goal_contract": {
+        "contract_id": "4b960acdaa907da81426d3bc38996df58e4bfa526ac853cc7f664bd0bd9d3c96",
+        "observation_id": "709bc6df-5286-4e71-b439-82fb92129828",
+        "context_id": "4d3ee558-a74f-42ef-a2d0-d8e3260abb85",
+        "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b",
+        "goal_summary": "Open Firefox",
+        "intent_kind": "analyze_plan",
+        "action_type": "open_app",
+        "target_app_kind": "browser",
+        "target_app_hint": "Firefox",
+        "target_window_hint": "obaid@obaid-ubuntu: /media/obaid/SSD/KRIA",
+        "target_control_hint": null,
+        "query_summary": null,
+        "query_hash": null,
+        "text_payload_summary": null,
+        "text_payload_hash": null,
+        "desired_final_state": "target application is opened or blocker is explained",
+        "risk_level": "low",
+        "requires_user_approval": false,
+        "ambiguity_count": 0,
+        "ambiguities": [],
+        "source_evidence": [
+          {
+            "source": "user_prompt",
+            "field": "action_type",
+            "summary": "matched action open_app",
+            "confidence": 0.9
+          },
+          {
+            "source": "user_prompt",
+            "field": "target_app_kind",
+            "summary": "browser",
+            "confidence": 0.86
+          },
+          {
+            "source": "user_prompt",
+            "field": "target_app_hint",
+            "summary": "Firefox",
+            "confidence": 0.86
+          }
+        ],
+        "extraction_confidence": 0.76,
+        "extractor_mode": "deterministic"
+      },
+      "planner": {
+        "mode": "llm_rejected_fallback",
+        "llm_attempted": true,
+        "llm_status": "rejected",
+        "llm_failure_reason": "LLM planner returned prose or non-object content",
+        "model": null,
+        "validation_status": "valid",
+        "plan_status": "valid",
+        "blocked_reasons": [],
+        "warnings": [],
+        "confidence": 0.62
+      },
+      "plan": {
+        "plan_id": "cdcac5eb-b950-41ee-9db2-99ac6d4f271e",
+        "goal_contract_id": "4b960acdaa907da81426d3bc38996df58e4bfa526ac853cc7f664bd0bd9d3c96",
+        "context_id": "4d3ee558-a74f-42ef-a2d0-d8e3260abb85",
+        "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b",
+        "goal_action_type": "open_app",
+        "summary": "open_app GUI plan",
+        "planner_mode": "llm_rejected_fallback",
+        "plan_status": "valid",
+        "step_count": 2,
+        "risk_level": "low",
+        "requires_user_approval": false,
+        "ambiguity_count": 0,
+        "confidence": 0.62,
+        "validation_errors": [],
+        "source_evidence": [
+          {
+            "source": "user_prompt",
+            "field": "action_type",
+            "summary": "matched action open_app",
+            "confidence": 0.9
+          },
+          {
+            "source": "user_prompt",
+            "field": "target_app_kind",
+            "summary": "browser",
+            "confidence": 0.86
+          },
+          {
+            "source": "user_prompt",
+            "field": "target_app_hint",
+            "summary": "Firefox",
+            "confidence": 0.86
+          }
+        ],
+        "steps": [
+          "Open or switch to the requested app",
+          "Verify requested app window is visible"
+        ],
+        "typed_steps": [
+          {
+            "step_id": "det-1",
+            "step_type": "OpenApp",
+            "summary": "Open or switch to the requested app",
+            "target_app_hint": "Firefox",
+            "target_window_hint": "obaid@obaid-ubuntu: /media/obaid/SSD/KRIA",
+            "target_control_hint": null,
+            "text_payload_summary": null,
+            "text_payload_hash": null,
+            "expected_precondition": "requested app is not guaranteed visible",
+            "expected_postcondition": "requested app window is visible",
+            "verification_strategy": "window_visible",
+            "risk_level": "low",
+            "requires_approval": false,
+            "allowed_to_execute": false,
+            "confidence": 0.76,
+            "reason": "analyze_plan"
+          },
+          {
+            "step_id": "det-2",
+            "step_type": "WaitForState",
+            "summary": "Verify requested app window is visible",
+            "target_app_hint": "Firefox",
+            "target_window_hint": "obaid@obaid-ubuntu: /media/obaid/SSD/KRIA",
+            "target_control_hint": null,
+            "text_payload_summary": null,
+            "text_payload_hash": null,
+            "expected_precondition": "OpenApp step has been planned",
+            "expected_postcondition": "window visible or safe blocker reported",
+            "verification_strategy": "window_visible",
+            "risk_level": "low",
+            "requires_approval": false,
+            "allowed_to_execute": false,
+            "confidence": 0.76,
+            "reason": "analyze_plan"
+          }
+        ]
+      },
+      "plan_validation": {
+        "confidence": 0.62,
+        "validation_id": "validation-cdcac5eb-b950-41ee-9db2-99ac6d4f271e",
+        "plan_id": "cdcac5eb-b950-41ee-9db2-99ac6d4f271e",
+        "goal_contract_id": "4b960acdaa907da81426d3bc38996df58e4bfa526ac853cc7f664bd0bd9d3c96",
+        "context_id": "4d3ee558-a74f-42ef-a2d0-d8e3260abb85",
+        "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b",
+        "status": "valid",
+        "readiness_status": "valid_for_resolution",
+        "risk_level": "low",
+        "requires_user_approval": false,
+        "can_proceed_to_target_resolution": true,
+        "can_execute": false,
+        "blocker_count": 0,
+        "warning_count": 0,
+        "blocked_reasons": [],
+        "warnings": [],
+        "validation_errors": [],
+        "source_evidence": [
+          {
+            "source": "user_prompt",
+            "field": "action_type",
+            "summary": "matched action open_app",
+            "confidence": 0.9
+          },
+          {
+            "source": "user_prompt",
+            "field": "target_app_kind",
+            "summary": "browser",
+            "confidence": 0.86
+          },
+          {
+            "source": "user_prompt",
+            "field": "target_app_hint",
+            "summary": "Firefox",
+            "confidence": 0.86
+          }
+        ],
+        "step_results": [
+          {
+            "step_id": "det-1",
+            "step_type": "OpenApp",
+            "status": "valid_for_resolution",
+            "risk_level": "low",
+            "requires_approval": false,
+            "target_resolution_required": false,
+            "target_available": false,
+            "verification_present": true,
+            "precondition_status": "present",
+            "postcondition_status": "present",
+            "blocker": null,
+            "confidence": 0.76
+          },
+          {
+            "step_id": "det-2",
+            "step_type": "WaitForState",
+            "status": "valid_for_resolution",
+            "risk_level": "low",
+            "requires_approval": false,
+            "target_resolution_required": false,
+            "target_available": false,
+            "verification_present": true,
+            "precondition_status": "present",
+            "postcondition_status": "present",
+            "blocker": null,
+            "confidence": 0.76
+          }
+        ]
+      },
+      "target_resolution": {
+        "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b",
+        "resolution_id": "resolution-cdcac5eb-b950-41ee-9db2-99ac6d4f271e-s0",
+        "plan_id": "cdcac5eb-b950-41ee-9db2-99ac6d4f271e-s0",
+        "validation_id": "validation-cdcac5eb-b950-41ee-9db2-99ac6d4f271e",
+        "goal_contract_id": "4b960acdaa907da81426d3bc38996df58e4bfa526ac853cc7f664bd0bd9d3c96",
+        "context_id": "4d3ee558-a74f-42ef-a2d0-d8e3260abb85",
+        "observation_id": "709bc6df-5286-4e71-b439-82fb92129828",
+        "status": "resolved",
+        "results": [],
+        "resolved_target": null,
+        "candidates": [],
+        "confidence": 0.76,
+        "ambiguity_count": 0,
+        "ambiguity_reasons": [],
+        "blocker_count": 0,
+        "blockers": [],
+        "can_proceed_to_safety_gate": true,
+        "can_execute": false
+      },
+      "target": null,
+      "safety_gate": {
+        "proposal": {
+          "proposal_schema_version": 1,
+          "proposal_id": "gui-proposal-6e3310f0261e57013a67553391eb3b6dcfd89566633569a32cf46ba2c074bd24",
+          "request_id": "gui-hitl-fc5e9c8443b983138a5ffbe9ce0e1fdbf75196256f93ea5830a2277e80742e62",
+          "goal_contract_id": "4b960acdaa907da81426d3bc38996df58e4bfa526ac853cc7f664bd0bd9d3c96",
+          "plan_id": "cdcac5eb-b950-41ee-9db2-99ac6d4f271e-s0",
+          "validation_id": "validation-cdcac5eb-b950-41ee-9db2-99ac6d4f271e",
+          "resolution_id": "resolution-cdcac5eb-b950-41ee-9db2-99ac6d4f271e-s0",
+          "context_id": "4d3ee558-a74f-42ef-a2d0-d8e3260abb85",
+          "observation_id": "709bc6df-5286-4e71-b439-82fb92129828",
+          "step_id": "det-1",
+          "action_type": "OpenApp",
+          "target_hash": "1c150bbeb0469615cffa76ca9c2c56b9eb26d8c711825d7255635ed4e2260ded",
+          "target_control_id": null,
+          "target_label": "Firefox",
+          "target_role": null,
+          "target_bounds": null,
+          "text_payload_summary": null,
+          "text_payload_hash": null,
+          "expected_precondition": "requested app is not guaranteed visible",
+          "expected_postcondition": "requested app window is visible",
+          "risk_level": "low",
+          "risk_reasons": [
+            "risk level: low"
+          ],
+          "requires_user_approval": false,
+          "created_at_ms": 1781266672235,
+          "expires_at_ms": 1781266732235,
+          "proposal_hash": "a59b906bfbaab96ccf76ccf05264c0807c3dbc4a3efb32aa08e43fd9b131cb49",
+          "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b",
+          "can_execute": false
+        },
+        "safety_gate_id": "safety-gui-proposal-6e3310f0261e57013a67553391eb3b6dcfd89566633569a32cf46ba2c074bd24",
+        "proposal_id": "gui-proposal-6e3310f0261e57013a67553391eb3b6dcfd89566633569a32cf46ba2c074bd24",
+        "request_id": "gui-hitl-fc5e9c8443b983138a5ffbe9ce0e1fdbf75196256f93ea5830a2277e80742e62",
+        "proposal_hash": "a59b906bfbaab96ccf76ccf05264c0807c3dbc4a3efb32aa08e43fd9b131cb49",
+        "target_hash": "1c150bbeb0469615cffa76ca9c2c56b9eb26d8c711825d7255635ed4e2260ded",
+        "status": "Allowed",
+        "safety_status": "safe_no_approval_required",
+        "risk_level": "low",
+        "reasons": [
+          "risk level: low"
+        ],
+        "risk_reasons": [
+          "risk level: low"
+        ],
+        "requires_user_approval": false,
+        "approval_reason": null,
+        "blockers": [],
+        "warnings": [],
+        "can_request_hitl": false,
+        "can_authorize_step7": true,
+        "can_execute": false,
+        "source_evidence": [
+          "gui_goal_contract",
+          "plan_validation",
+          "target_resolution"
+        ],
+        "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b",
+        "action_type": "OpenApp",
+        "target_label": "Firefox",
+        "target_role": null,
+        "expected_postcondition": "requested app window is visible",
+        "expires_at_ms": 1781266732235
+      },
+      "hitl_decision": null,
+      "action": {
+        "execution_id": "execution-8724dac33384f820ffcccdc73c4834173d9f973c959e0b70974b05af367ef2b2",
+        "proposal_id": "gui-proposal-6e3310f0261e57013a67553391eb3b6dcfd89566633569a32cf46ba2c074bd24",
+        "proposal_hash": "a59b906bfbaab96ccf76ccf05264c0807c3dbc4a3efb32aa08e43fd9b131cb49",
+        "action_type": "OpenApp",
+        "status": "completed",
+        "started_at_ms": 1781266672235,
+        "completed_at_ms": 1781266672239,
+        "backend_used": "open_application",
+        "precondition_check": {
+          "status": "valid",
+          "can_start_action": true,
+          "blockers": [],
+          "warnings": [],
+          "checked_at_ms": 1781266672235
+        },
+        "postcondition_check": "requested app window is visible",
+        "verification_result": "verification_failed",
+        "error_code": null,
+        "safe_error_summary": null,
+        "can_retry": true,
+        "recovery_hint": "Re-observe and confirm the expected state before retrying; do not blind-retry.",
+        "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b"
+      },
+      "execution": {
+        "execution_id": "execution-8724dac33384f820ffcccdc73c4834173d9f973c959e0b70974b05af367ef2b2",
+        "proposal_id": "gui-proposal-6e3310f0261e57013a67553391eb3b6dcfd89566633569a32cf46ba2c074bd24",
+        "proposal_hash": "a59b906bfbaab96ccf76ccf05264c0807c3dbc4a3efb32aa08e43fd9b131cb49",
+        "action_type": "OpenApp",
+        "status": "completed",
+        "started_at_ms": 1781266672235,
+        "completed_at_ms": 1781266672239,
+        "backend_used": "open_application",
+        "precondition_check": {
+          "status": "valid",
+          "can_start_action": true,
+          "blockers": [],
+          "warnings": [],
+          "checked_at_ms": 1781266672235
+        },
+        "postcondition_check": "requested app window is visible",
+        "verification_result": "verification_failed",
+        "error_code": null,
+        "safe_error_summary": null,
+        "can_retry": true,
+        "recovery_hint": "Re-observe and confirm the expected state before retrying; do not blind-retry.",
+        "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b"
+      },
+      "action_backend": {
+        "global_halt_engaged": false,
+        "halt_kind": "none",
+        "halt_reason": null,
+        "release_conditions": [],
+        "startup_elapsed_ms": null,
+        "can_observe": true,
+        "can_plan": true,
+        "automation_enabled": true,
+        "vision_sidecar": "running",
+        "uinput_daemon": "running",
+        "orchestrator_available": true,
+        "session_type": "wayland",
+        "xdotool_available": true,
+        "ydotool_available": false,
+        "uinput_available": true,
+        "selected_backend": "uinput_accessibility",
+        "backend_selection_reason": "Wayland session selected uinput because the daemon and socket are healthy.",
+        "backend_probe_status": "wayland_uinput_ready",
+        "backend_probe_errors": [
+          "xdotool detected but not usable for Wayland GUI actions"
+        ],
+        "input_backend_kind": "uinput",
+        "focus_supported": true,
+        "typing_supported": true,
+        "click_supported": true,
+        "verification_supported": true,
+        "xdotool_usable_for_actions": false,
+        "ydotool_usable_for_actions": false,
+        "uinput_socket_path": "/run/user/1000/kria-uinput.sock",
+        "uinput_socket_accessible": true,
+        "can_execute_actions": true,
+        "blockers": [],
+        "capabilities": {
+          "observe": true,
+          "focus_field": true,
+          "fill_field": true,
+          "click_control": true,
+          "post_action_observe": true,
+          "verify": true,
+          "recovery_focus": true,
+          "recovery_modal": true
+        }
+      },
+      "execution_blocker": null,
+      "verification": {
+        "verification_id": "verification-a255ab48d2ffceb2d1aeead254b28e5237aec53f0d7d73c00e0a4bb75c24ecbd",
+        "execution_id": "execution-8724dac33384f820ffcccdc73c4834173d9f973c959e0b70974b05af367ef2b2",
+        "proposal_id": "gui-proposal-6e3310f0261e57013a67553391eb3b6dcfd89566633569a32cf46ba2c074bd24",
+        "status": "verification_failed",
+        "verification_strategy": "active_window_match",
+        "evidence": [
+          "active window did not match expected app/window hint (Firefox)"
+        ],
+        "pre_state_summary": "app=Terminal; controls=13; dialogs=0; focus_role=terminal; screen=ea9c63d6",
+        "post_state_summary": "app=Terminal; controls=17; dialogs=0; focus_role=terminal; screen=ea9c63d6",
+        "matched_expected_state": false,
+        "target_still_present": false,
+        "target_identity_matches": true,
+        "confidence": 0.2,
+        "safe_error_summary": "Expected post-action state was not verified for OpenApp.",
+        "recovery_hint": "Re-observe and confirm the expected state before retrying; do not blind-retry.",
+        "can_retry": true,
+        "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b"
+      },
+      "recovery_assessment": {
+        "recovery_id": "recovery-c3de0636d4b1f3e3e56a7342f6ffb41be712981260cc04ca03d7b0b6375d05ba",
+        "execution_id": "execution-8724dac33384f820ffcccdc73c4834173d9f973c959e0b70974b05af367ef2b2",
+        "verification_id": "verification-a255ab48d2ffceb2d1aeead254b28e5237aec53f0d7d73c00e0a4bb75c24ecbd",
+        "proposal_id": "gui-proposal-6e3310f0261e57013a67553391eb3b6dcfd89566633569a32cf46ba2c074bd24",
+        "proposal_hash": "a59b906bfbaab96ccf76ccf05264c0807c3dbc4a3efb32aa08e43fd9b131cb49",
+        "target_hash": "1c150bbeb0469615cffa76ca9c2c56b9eb26d8c711825d7255635ed4e2260ded",
+        "action_type": "OpenApp",
+        "failure_kind": "target_missing",
+        "status": "blocked",
+        "proposed_recovery_step": "Stop",
+        "recovery_action_kind": "Stop",
+        "requires_user_approval": false,
+        "can_recover": false,
+        "can_execute_recovery": false,
+        "retry_count": 0,
+        "max_retry_count": 1,
+        "blockers": [
+          "the resolved target is no longer present"
+        ],
+        "warnings": [],
+        "safe_explanation": "The target is no longer on screen and cannot be re-resolved safely, so KRIA stops.",
+        "recovery_hint": "Re-observe and confirm a safe target before any manual retry; KRIA will not blind-retry.",
+        "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b"
+      },
+      "recovery": null,
+      "workflow_run": {
+        "workflow_run_id": "workflow-run-df749f8f5f829b86f2419b88895588964724b179ba4ef90ed3155e03576dd275",
+        "session_id": "live-eval-p07-1781266656",
+        "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+        "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+        "goal_contract_id": "4b960acdaa907da81426d3bc38996df58e4bfa526ac853cc7f664bd0bd9d3c96",
+        "plan_id": "cdcac5eb-b950-41ee-9db2-99ac6d4f271e",
+        "initial_context_id": "4d3ee558-a74f-42ef-a2d0-d8e3260abb85",
+        "current_context_id": "4d3ee558-a74f-42ef-a2d0-d8e3260abb85",
+        "status": "blocked",
+        "current_step_index": 0,
+        "step_count": 2,
+        "step_states": [
+          {
+            "step_id": "det-1",
+            "step_index": 0,
+            "step_type": "OpenApp",
+            "summary": "Open or switch to the requested app",
+            "status": "blocked",
+            "target_resolution_id": "resolution-cdcac5eb-b950-41ee-9db2-99ac6d4f271e-s0",
+            "proposal_id": "gui-proposal-6e3310f0261e57013a67553391eb3b6dcfd89566633569a32cf46ba2c074bd24",
+            "proposal_hash": "a59b906bfbaab96ccf76ccf05264c0807c3dbc4a3efb32aa08e43fd9b131cb49",
+            "hitl_decision_id": null,
+            "execution_id": "execution-8724dac33384f820ffcccdc73c4834173d9f973c959e0b70974b05af367ef2b2",
+            "verification_id": "verification-a255ab48d2ffceb2d1aeead254b28e5237aec53f0d7d73c00e0a4bb75c24ecbd",
+            "recovery_id": "recovery-c3de0636d4b1f3e3e56a7342f6ffb41be712981260cc04ca03d7b0b6375d05ba",
+            "started_at_ms": 1781266672235,
+            "completed_at_ms": 1781266673266,
+            "blockers": [
+              "the resolved target is no longer present"
+            ],
+            "warnings": [],
+            "can_continue": false,
+            "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b"
+          },
+          {
+            "step_id": "det-2",
+            "step_index": 1,
+            "step_type": "WaitForState",
+            "summary": "Verify requested app window is visible",
+            "status": "pending",
+            "target_resolution_id": null,
+            "proposal_id": null,
+            "proposal_hash": null,
+            "hitl_decision_id": null,
+            "execution_id": null,
+            "verification_id": null,
+            "recovery_id": null,
+            "started_at_ms": 0,
+            "completed_at_ms": 0,
+            "blockers": [],
+            "warnings": [],
+            "can_continue": false,
+            "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b"
+          }
+        ],
+        "completed_step_receipts": [],
+        "blocked_reason": "the resolved target is no longer present",
+        "recovery_summary": null,
+        "risk_level": "low",
+        "requires_user_approval": false,
+        "execution_mode": "execute_live",
+        "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b"
+      },
+      "workflow_checkpoint": {
+        "checkpoint_schema_version": 1,
+        "checkpoint_id": "checkpoint-d028fa452842e4b96c692eb3c0de9971195d18750ae371982b9e5d54b9259305",
+        "workflow_run_id": "workflow-run-df749f8f5f829b86f2419b88895588964724b179ba4ef90ed3155e03576dd275",
+        "session_id": "live-eval-p07-1781266656",
+        "workflow_id": "66f150ba-54ef-43e2-894c-0b9ddba37214",
+        "turn_id": "39c095fa-27d8-483c-bc76-2f60b08ce59b",
+        "goal_contract_id": "4b960acdaa907da81426d3bc38996df58e4bfa526ac853cc7f664bd0bd9d3c96",
+        "plan_id": "cdcac5eb-b950-41ee-9db2-99ac6d4f271e",
+        "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b",
+        "current_step_index": 0,
+        "step_count": 2,
+        "step_states": [
+          {
+            "step_id": "det-1",
+            "step_index": 0,
+            "step_type": "OpenApp",
+            "summary": "Open or switch to the requested app",
+            "status": "blocked",
+            "target_resolution_id": "resolution-cdcac5eb-b950-41ee-9db2-99ac6d4f271e-s0",
+            "proposal_id": "gui-proposal-6e3310f0261e57013a67553391eb3b6dcfd89566633569a32cf46ba2c074bd24",
+            "proposal_hash": "a59b906bfbaab96ccf76ccf05264c0807c3dbc4a3efb32aa08e43fd9b131cb49",
+            "hitl_decision_id": null,
+            "execution_id": "execution-8724dac33384f820ffcccdc73c4834173d9f973c959e0b70974b05af367ef2b2",
+            "verification_id": "verification-a255ab48d2ffceb2d1aeead254b28e5237aec53f0d7d73c00e0a4bb75c24ecbd",
+            "recovery_id": "recovery-c3de0636d4b1f3e3e56a7342f6ffb41be712981260cc04ca03d7b0b6375d05ba",
+            "started_at_ms": 1781266672235,
+            "completed_at_ms": 1781266673266,
+            "blockers": [
+              "the resolved target is no longer present"
+            ],
+            "warnings": [],
+            "can_continue": false,
+            "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b"
+          },
+          {
+            "step_id": "det-2",
+            "step_index": 1,
+            "step_type": "WaitForState",
+            "summary": "Verify requested app window is visible",
+            "status": "pending",
+            "target_resolution_id": null,
+            "proposal_id": null,
+            "proposal_hash": null,
+            "hitl_decision_id": null,
+            "execution_id": null,
+            "verification_id": null,
+            "recovery_id": null,
+            "started_at_ms": 0,
+            "completed_at_ms": 0,
+            "blockers": [],
+            "warnings": [],
+            "can_continue": false,
+            "prompt_hash": "ec6e9d4b7c6bebc9a4c881cca8f4844272d942e30fd0cf70d0187c92c18f645b"
+          }
+        ],
+        "completed_step_receipts": [],
+        "pending_step_id": "det-1",
+        "pending_proposal_id": "gui-proposal-6e3310f0261e57013a67553391eb3b6dcfd89566633569a32cf46ba2c074bd24",
+        "pending_proposal_hash": "a59b906bfbaab96ccf76ccf05264c0807c3dbc4a3efb32aa08e43fd9b131cb49",
+        "pending_target_hash": null,
+        "pending_stable_target_identity_hash": null,
+        "pending_hitl_request_id": "gui-hitl-fc5e9c8443b983138a5ffbe9ce0e1fdbf75196256f93ea5830a2277e80742e62",
+        "approved_decision_id": null,
+        "approved_decision_hash": null,
+        "last_observation_id": "709bc6df-5286-4e71-b439-82fb92129828",
+        "last_context_id": "4d3ee558-a74f-42ef-a2d0-d8e3260abb85",
+        "last_screen_hash_prefix": "ea9c63d60c01be6b",
+        "last_active_window_hash": null,
+        "created_at_ms": 1781266673266,
+        "expires_at_ms": 1781267273266,
+        "risk_level": "low",
+        "requires_user_approval": false,
+        "checkpoint_hash": "71f7c2943f131c5b6f20fba4550e72c42b514806bd088b80ec4f46329814bbfc",
+        "source_evidence": [
+          "gui_workflow_run",
+          "completed_step_receipts",
+          "last_observation"
+        ],
+        "can_resume": false,
+        "can_execute": false
+      },
+      "blocker": {
+        "kind": "recovery",
+        "reason": "the resolved target is no longer present",
+        "candidate_count": null,
+        "target_name": null,
+        "options": [],
+        "clarification_question": null
+      }
+    }
+  }
+}

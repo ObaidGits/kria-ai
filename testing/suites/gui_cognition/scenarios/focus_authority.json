@@ -1,0 +1,296 @@
+{
+  "schema_version": "kria.testing.scenarios.v1",
+  "scenarios": [
+    {
+      "id": "gui_cognition.focus.chrome_search_box",
+      "title": "Chrome CDP focus adapter reports focused search box",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "focus_authority", "perception"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 90,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "What is focused on my screen? Report focus source and editable target status.",
+        "expected_status_any": ["ok"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["RouteConfirmed", "ObservationCompleted", "ContextBuilt", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "desktop_command.path", "equals": "send_manual_tool_message" },
+          { "path": "gui_cognition.llm_tool_loop", "equals": false },
+          { "path": "gui_cognition.perception.focus_source", "equals": "chrome_cdp_active_element" },
+          { "path": "gui_cognition.perception.focus_confidence", "equals": 0.94 },
+          { "path": "gui_cognition.perception.focus_reliability", "equals": "reliable" },
+          { "path": "gui_cognition.perception.focused_control_label", "equals": "Search Google" },
+          { "path": "gui_cognition.perception.focused_control_role", "equals": "searchbox" },
+          { "path": "gui_cognition.perception.focused_control_bounds.width", "exists": true },
+          { "path": "gui_cognition.perception.editable_target_known", "equals": true },
+          { "path": "gui_cognition.perception.terminal_like", "equals": false },
+          { "path": "gui_cognition.perception.focus_adapter_status", "equals": "available" },
+          { "path": "gui_cognition.context.focus.source", "equals": "chrome_cdp_active_element" }
+        ],
+        "forbidden_json_paths": [
+          "gui_cognition.perception.ocr_blocks.0.text",
+          "gui_cognition.perception.screenshot_path",
+          "gui_cognition.perception.raw_accessibility_tree"
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "chrome_cdp_focus_search_box"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.focus.firefox_search_box",
+      "title": "Firefox BiDi focus adapter reports focused search box",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "focus_authority", "perception"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 90,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "What is focused on my screen? Report focus source and editable target status.",
+        "expected_status_any": ["ok"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["RouteConfirmed", "ObservationCompleted", "ContextBuilt", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "desktop_command.path", "equals": "send_manual_tool_message" },
+          { "path": "gui_cognition.llm_tool_loop", "equals": false },
+          { "path": "gui_cognition.perception.focus_source", "equals": "firefox_bidi_active_element" },
+          { "path": "gui_cognition.perception.focus_confidence", "equals": 0.90 },
+          { "path": "gui_cognition.perception.focus_reliability", "equals": "reliable" },
+          { "path": "gui_cognition.perception.focused_control_role", "equals": "searchbox" },
+          { "path": "gui_cognition.perception.editable_target_known", "equals": true },
+          { "path": "gui_cognition.perception.terminal_like", "equals": false },
+          { "path": "gui_cognition.perception.focus_adapter_status", "equals": "available" }
+        ],
+        "forbidden_json_paths": [
+          "gui_cognition.perception.ocr_blocks.0.text",
+          "gui_cognition.perception.screenshot_path",
+          "gui_cognition.perception.raw_accessibility_tree"
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "firefox_bidi_focus_search_box"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.focus.vscode_editor",
+      "title": "VS Code extension focus adapter reports editor focus",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "focus_authority", "perception"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 90,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "What is focused on my screen? Report focus source and editable target status.",
+        "expected_status_any": ["ok"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["RouteConfirmed", "ObservationCompleted", "ContextBuilt", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "desktop_command.path", "equals": "send_manual_tool_message" },
+          { "path": "gui_cognition.perception.focus_source", "equals": "vscode_extension" },
+          { "path": "gui_cognition.perception.focus_confidence", "equals": 0.95 },
+          { "path": "gui_cognition.perception.focused_control_role", "equals": "editor" },
+          { "path": "gui_cognition.perception.editable_target_known", "equals": true },
+          { "path": "gui_cognition.perception.terminal_like", "equals": false },
+          { "path": "gui_cognition.context.focus.source", "equals": "vscode_extension" }
+        ],
+        "forbidden_json_paths": [
+          "gui_cognition.perception.ocr_blocks.0.text",
+          "gui_cognition.perception.raw_accessibility_tree"
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "vscode_extension_editor_focus"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.focus.vscode_integrated_terminal",
+      "title": "VS Code extension focus adapter marks integrated terminal as terminal-like",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "focus_authority", "perception"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 90,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "What is focused on my screen? Report focus source and editable target status.",
+        "expected_status_any": ["ok"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["RouteConfirmed", "ObservationCompleted", "ContextBuilt", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "desktop_command.path", "equals": "send_manual_tool_message" },
+          { "path": "gui_cognition.perception.focus_source", "equals": "vscode_extension" },
+          { "path": "gui_cognition.perception.focused_control_role", "equals": "terminal" },
+          { "path": "gui_cognition.perception.editable_target_known", "equals": false },
+          { "path": "gui_cognition.perception.terminal_like", "equals": true },
+          { "path": "gui_cognition.context.focus.terminal_like", "equals": true }
+        ],
+        "forbidden_json_paths": [
+          "gui_cognition.perception.ocr_blocks.0.text",
+          "gui_cognition.perception.raw_accessibility_tree"
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "vscode_extension_terminal_focus"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.focus.gnome_terminal",
+      "title": "GNOME Terminal focus adapter marks terminal as terminal-like",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "focus_authority", "perception"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 90,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "What is focused on my screen? Report focus source and editable target status.",
+        "expected_status_any": ["ok"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["RouteConfirmed", "ObservationCompleted", "ContextBuilt", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "desktop_command.path", "equals": "send_manual_tool_message" },
+          { "path": "gui_cognition.perception.focus_source", "equals": "gnome_terminal_adapter" },
+          { "path": "gui_cognition.perception.focus_confidence", "equals": 0.82 },
+          { "path": "gui_cognition.perception.focused_control_role", "equals": "terminal" },
+          { "path": "gui_cognition.perception.editable_target_known", "equals": false },
+          { "path": "gui_cognition.perception.terminal_like", "equals": true }
+        ],
+        "forbidden_json_paths": [
+          "gui_cognition.perception.ocr_blocks.0.text",
+          "gui_cognition.perception.raw_accessibility_tree"
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "gnome_terminal_focus"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.focus.adapter_unavailable_fallback",
+      "title": "Focus authority reports precise blocker when adapters are unavailable",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "focus_authority", "perception"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 90,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "What is focused on my screen? Report focus source and editable target status.",
+        "expected_status_any": ["ok"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["RouteConfirmed", "ObservationCompleted", "ContextBuilt", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "desktop_command.path", "equals": "send_manual_tool_message" },
+          { "path": "gui_cognition.perception.focus_source", "equals": "unavailable" },
+          { "path": "gui_cognition.perception.focus_confidence", "equals": 0.0 },
+          { "path": "gui_cognition.perception.focus_reliability", "equals": "unavailable" },
+          { "path": "gui_cognition.perception.editable_target_known", "equals": false },
+          { "path": "gui_cognition.perception.focus_failure_chain.0.source", "equals": "chrome_cdp_active_element" },
+          { "path": "gui_cognition.context.focus.confidence", "equals": 0.0 }
+        ],
+        "forbidden_json_paths": [
+          "gui_cognition.perception.ocr_blocks.0.text",
+          "gui_cognition.perception.raw_accessibility_tree"
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "all_focus_adapters_unavailable"
+        }
+      }
+    },
+    {
+      "id": "gui_cognition.focus.no_action_events",
+      "title": "Focus authority observe-only prompt does not execute GUI actions",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "focus_authority", "perception"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 90,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "What is focused on my screen? Report focus source and editable target status.",
+        "expected_status_any": ["ok"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["RouteConfirmed", "ObservationCompleted", "ContextBuilt", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "ActionCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "desktop_command.path", "equals": "send_manual_tool_message" },
+          { "path": "gui_cognition.perception.focus_source", "exists": true },
+          { "path": "gui_cognition.perception.focus_adapter_status", "exists": true }
+        ],
+        "forbidden_json_paths": [
+          "gui_cognition.perception.ocr_blocks.0.text",
+          "gui_cognition.perception.screenshot_path",
+          "gui_cognition.perception.raw_accessibility_tree"
+        ],
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "chrome_cdp_focus_search_box"
+        }
+      }
+    }
+  ]
+}

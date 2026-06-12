@@ -144,31 +144,63 @@ pub async fn submit_turn_feedback(
 pub async fn approve_action(
     request_id: String,
     state: State<'_, AppStateCell>,
-) -> Result<(), String> {
+) -> Result<serde_json::Value, String> {
     let state = state
         .get()
         .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
+    {
+        let mut gui_store = state.gui_cognition_hitl_proposals.write().await;
+        let now_ms = kria_core::agent::gui_cognition::safety_hitl::now_ms();
+        let _ = gui_store.expire_old_proposals(now_ms);
+        if gui_store.lookup_by_request_id(&request_id).is_some() {
+            let decision = gui_store.record_decision(&request_id, true, now_ms);
+            return Ok(serde_json::json!({
+                "status": "ok",
+                "kind": "gui_cognition_hitl_decision",
+                "decision": decision.summary_json(),
+            }));
+        }
+    }
     state
         .hitl
         .respond(&request_id, ApprovalResponse::Approved)
         .await;
-    Ok(())
+    Ok(serde_json::json!({"status": "ok", "kind": "generic_hitl_decision", "decision": "approved"}))
 }
 
 #[tauri::command]
 pub async fn deny_action(
     request_id: String,
-    _reason: Option<String>,
+    reason: Option<String>,
     state: State<'_, AppStateCell>,
-) -> Result<(), String> {
+) -> Result<serde_json::Value, String> {
     let state = state
         .get()
         .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
+    {
+        let mut gui_store = state.gui_cognition_hitl_proposals.write().await;
+        let now_ms = kria_core::agent::gui_cognition::safety_hitl::now_ms();
+        let _ = gui_store.expire_old_proposals(now_ms);
+        if gui_store.lookup_by_request_id(&request_id).is_some() {
+            let mut decision = gui_store.record_decision(&request_id, false, now_ms);
+            if let Some(reason) = reason {
+                decision.decision_reason =
+                    Some(kria_core::agent::gui_cognition::perception::sanitize_gui_text(
+                        &reason, 160,
+                    ).text);
+            }
+            return Ok(serde_json::json!({
+                "status": "ok",
+                "kind": "gui_cognition_hitl_decision",
+                "decision": decision.summary_json(),
+            }));
+        }
+    }
     state
         .hitl
         .respond(&request_id, ApprovalResponse::Denied)
         .await;
-    Ok(())
+    Ok(serde_json::json!({"status": "ok", "kind": "generic_hitl_decision", "decision": "denied"}))
 }
 
 #[tauri::command]

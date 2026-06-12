@@ -1,0 +1,226 @@
+{
+  "schema_version": "kria.testing.scenarios.v1",
+  "scenarios": [
+    {
+      "id": "step11.checkpoint.saved_after_each_step",
+      "title": "Step 11 saves a workflow checkpoint as the workflow progresses",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step11_checkpoint_resume", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "focused_search_field",
+          "action_backend_fixture": "services_healthy",
+          "execution_mode": "execute_fixture",
+          "workflow": true
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Open KRIA Perception Test and focus the visible search field",
+        "expected_status_any": ["completed"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["WorkflowRunStarted", "WorkflowStepCompleted", "WorkflowCheckpointSaved", "WorkflowRunCompleted", "TurnCompleted"],
+        "forbidden_gui_event_types": ["WorkflowRunBlocked"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "desktop_command.path", "equals": "send_manual_tool_message" },
+          { "path": "gui_cognition.workflow_checkpoint.checkpoint_hash", "exists": true },
+          { "path": "gui_cognition.workflow_checkpoint.can_execute", "equals": false }
+        ],
+        "forbidden_json_paths": [
+          "gui_cognition.raw_prompt",
+          "gui_cognition.perception.ocr_blocks.0.text",
+          "gui_cognition.perception.screenshot",
+          "gui_cognition.workflow_checkpoint.raw_prompt"
+        ]
+      }
+    },
+    {
+      "id": "step11.checkpoint.pending_hitl_saved",
+      "title": "Step 11 saves a checkpoint when the workflow pauses for a risky step",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step11_checkpoint_resume", "hitl", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "text_field_and_button",
+          "action_backend_fixture": "services_healthy",
+          "execution_mode": "execute_fixture",
+          "workflow": true
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Click the Submit Test button and submit this form",
+        "expected_status_any": ["paused", "blocked"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["WorkflowRunStarted", "WorkflowCheckpointSaved", "TurnCompleted"],
+        "forbidden_gui_event_types": ["ActionStarted", "WorkflowRunCompleted"],
+        "assert_gui_event_sequence_monotonic": true,
+        "expected_json_paths": [
+          { "path": "gui_cognition.workflow_checkpoint.checkpoint_id", "exists": true }
+        ],
+        "forbidden_json_paths": [
+          "gui_cognition.raw_prompt",
+          "gui_cognition.perception.screenshot"
+        ]
+      }
+    },
+    {
+      "id": "step11.resume.validated_continues_without_replay",
+      "title": "Step 11 resume re-observes, validates, and never replays completed steps",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step11_checkpoint_resume", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 180,
+      "inputs": {
+        "session_id": "step11-resume-{run_id}",
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "steps": [
+          {
+            "prompt": "Open KRIA Perception Test and focus the visible search field",
+            "expected_desktop_path": "send_manual_tool_message",
+            "expected_status_any": ["completed"],
+            "expected_event_names": ["gui_cognition:event"],
+            "expected_gui_event_types": ["WorkflowRunStarted", "WorkflowCheckpointSaved", "WorkflowRunCompleted"],
+            "gui_cognition_test": {
+              "disable_live_llm_planner": true,
+              "perception_fixture": "focused_search_field",
+              "action_backend_fixture": "services_healthy",
+              "execution_mode": "execute_fixture",
+              "workflow": true
+            }
+          },
+          {
+            "prompt": "Open KRIA Perception Test and focus the visible search field",
+            "expected_desktop_path": "send_manual_tool_message",
+            "expected_event_names": ["gui_cognition:event"],
+            "expected_gui_event_types": ["WorkflowResumeRequested", "WorkflowCheckpointLoaded", "WorkflowResumeValidated", "TurnCompleted"],
+            "forbidden_gui_event_types": ["ActionStarted"],
+            "gui_cognition_test": {
+              "disable_live_llm_planner": true,
+              "perception_fixture": "focused_search_field",
+              "action_backend_fixture": "services_healthy",
+              "execution_mode": "execute_fixture",
+              "workflow": true,
+              "workflow_resume": true,
+              "resume_reason": "user_resume"
+            },
+            "forbidden_json_paths": [
+              "gui_cognition.raw_prompt",
+              "gui_cognition.perception.screenshot"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "step11.resume.safety_only_no_action_started",
+      "title": "Step 11 resume in safety_only mode never starts an action",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step11_checkpoint_resume", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 180,
+      "inputs": {
+        "session_id": "step11-safety-{run_id}",
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "steps": [
+          {
+            "prompt": "Open KRIA Perception Test and focus the visible search field",
+            "expected_desktop_path": "send_manual_tool_message",
+            "expected_event_names": ["gui_cognition:event"],
+            "expected_gui_event_types": ["WorkflowRunStarted", "WorkflowCheckpointSaved"],
+            "forbidden_gui_event_types": ["ActionStarted"],
+            "gui_cognition_test": {
+              "disable_live_llm_planner": true,
+              "perception_fixture": "focused_search_field",
+              "action_backend_fixture": "services_healthy",
+              "execution_mode": "safety_only",
+              "workflow": true
+            }
+          },
+          {
+            "prompt": "Open KRIA Perception Test and focus the visible search field",
+            "expected_desktop_path": "send_manual_tool_message",
+            "expected_event_names": ["gui_cognition:event"],
+            "expected_gui_event_types": ["WorkflowResumeRequested", "WorkflowCheckpointLoaded", "TurnCompleted"],
+            "forbidden_gui_event_types": ["ActionStarted"],
+            "gui_cognition_test": {
+              "disable_live_llm_planner": true,
+              "perception_fixture": "focused_search_field",
+              "action_backend_fixture": "services_healthy",
+              "execution_mode": "safety_only",
+              "workflow": true,
+              "workflow_resume": true
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "step11.resume.no_raw_secret_leakage",
+      "title": "Step 11 checkpoint/resume events never expose raw prompt, OCR, screenshot, or secrets",
+      "driver": "desktop_chat_command",
+      "tags": ["live", "slow", "gui_cognition", "desktop_command", "step11_checkpoint_resume", "regression"],
+      "required_services": ["kria_api"],
+      "timeout_seconds": 120,
+      "inputs": {
+        "manual_profile": {
+          "mode_id": "gui_cognition",
+          "label": "GUI Cognition",
+          "app_lock": "gui_cognition",
+          "tool_lock": null,
+          "strategy": "routed_within_lock"
+        },
+        "gui_cognition_test": {
+          "disable_live_llm_planner": true,
+          "perception_fixture": "focused_search_field",
+          "action_backend_fixture": "services_healthy",
+          "execution_mode": "execute_fixture",
+          "workflow": true
+        },
+        "expected_desktop_path": "send_manual_tool_message",
+        "prompt": "Open KRIA Perception Test and focus the visible search field",
+        "expected_status_any": ["completed"],
+        "expected_event_names": ["gui_cognition:event"],
+        "expected_gui_event_types": ["WorkflowCheckpointSaved"],
+        "assert_gui_event_sequence_monotonic": true,
+        "forbidden_json_paths": [
+          "gui_cognition.raw_prompt",
+          "gui_cognition.perception.ocr_blocks.0.text",
+          "gui_cognition.perception.screenshot",
+          "gui_cognition.perception.clipboard",
+          "gui_cognition.workflow_checkpoint.raw_prompt",
+          "gui_cognition.workflow_checkpoint.last_screenshot"
+        ]
+      }
+    }
+  ]
+}
