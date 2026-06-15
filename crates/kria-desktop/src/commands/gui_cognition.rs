@@ -4066,6 +4066,30 @@ async fn xdotool_display_usable(session_type: &str, xdotool_available: bool) -> 
     }
 }
 
+/// Task 13 (Issue #11): assemble the window-focus/capture/activate backend
+/// availability status. Bounded best-effort extension probe; portal probing is
+/// not yet implemented (treated as unavailable, documented). Pure assessment in
+/// `GuiBackendStatus::assess`.
+pub(crate) async fn assess_gui_backend_status(
+    uinput_available: bool,
+    xdotool_available: bool,
+    is_wayland: bool,
+) -> kria_core::agent::gui_cognition::window_focus::GuiBackendStatus {
+    let extension_available = match kria_ext::read_ext_token() {
+        Some(token) => kria_ext::ext_available(&token).await,
+        None => false,
+    };
+    // Portal capture/activate fallback is scoped (design) but not yet probed.
+    let portal_available = false;
+    kria_core::agent::gui_cognition::window_focus::GuiBackendStatus::assess(
+        extension_available,
+        uinput_available,
+        portal_available,
+        xdotool_available,
+        is_wayland,
+    )
+}
+
 async fn uinput_socket_accessible(path: &std::path::Path) -> bool {
     match tokio::time::timeout(
         std::time::Duration::from_millis(500),

@@ -540,6 +540,22 @@ async fn local_api_gui_automation_status(
     let capabilities = serde_json::to_value(&action_backend.capabilities)
         .unwrap_or_else(|_| serde_json::json!({}));
 
+    // Task 13 (Issue #11): surface the window-focus/capture/activate backend
+    // availability + honest capability notice (additive; flag-OFF omits it).
+    let gui_backend_status =
+        if kria_core::agent::gui_cognition::window_focus::backend_status_enabled() {
+            let is_wayland = action_backend.session_type.eq_ignore_ascii_case("wayland");
+            let status = super::gui_cognition::assess_gui_backend_status(
+                action_backend.uinput_available,
+                action_backend.xdotool_available,
+                is_wayland,
+            )
+            .await;
+            serde_json::to_value(&status).unwrap_or(serde_json::Value::Null)
+        } else {
+            serde_json::Value::Null
+        };
+
     (
         StatusCode::OK,
         Json(serde_json::json!({
@@ -576,6 +592,7 @@ async fn local_api_gui_automation_status(
                 "can_execute_actions": action_backend.can_execute_actions,
                 "blockers": action_backend.blockers,
                 "capabilities": capabilities,
+                "gui_backend_status": gui_backend_status,
             }
         })),
     )

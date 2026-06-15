@@ -121,6 +121,123 @@ impl WindowFocusBackend {
     }
 }
 
+/// Task 13 (Issue #11): the `gui_cog_backend_status` feature flag. Default ON;
+/// an explicit falsy value (`0`/`false`/`no`/`off`/empty) in
+/// `KRIA_GUI_COG_BACKEND_STATUS` rolls back to the prior behavior (the
+/// backend-availability status is not surfaced), byte-for-byte. An absent env
+/// value keeps it ON.
+pub const BACKEND_STATUS_ENV_FLAG: &str = "KRIA_GUI_COG_BACKEND_STATUS";
+
+/// Whether the backend-availability status surfacing is enabled.
+pub fn backend_status_enabled() -> bool {
+    backend_status_enabled_lookup(|key| std::env::var(key).ok())
+}
+
+/// Testable core of [`backend_status_enabled`] with an injectable lookup.
+pub fn backend_status_enabled_lookup<F>(lookup: F) -> bool
+where
+    F: Fn(&str) -> Option<String>,
+{
+    match lookup(BACKEND_STATUS_ENV_FLAG) {
+        Some(v) => !matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "no" | "off" | ""
+        ),
+        None => true,
+    }
+}
+
+/// Task 13 (Issue #11): availability of the window-focus / capture / activate
+/// backends. Lets the runtime degrade GRACEFULLY and surface an honest
+/// capability notice instead of a silent failure when the GNOME extension (the
+/// current single point of dependency) is absent. Pure/derived — no I/O.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GuiBackendStatus {
+    /// The GNOME `kria-active-window` extension is reachable (activate+capture).
+    pub extension_available: bool,
+    /// The uinput daemon is up (keyboard, Alt+Tab focus fallback, abs click).
+    pub uinput_available: bool,
+    /// An xdg desktop portal is available (capture/activate fallback).
+    pub portal_available: bool,
+    /// The X11 `wmctrl`/`xdotool` path is usable (X11 sessions only).
+    pub x11_available: bool,
+    /// Window CAPTURE is available via SOME backend (extension or portal).
+    pub capture_available: bool,
+    /// Window ACTIVATION is available via SOME backend (extension/portal/altTab).
+    pub activate_available: bool,
+    /// The best window-focus backend given availability + session type, or
+    /// `None` when no path exists (fully degraded).
+    pub preferred_focus_backend: Option<WindowFocusBackend>,
+    /// Honest, user-facing capability notices (empty when fully capable).
+    pub capability_notices: Vec<String>,
+}
+
+impl GuiBackendStatus {
+    /// Derive the backend status from probed availability + session type. Never
+    /// fabricates a capability: a missing extension yields a clear notice and
+    /// the best available fallback (or an explicit "no backend" notice).
+    pub fn assess(
+        extension_available: bool,
+        uinput_available: bool,
+        portal_available: bool,
+        x11_available: bool,
+        is_wayland: bool,
+    ) -> Self {
+        let capture_available = extension_available || portal_available;
+        let activate_available = extension_available || portal_available || uinput_available;
+
+        // Best focus backend in the global preference order, filtered by
+        // availability + session type (X11 path never eligible on Wayland).
+        let preferred_focus_backend = if extension_available {
+            Some(WindowFocusBackend::GnomeBridge)
+        } else if portal_available {
+            Some(WindowFocusBackend::Portal)
+        } else if uinput_available {
+            Some(WindowFocusBackend::UinputAltTab)
+        } else if x11_available && !is_wayland {
+            Some(WindowFocusBackend::X11Wmctrl)
+        } else {
+            None
+        };
+
+        let mut capability_notices = Vec::new();
+        if !extension_available {
+            capability_notices.push(
+                "GNOME window extension unavailable: window activation/capture is degraded; using the best available fallback".to_string(),
+            );
+        }
+        if !capture_available {
+            capability_notices
+                .push("screen capture unavailable (no extension or portal backend)".to_string());
+        }
+        if !activate_available {
+            capability_notices.push(
+                "window activation unavailable (no extension, portal, or input backend)".to_string(),
+            );
+        }
+        if preferred_focus_backend.is_none() {
+            capability_notices
+                .push("no window-focus backend available for this session".to_string());
+        }
+
+        Self {
+            extension_available,
+            uinput_available,
+            portal_available,
+            x11_available,
+            capture_available,
+            activate_available,
+            preferred_focus_backend,
+            capability_notices,
+        }
+    }
+
+    /// Whether the system is fully capable (no degradation notices).
+    pub fn fully_capable(&self) -> bool {
+        self.capability_notices.is_empty()
+    }
+}
+
 /// The `gui_cog_wayland_focus` feature-flag bundle (default OFF) — Task 4.1.
 ///
 /// Mirrors [`GuiReobserveConfig`]/[`GuiSmartPlannerConfig`]/
@@ -594,6 +711,71 @@ pub fn verify_focus_by_reobserve(
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    // ---- Task 13 (Issue #11): backend availability status + capability notice -
+
+    #[test]
+    fn backend_status_flag_defaults_on_and_rolls_back() {
+        assert!(backend_status_enabled_lookup(|_| None));
+        for raw in ["0", "false", "no", "off", "", " OFF "] {
+            assert!(!backend_status_enabled_lookup(|_| Some(raw.to_string())));
+        }
+        for raw in ["1", "true", "on", "yes"] {
+            assert!(backend_status_enabled_lookup(|_| Some(raw.to_string())));
+        }
+    }
+
+    #[test]
+    fn backend_status_fully_capable_with_extension() {
+        let s = GuiBackendStatus::assess(true, true, false, false, true);
+        assert!(s.fully_capable(), "extension present => no degradation notices");
+        assert_eq!(s.preferred_focus_backend, Some(WindowFocusBackend::GnomeBridge));
+        assert!(s.capture_available && s.activate_available);
+    }
+
+    #[test]
+    fn extension_absent_emits_notice_and_uses_fallback_not_silent_fail() {
+        // No extension, but uinput is up: degrade to the Alt+Tab focus fallback
+        // and surface an honest capability notice (never a silent failure).
+        let s = GuiBackendStatus::assess(false, true, false, false, true);
+        assert_eq!(s.preferred_focus_backend, Some(WindowFocusBackend::UinputAltTab));
+        assert!(!s.capability_notices.is_empty());
+        assert!(s
+            .capability_notices
+            .iter()
+            .any(|n| n.contains("GNOME window extension unavailable")));
+        // Capture has no fallback here (no portal) -> honest notice.
+        assert!(!s.capture_available);
+        assert!(s.activate_available, "uinput Alt+Tab can still activate");
+    }
+
+    #[test]
+    fn extension_absent_with_portal_keeps_capture_and_activate() {
+        let s = GuiBackendStatus::assess(false, false, true, false, true);
+        assert_eq!(s.preferred_focus_backend, Some(WindowFocusBackend::Portal));
+        assert!(s.capture_available && s.activate_available);
+    }
+
+    #[test]
+    fn fully_degraded_has_no_backend_and_clear_notices() {
+        let s = GuiBackendStatus::assess(false, false, false, false, true);
+        assert_eq!(s.preferred_focus_backend, None);
+        assert!(!s.capture_available && !s.activate_available);
+        assert!(s
+            .capability_notices
+            .iter()
+            .any(|n| n.contains("no window-focus backend available")));
+    }
+
+    #[test]
+    fn x11_wmctrl_only_eligible_off_wayland() {
+        // x11 available, Wayland session -> wmctrl NOT eligible (no path).
+        let wayland = GuiBackendStatus::assess(false, false, false, true, true);
+        assert_eq!(wayland.preferred_focus_backend, None);
+        // Same on an X11 session -> wmctrl is the fallback.
+        let x11 = GuiBackendStatus::assess(false, false, false, true, false);
+        assert_eq!(x11.preferred_focus_backend, Some(WindowFocusBackend::X11Wmctrl));
+    }
 
     fn lookup_from(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
         let map: HashMap<String, String> = pairs
