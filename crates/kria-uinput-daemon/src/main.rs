@@ -134,6 +134,18 @@ pub enum DaemonRequest {
         /// "left", "right", "middle"
         button: String,
     },
+    /// Task 7 (Issue #4): absolute coordinate click via uinput EV_ABS. `x`/`y`
+    /// are NORMALIZED to [0, 65535] by the caller (desktop) from the target's
+    /// physical-pixel center + screen size, so the click lands on native
+    /// Wayland windows through the kernel (not the X11-only xdotool fallback).
+    ClickAbs {
+        /// Normalized absolute X in [0, 65535].
+        x: i32,
+        /// Normalized absolute Y in [0, 65535].
+        y: i32,
+        /// "left", "right", "middle"
+        button: String,
+    },
     /// Type text with optional delay
     Type {
         text: String,
@@ -322,6 +334,33 @@ fn map_key_name(key: &str) -> Result<String> {
 /// Handle daemon requests and execute commands.
 async fn handle_request(request: DaemonRequest) -> DaemonResponse {
     match request {
+        DaemonRequest::ClickAbs { x, y, button } => {
+            info!(x = x, y = y, button = %button, "Received absolute click command");
+            // Task 7 (Issue #4): absolute coordinate click via uinput EV_ABS.
+            // Requires the abs-pointer flag (the device must have registered
+            // EV_ABS). Flag-OFF → honest error so the caller can fall back.
+            if !uinput::abs_pointer_enabled() {
+                return DaemonResponse::Error {
+                    message: "absolute pointer is disabled (KRIA_GUI_COG_ABS_POINTER falsy); device has no EV_ABS".to_string(),
+                    code: Some("ABS_POINTER_DISABLED".to_string()),
+                };
+            }
+            let button_code = uinput::pointer_button_code(&button);
+            match with_uinput(|dev| dev.click_abs(x, y, button_code)) {
+                Ok(()) => DaemonResponse::Ok {
+                    data: Some(serde_json::json!({
+                        "backend": "uinput",
+                        "positioned": true,
+                        "abs_x": x.clamp(0, 65535),
+                        "abs_y": y.clamp(0, 65535),
+                    })),
+                },
+                Err(e) => DaemonResponse::Error {
+                    message: format!("uinput absolute click failed: {}", e),
+                    code: Some("CLICK_ABS_FAILED".to_string()),
+                },
+            }
+        }
         DaemonRequest::Click { x, y, button } => {
             info!(x = x, y = y, button = %button, "Received click command");
 

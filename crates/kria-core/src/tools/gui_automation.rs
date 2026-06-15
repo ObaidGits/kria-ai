@@ -27,6 +27,21 @@ pub trait GuiBackend: Send + Sync {
     /// Execute a mouse click at the specified coordinates.
     async fn click_mouse(&self, x: i32, y: i32, button: MouseButton) -> Result<(), GuiError>;
 
+    /// Task 7 (Issue #4): execute an ABSOLUTE coordinate click. `x`/`y` are
+    /// NORMALIZED to [0, 65535]. Default impl returns an error so existing
+    /// backends/mocks are unaffected (only the uinput daemon backend supports
+    /// it, gated by the `gui_cog_abs_pointer` flag on the daemon side).
+    async fn click_mouse_abs(
+        &self,
+        _x: i32,
+        _y: i32,
+        _button: MouseButton,
+    ) -> Result<(), GuiError> {
+        Err(GuiError::IpcError(
+            "absolute coordinate click is not supported by this backend".to_string(),
+        ))
+    }
+
     /// Type text with optional inter-keystroke interval.
     async fn type_text(&self, text: &str, interval_ms: Option<u64>) -> Result<(), GuiError>;
 
@@ -146,6 +161,15 @@ pub struct YdotoolBackend {
 #[serde(tag = "cmd", rename_all = "snake_case")]
 pub enum IpcRequest {
     Click {
+        x: i32,
+        y: i32,
+        button: String,
+    },
+    /// Task 7 (Issue #4): absolute coordinate click via the daemon EV_ABS path.
+    /// `x`/`y` are NORMALIZED to [0, 65535] by the caller from the target's
+    /// physical-pixel center + screen size, so the click lands on native
+    /// Wayland windows through the kernel (not the X11-only xdotool fallback).
+    ClickAbs {
         x: i32,
         y: i32,
         button: String,
@@ -315,6 +339,31 @@ impl GuiBackend for YdotoolBackend {
         };
 
         let request = IpcRequest::Click {
+            x,
+            y,
+            button: button_str.to_string(),
+        };
+
+        self.execute_command(request).await
+    }
+
+    async fn click_mouse_abs(&self, x: i32, y: i32, button: MouseButton) -> Result<(), GuiError> {
+        check_global_halt()?;
+
+        // Normalized absolute coordinates must be in [0, 65535] (the daemon
+        // declares this ABS range). Reject out-of-range rather than clamping
+        // silently to a wrong location.
+        if !(0..=65_535).contains(&x) || !(0..=65_535).contains(&y) {
+            return Err(GuiError::InvalidCoordinates(x, y));
+        }
+
+        let button_str = match button {
+            MouseButton::Left => "left",
+            MouseButton::Right => "right",
+            MouseButton::Middle => "middle",
+        };
+
+        let request = IpcRequest::ClickAbs {
             x,
             y,
             button: button_str.to_string(),
@@ -1739,6 +1788,67 @@ pub fn register(reg: &ToolRegistry) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn click_abs_ipc_request_serializes_with_snake_case_cmd() {
+        // Task 7 (Issue #4): the abs-click IPC must match the daemon's
+        // `#[serde(rename_all = "snake_case")]` -> cmd = "click_abs".
+        let req = IpcRequest::ClickAbs {
+            x: 32_768,
+            y: 100,
+            button: "left".to_string(),
+        };
+        let v: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&req).unwrap()).unwrap();
+        assert_eq!(v["cmd"], "click_abs");
+        assert_eq!(v["x"], 32_768);
+        assert_eq!(v["y"], 100);
+        assert_eq!(v["button"], "left");
+    }
+
+    #[tokio::test]
+    async fn default_backend_rejects_abs_click() {
+        // A backend that does not override click_mouse_abs returns an honest
+        // error (only the daemon-backed path supports it).
+        struct NoAbsBackend;
+        #[async_trait]
+        impl GuiBackend for NoAbsBackend {
+            async fn click_mouse(&self, _x: i32, _y: i32, _b: MouseButton) -> Result<(), GuiError> {
+                Ok(())
+            }
+            async fn type_text(&self, _t: &str, _i: Option<u64>) -> Result<(), GuiError> {
+                Ok(())
+            }
+            async fn press_shortcut(
+                &self,
+                _k: &[Key],
+                _h: Option<u64>,
+            ) -> Result<(), GuiError> {
+                Ok(())
+            }
+            async fn release_all_modifiers(&self) -> Result<(), GuiError> {
+                Ok(())
+            }
+            async fn focus_window(&self) -> Result<(), GuiError> {
+                Ok(())
+            }
+            async fn get_active_window(&self) -> Result<WindowInfo, GuiError> {
+                Err(GuiError::IpcError("n/a".into()))
+            }
+            async fn send_heartbeat(&self) -> Result<(), GuiError> {
+                Ok(())
+            }
+            async fn send_task_complete(&self) -> Result<(), GuiError> {
+                Ok(())
+            }
+        }
+        let backend = NoAbsBackend;
+        let err = backend
+            .click_mouse_abs(10, 10, MouseButton::Left)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, GuiError::IpcError(_)));
+    }
 
     #[test]
     fn test_protected_mode_detection() {

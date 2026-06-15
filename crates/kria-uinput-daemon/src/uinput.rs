@@ -10,9 +10,11 @@
 //! return value is checked and surfaced as an error — we never silently claim
 //! success.
 //!
-//! Pointer note: we only register `EV_REL` (relative motion + wheel). Absolute
-//! positioning would require `EV_ABS`, which we deliberately do NOT set, so
-//! absolute `click(x, y)` stays on the xdotool fallback in the daemon.
+//! Pointer note: we register `EV_REL` (relative motion + wheel) always, and —
+//! when the `gui_cog_abs_pointer` flag is ON (Task 7) — also `EV_ABS`
+//! (`ABS_X`/`ABS_Y`) so absolute `click(x, y)` lands on native Wayland windows
+//! via the kernel instead of the X11-only xdotool fallback. Flag-OFF keeps the
+//! device EV_REL-only (no EV_ABS), byte-for-byte the prior descriptor.
 
 use std::io;
 use std::os::unix::io::RawFd;
@@ -28,6 +30,8 @@ use std::time::Duration;
 const EV_SYN: u16 = 0;
 const EV_KEY: u16 = 1;
 const EV_REL: u16 = 2;
+// Task 7 (Issue #4): absolute axes for coordinate clicks on native Wayland.
+const EV_ABS: u16 = 3;
 
 // Sync
 const SYN_REPORT: u16 = 0;
@@ -38,10 +42,19 @@ const REL_Y: u16 = 1;
 const REL_HWHEEL: u16 = 6;
 const REL_WHEEL: u16 = 8;
 
+// Absolute axes (Task 7)
+const ABS_X: u16 = 0;
+const ABS_Y: u16 = 1;
+/// Normalized absolute range [0, ABS_RANGE_MAX] for ABS_X/ABS_Y. The desktop
+/// maps a target's physical-pixel center to this range using the screen size,
+/// so the daemon stays screen-agnostic.
+const ABS_RANGE_MAX: i32 = 65535;
+
 // uinput ioctl request codes (used as libc::c_ulong)
 const UI_SET_EVBIT: libc::c_ulong = 0x4004_5564;
 const UI_SET_KEYBIT: libc::c_ulong = 0x4004_5565;
 const UI_SET_RELBIT: libc::c_ulong = 0x4004_5566;
+const UI_SET_ABSBIT: libc::c_ulong = 0x4004_5567;
 const UI_DEV_CREATE: libc::c_ulong = 0x5501;
 const UI_DEV_DESTROY: libc::c_ulong = 0x5502;
 
@@ -201,6 +214,16 @@ impl UinputDevice {
         self.set_relbit(REL_WHEEL)?;
         self.set_relbit(REL_HWHEEL)?;
 
+        // Task 7 (Issue #4): register absolute axes for coordinate clicks when
+        // the abs-pointer flag is ON. Flag-OFF leaves the device EV_REL-only
+        // (no EV_ABS), byte-for-byte the prior descriptor.
+        let abs_pointer = abs_pointer_enabled();
+        if abs_pointer {
+            self.set_evbit(EV_ABS)?;
+            self.set_absbit(ABS_X)?;
+            self.set_absbit(ABS_Y)?;
+        }
+
         // Build and write the device descriptor
         let mut uidev: UinputUserDev = unsafe { std::mem::zeroed() };
         let name = b"kria-uinput";
@@ -209,6 +232,14 @@ impl UinputDevice {
         uidev.id_vendor = 0x1234;
         uidev.id_product = 0x5678;
         uidev.id_version = 1;
+        // Task 7: declare the normalized absolute range so the kernel accepts
+        // ABS_X/ABS_Y in [0, ABS_RANGE_MAX]. Only when the flag is ON.
+        if abs_pointer {
+            uidev.absmin[ABS_X as usize] = 0;
+            uidev.absmax[ABS_X as usize] = ABS_RANGE_MAX;
+            uidev.absmin[ABS_Y as usize] = 0;
+            uidev.absmax[ABS_Y as usize] = ABS_RANGE_MAX;
+        }
 
         // SAFETY: write the descriptor as raw bytes. The pointer/len describe a
         // single valid UinputUserDev on the stack; the kernel copies it in.
@@ -253,6 +284,10 @@ impl UinputDevice {
 
     fn set_relbit(&self, rel: u16) -> io::Result<()> {
         self.ioctl_arg(UI_SET_RELBIT, rel as libc::c_int)
+    }
+
+    fn set_absbit(&self, abs: u16) -> io::Result<()> {
+        self.ioctl_arg(UI_SET_ABSBIT, abs as libc::c_int)
     }
 
     /// Invoke an ioctl with an integer argument, surfacing failures.
@@ -383,6 +418,26 @@ impl UinputDevice {
     pub fn click_button(&self, button_code: u16) -> io::Result<()> {
         self.key_down(button_code)?;
         self.key_up(button_code)
+    }
+
+    /// Task 7 (Issue #4): move the pointer to an ABSOLUTE normalized position
+    /// (`x`/`y` in [0, ABS_RANGE_MAX]) and flush. Requires the abs-pointer flag
+    /// (EV_ABS registered); values are clamped to the declared range.
+    #[allow(dead_code)] // part of the abs-pointer API; click_abs is the routed entry
+    pub fn move_abs(&self, x: i32, y: i32) -> io::Result<()> {
+        for (type_, code, value) in abs_move_event_sequence(x, y) {
+            self.write_event(type_, code, value)?;
+        }
+        Ok(())
+    }
+
+    /// Task 7: absolute coordinate click — move to (`x`,`y`) normalized, then
+    /// press+release `button_code`. Emits exactly [`abs_click_event_sequence`].
+    pub fn click_abs(&self, x: i32, y: i32, button_code: u16) -> io::Result<()> {
+        for (type_, code, value) in abs_click_event_sequence(x, y, button_code) {
+            self.write_event(type_, code, value)?;
+        }
+        Ok(())
     }
 
     /// Release every modifier key (RFC 008 emergency dead-man's-switch release).
@@ -522,6 +577,76 @@ pub fn key_code(name: &str) -> Option<(u16, bool)> {
     char_to_key(first)
 }
 
+/// Task 7 (Issue #4): whether absolute coordinate clicks are enabled. Default
+/// ON; an explicit falsy value (`0`/`false`/`no`/`off`/empty) in
+/// `KRIA_GUI_COG_ABS_POINTER` rolls back to the prior EV_REL-only device + the
+/// xdotool fallback for clicks, byte-for-byte. An absent env value keeps it ON.
+pub fn abs_pointer_enabled() -> bool {
+    abs_pointer_enabled_lookup(|key| std::env::var(key).ok())
+}
+
+/// Testable core of [`abs_pointer_enabled`] with an injectable env lookup.
+pub fn abs_pointer_enabled_lookup<F>(lookup: F) -> bool
+where
+    F: Fn(&str) -> Option<String>,
+{
+    match lookup("KRIA_GUI_COG_ABS_POINTER") {
+        Some(v) => {
+            let v = v.trim().to_ascii_lowercase();
+            !matches!(v.as_str(), "0" | "false" | "no" | "off" | "")
+        }
+        None => true,
+    }
+}
+
+/// Resolve a pointer button name (`left`/`right`/`middle`, case-insensitive) to
+/// its BTN_* code. Defaults to `BTN_LEFT` for an empty/unknown name (the common
+/// click). Returns `None` only for a clearly-invalid token so the daemon can
+/// surface an honest error if it wants strict parsing.
+pub fn pointer_button_code(name: &str) -> u16 {
+    match name.trim().to_ascii_lowercase().as_str() {
+        "right" | "secondary" => BTN_RIGHT,
+        "middle" => BTN_MIDDLE,
+        _ => BTN_LEFT,
+    }
+}
+
+/// Task 7: the exact `(type, code, value)` event sequence for an absolute move.
+/// `x`/`y` are clamped to the declared normalized range [0, ABS_RANGE_MAX].
+/// Authoritative shape — [`UinputDevice::move_abs`] emits exactly this.
+pub fn abs_move_event_sequence(x: i32, y: i32) -> Vec<(u16, u16, i32)> {
+    let x = x.clamp(0, ABS_RANGE_MAX);
+    let y = y.clamp(0, ABS_RANGE_MAX);
+    vec![
+        (EV_ABS, ABS_X, x),
+        (EV_ABS, ABS_Y, y),
+        (EV_SYN, SYN_REPORT, 0),
+    ]
+}
+
+/// Task 7: the exact `(type, code, value)` event sequence for an absolute
+/// click — move, then press+release the button. Authoritative shape.
+pub fn abs_click_event_sequence(x: i32, y: i32, button_code: u16) -> Vec<(u16, u16, i32)> {
+    let mut seq = abs_move_event_sequence(x, y);
+    seq.push((EV_KEY, button_code, 1));
+    seq.push((EV_SYN, SYN_REPORT, 0));
+    seq.push((EV_KEY, button_code, 0));
+    seq.push((EV_SYN, SYN_REPORT, 0));
+    seq
+}
+
+/// Task 7: map a physical-pixel coordinate to the normalized absolute range
+/// using the screen dimension. Clamps to the screen so an out-of-range target
+/// never produces an out-of-range abs value. `screen_dim` of 0 maps to 0.
+#[allow(dead_code)] // used by the desktop ClickControl mapping + CI tests
+pub fn pixel_to_abs(coord: i32, screen_dim: i32) -> i32 {
+    if screen_dim <= 0 {
+        return 0;
+    }
+    let clamped = coord.clamp(0, screen_dim);
+    (((clamped as i64) * (ABS_RANGE_MAX as i64)) / (screen_dim as i64)) as i32
+}
+
 /// Resolve a named shortcut key (modifiers, named keys, function keys, or a
 /// single letter/digit) to its key code. Case-insensitive.
 pub fn modifier_or_named_key(name: &str) -> Option<u16> {
@@ -644,5 +769,76 @@ mod tests {
     #[test]
     fn named_function_key_resolves() {
         assert_eq!(modifier_or_named_key("f5"), Some(63));
+    }
+
+    // ---- Task 7 (Issue #4): absolute pointer / coordinate click ------------
+
+    #[test]
+    fn abs_pointer_flag_defaults_on_and_rolls_back() {
+        assert!(abs_pointer_enabled_lookup(|_| None));
+        for raw in ["0", "false", "no", "off", "", " OFF "] {
+            assert!(!abs_pointer_enabled_lookup(|_| Some(raw.to_string())));
+        }
+        for raw in ["1", "true", "yes", "on", "anything"] {
+            assert!(abs_pointer_enabled_lookup(|_| Some(raw.to_string())));
+        }
+    }
+
+    #[test]
+    fn abs_move_sequence_has_correct_codes_and_clamps() {
+        assert_eq!(
+            abs_move_event_sequence(100, 200),
+            vec![(EV_ABS, ABS_X, 100), (EV_ABS, ABS_Y, 200), (EV_SYN, SYN_REPORT, 0)]
+        );
+        // Clamp negative -> 0 and over-range -> ABS_RANGE_MAX.
+        assert_eq!(
+            abs_move_event_sequence(-5, 999_999),
+            vec![
+                (EV_ABS, ABS_X, 0),
+                (EV_ABS, ABS_Y, ABS_RANGE_MAX),
+                (EV_SYN, SYN_REPORT, 0)
+            ]
+        );
+    }
+
+    #[test]
+    fn abs_click_sequence_moves_then_presses_and_releases() {
+        let seq = abs_click_event_sequence(10, 20, BTN_LEFT);
+        assert_eq!(
+            seq,
+            vec![
+                (EV_ABS, ABS_X, 10),
+                (EV_ABS, ABS_Y, 20),
+                (EV_SYN, SYN_REPORT, 0),
+                (EV_KEY, BTN_LEFT, 1),
+                (EV_SYN, SYN_REPORT, 0),
+                (EV_KEY, BTN_LEFT, 0),
+                (EV_SYN, SYN_REPORT, 0),
+            ]
+        );
+    }
+
+    #[test]
+    fn pointer_button_code_maps_names() {
+        assert_eq!(pointer_button_code("left"), BTN_LEFT);
+        assert_eq!(pointer_button_code("RIGHT"), BTN_RIGHT);
+        assert_eq!(pointer_button_code("middle"), BTN_MIDDLE);
+        // Empty / unknown -> primary click.
+        assert_eq!(pointer_button_code(""), BTN_LEFT);
+        assert_eq!(pointer_button_code("garbage"), BTN_LEFT);
+    }
+
+    #[test]
+    fn pixel_to_abs_maps_center_and_edges() {
+        // Center of a 1920-wide screen -> ~half of the normalized range.
+        assert_eq!(pixel_to_abs(960, 1920), ABS_RANGE_MAX / 2);
+        // Edges.
+        assert_eq!(pixel_to_abs(0, 1920), 0);
+        assert_eq!(pixel_to_abs(1920, 1920), ABS_RANGE_MAX);
+        // Out-of-range clamps to the screen edge.
+        assert_eq!(pixel_to_abs(5000, 1920), ABS_RANGE_MAX);
+        assert_eq!(pixel_to_abs(-10, 1920), 0);
+        // Degenerate screen dim -> 0 (never out of range).
+        assert_eq!(pixel_to_abs(100, 0), 0);
     }
 }
