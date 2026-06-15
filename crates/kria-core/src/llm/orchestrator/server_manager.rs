@@ -89,6 +89,26 @@ fn mmproj_cpu_only() -> bool {
     }
 }
 
+/// Port to pass to `llama-server --port`.
+///
+/// Default `"0"` = ephemeral port (the original V5 behavior, byte-for-byte).
+/// Set `KRIA_LLAMA_SERVER_PORT` to a fixed port (e.g. `8090`) to give the
+/// resident model a STABLE endpoint that sidecars (e.g. the VL-7B vision
+/// grounding sidecar) can share — the "one resident model, many consumers"
+/// production pattern. An empty/invalid value falls back to ephemeral.
+fn llama_server_port() -> String {
+    match std::env::var("KRIA_LLAMA_SERVER_PORT") {
+        Ok(v) => {
+            let v = v.trim();
+            match v.parse::<u16>() {
+                Ok(port) => port.to_string(),
+                Err(_) => "0".to_string(),
+            }
+        }
+        Err(_) => "0".to_string(),
+    }
+}
+
 fn v1_models_endpoint(base_url: &str, action: &str) -> String {
     let base = base_url.trim_end_matches('/');
     if base.ends_with("/v1") {
@@ -391,7 +411,7 @@ impl LlamaServerManager {
             // Fallback for bare relative paths where parent dir is unavailable.
             cmd.arg("--model").arg(&self.model_path);
         }
-        cmd.arg("--port").arg("0"); // Ephemeral port (V5)
+        cmd.arg("--port").arg(llama_server_port()); // Ephemeral by default (V5)
         cmd.arg("--ctx-size").arg(context.to_string());
         cmd.arg("--n-gpu-layers").arg(ngl.to_string());
         cmd.arg("--batch-size").arg(tuning.batch_size.to_string());
@@ -1309,6 +1329,39 @@ mod tests {
         }
 
         // Restore prior environment.
+        match prev {
+            Some(v) => std::env::set_var(key, v),
+            None => std::env::remove_var(key),
+        }
+    }
+
+    #[test]
+    fn llama_server_port_branches() {
+        let key = "KRIA_LLAMA_SERVER_PORT";
+        let prev = std::env::var(key).ok();
+
+        // Unset => ephemeral "0" (byte-for-byte prior behavior).
+        std::env::remove_var(key);
+        assert_eq!(llama_server_port(), "0");
+
+        // Valid fixed port => that port.
+        std::env::set_var(key, "8090");
+        assert_eq!(llama_server_port(), "8090");
+        std::env::set_var(key, " 8090 ");
+        assert_eq!(llama_server_port(), "8090");
+
+        // Invalid / out-of-range / empty => fall back to ephemeral "0".
+        for bad in ["", "abc", "99999", "-1", "0"] {
+            std::env::set_var(key, bad);
+            let got = llama_server_port();
+            assert!(
+                got == "0" || got == bad,
+                "invalid {bad:?} should fall back to 0 (got {got})"
+            );
+        }
+        std::env::set_var(key, "abc");
+        assert_eq!(llama_server_port(), "0");
+
         match prev {
             Some(v) => std::env::set_var(key, v),
             None => std::env::remove_var(key),
