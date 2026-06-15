@@ -1,0 +1,61 @@
+name: GUI Cognition Nightly (real, externally-verified)
+
+# GUI automation needs a REAL desktop session (display + input + GPU) and the
+# KRIA app running with its local API. Stock cloud runners cannot do this, so
+# this job targets a SELF-HOSTED runner that has:
+#   - a logged-in GNOME session (DISPLAY / WAYLAND_DISPLAY)
+#   - the KRIA app built and running (local API on :3001, ~/.kria/api_token)
+#   - pgrep + xdotool (and optionally wmctrl/grim/scrot)
+# Trigger manually (workflow_dispatch) or nightly.
+
+on:
+  schedule:
+    - cron: "0 2 * * *"   # 02:00 daily
+  workflow_dispatch:
+    inputs:
+      case_ids:
+        description: "Optional space-separated case ids (blank = all)"
+        required: false
+        default: ""
+
+jobs:
+  gui-cognition-real:
+    # Requires a self-hosted runner labelled 'kria-desktop' on the test machine.
+    runs-on: [self-hosted, kria-desktop]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Preflight — API + tools
+        run: |
+          test -f "$HOME/.kria/api_token" || { echo "::error::KRIA not running (no api_token)"; exit 1; }
+          curl -sf -m 5 -o /dev/null \
+            -H "Authorization: Bearer $(cat "$HOME/.kria/api_token")" \
+            http://127.0.0.1:3001/api/testing/gui-automation-status \
+            || { echo "::error::local API not reachable on :3001"; exit 1; }
+          command -v pgrep >/dev/null || { echo "::error::pgrep missing"; exit 1; }
+          command -v xdotool >/dev/null || echo "::warning::xdotool missing — window checks limited"
+
+      - name: Run GUI Cognition real test harness
+        run: |
+          python3 scripts/gui_cog_real_test.py ${{ github.event.inputs.case_ids }} | tee /tmp/gui_cog_run.log
+        # Non-zero exit is not forced on FAIL so the report always uploads; the
+        # gate below inspects the summary.
+
+      - name: Gate on MISMATCH / FAIL
+        run: |
+          if grep -qE "MISMATCH:" /tmp/gui_cog_run.log; then
+            echo "::error::GUI Cognition MISMATCH detected (claimed success, reality disagreed)"; exit 1; fi
+          if grep -qE "^  FAIL: [1-9]" /tmp/gui_cog_run.log; then
+            echo "::warning::GUI Cognition FAIL cases present — see report artifact"; fi
+
+      - name: Upload report + artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-cognition-report
+          path: |
+            ~/.kria/gui_cog_test_results/report-*.md
+            /tmp/kria_gui_cog_test_sandbox/*.png
+          if-no-files-found: warn
+          retention-days: 14

@@ -210,6 +210,49 @@ def setup_sandbox():
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
+WEB_PORT = 8765
+_web_proc = None
+
+
+def start_web_target() -> bool:
+    """Start the Phase-2 web target server (for click/type DOM verification)."""
+    global _web_proc
+    try:
+        urllib.request.urlopen(f"http://127.0.0.1:{WEB_PORT}/state", timeout=2)
+        return True
+    except Exception:  # noqa: BLE001
+        pass
+    _web_proc = subprocess.Popen(
+        ["python3", str(HERE / "gui_cog_web_target.py"), str(WEB_PORT)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    for _ in range(20):
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{WEB_PORT}/state", timeout=2)
+            return True
+        except Exception:  # noqa: BLE001
+            time.sleep(0.5)
+    return False
+
+
+def open_web_target_focused():
+    """Reset recorded events and open the target page in a focused Chrome window."""
+    try:
+        urllib.request.urlopen(f"http://127.0.0.1:{WEB_PORT}/reset", timeout=3)
+    except Exception:  # noqa: BLE001
+        pass
+    subprocess.run(["bash", "-lc",
+        "for b in google-chrome-stable google-chrome chromium-browser chromium chrome; do "
+        f"command -v $b >/dev/null && {{ setsid $b --new-window http://127.0.0.1:{WEB_PORT}/ >/dev/null 2>&1 & break; }}; done; "
+        "sleep 4; xdotool search --name KGTEST windowactivate 2>/dev/null; sleep 1"],
+        capture_output=True)
+
+
+def stop_web_target():
+    if _web_proc:
+        _web_proc.terminate()
+
+
 def main():
     tok = token()
     setup_sandbox()
@@ -220,6 +263,11 @@ def main():
     if not cases:
         print("[FATAL] no matching cases")
         sys.exit(2)
+
+    web_needed = any(c.get("web") for c in cases)
+    if web_needed:
+        ok = start_web_target()
+        print(f"[web-target] {'up' if ok else 'FAILED to start'} on :{WEB_PORT}")
 
     have_shot = any(tool(t) for t in ("grim", "scrot", "import", "spectacle"))
     print(f"== KRIA GUI Cognition REAL test ==  API={API}  cases={len(cases)}  "
@@ -238,6 +286,8 @@ def main():
         after = SANDBOX / f"{cid}_after.png"
         ctx_change = False
         # Optional pre-step: reset state so 'verify' proves THIS turn's effect.
+        if c.get("web"):
+            open_web_target_focused()
         if c.get("pre"):
             subprocess.run(["bash", "-lc", c["pre"]], capture_output=True)
         shot_before = screenshot(before) if (verify == "__SCREEN_CHANGED__" and have_shot) else False
@@ -295,6 +345,7 @@ def main():
     skips = [r["id"] for r in rows if r["verdict"] == "SKIP_READY"]
     if skips:
         print(f"ℹ SKIP_READY (safety_only): {', '.join(skips)}  -> enable 'Force live execution' in Settings")
+    stop_web_target()
 
 
 if __name__ == "__main__":
