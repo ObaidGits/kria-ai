@@ -13,6 +13,20 @@ use tauri::Manager;
 static RUNTIME_SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 fn main() {
+    // Linux/webkit2gtk blank-window workaround. On several GPU/driver combos —
+    // notably NVIDIA under Wayland/XWayland (this project's target hardware) —
+    // webkit2gtk's DMABUF renderer paints a BLANK white WebView (the Rust
+    // backend boots fine but no UI shows). Forcing the DMABUF renderer off makes
+    // the WebView fall back to a reliable GL/software path that renders. We only
+    // set it when the user has NOT already chosen a value, so an explicit
+    // override still wins, and it is a no-op on non-Linux platforms.
+    #[cfg(target_os = "linux")]
+    {
+        if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        }
+    }
+
     // Ring 4 — install Linux seccomp-BPF filter before anything else.
     // On non-Linux platforms this is a no-op.
     if let Err(e) = kria_core::platform::install_seccomp_filter() {
