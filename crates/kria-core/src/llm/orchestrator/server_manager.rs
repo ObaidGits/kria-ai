@@ -67,6 +67,28 @@ fn launch_tuning(config_batch_size: u32, enable_vision: bool) -> LaunchTuning {
     }
 }
 
+/// Whether the vision projector (clip/mmproj) weights should be kept in system
+/// RAM instead of being offloaded to the GPU.
+///
+/// Default: `true` (CPU-resident clip). This avoids the VRAM OOM abort during
+/// clip load on small (6GB-class) GPUs where the LLM weights + KV cache already
+/// consume most of the device memory.
+///
+/// Opt back into GPU offload (old behavior) by setting `KRIA_MMPROJ_GPU_OFFLOAD`
+/// to a truthy value (`1`, `true`, `yes`, `on`). When enabled, no
+/// `--no-mmproj-offload` flag is passed and the spawn command is byte-for-byte
+/// identical to the pre-fix behavior.
+fn mmproj_cpu_only() -> bool {
+    match std::env::var("KRIA_MMPROJ_GPU_OFFLOAD") {
+        Ok(v) => {
+            let v = v.trim().to_ascii_lowercase();
+            // Truthy => allow GPU offload => NOT cpu-only.
+            !matches!(v.as_str(), "1" | "true" | "yes" | "on")
+        }
+        Err(_) => true,
+    }
+}
+
 fn v1_models_endpoint(base_url: &str, action: &str) -> String {
     let base = base_url.trim_end_matches('/');
     if base.ends_with("/v1") {
@@ -423,9 +445,25 @@ impl LlamaServerManager {
         if vision_enabled {
             if let Some(ref mmproj) = self.mmproj_path {
                 cmd.arg("--mmproj").arg(mmproj);
+
+                // Keep the vision projector (clip) weights in system RAM by
+                // default. On 6GB-class GPUs the LLM weights + KV cache already
+                // fill VRAM, so offloading the ~2GB worst-case mmproj causes a
+                // hard `ggml_backend_buffer_set_usage` OOM abort during clip
+                // load ("exited before reporting listening port"). Keeping clip
+                // on CPU is also the documented design intent above.
+                //
+                // Kill-switch / opt-in: set KRIA_MMPROJ_GPU_OFFLOAD=1 (or true)
+                // on machines with VRAM headroom to restore GPU offload. When
+                // set, the spawn command is byte-for-byte the pre-fix behavior.
+                if mmproj_cpu_only() {
+                    cmd.arg("--no-mmproj-offload");
+                }
+
                 tracing::info!(
                     ?vision_mode,
                     ngl,
+                    mmproj_cpu_only = mmproj_cpu_only(),
                     "server_manager: loading mmproj (vision_mode={vision_mode})"
                 );
             }
@@ -1239,5 +1277,41 @@ mod tests {
         assert_eq!(tuning.ubatch_size, None);
         assert_eq!(tuning.parallel, None);
         assert!(!tuning.no_warmup);
+    }
+
+    #[test]
+    fn mmproj_cpu_only_branches() {
+        // Serialize env mutation within this single test to avoid cross-test
+        // interference (no other test touches KRIA_MMPROJ_GPU_OFFLOAD).
+        let key = "KRIA_MMPROJ_GPU_OFFLOAD";
+        let prev = std::env::var(key).ok();
+
+        // Default (unset) => clip stays on CPU (safe default).
+        std::env::remove_var(key);
+        assert!(mmproj_cpu_only(), "unset must default to CPU-resident clip");
+
+        // Truthy values => allow GPU offload => NOT cpu-only.
+        for truthy in ["1", "true", "TRUE", "Yes", " on "] {
+            std::env::set_var(key, truthy);
+            assert!(
+                !mmproj_cpu_only(),
+                "{truthy:?} must opt into GPU offload (not cpu-only)"
+            );
+        }
+
+        // Falsy / unrecognized values => keep clip on CPU.
+        for falsy in ["0", "false", "no", "off", ""] {
+            std::env::set_var(key, falsy);
+            assert!(
+                mmproj_cpu_only(),
+                "{falsy:?} must keep clip CPU-resident"
+            );
+        }
+
+        // Restore prior environment.
+        match prev {
+            Some(v) => std::env::set_var(key, v),
+            None => std::env::remove_var(key),
+        }
     }
 }
