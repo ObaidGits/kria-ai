@@ -17,6 +17,7 @@ const STORAGE_KEYS = {
   promptLabSession: "kria_prompt_lab_session_id",
   telegramBotInfo: "kria_telegram_bot_info",
   manualToolMode: "kria_manual_tool_mode",
+  developerMode: "kria_developer_mode",
 } as const;
 
 function readStorageValue(key: string): string | null {
@@ -128,6 +129,17 @@ const resolveInitialTheme = (): "dark" | "light" => {
 };
 
 const [theme, setTheme] = createSignal<"dark" | "light">(resolveInitialTheme());
+
+// Developer mode: OFF by default => the entire UI is layman-friendly (no
+// dismissible debug banners, no "Developer details" accordions, no hashes/probe
+// internals). Toggled in Settings -> Developer. Persisted.
+const resolveInitialDeveloperMode = (): boolean =>
+  readStorageValue(STORAGE_KEYS.developerMode) === "true";
+const [developerMode, setDeveloperModeSignal] = createSignal<boolean>(resolveInitialDeveloperMode());
+function setDeveloperMode(enabled: boolean) {
+  setDeveloperModeSignal(enabled);
+  writeStorageValue(STORAGE_KEYS.developerMode, enabled ? "true" : null);
+}
 const [mcpServers, setMcpServers] = createSignal<McpServer[]>([]);
 const [healthInfo, setHealthInfo] = createSignal<Record<string, any> | null>(null);
 const [runtimeStatus, setRuntimeStatus] = createSignal<RuntimeStatusPayload | null>(null);
@@ -4032,6 +4044,8 @@ export const appStore = {
   models,
   audioDevices,
   theme,
+  developerMode,
+  setDeveloperMode,
   sendMessage,
   sendLabMessage,
   sendImageMessage,

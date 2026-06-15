@@ -62,6 +62,7 @@ const App: Component = () => {
     setShowSettings,
     currentEnvironment,
     colabDispatchWarning,
+    developerMode,
   } = appStore;
   const [showShortcuts, setShowShortcuts] = createSignal(false);
   const [showWizard, setShowWizard] = createSignal(false);
@@ -597,12 +598,12 @@ const App: Component = () => {
             <button type="button" class={`modern-nav-btn ${route() === "settings" ? "active" : ""}`} onClick={() => { navigate("settings"); setShowSettings(true); }}>Settings</button>
           </div>
 
-          <Show when={colabDispatchWarning()}>
+          <Show when={developerMode() && colabDispatchWarning()}>
             <div class="startup-warning-banner">
               <strong>Colab Routing:</strong> {colabDispatchWarning()}
             </div>
           </Show>
-          <Show when={ocrStartupWarning()}>
+          <Show when={developerMode() && ocrStartupWarning()}>
             <div class="startup-warning-banner">
               <strong>OCR Warning:</strong> {ocrStartupWarning()}
             </div>

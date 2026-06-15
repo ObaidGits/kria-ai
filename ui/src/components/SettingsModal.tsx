@@ -8,7 +8,7 @@ import SubstrateStatus from "./SubstrateStatus";
 import ProviderSettings from "./ProviderSettings";
 import N8nSettings from "./N8nSettings";
 
-type Tab = "llm" | "voice" | "safety" | "ui" | "assistant" | "labs" | "search" | "services" | "telegram" | "n8n" | "automation" | "gui_automation" | "hardware" | "knowledge" | "google" | "colab" | "ironclad" | "marketplace";
+type Tab = "llm" | "voice" | "safety" | "ui" | "assistant" | "labs" | "search" | "services" | "telegram" | "n8n" | "automation" | "gui_automation" | "hardware" | "knowledge" | "google" | "colab" | "ironclad" | "marketplace" | "developer";
 type SettingsLayer = "basic" | "workflow" | "integrations" | "advanced" | "developer";
 
 interface SettingsTabDefinition {
@@ -73,7 +73,7 @@ function normalizeFontScaleValue(value: unknown): string {
 }
 
 const SettingsModal: Component = () => {
-  const { setShowSettings, settings, loadSettings, saveSettings, models, loadModels, audioDevices, loadAudioDevices, theme, applyTheme, mcpServers, loadMcpServers, addMcpServer, removeMcpServer, toggleMcpServer, healthInfo, loadHealth, scheduledTasks, loadScheduledTasks, addScheduledTask, removeScheduledTask, macros, loadMacros, deleteMacro, workflows, loadWorkflows, deleteWorkflow, hardwareInfo, loadHardwareInfo, knowledgeBase, loadKnowledgeBase, sessions, clearAllChatSessions, telegramConfig, telegramBotInfo, loadTelegramConfig, saveTelegramConfig, testTelegramConnection, startTelegramMcp, stopTelegramMcp, googleStatus, loadGoogleStatus, setGoogleAccount, connectGoogle, disconnectGoogle, colabStatus, loadColabStatus, connectColab, disconnectColab, setColabNotebook, reconcileMcpRuntime, restartMcpServerRuntime, ironcladStatus, loadIroncladStatus, getIroncladConfig, updateIroncladConfig, requestIroncladSoftReset, requestIroncladHardReset, loadIroncladForensics, ironcladForensicsTotal } = appStore;
+  const { setShowSettings, settings, loadSettings, saveSettings, models, loadModels, audioDevices, loadAudioDevices, theme, applyTheme, mcpServers, loadMcpServers, addMcpServer, removeMcpServer, toggleMcpServer, healthInfo, loadHealth, scheduledTasks, loadScheduledTasks, addScheduledTask, removeScheduledTask, macros, loadMacros, deleteMacro, workflows, loadWorkflows, deleteWorkflow, hardwareInfo, loadHardwareInfo, knowledgeBase, loadKnowledgeBase, sessions, clearAllChatSessions, telegramConfig, telegramBotInfo, loadTelegramConfig, saveTelegramConfig, testTelegramConnection, startTelegramMcp, stopTelegramMcp, googleStatus, loadGoogleStatus, setGoogleAccount, connectGoogle, disconnectGoogle, colabStatus, loadColabStatus, connectColab, disconnectColab, setColabNotebook, reconcileMcpRuntime, restartMcpServerRuntime, ironcladStatus, loadIroncladStatus, getIroncladConfig, updateIroncladConfig, requestIroncladSoftReset, requestIroncladHardReset, loadIroncladForensics, ironcladForensicsTotal, developerMode, setDeveloperMode } = appStore;
 
   const [activeTab, setActiveTab] = createSignal<Tab>("llm");
   const [activeLayer, setActiveLayer] = createSignal<SettingsLayer>("basic");
@@ -882,6 +882,13 @@ const SettingsModal: Component = () => {
           label: "Ironclad",
           icon: "I",
           description: "Fleet health telemetry, reset controls, forensic audit feed, and advanced runtime config.",
+          layer: "developer",
+        },
+        {
+          id: "developer",
+          label: "Developer",
+          icon: "D",
+          description: "Developer mode: show diagnostic details, debug banners, and technical internals across the app.",
           layer: "developer",
         },
         {
@@ -3127,6 +3134,41 @@ const SettingsModal: Component = () => {
                     This action deletes saved conversation turns and cannot be undone.
                   </span>
                 </div>
+              </div>
+            </section>
+          </Show>
+
+          {/* Developer Tab */}
+          <Show when={activeTab() === "developer"}>
+            <section class="settings-section">
+              <h3>Developer Mode</h3>
+              <p class="settings-section-desc">
+                KRIA is layman-friendly by default. Turn on Developer Mode to reveal diagnostic
+                detail across the app — the GUI Cognition "Developer details" panel, debug/startup
+                banners, hashes, probe timings, and other technical internals. Off by default;
+                your choice is remembered.
+              </p>
+              <div class="settings-field" style={{ "margin-top": "14px", "padding": "12px", "background": "#241a2e", "border": "1px solid #4a356b", "border-radius": "6px" }}>
+                <label class="toggle-switch" style={{ "display": "inline-flex", "align-items": "center", "gap": "12px", "cursor": "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={developerMode()}
+                    onChange={(e) => setDeveloperMode((e.currentTarget as HTMLInputElement).checked)}
+                  />
+                  <span style={{ "font-size": "16px", "font-weight": "600" }}>
+                    {developerMode() ? "Developer Mode: ON" : "Developer Mode: OFF"}
+                  </span>
+                  <Show when={developerMode()}>
+                    <span style={{ "background": "#5a3a20", "color": "#ffd86b", "padding": "3px 9px", "border-radius": "12px", "font-size": "11px", "font-weight": "700" }}>
+                      DEV
+                    </span>
+                  </Show>
+                </label>
+                <p class="field-hint" style={{ "margin-top": "8px" }}>
+                  When OFF: clean, layman-friendly UI — no developer accordions, no dismissible
+                  debug banners, no hashes/timings. When ON: full diagnostic detail for debugging
+                  GUI Cognition and other subsystems.
+                </p>
               </div>
             </section>
           </Show>

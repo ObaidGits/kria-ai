@@ -10,6 +10,12 @@ interface GuiCognitionPanelProps {
    * turn via the Task 1 cancel path. When omitted, the Stop control is hidden.
    */
   onStop?: () => void;
+  /**
+   * When false/undefined the "Developer details" accordion is hidden (clean
+   * layman view). The app passes `appStore.developerMode()`; tests/other
+   * callers that omit it keep the detailed view (back-compatible).
+   */
+  developerMode?: boolean;
 }
 
 const lifecycleLabel: Record<GuiCognitionLifecycle, string> = {
@@ -161,6 +167,7 @@ export const GuiCognitionPanel: Component<GuiCognitionPanelProps> = (props) => {
         </Show>
       </div>
 
+      <Show when={props.developerMode ?? true}>
       <details class="gui-cognition-details">
         <summary class="gui-cognition-details-summary">Developer details</summary>
         <div class="gui-cognition-detail-region">
@@ -1040,6 +1047,7 @@ export const GuiCognitionPanel: Component<GuiCognitionPanelProps> = (props) => {
       </div>
         </div>
       </details>
+      </Show>
     </section>
   );
 };

@@ -385,6 +385,7 @@ const ChatView: Component = () => {
           {(session) => (
             <GuiCognitionPanel
               session={session()}
+              developerMode={appStore.developerMode()}
               onDismiss={() => clearGuiCognitionSession()}
               onStop={() => cancelGuiCognitionTurn()}
             />
