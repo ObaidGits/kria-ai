@@ -5578,6 +5578,30 @@ where
     }
 }
 
+/// Task 10 (Issue #8): whether the consolidated honest AT-SPI health signal
+/// (`accessibility_resolution_trustworthy`) is surfaced in the observation
+/// event. Default ON; an explicit falsy value (`0`/`false`/`no`/`off`/empty) in
+/// `KRIA_GUI_COG_ATSPI_HEALTH` rolls back to the prior event payload
+/// byte-for-byte (no trust field). Additive-only telemetry — the underlying
+/// snapshot/confidence behavior is unchanged either way.
+fn atspi_health_enabled() -> bool {
+    atspi_health_enabled_lookup(|key| std::env::var(key).ok())
+}
+
+/// Testable core of [`atspi_health_enabled`] with an injectable lookup.
+fn atspi_health_enabled_lookup<F>(lookup: F) -> bool
+where
+    F: Fn(&str) -> Option<String>,
+{
+    match lookup("KRIA_GUI_COG_ATSPI_HEALTH") {
+        Some(v) => !matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "no" | "off" | ""
+        ),
+        None => true,
+    }
+}
+
 /// Task 5 (Issue #12): the user-facing ROOT CAUSE for a workflow stop, mapped
 /// from the failing step + the bounded-guard reason. Replaces an opaque
 /// "screen state repeated N times" / "re-observe budget reached" with an
@@ -5794,6 +5818,74 @@ mod smart_recovery_tests {
         for raw in ["1", "true", "yes", "on", "anything"] {
             assert!(smart_recovery_enabled_lookup(|_| Some(raw.to_string())));
         }
+    }
+}
+
+#[cfg(test)]
+mod atspi_health_tests {
+    //! Task 10 (Issue #8): the `gui_cog_atspi_health` kill-switch (default ON,
+    //! falsy = rollback) + the consolidated `resolution_trustworthy` derivation
+    //! on the accessibility summary (degraded/partial/unavailable → low-trust).
+    use super::*;
+    use crate::agent::gui_cognition::perception::GuiAccessibilitySummary;
+
+    #[test]
+    fn atspi_health_flag_defaults_on_and_rolls_back_on_falsy() {
+        assert!(atspi_health_enabled_lookup(|_| None));
+        for raw in ["0", "false", "no", "off", "", " OFF "] {
+            assert!(!atspi_health_enabled_lookup(|_| Some(raw.to_string())));
+        }
+        for raw in ["1", "true", "yes", "on", "anything"] {
+            assert!(atspi_health_enabled_lookup(|_| Some(raw.to_string())));
+        }
+    }
+
+    #[test]
+    fn healthy_summary_with_controls_is_resolution_trustworthy() {
+        let mut s = GuiAccessibilitySummary {
+            available: true,
+            overall_status: "healthy".into(),
+            control_count: 5,
+            ..Default::default()
+        };
+        assert!(s.resolution_trustworthy());
+        // Any partiality removes trust.
+        s.omitted_node_count = 1;
+        assert!(!s.resolution_trustworthy());
+    }
+
+    #[test]
+    fn degraded_or_partial_summary_is_not_trustworthy() {
+        // Degraded status.
+        let degraded = GuiAccessibilitySummary {
+            available: true,
+            overall_status: "degraded".into(),
+            control_count: 5,
+            ..Default::default()
+        };
+        assert!(!degraded.resolution_trustworthy());
+
+        // Healthy but no controls (app a11y off).
+        let empty = GuiAccessibilitySummary {
+            available: true,
+            overall_status: "healthy".into(),
+            control_count: 0,
+            ..Default::default()
+        };
+        assert!(!empty.resolution_trustworthy());
+
+        // Healthy but apps skipped.
+        let skipped = GuiAccessibilitySummary {
+            available: true,
+            overall_status: "healthy".into(),
+            control_count: 5,
+            skipped_app_count: 1,
+            ..Default::default()
+        };
+        assert!(!skipped.resolution_trustworthy());
+
+        // Unavailable (default).
+        assert!(!GuiAccessibilitySummary::default().resolution_trustworthy());
     }
 }
 
@@ -6106,6 +6198,15 @@ fn observation_completed_event(
         "accessibility_overall_confidence".into(),
         serde_json::json!(observation.accessibility.overall_confidence),
     );
+    if atspi_health_enabled() {
+        // Task 10 (Issue #8): consolidated honest trust signal (additive;
+        // flag-OFF omits it → prior event byte-for-byte). False on a degraded/
+        // partial/unavailable summary → the resolver/UI prefers extension/vision.
+        object.insert(
+            "accessibility_resolution_trustworthy".into(),
+            serde_json::json!(observation.accessibility.resolution_trustworthy()),
+        );
+    }
     object.insert(
         "accessibility_app_scores".into(),
         serde_json::to_value(&observation.accessibility.app_scores)

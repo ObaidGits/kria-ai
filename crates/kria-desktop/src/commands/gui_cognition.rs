@@ -197,6 +197,32 @@ where
     }
 }
 
+/// Task 10 (Issue #8): whether the consolidated, honest AT-SPI health signal is
+/// surfaced in the accessibility source-status payload (`atspi_health`,
+/// `atspi_resolution_trustworthy`, `atspi_health_reason`). Default ON; an
+/// explicit falsy value (`0`/`false`/`no`/`off`/empty) in
+/// `KRIA_GUI_COG_ATSPI_HEALTH` rolls back to the prior payload byte-for-byte
+/// (no health fields). Additive-only: the underlying snapshot/confidence
+/// behavior is unchanged either way — this only adds telemetry the resolver/UI
+/// can consult to prefer the extension/vision path when AT-SPI is degraded.
+fn atspi_health_enabled() -> bool {
+    atspi_health_enabled_lookup(|key| std::env::var(key).ok())
+}
+
+/// Testable core of [`atspi_health_enabled`] with an injectable env lookup.
+fn atspi_health_enabled_lookup<F>(lookup: F) -> bool
+where
+    F: Fn(&str) -> Option<String>,
+{
+    match lookup("KRIA_GUI_COG_ATSPI_HEALTH") {
+        Some(v) => {
+            let v = v.trim().to_ascii_lowercase();
+            !matches!(v.as_str(), "0" | "false" | "no" | "off" | "")
+        }
+        None => true,
+    }
+}
+
 /// Task 9: the OCR scope for a turn. OCR is expensive and only meaningful for
 /// read/summarize intents. A pure ACTION turn (focus/type/click/scroll/key/
 /// approval) never reads screen TEXT for its verdict — verification uses the
@@ -1825,6 +1851,19 @@ impl<'a> DesktopGuiPerceptionProvider<'a> {
     }
 
     fn snapshot_source_status(snapshot: &AtSpiSnapshot) -> serde_json::Value {
+        Self::snapshot_source_status_with_health(snapshot, atspi_health_enabled())
+    }
+
+    /// Task 10: build the accessibility source-status payload. When `health_on`
+    /// (the `gui_cog_atspi_health` flag), the consolidated honest health signal
+    /// (`atspi_health` / `atspi_resolution_trustworthy` / `atspi_health_reason`)
+    /// is added so the resolver/UI can prefer the extension/vision path on a
+    /// degraded/unavailable snapshot. `health_on=false` returns the prior
+    /// payload byte-for-byte (no health fields).
+    fn snapshot_source_status_with_health(
+        snapshot: &AtSpiSnapshot,
+        health_on: bool,
+    ) -> serde_json::Value {
         let confidence = Self::snapshot_accessibility_confidence(snapshot);
         let health_status = Self::snapshot_accessibility_status(snapshot, confidence);
         let stale_node_count = Self::snapshot_stale_node_count(snapshot);
@@ -1864,7 +1903,7 @@ impl<'a> DesktopGuiPerceptionProvider<'a> {
                 })
                 .collect::<Vec<_>>()
         };
-        serde_json::json!({
+        let mut payload = serde_json::json!({
             "accessibility_source_status": snapshot.status,
             "accessibility_health_status": health_status,
             "accessibility_overall_status": health_status,
@@ -1884,7 +1923,29 @@ impl<'a> DesktopGuiPerceptionProvider<'a> {
             "atspi_timeout_reason": snapshot.source_blockers.first().cloned(),
             "source_blockers": snapshot.source_blockers,
             "accessibility_remediation": snapshot.remediation,
-        })
+        });
+        if health_on {
+            // Task 10: consolidated honest health (additive). When degraded/
+            // unavailable, `atspi_resolution_trustworthy=false` signals the
+            // resolver/UI to PREFER the extension/vision path over low-trust
+            // AT-SPI candidates.
+            let health = snapshot.health();
+            if let Some(object) = payload.as_object_mut() {
+                object.insert(
+                    "atspi_health".into(),
+                    serde_json::json!(health.level.as_str()),
+                );
+                object.insert(
+                    "atspi_resolution_trustworthy".into(),
+                    serde_json::json!(health.resolution_trustworthy),
+                );
+                object.insert(
+                    "atspi_health_reason".into(),
+                    serde_json::json!(health.reason),
+                );
+            }
+        }
+        payload
     }
 
     fn element_matches_role(element_role: &str, role: &str) -> bool {
@@ -2349,6 +2410,23 @@ impl GuiPerceptionProvider for DesktopGuiPerceptionProvider<'_> {
                 "accessibility_source_status".into(),
                 serde_json::json!(snapshot.status),
             );
+            // Task 10 (Issue #8): surface the honest consolidated health on the
+            // common observe path too (additive; flag-OFF = prior payload).
+            if atspi_health_enabled() {
+                let health = snapshot.health();
+                object.insert(
+                    "atspi_health".into(),
+                    serde_json::json!(health.level.as_str()),
+                );
+                object.insert(
+                    "atspi_resolution_trustworthy".into(),
+                    serde_json::json!(health.resolution_trustworthy),
+                );
+                object.insert(
+                    "atspi_health_reason".into(),
+                    serde_json::json!(health.reason),
+                );
+            }
         }
         result
     }
@@ -5715,6 +5793,88 @@ mod ocr_quality_tests {
         assert!(
             status.contains("quality_full_frame_downscaled_1920x1080_to_1600x900"),
             "status {status:?} should record the adequate 1600px downscale"
+        );
+    }
+}
+
+#[cfg(test)]
+mod atspi_health_tests {
+    //! Task 10 (Issue #8): the `gui_cog_atspi_health` flag gate + the additive,
+    //! honest AT-SPI health surfaced in the source-status payload. Pure (no
+    //! display/D-Bus): builds an `AtSpiSnapshot` directly.
+    use super::{atspi_health_enabled_lookup, DesktopGuiPerceptionProvider};
+    use kria_core::agent::atspi_engine::{AtSpiSnapshot, AtSpiSnapshotTiming};
+
+    fn snapshot(status: &str, omitted: usize) -> AtSpiSnapshot {
+        AtSpiSnapshot {
+            status: status.into(),
+            applications: Vec::new(),
+            application_labels: Vec::new(),
+            focused_app: None,
+            focused_app_label: None,
+            focused_window: None,
+            elements: Vec::new(),
+            dialog_visible: false,
+            node_count: 0,
+            omitted_node_count: omitted,
+            skipped_apps: Vec::new(),
+            source_blockers: Vec::new(),
+            remediation: Vec::new(),
+            roles: Vec::new(),
+            timing: AtSpiSnapshotTiming::default(),
+        }
+    }
+
+    #[test]
+    fn atspi_health_flag_defaults_on_when_env_absent() {
+        assert!(atspi_health_enabled_lookup(|_| None));
+    }
+
+    #[test]
+    fn atspi_health_flag_rolls_back_on_falsy_values() {
+        for raw in ["0", "false", "no", "off", "", " Off "] {
+            assert!(
+                !atspi_health_enabled_lookup(|_| Some(raw.to_string())),
+                "value {raw:?} must disable atspi health surfacing (rollback)"
+            );
+        }
+    }
+
+    #[test]
+    fn flag_off_payload_omits_health_fields_byte_for_byte() {
+        let snap = snapshot("degraded", 5);
+        let off = DesktopGuiPerceptionProvider::snapshot_source_status_with_health(&snap, false);
+        let obj = off.as_object().expect("object");
+        assert!(!obj.contains_key("atspi_health"));
+        assert!(!obj.contains_key("atspi_resolution_trustworthy"));
+        assert!(!obj.contains_key("atspi_health_reason"));
+        // The prior fields remain present.
+        assert!(obj.contains_key("accessibility_source_status"));
+    }
+
+    #[test]
+    fn flag_on_payload_adds_honest_health_for_degraded_snapshot() {
+        let snap = snapshot("degraded", 5);
+        let on = DesktopGuiPerceptionProvider::snapshot_source_status_with_health(&snap, true);
+        let obj = on.as_object().expect("object");
+        assert_eq!(obj.get("atspi_health").and_then(|v| v.as_str()), Some("degraded"));
+        assert_eq!(
+            obj.get("atspi_resolution_trustworthy").and_then(|v| v.as_bool()),
+            Some(false),
+            "a degraded snapshot must not be trustworthy for resolution"
+        );
+        assert!(obj.get("atspi_health_reason").map(|v| !v.is_null()).unwrap_or(false));
+    }
+
+    #[test]
+    fn flag_on_unavailable_snapshot_is_not_trustworthy() {
+        let snap = snapshot("unavailable", 0);
+        let on = DesktopGuiPerceptionProvider::snapshot_source_status_with_health(&snap, true);
+        let obj = on.as_object().expect("object");
+        assert_eq!(obj.get("atspi_health").and_then(|v| v.as_str()), Some("unavailable"));
+        assert_eq!(
+            obj.get("atspi_resolution_trustworthy").and_then(|v| v.as_bool()),
+            Some(false)
         );
     }
 }

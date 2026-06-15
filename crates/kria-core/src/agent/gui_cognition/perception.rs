@@ -515,6 +515,22 @@ fn default_accessibility_overall_status() -> String {
     "unavailable".into()
 }
 
+impl GuiAccessibilitySummary {
+    /// Task 10 (Issue #8): whether AT-SPI candidates are trustworthy enough to
+    /// drive control resolution on their own. `false` on a degraded / unavailable
+    /// / partial (apps skipped, nodes omitted, or no controls) summary → the
+    /// resolver PREFERS the extension/vision path and treats AT-SPI candidates as
+    /// low-trust hints, never authoritative. Pure (derived from the already-
+    /// bounded summary), so it can never poll or block.
+    pub fn resolution_trustworthy(&self) -> bool {
+        self.available
+            && self.overall_status == "healthy"
+            && self.skipped_app_count == 0
+            && self.omitted_node_count == 0
+            && self.control_count > 0
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GuiOcrBlock {
     pub block_id: String,

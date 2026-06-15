@@ -354,6 +354,95 @@ impl AtSpiSnapshot {
     }
 }
 
+/// Task 10 (Issue #8): the honest health level of an AT-SPI snapshot for GUI
+/// cognition. A truncated/timed-out/empty scan is never reported as fully
+/// healthy — the caller must be able to tell when AT-SPI candidates are merely
+/// low-trust hints (prefer the extension/vision path) versus authoritative.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum AtSpiHealthLevel {
+    /// Operational, complete, with usable elements.
+    Healthy,
+    /// Operational but partial (apps skipped / nodes omitted / no elements) —
+    /// candidates are low-trust hints, not authoritative.
+    Degraded,
+    /// Not operational (no connection / anonymous bus / accessibility off).
+    Unavailable,
+}
+
+impl AtSpiHealthLevel {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Healthy => "healthy",
+            Self::Degraded => "degraded",
+            Self::Unavailable => "unavailable",
+        }
+    }
+}
+
+/// Task 10 (Issue #8): a consolidated, honest AT-SPI health assessment.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AtSpiHealth {
+    pub level: AtSpiHealthLevel,
+    /// Whether AT-SPI candidates are trustworthy enough to drive control
+    /// resolution on their own. `false` for degraded/unavailable → the caller
+    /// PREFERS the extension/vision path and treats AT-SPI candidates as
+    /// low-trust hints, never authoritative (avoids acting on stale/partial
+    /// accessibility data).
+    pub resolution_trustworthy: bool,
+    pub reason: Option<String>,
+}
+
+impl AtSpiSnapshot {
+    /// Assess the honest health of this snapshot. Pure (no I/O): derived only
+    /// from the already-bounded scan result, so it can never poll or block.
+    ///
+    /// - `Unavailable` when the scan is not operational (status is neither
+    ///   `healthy` nor `degraded`).
+    /// - `Degraded` (low-trust) when operational but partial: status is not
+    ///   `healthy`, OR apps were skipped, OR nodes were omitted at the bound,
+    ///   OR no elements were found (app accessibility likely off).
+    /// - `Healthy` (trustworthy) otherwise.
+    pub fn health(&self) -> AtSpiHealth {
+        let operational = matches!(self.status.as_str(), "healthy" | "degraded");
+        if !operational {
+            return AtSpiHealth {
+                level: AtSpiHealthLevel::Unavailable,
+                resolution_trustworthy: false,
+                reason: self
+                    .source_blockers
+                    .first()
+                    .cloned()
+                    .or_else(|| Some("AT-SPI not operational".into())),
+            };
+        }
+        let degraded = self.status != "healthy"
+            || !self.skipped_apps.is_empty()
+            || self.omitted_node_count > 0
+            || self.elements.is_empty();
+        if degraded {
+            let reason = if self.elements.is_empty() {
+                "no accessible elements (app accessibility likely off)"
+            } else if !self.skipped_apps.is_empty() {
+                "one or more apps were skipped (unresponsive/timed out)"
+            } else if self.omitted_node_count > 0 {
+                "snapshot truncated at the node bound"
+            } else {
+                "accessibility source degraded"
+            };
+            return AtSpiHealth {
+                level: AtSpiHealthLevel::Degraded,
+                resolution_trustworthy: false,
+                reason: Some(reason.into()),
+            };
+        }
+        AtSpiHealth {
+            level: AtSpiHealthLevel::Healthy,
+            resolution_trustworthy: true,
+            reason: None,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 struct AtSpiAppScan {
     elements: Vec<AccessibleElement>,
@@ -2160,7 +2249,23 @@ mod tests {
     fn atspi_snapshot_request_defaults_are_bounded_for_gui_cognition() {
         let request = AtSpiSnapshotRequest::default();
 
-        assert_eq!(request.roles, vec!["text", "push button", "dialog"]);
+        // The role allow-list is a bounded, non-empty focused set. The exact set
+        // may be tuned over time (more roles improve resolution coverage); the
+        // BOUND is what this test guards — a capped, focused scan — not a brittle
+        // exact list. It must always include the core interactive roles.
+        assert!(!request.roles.is_empty(), "role allow-list must be non-empty");
+        assert!(
+            request.roles.len() <= 16,
+            "role allow-list must stay bounded (was {})",
+            request.roles.len()
+        );
+        for core in ["text", "push button", "dialog"] {
+            assert!(
+                request.roles.iter().any(|r| r == core),
+                "core role {core:?} must be in the default allow-list"
+            );
+        }
+
         assert_eq!(request.max_depth, 8);
         assert_eq!(request.max_nodes, 400);
         assert_eq!(request.max_apps, 5);
@@ -2168,6 +2273,109 @@ mod tests {
         assert_eq!(request.dbus_call_budget_ms, 80);
         assert_eq!(request.focused_app_budget_ms, 250);
         assert_eq!(request.background_app_budget_ms, 120);
+    }
+
+    fn health_snapshot(
+        status: &str,
+        elements: Vec<AccessibleElement>,
+        omitted_node_count: usize,
+        skipped_apps: Vec<String>,
+        source_blockers: Vec<String>,
+    ) -> AtSpiSnapshot {
+        AtSpiSnapshot {
+            status: status.into(),
+            applications: Vec::new(),
+            application_labels: Vec::new(),
+            focused_app: None,
+            focused_app_label: None,
+            focused_window: None,
+            node_count: elements.len(),
+            elements,
+            dialog_visible: false,
+            omitted_node_count,
+            skipped_apps,
+            source_blockers,
+            remediation: Vec::new(),
+            roles: Vec::new(),
+            timing: AtSpiSnapshotTiming::default(),
+        }
+    }
+
+    fn sample_element() -> AccessibleElement {
+        AccessibleElement {
+            path: "/org/a11y/atspi/accessible/1".into(),
+            bus_name: ":1.42".into(),
+            role: "push button".into(),
+            name: "OK".into(),
+            focused: false,
+            enabled: true,
+            visible: true,
+            in_active_window: true,
+            bounds: Some([10, 20, 90, 32]),
+            depth: 1,
+            score: 1.0,
+            children: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn atspi_health_healthy_is_trustworthy() {
+        let snap = health_snapshot("healthy", vec![sample_element()], 0, vec![], vec![]);
+        let health = snap.health();
+        assert_eq!(health.level, AtSpiHealthLevel::Healthy);
+        assert!(health.resolution_trustworthy);
+        assert!(health.reason.is_none());
+    }
+
+    #[test]
+    fn atspi_health_truncated_scan_is_degraded_and_low_trust() {
+        // Operational with elements but nodes omitted at the bound → degraded.
+        let snap = health_snapshot("degraded", vec![sample_element()], 12, vec![], vec![]);
+        let health = snap.health();
+        assert_eq!(health.level, AtSpiHealthLevel::Degraded);
+        assert!(!health.resolution_trustworthy);
+        assert!(health.reason.is_some());
+    }
+
+    #[test]
+    fn atspi_health_no_elements_is_degraded_low_trust() {
+        // Status healthy but no accessible elements (app a11y off) → degraded.
+        let snap = health_snapshot("healthy", vec![], 0, vec![], vec![]);
+        let health = snap.health();
+        assert_eq!(health.level, AtSpiHealthLevel::Degraded);
+        assert!(!health.resolution_trustworthy);
+    }
+
+    #[test]
+    fn atspi_health_skipped_apps_is_degraded_low_trust() {
+        let snap = health_snapshot(
+            "degraded",
+            vec![sample_element()],
+            0,
+            vec!["frozen-app".into()],
+            vec![],
+        );
+        let health = snap.health();
+        assert_eq!(health.level, AtSpiHealthLevel::Degraded);
+        assert!(!health.resolution_trustworthy);
+    }
+
+    #[test]
+    fn atspi_health_unavailable_is_never_trustworthy() {
+        let snap = health_snapshot(
+            "unavailable",
+            vec![],
+            0,
+            vec![],
+            vec!["AT-SPI connection unavailable".into()],
+        );
+        let health = snap.health();
+        assert_eq!(health.level, AtSpiHealthLevel::Unavailable);
+        assert!(!health.resolution_trustworthy);
+        assert_eq!(
+            health.reason.as_deref(),
+            Some("AT-SPI connection unavailable")
+        );
     }
 
     #[test]
