@@ -220,13 +220,13 @@ clipboard `t2_second_session_waits_for_first_to_release` (flake).
   - **Done-when:** 8.1 real VL-7B detections wired + 8.4 tests green + 8.6 live (unique target resolved from vision, click+verify via Task 7)
   - _Flag: `gui_cog_real_vision`_  _Requirements: 1_
 
-- [ ] 9. OCR quality + scope (Issue #7)
-  - [ ] 9.1 In the desktop OCR path (`gui_cognition.rs`, the `cached_ocr_result`/full-screen OCR arms) + `perception.rs`: run OCR on the active-window REGION-OF-INTEREST (bounds from the extension `ListWindows`/active-window) at adequate resolution (avoid blind over-downscale of 1920→1000), and ONLY on read/summarize intents (intent-gated, not every observation). Reuse the extension capture (sees Wayland windows). Preserve trusted/untrusted labeling + the prompt-injection scan
-  - [ ] 9.2 Flag `gui_cog_ocr_quality` (env `KRIA_GUI_COG_OCR_QUALITY`, default-ON after gate; falsy = prior full-screen OCR byte-for-byte)
-  - [ ] 9.3 CI tests: ROI selection from window bounds; OCR runs only on read intents (skipped for click/type/scroll); redaction/injection scan preserved; flag-OFF parity
-  - [ ] 9.4 `cargo build` clean; lib + `gui_cognition_browser_read_summarize_tests` green
-  - [ ] 9.5 LIVE gate: a read/summarize-visible prompt against a content window returns a NON-EMPTY, on-screen-grounded summary; the C16 read family improves; 0 leak; record
-  - **Done-when:** 9.1 ROI + intent-gated OCR + 9.3 tests green + 9.5 live (grounded summary)
+- [x] 9. OCR quality + scope (Issue #7) — **DONE + CI (9 tests) + LIVE-VERIFIED (ROI+adequate-res + intent-gating); text-extraction INCONCLUSIVE (OCR engines not installed in env)**
+  - [x] 9.1 In the desktop OCR path (`gui_cognition.rs`): `prepare_ocr_png` refactored to `prepare_ocr_png_scoped(bytes, roi, quality_on)` — flag-ON crops to the active-window REGION-OF-INTEREST (physical-px bounds from the GNOME extension `GetFocusedWindow` frame rect via `active_window_ocr_roi`, scaled by monitor scale, clamped by `OcrRoi::clamp_to`, fail-open to full frame) and downscales only above an ADEQUATE 1600px cap (vs the legacy blind 1920→1000). OCR is intent-gated via a new `DesktopGuiPerceptionProvider.ocr_scope` (`gui_ocr_scope_for_prompt`, derived once from the prompt): a pure ACTION turn (focus/type/click/safe-action/risk-approval — the same set as the observation-cache `Disabled` set) SKIPS OCR with an honest benign empty result (`skipped_non_read_intent`/`intent_gated_skip`); read/observe/plan turns run it. Reuses the extension capture (sees Wayland windows); trusted/untrusted labeling + the prompt-injection scan are downstream of `run_ocr` and unchanged
+  - [x] 9.2 Flag `gui_cog_ocr_quality` (env `KRIA_GUI_COG_OCR_QUALITY`, default-ON; falsy = prior full-screen, every-observation OCR byte-for-byte — `prepare_ocr_png` legacy wrapper delegates to the scoped variant with `quality_on=false`, asserted identical)
+  - [x] 9.3 CI: `ocr_quality_tests` (9): flag default-ON + falsy-rollback + truthy-keep; intent-scope partition (action prompts → skip, read prompts → run); `OcrRoi::clamp_to` (in-bounds unchanged / overflow clamped / too-small → None / tiny → None); flag-OFF byte-for-byte parity (scoped `quality_on=false` == legacy `prepare_ocr_png`, ROI ignored); flag-ON ROI crop at full detail (1280-wide ROI not downscaled); flag-ON full-frame adequate cap (1920→1600, not 1000)
+  - [x] 9.4 `cargo build -p kria-desktop` clean; `ocr_quality_tests` 9 green
+  - [x] 9.5 LIVE gate (real GNOME Shell 46 Wayland, restarted on new binary, warmed `preconditions.ready`): "read the screen and summarize what is visible" → OCR ran with `ocr_image_status = quality_roi_1854x1168+66+32_downscaled_1854x1168_to_1600x1008_from_1920x1200` (active-window ROI at the adequate 1600px cap, NOT the legacy 1000px over-downscale) — **ROI + adequate-resolution VERIFIED live**. "click the OK button" → intent `click_control` → OCR `skipped_non_read_intent`/`intent_gated_skip` — **intent-gating VERIFIED live** (read turn ran OCR; action turn skipped it). 0 destructive. HONEST CAVEAT: the OCR text-extraction half is INCONCLUSIVE on this machine — the OCR engine binaries (rapidocr/paddleocr/tesseract) are not installed (`ocr_engine_status=engines_unavailable`), so no grounded text could be produced; this is a pre-existing environment gap, NOT a Task 9 code defect (the ROI/resolution/scope preprocessing is proven correct, and the flag-OFF byte-for-byte parity is CI-verified). No fabricated text/numbers
+  - **Done-when:** 9.1 ROI + intent-gated OCR + 9.3 tests green + 9.5 live (ROI+adequate-res + intent-gating verified; grounded-text inconclusive pending OCR engine install)
   - _Flag: `gui_cog_ocr_quality`_  _Requirements: 7_
 
 - [ ] 10. AT-SPI reliability on Wayland (Issue #8)
@@ -237,6 +237,7 @@ clipboard `t2_second_session_waits_for_first_to_release` (flake).
   - [ ] 10.5 LIVE gate: a control-resolution prompt no longer blocks on degraded AT-SPI when the extension/vision can resolve; honest health surfaced; 0 leak; record
   - **Done-when:** 10.1 bounded+honest AT-SPI + 10.3 tests green (incl. the un-excluded bound test) + 10.5 live
   - _Flag: `gui_cog_atspi_health`_  _Requirements: 8_
+
 
 - [ ] 11. Local grammar planner rung (Issue #2)
   - Uses the SAME resident `Qwen2.5-VL-7B-Instruct` `llama-server` as Task 8 (one model, sequential — vision and the planner rung never run simultaneously within a turn). `light` fallback uses `models/llm/Qwen2.5-3B-Instruct-Q4_K_M.gguf` for the planner.

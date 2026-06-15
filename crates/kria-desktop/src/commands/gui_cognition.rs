@@ -100,6 +100,11 @@ struct DesktopGuiPerceptionProvider<'a> {
     // `collect_observation_with_freshness`; only ever true when the
     // `gui_cog_cache_coherence` flag is ON, so flag-OFF behavior is unchanged.
     force_fresh: std::sync::atomic::AtomicBool,
+    // Task 9 (Issue #7): the turn's OCR scope, derived once from the prompt at
+    // construction. `run_ocr` skips OCR for an `ActionIntent` turn when the
+    // `gui_cog_ocr_quality` flag is ON (the verdict never reads screen text);
+    // flag-OFF ignores this and runs OCR on every observation as before.
+    ocr_scope: GuiOcrScope,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -164,6 +169,98 @@ fn primitives_cache_bypass_enabled() -> bool {
             !matches!(v.as_str(), "0" | "false" | "no" | "off" | "")
         }
         Err(_) => true,
+    }
+}
+
+/// Task 9 (Issue #7): whether the OCR quality + scope improvements are enabled —
+/// (a) crop OCR to the active-window region-of-interest at an ADEQUATE
+/// resolution (no blind 1920→1000 over-downscale), and (b) intent-gate OCR so it
+/// runs only on read/summarize turns instead of every observation. Default ON;
+/// an explicit falsy value (`0`/`false`/`no`/`off`/empty) in
+/// `KRIA_GUI_COG_OCR_QUALITY` rolls back to the prior full-screen,
+/// every-observation OCR path byte-for-byte. An absent env value keeps it ON.
+fn ocr_quality_enabled() -> bool {
+    ocr_quality_enabled_lookup(|key| std::env::var(key).ok())
+}
+
+/// Testable core of [`ocr_quality_enabled`] with an injectable env lookup.
+fn ocr_quality_enabled_lookup<F>(lookup: F) -> bool
+where
+    F: Fn(&str) -> Option<String>,
+{
+    match lookup("KRIA_GUI_COG_OCR_QUALITY") {
+        Some(v) => {
+            let v = v.trim().to_ascii_lowercase();
+            !matches!(v.as_str(), "0" | "false" | "no" | "off" | "")
+        }
+        None => true,
+    }
+}
+
+/// Task 9: the OCR scope for a turn. OCR is expensive and only meaningful for
+/// read/summarize intents. A pure ACTION turn (focus/type/click/scroll/key/
+/// approval) never reads screen TEXT for its verdict — verification uses the
+/// screen-change / active-window / clipboard evidence sources, never OCR text
+/// (the Task 4 evidence contract). So OCR is skipped for action turns when the
+/// flag is ON (an honest, benign empty result), and runs for read turns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GuiOcrScope {
+    /// Read / summarize / observe / plan turn — OCR runs (ROI + adequate res).
+    ReadIntent,
+    /// Pure action turn — OCR is skipped (honest empty result) when flag ON.
+    ActionIntent,
+}
+
+/// Classify a turn prompt into an [`GuiOcrScope`]. The ACTION set mirrors the
+/// observation-cache `Disabled` set exactly (focus/type/click/safe-action/
+/// risk-approval) so the two intent gates stay consistent; everything else
+/// (observe/analyze/browser-search/fill-form/checks/recovery) is read-scoped.
+fn gui_ocr_scope_for_prompt(message: &str) -> GuiOcrScope {
+    match classify_gui_cognition_prompt(message).kind {
+        GuiCognitionIntentKind::FocusInput
+        | GuiCognitionIntentKind::TypeText
+        | GuiCognitionIntentKind::ClickControl
+        | GuiCognitionIntentKind::SafeAction
+        | GuiCognitionIntentKind::RiskApproval => GuiOcrScope::ActionIntent,
+        _ => GuiOcrScope::ReadIntent,
+    }
+}
+
+/// Task 9: a PHYSICAL-pixel region of interest (the active window's frame rect)
+/// to crop a screenshot to before OCR, so text is OCR'd at an adequate
+/// resolution instead of a blindly down-scaled full (possibly multi-monitor)
+/// span.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct OcrRoi {
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+}
+
+impl OcrRoi {
+    /// Clamp the ROI to the captured image. Returns `None` (→ caller uses the
+    /// full frame) when the region does not sanely fit — fully outside, or the
+    /// in-bounds remainder is smaller than a minimum content region — so a bad
+    /// or stale bounds value can never crop OCR down to a useless sliver.
+    fn clamp_to(self, img_w: u32, img_h: u32) -> Option<OcrRoi> {
+        const MIN_ROI_EDGE: u32 = 64;
+        if img_w == 0 || img_h == 0 {
+            return None;
+        }
+        let x = self.x.min(img_w.saturating_sub(1));
+        let y = self.y.min(img_h.saturating_sub(1));
+        let width = self.width.min(img_w - x);
+        let height = self.height.min(img_h - y);
+        if width < MIN_ROI_EDGE || height < MIN_ROI_EDGE {
+            return None;
+        }
+        Some(OcrRoi {
+            x,
+            y,
+            width,
+            height,
+        })
     }
 }
 
@@ -1180,38 +1277,128 @@ impl<'a> DesktopGuiPerceptionProvider<'a> {
         format!("{:x}", hasher.finalize())
     }
 
+    // Retained as the byte-for-byte legacy reference (flag-OFF path delegates to
+    // the scoped variant; the parity test asserts they match). Not called on the
+    // hot path, hence `allow(dead_code)`.
+    #[allow(dead_code)]
     fn prepare_ocr_png(bytes: &[u8]) -> Result<(Vec<u8>, String), String> {
-        const MAX_OCR_WIDTH: u32 = 1000;
-        let image = image::load_from_memory(bytes)
+        // Legacy / flag-OFF path: full-frame, downscaled to 1000px. Delegated to
+        // the scoped variant with `quality_on=false` so it stays byte-for-byte.
+        Self::prepare_ocr_png_scoped(bytes, None, false)
+    }
+
+    /// Task 9 (Issue #7): scope- and quality-aware OCR preprocessing.
+    ///
+    /// - `quality_on=false` (flag OFF): EXACTLY the prior behavior — no crop,
+    ///   downscale the full frame to 1000px (`LEGACY_MAX_OCR_WIDTH`). Byte-for-
+    ///   byte identical to the legacy `prepare_ocr_png`.
+    /// - `quality_on=true` (flag ON): crop to the active-window `roi` (clamped to
+    ///   the image; ignored if it does not sanely fit) and downscale only when
+    ///   wider than 1600px (`QUALITY_MAX_OCR_WIDTH`), so 1080p/1440p text is OCR'd
+    ///   at an adequate resolution instead of being blindly over-downscaled.
+    fn prepare_ocr_png_scoped(
+        bytes: &[u8],
+        roi: Option<OcrRoi>,
+        quality_on: bool,
+    ) -> Result<(Vec<u8>, String), String> {
+        const LEGACY_MAX_OCR_WIDTH: u32 = 1000;
+        const QUALITY_MAX_OCR_WIDTH: u32 = 1600;
+        let mut image = image::load_from_memory(bytes)
             .map_err(|error| format!("OCR unavailable: screenshot decode failed: {error}"))?;
-        let width = image.width();
-        let height = image.height();
-        let image = if width > MAX_OCR_WIDTH {
-            let target_height = ((height as f64) * (MAX_OCR_WIDTH as f64 / width as f64))
+        let full_width = image.width();
+        let full_height = image.height();
+
+        // Flag-ON: crop to the active-window ROI (physical px) so OCR sees the
+        // content region at full detail. A ROI that does not sanely fit the
+        // captured image is ignored (the full frame is used).
+        let mut roi_status = "full_frame".to_string();
+        if quality_on {
+            if let Some(region) = roi.and_then(|r| r.clamp_to(full_width, full_height)) {
+                image = image.crop_imm(region.x, region.y, region.width, region.height);
+                roi_status = format!(
+                    "roi_{}x{}+{}+{}",
+                    region.width, region.height, region.x, region.y
+                );
+            }
+        }
+
+        let work_width = image.width();
+        let work_height = image.height();
+        let max_width = if quality_on {
+            QUALITY_MAX_OCR_WIDTH
+        } else {
+            LEGACY_MAX_OCR_WIDTH
+        };
+        let resized = work_width > max_width;
+        let image = if resized {
+            let target_height = ((work_height as f64) * (max_width as f64 / work_width as f64))
                 .round()
                 .max(1.0) as u32;
-            image.resize(
-                MAX_OCR_WIDTH,
-                target_height,
-                image::imageops::FilterType::Triangle,
-            )
+            image.resize(max_width, target_height, image::imageops::FilterType::Triangle)
         } else {
             image
         };
-        let status = if width > MAX_OCR_WIDTH {
+
+        let status = if quality_on {
+            let scale_part = if resized {
+                format!(
+                    "downscaled_{work_width}x{work_height}_to_{}x{}",
+                    image.width(),
+                    image.height()
+                )
+            } else {
+                format!("adequate_{work_width}x{work_height}")
+            };
+            format!("quality_{roi_status}_{scale_part}_from_{full_width}x{full_height}")
+        } else if resized {
+            // Legacy status string — byte-for-byte with the prior implementation.
             format!(
-                "downscaled_{width}x{height}_to_{}x{}",
+                "downscaled_{full_width}x{full_height}_to_{}x{}",
                 image.width(),
                 image.height()
             )
         } else {
-            format!("original_{width}x{height}")
+            format!("original_{full_width}x{full_height}")
         };
+
         let mut buffer = Cursor::new(Vec::new());
         image
             .write_to(&mut buffer, image::ImageFormat::Png)
             .map_err(|error| format!("OCR unavailable: screenshot preprocess failed: {error}"))?;
         Ok((buffer.into_inner(), status))
+    }
+
+    /// Task 9: best-effort PHYSICAL-pixel ROI from the GNOME extension's focused
+    /// window frame rect (`GetFocusedWindow`). Bounded + fail-open: any
+    /// missing/invalid value returns `None` so OCR falls back to the full frame.
+    /// The frame rect is logical px; the screenshot is physical px, so the rect
+    /// is scaled by the monitor scale.
+    async fn active_window_ocr_roi() -> Option<OcrRoi> {
+        let token = kria_ext::read_ext_token()?;
+        let value = kria_ext::ext_call("GetFocusedWindow", &[token.as_str()], 400).await?;
+        let window = value.get("window")?;
+        if window.is_null() {
+            return None;
+        }
+        let x = window.get("x").and_then(serde_json::Value::as_i64)?;
+        let y = window.get("y").and_then(serde_json::Value::as_i64)?;
+        let w = window.get("w").and_then(serde_json::Value::as_i64)?;
+        let h = window.get("h").and_then(serde_json::Value::as_i64)?;
+        if w <= 0 || h <= 0 {
+            return None;
+        }
+        let scale = window
+            .get("scale")
+            .and_then(serde_json::Value::as_f64)
+            .filter(|s| s.is_finite() && *s >= 1.0)
+            .unwrap_or(1.0);
+        let to_phys = |v: i64| -> u32 { ((v.max(0) as f64) * scale).round().max(0.0) as u32 };
+        Some(OcrRoi {
+            x: to_phys(x),
+            y: to_phys(y),
+            width: to_phys(w),
+            height: to_phys(h),
+        })
     }
 
     fn normalize_ocr_error(error: impl AsRef<str>) -> String {
@@ -1907,6 +2094,27 @@ impl GuiPerceptionProvider for DesktopGuiPerceptionProvider<'_> {
 
     async fn run_ocr(&self) -> GuiProbeResult {
         let started = Instant::now();
+        // Task 9 (Issue #7): intent-gated OCR. On a pure ACTION turn the verdict
+        // never reads screen text (Task 4 evidence contract), so skip the
+        // expensive OCR entirely and return an honest, benign empty result.
+        // Flag-OFF keeps OCR running on every observation (byte-for-byte).
+        let quality_on = ocr_quality_enabled();
+        if quality_on && matches!(self.ocr_scope, GuiOcrScope::ActionIntent) {
+            let total_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+            return GuiProbeResult::ok(serde_json::json!({
+                "text": "",
+                "source": "intent_gated_skip",
+                "ocr_engine": "none",
+                "ocr_engine_status": "skipped_non_read_intent",
+                "ocr_scope": "action_intent",
+                "ocr_fast_path": "intent_gated_skip",
+                "ocr_cache_hit": false,
+                "ocr_roi_count": 0,
+                "ocr_changed_region_count": 0,
+                "ocr_wait_for_screenshot_ms": 0,
+                "ocr_total_ms": total_ms,
+            }));
+        }
         let wait_for_screenshot_ms: u64;
         let bytes = match tokio::time::timeout(
             Duration::from_millis(1_850),
@@ -1954,7 +2162,15 @@ impl GuiPerceptionProvider for DesktopGuiPerceptionProvider<'_> {
                 return cached;
             }
         }
-        let (ocr_bytes, ocr_image_status) = match Self::prepare_ocr_png(bytes.as_ref()) {
+        let (ocr_bytes, ocr_image_status) = match Self::prepare_ocr_png_scoped(
+            bytes.as_ref(),
+            if quality_on {
+                Self::active_window_ocr_roi().await
+            } else {
+                None
+            },
+            quality_on,
+        ) {
             Ok(result) => result,
             Err(error) => {
                 let total_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
@@ -4646,6 +4862,7 @@ pub(super) async fn desktop_gui_cognition_command_capture_streamed(
             atspi_snapshot: OnceCell::new(),
             cache_policy: gui_observation_cache_policy_for_prompt(&message),
             force_fresh: std::sync::atomic::AtomicBool::new(false),
+            ocr_scope: gui_ocr_scope_for_prompt(&message),
         }),
     };
     let backend_status =
@@ -5330,6 +5547,174 @@ mod tests {
             pre.screen_hash, post.screen_hash,
             "post-action ForceFresh re-observe must reflect the changed screen, \
              not the pre-action frame (verify-by-screen-change is sound)"
+        );
+    }
+}
+
+#[cfg(test)]
+mod ocr_quality_tests {
+    //! Task 9 (Issue #7): OCR quality + scope. Pure-function CI checks (no
+    //! display/backend): the `gui_cog_ocr_quality` flag gate (default ON, falsy
+    //! rollback), intent-scope partition, ROI clamping, and flag-OFF byte-for-
+    //! byte parity of the OCR preprocessing against the legacy path.
+    use super::{
+        gui_ocr_scope_for_prompt, ocr_quality_enabled_lookup, DesktopGuiPerceptionProvider,
+        GuiOcrScope, OcrRoi,
+    };
+
+    /// Encode a solid-grey RGB image of the given size to PNG bytes (deterministic).
+    fn synthetic_png(width: u32, height: u32) -> Vec<u8> {
+        use std::io::Cursor;
+        let img = image::RgbImage::from_pixel(width, height, image::Rgb([128, 128, 128]));
+        let dynamic = image::DynamicImage::ImageRgb8(img);
+        let mut buffer = Cursor::new(Vec::new());
+        dynamic
+            .write_to(&mut buffer, image::ImageFormat::Png)
+            .expect("encode synthetic png");
+        buffer.into_inner()
+    }
+
+    fn png_dimensions(bytes: &[u8]) -> (u32, u32) {
+        let image = image::load_from_memory(bytes).expect("decode png");
+        (image.width(), image.height())
+    }
+
+    #[test]
+    fn ocr_quality_flag_defaults_on_when_env_absent() {
+        assert!(ocr_quality_enabled_lookup(|_| None));
+    }
+
+    #[test]
+    fn ocr_quality_flag_rolls_back_on_falsy_values() {
+        for raw in ["0", "false", "no", "off", "", " OFF ", "False"] {
+            assert!(
+                !ocr_quality_enabled_lookup(|_| Some(raw.to_string())),
+                "value {raw:?} must disable OCR quality (rollback)"
+            );
+        }
+    }
+
+    #[test]
+    fn ocr_quality_flag_stays_on_for_truthy_values() {
+        for raw in ["1", "true", "yes", "on", "anything-else"] {
+            assert!(
+                ocr_quality_enabled_lookup(|_| Some(raw.to_string())),
+                "value {raw:?} must keep OCR quality ON"
+            );
+        }
+    }
+
+    #[test]
+    fn ocr_scope_action_intents_skip_ocr() {
+        for prompt in [
+            "click the OK button",
+            "type \"hello world\" into the search field",
+            "press the Enter key",
+        ] {
+            // These resolve to focus/type/click/safe-action/risk-approval intents,
+            // which are action-scoped (OCR skipped under the flag).
+            assert_eq!(
+                gui_ocr_scope_for_prompt(prompt),
+                GuiOcrScope::ActionIntent,
+                "prompt {prompt:?} should be action-scoped"
+            );
+        }
+    }
+
+    #[test]
+    fn ocr_scope_read_intents_run_ocr() {
+        for prompt in [
+            "summarize what is visible on the screen",
+            "read the current page and tell me what it says",
+            "what is shown on screen right now",
+        ] {
+            assert_eq!(
+                gui_ocr_scope_for_prompt(prompt),
+                GuiOcrScope::ReadIntent,
+                "prompt {prompt:?} should be read-scoped"
+            );
+        }
+    }
+
+    #[test]
+    fn ocr_roi_clamps_to_image_and_rejects_unfit_regions() {
+        // Fully inside → unchanged.
+        assert_eq!(
+            OcrRoi { x: 10, y: 20, width: 200, height: 100 }.clamp_to(1920, 1080),
+            Some(OcrRoi { x: 10, y: 20, width: 200, height: 100 })
+        );
+        // Overflowing right/bottom → clamped to the in-bounds remainder.
+        assert_eq!(
+            OcrRoi { x: 1800, y: 1000, width: 500, height: 500 }.clamp_to(1920, 1080),
+            Some(OcrRoi { x: 1800, y: 1000, width: 120, height: 80 })
+        );
+        // Remainder smaller than the minimum content edge → None (use full frame).
+        assert_eq!(
+            OcrRoi { x: 1900, y: 1070, width: 500, height: 500 }.clamp_to(1920, 1080),
+            None
+        );
+        // A tiny region → None.
+        assert_eq!(
+            OcrRoi { x: 0, y: 0, width: 32, height: 32 }.clamp_to(1920, 1080),
+            None
+        );
+    }
+
+    #[test]
+    fn flag_off_scoped_matches_legacy_prepare_byte_for_byte() {
+        // Flag OFF must be byte-for-byte identical to the legacy full-frame path,
+        // and must IGNORE any supplied ROI (no crop when quality is off).
+        let bytes = synthetic_png(1920, 1080);
+        let legacy = DesktopGuiPerceptionProvider::prepare_ocr_png(&bytes).expect("legacy");
+        let scoped_none =
+            DesktopGuiPerceptionProvider::prepare_ocr_png_scoped(&bytes, None, false)
+                .expect("scoped none");
+        let scoped_with_roi = DesktopGuiPerceptionProvider::prepare_ocr_png_scoped(
+            &bytes,
+            Some(OcrRoi { x: 100, y: 100, width: 800, height: 600 }),
+            false,
+        )
+        .expect("scoped roi ignored");
+
+        assert_eq!(legacy, scoped_none, "flag-OFF (no ROI) must equal legacy");
+        assert_eq!(
+            legacy, scoped_with_roi,
+            "flag-OFF must ignore the ROI and equal legacy byte-for-byte"
+        );
+        // Legacy downscales the 1920-wide frame to the 1000px cap.
+        assert_eq!(png_dimensions(&legacy.0).0, 1000);
+        assert!(legacy.1.starts_with("downscaled_1920x1080_to_1000x"));
+    }
+
+    #[test]
+    fn flag_on_crops_to_roi_at_adequate_resolution() {
+        // A 1280-wide ROI is below the 1600px quality cap → cropped, NOT downscaled.
+        let bytes = synthetic_png(1920, 1080);
+        let (out, status) = DesktopGuiPerceptionProvider::prepare_ocr_png_scoped(
+            &bytes,
+            Some(OcrRoi { x: 100, y: 100, width: 1280, height: 720 }),
+            true,
+        )
+        .expect("scoped quality roi");
+        assert_eq!(png_dimensions(&out), (1280, 720), "ROI cropped at full detail");
+        assert!(
+            status.contains("roi_1280x720+100+100") && status.contains("adequate_1280x720"),
+            "status {status:?} should record the ROI + adequate (non-downscaled) resolution"
+        );
+    }
+
+    #[test]
+    fn flag_on_full_frame_uses_adequate_cap_not_legacy_cap() {
+        // No ROI, flag ON: full 1920-wide frame downscales to the 1600px quality
+        // cap (adequate), NOT the legacy 1000px cap — text stays legible.
+        let bytes = synthetic_png(1920, 1080);
+        let (out, status) =
+            DesktopGuiPerceptionProvider::prepare_ocr_png_scoped(&bytes, None, true)
+                .expect("scoped quality full");
+        assert_eq!(png_dimensions(&out).0, 1600);
+        assert!(
+            status.contains("quality_full_frame_downscaled_1920x1080_to_1600x900"),
+            "status {status:?} should record the adequate 1600px downscale"
         );
     }
 }
