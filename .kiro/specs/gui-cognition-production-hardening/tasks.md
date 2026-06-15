@@ -288,5 +288,9 @@ clipboard `t2_second_session_waits_for_first_to_release` (flake).
   clipboard `t2_second_session_waits_for_first_to_release` (flake).
 - **Live runner** reuses `testing/tools/gui_cognition_capability_audit.py` + `_user_list_gate.py` /
   `_focused_gate.py` / `_task2_live.py`.
-- **Status:** Tasks 1–2 DONE + live-verified. Task 7 keyboard-input portion already CONFIRMED working
-  (Task 2). Tasks 3–13 pending in the order above.
+- **Status:** Tasks 1–6 DONE + live-verified. Tasks 9, 10, 12 DONE + CI + LIVE-verified (Task 12 probe-latency
+  verified; turn-level p50 planner-bound → Task 11). Tasks 7, 8, 11, 13 CODE+CI DONE; their LIVE gates are
+  DEFERRED to the user: Task 7 + Task 13 need a re-login (session-level device re-registration / extension
+  toggle); Tasks 8 + 11 need the `Qwen2.5-VL-7B-Instruct` `llama-server` served on the GPU (one resident
+  model, sequential vision + planner). Every fix is flag-gated (`gui_cog_*`, default-ON, falsy=rollback,
+  flag-OFF byte-for-byte) with CI tests; no fabricated live numbers.
