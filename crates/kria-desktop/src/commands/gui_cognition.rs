@@ -254,6 +254,31 @@ where
     }
 }
 
+/// Task 11 (Issue #2): whether the LOCAL grammar planner rung (Rung B) is wired.
+/// Default ON; an explicit falsy value (`0`/`false`/`no`/`off`/empty) in
+/// `KRIA_GUI_COG_LOCAL_PLANNER` rolls back to the prior cloud→deterministic
+/// ladder byte-for-byte (no local fallback planner wired → Rung A → Rung C). An
+/// absent env value keeps it ON. The rung itself ALSO requires the
+/// `gui_cog_structured_planner` ladder + a distinct grammar-capable local
+/// backend; this flag is the dedicated kill-switch for the local rung.
+fn local_planner_enabled() -> bool {
+    local_planner_enabled_lookup(|key| std::env::var(key).ok())
+}
+
+/// Testable core of [`local_planner_enabled`] with an injectable env lookup.
+fn local_planner_enabled_lookup<F>(lookup: F) -> bool
+where
+    F: Fn(&str) -> Option<String>,
+{
+    match lookup("KRIA_GUI_COG_LOCAL_PLANNER") {
+        Some(v) => {
+            let v = v.trim().to_ascii_lowercase();
+            !matches!(v.as_str(), "0" | "false" | "no" | "off" | "")
+        }
+        None => true,
+    }
+}
+
 /// Task 12: the observation profile for a turn. `FastAction` turns skip the slow
 /// OCR + vision probes (the verdict is the active-window / screen-change
 /// evidence, which the cheap probes still capture); `Full` turns run every
@@ -5090,7 +5115,7 @@ pub(super) async fn desktop_gui_cognition_command_capture_streamed(
     // and the ladder collapses to Rung A → Rung C.
     let local_fallback_planner = {
         match (
-            structured_planner_cfg.is_enabled(),
+            structured_planner_cfg.is_enabled() && local_planner_enabled(),
             routed_planner_backend.as_ref(),
             app_state.model_router.local_backend(),
         ) {
@@ -6043,6 +6068,38 @@ mod fast_observe_tests {
                 GuiObserveProfile::Full,
                 "prompt {prompt:?} must keep OCR/vision (read or control resolution)"
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod local_planner_tests {
+    //! Task 11 (Issue #2): the `gui_cog_local_planner` kill-switch for the local
+    //! grammar planner rung (Rung B). Default ON; falsy = rollback (no local
+    //! fallback wired → ladder collapses to Rung A → Rung C, byte-for-byte). The
+    //! Rung B BEHAVIOR is covered by `gui_cognition_llm_planner_tests`
+    //! (`ladder_rung_b_uses_local_grammar_fallback_when_configured_rejected`).
+    use super::local_planner_enabled_lookup;
+
+    #[test]
+    fn local_planner_flag_defaults_on_when_env_absent() {
+        assert!(local_planner_enabled_lookup(|_| None));
+    }
+
+    #[test]
+    fn local_planner_flag_rolls_back_on_falsy_values() {
+        for raw in ["0", "false", "no", "off", "", " OFF "] {
+            assert!(
+                !local_planner_enabled_lookup(|_| Some(raw.to_string())),
+                "value {raw:?} must disable the local grammar rung (rollback)"
+            );
+        }
+    }
+
+    #[test]
+    fn local_planner_flag_stays_on_for_truthy_values() {
+        for raw in ["1", "true", "yes", "on", "anything"] {
+            assert!(local_planner_enabled_lookup(|_| Some(raw.to_string())));
         }
     }
 }
