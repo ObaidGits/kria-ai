@@ -105,6 +105,12 @@ struct DesktopGuiPerceptionProvider<'a> {
     // `gui_cog_ocr_quality` flag is ON (the verdict never reads screen text);
     // flag-OFF ignores this and runs OCR on every observation as before.
     ocr_scope: GuiOcrScope,
+    // Task 12 (Issue #6): the turn's observation profile, derived once from the
+    // goal-contract action type. A `FastAction` turn (open/scroll/key/switch)
+    // skips the slow OCR + vision probes when the `gui_cog_fast_observe` flag is
+    // ON (the verdict is active-window/screen-change evidence, captured by the
+    // cheap probes); flag-OFF runs every probe as before.
+    observe_profile: GuiObserveProfile,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -220,6 +226,60 @@ where
             !matches!(v.as_str(), "0" | "false" | "no" | "off" | "")
         }
         None => true,
+    }
+}
+
+/// Task 12 (Issue #6): whether intent-aware fast observation is enabled — skip
+/// the two SLOW probes (OCR + visual-control detection) for primitive ACTION
+/// turns whose verdict needs neither (open/scroll/key/switch are verified by
+/// the active-window or screen-change evidence, never OCR text or vision
+/// boxes). Default ON; an explicit falsy value (`0`/`false`/`no`/`off`/empty)
+/// in `KRIA_GUI_COG_FAST_OBSERVE` rolls back to running every probe on every
+/// observation byte-for-byte. An absent env value keeps it ON.
+fn fast_observe_enabled() -> bool {
+    fast_observe_enabled_lookup(|key| std::env::var(key).ok())
+}
+
+/// Testable core of [`fast_observe_enabled`] with an injectable env lookup.
+fn fast_observe_enabled_lookup<F>(lookup: F) -> bool
+where
+    F: Fn(&str) -> Option<String>,
+{
+    match lookup("KRIA_GUI_COG_FAST_OBSERVE") {
+        Some(v) => {
+            let v = v.trim().to_ascii_lowercase();
+            !matches!(v.as_str(), "0" | "false" | "no" | "off" | "")
+        }
+        None => true,
+    }
+}
+
+/// Task 12: the observation profile for a turn. `FastAction` turns skip the slow
+/// OCR + vision probes (the verdict is the active-window / screen-change
+/// evidence, which the cheap probes still capture); `Full` turns run every
+/// probe. The verdict-critical probes (`capture_screenshot` for the screen hash,
+/// `get_active_window`, accessibility) are NEVER skipped — only OCR + vision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GuiObserveProfile {
+    /// Primitive action (open/scroll/key/switch) — skip OCR + vision.
+    FastAction,
+    /// Read / element / plan / in-app resolve turn — run every probe.
+    Full,
+}
+
+/// Classify a turn into a [`GuiObserveProfile`] from the GOAL CONTRACT action
+/// type (authoritative for the primitives). Only the screen-change / active-
+/// window-verified primitives are fast-pathed; control-resolving intents
+/// (click/type-into-field) and read/summarize turns stay `Full` so vision (for
+/// resolution) and OCR (for reading) are available.
+fn gui_observe_profile_for_prompt(message: &str) -> GuiObserveProfile {
+    let action = extract_gui_goal_contract(message, None).contract.action_type;
+    match action {
+        GuiActionType::OpenApp
+        | GuiActionType::Scroll
+        | GuiActionType::PressKey
+        | GuiActionType::SwitchWindow => GuiObserveProfile::FastAction,
+        _ => GuiObserveProfile::Full,
     }
 }
 
@@ -2160,14 +2220,23 @@ impl GuiPerceptionProvider for DesktopGuiPerceptionProvider<'_> {
         // expensive OCR entirely and return an honest, benign empty result.
         // Flag-OFF keeps OCR running on every observation (byte-for-byte).
         let quality_on = ocr_quality_enabled();
-        if quality_on && matches!(self.ocr_scope, GuiOcrScope::ActionIntent) {
+        // Task 12 (Issue #6): a FastAction turn (open/scroll/key/switch) also
+        // skips OCR — its verdict is active-window/screen-change evidence.
+        let fast_skip =
+            fast_observe_enabled() && matches!(self.observe_profile, GuiObserveProfile::FastAction);
+        if fast_skip || (quality_on && matches!(self.ocr_scope, GuiOcrScope::ActionIntent)) {
             let total_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+            let reason = if fast_skip {
+                "skipped_fast_observe"
+            } else {
+                "skipped_non_read_intent"
+            };
             return GuiProbeResult::ok(serde_json::json!({
                 "text": "",
                 "source": "intent_gated_skip",
                 "ocr_engine": "none",
-                "ocr_engine_status": "skipped_non_read_intent",
-                "ocr_scope": "action_intent",
+                "ocr_engine_status": reason,
+                "ocr_scope": if fast_skip { "fast_action" } else { "action_intent" },
                 "ocr_fast_path": "intent_gated_skip",
                 "ocr_cache_hit": false,
                 "ocr_roi_count": 0,
@@ -2458,6 +2527,20 @@ impl GuiPerceptionProvider for DesktopGuiPerceptionProvider<'_> {
 
     async fn detect_visual_controls(&self) -> GuiProbeResult {
         let started = Instant::now();
+        // Task 12 (Issue #6): a FastAction turn (open/scroll/key/switch) skips
+        // vision — its verdict is active-window/screen-change evidence, never a
+        // visual-control box. Honest benign empty result; flag-OFF runs vision
+        // on every observation (byte-for-byte).
+        if fast_observe_enabled() && matches!(self.observe_profile, GuiObserveProfile::FastAction) {
+            return GuiProbeResult::ok(serde_json::json!({
+                "source": "vision_sidecar",
+                "visual_detector_status": "skipped_fast_observe",
+                "controls": [],
+                "control_count": 0,
+                "visual_detector_total_ms":
+                    started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+            }));
+        }
         let bytes = match tokio::time::timeout(
             Duration::from_millis(1_850),
             self.capture_screenshot_bytes(),
@@ -4941,6 +5024,7 @@ pub(super) async fn desktop_gui_cognition_command_capture_streamed(
             cache_policy: gui_observation_cache_policy_for_prompt(&message),
             force_fresh: std::sync::atomic::AtomicBool::new(false),
             ocr_scope: gui_ocr_scope_for_prompt(&message),
+            observe_profile: gui_observe_profile_for_prompt(&message),
         }),
     };
     let backend_status =
@@ -5876,5 +5960,65 @@ mod atspi_health_tests {
             obj.get("atspi_resolution_trustworthy").and_then(|v| v.as_bool()),
             Some(false)
         );
+    }
+}
+
+#[cfg(test)]
+mod fast_observe_tests {
+    //! Task 12 (Issue #6): the `gui_cog_fast_observe` flag gate + the intent
+    //! (goal-contract action) → observation-profile partition. Pure functions.
+    use super::{fast_observe_enabled_lookup, gui_observe_profile_for_prompt, GuiObserveProfile};
+
+    #[test]
+    fn fast_observe_flag_defaults_on_when_env_absent() {
+        assert!(fast_observe_enabled_lookup(|_| None));
+    }
+
+    #[test]
+    fn fast_observe_flag_rolls_back_on_falsy_values() {
+        for raw in ["0", "false", "no", "off", "", " Off "] {
+            assert!(
+                !fast_observe_enabled_lookup(|_| Some(raw.to_string())),
+                "value {raw:?} must disable fast observe (rollback)"
+            );
+        }
+    }
+
+    #[test]
+    fn fast_observe_flag_stays_on_for_truthy_values() {
+        for raw in ["1", "true", "yes", "on", "anything"] {
+            assert!(fast_observe_enabled_lookup(|_| Some(raw.to_string())));
+        }
+    }
+
+    #[test]
+    fn primitive_action_turns_use_fast_profile() {
+        for prompt in [
+            "scroll down the page",
+            "press the Escape key",
+            "open the calculator",
+            "switch to the Chrome window",
+        ] {
+            assert_eq!(
+                gui_observe_profile_for_prompt(prompt),
+                GuiObserveProfile::FastAction,
+                "prompt {prompt:?} should fast-path (skip OCR + vision)"
+            );
+        }
+    }
+
+    #[test]
+    fn read_and_resolve_turns_use_full_profile() {
+        for prompt in [
+            "summarize what is visible on the screen",
+            "read the current page",
+            "click the OK button",
+        ] {
+            assert_eq!(
+                gui_observe_profile_for_prompt(prompt),
+                GuiObserveProfile::Full,
+                "prompt {prompt:?} must keep OCR/vision (read or control resolution)"
+            );
+        }
     }
 }
