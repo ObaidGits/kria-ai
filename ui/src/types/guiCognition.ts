@@ -9,7 +9,8 @@ export type GuiCognitionLifecycle =
   | "verifying"
   | "blocked"
   | "completed"
-  | "failed";
+  | "failed"
+  | "cancelled";
 
 export interface GuiCognitionEnvelope {
   version: number;

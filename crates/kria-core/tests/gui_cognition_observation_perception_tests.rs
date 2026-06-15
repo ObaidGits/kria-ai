@@ -713,6 +713,50 @@ async fn gui_cognition_perception_matching_controls_ignores_disabled_and_hidden_
     );
 }
 
+// ── Task 3.4: tolerant present-after-change presence predicate ───────────────
+
+#[tokio::test]
+async fn gui_cognition_perception_control_descriptor_observable_matches_by_role_and_label() {
+    // The tolerant presence predicate underpins the present-after-change vs
+    // genuinely-absent distinction (Requirement 2.3/2.4): it decides whether a
+    // control matching the expected descriptor is OBSERVABLE on the fresh
+    // screen, matched by role + label and TOLERANT of a changed control_id.
+    let observation = collect_observation(
+        &RichFakeProvider::healthy(),
+        "obs-rich".into(),
+        "ctx-rich".into(),
+    )
+    .await;
+
+    // Present: a visible text field named "Search" (case-insensitive, either
+    // direction). This is the core eliminated false-negative — a re-identified
+    // control (new control_id) still counts as present because the predicate
+    // never compares identity, only role + label.
+    assert!(observation.control_descriptor_observable("Search", &["text"]));
+    assert!(observation.control_descriptor_observable("search", &["text"]));
+    // A visible button named "Search" is observable for a ClickControl family.
+    assert!(observation.control_descriptor_observable("Search", &["button"]));
+    // No label hint → any visible control in the expected role family counts.
+    assert!(observation.control_descriptor_observable("", &["text"]));
+}
+
+#[tokio::test]
+async fn gui_cognition_perception_control_descriptor_observable_rejects_absent_hidden_and_wrong_role() {
+    let observation = collect_observation(
+        &RichFakeProvider::healthy(),
+        "obs-rich".into(),
+        "ctx-rich".into(),
+    )
+    .await;
+
+    // Genuinely absent: no control with that label.
+    assert!(!observation.control_descriptor_observable("Nonexistent Field", &["text"]));
+    // Hidden control ("Search Hidden" button is visible:false) is not observable.
+    assert!(!observation.control_descriptor_observable("Search Hidden", &["button"]));
+    // Role family mismatch: a "Search" text field is not a dialog.
+    assert!(!observation.control_descriptor_observable("Search", &["dialog"]));
+}
+
 #[tokio::test]
 async fn gui_cognition_perception_runs_independent_probes_in_parallel() {
     let provider = DelayedFakeProvider::new(200);
@@ -783,4 +827,210 @@ async fn gui_cognition_perception_ocr_budget_error_is_not_probe_timeout() {
         .probe_timings
         .iter()
         .any(|timing| timing.probe_name == "run_ocr" && timing.status == "blocked"));
+}
+
+// ── Task 3.3: readiness predicate (window_or_app_observable) ─────────────────
+//
+// The bounded readiness wait uses this predicate to decide whether the expected
+// window/app/page is observable on the fresh screen before the next step's
+// target is resolved (Requirement 2.5). Matching is a case-insensitive substring
+// check against the active window label/app and every visible window's
+// title/app, scoped to English (Requirement 26.3).
+
+#[tokio::test]
+async fn window_or_app_observable_matches_active_window_case_insensitively() {
+    let observation =
+        collect_observation(&RichFakeProvider::healthy(), "obs".into(), "ctx".into()).await;
+    assert_eq!(observation.active_window_label, "Kria Test Window");
+    // Exact label, case-insensitive substring, and partial token all match.
+    assert!(observation.window_or_app_observable("Kria Test Window"));
+    assert!(observation.window_or_app_observable("kria test window"));
+    assert!(observation.window_or_app_observable("Kria"));
+    // A window/app that is not present is not observable.
+    assert!(!observation.window_or_app_observable("Definitely Not A Visible App"));
+    // An empty/blank hint is never "ready".
+    assert!(!observation.window_or_app_observable(""));
+    assert!(!observation.window_or_app_observable("   "));
+}
+
+#[tokio::test]
+async fn window_or_app_observable_false_when_active_window_unknown() {
+    let mut provider = RichFakeProvider::healthy();
+    provider.active_window = GuiProbeResult::err("no active window");
+    provider.desktop_state = GuiProbeResult::ok(serde_json::json!({
+        "accessibility_operational": true,
+        "applications": [],
+    }));
+    provider.cursor_focus = GuiProbeResult::ok(serde_json::json!({
+        "keyboard_focus_known": false,
+    }));
+    provider.focused_title = None;
+
+    let observation = collect_observation(&provider, "obs".into(), "ctx".into()).await;
+    assert_eq!(observation.active_window_label, "unknown");
+    // With no observable window/app, the expected target cannot be ready.
+    assert!(!observation.window_or_app_observable("Kria Test Window"));
+}
+
+// ── Task 3 (Issue #9): force-fresh bypasses the observation cache ────────────
+//
+// A post-action verification re-observe MUST be a fresh capture, never served a
+// pre-action cached frame. These tests prove the bypass behaviorally: a provider
+// that WOULD serve a stale cached observation is overridden by a `ForceFresh`
+// request (flag ON) — the live probes run and the fresh label wins — while a
+// `Default` request still uses the cache, and with the flag OFF `ForceFresh`
+// falls back to the cached frame (byte-for-byte parity).
+mod cache_coherence_behavior {
+    use super::*;
+    use kria_core::agent::gui_cognition::perception::{
+        collect_observation_with_freshness, GuiObservationSnapshot, ObservationFreshness,
+    };
+
+    const FRESH_LABEL: &str = "FRESH-LIVE Window";
+    const STALE_LABEL: &str = "CACHED-STALE Window";
+
+    // Serialize the env-var-sensitive tests so the `KRIA_GUI_COG_CACHE_COHERENCE`
+    // toggle in one test cannot race another running in parallel.
+    static ENV_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Wraps a healthy provider whose LIVE probes report `FRESH_LABEL`, but whose
+    /// observation cache (when consulted) returns a snapshot relabeled to
+    /// `STALE_LABEL`. Tracks cache consultation + the force-fresh signals.
+    #[derive(Clone)]
+    struct CacheTrackingProvider {
+        inner: RichFakeProvider,
+        cached: Arc<GuiObservationSnapshot>,
+        cached_calls: Arc<AtomicUsize>,
+        begin_calls: Arc<AtomicUsize>,
+        force_fresh_true: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl GuiPerceptionProvider for CacheTrackingProvider {
+        async fn get_active_window(&self) -> GuiProbeResult {
+            GuiProbeResult::ok(serde_json::json!({ "title": FRESH_LABEL }))
+        }
+        async fn get_desktop_state(&self) -> GuiProbeResult {
+            self.inner.get_desktop_state().await
+        }
+        async fn get_accessibility_capabilities(&self) -> GuiProbeResult {
+            self.inner.get_accessibility_capabilities().await
+        }
+        async fn find_ui_elements(&self, role: &str) -> GuiProbeResult {
+            self.inner.find_ui_elements(role).await
+        }
+        async fn focused_window_title(&self) -> Option<String> {
+            Some(FRESH_LABEL.to_string())
+        }
+        async fn capture_screenshot(&self) -> GuiProbeResult {
+            self.inner.capture_screenshot().await
+        }
+        async fn run_ocr(&self) -> GuiProbeResult {
+            self.inner.run_ocr().await
+        }
+        async fn begin_observation(&self) {
+            self.begin_calls.fetch_add(1, Ordering::SeqCst);
+        }
+        fn set_force_fresh(&self, force_fresh: bool) {
+            if force_fresh {
+                self.force_fresh_true.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+        async fn cached_observation(
+            &self,
+            _observation_id: &str,
+            _context_id: &str,
+        ) -> Option<GuiObservationSnapshot> {
+            self.cached_calls.fetch_add(1, Ordering::SeqCst);
+            Some((*self.cached).clone())
+        }
+    }
+
+    async fn tracking_provider() -> CacheTrackingProvider {
+        // Build a real snapshot from a healthy provider, then relabel it as the
+        // STALE cached frame so a cache hit is unambiguous vs the fresh probes.
+        let mut cached = collect_observation(
+            &RichFakeProvider::healthy(),
+            "obs-cached".into(),
+            "ctx-cached".into(),
+        )
+        .await;
+        cached.active_window_label = STALE_LABEL.into();
+        cached.active_window.label = STALE_LABEL.into();
+        CacheTrackingProvider {
+            inner: RichFakeProvider::healthy(),
+            cached: Arc::new(cached),
+            cached_calls: Arc::new(AtomicUsize::new(0)),
+            begin_calls: Arc::new(AtomicUsize::new(0)),
+            force_fresh_true: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    #[tokio::test]
+    async fn default_freshness_uses_the_cache() {
+        let provider = tracking_provider().await;
+        let observation = collect_observation_with_freshness(
+            &provider,
+            "obs".into(),
+            "ctx".into(),
+            ObservationFreshness::Default,
+        )
+        .await;
+        // Default consults the cache and is served the stale frame.
+        assert_eq!(provider.cached_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(observation.active_window_label, STALE_LABEL);
+        assert!(observation.cache.cache_hit);
+        // No force-fresh signal on the Default path.
+        assert_eq!(provider.force_fresh_true.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn force_fresh_bypasses_the_cache_when_flag_on() {
+        let _guard = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        // Flag ON (default): ForceFresh must NOT consult the cache; it runs the
+        // live probes and returns the FRESH label, signalling the provider to
+        // bypass its per-turn caches (set_force_fresh(true) + begin_observation).
+        std::env::remove_var("KRIA_GUI_COG_CACHE_COHERENCE");
+        let provider = tracking_provider().await;
+        let observation = collect_observation_with_freshness(
+            &provider,
+            "obs".into(),
+            "ctx".into(),
+            ObservationFreshness::ForceFresh,
+        )
+        .await;
+        assert_eq!(
+            provider.cached_calls.load(Ordering::SeqCst),
+            0,
+            "ForceFresh must NOT consult the observation cache"
+        );
+        assert_eq!(observation.active_window_label, FRESH_LABEL);
+        assert!(!observation.cache.cache_hit);
+        assert_eq!(
+            provider.force_fresh_true.load(Ordering::SeqCst),
+            1,
+            "ForceFresh must signal the provider to bypass per-turn caches"
+        );
+        assert!(provider.begin_calls.load(Ordering::SeqCst) >= 1);
+    }
+
+    #[tokio::test]
+    async fn flag_off_makes_force_fresh_fall_back_to_cache() {
+        let _guard = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        // Rollback (flag OFF): a ForceFresh request is treated exactly like
+        // Default — byte-for-byte the prior caching path (the stale frame wins).
+        std::env::set_var("KRIA_GUI_COG_CACHE_COHERENCE", "0");
+        let provider = tracking_provider().await;
+        let observation = collect_observation_with_freshness(
+            &provider,
+            "obs".into(),
+            "ctx".into(),
+            ObservationFreshness::ForceFresh,
+        )
+        .await;
+        std::env::remove_var("KRIA_GUI_COG_CACHE_COHERENCE");
+        assert_eq!(provider.cached_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(observation.active_window_label, STALE_LABEL);
+        assert_eq!(provider.force_fresh_true.load(Ordering::SeqCst), 0);
+    }
 }

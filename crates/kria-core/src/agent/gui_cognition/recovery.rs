@@ -46,6 +46,7 @@ impl GuiBlocker {
 // ---------------------------------------------------------------------------
 
 use super::executor::GuiActionKind;
+use super::llm_planner::default_idempotent_for;
 
 pub const RECOVERY_MAX_RETRY_COUNT: u32 = 1;
 
@@ -57,6 +58,11 @@ pub enum GuiRecoveryFailureKind {
     TargetMoved,
     TargetAmbiguous,
     ModalAppeared,
+    /// Task 9.5 (Requirements 10, 14): the expected page/window did not finish
+    /// loading (expected state is not observable). Recovery re-observes and
+    /// EXPLAINS the load failure rather than blind-retrying or fabricating a
+    /// success. Classified only when the `gui_cog_safety_polish` flag is ON.
+    LoadFailed,
     StaleContext,
     BackendFailed,
     VerificationFailed,
@@ -73,6 +79,7 @@ impl GuiRecoveryFailureKind {
             Self::TargetMoved => "target_moved",
             Self::TargetAmbiguous => "target_ambiguous",
             Self::ModalAppeared => "modal_appeared",
+            Self::LoadFailed => "load_failed",
             Self::StaleContext => "stale_context",
             Self::BackendFailed => "backend_failed",
             Self::VerificationFailed => "verification_failed",
@@ -136,6 +143,12 @@ pub struct GuiRecoverySignals {
     pub active_window_known: bool,
     pub reresolve_candidate_count: usize,
     pub context_stale: bool,
+    /// Task 9.5 (Requirements 10, 14): the expected page/window failed to load
+    /// (expected state is not observable after a state-changing navigation /
+    /// open / switch). Set by the runtime ONLY when the `gui_cog_safety_polish`
+    /// flag is ON; while the flag is OFF this is always `false` so the recovery
+    /// decision is byte-for-byte unchanged.
+    pub load_failed: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -154,6 +167,13 @@ pub struct GuiRecoveryInput {
     pub retry_count: u32,
     pub prompt_hash: String,
     pub signals: GuiRecoverySignals,
+    /// Task 9.5 (Requirements 10, 14, 15): whether the `gui_cog_safety_polish`
+    /// flag is ON for this turn. When ON, recovery gates any input-backend retry
+    /// on the CANONICAL idempotency classification ([`default_idempotent_for`])
+    /// — so a non-idempotent action (e.g. `OpenApp`) is NEVER auto-retried — and
+    /// honors the load-failure re-observe path. When OFF (the default) the prior
+    /// recovery routing runs byte-for-byte unchanged.
+    pub safety_polish: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -325,6 +345,26 @@ fn idempotent_recoverable(kind: &GuiActionKind) -> bool {
     )
 }
 
+/// Task 9.5 (Requirements 10, 14, 15): whether a bounded input-backend RETRY of
+/// the original action is allowed.
+///
+/// When the `gui_cog_safety_polish` flag is ON we gate the retry on the SINGLE
+/// canonical idempotency classification ([`default_idempotent_for`]) so the
+/// recovery layer can never disagree with the planner about what is safe to
+/// repeat. This closes a genuine gap in the legacy [`idempotent_recoverable`]
+/// helper, which treated `OpenApp` as retryable even though
+/// [`default_idempotent_for`] classifies it as NOT idempotent (re-launching an
+/// app can spawn a second window / duplicate side effect). A non-idempotent
+/// action is therefore never auto-retried; recovery stops and reports instead.
+/// While the flag is OFF the legacy classification is preserved byte-for-byte.
+fn idempotent_retry_allowed(kind: &GuiActionKind, safety_polish: bool) -> bool {
+    if safety_polish {
+        default_idempotent_for(kind.as_str())
+    } else {
+        idempotent_recoverable(kind)
+    }
+}
+
 /// Returns true only when verification did not confirm the expected state, i.e.
 /// a recovery assessment should run. Verified actions never trigger recovery.
 pub fn should_attempt_recovery(verification_status: &str) -> bool {
@@ -480,6 +520,22 @@ pub fn assess_recovery(input: &GuiRecoveryInput) -> GuiRecoveryAssessment {
         );
     }
 
+    // 4b. Page/window failed to load (expected state not observable) -> safe
+    // re-observe + EXPLAIN (Task 9.5, Requirements 10, 14). KRIA never
+    // blind-retries a navigation/open/switch that did not complete and never
+    // fabricates a success. Classified only when the `gui_cog_safety_polish`
+    // flag is ON (the caller leaves `load_failed` false while the flag is OFF,
+    // so the legacy routing is unchanged).
+    if input.safety_polish && signals.load_failed {
+        return recoverable(
+            input,
+            GuiRecoveryFailureKind::LoadFailed,
+            "needs_reobserve",
+            GuiRecoveryActionKind::ReObserve,
+            "The page or window did not finish loading, so KRIA re-observes and explains the load failure instead of retrying blindly.",
+        );
+    }
+
     // 5. Stale context -> safe re-observe only (no input-backend action).
     if signals.context_stale {
         let mut assessment = recoverable(
@@ -577,7 +633,7 @@ pub fn assess_recovery(input: &GuiRecoveryInput) -> GuiRecoveryAssessment {
                 "The intended window is still visible, so KRIA switches back to it once.",
             )
         }
-        _ if idempotent_recoverable(&action_kind) => recoverable(
+        _ if idempotent_retry_allowed(&action_kind, input.safety_polish) => recoverable(
             input,
             GuiRecoveryFailureKind::VerificationFailed,
             "recoverable",

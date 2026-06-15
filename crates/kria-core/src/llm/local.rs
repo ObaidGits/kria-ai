@@ -457,6 +457,18 @@ impl LlmBackend for LocalBackend {
         true
     }
 
+    /// The local llama.cpp backend genuinely posts a `json_schema`
+    /// `response_format` in [`chat_with_grammar`] to activate constrained
+    /// decoding (llguidance), so its structured-output mode is
+    /// [`StructuredOutputMode::Grammar`] (Task 2.2, Requirement 1.2/1.5/0.3).
+    /// `supports_grammar()` derives `true` from this mode for back-compat. If the
+    /// running server lacks `json_schema` support it logs a warning and degrades
+    /// to an unconstrained chat at call time; the capability signal reflects the
+    /// configured/expected path for this backend.
+    fn structured_output_mode(&self) -> crate::llm::StructuredOutputMode {
+        crate::llm::StructuredOutputMode::Grammar
+    }
+
     fn tokenizer_base_url(&self) -> String {
         let url = self.resolve_api_url();
         url.strip_suffix("/v1").unwrap_or(&url).to_string()

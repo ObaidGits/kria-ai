@@ -25,6 +25,27 @@ async function sendManualPrompt(
   await page.getByRole("button", { name: "Send" }).click();
 }
 
+/**
+ * Task 10.4 moved the GUI Cognition technical detail behind a collapsed
+ * `<details class="gui-cognition-details">` (summary text "Developer details").
+ * The layman summary (`.gui-cognition-summary`) stays on top; every developer
+ * field (Active window, Screen observed, AT-SPI/backend status, Planner,
+ * safe-execution detail, Screen hash, injections/redactions, blocker/recovery
+ * sections, …) now lives inside `.gui-cognition-detail-region`, hidden until the
+ * details are expanded. These assertions target that developer detail, so each
+ * test expands the developer details first and scopes the detail assertions to
+ * the detail region (mirroring the Task 10.6 production-UX spec). This only
+ * adjusts the interaction for the collapsible layered output — the assertions
+ * themselves are unchanged.
+ */
+async function expandDeveloperDetails(panel: import("@playwright/test").Locator) {
+  await expect(panel).toBeVisible();
+  await panel.getByText("Developer details").click();
+  const details = panel.locator("details.gui-cognition-details");
+  await expect(details).toHaveJSProperty("open", true);
+  return panel.locator(".gui-cognition-detail-region");
+}
+
 test.describe("GUI Cognition selected tool mode", () => {
   test.beforeEach(async ({ page }) => {
     await installTauriMockBridge(page);
@@ -36,40 +57,40 @@ test.describe("GUI Cognition selected tool mode", () => {
     await sendGuiPrompt(page, "Observe my current screen.");
 
     const panel = page.getByLabel("GUI Cognition progress");
-    await expect(panel).toBeVisible();
-    await expect(panel.getByText("GUI Cognition", { exact: true })).toBeVisible();
-    await expect(panel.getByText(/Active window: Mock Browser/)).toBeVisible();
-    await expect(panel.getByText(/reliable/)).toBeVisible();
-    await expect(panel.getByText("Screen observed")).toBeVisible();
-    await expect(panel.getByText("Controls 6")).toBeVisible();
-    await expect(panel.getByText("Other 2")).toBeVisible();
-    await expect(panel.getByText(/Screenshot available/)).toBeVisible();
-    await expect(panel.getByText(/OCR available/)).toBeVisible();
-    await expect(panel.getByText(/injections 0/).first()).toBeVisible();
-    await expect(panel.getByText(/Accessibility available/)).toBeVisible();
-    await expect(panel.getByText(/Quality trusted 6/)).toBeVisible();
-    await expect(panel.getByText(/42 nodes/)).toBeVisible();
-    await expect(panel.getByText(/AT-SPI healthy/)).toBeVisible();
-    await expect(panel.getByText(/snapshot 118ms/)).toBeVisible();
-    await expect(panel.getByText(/Observation 420ms/)).toBeVisible();
-    await expect(panel.getByText(/Screenshot 96ms/)).toBeVisible();
-    await expect(panel.getByText(/Slowest probe: run_ocr 310ms/)).toBeVisible();
-    await expect(panel.getByText(/Cache miss/)).toBeVisible();
-    await expect(panel.getByText(/Monitors 1/)).toBeVisible();
-    await expect(panel.getByText(/Screen hash abcdef0123456789/)).toBeVisible();
-    await expect(panel.getByText("Context")).toBeVisible();
-    await expect(panel.getByText(/ready · fresh/)).toBeVisible();
-    await expect(panel.getByText("Trusted 6").last()).toBeVisible();
-    await expect(panel.getByText("Executable 6")).toBeVisible();
-    await expect(panel.getByText(/OCR untrusted/)).toBeVisible();
-    await expect(panel.getByText(/Action observe/)).toBeVisible();
-    await expect(panel.getByText(/Final state desktop state observed and summarized/)).toBeVisible();
-    await expect(panel.getByText(/Goal confidence 90%/)).toBeVisible();
-    await expect(panel.getByText(/Planner llm_assisted/)).toBeVisible();
-    await expect(panel.getByText(/LLM completed/)).toBeVisible();
-    await expect(panel.getByText(/Plan confidence 86%/)).toBeVisible();
-    await expect(panel.getByText(/Validation valid/)).toBeVisible();
-    await expect(panel.getByText("Completed", { exact: true })).toBeVisible();
+    const detail = await expandDeveloperDetails(panel);
+    await expect(detail.getByText("GUI Cognition", { exact: true })).toBeVisible();
+    await expect(detail.getByText(/Active window: Mock Browser/)).toBeVisible();
+    await expect(detail.getByText(/reliable/)).toBeVisible();
+    await expect(detail.getByText("Screen observed")).toBeVisible();
+    await expect(detail.getByText("Controls 6")).toBeVisible();
+    await expect(detail.getByText("Other 2")).toBeVisible();
+    await expect(detail.getByText(/Screenshot available/)).toBeVisible();
+    await expect(detail.getByText(/OCR available/)).toBeVisible();
+    await expect(detail.getByText(/injections 0/).first()).toBeVisible();
+    await expect(detail.getByText(/Accessibility available/)).toBeVisible();
+    await expect(detail.getByText(/Quality trusted 6/)).toBeVisible();
+    await expect(detail.getByText(/42 nodes/)).toBeVisible();
+    await expect(detail.getByText(/AT-SPI healthy/)).toBeVisible();
+    await expect(detail.getByText(/snapshot 118ms/)).toBeVisible();
+    await expect(detail.getByText(/Observation 420ms/)).toBeVisible();
+    await expect(detail.getByText(/Screenshot 96ms/)).toBeVisible();
+    await expect(detail.getByText(/Slowest probe: run_ocr 310ms/)).toBeVisible();
+    await expect(detail.getByText(/Cache miss/)).toBeVisible();
+    await expect(detail.getByText(/Monitors 1/)).toBeVisible();
+    await expect(detail.getByText(/Screen hash abcdef0123456789/)).toBeVisible();
+    await expect(detail.getByText("Context")).toBeVisible();
+    await expect(detail.getByText(/ready · fresh/)).toBeVisible();
+    await expect(detail.getByText("Trusted 6").last()).toBeVisible();
+    await expect(detail.getByText("Executable 6")).toBeVisible();
+    await expect(detail.getByText(/OCR untrusted/)).toBeVisible();
+    await expect(detail.getByText(/Action observe/)).toBeVisible();
+    await expect(detail.getByText(/Final state desktop state observed and summarized/)).toBeVisible();
+    await expect(detail.getByText(/Goal confidence 90%/)).toBeVisible();
+    await expect(detail.getByText(/Planner llm_assisted/)).toBeVisible();
+    await expect(detail.getByText(/LLM completed/)).toBeVisible();
+    await expect(detail.getByText(/Plan confidence 86%/)).toBeVisible();
+    await expect(detail.getByText(/Validation valid/)).toBeVisible();
+    await expect(detail.getByText("Completed", { exact: true })).toBeVisible();
 
     const commands = await getTauriMockCommands(page);
     expect(commands.some((entry) => entry.cmd === "send_manual_tool_message" && entry.args?.profile?.mode_id === "gui_cognition")).toBeTruthy();
@@ -89,11 +110,11 @@ test.describe("GUI Cognition selected tool mode", () => {
     await sendGuiPrompt(page, "Observe with atspi degraded status.");
 
     const panel = page.getByLabel("GUI Cognition progress");
-    await expect(panel).toBeVisible();
-    await expect(panel.getByText(/AT-SPI degraded/)).toBeVisible();
-    await expect(panel.getByText(/snapshot 760ms/)).toBeVisible();
-    await expect(panel.getByText(/skipped apps 1/)).toBeVisible();
-    await expect(panel.getByText(/omitted nodes 24/)).toBeVisible();
+    const detail = await expandDeveloperDetails(panel);
+    await expect(detail.getByText(/AT-SPI degraded/)).toBeVisible();
+    await expect(detail.getByText(/snapshot 760ms/)).toBeVisible();
+    await expect(detail.getByText(/skipped apps 1/)).toBeVisible();
+    await expect(detail.getByText(/omitted nodes 24/)).toBeVisible();
     await expect(page.getByText(/raw accessibility tree/i)).toHaveCount(0);
   });
 
@@ -105,77 +126,78 @@ test.describe("GUI Cognition selected tool mode", () => {
     await expect(banner.getByText("Tool Mode: GUI Cognition")).toBeVisible();
     await expect(banner.getByText("Route: Manual")).toBeVisible();
     await expect(banner.getByText("State: Running")).toBeVisible();
-    await expect(panel.getByText("Running")).toBeVisible();
+    const detail = await expandDeveloperDetails(panel);
+    await expect(detail.getByText("Running")).toBeVisible();
   });
 
   test("shows startup warming action backend state", async ({ page }) => {
     await sendGuiPrompt(page, "startup warming observe status");
 
     const panel = page.getByLabel("GUI Cognition progress");
-    await expect(panel).toBeVisible();
-    await expect(panel.getByText(/warming up · blocked_global_halt/)).toBeVisible();
-    await expect(panel.getByText(/Vision starting · uinput starting · startup_warming/)).toBeVisible();
-    await expect(panel.getByText(/Wait for vision sidecar and uinput daemon/)).toBeVisible();
-    await expect(panel.getByText(/Capabilities focus unavailable/)).toBeVisible();
+    const detail = await expandDeveloperDetails(panel);
+    await expect(detail.getByText(/warming up · blocked_global_halt/)).toBeVisible();
+    await expect(detail.getByText(/Vision starting · uinput starting · startup_warming/)).toBeVisible();
+    await expect(detail.getByText(/Wait for vision sidecar and uinput daemon/)).toBeVisible();
+    await expect(detail.getByText(/Capabilities focus unavailable/)).toBeVisible();
   });
 
   test("shows Wayland no-backend action blocker and xdotool warning", async ({ page }) => {
     await sendGuiPrompt(page, "wayland no backend observe status");
 
     const panel = page.getByLabel("GUI Cognition progress");
-    await expect(panel).toBeVisible();
-    await expect(panel.getByText(/blocked · unavailable/)).toBeVisible();
-    await expect(panel.getByText(/Probe wayland_no_input_backend/)).toBeVisible();
-    await expect(panel.getByText(/xdotool detected but not usable for Wayland actions/)).toBeVisible();
-    await expect(panel.getByText(/Capabilities focus unavailable/)).toBeVisible();
+    const detail = await expandDeveloperDetails(panel);
+    await expect(detail.getByText(/blocked · unavailable/)).toBeVisible();
+    await expect(detail.getByText(/Probe wayland_no_input_backend/)).toBeVisible();
+    await expect(detail.getByText(/xdotool detected but not usable for Wayland actions/)).toBeVisible();
+    await expect(detail.getByText(/Capabilities focus unavailable/)).toBeVisible();
   });
 
   test("shows Wayland ydotool backend only after usability probe", async ({ page }) => {
     await sendGuiPrompt(page, "ydotool ready observe status");
 
     const panel = page.getByLabel("GUI Cognition progress");
-    await expect(panel).toBeVisible();
-    await expect(panel.getByText(/ready · ydotool_accessibility/)).toBeVisible();
-    await expect(panel.getByText(/Probe wayland_ydotool_ready/)).toBeVisible();
-    await expect(panel.getByText(/ydotool actions available/)).toBeVisible();
+    const detail = await expandDeveloperDetails(panel);
+    await expect(detail.getByText(/ready · ydotool_accessibility/)).toBeVisible();
+    await expect(detail.getByText(/Probe wayland_ydotool_ready/)).toBeVisible();
+    await expect(detail.getByText(/ydotool actions available/)).toBeVisible();
   });
 
   test("shows X11 xdotool backend as action-ready", async ({ page }) => {
     await sendGuiPrompt(page, "x11 xdotool observe status");
 
     const panel = page.getByLabel("GUI Cognition progress");
-    await expect(panel).toBeVisible();
-    await expect(panel.getByText(/ready · xdotool_accessibility/)).toBeVisible();
-    await expect(panel.getByText(/Session x11/)).toBeVisible();
-    await expect(panel.getByText(/Probe x11_xdotool_ready/)).toBeVisible();
-    await expect(panel.getByText(/xdotool actions available/)).toBeVisible();
+    const detail = await expandDeveloperDetails(panel);
+    await expect(detail.getByText(/ready · xdotool_accessibility/)).toBeVisible();
+    await expect(detail.getByText(/Session x11/)).toBeVisible();
+    await expect(detail.getByText(/Probe x11_xdotool_ready/)).toBeVisible();
+    await expect(detail.getByText(/xdotool actions available/)).toBeVisible();
   });
 
   test("renders safe execution target, safety, and verification", async ({ page }) => {
     await sendGuiPrompt(page, "Perform safe execution by clicking Search.");
 
     const panel = page.getByLabel("GUI Cognition progress");
-    await expect(panel).toBeVisible();
-    await expect(panel.getByText("Search").first()).toBeVisible();
-    await expect(panel.getByText(/Action click_control/)).toBeVisible();
-    await expect(panel.getByText(/Planner llm_assisted/)).toBeVisible();
-    await expect(panel.getByText(/Validation valid/)).toBeVisible();
-    await expect(panel.getByText(/Confidence 91%/)).toBeVisible();
-    await expect(panel.getByText("Allowed")).toBeVisible();
-    await expect(panel.getByText(/ClickControl/)).toBeVisible();
-    await expect(panel.getByText(/Verification completed/)).toBeVisible();
+    const detail = await expandDeveloperDetails(panel);
+    await expect(detail.getByText("Search").first()).toBeVisible();
+    await expect(detail.getByText(/Action click_control/)).toBeVisible();
+    await expect(detail.getByText(/Planner llm_assisted/)).toBeVisible();
+    await expect(detail.getByText(/Validation valid/)).toBeVisible();
+    await expect(detail.getByText(/Confidence 91%/)).toBeVisible();
+    await expect(detail.getByText("Allowed")).toBeVisible();
+    await expect(detail.getByText(/ClickControl/)).toBeVisible();
+    await expect(detail.getByText(/Verification completed/)).toBeVisible();
   });
 
   test("shows deterministic fallback when LLM plan is rejected", async ({ page }) => {
     await sendGuiPrompt(page, "invalid llm fallback plan");
 
     const panel = page.getByLabel("GUI Cognition progress");
-    await expect(panel).toBeVisible();
-    await expect(panel.getByText(/Planner deterministic_fallback/)).toBeVisible();
-    await expect(panel.getByText(/LLM rejected/)).toBeVisible();
-    await expect(panel.getByText(/Plan confidence 62%/)).toBeVisible();
-    await expect(panel.getByText(/Validation valid/)).toBeVisible();
-    await expect(panel.getByText("LLM planner output was rejected; deterministic fallback used.")).toBeVisible();
+    const detail = await expandDeveloperDetails(panel);
+    await expect(detail.getByText(/Planner deterministic_fallback/)).toBeVisible();
+    await expect(detail.getByText(/LLM rejected/)).toBeVisible();
+    await expect(detail.getByText(/Plan confidence 62%/)).toBeVisible();
+    await expect(detail.getByText(/Validation valid/)).toBeVisible();
+    await expect(detail.getByText("LLM planner output was rejected; deterministic fallback used.")).toBeVisible();
     await expect(page.getByText(/raw provider response/i)).toHaveCount(0);
   });
 
@@ -185,8 +207,9 @@ test.describe("GUI Cognition selected tool mode", () => {
     const banner = page.locator(".manual-tool-mode-banner");
     const panel = page.getByLabel("GUI Cognition progress");
     await expect(banner.getByText("State: Blocked")).toBeVisible();
-    await expect(panel.getByText("Blocked")).toBeVisible();
-    await expect(panel.getByText("No matching accessible button/control was found.")).toBeVisible();
+    const detail = await expandDeveloperDetails(panel);
+    await expect(detail.getByText("Blocked")).toBeVisible();
+    await expect(detail.getByText("No matching accessible button/control was found.")).toBeVisible();
   });
 
   test("opens exact GUI HITL modal for risky submit and denial does not execute", async ({ page }) => {
@@ -212,12 +235,13 @@ test.describe("GUI Cognition selected tool mode", () => {
     await sendGuiPrompt(page, "Run recovery scenario with OCR injection.");
 
     const panel = page.getByLabel("GUI Cognition progress");
-    await expect(panel.getByText(/injections 1/).first()).toBeVisible();
-    await expect(panel.getByText(/redactions 1/)).toBeVisible();
-    await expect(panel.getByText("Recovery", { exact: true })).toBeVisible();
-    await expect(panel.getByText("Focus changed before verification.")).toBeVisible();
-    await expect(panel.getByText("Re-observe screen")).toBeVisible();
-    await expect(panel.getByText("Ask for clarification")).toBeVisible();
+    const detail = await expandDeveloperDetails(panel);
+    await expect(detail.getByText(/injections 1/).first()).toBeVisible();
+    await expect(detail.getByText(/redactions 1/)).toBeVisible();
+    await expect(detail.getByText("Recovery", { exact: true })).toBeVisible();
+    await expect(detail.getByText("Focus changed before verification.")).toBeVisible();
+    await expect(detail.getByText("Re-observe screen")).toBeVisible();
+    await expect(detail.getByText("Ask for clarification")).toBeVisible();
     await expect(page.getByText(/ignore previous instructions/i)).toHaveCount(0);
   });
 

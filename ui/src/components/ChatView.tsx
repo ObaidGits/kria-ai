@@ -44,6 +44,7 @@ const ChatView: Component = () => {
     removePendingFile,
     clearPendingFiles,
     cancelTurn,
+    cancelGuiCognitionTurn,
     toggleVoice,
     voiceActive,
     voiceState,
@@ -385,6 +386,7 @@ const ChatView: Component = () => {
             <GuiCognitionPanel
               session={session()}
               onDismiss={() => clearGuiCognitionSession()}
+              onStop={() => cancelGuiCognitionTurn()}
             />
           )}
         </Show>

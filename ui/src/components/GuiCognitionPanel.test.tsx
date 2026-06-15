@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import GuiCognitionPanel from "./GuiCognitionPanel";
 import type { GuiCognitionSessionState } from "../types/guiCognition";
@@ -758,5 +758,117 @@ describe("GuiCognitionPanel", () => {
     expect(screen.queryByText(/raw_ocr_text/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/hidden_prompt/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/abc123/)).not.toBeInTheDocument();
+  });
+
+  it("shows a Stop control while the turn is active and invokes onStop", () => {
+    const onStop = vi.fn();
+    render(() => (
+      <GuiCognitionPanel
+        onStop={onStop}
+        session={{ ...baseSession, lifecycle: "executing" }}
+      />
+    ));
+
+    const stop = screen.getByRole("button", { name: /stop the active gui cognition turn/i });
+    expect(stop).toBeInTheDocument();
+    fireEvent.click(stop);
+    expect(onStop).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides the Stop control once the turn reaches a terminal state", () => {
+    render(() => (
+      <GuiCognitionPanel
+        onStop={vi.fn()}
+        session={{ ...baseSession, lifecycle: "completed" }}
+      />
+    ));
+
+    expect(
+      screen.queryByRole("button", { name: /stop the active gui cognition turn/i })
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders a clear cancelled state", () => {
+    render(() => (
+      <GuiCognitionPanel
+        onStop={vi.fn()}
+        session={{
+          ...baseSession,
+          lifecycle: "cancelled",
+          blocker: { type: "turn", reason: "Turn cancelled by you.", options: [] },
+        }}
+      />
+    ));
+
+    expect(screen.getAllByText("Cancelled").length).toBeGreaterThan(0);
+    expect(screen.getByText(/Cancelled — Turn cancelled by you\./)).toBeInTheDocument();
+    // Cancelled is terminal → the Stop control is no longer offered.
+    expect(
+      screen.queryByRole("button", { name: /stop the active gui cognition turn/i })
+    ).not.toBeInTheDocument();
+  });
+
+  // Task 10.4 / Requirement 16.4-16.5: layered output.
+  describe("layered output (layman summary + collapsible developer detail)", () => {
+    it("renders a layman summary layer above a collapsible developer detail layer", () => {
+      const { container } = render(() => <GuiCognitionPanel session={baseSession} />);
+
+      // Layman layer present.
+      const summary = container.querySelector(".gui-cognition-summary");
+      expect(summary).toBeTruthy();
+      expect(summary?.querySelector(".gui-cognition-summary-headline")?.textContent).toBeTruthy();
+
+      // Developer detail layer is a <details> collapsed by default.
+      const details = container.querySelector<HTMLDetailsElement>("details.gui-cognition-details");
+      expect(details).toBeTruthy();
+      expect(details?.open).toBe(false);
+      expect(details?.querySelector("summary")?.textContent).toMatch(/developer detail/i);
+    });
+
+    it("expands the developer detail layer to reveal the full technical envelope", () => {
+      const { container } = render(() => <GuiCognitionPanel session={baseSession} />);
+      const details = container.querySelector<HTMLDetailsElement>("details.gui-cognition-details");
+      expect(details?.open).toBe(false);
+
+      // Expand the collapsible developer layer.
+      const summaryEl = details!.querySelector("summary")!;
+      details!.open = true;
+      fireEvent.click(summaryEl);
+
+      // The full technical detail (raw IDs/hashes/coordinates) lives ONLY here.
+      const detailRegion = details!.querySelector(".gui-cognition-detail-region");
+      expect(detailRegion?.textContent).toContain("GUI Cognition");
+      expect(detailRegion?.textContent).toContain("Prompt hash prompt-hash-123");
+      expect(detailRegion?.textContent).toMatch(/Screen hash abcdef0123456789/);
+    });
+
+    it("never leaks hashes, internal IDs, coordinates, or secrets into the layman layer", () => {
+      const { container } = render(() => (
+        <GuiCognitionPanel
+          session={{
+            ...baseSession,
+            lifecycle: "blocked",
+            blocker: {
+              type: "execution",
+              // Deliberately leaky upstream reason: id + coordinate + hash + secret.
+              reason:
+                "control-search at 12,24 failed (prompt-hash-abcdef0123456789, token=sk-secret-value)",
+              options: [],
+            },
+          }}
+        />
+      ));
+
+      const laymanText = container.querySelector(".gui-cognition-summary")?.textContent ?? "";
+      expect(laymanText).toContain("Stopped safely");
+      // Privacy guarantees on the layman layer:
+      expect(laymanText).not.toMatch(/[0-9a-f]{12,}/i); // hex digest / hash
+      expect(laymanText).not.toMatch(
+        /\b(control|prompt|turn|session|workflow|resolution)[-_][a-z0-9]/i,
+      ); // internal id token
+      expect(laymanText).not.toMatch(/\b\d{2,4}\s*,\s*\d{2,4}\b/); // coordinates
+      expect(laymanText).not.toMatch(/token\s*=\s*sk-/i); // secret value
+      expect(laymanText).toContain("[redacted]");
+    });
   });
 });

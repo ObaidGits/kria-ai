@@ -3,7 +3,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import hljsDarkThemeUrl from "highlight.js/styles/github-dark.css?url";
 import hljsLightThemeUrl from "highlight.js/styles/github.css?url";
-import { handleGuiCognitionEvent } from "./guiCognitionSession";
+import {
+  handleGuiCognitionEvent,
+  activeGuiCognitionSession,
+  hasActiveGuiCognitionSession,
+  markGuiCognitionCancelled,
+} from "./guiCognitionSession";
 
 const STORAGE_KEYS = {
   theme: "kria_theme",
@@ -1117,6 +1122,34 @@ function isScopedThinking(scope: StreamScope): boolean {
   return scope === "prompt_lab" ? promptLabIsThinking() : assistantIsThinking();
 }
 
+/**
+ * Task 10.2 (Requirement 16.3): user-visible message shown when a new prompt is
+ * submitted while a turn is still active. We never silently drop or interleave:
+ * the prompt is NOT dispatched and NOT recorded as a user turn, but the user is
+ * told why and that they can wait or press Stop.
+ */
+const TURN_BUSY_MESSAGE =
+  "A request is already running. Wait for it to finish or press Stop before sending another prompt.";
+
+/**
+ * Append an explicit "busy" notice for the given scope. Consecutive attempts are
+ * de-duplicated so repeated submissions do not spam the transcript. Returns the
+ * scope's current messages so callers can stay terse.
+ */
+function notifyTurnBusy(scope: StreamScope): void {
+  const existing = scope === "prompt_lab" ? promptLabMessages() : assistantMessages();
+  const last = existing[existing.length - 1];
+  if (last && last.role === "system" && last.content === TURN_BUSY_MESSAGE) {
+    return;
+  }
+  appendScopedMessage(scope, {
+    id: crypto.randomUUID(),
+    role: "system",
+    content: TURN_BUSY_MESSAGE,
+    timestamp: Date.now(),
+  });
+}
+
 async function cancelScopedTurnIfActive(scope: StreamScope): Promise<void> {
   const sessionId = getScopedCurrentSession(scope);
   if (!sessionId || !isScopedThinking(scope)) return;
@@ -1133,6 +1166,13 @@ async function cancelScopedTurnIfActive(scope: StreamScope): Promise<void> {
 async function cancelTurn(scope: StreamScope = "assistant"): Promise<void> {
   const sessionId = getScopedCurrentSession(scope);
   if (!sessionId || !isScopedThinking(scope)) return;
+  // Task 10.3 (Requirement 16.6 / 21.1): if a GUI Cognition turn is active for
+  // the assistant scope, also abort it through the Task 1 cancel path
+  // (`cancel_gui_cognition_turn` → process-local CancelToken registry) so the
+  // workflow loop halts before its next action — not just the chat/agent loop.
+  if (scope === "assistant" && hasActiveGuiCognitionSession()) {
+    await requestGuiCognitionCancel(sessionId);
+  }
   try {
     await invoke("cancel_turn", { sessionId });
     setScopedThinking(scope, false);
@@ -1148,6 +1188,43 @@ async function cancelTurn(scope: StreamScope = "assistant"): Promise<void> {
     } catch (httpErr) {
       console.warn("Failed to cancel active turn via HTTP fallback:", httpErr);
     }
+  }
+}
+
+/**
+ * Task 10.3 (Requirement 16.6 / 21.1): abort the active GUI Cognition turn via
+ * the Task 1 cancel mechanism. Cancellation is cooperative — the backend
+ * `cancel_gui_cognition_turn` command trips the per-turn `CancelToken` keyed by
+ * `session_id`, so the workflow loop stops before its next action (bounded,
+ * deterministic stop — never an uncontrolled kill). The UI is updated
+ * optimistically (panel → "cancelled", thinking indicator cleared) regardless
+ * of the IPC result so the surface always returns to idle/ready.
+ */
+async function requestGuiCognitionCancel(sessionId: string): Promise<void> {
+  const reason = "Turn cancelled by you.";
+  try {
+    await invoke("cancel_gui_cognition_turn", { sessionId, reason });
+  } catch (e) {
+    console.warn("Failed to cancel GUI cognition turn:", e);
+  }
+  markGuiCognitionCancelled(reason);
+}
+
+/**
+ * Public API: visible Stop/Cancel control for the GUI Cognition panel. Aborts
+ * the active GUI Cognition turn and clears the assistant thinking indicator.
+ */
+async function cancelGuiCognitionTurn(): Promise<void> {
+  const sessionId = activeGuiCognitionSession()?.sessionId ?? getScopedCurrentSession("assistant");
+  // Flip the panel into a clear cancelled state immediately even if we cannot
+  // resolve a session id (degrades gracefully when streaming is OFF / no turn).
+  markGuiCognitionCancelled("Turn cancelled by you.");
+  setScopedThinking("assistant", false);
+  if (!sessionId) return;
+  try {
+    await invoke("cancel_gui_cognition_turn", { sessionId, reason: "Turn cancelled by you." });
+  } catch (e) {
+    console.warn("Failed to cancel GUI cognition turn:", e);
   }
 }
 
@@ -1207,7 +1284,10 @@ function formatColabDispatchWarning(stage: AgentStageEvent): string {
 // --- Actions ---
 async function sendMessage(text: string) {
   if (!text.trim()) return;
-  if (isScopedThinking("assistant")) return;
+  if (isScopedThinking("assistant")) {
+    notifyTurnBusy("assistant");
+    return;
+  }
 
   setScopedToolChoice("assistant", null);
   const selectedMode = selectedManualToolMode();
@@ -1256,7 +1336,10 @@ async function sendMessage(text: string) {
 
 async function sendLabMessage(text: string, profile?: PromptLabProfile) {
   if (!text.trim()) return;
-  if (isScopedThinking("prompt_lab")) return;
+  if (isScopedThinking("prompt_lab")) {
+    notifyTurnBusy("prompt_lab");
+    return;
+  }
 
   setScopedToolChoice("prompt_lab", null);
 
@@ -1339,7 +1422,10 @@ function clearPendingFiles() {
 
 async function sendDocumentMessage(files: PendingFile[], text?: string) {
   if (files.length === 0) return;
-  if (isScopedThinking("assistant")) return;
+  if (isScopedThinking("assistant")) {
+    notifyTurnBusy("assistant");
+    return;
+  }
 
   try {
     const sessionId = await ensureScopedSessionActive("assistant");
@@ -1447,7 +1533,10 @@ async function transcribeUploadedAudio(file: File) {
 }
 
 async function sendImageMessage(imageData: Uint8Array, mimeType: string, text?: string) {
-  if (isScopedThinking("assistant")) return;
+  if (isScopedThinking("assistant")) {
+    notifyTurnBusy("assistant");
+    return;
+  }
 
   const b64 = uint8ToBase64(imageData);
   const dataUrl = `data:${mimeType};base64,${b64}`;
@@ -3205,6 +3294,21 @@ function initListeners() {
   listen("gui_cognition:event", (event) => {
     try {
       handleGuiCognitionEvent(event.payload as any);
+      // Task 10.2 (Requirement 16.2/16.3): safety net so the thinking indicator
+      // NEVER sticks. The `agent:done` companion already clears it on the
+      // batch/end path, but when `gui_cog_stream_ux` streams envelopes DURING
+      // the turn we also clear on any definitively terminal lifecycle in case a
+      // terminal envelope is observed before (or without) `agent:done`. Paused
+      // states (awaiting_approval) intentionally keep the indicator running.
+      const lifecycle = activeGuiCognitionSession()?.lifecycle;
+      if (
+        lifecycle === "completed" ||
+        lifecycle === "failed" ||
+        lifecycle === "blocked" ||
+        lifecycle === "cancelled"
+      ) {
+        setScopedThinking("assistant", false);
+      }
     } catch (e) {
       console.warn("[GuiCognition] Failed to process event:", e);
     }
@@ -3809,6 +3913,7 @@ export const appStore = {
   removePendingFile,
   clearPendingFiles,
   cancelTurn,
+  cancelGuiCognitionTurn,
   approveAction,
   denyAction,
   interactionDecisions,

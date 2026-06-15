@@ -659,6 +659,51 @@ export async function installTauriMockBridge(page: Page, options: TauriMockOptio
           return;
         }
 
+        if (lower.includes("streaming lifecycle")) {
+          // Task 10.6 (Requirement 16.1): emit lifecycle phases with deliberate
+          // gaps so the panel renders progressively DURING the turn
+          // (observe -> plan -> per-step execute/verify -> complete). This proves
+          // the `gui_cognition:event` envelopes stream incrementally rather than
+          // arriving as a single end-of-turn batch.
+          emitGui(observationSummary());
+          emitGui(contextSummary());
+          setTimeout(() => {
+            emitGui(actionBackendStatus());
+            emitGui(
+              goalContractSummary({
+                goal_summary: "Click requested control",
+                intent_kind: "click_control",
+                action_type: "click_control",
+                target_control_hint: "Search",
+                risk_level: "low",
+                requires_user_approval: false,
+              }),
+            );
+            emitPlannerEvents();
+          }, 700);
+          setTimeout(() => {
+            emitGui({ type: "TargetResolutionStarted", action_kind: "ClickControl", query: "Search" });
+            emitGui({ type: "TargetResolved", target_type: "button", label: "Search", confidence: 0.91 });
+            emitGui({ type: "SafetyGateCompleted", status: "Allowed", risk_level: "low", reasons: [] });
+            emitGui({ type: "ActionStarted", action_kind: "ClickControl", target: "Search" });
+            emitGui({ type: "ActionCompleted", action_kind: "ClickControl", status: "completed" });
+          }, 1600);
+          setTimeout(() => {
+            emitGui(
+              observationSummary({
+                observation_id: "mock-post-observation",
+                visible_control_count: 7,
+                accessibility_control_count: 7,
+              }),
+            );
+            emitGui({ type: "VerificationCompleted", status: "completed", confidence: 0.82 });
+            emitGui({ type: "TurnCompleted", status: "ok" });
+            emitEvent("agent:token", { text: "Safe GUI action completed and verified." });
+            emitEvent("agent:done", {});
+          }, 3500);
+          return;
+        }
+
         emitGui(observationSummary());
         emitGui(contextSummary());
         if (lower.includes("startup warming")) {

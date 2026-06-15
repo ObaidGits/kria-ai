@@ -375,6 +375,20 @@ impl GuiBackend for YdotoolBackend {
     }
 
     async fn focus_window(&self) -> Result<(), GuiError> {
+        // Task 3 (Issue #1): `xdotool getactivewindow`/`windowactivate` is
+        // X11-only and cannot raise a window on Wayland (GNOME blocks window
+        // enumeration). Rather than spawn xdotool and surface an opaque failure —
+        // or worse, appear to succeed — return a clear, honest error on Wayland so
+        // the orchestrator uses the compositor-native activate path (the
+        // gui-cognition desktop runtime resolves the target to its `.desktop` and
+        // raises it via `gio launch`). NEVER fabricate success here.
+        if Self::session_is_wayland() {
+            return Err(GuiError::IpcError(
+                "focus_window via xdotool is X11-only and cannot activate a window on Wayland; \
+                 use the compositor-native activation path (gio launch of the target .desktop)"
+                    .to_string(),
+            ));
+        }
         // Use xdotool to activate the active window
         // This ensures keyboard focus in X11
         // Execute: xdotool windowactiv $(xdotool getactivewindow)
@@ -434,11 +448,31 @@ impl GuiBackend for YdotoolBackend {
                 }
                 Err(GuiError::IpcError("No window data in response".to_string()))
             }
-            Ok(IpcResponse::Error { message, code }) => Err(GuiError::IpcError(format!(
-                "{}: {}",
-                code.unwrap_or_else(|| "WINDOW_ERROR".to_string()),
-                message
-            ))),
+            Ok(IpcResponse::Error { message, code }) => {
+                // Wayland: the daemon completed the round-trip but could not
+                // resolve a window id (WINDOW_ID_FAILED — xdotool is X11-only and
+                // GNOME blocks window enumeration). Try the Wayland-native
+                // fallback (AT-SPI / proc) BEFORE surfacing the error, so a
+                // resolvable focused app can still drive the protected-mode guard.
+                let ipc_err = format!(
+                    "{}: {}",
+                    code.clone().unwrap_or_else(|| "WINDOW_ERROR".to_string()),
+                    message
+                );
+                tracing::debug!(
+                    target: "gui_automation",
+                    ipc_error = %ipc_err,
+                    "daemon get_active_window returned an error — trying Wayland-native fallback"
+                );
+                Self::get_active_window_wayland_fallback()
+                    .await
+                    .map_err(|fallback_err| {
+                        GuiError::IpcError(format!(
+                            "{} (Wayland fallback also failed: {})",
+                            ipc_err, fallback_err
+                        ))
+                    })
+            }
             Err(e) => {
                 // IPC failed (WINDOW_ID_FAILED on Wayland, daemon not running, etc.)
                 // Try Wayland-native fallback: AT-SPI via /proc + xdg-activation heuristic.
@@ -466,6 +500,19 @@ impl GuiBackend for YdotoolBackend {
 /// These are not part of the `GuiBackend` trait — they are internal helpers
 /// used when the uinput daemon IPC fails on Wayland.
 impl YdotoolBackend {
+    /// Task 3 (Issue #1): whether the current session is Wayland, where the
+    /// X11-only `xdotool windowactivate` focus path cannot raise a window. Reads
+    /// `XDG_SESSION_TYPE` first, then falls back to `WAYLAND_DISPLAY`.
+    fn session_is_wayland() -> bool {
+        if let Ok(session) = std::env::var("XDG_SESSION_TYPE") {
+            let session = session.trim().to_ascii_lowercase();
+            if !session.is_empty() {
+                return session.contains("wayland");
+            }
+        }
+        std::env::var_os("WAYLAND_DISPLAY").is_some()
+    }
+
     /// Wayland-native fallback for active window detection.
     ///
     /// When the uinput daemon IPC fails (WINDOW_ID_FAILED on Wayland), this
@@ -1113,6 +1160,70 @@ impl ProtectedModeDetector {
     }
 }
 
+/// Wayland input fix: whether a failure to RESOLVE the active window (window-id
+/// unavailable — `WINDOW_ID_FAILED` on GNOME/Wayland where xdotool is X11-only)
+/// should be TOLERATED for input delivery. The uinput backend injects events at
+/// the kernel level and needs no window id, and the GUI-cognition safety gate +
+/// `screen_changed`/process verification govern the action's effect — so on the
+/// Wayland (uinput/auto) backend we proceed instead of hard-failing the input
+/// tool. Reads `KRIA_INPUT_BACKEND`: `xdotool` (explicit X11 rollback) ⇒ NOT
+/// tolerant (legacy hard-fail preserved byte-for-byte); `auto`/`uinput`/absent ⇒
+/// tolerant. This NEVER relaxes a PROTECTED-MODE / expected-title rejection —
+/// those are returned as `PermissionDenied` and always block.
+fn window_verify_tolerant() -> bool {
+    !matches!(
+        std::env::var("KRIA_INPUT_BACKEND")
+            .ok()
+            .as_deref()
+            .map(|s| s.trim().to_lowercase())
+            .as_deref(),
+        Some("xdotool")
+    )
+}
+
+impl ProtectedModeDetector {
+    /// Wayland-tolerant wrapper over [`verify_active_window`].
+    ///
+    /// Returns:
+    /// - `Ok(Some(window))` when the active window resolved and passed the
+    ///   protected-mode / expected-title checks.
+    /// - `Ok(None)` when the active window could NOT be resolved (Wayland
+    ///   `WINDOW_ID_FAILED`) AND the tolerant backend is active — the caller
+    ///   should PROCEED (uinput needs no window id); the effect is verified by
+    ///   the GUI-cognition layer (`screen_changed`).
+    /// - `Err(PermissionDenied)` ALWAYS when protected mode is active or the
+    ///   expected title does not match (these are never tolerated).
+    /// - `Err(other)` when the window could not be resolved AND the backend is
+    ///   the explicit `xdotool` rollback (legacy hard-fail preserved).
+    pub async fn verify_active_window_tolerant(
+        &self,
+        backend: &dyn GuiBackend,
+        expected_title: Option<&str>,
+    ) -> Result<Option<WindowInfo>, GuiError> {
+        match self.verify_active_window(backend, expected_title).await {
+            Ok(window) => Ok(Some(window)),
+            // Protected-mode / expected-title rejections ALWAYS block.
+            Err(e @ GuiError::PermissionDenied(_)) => Err(e),
+            // Window could not be resolved (Wayland window-id unavailable, daemon
+            // down, etc.). Tolerate on the uinput/auto backend; preserve the
+            // legacy hard-fail when forced to xdotool.
+            Err(e) => {
+                if window_verify_tolerant() {
+                    tracing::warn!(
+                        target: "gui_automation",
+                        error = %e,
+                        "active window unavailable (Wayland); proceeding with uinput input \
+                         without window-id verification — effect is verified downstream"
+                    );
+                    Ok(None)
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+}
+
 impl Default for ProtectedModeDetector {
     fn default() -> Self {
         Self::new()
@@ -1172,7 +1283,7 @@ impl ToolHandler for ClickMouse {
         if let Err(e) = self
             .state
             .detector
-            .verify_active_window(self.state.backend.as_ref(), None)
+            .verify_active_window_tolerant(self.state.backend.as_ref(), None)
             .await
         {
             return ToolResult::err(format!("Window verification failed: {}", e));
@@ -1239,7 +1350,7 @@ impl ToolHandler for TypeText {
         if let Err(e) = self
             .state
             .detector
-            .verify_active_window(self.state.backend.as_ref(), expected_window)
+            .verify_active_window_tolerant(self.state.backend.as_ref(), expected_window)
             .await
         {
             return ToolResult::err(format!("Window verification failed: {}", e));
@@ -1329,7 +1440,7 @@ impl ToolHandler for PressShortcut {
         if let Err(e) = self
             .state
             .detector
-            .verify_active_window(self.state.backend.as_ref(), None)
+            .verify_active_window_tolerant(self.state.backend.as_ref(), None)
             .await
         {
             return ToolResult::err(format!("Window verification failed: {}", e));

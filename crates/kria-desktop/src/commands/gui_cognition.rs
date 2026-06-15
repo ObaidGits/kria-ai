@@ -16,8 +16,11 @@ use kria_core::agent::gui_cognition::perception::{
 use kria_core::agent::gui_cognition::planner::{
     classify_gui_cognition_prompt, GuiCognitionIntentKind,
 };
+use kria_core::agent::gui_cognition::goal_contract::{extract_gui_goal_contract, GuiActionType};
 use kria_core::agent::gui_cognition::safety_hitl::GuiHitlDecisionFixture;
 use kria_core::agent::gui_cognition::{GuiCognitionRuntime, GuiTurnRequest};
+use kria_core::agent::gui_cognition::event_stream::{GuiEventStreamSink, GuiStreamUxConfig};
+use tauri::{AppHandle, Emitter};
 use kria_core::tools::vision_automation::{OmniParserClient, ScreenshotCapture};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -80,9 +83,23 @@ fn execution_from_tool_result(tool: &str, result: ToolResult) -> GuiActionExecut
 
 struct DesktopGuiPerceptionProvider<'a> {
     app_state: &'a AppState,
-    screenshot_bytes: OnceCell<Result<StdArc<Vec<u8>>, String>>,
+    // Per-observation capture cache: the screenshot is captured ONCE per
+    // observation and shared by the screenshot/OCR/visual probes. It is CLEARED
+    // by `begin_observation` at the start of each fresh observation so a
+    // re-observe in the SAME turn (the pre/post pair of a `screen_changed`
+    // verification, or a multi-step combo) captures a fresh frame instead of
+    // reusing the turn's first capture. (`OnceCell` could not be reset, which
+    // made `screen_changed` always false for single-turn scroll/key actions.)
+    screenshot_bytes: Mutex<Option<Result<StdArc<Vec<u8>>, String>>>,
     atspi_snapshot: OnceCell<Result<StdArc<AtSpiSnapshot>, String>>,
     cache_policy: GuiObservationCachePolicy,
+    // Task 3 (Issue #9): when set, the current observation MUST bypass the OCR
+    // cache (`GUI_OCR_CACHE`) and the screenshot memo so a post-action
+    // verification re-observe is a TRUE fresh capture, never a pre-action cached
+    // frame. Set/reset by `set_force_fresh` from
+    // `collect_observation_with_freshness`; only ever true when the
+    // `gui_cog_cache_coherence` flag is ON, so flag-OFF behavior is unchanged.
+    force_fresh: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,6 +122,21 @@ impl GuiObservationCachePolicy {
 }
 
 fn gui_observation_cache_policy_for_prompt(message: &str) -> GuiObservationCachePolicy {
+    // Execute-and-verify-by-screen-change primitives (Scroll / PressKey) MUST
+    // observe FRESH both before AND after the action. They classify as `Observe`
+    // (their `intent_kind` is "scroll"/"press_key", which the intent map folds to
+    // Observe), so without this guard they would use `ObservePlanShort` caching —
+    // and the post-action re-observe, falling inside the 750ms TTL, would be
+    // served the STALE pre-action snapshot, making `screen_changed` always false
+    // (a false `verification_failed`). Disable the cache for them. Flag-gated by
+    // `KRIA_GUI_COG_PRIMITIVES` (default-ON); flag-OFF keeps the prior caching
+    // byte-for-byte.
+    if primitives_cache_bypass_enabled() {
+        let action = extract_gui_goal_contract(message, None).contract.action_type;
+        if matches!(action, GuiActionType::Scroll | GuiActionType::PressKey) {
+            return GuiObservationCachePolicy::Disabled;
+        }
+    }
     match classify_gui_cognition_prompt(message).kind {
         GuiCognitionIntentKind::Observe
         | GuiCognitionIntentKind::AnalyzePlan
@@ -118,6 +150,20 @@ fn gui_observation_cache_policy_for_prompt(message: &str) -> GuiObservationCache
         | GuiCognitionIntentKind::ClickControl
         | GuiCognitionIntentKind::SafeAction
         | GuiCognitionIntentKind::RiskApproval => GuiObservationCachePolicy::Disabled,
+    }
+}
+
+/// Whether the screen-change primitive cache-bypass (Scroll / PressKey fresh
+/// pre/post observation) is enabled. Shares the `gui_cog_primitives` flag
+/// (`KRIA_GUI_COG_PRIMITIVES`, default-ON); an explicit falsy value
+/// (`0`/`false`/`no`/`off`/empty) restores the prior caching behavior.
+fn primitives_cache_bypass_enabled() -> bool {
+    match std::env::var("KRIA_GUI_COG_PRIMITIVES") {
+        Ok(v) => {
+            let v = v.trim().to_ascii_lowercase();
+            !matches!(v.as_str(), "0" | "false" | "no" | "off" | "")
+        }
+        Err(_) => true,
     }
 }
 
@@ -267,15 +313,46 @@ impl<'a> DesktopGuiPerceptionProvider<'a> {
     }
 
     async fn capture_screenshot_bytes(&self) -> Result<StdArc<Vec<u8>>, String> {
-        self.screenshot_bytes
-            .get_or_init(|| async {
+        // Return the per-observation cached capture if present; otherwise capture
+        // once and memoize for the rest of THIS observation. `begin_observation`
+        // clears the slot so the next observation re-captures.
+        {
+            let guard = self.screenshot_bytes.lock().await;
+            if let Some(cached) = guard.as_ref() {
+                return cached.clone();
+            }
+        }
+        // On Wayland an external xcap/portal grab is blocked or blind to native
+        // Wayland windows (it returns the desktop background only), so
+        // screen-change / OCR / element verification cannot see app content.
+        // Prefer the KRIA GNOME Shell extension's in-shell `Shell.Screenshot`
+        // capture (full composited stage, all windows) and fall back to xcap when
+        // the extension is unavailable.
+        let wayland = std::env::var("XDG_SESSION_TYPE")
+            .unwrap_or_default()
+            .eq_ignore_ascii_case("wayland");
+        let captured: Result<StdArc<Vec<u8>>, String> = if wayland
+            && kria_ext::ext_capture_enabled()
+        {
+            if let Some(bytes) = kria_ext::ext_capture_screen().await {
+                tracing::info!(target: "gui_capture", backend = "extension", bytes = bytes.len(), "screen capture via GNOME extension");
+                Ok(StdArc::new(bytes))
+            } else {
+                tracing::warn!(target: "gui_capture", "extension capture unavailable; falling back to xcap (blind on Wayland)");
                 ScreenshotCapture::capture_full()
                     .await
                     .map(StdArc::new)
                     .map_err(|err| format!("screenshot capture unavailable: {err}"))
-            })
-            .await
-            .clone()
+            }
+        } else {
+            ScreenshotCapture::capture_full()
+                .await
+                .map(StdArc::new)
+                .map_err(|err| format!("screenshot capture unavailable: {err}"))
+        };
+        let mut guard = self.screenshot_bytes.lock().await;
+        *guard = Some(captured.clone());
+        captured
     }
 
     async fn capture_atspi_snapshot(&self) -> Result<StdArc<AtSpiSnapshot>, String> {
@@ -1663,6 +1740,32 @@ impl<'a> DesktopGuiPerceptionProvider<'a> {
 
 #[async_trait]
 impl GuiPerceptionProvider for DesktopGuiPerceptionProvider<'_> {
+    async fn begin_observation(&self) {
+        // Drop the prior observation's memoized screenshot so this observation
+        // captures a FRESH frame. Without this, the provider (which lives for the
+        // whole turn) reused the turn's first capture for both the pre- and
+        // post-action observations, making `screen_changed` always false. Gated
+        // by the extension-capture flag (`KRIA_GUI_COG_EXT_CAPTURE`, default-ON);
+        // flag-OFF keeps the prior per-turn memoization byte-for-byte.
+        if kria_ext::ext_capture_enabled()
+            || self
+                .force_fresh
+                .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            let mut guard = self.screenshot_bytes.lock().await;
+            *guard = None;
+        }
+    }
+
+    fn set_force_fresh(&self, force_fresh: bool) {
+        // Task 3 (Issue #9): toggle the per-turn cache bypass for the current
+        // (post-action / verification) observation. `run_ocr` consults this to
+        // skip the OCR cache, and `begin_observation` clears the screenshot memo
+        // when set, so the post-action frame is a true fresh capture.
+        self.force_fresh
+            .store(force_fresh, std::sync::atomic::Ordering::SeqCst);
+    }
+
     async fn get_active_window(&self) -> GuiProbeResult {
         if std::env::var("XDG_SESSION_TYPE")
             .unwrap_or_default()
@@ -1842,10 +1945,14 @@ impl GuiPerceptionProvider for DesktopGuiPerceptionProvider<'_> {
             }
         };
         let screen_hash = Self::screenshot_hash(bytes.as_ref());
-        if let Some(cached) =
-            Self::cached_ocr_result(&screen_hash, wait_for_screenshot_ms, started).await
-        {
-            return cached;
+        // Task 3 (Issue #9): a force-fresh (post-action verification) observation
+        // bypasses the OCR cache so it can never reuse a pre-action OCR result.
+        if !self.force_fresh.load(std::sync::atomic::Ordering::SeqCst) {
+            if let Some(cached) =
+                Self::cached_ocr_result(&screen_hash, wait_for_screenshot_ms, started).await
+            {
+                return cached;
+            }
         }
         let (ocr_bytes, ocr_image_status) = match Self::prepare_ocr_png(bytes.as_ref()) {
             Ok(result) => result,
@@ -3022,6 +3129,20 @@ impl GuiPerceptionProvider for FixtureGuiPerceptionProvider {
 
 #[async_trait]
 impl GuiPerceptionProvider for GuiPerceptionProviderAdapter<'_> {
+    async fn begin_observation(&self) {
+        match self {
+            Self::Live(provider) => provider.begin_observation().await,
+            Self::Fixture(provider) => provider.begin_observation().await,
+        }
+    }
+
+    fn set_force_fresh(&self, force_fresh: bool) {
+        match self {
+            Self::Live(provider) => provider.set_force_fresh(force_fresh),
+            Self::Fixture(provider) => provider.set_force_fresh(force_fresh),
+        }
+    }
+
     async fn get_active_window(&self) -> GuiProbeResult {
         match self {
             Self::Live(provider) => provider.get_active_window().await,
@@ -3238,18 +3359,113 @@ impl GuiActionExecutor for DesktopGuiActionExecutor<'_> {
                         }),
                     )
                     .await;
-                execution_from_tool_result("open_application", result)
+                let execution = execution_from_tool_result("open_application", result);
+                // Task 2 (Issue #3): open-then-act focus guarantee. After a
+                // successful open on Wayland, ACTIVATE the just-opened target
+                // window via the GNOME extension so it becomes the focused window
+                // (a freshly launched app usually auto-focuses, but an
+                // ALREADY-RUNNING app is NOT raised by gio-launch). This ensures
+                // the NEXT in-app step (FocusField/TypeText/Click) resolves
+                // against the right window instead of flapping on the prior one.
+                // Best-effort: never changes the OpenApp verdict; bounded retry
+                // because the window may still be appearing. Flag-gated; flag-OFF
+                // = prior open-only behavior byte-for-byte.
+                if execution.success
+                    && open_then_act_focus_enabled()
+                    && self.backend_status.session_type.trim().eq_ignore_ascii_case("wayland")
+                    && !request.target_name.trim().is_empty()
+                {
+                    if let Some(token) = read_ext_token() {
+                        if ext_available(&token).await {
+                            let focused = ext_activate_target_with_retry(
+                                &token,
+                                &request.target_name,
+                                5,
+                                500,
+                            )
+                            .await;
+                            tracing::info!(
+                                target: "gui_open_focus",
+                                app = %request.target_name,
+                                focused = ?focused,
+                                "open-then-act: activated opened app for focus"
+                            );
+                        }
+                    }
+                }
+                execution
             }
             "focus_window" => {
-                let result = self
-                    .execute_tool(
-                        "focus_window",
-                        serde_json::json!({
-                            "title": request.target_name,
-                        }),
-                    )
-                    .await;
-                execution_from_tool_result("focus_window", result)
+                // Task 3 (Issue #1): on Wayland the X11-only `xdotool
+                // windowactivate` path used by the `focus_window` tool cannot
+                // raise a window. When the `gui_cog_wayland_focus` flag is active
+                // (default ON; rollback via `KRIA_GUI_COG_WAYLAND_FOCUS=0`) and the
+                // session is Wayland, ACTIVATE the target window via the KRIA GNOME
+                // Shell extension's token-gated `ActivateWindow` (preferred — runs
+                // inside gnome-shell and bypasses focus-stealing prevention), and
+                // only fall back to the gio-launch (`open_application`) best-effort
+                // path when the extension/token is unavailable or it did not
+                // confirm focus. The result is reported honestly; the runtime's
+                // re-observe verification decides verified vs. inconclusive/failed.
+                // Never fabricate success. On X11 / when the flag is OFF, fall back
+                // to the legacy `focus_window` (xdotool) tool byte-for-byte.
+                if wayland_focus_activation_enabled()
+                    && self.backend_status.session_type.trim().eq_ignore_ascii_case("wayland")
+                {
+                    // Issue #1 (extension wiring): PREFER the KRIA GNOME Shell
+                    // extension's token-gated `ActivateWindow`, which raises and
+                    // focuses the target window from *inside* gnome-shell and so
+                    // bypasses Mutter's focus-stealing prevention (the gio-launch
+                    // path below is only best-effort and is frequently ignored by
+                    // Mutter for an already-running window). We only treat the
+                    // extension path as a success when it CONFIRMS focus
+                    // (`{"ok":true,"activated":true}` AND `focused_after == id`);
+                    // the runtime's re-observe verification independently
+                    // re-confirms. On any miss/unavailable/unconfirmed result we
+                    // fall back to the unchanged gio-launch activation. Never
+                    // fabricate success.
+                    let mut ext_execution: Option<GuiActionExecution> = None;
+                    if let Some(token) = read_ext_token() {
+                        if ext_available(&token).await {
+                            if let Some(true) =
+                                ext_activate_target(&token, &request.target_name).await
+                            {
+                                ext_execution = Some(GuiActionExecution::ok(
+                                    "gnome_extension_activate",
+                                    serde_json::json!({ "activated": true }),
+                                ));
+                            }
+                        }
+                    }
+                    match ext_execution {
+                        Some(execution) => execution,
+                        None => {
+                            let result = self
+                                .execute_tool(
+                                    "open_application",
+                                    serde_json::json!({
+                                        "name": request.target_name,
+                                        "args": [],
+                                    }),
+                                )
+                                .await;
+                            // Label the backend honestly: this is the
+                            // GNOME-bridge-class gio-launch activation path, not
+                            // the legacy xdotool focus.
+                            execution_from_tool_result("gnome_bridge_activate", result)
+                        }
+                    }
+                } else {
+                    let result = self
+                        .execute_tool(
+                            "focus_window",
+                            serde_json::json!({
+                                "title": request.target_name,
+                            }),
+                        )
+                        .await;
+                    execution_from_tool_result("focus_window", result)
+                }
             }
             "fill_form_field" => {
                 let result = self
@@ -3280,14 +3496,61 @@ impl GuiActionExecutor for DesktopGuiActionExecutor<'_> {
                     )
                 }
             }
+            "browser_addressbar_type" => {
+                // Task 2 (Issue #3): atomic, vision-free browser address-bar entry.
+                // The preceding OpenApp step activated the browser window; focus
+                // the address bar with Ctrl+L then type the query via synthetic
+                // uinput keystrokes (works without app a11y, unlike AT-SPI; proven
+                // by the editor type path). Typing visibly changes the screen, so
+                // the single step is reliably verifiable (screen_changed) — there
+                // is NO separately-gated, unobservable focus step.
+                let text = request.value.clone().unwrap_or_default();
+                // Focus the address bar (best-effort; never the verdict — the type
+                // below produces the observable change the verifier checks).
+                let _ = self
+                    .execute_tool(
+                        "press_shortcut",
+                        serde_json::json!({ "keys": ["ctrl", "l"] }),
+                    )
+                    .await;
+                // Let the address bar take focus before typing.
+                tokio::time::sleep(Duration::from_millis(150)).await;
+                let result = self
+                    .execute_tool("type_text", serde_json::json!({ "text": text }))
+                    .await;
+                // Submit the search (Enter) so navigation produces an observable
+                // change (the address-bar text alone is a minimal pixel delta).
+                tokio::time::sleep(Duration::from_millis(120)).await;
+                let _ = self
+                    .execute_tool("press_shortcut", serde_json::json!({ "keys": ["enter"] }))
+                    .await;
+                execution_from_tool_result("browser_addressbar_type", result)
+            }
             "press_shortcut" => {
                 let keys = match request.kind {
                     GuiActionKind::Copy => vec!["ctrl", "c"],
                     GuiActionKind::Paste => vec!["ctrl", "v"],
+                    // Task 6.1: select-all is a well-known shortcut; clear-field
+                    // selects-all first (the delete step is wired in Task 6.4).
+                    GuiActionKind::SelectAll | GuiActionKind::ClearField => vec!["ctrl", "a"],
+                    // Task 2 (Issue #3): a combined shortcut value like "ctrl+l"
+                    // must be split into individual key tokens (["ctrl","l"]) —
+                    // the press_shortcut tool's parse_key_string rejects combined
+                    // tokens. A bare token (e.g. "enter") passes through as-is.
                     _ => request
                         .value
                         .as_deref()
-                        .map(|value| vec![value])
+                        .map(|value| {
+                            if value.contains('+') {
+                                value
+                                    .split('+')
+                                    .map(|k| k.trim())
+                                    .filter(|k| !k.is_empty())
+                                    .collect::<Vec<_>>()
+                            } else {
+                                vec![value]
+                            }
+                        })
                         .unwrap_or_else(|| vec!["enter"]),
                 };
                 let result = self
@@ -3300,10 +3563,30 @@ impl GuiActionExecutor for DesktopGuiActionExecutor<'_> {
                     .await;
                 execution_from_tool_result("press_shortcut", result)
             }
-            "scroll" => GuiActionExecution::err(
-                self.backend_status.selected_backend.clone(),
-                "Scroll execution is not supported by the selected Step 7 backend yet.",
-            ),
+            "scroll" => {
+                // Task 4 (Issue #5): real DIRECTION-AWARE scroll on the focused
+                // window/viewport via the Wayland-capable `press_shortcut` tool.
+                // The direction marker (`scroll:<dir>`) is threaded from the goal
+                // contract → typed step → proposal target_label → `target_name`
+                // (with `value` as a fallback). Keys per direction:
+                //   down            → [page_down]
+                //   up              → [page_up]
+                //   bottom / end    → [ctrl, end]
+                //   top / beginning → [ctrl, home]
+                //   default/unknown → [page_down]
+                // The result is the tool's REAL ok/err (no fabricated success);
+                // the screen_changed verifier remains authoritative downstream.
+                let keys = scroll_keys_for_request(&request);
+                let result = self
+                    .execute_tool(
+                        "press_shortcut",
+                        serde_json::json!({
+                            "keys": keys,
+                        }),
+                    )
+                    .await;
+                execution_from_tool_result("scroll", result)
+            }
             _ => {
                 let role = request.role.clone();
                 let result = self
@@ -3339,6 +3622,50 @@ fn executable_available(name: &str) -> bool {
                 .find(|candidate| candidate.is_file())
         })
         .is_some()
+}
+
+/// Task 4 (Issue #5): pick the paging/arrow keys for a surface scroll from the
+/// DIRECTION threaded onto the request. The direction is carried as a
+/// `scroll:<dir>` marker in `target_name` (proposal `target_label`), with
+/// `value` as a fallback; a bare direction word in either field is also
+/// honored. Delegates to [`scroll_keys_for_direction`] for the pure mapping.
+fn scroll_keys_for_request(request: &GuiActionRequest) -> Vec<&'static str> {
+    let direction = scroll_direction_from_field(&request.target_name)
+        .or_else(|| {
+            request
+                .value
+                .as_deref()
+                .and_then(scroll_direction_from_field)
+        })
+        .unwrap_or("");
+    scroll_keys_for_direction(direction)
+}
+
+/// Extract the scroll direction token from a single request field. Accepts the
+/// threaded `scroll:<dir>` marker (preferred) or a bare direction word.
+fn scroll_direction_from_field(value: &str) -> Option<&str> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.strip_prefix("scroll:").unwrap_or(trimmed).trim())
+}
+
+/// Task 4 (Issue #5): pure DIRECTION → keys mapping for a surface scroll. Kept
+/// free of any backend so it is unit-testable without a live executor.
+///   down            → [page_down]
+///   up              → [page_up]
+///   bottom / end    → [ctrl, end]
+///   top / beginning → [ctrl, home]
+///   default/unknown → [page_down]
+fn scroll_keys_for_direction(direction: &str) -> Vec<&'static str> {
+    match direction.trim().to_ascii_lowercase().as_str() {
+        "up" => vec!["page_up"],
+        "bottom" | "end" => vec!["ctrl", "end"],
+        "top" | "beginning" => vec!["ctrl", "home"],
+        "down" => vec!["page_down"],
+        _ => vec!["page_down"],
+    }
 }
 
 async fn xdotool_display_usable(session_type: &str, xdotool_available: bool) -> bool {
@@ -3394,6 +3721,478 @@ async fn ydotool_permission_probe(ydotool_available: bool) -> bool {
         _ => {
             let _ = child.kill().await;
             false
+        }
+    }
+}
+
+/// Issue #1 (extension wiring): helpers that talk to the KRIA GNOME Shell
+/// extension's NEW token-gated D-Bus API (`ai.kria.ActiveWindow`) over `gdbus`,
+/// reusing the same `tokio::process::Command` pattern as the unauthenticated
+/// `GetActiveWindow` perception probe (no new crate dependency). These power the
+/// Wayland `focus_window` activation path: the extension raises/focuses the
+/// window from inside gnome-shell, bypassing Mutter's focus-stealing prevention.
+mod kria_ext {
+    use std::time::Duration;
+
+    /// Read the extension auth token from `~/.kria/gui_ext_token` (trimmed).
+    /// Returns `None` when the file is missing/empty/unreadable.
+    pub(super) fn read_ext_token() -> Option<String> {
+        let home = std::env::var_os("HOME")?;
+        let path = std::path::Path::new(&home)
+            .join(".kria")
+            .join("gui_ext_token");
+        let raw = std::fs::read_to_string(path).ok()?;
+        let trimmed = raw.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    }
+
+    /// Format a Rust string as a GVariant string literal for `gdbus call`
+    /// (quoted + backslash/quote escaped) so the `s` parameters parse cleanly.
+    fn gvariant_string(value: &str) -> String {
+        let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+        format!("\"{escaped}\"")
+    }
+
+    /// Run `gdbus` with a bounded timeout, returning trimmed stdout on success.
+    /// Mirrors `DesktopGuiPerceptionProvider::command_stdout`.
+    async fn gdbus_stdout(args: &[&str], budget_ms: u64) -> Result<String, String> {
+        let mut command = tokio::process::Command::new("gdbus");
+        command.args(args).kill_on_drop(true);
+        match tokio::time::timeout(Duration::from_millis(budget_ms), command.output()).await {
+            Ok(Ok(output)) if output.status.success() => {
+                Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+            }
+            Ok(Ok(output)) => Err(String::from_utf8_lossy(&output.stderr)
+                .trim()
+                .chars()
+                .take(180)
+                .collect::<String>()),
+            Ok(Err(error)) => Err(error.to_string()),
+            Err(_) => Err("command budget exceeded".into()),
+        }
+    }
+
+    /// Unwrap the JSON payload from a `gdbus call` result. `gdbus` wraps a
+    /// string return as a tuple with a type tag, e.g.
+    /// `(s "{\"ok\":true}",)` / `s "{\"ok\":true,...}"`. We strip the
+    /// surrounding tuple parens, the `s ` type tag, the surrounding double
+    /// quotes, then unescape `\"` -> `"` (and `\\` -> `\`) before parsing into a
+    /// `serde_json::Value`. A brace-extraction fallback keeps parsing robust
+    /// against formatting differences. Returns `None` on any parse failure.
+    pub(super) fn unwrap_gdbus_string(output: &str) -> Option<serde_json::Value> {
+        let trimmed = output.trim();
+        // Strip the outer GVariant tuple: `( ... ,)`.
+        let inner = trimmed
+            .strip_prefix('(')
+            .and_then(|s| s.strip_suffix(')'))
+            .map(|s| s.trim().trim_end_matches(',').trim())
+            .unwrap_or(trimmed);
+        // Strip a leading string type tag (`s `, emitted by some gdbus builds).
+        let inner = inner.strip_prefix("s ").map(str::trim).unwrap_or(inner);
+        // Strip surrounding double quotes around the escaped JSON string.
+        let inner = inner
+            .strip_prefix('"')
+            .and_then(|s| s.strip_suffix('"'))
+            .unwrap_or(inner);
+
+        let unescaped = inner.replace("\\\"", "\"").replace("\\\\", "\\");
+        for candidate in [inner, unescaped.as_str()] {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(candidate) {
+                return Some(value);
+            }
+        }
+        // Last-resort: extract the outermost `{ ... }` and try raw + unescaped.
+        let start = trimmed.find('{')?;
+        let end = trimmed.rfind('}')?;
+        if end <= start {
+            return None;
+        }
+        let raw = &trimmed[start..=end];
+        serde_json::from_str(raw)
+            .ok()
+            .or_else(|| serde_json::from_str(&raw.replace("\\\"", "\"")).ok())
+    }
+
+    /// Invoke `ai.kria.ActiveWindow.<method>` via `gdbus call` over the session
+    /// bus. `args` are raw string values (the methods used here take `s`
+    /// params); each is GVariant-quoted. Returns the parsed JSON payload or
+    /// `None` on any failure/timeout.
+    pub(super) async fn ext_call(
+        method: &str,
+        args: &[&str],
+        timeout_ms: u64,
+    ) -> Option<serde_json::Value> {
+        let full_method = format!("ai.kria.ActiveWindow.{method}");
+        let quoted: Vec<String> = args.iter().map(|a| gvariant_string(a)).collect();
+        let mut argv: Vec<&str> = vec![
+            "call",
+            "--session",
+            "--dest",
+            "ai.kria.ActiveWindow",
+            "--object-path",
+            "/ai/kria/ActiveWindow",
+            "--method",
+            full_method.as_str(),
+        ];
+        for q in &quoted {
+            argv.push(q.as_str());
+        }
+        let stdout = gdbus_stdout(&argv, timeout_ms).await.ok()?;
+        unwrap_gdbus_string(&stdout)
+    }
+
+    /// `Ping(token)` returns `{"ok":true,...}` when the NEW token-gated API is
+    /// loaded and the token is accepted.
+    pub(super) async fn ext_available(token: &str) -> bool {
+        match ext_call("Ping", &[token], 1500).await {
+            Some(value) => value
+                .get("ok")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
+            None => false,
+        }
+    }
+
+    /// Build the ordered set of case-insensitive search terms for a SwitchWindow
+    /// hint. Index 0 is always the raw (lowercased) hint (highest weight); the
+    /// rest are tolerant aliases for common apps (browser/file-manager/terminal/
+    /// editor/calculator).
+    fn alias_terms(hint: &str) -> Vec<String> {
+        let h = hint.trim().to_ascii_lowercase();
+        let mut terms = vec![h.clone()];
+        let mut add = |items: &[&str]| {
+            for item in items {
+                let s = item.to_string();
+                if !terms.contains(&s) {
+                    terms.push(s);
+                }
+            }
+        };
+        if h.contains("chrome") {
+            add(&["google-chrome", "chromium", "chrome"]);
+        }
+        if h.contains("chromium") {
+            add(&["chromium", "chrome"]);
+        }
+        if h.contains("firefox") {
+            add(&["firefox", "mozilla firefox"]);
+        }
+        if h.contains("file manager") || h == "files" || h.contains("nautilus") {
+            add(&["nautilus", "files", "org.gnome.nautilus"]);
+        }
+        if h.contains("terminal") || h.contains("console") {
+            add(&["gnome-terminal", "kgx", "console", "org.gnome.terminal"]);
+        }
+        if h.contains("text editor") || h.contains("editor") {
+            add(&["gnome-text-editor", "gedit", "org.gnome.texteditor"]);
+        }
+        if h.contains("calculator") {
+            add(&["gnome-calculator", "org.gnome.calculator"]);
+        }
+        terms
+    }
+
+    /// Extract the activation id (`id`) of a window object as a string.
+    fn window_id(window: &serde_json::Value) -> Option<String> {
+        match window.get("id") {
+            Some(serde_json::Value::String(s)) if !s.is_empty() => Some(s.clone()),
+            Some(serde_json::Value::Number(n)) => Some(n.to_string()),
+            _ => None,
+        }
+    }
+
+    /// Score a single window against the term set across `app_name`, `wm_class`,
+    /// `app_id`, `title`. The raw hint (term index 0) outweighs aliases; exact >
+    /// prefix > substring > field-contained-in-hint. 0 means no match.
+    fn window_match_score(window: &serde_json::Value, terms: &[String]) -> u32 {
+        const FIELDS: [&str; 4] = ["app_name", "wm_class", "app_id", "title"];
+        let mut best = 0u32;
+        for (idx, term) in terms.iter().enumerate() {
+            if term.is_empty() {
+                continue;
+            }
+            let weight = if idx == 0 { 100 } else { 50 };
+            for field in FIELDS {
+                let Some(raw) = window.get(field).and_then(serde_json::Value::as_str) else {
+                    continue;
+                };
+                let value = raw.to_ascii_lowercase();
+                if value.is_empty() {
+                    continue;
+                }
+                let score = if value == *term {
+                    weight + 30
+                } else if value.starts_with(term.as_str()) {
+                    weight + 20
+                } else if value.contains(term.as_str()) {
+                    weight + 10
+                } else if value.len() >= 3 && term.contains(value.as_str()) {
+                    weight
+                } else {
+                    0
+                };
+                if score > best {
+                    best = score;
+                }
+            }
+        }
+        best
+    }
+
+    /// Pick the BEST-matching window id for `hint` from a windows JSON array.
+    /// Returns `None` when nothing matches.
+    pub(super) fn pick_window_match(windows: &[serde_json::Value], hint: &str) -> Option<String> {
+        let terms = alias_terms(hint);
+        let mut best_id: Option<String> = None;
+        let mut best_score = 0u32;
+        for window in windows {
+            let score = window_match_score(window, &terms);
+            if score > best_score {
+                if let Some(id) = window_id(window) {
+                    best_score = score;
+                    best_id = Some(id);
+                }
+            }
+        }
+        best_id
+    }
+
+    /// `ListWindows` -> best match -> `ActivateWindow`. Returns:
+    ///   `Some(true)`  when activation CONFIRMED focus
+    ///                 (`ok && activated && focused_after == id`),
+    ///   `Some(false)` when activate ran but did NOT confirm focus,
+    ///   `None`        when no window matched / the extension was unavailable.
+    pub(super) async fn ext_activate_target(token: &str, target_name: &str) -> Option<bool> {
+        let listing = ext_call("ListWindows", &[token], 1500).await?;
+        let windows = listing.get("windows").and_then(serde_json::Value::as_array)?;
+        let id = pick_window_match(windows, target_name)?;
+        let result = ext_call("ActivateWindow", &[token, id.as_str()], 1500).await?;
+        let ok = result
+            .get("ok")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let activated = result
+            .get("activated")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let focused_after = result
+            .get("focused_after")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        Some(ok && activated && focused_after == id)
+    }
+
+    /// Task 2 (Issue #3): activate a just-OPENED app's window, tolerating that
+    /// the window may still be appearing right after launch. Polls `ListWindows`
+    /// + `ActivateWindow` up to `attempts` times (with `delay_ms` between) until
+    /// the target window is found AND focus is confirmed. Returns `Some(true)`
+    /// when focus was confirmed, `Some(false)` when activate ran but did not
+    /// confirm, `None` when the window never appeared / extension unavailable.
+    /// Best-effort: the OpenApp verdict is unchanged; this only guarantees the
+    /// opened app is FOCUSED so the next in-app step resolves against it.
+    pub(super) async fn ext_activate_target_with_retry(
+        token: &str,
+        target_name: &str,
+        attempts: u32,
+        delay_ms: u64,
+    ) -> Option<bool> {
+        let mut last: Option<bool> = None;
+        for i in 0..attempts.max(1) {
+            match ext_activate_target(token, target_name).await {
+                Some(true) => return Some(true),
+                other => last = other.or(last),
+            }
+            if i + 1 < attempts {
+                tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+            }
+        }
+        last
+    }
+
+    /// Whether the GNOME-extension screen-capture path is enabled. Default-ON;
+    /// rollback with `KRIA_GUI_COG_EXT_CAPTURE` set to a falsy value
+    /// (`0`/`false`/`no`/`off`/empty) to force the legacy xcap capture.
+    pub(super) fn ext_capture_enabled() -> bool {
+        match std::env::var("KRIA_GUI_COG_EXT_CAPTURE") {
+            Ok(v) => {
+                let v = v.trim().to_ascii_lowercase();
+                !matches!(v.as_str(), "0" | "false" | "no" | "off" | "")
+            }
+            Err(_) => true,
+        }
+    }
+
+    /// Capture the whole composited stage via the extension's `CaptureScreen`
+    /// (in-shell `Shell.Screenshot`, which — unlike an external xcap/portal grab
+    /// — actually sees native Wayland windows). Writes a temp PNG, reads its
+    /// bytes, deletes it. Returns `None` on any failure (caller falls back to
+    /// xcap). Bounded timeout so a wedged shell never stalls perception.
+    pub(super) async fn ext_capture_screen() -> Option<Vec<u8>> {
+        let token = read_ext_token()?;
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!("kria_ext_cap_{}_{nanos}.png", std::process::id()));
+        let path_str = path.to_str()?.to_string();
+        let result = ext_call("CaptureScreen", &[token.as_str(), path_str.as_str()], 4000).await;
+        let ok = result
+            .as_ref()
+            .and_then(|v| v.get("ok"))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        if !ok {
+            let _ = tokio::fs::remove_file(&path).await;
+            return None;
+        }
+        let bytes = tokio::fs::read(&path).await.ok();
+        let _ = tokio::fs::remove_file(&path).await;
+        match bytes {
+            Some(b) if !b.is_empty() => Some(b),
+            _ => None,
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn unwrap_gdbus_string_strips_type_tag_and_unescapes() {
+            let raw = r#"(s "{\"ok\":true,\"activated\":true,\"focused_after\":\"w12\"}",)"#;
+            let value = unwrap_gdbus_string(raw).expect("parse");
+            assert_eq!(value.get("ok").and_then(|v| v.as_bool()), Some(true));
+            assert_eq!(value.get("activated").and_then(|v| v.as_bool()), Some(true));
+            assert_eq!(
+                value.get("focused_after").and_then(|v| v.as_str()),
+                Some("w12")
+            );
+        }
+
+        #[test]
+        fn unwrap_gdbus_string_handles_bare_quoted_string() {
+            let raw = r#"s "{\"ok\":true,\"version\":\"1.2\"}""#;
+            let value = unwrap_gdbus_string(raw).expect("parse");
+            assert_eq!(value.get("ok").and_then(|v| v.as_bool()), Some(true));
+            assert_eq!(value.get("version").and_then(|v| v.as_str()), Some("1.2"));
+        }
+
+        #[test]
+        fn unwrap_gdbus_string_rejects_garbage() {
+            assert!(unwrap_gdbus_string("not a dbus reply").is_none());
+            assert!(unwrap_gdbus_string("").is_none());
+        }
+
+        fn windows_fixture() -> Vec<serde_json::Value> {
+            serde_json::json!([
+                {
+                    "id": "w1", "app_name": "Files", "wm_class": "org.gnome.Nautilus",
+                    "app_id": "org.gnome.Nautilus.desktop", "title": "Home"
+                },
+                {
+                    "id": "w2", "app_name": "Google Chrome", "wm_class": "google-chrome",
+                    "app_id": "google-chrome.desktop", "title": "New Tab - Google Chrome"
+                },
+                {
+                    "id": "w3", "app_name": "Terminal", "wm_class": "gnome-terminal-server",
+                    "app_id": "org.gnome.Terminal.desktop", "title": "obaid@host: ~"
+                }
+            ])
+            .as_array()
+            .cloned()
+            .unwrap()
+        }
+
+        #[test]
+        fn pick_window_match_direct_title_substring() {
+            let windows = windows_fixture();
+            assert_eq!(
+                pick_window_match(&windows, "New Tab").as_deref(),
+                Some("w2")
+            );
+        }
+
+        #[test]
+        fn pick_window_match_browser_alias() {
+            let windows = windows_fixture();
+            // "chrome" -> google-chrome alias picks the Chrome window.
+            assert_eq!(pick_window_match(&windows, "chrome").as_deref(), Some("w2"));
+        }
+
+        #[test]
+        fn pick_window_match_file_manager_alias() {
+            let windows = windows_fixture();
+            assert_eq!(
+                pick_window_match(&windows, "file manager").as_deref(),
+                Some("w1")
+            );
+        }
+
+        #[test]
+        fn pick_window_match_terminal_alias() {
+            let windows = windows_fixture();
+            assert_eq!(
+                pick_window_match(&windows, "terminal").as_deref(),
+                Some("w3")
+            );
+        }
+
+        #[test]
+        fn pick_window_match_no_match_returns_none() {
+            let windows = windows_fixture();
+            assert!(pick_window_match(&windows, "spotify").is_none());
+        }
+    }
+}
+
+use kria_ext::{ext_activate_target, ext_activate_target_with_retry, ext_available, read_ext_token};
+
+/// Task 3 (Issue #1): whether the Wayland-native window-activation path
+/// (`gio launch <.desktop>`) should be used for `focus_window` execution. Mirrors
+/// how the other `gui_cog_*` flags are read on the desktop runtime — the
+/// `gui_cog_wayland_focus` flag defaults ON and is rolled back without a code
+/// change via `KRIA_GUI_COG_WAYLAND_FOCUS=0` (or `false`/`no`/`off`). Reuses the
+/// shared kria-core config parser so the gate is identical to the runtime wiring.
+fn wayland_focus_activation_enabled() -> bool {
+    kria_core::agent::gui_cognition::window_focus::GuiWaylandFocusConfig::from_env_default_on()
+        .is_enabled()
+}
+
+/// Task 2 (Issue #3): whether the open-then-act focus guarantee is active —
+/// after `OpenApp` on Wayland, the just-opened target window is ACTIVATED via the
+/// GNOME extension so the next in-app step resolves against the right (focused)
+/// window instead of whatever was focused before (which caused the "open Chrome
+/// and search" flap). Default ON; rollback via `KRIA_GUI_COG_OPEN_THEN_ACT_FOCUS`
+/// set to a falsy value (`0`/`false`/`no`/`off`/empty), restoring the prior
+/// open-only behavior byte-for-byte.
+fn open_then_act_focus_enabled() -> bool {
+    match std::env::var("KRIA_GUI_COG_OPEN_THEN_ACT_FOCUS") {
+        Ok(v) => {
+            let v = v.trim().to_ascii_lowercase();
+            !matches!(v.as_str(), "0" | "false" | "no" | "off" | "")
+        }
+        Err(_) => true,
+    }
+}
+
+#[cfg(test)]
+mod open_then_act_focus_tests {
+    use super::open_then_act_focus_enabled;
+
+    #[test]
+    fn flag_defaults_on_with_falsy_rollback() {
+        let prev = std::env::var("KRIA_GUI_COG_OPEN_THEN_ACT_FOCUS").ok();
+        std::env::remove_var("KRIA_GUI_COG_OPEN_THEN_ACT_FOCUS");
+        assert!(open_then_act_focus_enabled(), "default must be ON");
+        std::env::set_var("KRIA_GUI_COG_OPEN_THEN_ACT_FOCUS", "0");
+        assert!(!open_then_act_focus_enabled(), "0 must roll back (OFF)");
+        std::env::set_var("KRIA_GUI_COG_OPEN_THEN_ACT_FOCUS", "off");
+        assert!(!open_then_act_focus_enabled(), "off must roll back (OFF)");
+        std::env::set_var("KRIA_GUI_COG_OPEN_THEN_ACT_FOCUS", "1");
+        assert!(open_then_act_focus_enabled(), "1 must be ON");
+        match prev {
+            Some(v) => std::env::set_var("KRIA_GUI_COG_OPEN_THEN_ACT_FOCUS", v),
+            None => std::env::remove_var("KRIA_GUI_COG_OPEN_THEN_ACT_FOCUS"),
         }
     }
 }
@@ -3800,6 +4599,35 @@ pub(super) async fn desktop_gui_cognition_command_capture(
     event_scope_prefix: &str,
     options: Option<GuiCognitionCommandOptions>,
 ) -> Result<super::chat::DesktopChatCommandCapture, String> {
+    desktop_gui_cognition_command_capture_streamed(
+        message,
+        app_state,
+        session_id_override,
+        event_scope_prefix,
+        options,
+        None,
+    )
+    .await
+}
+
+/// Task 10.1 (`gui_cog_stream_ux`, default OFF): the streaming-aware capture
+/// entry point. When the `gui_cog_stream_ux` flag is ON **and** an
+/// `event_emitter` is supplied, the runtime is given an mpsc streaming sink and
+/// a background task drains the receiver, emitting each `gui_cognition:event`
+/// envelope to the frontend via the EXISTING `gui_cognition:event` Tauri event
+/// the moment it is produced DURING the turn (observe → plan → per-step) instead
+/// of waiting for the end-of-turn batch (Requirement 16, 24). The event NAME is
+/// unchanged (frontend/backend contract). When the flag is OFF (the default) or
+/// no emitter is supplied, no sink is attached and the end-of-turn batch is
+/// returned/emitted exactly as before — byte-for-byte unchanged behavior.
+pub(super) async fn desktop_gui_cognition_command_capture_streamed(
+    message: String,
+    app_state: &AppState,
+    session_id_override: Option<String>,
+    event_scope_prefix: &str,
+    options: Option<GuiCognitionCommandOptions>,
+    event_emitter: Option<AppHandle>,
+) -> Result<super::chat::DesktopChatCommandCapture, String> {
     let session_id = match session_id_override.filter(|value| !value.trim().is_empty()) {
         Some(value) => value,
         None => app_state.current_session_id.read().await.clone(),
@@ -3814,9 +4642,10 @@ pub(super) async fn desktop_gui_cognition_command_capture(
         }
         None => GuiPerceptionProviderAdapter::Live(DesktopGuiPerceptionProvider {
             app_state,
-            screenshot_bytes: OnceCell::new(),
+            screenshot_bytes: Mutex::new(None),
             atspi_snapshot: OnceCell::new(),
             cache_policy: gui_observation_cache_policy_for_prompt(&message),
+            force_fresh: std::sync::atomic::AtomicBool::new(false),
         }),
     };
     let backend_status =
@@ -3830,21 +4659,364 @@ pub(super) async fn desktop_gui_cognition_command_capture(
         .llm_planner_fixture
         .clone()
         .map(FixtureGuiLlmPlanner::new);
-    let live_planner = if fixture_planner.is_none() && !options.disable_live_llm_planner {
-        app_state
-            .model_router
-            .route("gui_cognition_planner")
-            .await
-            .map(LlmBackendGuiPlanner::new)
+    // Task 0 (Requirement 0.6): the structured-output adapter config, gated by
+    // `gui_cog_structured_planner` (server-side env, default ON).
+    let structured_planner_cfg =
+        kria_core::agent::gui_cognition::llm_planner::GuiStructuredPlannerConfig::from_env_default_on();
+    // Route the configured planner backend ONCE so it can be wrapped as the live
+    // planner AND inspected for grammar capability (Task 0.9 Rung B).
+    let routed_planner_backend = if fixture_planner.is_none() && !options.disable_live_llm_planner {
+        app_state.model_router.route("gui_cognition_planner").await
     } else {
         None
+    };
+    let live_planner = routed_planner_backend.as_ref().map(|backend| {
+        // Task 0 (Requirement 0.6): adopt the shared structured-output adapter
+        // for the live planner, gated by `gui_cog_structured_planner`. Flag-OFF
+        // restores the prior `chat_with_grammar` path byte-for-byte.
+        LlmBackendGuiPlanner::new(backend.clone()).with_structured_config(structured_planner_cfg)
+    });
+    // Task 0.9 (Requirement 0.9 Rung B): build an optional LOCAL grammar fallback
+    // planner ONLY when the structured flag is ON, the configured planner backend
+    // is NOT itself grammar-capable, and a DIFFERENT, grammar-capable local
+    // backend exists. This is the ladder's middle rung: when the configured (e.g.
+    // cloud) plan is strictly rejected the runtime retries the plan ONCE through
+    // this local grammar planner (which posts a real grammar/json_schema
+    // constraint → ~100% schema-valid). When the configured backend is itself
+    // grammar-capable (or no distinct local backend exists), no fallback is wired
+    // and the ladder collapses to Rung A → Rung C.
+    let local_fallback_planner = {
+        match (
+            structured_planner_cfg.is_enabled(),
+            routed_planner_backend.as_ref(),
+            app_state.model_router.local_backend(),
+        ) {
+            (true, Some(configured), Some(local))
+                if !kria_core::llm::model_router::is_grammar_capable(configured)
+                    && kria_core::llm::model_router::is_grammar_capable(&local)
+                    && local.model_label() != configured.model_label() =>
+            {
+                Some(
+                    LlmBackendGuiPlanner::new(local)
+                        .with_structured_config(structured_planner_cfg),
+                )
+            }
+            _ => None,
+        }
     };
     let planner_ref: Option<&dyn GuiLlmPlanner> = match (&fixture_planner, &live_planner) {
         (Some(planner), _) => Some(planner),
         (None, Some(planner)) => Some(planner),
         (None, None) => None,
     };
-    let runtime = GuiCognitionRuntime::new(&perception, &executor).with_llm_planner(planner_ref);
+    let local_fallback_ref: Option<&dyn GuiLlmPlanner> = local_fallback_planner
+        .as_ref()
+        .map(|planner| planner as &dyn GuiLlmPlanner);
+    let runtime = GuiCognitionRuntime::new(&perception, &executor)
+        .with_llm_planner(planner_ref)
+        .with_local_grammar_planner(local_fallback_ref);
+    // Task 1.2 (Requirement 21): runtime guards are read from the server-side
+    // environment so a client cannot toggle enforcement. A cooperative cancel
+    // token is registered under the session_id so a Tauri cancel command can
+    // halt the active turn before its next action.
+    //
+    // Task 1.6 (gate flip): the Task 1 gate has passed, so the live/desktop
+    // path now enables the runaway-control guards (cancel/watchdog/abort/
+    // preconditions, Requirements 19/21/25) by DEFAULT via
+    // `from_env_default_on()`. Rollback without a code change: set
+    // `KRIA_GUI_COG_RUNTIME_GUARDS=0` (or `false`/`no`/`off`) in the desktop
+    // environment to restore the prior Step 1–12 behavior. The deterministic
+    // T2 fixture tier is unaffected because those runtimes construct their
+    // guard config explicitly (never through this env path).
+    let runtime_guards =
+        kria_core::agent::gui_cognition::turn_budget::GuiRuntimeGuardConfig::from_env_default_on();
+    let cancel_token =
+        kria_core::agent::gui_cognition::cancel::gui_cancel_registry().register(&session_id);
+    // Task 2.1 (Requirement 1, 4): the `gui_cog_smart_planner` flag (strict
+    // schema-validate + exactly ONE repair-retry feeding the validation error
+    // back, then deterministic fallback) is read from the server-side
+    // environment so a client cannot toggle it.
+    //
+    // Task 2.9 (gate flip): the Task 2 gate has passed (CI-safe deterministic
+    // T1/T2 evidence shows every supported intent/primitive/combo reaches
+    // `valid_for_resolution` — planner-blocked families no longer land on "Plan
+    // validation blocked"), so the live/desktop path now enables the
+    // smart-planner repair-retry path by DEFAULT via `from_env_default_on()`.
+    // Rollback without a code change: set `KRIA_GUI_COG_SMART_PLANNER=0` (or
+    // `false`/`no`/`off`) in the desktop environment to restore the prior
+    // single-attempt Step 1–12 behavior. The deterministic T2 fixture tier is
+    // unaffected because those runtimes construct their planner config
+    // explicitly (never through this env path).
+    let smart_planner =
+        kria_core::agent::gui_cognition::llm_planner::GuiSmartPlannerConfig::from_env_default_on();
+    // Task 0 (Requirement 0): the `gui_cog_structured_planner` flag adopts the
+    // shared multi-backend structured-output adapter for the GUI-cognition
+    // planner — every OpenAI-compatible provider (local grammar + cloud
+    // json_schema/json_object/tool-calling) returns a schema-valid typed plan,
+    // and the bounded re-ask budget is raised to AT MOST 2 (feeding the strict
+    // validation error back). It is read from the server-side environment so a
+    // client cannot toggle it. The live/desktop path enables it by DEFAULT via
+    // `from_env_default_on()` — mirroring the prior `gui_cog_*` flags. Rollback
+    // without a code change: set `KRIA_GUI_COG_STRUCTURED_PLANNER=0` (or
+    // `false`/`no`/`off`) in the desktop environment to restore the prior
+    // `chat_with_grammar` planner path + one-shot repair behavior byte-for-byte.
+    // The deterministic T2 fixture tier is unaffected — those runtimes set their
+    // structured-planner config explicitly (never through this env path).
+    let structured_planner =
+        kria_core::agent::gui_cognition::llm_planner::GuiStructuredPlannerConfig::from_env_default_on();
+    // Task 3.1 (Requirement 2): the `gui_cog_reobserve` flag gates the explicit
+    // per-step re-observe hook (fresh GuiContext between steps, bounded by the
+    // Task 1 runaway caps). It is read from the server-side environment so a
+    // client cannot toggle it.
+    //
+    // Task 3.6 (Wave 3 gate flip): the Task 3 gate has passed (CI-safe
+    // deterministic T1/T2 evidence shows representative multi-step combos
+    // re-observe between steps with each step resolved+verified against the
+    // FRESH context, bounded by the Task 1 runaway caps), so the live/desktop
+    // path now enables the per-step re-observe hook by DEFAULT via
+    // `from_env_default_on()` — mirroring Task 1's `gui_cog_runtime_guards` and
+    // Task 2's `gui_cog_smart_planner`. Rollback without a code change: set
+    // `KRIA_GUI_COG_REOBSERVE=0` (or `false`/`no`/`off`) in the desktop
+    // environment to restore the prior re-observe behavior. The deterministic
+    // T2 fixture tier is unaffected because those runtimes construct their
+    // re-observe config explicitly (never through this env path).
+    let reobserve =
+        kria_core::agent::gui_cognition::turn_budget::GuiReobserveConfig::from_env_default_on();
+    // Task 4.2 (Requirement 3): the `gui_cog_wayland_focus` flag routes
+    // SwitchWindow through the Wayland-safe window-focus abstraction
+    // (activate-by-window-identity preferred; truthful `backend_used`). The Wave 3
+    // gate (Task 4.5) verified — at the CI-safe level — that SwitchWindow routes
+    // through the abstraction, executes, is verified by re-observe, and the legacy
+    // "wmctrl required" path is replaced by a clear actionable error. The
+    // live/desktop path now enables the Wayland-safe focus abstraction by DEFAULT
+    // via `from_env_default_on()` — mirroring Task 1's `gui_cog_runtime_guards`,
+    // Task 2's `gui_cog_smart_planner`, and Task 3's `gui_cog_reobserve`. It is
+    // read from the server-side environment so a client cannot toggle it. Rollback
+    // without a code change: set `KRIA_GUI_COG_WAYLAND_FOCUS=0` (or
+    // `false`/`no`/`off`) in the desktop environment to restore the prior
+    // SwitchWindow behavior. The deterministic T2 fixture tier is unaffected — those
+    // runtimes set their Wayland-focus config explicitly (never through this env path).
+    let wayland_focus =
+        kria_core::agent::gui_cognition::window_focus::GuiWaylandFocusConfig::from_env_default_on();
+    // Task 5.1 (Requirement 4.2): the `gui_cog_step_completeness` flag gates the
+    // plan post-processing pass that fills a type-correct `verification_strategy`
+    // for any step missing/empty/incompatible one (and sources sanitized payloads,
+    // converting genuinely-missing payloads to AskClarification rather than an
+    // invalid step). The Wave 4 gate (Task 5.4) is GREEN at the CI-safe level
+    // (file-manager search / summarize-visible / copy no longer blocked by the
+    // validator; T1/T2 step-completeness suites pass; Steps 1–12 green), so the
+    // live/desktop path now enables the step-completeness post-processing by
+    // DEFAULT via `from_env_default_on()` — mirroring Task 1's
+    // `gui_cog_runtime_guards`, Task 2's `gui_cog_smart_planner`, Task 3's
+    // `gui_cog_reobserve`, and Task 4's `gui_cog_wayland_focus`. It is read from
+    // the server-side environment so a client cannot toggle it. Rollback without a
+    // code change: set `KRIA_GUI_COG_STEP_COMPLETENESS=0` (or `false`/`no`/`off`)
+    // in the desktop environment to restore the prior plan-preserving behavior.
+    let step_completeness =
+        kria_core::agent::gui_cognition::llm_planner::GuiStepCompletenessConfig::from_env_default_on();
+    // Task 6.1 (Requirement 5): the `gui_cog_primitives` flag gates the richer
+    // primitive-coverage executor mapping (clear/select-all/checkbox/
+    // dialog-close/in-app-search route to their correct typed action kind
+    // instead of the legacy ClickControl catch-all) plus the DPI/multi-monitor
+    // aware physical-bounds annotation. Wave 5 / Task 6.5 gate PASSED at the
+    // CI-safe level (held-out set frozen; audit dry-run green on real_session +
+    // test_substrate; per-primitive tier/coverage/privacy suites green; Steps
+    // 1–12 green; flag-OFF preserves the legacy mapping byte-for-byte), so the
+    // live/desktop path now enables the richer primitive-coverage mapping by
+    // DEFAULT via `from_env_default_on()` — mirroring Task 1's
+    // `gui_cog_runtime_guards`, Task 2's `gui_cog_smart_planner`, Task 3's
+    // `gui_cog_reobserve`, Task 4's `gui_cog_wayland_focus`, and Task 5's
+    // `gui_cog_step_completeness`. It is read from the server-side environment so
+    // a client cannot toggle it. Rollback without a code change: set
+    // `KRIA_GUI_COG_PRIMITIVES=0` (or `false`/`no`/`off`) in the desktop
+    // environment to restore the prior executor path byte-for-byte (the richer
+    // primitive mapping does not run). The deterministic T2 fixture tier is
+    // unaffected — those runtimes set their primitives config explicitly (never
+    // through this env path).
+    let primitives =
+        kria_core::agent::gui_cognition::executor::GuiPrimitivesConfig::from_env_default_on();
+    // Task 7.1 (Requirements 5, 9, 26): the `gui_cog_browser` flag gates browser
+    // chrome-UI targeting (address/URL bar, tab strip / individual tabs,
+    // back/forward, reload/stop, in-page Find bar become targetable via the
+    // accessibility resolver when the active app is a recognized browser;
+    // page-content targeting stays out of scope — that is Task 7.2). Read/
+    // summarize uses OCR/page text as DATA ONLY and never influences the planner
+    // or executor (injection defense, Requirement 9). It is read from the
+    // server-side environment so a client cannot toggle it. Task 7.5 (Wave 6
+    // live gate) flipped the live/desktop default to ON via
+    // `from_env_default_on()` — mirroring Task 1's `gui_cog_runtime_guards`,
+    // Task 2's `gui_cog_smart_planner`, Task 3's `gui_cog_reobserve`, Task 4's
+    // `gui_cog_wayland_focus`, Task 5's `gui_cog_step_completeness`, and Task 6's
+    // `gui_cog_primitives`. The browser chrome-UI targeting + data-only
+    // summarize path is now ON unless `KRIA_GUI_COG_BROWSER` is an explicit
+    // opt-out (`0`/`false`/`no`/`off`/empty); an absent value keeps it ON.
+    // Rollback without a code change: set `KRIA_GUI_COG_BROWSER=0` (or
+    // `false`/`no`/`off`) in the desktop environment to restore the prior
+    // executor / resolver path byte-for-byte. The deterministic T2 fixture tier
+    // is unaffected — those runtimes set their browser config explicitly (never
+    // through this env path).
+    let browser =
+        kria_core::agent::gui_cognition::browser::GuiBrowserConfig::from_env_default_on();
+    // Task 8.1 (Requirements 6, 7, 8): the `gui_cog_crossapp` flag gates cross-app
+    // clipboard combos (copy in one app → switch → paste in another), the
+    // clipboard-safe SAVE → USE → RESTORE helper (the user's clipboard is
+    // captured before the operation and restored afterwards, never clobbered —
+    // Requirement 8), and file-manager select (Tasks 8.2/8.3). It is read from
+    // the server-side environment so a client cannot toggle it. Like the
+    // already-gated Tasks 1–7, this flag now defaults ON for the live/desktop turn
+    // builder via `from_env_default_on()`. Task 8.5 (Wave 6 live gate) flipped the
+    // live/desktop default to ON — mirroring Task 1's
+    // `gui_cog_runtime_guards`, Task 2's `gui_cog_smart_planner`, Task 3's
+    // `gui_cog_reobserve`, Task 4's `gui_cog_wayland_focus`, Task 5's
+    // `gui_cog_step_completeness`, Task 6's `gui_cog_primitives`, and Task 7's
+    // `gui_cog_browser`. The cross-app clipboard combo + clipboard-safe
+    // SAVE → USE → RESTORE helper + file-manager select path is now ON unless
+    // `KRIA_GUI_COG_CROSSAPP` is an explicit opt-out (`0`/`false`/`no`/`off`/
+    // empty); an absent value keeps it ON. Rollback without a code change: set
+    // `KRIA_GUI_COG_CROSSAPP=0` (or `false`/`no`/`off`) in the desktop environment
+    // to restore the prior executor / runtime path byte-for-byte (the user's
+    // clipboard is never borrowed and no cross-app/fm-select layer runs; the
+    // Steps 1–12 path is preserved). The deterministic T2 fixture tier is
+    // unaffected — those runtimes set their cross-app config explicitly (never
+    // through this env path).
+    let crossapp =
+        kria_core::agent::gui_cognition::clipboard::GuiCrossAppConfig::from_env_default_on();
+    // Task 9.1 (Requirements 10, 11, 12, 13, 14, 15, 22, 23): the
+    // `gui_cog_safety_polish` flag gates the formalized per-action-type
+    // verification CONTRACT (predicate + evidence source + bounded wait +
+    // confidence) and the honest `inconclusive` verdict for low-confidence /
+    // unreliable-evidence outcomes. It is read from the server-side environment
+    // so a client cannot toggle it. Task 9.7 (Wave 7 live gate) flipped the
+    // live/desktop default to ON via `from_env_default_on()` — mirroring Task 1's
+    // `gui_cog_runtime_guards`, Task 2's `gui_cog_smart_planner`, Task 3's
+    // `gui_cog_reobserve`, Task 4's `gui_cog_wayland_focus`, Task 5's
+    // `gui_cog_step_completeness`, Task 6's `gui_cog_primitives`, Task 7's
+    // `gui_cog_browser`, and Task 8's `gui_cog_crossapp`. The formalized
+    // per-action-type verification CONTRACT + honest `inconclusive` verdict is now
+    // ON unless `KRIA_GUI_COG_SAFETY_POLISH` is an explicit opt-out
+    // (`0`/`false`/`no`/`off`/empty); an absent value keeps it ON. Rollback without
+    // a code change: set `KRIA_GUI_COG_SAFETY_POLISH=0` (or `false`/`no`/`off`) in
+    // the desktop environment to restore the prior verification verdict
+    // byte-for-byte. The deterministic T2 fixture tier is unaffected — those
+    // runtimes set their safety-polish config explicitly (never through this env
+    // path).
+    let safety_polish =
+        kria_core::agent::gui_cognition::verifier::GuiSafetyPolishConfig::from_env_default_on();
+
+    // Phase 1 (Requirement 1): the `gui_cog_verify_live` flag changes the OpenApp
+    // post-action verification predicate from `active_window_match` to
+    // `window_visible` (the app's window PRESENT/visible in the desktop open-
+    // window set, alias-tolerant, evidence `observation`/desktop-state) with a
+    // bounded readiness wait, so genuine Wayland app launches that do not steal
+    // focus are no longer falsely downgraded to PARTIAL. It is read from the
+    // server-side environment so a client cannot toggle it. Like the already-
+    // gated prior waves, the live/desktop path enables it by DEFAULT via
+    // `from_env_default_on()`. Rollback without a code change: set
+    // `KRIA_GUI_COG_VERIFY_LIVE=0` (or `false`/`no`/`off`) in the desktop
+    // environment to restore the prior `active_window_match` verdict byte-for-
+    // byte. The deterministic T2 fixture tier builds its verify-live config
+    // explicitly (never through this env path).
+    let verify_live =
+        kria_core::agent::gui_cognition::verifier::GuiVerifyLiveConfig::from_env_default_on();
+
+    // Task 2.1 (Requirement 2): the `gui_cog_auto_prereq` flag prepends an
+    // inferred OpenApp/SwitchWindow prerequisite for a bare-primitive plan whose
+    // target app is not the active/observable window (or replaces the plan with
+    // an AskClarification when no app is inferable). Read from the server-side
+    // environment so a client cannot toggle it. Like the already-gated prior
+    // waves, the live/desktop path enables it by DEFAULT via
+    // `from_env_default_on()`. Rollback without a code change: set
+    // `KRIA_GUI_COG_AUTO_PREREQ=0` (or `false`/`no`/`off`) in the desktop
+    // environment to restore the prior plan byte-for-byte.
+    let auto_prereq =
+        kria_core::agent::gui_cognition::llm_planner::GuiAutoPrereqConfig::from_env_default_on();
+
+    // Task 10.1 (Requirements 16, 24): the `gui_cog_stream_ux` flag gates
+    // DURING-turn streaming of `gui_cognition:event` envelopes through an mpsc
+    // channel. It is read from the server-side environment so a client cannot
+    // toggle it. Task 10.7 (Wave 8 live gate) flipped the live/desktop default
+    // to ON via `from_env_default_on()` — mirroring Task 1's
+    // `gui_cog_runtime_guards`, Task 2's `gui_cog_smart_planner`, Task 3's
+    // `gui_cog_reobserve`, Task 4's `gui_cog_wayland_focus`, Task 5's
+    // `gui_cog_step_completeness`, Task 6's `gui_cog_primitives`, Task 7's
+    // `gui_cog_browser`, Task 8's `gui_cog_crossapp`, and Task 9's
+    // `gui_cog_safety_polish`. DURING-turn streaming is now ON unless
+    // `KRIA_GUI_COG_STREAM_UX` is an explicit opt-out (`0`/`false`/`no`/`off`/
+    // empty); an absent value keeps it ON. Rollback without a code change: set
+    // `KRIA_GUI_COG_STREAM_UX=0` (or `false`/`no`/`off`) in the desktop
+    // environment to restore the prior end-of-turn batch behavior byte-for-byte.
+    // Streaming still requires BOTH the flag ON and an `event_emitter` (the
+    // desktop AppHandle that emits to the frontend); the deterministic T2 fixture
+    // tier never supplies an emitter, so it is unaffected. While OFF (or no
+    // emitter), no sink is attached and the end-of-turn batch is emitted exactly
+    // as before.
+    let stream_ux = GuiStreamUxConfig::from_env_default_on();
+    let streaming = stream_ux.is_enabled() && event_emitter.is_some();
+
+    // When streaming, build the sink + spawn the drain task that emits each
+    // envelope live via the EXISTING `gui_cognition:event` Tauri event (the event
+    // NAME is a frontend/backend contract and is unchanged). The drain mirrors
+    // the end-of-turn batch loop exactly (HitlRequired → `:approval_required`,
+    // then `gui_cognition:event` with a monotonic sequence), so the only
+    // difference is WHEN the frontend sees each envelope, not WHAT it sees.
+    let (event_sink, drain_handle) = if streaming {
+        let app = event_emitter.clone().expect("emitter present when streaming");
+        let (sink, mut receiver) = GuiEventStreamSink::channel();
+        let stream_session = session_id.clone();
+        let stream_turn = turn_id.clone();
+        let stream_workflow = workflow_id.clone();
+        let stream_prefix = event_scope_prefix.to_string();
+        // Emit the `:thinking` state live up-front so the UI ordering matches the
+        // batch path (processing state set before the first streamed envelope).
+        let _ = app.emit(
+            &format!("{stream_prefix}:thinking"),
+            serde_json::json!({ "status": "processing", "mode": "gui_cognition" }),
+        );
+        let handle = tokio::spawn(async move {
+            let mut sequence: u64 = 0;
+            while let Some(envelope) = receiver.recv().await {
+                if envelope.get("type").and_then(serde_json::Value::as_str)
+                    == Some("HitlRequired")
+                {
+                    if let Some(approval_request) = envelope.get("approval_request").cloned() {
+                        let _ =
+                            app.emit(&format!("{stream_prefix}:approval_required"), approval_request);
+                    }
+                }
+                sequence += 1;
+                let _ = app.emit(
+                    "gui_cognition:event",
+                    gui_cognition_event_payload(
+                        &stream_session,
+                        &stream_turn,
+                        &stream_workflow,
+                        sequence,
+                        envelope,
+                    ),
+                );
+            }
+        });
+        (Some(sink), Some(handle))
+    } else {
+        (None, None)
+    };
+
+    let runtime = runtime
+        .with_runtime_guards(runtime_guards)
+        .with_cancel_token(Some(cancel_token))
+        .with_smart_planner(smart_planner)
+        .with_structured_planner(structured_planner)
+        .with_reobserve(reobserve)
+        .with_wayland_focus(wayland_focus)
+        .with_step_completeness(step_completeness)
+        .with_primitives(primitives)
+        .with_browser(browser)
+        .with_crossapp(crossapp)
+        .with_safety_polish(safety_polish)
+        .with_verify_live(verify_live)
+        .with_auto_prereq(auto_prereq)
+        .with_stream_ux(stream_ux)
+        .with_event_sink(event_sink.clone());
     // Step 11: load a previously saved checkpoint for this session when resuming.
     let resume_checkpoint = if options.workflow_resume {
         load_session_checkpoint(&session_id)
@@ -3860,12 +5032,21 @@ pub(super) async fn desktop_gui_cognition_command_capture(
             route_path: "send_manual_tool_message".into(),
             llm_tool_loop: false,
             hitl_decision_fixture: options.hitl_decision_fixture.clone(),
+            // Task 0.3 / Requirement 20.3: the substrate marker is derived from the
+            // server-side process environment, never from the request payload, so a
+            // client cannot coax the real session into auto-approving.
+            execution_environment:
+                kria_core::agent::gui_cognition::execution_environment::GuiExecutionEnvironment::from_env(),
             execution_mode: options.execution_mode,
             workflow_enabled: options.workflow_enabled,
             resume_checkpoint,
             resume_reason: options.resume_reason.clone(),
         })
         .await;
+
+    // Task 1.2: the turn is finished; drop its cancel token from the registry so
+    // a late cancel request cannot affect a future turn for this session.
+    kria_core::agent::gui_cognition::cancel::gui_cancel_registry().unregister(&session_id);
 
     // Step 11: persist the latest checkpoint for this session (in-memory store).
     if let Some(checkpoint) = outcome
@@ -3894,35 +5075,65 @@ pub(super) async fn desktop_gui_cognition_command_capture(
             {
                 let mut store = app_state.gui_cognition_hitl_proposals.write().await;
                 for decision in store.insert_pending(proposal) {
-                    outcome.events.push(decision.invalidated_event_payload());
+                    let invalidated = decision.invalidated_event_payload();
+                    // Task 10.1: when streaming, the late HITL-invalidation
+                    // envelopes are produced AFTER the runtime returns, so push
+                    // them through the sink too — the drain task emits them live
+                    // in the same FIFO order, and the batch loop below skips them
+                    // (no duplicate emission).
+                    if let Some(sink) = &event_sink {
+                        sink.send(invalidated.clone());
+                    }
+                    outcome.events.push(invalidated);
                 }
             }
         }
     }
 
-    let mut events = vec![super::chat::desktop_chat_event(
-        format!("{event_scope_prefix}:thinking"),
-        serde_json::json!({"status": "processing", "mode": "gui_cognition"}),
-    )];
-    for (index, event) in outcome.events.into_iter().enumerate() {
-        if event.get("type").and_then(serde_json::Value::as_str) == Some("HitlRequired") {
-            if let Some(approval_request) = event.get("approval_request").cloned() {
-                events.push(super::chat::desktop_chat_event(
-                    format!("{event_scope_prefix}:approval_required"),
-                    approval_request,
-                ));
+    // Task 10.1: close the streaming channel and wait for the drain task to flush
+    // every live `gui_cognition:event` emission before returning. Dropping the
+    // runtime (which holds a sink clone) and our own sink handle closes the
+    // channel so the drain loop terminates. While not streaming this is a no-op.
+    drop(runtime);
+    drop(event_sink);
+    if let Some(handle) = drain_handle {
+        let _ = handle.await;
+    }
+
+    // Task 10.1: when streaming, the `:thinking` state + every `gui_cognition:event`
+    // envelope (and its `:approval_required` companion) were ALREADY emitted live
+    // by the drain task DURING the turn, so they are intentionally OMITTED from
+    // the returned batch to avoid double-emission. While not streaming, the batch
+    // is built exactly as before (byte-for-byte unchanged).
+    let mut events = if streaming {
+        Vec::new()
+    } else {
+        vec![super::chat::desktop_chat_event(
+            format!("{event_scope_prefix}:thinking"),
+            serde_json::json!({"status": "processing", "mode": "gui_cognition"}),
+        )]
+    };
+    if !streaming {
+        for (index, event) in outcome.events.into_iter().enumerate() {
+            if event.get("type").and_then(serde_json::Value::as_str) == Some("HitlRequired") {
+                if let Some(approval_request) = event.get("approval_request").cloned() {
+                    events.push(super::chat::desktop_chat_event(
+                        format!("{event_scope_prefix}:approval_required"),
+                        approval_request,
+                    ));
+                }
             }
+            events.push(super::chat::desktop_chat_event(
+                "gui_cognition:event",
+                gui_cognition_event_payload(
+                    &session_id,
+                    &turn_id,
+                    &workflow_id,
+                    (index + 1) as u64,
+                    event,
+                ),
+            ));
         }
-        events.push(super::chat::desktop_chat_event(
-            "gui_cognition:event",
-            gui_cognition_event_payload(
-                &session_id,
-                &turn_id,
-                &workflow_id,
-                (index + 1) as u64,
-                event,
-            ),
-        ));
     }
 
     let memory_writer: Arc<dyn MemoryManager> = app_state.memory_store.clone();
@@ -3981,6 +5192,68 @@ pub(super) async fn desktop_gui_cognition_command_capture(
 mod tests {
     use super::*;
 
+    fn scroll_request(target_name: &str, value: Option<&str>) -> GuiActionRequest {
+        GuiActionRequest {
+            kind: GuiActionKind::Scroll,
+            role: "scrollable".into(),
+            target_name: target_name.into(),
+            value: value.map(str::to_string),
+            execution_hint: "scroll".into(),
+        }
+    }
+
+    #[test]
+    fn scroll_keys_map_each_direction_to_correct_shortcut() {
+        // Task 4 (Issue #5): direction → keys mapping for a surface scroll.
+        assert_eq!(scroll_keys_for_direction("down"), vec!["page_down"]);
+        assert_eq!(scroll_keys_for_direction("up"), vec!["page_up"]);
+        assert_eq!(scroll_keys_for_direction("bottom"), vec!["ctrl", "end"]);
+        assert_eq!(scroll_keys_for_direction("end"), vec!["ctrl", "end"]);
+        assert_eq!(scroll_keys_for_direction("top"), vec!["ctrl", "home"]);
+        assert_eq!(scroll_keys_for_direction("beginning"), vec!["ctrl", "home"]);
+        // Unknown / empty falls back to page_down (never blind-fails).
+        assert_eq!(scroll_keys_for_direction("sideways"), vec!["page_down"]);
+        assert_eq!(scroll_keys_for_direction(""), vec!["page_down"]);
+        // Case-insensitive.
+        assert_eq!(scroll_keys_for_direction("UP"), vec!["page_up"]);
+    }
+
+    #[test]
+    fn scroll_keys_from_request_read_threaded_marker_and_fallback() {
+        // Threaded marker on target_name (proposal target_label).
+        assert_eq!(
+            scroll_keys_for_request(&scroll_request("scroll:up", None)),
+            vec!["page_up"]
+        );
+        assert_eq!(
+            scroll_keys_for_request(&scroll_request("scroll:bottom", None)),
+            vec!["ctrl", "end"]
+        );
+        assert_eq!(
+            scroll_keys_for_request(&scroll_request("scroll:top", None)),
+            vec!["ctrl", "home"]
+        );
+        assert_eq!(
+            scroll_keys_for_request(&scroll_request("scroll:down", None)),
+            vec!["page_down"]
+        );
+        // Fallback to value when target_name carries no marker.
+        assert_eq!(
+            scroll_keys_for_request(&scroll_request("", Some("scroll:up"))),
+            vec!["page_up"]
+        );
+        // Bare direction word (no marker prefix) is honored too.
+        assert_eq!(
+            scroll_keys_for_request(&scroll_request("up", None)),
+            vec!["page_up"]
+        );
+        // No direction anywhere → safe default.
+        assert_eq!(
+            scroll_keys_for_request(&scroll_request("", None)),
+            vec!["page_down"]
+        );
+    }
+
     #[test]
     fn gui_cognition_event_payload_contains_required_envelope_fields() {
         let payload = gui_cognition_event_payload(
@@ -4018,5 +5291,45 @@ mod tests {
         );
 
         assert!(second["sequence"].as_u64().unwrap() > first["sequence"].as_u64().unwrap());
+    }
+
+    // Task 3 (Issue #9): desktop-layer cache-coherence test. Drives the REAL
+    // desktop `FixtureGuiPerceptionProvider` through the freshness path and
+    // asserts the pre-action observe and the post-action ForceFresh re-observe
+    // are DISTINCT captures (different observation_id + different screen hash) —
+    // the post-action verification re-observe is never the pre-action frame.
+    #[tokio::test]
+    async fn desktop_provider_force_fresh_post_action_reobserve_is_distinct() {
+        use kria_core::agent::gui_cognition::perception::{
+            collect_observation, collect_observation_with_freshness, ObservationFreshness,
+        };
+
+        // This fixture models a real screen change after the action: the
+        // pre-action capture (index 0) and post-action re-observe (index >= 1)
+        // return different screen hashes.
+        let provider =
+            FixtureGuiPerceptionProvider::new(GuiPerceptionFixture::Step8ClickResultChanges);
+
+        // Pre-action observe (Default — caches may serve).
+        let pre = collect_observation(&provider, "obs-pre".into(), "ctx".into()).await;
+
+        // Post-action verification re-observe (ForceFresh).
+        let post = collect_observation_with_freshness(
+            &provider,
+            "obs-post".into(),
+            "ctx".into(),
+            ObservationFreshness::ForceFresh,
+        )
+        .await;
+
+        assert_ne!(
+            pre.observation_id, post.observation_id,
+            "pre/post observations must be distinct captures"
+        );
+        assert_ne!(
+            pre.screen_hash, post.screen_hash,
+            "post-action ForceFresh re-observe must reflect the changed screen, \
+             not the pre-action frame (verify-by-screen-change is sound)"
+        );
     }
 }

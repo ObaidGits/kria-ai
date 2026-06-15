@@ -228,3 +228,83 @@ NOT done here (requires a running desktop):
 
 _Last updated by Task 0.5. Authoritative numeric per-family matrix to be appended by the first live
 3-run audit (Task 0.6)._
+
+---
+
+## 7. Task 0.6 gate result
+
+**Task:** 0.6 — Gate: audit runs clean end-to-end on real session (non-destructive) +
+substrate (destructive); baseline reproduced within band.
+**Requirements:** 17 (live testing methodology), 20 (test isolation / data-loss safety),
+18 (no regression).
+**Recorded:** `2026-06-12T16:41:59Z` · commit `619b7ae`.
+
+### 7.1 Environment determination (preflight)
+`bash scripts/gui_cognition_desktop_preflight.sh` → **FAIL (exit 1)**:
+`/api/health not healthy at http://127.0.0.1:3001`. The KRIA desktop app
+(full build + LLM server + Tauri runtime + display) is **not running** in this CI/build
+environment, so the live `execute_live` same-path audit cannot be exercised here. Per the
+methodology in §5 the tool **fails safe** and writes no report when the session is down — no
+numbers are fabricated.
+
+Consequently the gate was driven to **green at the CI-safe level** (everything runnable without a
+live desktop session). The live numeric reproduction of the ~28% overall median remains **gated on
+a running desktop session** — re-run commands below.
+
+### 7.2 CI-safe checks executed (all PASS)
+| # | Check | Command | Result |
+|---|---|---|---|
+| 1 | Desktop preflight (env gate) | `bash scripts/gui_cognition_desktop_preflight.sh` | API down → exit 1 (expected; routes to CI-safe tier) |
+| 2 | Frozen held-out set intact | `python3 testing/tools/heldout_prompt_set.py --verify` | PASS — "frozen + valid (21 families, 105 prompts, ≥ 5/family)" |
+| 3 | Audit dry-run (real session) | `… capability_audit.py --dry-run --environment real_session` | PASS (exit 0) — 21 families / 105 prompts; per-kind asserts correct; destructive-leak detector active |
+| 4 | Audit dry-run (test substrate) | `… capability_audit.py --dry-run --environment test_substrate` | PASS (exit 0) — same plan, substrate auto-approval path armed |
+| 5 | Python audit/substrate suites | `python3 -m pytest testing/suites/gui_cognition/` | PASS — **66 passed** |
+| 6 | T2 deterministic fixture tier (no display) | `cargo test -p kria-core --test gui_cognition_t2_fixture_tier` | PASS — **10 passed** |
+| 7 | Backend-route suite | `cargo test -p kria-core --test gui_cognition_backend_route_tests` | PASS — **21 passed** (incl. auto-approve rejected on real session / honored in substrate) |
+| 8 | Workflow-runtime suite | `cargo test -p kria-core --test gui_cognition_workflow_runtime_tests` | PASS — **10 passed** (checkpoint/resume, no-leak, verify-before-next-step) |
+| 9 | Substrate refuses real display | `scripts/gui_cognition_test_substrate.sh --display :0` / `:1` | PASS — REFUSES `:0` and `:1` (exit 1) |
+| 10 | Substrate scratch smoke (no display) | `scripts/gui_cognition_test_substrate.sh --no-restore-clipboard --scratch-dir …` | PASS — scratch HOME built (5 dirs / 5 files), `KRIA_GUI_TEST_SUBSTRATE=1` marker set, **no display started** |
+
+Isolation evidence (Requirement 20): the substrate launcher refuses the real session displays
+`:0`/`:1`, and the auto-approval fixture is **rejected on the real session** and **only honored in
+the substrate** (Rust `t2_real_session_rejects_auto_approval_fixture` /
+`t2_test_substrate_honors_auto_approval_fixture`, plus the Python suite). No destructive path can
+execute on the user's machine.
+
+No-regression evidence (Requirement 18): the closest prior-green Rust suites (backend-route,
+workflow-runtime) and the full Python gui_cognition suite stayed green; T2 fixture tier green.
+
+### 7.3 Gate verdict
+- **CI-safe gate: SATISFIED** — audit pipeline, frozen set, substrate isolation, and the
+  deterministic (no-display) tiers all run clean end-to-end; destructive-leak detector and
+  real-session auto-approval rejection are armed and verified.
+- **Live numeric gate: PENDING (environment-limited)** — the live 3-run median per-family matrix and
+  the ~28% overall reproduction within band require a running desktop session and are **not** closed
+  in this environment. The audit refuses to fabricate numbers when the session is down.
+
+### 7.4 Exact re-run to close the live numeric gate (on a machine with a desktop session)
+```bash
+# 0. Stand up the desktop so /api/health returns 200
+cd crates/kria-desktop && cargo tauri dev    # (or: cargo run -p kria-desktop)
+
+# 1. Preflight (uinput / AT-SPI / focus / DISPLAY)
+bash scripts/gui_cognition_desktop_preflight.sh
+
+# 2. Frozen set intact
+python3 testing/tools/heldout_prompt_set.py --verify
+
+# 3. Non-destructive baseline on the REAL session (3 runs, gate on median)
+python3 testing/tools/gui_cognition_capability_audit.py \
+    --runs 3 --out planning_docs/gui_cognition_capability_audit.md
+
+# 4. Destructive / approval families in the TEST SUBSTRATE only (Xvfb/headless seat),
+#    scratch files + clipboard save/restore; auto-approval rejected on real session
+scripts/gui_cognition_test_substrate.sh --mode xvfb -- \
+    python3 testing/tools/gui_cognition_capability_audit.py \
+    --runs 3 --environment test_substrate \
+    --out planning_docs/gui_cognition_capability_audit_substrate.md
+```
+Expected close condition: overall median **≈ 28%** within the recorded variance band, **zero
+destructive-leak** (audit exit 0), and both generated matrices committed alongside this doc.
+
+_Last updated by Task 0.6. Live numeric per-family matrix still pending a running desktop session._

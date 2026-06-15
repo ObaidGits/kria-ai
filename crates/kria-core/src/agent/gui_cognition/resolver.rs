@@ -463,6 +463,23 @@ fn resolve_step_target(
             resolve_control_step(step, context, candidates, target_kind_for_click(step), None)
         }
         "PressKey" => resolve_press_key_step(step, context, prior_resolutions),
+        // Task 4 (Issue #5): Scroll is a SURFACE action — it scrolls the active
+        // focused window/viewport and needs no named control. When the
+        // surface-scroll primitive is enabled (default-ON), resolve the active
+        // scrollable surface; otherwise (explicit rollback) fall through to the
+        // legacy `_` blocked arm byte-for-byte.
+        "Scroll" => {
+            if primitives_surface_scroll_enabled() {
+                resolve_scroll_step(step, context)
+            } else {
+                let fallback = if plan.goal_action_type.as_deref() == Some("browser_search") {
+                    "browser search target metadata only"
+                } else {
+                    "unsupported target step"
+                };
+                blocked_result(step, "unknown", "blocked", fallback)
+            }
+        }
         "RequireApproval" => approval_result(step),
         "AskClarification" => clarification_result(step),
         "WaitForState" | "VerifyState" | "SummarizeVisibleContent" => metadata_result(step),
@@ -613,6 +630,31 @@ fn resolve_type_text_step(
         );
     }
 
+    // Task 2 (Issue #3): a browser address-bar type (preceded by a deterministic
+    // Ctrl+L focus) is a FOCUSED-SURFACE action — the address bar is already
+    // focused and is not a resolvable a11y control on Wayland, so resolve as a
+    // surface (no control id/bounds) and let the executor type into the focused
+    // element. Recognized by the sentinel control hint set in
+    // `browser_search_steps`.
+    if step.target_control_hint.as_deref() == Some(super::llm_planner::BROWSER_ADDRESSBAR_HINT) {
+        return GuiTargetResolutionResult {
+            step_id: sanitize_target_text(&step.step_id),
+            step_type: sanitize_target_text(&step.step_type),
+            target_query: "focused address bar".into(),
+            target_kind: "focused_context".into(),
+            status: "resolved".into(),
+            resolved_target: None,
+            candidates: Vec::new(),
+            confidence: 0.82,
+            requires_approval: step.requires_approval,
+            can_proceed_to_safety_gate: true,
+            can_execute: false,
+            blockers: Vec::new(),
+            ambiguity_reasons: Vec::new(),
+            source_evidence: vec!["browser address bar focused via Ctrl+L".into()],
+        };
+    }
+
     if let Some(previous) = prior_resolutions
         .values()
         .find(|target| role_group(&target.role) == "editable")
@@ -646,6 +688,34 @@ fn resolve_press_key_step(
     context: &GuiContext,
     prior_resolutions: &HashMap<String, GuiResolvedTarget>,
 ) -> GuiTargetResolutionResult {
+    // Task 2 (Issue #3): the deterministic browser address-bar Ctrl+L PressKey is
+    // a WINDOW-LEVEL shortcut. The preceding OpenApp step activates the browser
+    // window (Wayland focus guarantee, Task 2 Part A), so the shortcut targets
+    // the focused window even though element-level keyboard focus is not probeable
+    // on Wayland (`keyboard_focus_known == false`, `cursor_focus == null`). Resolve
+    // it as a focused-surface action (no control resolution); the step's own
+    // `screen_changed` verification confirms the address bar actually focused, so a
+    // mis-activation is caught honestly rather than typed blindly.
+    if step.target_control_hint.as_deref() == Some(super::llm_planner::BROWSER_ADDRESSBAR_HINT) {
+        return GuiTargetResolutionResult {
+            step_id: sanitize_target_text(&step.step_id),
+            step_type: sanitize_target_text(&step.step_type),
+            target_query: "browser address bar (window shortcut)".into(),
+            target_kind: "focused_context".into(),
+            status: "resolved".into(),
+            resolved_target: None,
+            candidates: Vec::new(),
+            confidence: 0.9,
+            requires_approval: step.requires_approval,
+            can_proceed_to_safety_gate: true,
+            can_execute: false,
+            blockers: Vec::new(),
+            ambiguity_reasons: Vec::new(),
+            source_evidence: vec![
+                "browser address-bar Ctrl+L targets the just-activated browser window".into(),
+            ],
+        };
+    }
     if context.focus_state.keyboard_focus_known
         || prior_resolutions
             .values()
@@ -674,6 +744,71 @@ fn resolve_press_key_step(
             "blocked",
             "PressKey requires known focus or a prior resolved editable target.",
         )
+    }
+}
+
+/// Task 4 (Issue #5): whether surface-scroll resolution is active. Mirrors the
+/// `gui_cog_primitives` default-ON env contract (`KRIA_GUI_COG_PRIMITIVES`) used
+/// across the executor: an absent value ⇒ ON; an explicit falsy value
+/// (`0`/`false`/`no`/`off`/empty) is the documented rollback that keeps `Scroll`
+/// falling through to the legacy blocked `_` arm byte-for-byte. The resolver
+/// functions do not receive `GuiPrimitivesConfig`, so this local helper reads
+/// the same env flag (matching the `smart_planner_vocab_enabled` pattern in
+/// `goal_contract.rs`).
+fn primitives_surface_scroll_enabled() -> bool {
+    match std::env::var("KRIA_GUI_COG_PRIMITIVES") {
+        Ok(v) => {
+            let v = v.trim().to_ascii_lowercase();
+            !matches!(v.as_str(), "0" | "false" | "no" | "off" | "")
+        }
+        Err(_) => true,
+    }
+}
+
+/// Task 4 (Issue #5): resolve the active scrollable SURFACE for a `Scroll` step.
+/// A scroll scrolls the focused window/viewport and needs NO named control, so
+/// the resolved result intentionally carries `resolved_target: None` (a surface
+/// has no control id / bounds / identity hash). When a scrollable surface is
+/// observable — a known active window OR at least one visible window — return a
+/// RESOLVED result that proceeds to the safety gate; execution is then verified
+/// via `screen_changed`. When NO surface is observable (no active window AND no
+/// visible windows) block honestly and never blind-scroll.
+fn resolve_scroll_step(step: &GuiTypedPlanStep, context: &GuiContext) -> GuiTargetResolutionResult {
+    let active_window_known = {
+        let label = context.active_window.label.trim().to_ascii_lowercase();
+        let has_label = !label.is_empty() && label != "unknown";
+        let has_app = context
+            .active_window
+            .app_name
+            .as_deref()
+            .map(|name| !name.trim().is_empty())
+            .unwrap_or(false);
+        has_label || has_app
+    };
+    let has_visible_window = !context.observation.visible_windows.is_empty();
+    if !active_window_known && !has_visible_window {
+        return blocked_result(
+            step,
+            "scrollable",
+            "blocked",
+            "No scrollable surface is observable; re-observe or ask before scrolling.",
+        );
+    }
+    GuiTargetResolutionResult {
+        step_id: sanitize_target_text(&step.step_id),
+        step_type: sanitize_target_text(&step.step_type),
+        target_query: "active scrollable surface".into(),
+        target_kind: "scrollable".into(),
+        status: "resolved".into(),
+        resolved_target: None,
+        candidates: Vec::new(),
+        confidence: 0.8,
+        requires_approval: step.requires_approval,
+        can_proceed_to_safety_gate: true,
+        can_execute: false,
+        blockers: Vec::new(),
+        ambiguity_reasons: Vec::new(),
+        source_evidence: vec!["active scrollable surface (focused window/viewport)".into()],
     }
 }
 
@@ -1488,6 +1623,13 @@ fn source_only(candidate: &GuiTargetCandidate, needle: &str) -> bool {
 }
 
 fn step_should_emit_resolution(step: &GuiTypedPlanStep) -> bool {
+    // Task 4 (Issue #5): a `Scroll` is a SURFACE action. It only emits a target
+    // resolution (so `resolve_scroll_step` can run) when the surface-scroll
+    // primitive is enabled. While the flag is OFF, `Scroll` stays filtered out
+    // exactly as before (skipped → byte-for-byte unchanged).
+    if step.step_type == "Scroll" {
+        return primitives_surface_scroll_enabled();
+    }
     matches!(
         step.step_type.as_str(),
         "OpenApp"

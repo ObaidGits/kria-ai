@@ -5,6 +5,11 @@ import { deriveGuiCognitionSummary } from "../lib/guiCognitionSummary";
 interface GuiCognitionPanelProps {
   session: GuiCognitionSessionState;
   onDismiss?: () => void;
+  /**
+   * Task 10.3: invoked by the visible Stop/Cancel control to abort the active
+   * turn via the Task 1 cancel path. When omitted, the Stop control is hidden.
+   */
+  onStop?: () => void;
 }
 
 const lifecycleLabel: Record<GuiCognitionLifecycle, string> = {
@@ -19,12 +24,13 @@ const lifecycleLabel: Record<GuiCognitionLifecycle, string> = {
   blocked: "Blocked",
   completed: "Completed",
   failed: "Failed",
+  cancelled: "Cancelled",
 };
 
 const lifecycleTone = (lifecycle: GuiCognitionLifecycle) => {
   if (lifecycle === "completed") return "success";
   if (lifecycle === "blocked" || lifecycle === "failed") return "danger";
-  if (lifecycle === "awaiting_approval") return "warning";
+  if (lifecycle === "awaiting_approval" || lifecycle === "cancelled") return "warning";
   if (lifecycle === "executing" || lifecycle === "verifying" || lifecycle === "observing") {
     return "active";
   }
@@ -99,7 +105,11 @@ export const GuiCognitionPanel: Component<GuiCognitionPanelProps> = (props) => {
   const isTerminal = () =>
     props.session.lifecycle === "completed" ||
     props.session.lifecycle === "blocked" ||
-    props.session.lifecycle === "failed";
+    props.session.lifecycle === "failed" ||
+    props.session.lifecycle === "cancelled";
+  // Task 10.3: the turn is "active" (abortable) until it reaches a terminal
+  // lifecycle. The Stop control is shown only while active.
+  const isActive = () => props.session.lifecycle !== "idle" && !isTerminal();
 
   return (
     <section class="gui-cognition-panel" aria-label="GUI Cognition progress">
@@ -109,6 +119,20 @@ export const GuiCognitionPanel: Component<GuiCognitionPanelProps> = (props) => {
             {summary().statusLabel}
           </span>
           <span class="gui-cognition-summary-headline">{summary().headline}</span>
+          <Show when={props.onStop && isActive()}>
+            <button
+              type="button"
+              class="gui-cognition-stop"
+              onClick={() => props.onStop?.()}
+              title="Stop the active GUI Cognition turn"
+              aria-label="Stop the active GUI Cognition turn"
+            >
+              <svg width="12" height="12" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true" style="vertical-align: middle; margin-right: 4px;">
+                <rect x="1" y="1" width="12" height="12" rx="2" />
+              </svg>
+              Stop
+            </button>
+          </Show>
           <Show when={props.onDismiss && isTerminal()}>
             <button type="button" class="gui-cognition-dismiss" onClick={() => props.onDismiss?.()}>
               Dismiss

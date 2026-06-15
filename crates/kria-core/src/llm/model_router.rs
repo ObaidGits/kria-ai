@@ -6,6 +6,20 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+/// Task 0.9 (Requirement 0.9 Rung B): whether a backend genuinely posts a
+/// grammar / `json_schema` constraint and can therefore be relied on for a
+/// ~100% schema-valid typed plan. This is the strong signal the Planner
+/// Capability Ladder uses to pick a LOCAL fallback backend: a `json_object` or
+/// `tool_calling` mode (which only *guides* output) does NOT qualify.
+pub fn is_grammar_capable(backend: &Arc<dyn LlmBackend>) -> bool {
+    use crate::llm::StructuredOutputMode;
+    backend.supports_grammar()
+        || matches!(
+            backend.structured_output_mode(),
+            StructuredOutputMode::Grammar | StructuredOutputMode::JsonSchema
+        )
+}
+
 /// Routing modes for model selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RoutingMode {
@@ -313,6 +327,15 @@ impl ModelRouter {
 
     /// Always returns local client (for classification, planning).
     pub fn get_local(&self) -> Option<Arc<dyn LlmBackend>> {
+        self.local.clone()
+    }
+
+    /// Task 0.9 (Requirement 0.9 Rung B): the configured LOCAL backend, if any.
+    /// Used by the GUI-cognition Planner Capability Ladder to obtain a
+    /// grammar-capable local backend for the middle rung when the configured
+    /// (e.g. cloud) planner backend is NOT itself grammar-capable. Returns the
+    /// same `Arc` clone as [`get_local`](Self::get_local).
+    pub fn local_backend(&self) -> Option<Arc<dyn LlmBackend>> {
         self.local.clone()
     }
 

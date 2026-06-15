@@ -9,6 +9,59 @@ const MAX_CONTROL_SUMMARY: usize = 160;
 const MAX_OCR_BLOCKS: usize = 16;
 const MAX_VISIBLE_WINDOWS: usize = 24;
 
+/// Task 3 (Issue #9): freshness contract for a single observation.
+///
+/// THE ONE COHERENCE RULE (also documented in `docs/GUI_COGNITION_CACHE_COHERENCE.md`):
+/// **a post-action re-observe used for verification MUST be a FRESH capture —
+/// it is NEVER served from a pre-action cache entry.** The three caches that
+/// otherwise could leak a pre-action frame across an action boundary are:
+///   1. the per-observation screenshot memo
+///      (`DesktopGuiPerceptionProvider::screenshot_bytes`), cleared by
+///      [`GuiPerceptionProvider::begin_observation`];
+///   2. the observation cache (`gui_cognition_observation_cache`, TTL 750 ms),
+///      consulted via [`GuiPerceptionProvider::cached_observation`];
+///   3. the OCR cache (`GUI_OCR_CACHE`, keyed by screen hash, TTL 1500 ms).
+///
+/// A [`ObservationFreshness::ForceFresh`] observation bypasses ALL THREE: it
+/// skips the observation cache, signals the provider (via
+/// [`GuiPerceptionProvider::set_force_fresh`]) to bypass the OCR cache, and
+/// calls `begin_observation` before capture so the screenshot memo is dropped.
+/// The pre-action observation stays [`ObservationFreshness::Default`] (caches
+/// allowed), so the pre/post pair around an action is guaranteed distinct.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ObservationFreshness {
+    /// Caches may serve this observation (pre-action / non-verification observe).
+    #[default]
+    Default,
+    /// Bypass every per-turn cache and capture a true fresh frame
+    /// (post-action / verification re-observe).
+    ForceFresh,
+}
+
+/// Task 3 (Issue #9): whether the cache-coherence force-fresh path is active.
+/// Default ON; rollback via `KRIA_GUI_COG_CACHE_COHERENCE` set to a falsy value
+/// (`0`/`false`/`no`/`off`/empty), which restores the prior caching behavior
+/// byte-for-byte (a [`ObservationFreshness::ForceFresh`] request is then treated
+/// exactly like [`ObservationFreshness::Default`]). An absent env value keeps
+/// the flag ON.
+pub fn cache_coherence_enabled() -> bool {
+    cache_coherence_enabled_lookup(|key| std::env::var(key).ok())
+}
+
+/// Testable core of [`cache_coherence_enabled`] with an injectable lookup.
+pub fn cache_coherence_enabled_lookup<F>(lookup: F) -> bool
+where
+    F: Fn(&str) -> Option<String>,
+{
+    match lookup("KRIA_GUI_COG_CACHE_COHERENCE") {
+        Some(v) => {
+            let v = v.trim().to_ascii_lowercase();
+            !matches!(v.as_str(), "0" | "false" | "no" | "off" | "")
+        }
+        None => true,
+    }
+}
+
 static SECRET_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
         r"(?i)((?:api[_-]?key|token|password|passwd|secret|credential|authorization|bearer)\s*[:=]\s*)[^\s,;]+",
@@ -604,6 +657,233 @@ pub struct GuiObservationSnapshot {
     pub cache: GuiObservationCacheSummary,
 }
 
+/// Phase 1 (Requirement 1.2): tolerant app-alias groups for window-presence
+/// matching. Given a requested app name/hint, returns the lowercased alias group
+/// it belongs to (always including the hint itself) so a launched app's window
+/// is recognised even when its app_name/title differs cosmetically from the
+/// requested name (`Chrome`/`chromium`/`google-chrome`, `files`/`nautilus`,
+/// `terminal`/`gnome-terminal`, `gedit`/"text editor", `gnome-calculator`/
+/// "calculator", `gnome-control-center`/"settings"). Matching is membership-
+/// tolerant (substring either direction) so `google-chrome` resolves the
+/// `chrome` group and a D-Bus-style `org.gnome.Nautilus` resolves `files`.
+pub fn app_alias_group(name: &str) -> Vec<String> {
+    let key = name.trim().to_ascii_lowercase();
+    // Each inner slice is one canonical app's full alias set.
+    const GROUPS: &[&[&str]] = &[
+        &[
+            "chrome",
+            "chromium",
+            "google-chrome",
+            "google chrome",
+            "chromium-browser",
+            "org.chromium.chromium",
+        ],
+        &["firefox", "mozilla firefox", "firefox-esr", "org.mozilla.firefox"],
+        &[
+            "files",
+            "nautilus",
+            "file manager",
+            "org.gnome.nautilus",
+        ],
+        &[
+            "terminal",
+            "gnome-terminal",
+            "gnome terminal",
+            "org.gnome.terminal",
+        ],
+        &[
+            "gedit",
+            "text editor",
+            "gnome-text-editor",
+            "org.gnome.gedit",
+            "org.gnome.texteditor",
+        ],
+        &["gnome-calculator", "calculator", "org.gnome.calculator"],
+        &[
+            "gnome-control-center",
+            "settings",
+            "system settings",
+            "control center",
+            "org.gnome.settings",
+        ],
+    ];
+
+    let mut out: Vec<String> = vec![key.clone()];
+    for group in GROUPS {
+        let member = group.iter().any(|alias| {
+            let a = alias.to_ascii_lowercase();
+            a == key || key.contains(&a) || (key.len() >= 3 && a.contains(&key))
+        });
+        if member {
+            for alias in *group {
+                let a = alias.to_ascii_lowercase();
+                if !out.contains(&a) {
+                    out.push(a);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Issue #2 (OpenApp process-launched evidence): the set of candidate PROCESS /
+/// binary names a launched app may run as, keyed by a tolerant app hint.
+///
+/// On this Wayland/GNOME session KRIA's observation can only name the ACTIVE
+/// window (GNOME Shell `Eval` window-enumeration is DISABLED, AT-SPI app labels
+/// are anonymous D-Bus names like `:1.0`), so a freshly launched app that is not
+/// focused is invisible to the window-presence check. The repo's own
+/// `planning_docs/KRIA_GUI_CORRECTION_AUDIT.md` notes app-open verification
+/// should use ProcessLaunched, not WindowState, on Wayland. This map provides
+/// the process names to match a launched app against the running-process set.
+///
+/// Matching (see [`app_process_running`]) is tolerant in BOTH directions so it
+/// is robust to Linux `comm` truncation (15 chars: `gnome-calculator` →
+/// `gnome-calculato`) and reverse-DNS / suffixed binaries. The returned group
+/// always includes the normalized hint itself first, mirroring
+/// [`app_alias_group`].
+pub fn app_process_alias_group(name: &str) -> Vec<String> {
+    let key = name.trim().to_ascii_lowercase();
+    // Each inner slice is one canonical app's full PROCESS/binary alias set.
+    const GROUPS: &[&[&str]] = &[
+        // file manager → nautilus / nemo / thunar / dolphin
+        &[
+            "file manager",
+            "files",
+            "nautilus",
+            "nemo",
+            "thunar",
+            "dolphin",
+        ],
+        // calculator → gnome-calculator / kcalc
+        &["calculator", "gnome-calculator", "kcalc"],
+        // text editor → gedit / gnome-text-editor / kate
+        &[
+            "text editor",
+            "gedit",
+            "gnome-text-editor",
+            "kate",
+        ],
+        // terminal → gnome-terminal / konsole / xterm / kgx
+        &[
+            "terminal",
+            "gnome-terminal",
+            "konsole",
+            "xterm",
+            "kgx",
+        ],
+        // chrome → chrome / google-chrome / chromium
+        &[
+            "chrome",
+            "google-chrome",
+            "google-chrome-stable",
+            "chromium",
+            "chromium-browser",
+        ],
+        // firefox → firefox
+        &["firefox", "firefox-esr"],
+        // settings → gnome-control-center / systemsettings
+        &[
+            "settings",
+            "system settings",
+            "gnome-control-center",
+            "systemsettings",
+        ],
+    ];
+
+    let mut out: Vec<String> = vec![key.clone()];
+    for group in GROUPS {
+        let member = group.iter().any(|alias| {
+            let a = alias.to_ascii_lowercase();
+            a == key || key.contains(&a) || (key.len() >= 3 && a.contains(&key))
+        });
+        if member {
+            for alias in *group {
+                let a = alias.to_ascii_lowercase();
+                if !out.contains(&a) {
+                    out.push(a);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Issue #2: whether a launched app's PROCESS is present in `running` — the
+/// process-launched evidence source for OpenApp verification.
+///
+/// `app_hint` is the requested app (e.g. "file manager", "calculator"); it is
+/// expanded to its full binary alias set via [`app_process_alias_group`] and
+/// matched tolerantly against the supplied `running` process names. Returns the
+/// ACTUAL matched running process name (the real evidence, for the
+/// `app_running:<process>` string) or `None` when no running process matches. A
+/// blank hint never matches.
+///
+/// This is a PURE function over an injected process-name list, so CI tests
+/// exercise it WITHOUT touching real processes (the live probe is
+/// [`SysinfoProcessProbe`]). Matching is tolerant in both directions to survive
+/// Linux `comm` 15-char truncation; the 1–2 char guard avoids trivial matches.
+/// Whitespace-bearing aliases (human labels like "file manager") are never used
+/// for matching — only binary names.
+pub fn app_process_running(app_hint: &str, running: &[String]) -> Option<String> {
+    let key = app_hint.trim().to_ascii_lowercase();
+    if key.is_empty() {
+        return None;
+    }
+    let aliases: Vec<String> = app_process_alias_group(&key)
+        .into_iter()
+        .filter(|alias| !alias.trim().is_empty() && !alias.contains(' '))
+        .collect();
+    if aliases.is_empty() {
+        return None;
+    }
+    for proc_name in running {
+        let proc_norm = proc_name.trim().to_ascii_lowercase();
+        if proc_norm.is_empty() {
+            continue;
+        }
+        let matched = aliases.iter().any(|alias| {
+            proc_norm == *alias
+                || (alias.len() >= 3 && alias.contains(proc_norm.as_str()))
+                || (proc_norm.len() >= 3 && proc_norm.contains(alias.as_str()))
+        });
+        if matched {
+            // Report the ACTUAL running process name — honest evidence of what
+            // is running, never a fabricated/normalized label.
+            return Some(proc_norm);
+        }
+    }
+    None
+}
+
+/// Issue #2: a mockable process-presence probe used by OpenApp verification.
+///
+/// Returns the lowercased names of currently-running processes. The live
+/// implementation ([`SysinfoProcessProbe`]) lists real processes via `sysinfo`;
+/// CI tests inject a fixed list (or call [`app_process_running`] directly) so
+/// they never depend on real processes.
+pub trait GuiProcessProbe: Send + Sync {
+    /// The lowercased names of all currently-running processes.
+    fn running_process_names(&self) -> Vec<String>;
+}
+
+/// Issue #2: the live `sysinfo`-backed [`GuiProcessProbe`]. O(processes); used
+/// only for OpenApp verification under the `gui_cog_verify_live` flag.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct SysinfoProcessProbe;
+
+impl GuiProcessProbe for SysinfoProcessProbe {
+    fn running_process_names(&self) -> Vec<String> {
+        let mut sys = sysinfo::System::new();
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+        sys.processes()
+            .values()
+            .map(|p| p.name().to_string_lossy().to_ascii_lowercase())
+            .filter(|name| !name.is_empty())
+            .collect()
+    }
+}
+
 impl GuiObservationSnapshot {
     pub fn visible_control_count(&self) -> usize {
         self.all_controls().len()
@@ -671,6 +951,145 @@ impl GuiObservationSnapshot {
             || self.screenshot_available
             || !self.monitors.is_empty()
     }
+
+    /// Task 3.3 (Requirement 2.5): whether the named window/app is currently
+    /// observable on the fresh screen. Used by the bounded readiness wait to
+    /// decide whether the expected window/app/page has finished loading before
+    /// the next step's target is resolved — so resolution never runs against an
+    /// un-ready screen.
+    ///
+    /// Matching is a case-insensitive substring check (either direction) against
+    /// the active window label/app and every visible window's title/app, scoped
+    /// to English per Requirement 26.3. An empty/blank hint is never "ready".
+    pub fn window_or_app_observable(&self, hint: &str) -> bool {
+        let needle = hint.trim().to_ascii_lowercase();
+        if needle.is_empty() {
+            return false;
+        }
+        let mut haystacks: Vec<String> = Vec::new();
+        if self.active_window_label != "unknown" {
+            haystacks.push(self.active_window_label.to_ascii_lowercase());
+        }
+        if let Some(app) = &self.active_window.app_name {
+            haystacks.push(app.to_ascii_lowercase());
+        }
+        if let Some(app) = &self.active_window.app_id {
+            haystacks.push(app.to_ascii_lowercase());
+        }
+        for window in &self.visible_windows {
+            if !window.title.trim().is_empty() {
+                haystacks.push(window.title.to_ascii_lowercase());
+            }
+            if let Some(app) = &window.app_name {
+                haystacks.push(app.to_ascii_lowercase());
+            }
+        }
+        haystacks.iter().any(|hay| {
+            let hay = hay.trim();
+            !hay.is_empty() && (hay.contains(&needle) || needle.contains(hay))
+        })
+    }
+
+    /// Phase 1 (Requirement 1.1/1.2/1.3): whether the launched app's window is
+    /// PRESENT/visible in the desktop open-window set, matched ALIAS-TOLERANTLY
+    /// by app_name/title — regardless of whether it is the focused/active window.
+    ///
+    /// On Wayland/GNOME a freshly launched app is not guaranteed to become the
+    /// focused/active window within the bounded wait (focus-stealing prevention,
+    /// async window mapping) and its window app_name/title may differ
+    /// cosmetically from the requested app name (`Chrome`/`chromium`/
+    /// `google-chrome`). This predicate therefore checks the active window AND
+    /// every visible (non-focused) window against the full alias group of the
+    /// requested app (see [`app_alias_group`]). An empty/blank hint is never
+    /// "visible". This is the strong, correct evidence that "the app opened".
+    pub fn window_visible_for_app(&self, app_hint: &str) -> bool {
+        let key = app_hint.trim().to_ascii_lowercase();
+        if key.is_empty() {
+            return false;
+        }
+        let aliases = app_alias_group(&key);
+
+        // Candidate haystacks: the active window AND every visible window
+        // (focused or not) — title, app_name, and app_id.
+        let mut haystacks: Vec<String> = Vec::new();
+        if self.active_window_label != "unknown" {
+            haystacks.push(self.active_window_label.to_ascii_lowercase());
+        }
+        if let Some(app) = &self.active_window.app_name {
+            haystacks.push(app.to_ascii_lowercase());
+        }
+        if let Some(app) = &self.active_window.app_id {
+            haystacks.push(app.to_ascii_lowercase());
+        }
+        for window in &self.visible_windows {
+            if !window.title.trim().is_empty() {
+                haystacks.push(window.title.to_ascii_lowercase());
+            }
+            if let Some(app) = &window.app_name {
+                haystacks.push(app.to_ascii_lowercase());
+            }
+        }
+
+        haystacks.iter().any(|hay| {
+            let hay = hay.trim();
+            if hay.is_empty() {
+                return false;
+            }
+            aliases.iter().any(|alias| {
+                // Substring match in the window's favor (app_name
+                // "org.gnome.Nautilus" contains alias "nautilus"; window title
+                // "Files" contains alias "files"); and the reverse for short
+                // window tokens, guarded to avoid trivial 1–2 char matches.
+                hay.contains(alias.as_str()) || (hay.len() >= 3 && alias.as_str().contains(hay))
+            })
+        })
+    }
+
+    /// Task 3.4 (Requirement 2.3/2.4, Property 2/8): tolerant *presence*
+    /// predicate for the present-after-change vs genuinely-absent distinction.
+    ///
+    /// Unlike [`matching_controls`] (which requires a *trusted executable*
+    /// candidate so a target can be safely resolved + acted on), this only asks
+    /// whether a control matching the expected descriptor is OBSERVABLE on the
+    /// fresh screen at all: visible, role within the expected family, and (when a
+    /// label hint is given) label-matching. It is deliberately TOLERANT OF A
+    /// CHANGED `control_id` — it never compares identity, only role + label — so
+    /// a control that was re-rendered with a new id after a state change is still
+    /// recognised as present rather than falsely treated as "no longer present".
+    ///
+    /// This is presence EVIDENCE only; it NEVER authorizes execution (the
+    /// resolver still gates that with its confidence threshold). The decision is
+    /// driven by real observation evidence (the descriptor matched against the
+    /// fresh controls), never by the action kind (preserves the Task 2.5
+    /// invariant). `role_groups` is the expected role family for the step
+    /// (e.g. text/entry for FocusField, button/check/link for ClickControl); an
+    /// empty list matches any role. Label matching is a case-insensitive
+    /// substring check in either direction, English-scoped per Requirement 26.3.
+    pub fn control_descriptor_observable(&self, label_hint: &str, role_groups: &[&str]) -> bool {
+        let needle = label_hint.trim().to_ascii_lowercase();
+        self.all_controls().iter().any(|control| {
+            if !control.visible {
+                return false;
+            }
+            let role = control.role.to_ascii_lowercase();
+            let role_ok =
+                role_groups.is_empty() || role_groups.iter().any(|group| role.contains(group));
+            if !role_ok {
+                return false;
+            }
+            if needle.is_empty() {
+                // No label hint → a visible control in the expected role family
+                // is enough to count as observable (e.g. "type into the focused
+                // text field" when the field carries no accessible name).
+                return true;
+            }
+            // One-directional substring match (the control's name contains the
+            // requested label), mirroring `matching_controls` so presence is at
+            // least as permissive as safe resolution — never more.
+            let name = control.name.trim().to_ascii_lowercase();
+            !name.is_empty() && name.contains(&needle)
+        })
+    }
 }
 
 #[async_trait]
@@ -680,6 +1099,25 @@ pub trait GuiPerceptionProvider: Send + Sync {
     async fn get_accessibility_capabilities(&self) -> GuiProbeResult;
     async fn find_ui_elements(&self, role: &str) -> GuiProbeResult;
     async fn focused_window_title(&self) -> Option<String>;
+
+    /// Invalidate any per-observation caches the provider holds (e.g. a single
+    /// captured screenshot shared by the screenshot/OCR/visual probes WITHIN one
+    /// observation). Called at the start of each [`collect_observation`] so a
+    /// re-observe in the SAME turn (a multi-step combo, or the pre/post pair of a
+    /// `screen_changed` verification) captures a FRESH frame instead of reusing
+    /// the turn's first capture. Default no-op (providers without per-observation
+    /// caches need no reset).
+    async fn begin_observation(&self) {}
+
+    /// Task 3 (Issue #9): signal the provider that the current observation must
+    /// bypass every per-turn cache (notably the OCR cache `GUI_OCR_CACHE` and
+    /// the screenshot memo) so a post-action verification re-observe is a TRUE
+    /// fresh capture, never a pre-action cached frame. Called by
+    /// [`collect_observation_with_freshness`] with `true` for a
+    /// [`ObservationFreshness::ForceFresh`] observation (and reset to `false`
+    /// afterward). Default no-op: providers without per-turn caches need no
+    /// bypass, so their behavior is byte-for-byte unchanged.
+    fn set_force_fresh(&self, _force_fresh: bool) {}
 
     async fn capture_screenshot(&self) -> GuiProbeResult {
         GuiProbeResult::err("screenshot capture is not implemented for this provider")
@@ -725,25 +1163,74 @@ pub async fn collect_observation<P: GuiPerceptionProvider>(
     observation_id: String,
     context_id: String,
 ) -> GuiObservationSnapshot {
+    // Default freshness: caches may serve this observation. This is the
+    // byte-for-byte prior behavior (pre-action / non-verification observe).
+    collect_observation_with_freshness(
+        provider,
+        observation_id,
+        context_id,
+        ObservationFreshness::Default,
+    )
+    .await
+}
+
+/// Task 3 (Issue #9): freshness-aware observation collection. When `freshness`
+/// is [`ObservationFreshness::ForceFresh`] AND the `gui_cog_cache_coherence`
+/// flag is ON, this bypasses ALL THREE caches so a post-action verification
+/// re-observe is a genuine fresh capture (never a pre-action cached frame):
+///   - skips the observation cache ([`GuiPerceptionProvider::cached_observation`]);
+///   - signals the provider to bypass the OCR cache
+///     ([`GuiPerceptionProvider::set_force_fresh`]);
+///   - calls [`GuiPerceptionProvider::begin_observation`] before capture so the
+///     per-observation screenshot memo is dropped.
+///
+/// When the flag is OFF (env `KRIA_GUI_COG_CACHE_COHERENCE` falsy) a
+/// `ForceFresh` request is treated exactly like `Default`, so behavior is
+/// byte-for-byte the prior caching path.
+pub async fn collect_observation_with_freshness<P: GuiPerceptionProvider>(
+    provider: &P,
+    observation_id: String,
+    context_id: String,
+    freshness: ObservationFreshness,
+) -> GuiObservationSnapshot {
     let observation_started = Instant::now();
-    if let Some(mut observation) = provider
-        .cached_observation(&observation_id, &context_id)
-        .await
-    {
-        observation.observation_id = observation_id;
-        observation.context_id = context_id;
-        observation.timestamp_ms = unix_now_ms();
-        observation.timing.total_ms = elapsed_ms(observation_started);
-        if observation.timing.probe_timings.is_empty() {
-            observation.timing.probe_timings =
-                vec![GuiProbeTimingSummary::cached("observation_cache")];
+    let force_fresh =
+        matches!(freshness, ObservationFreshness::ForceFresh) && cache_coherence_enabled();
+
+    // Force-fresh observations NEVER consult the observation cache — they must
+    // reflect the true post-action screen, not a recent pre-action entry.
+    if !force_fresh {
+        if let Some(mut observation) = provider
+            .cached_observation(&observation_id, &context_id)
+            .await
+        {
+            observation.observation_id = observation_id;
+            observation.context_id = context_id;
+            observation.timestamp_ms = unix_now_ms();
+            observation.timing.total_ms = elapsed_ms(observation_started);
+            if observation.timing.probe_timings.is_empty() {
+                observation.timing.probe_timings =
+                    vec![GuiProbeTimingSummary::cached("observation_cache")];
+            }
+            observation.cache.cache_hit = true;
+            if observation.cache.cache_policy.trim().is_empty() {
+                observation.cache.cache_policy = provider.observation_cache_policy().into();
+            }
+            return observation;
         }
-        observation.cache.cache_hit = true;
-        if observation.cache.cache_policy.trim().is_empty() {
-            observation.cache.cache_policy = provider.observation_cache_policy().into();
-        }
-        return observation;
     }
+
+    // Force-fresh: tell the provider to bypass the OCR cache for the probes
+    // below; reset right after the join. Gated by the flag (force_fresh is only
+    // ever true when the flag is ON), so flag-OFF behavior is unchanged.
+    if force_fresh {
+        provider.set_force_fresh(true);
+    }
+
+    // Fresh observation: drop any per-observation capture the provider memoized
+    // for a PRIOR observation this turn, so a re-observe (combo step or the
+    // pre/post pair of a `screen_changed` verification) captures a fresh frame.
+    provider.begin_observation().await;
 
     let (
         (active_window, active_window_timing),
@@ -798,6 +1285,13 @@ pub async fn collect_observation<P: GuiPerceptionProvider>(
         timed_bounded_probe("detect_visual_controls", provider.detect_visual_controls()),
         timed_optional_probe("focused_window_title", provider.focused_window_title()),
     );
+
+    // Task 3 (Issue #9): the force-fresh window is over once the probes have
+    // captured. Reset so a subsequent Default observation on the same provider
+    // can use its caches again.
+    if force_fresh {
+        provider.set_force_fresh(false);
+    }
 
     let mut probe_timings = vec![
         active_window_timing,
@@ -2851,5 +3345,103 @@ fn single_application(value: &serde_json::Value) -> Option<String> {
             .map(str::to_string)
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod app_alias_tests {
+    //! Phase 1 (Requirement 1.2) T1: the tolerant app-alias map. CI-safe pure
+    //! function, no display/backend.
+    use super::app_alias_group;
+
+    fn group_contains(name: &str, expected: &str) -> bool {
+        app_alias_group(name).iter().any(|a| a == expected)
+    }
+
+    #[test]
+    fn chrome_aliases_are_mutually_tolerant() {
+        // chrome ↔ chromium ↔ google-chrome all resolve to the same group.
+        for name in ["chrome", "chromium", "google-chrome", "Google Chrome"] {
+            assert!(group_contains(name, "chrome"), "{name} should map to chrome");
+            assert!(group_contains(name, "chromium"), "{name} should map to chromium");
+            assert!(
+                group_contains(name, "google-chrome"),
+                "{name} should map to google-chrome"
+            );
+        }
+    }
+
+    #[test]
+    fn files_resolves_nautilus_and_vice_versa() {
+        assert!(group_contains("files", "nautilus"));
+        assert!(group_contains("nautilus", "files"));
+        assert!(group_contains("org.gnome.Nautilus", "files"));
+    }
+
+    #[test]
+    fn terminal_editor_calculator_settings_aliases() {
+        assert!(group_contains("terminal", "gnome-terminal"));
+        assert!(group_contains("gnome-terminal", "terminal"));
+
+        assert!(group_contains("text editor", "gedit"));
+        assert!(group_contains("gedit", "text editor"));
+
+        assert!(group_contains("calculator", "gnome-calculator"));
+        assert!(group_contains("gnome-calculator", "calculator"));
+
+        assert!(group_contains("settings", "gnome-control-center"));
+        assert!(group_contains("system settings", "gnome-control-center"));
+        assert!(group_contains("gnome-control-center", "settings"));
+    }
+
+    #[test]
+    fn unknown_app_only_returns_itself() {
+        let group = app_alias_group("some-unknown-app");
+        assert_eq!(group, vec!["some-unknown-app".to_string()]);
+    }
+
+    #[test]
+    fn distinct_apps_do_not_cross_contaminate() {
+        // chrome must NOT pull in nautilus/terminal aliases.
+        assert!(!group_contains("chrome", "nautilus"));
+        assert!(!group_contains("chrome", "gnome-terminal"));
+        assert!(!group_contains("files", "chrome"));
+    }
+}
+
+#[cfg(test)]
+mod cache_coherence_flag_tests {
+    //! Task 3 (Issue #9): the `gui_cog_cache_coherence` flag gate — default ON,
+    //! falsy = rollback. Pure function, no display/backend.
+    use super::{cache_coherence_enabled_lookup, ObservationFreshness};
+
+    #[test]
+    fn cache_coherence_flag_defaults_on_when_env_absent() {
+        assert!(cache_coherence_enabled_lookup(|_| None));
+    }
+
+    #[test]
+    fn cache_coherence_flag_falsy_values_roll_back() {
+        for raw in ["0", "false", "no", "off", "", " off ", "FALSE"] {
+            assert!(
+                !cache_coherence_enabled_lookup(|_| Some(raw.to_string())),
+                "value {raw:?} must disable cache coherence (rollback)"
+            );
+        }
+    }
+
+    #[test]
+    fn cache_coherence_flag_truthy_values_stay_on() {
+        for raw in ["1", "true", "yes", "on", "anything-else"] {
+            assert!(
+                cache_coherence_enabled_lookup(|_| Some(raw.to_string())),
+                "value {raw:?} must keep cache coherence ON"
+            );
+        }
+    }
+
+    #[test]
+    fn observation_freshness_default_is_default_variant() {
+        assert_eq!(ObservationFreshness::default(), ObservationFreshness::Default);
     }
 }

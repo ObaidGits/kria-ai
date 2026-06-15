@@ -21,10 +21,14 @@ use kria_core::agent::gui_cognition::resolver::{
     resolve_button, resolve_type_text_target, resolve_unique_text_field, TargetResolution,
 };
 use kria_core::agent::gui_cognition::safety::{safety_for_intent, GuiSafetyStatus};
+use kria_core::agent::gui_cognition::execution_environment::GuiExecutionEnvironment;
+use kria_core::agent::gui_cognition::safety_hitl::GuiHitlDecisionFixture;
 use kria_core::agent::gui_cognition::validator::{validate_intent, GuiValidationStatus};
-use kria_core::agent::gui_cognition::verifier::verify_post_action;
+use kria_core::agent::gui_cognition::verifier::{verify_post_action, GuiSafetyPolishConfig};
 use kria_core::agent::gui_cognition::{GuiCognitionRuntime, GuiTurnRequest};
-
+use kria_core::agent::gui_cognition::llm_planner::{
+    GuiLlmPlanner, GuiLlmPlannerFixture, GuiSmartPlannerConfig, SequencedFixtureGuiLlmPlanner,
+};
 fn control(role: &str, name: &str) -> GuiControlSummary {
     let mut control = GuiControlSummary::new(role, name, format!("/root/{role}/{name}"));
     control.bounds = Some(kria_core::agent::gui_cognition::perception::GuiBounds {
@@ -569,6 +573,7 @@ async fn gui_cognition_backend_route_runtime_emits_ordered_observe_sequence_with
             route_path: "send_manual_tool_message".into(),
             llm_tool_loop: false,
             hitl_decision_fixture: None,
+            execution_environment: Default::default(),
             execution_mode: GuiExecutionMode::SafetyOnly,
             workflow_enabled: false,
             resume_checkpoint: None,
@@ -673,6 +678,7 @@ async fn gui_cognition_backend_route_runtime_resolves_safe_unique_target_without
             route_path: "send_manual_tool_message".into(),
             llm_tool_loop: false,
             hitl_decision_fixture: None,
+            execution_environment: Default::default(),
             execution_mode: GuiExecutionMode::SafetyOnly,
             workflow_enabled: false,
             resume_checkpoint: None,
@@ -726,6 +732,7 @@ async fn gui_cognition_backend_route_observe_still_works_when_action_backend_blo
             route_path: "send_manual_tool_message".into(),
             llm_tool_loop: false,
             hitl_decision_fixture: None,
+            execution_environment: Default::default(),
             execution_mode: GuiExecutionMode::SafetyOnly,
             workflow_enabled: false,
             resume_checkpoint: None,
@@ -771,6 +778,7 @@ async fn gui_cognition_backend_route_resolves_safe_action_without_execution_when
             route_path: "send_manual_tool_message".into(),
             llm_tool_loop: false,
             hitl_decision_fixture: None,
+            execution_environment: Default::default(),
             execution_mode: GuiExecutionMode::SafetyOnly,
             workflow_enabled: false,
             resume_checkpoint: None,
@@ -814,6 +822,7 @@ async fn gui_cognition_backend_route_runtime_risky_prompt_pauses_without_action(
             route_path: "send_manual_tool_message".into(),
             llm_tool_loop: false,
             hitl_decision_fixture: None,
+            execution_environment: Default::default(),
             execution_mode: GuiExecutionMode::SafetyOnly,
             workflow_enabled: false,
             resume_checkpoint: None,
@@ -957,6 +966,7 @@ async fn gui_cognition_pipeline_executes_and_verifies_focus_field_fixture() {
             route_path: "send_manual_tool_message".into(),
             llm_tool_loop: false,
             hitl_decision_fixture: None,
+            execution_environment: Default::default(),
             execution_mode: GuiExecutionMode::ExecuteFixture,
             workflow_enabled: false,
             resume_checkpoint: None,
@@ -1005,6 +1015,7 @@ async fn gui_cognition_pipeline_reports_verification_failed_without_blind_succes
             route_path: "send_manual_tool_message".into(),
             llm_tool_loop: false,
             hitl_decision_fixture: None,
+            execution_environment: Default::default(),
             execution_mode: GuiExecutionMode::ExecuteFixture,
             workflow_enabled: false,
             resume_checkpoint: None,
@@ -1144,6 +1155,7 @@ async fn gui_cognition_pipeline_recovers_focus_lost_with_refocus_same_target() {
             route_path: "send_manual_tool_message".into(),
             llm_tool_loop: false,
             hitl_decision_fixture: None,
+            execution_environment: Default::default(),
             execution_mode: GuiExecutionMode::ExecuteFixture,
             workflow_enabled: false,
             resume_checkpoint: None,
@@ -1174,4 +1186,962 @@ async fn gui_cognition_pipeline_recovers_focus_lost_with_refocus_same_target() {
     assert_eq!(completed["status"], "recovered");
     assert_eq!(completed["can_continue_workflow"], false);
     assert_eq!(outcome.status, "recovered");
+}
+
+/// Task 9.5 (Requirements 10, 14, 15): with the `gui_cog_safety_polish` flag ON,
+/// the idempotent focus-loss recovery emits the additive `RecoveryDecision`
+/// telemetry so the decision (idempotent-gated, bounded single retry) is
+/// inspectable from the event stream — and still recovers via RefocusSameTarget.
+#[tokio::test]
+async fn safety_polish_emits_recovery_decision_for_idempotent_focus_loss() {
+    let perception = FocusRecoversPerception::new();
+    let executor = FakeExecutor::available(true);
+    let runtime = GuiCognitionRuntime::new(&perception, &executor)
+        .with_safety_polish(GuiSafetyPolishConfig::enabled());
+
+    let outcome = runtime
+        .run_turn(GuiTurnRequest {
+            session_id: "session-1".into(),
+            turn_id: "turn-step9-focus-polish".into(),
+            workflow_id: "workflow-1".into(),
+            message: "Focus the visible search field and verify it is focused".into(),
+            route_path: "send_manual_tool_message".into(),
+            llm_tool_loop: false,
+            hitl_decision_fixture: None,
+            execution_environment: Default::default(),
+            execution_mode: GuiExecutionMode::ExecuteFixture,
+            workflow_enabled: false,
+            resume_checkpoint: None,
+            resume_reason: None,
+        })
+        .await;
+
+    let types = outcome
+        .events
+        .iter()
+        .filter_map(|event| event.get("type").and_then(serde_json::Value::as_str))
+        .collect::<Vec<_>>();
+
+    // The additive RecoveryDecision telemetry is present and inspectable.
+    assert!(types.contains(&"RecoveryDecision"), "events: {types:?}");
+    let decision = gui_event(&outcome, "RecoveryDecision").expect("decision exists");
+    assert_eq!(decision["recovery_action_kind"], "RefocusSameTarget");
+    assert_eq!(decision["failure_kind"], "focus_lost");
+    assert_eq!(decision["idempotent_gated"], true);
+    assert_eq!(decision["single_retry_respected"], true);
+    assert_eq!(decision["unexpected_dialog_stop"], false);
+    assert_eq!(decision["load_failure_explain"], false);
+    // Recovery still succeeds via the bounded refocus.
+    assert_eq!(outcome.status, "recovered");
+}
+
+/// Task 9.5: flag OFF = byte-for-byte unchanged — no `RecoveryDecision`
+/// telemetry is emitted (only the existing RecoveryAssessmentCompleted /
+/// RecoveryActionCompleted events appear).
+#[tokio::test]
+async fn flag_off_emits_no_recovery_decision_telemetry() {
+    let perception = FocusRecoversPerception::new();
+    let executor = FakeExecutor::available(true);
+    let runtime = GuiCognitionRuntime::new(&perception, &executor);
+
+    let outcome = runtime
+        .run_turn(GuiTurnRequest {
+            session_id: "session-1".into(),
+            turn_id: "turn-step9-focus-flagoff".into(),
+            workflow_id: "workflow-1".into(),
+            message: "Focus the visible search field and verify it is focused".into(),
+            route_path: "send_manual_tool_message".into(),
+            llm_tool_loop: false,
+            hitl_decision_fixture: None,
+            execution_environment: Default::default(),
+            execution_mode: GuiExecutionMode::ExecuteFixture,
+            workflow_enabled: false,
+            resume_checkpoint: None,
+            resume_reason: None,
+        })
+        .await;
+
+    let types = outcome
+        .events
+        .iter()
+        .filter_map(|event| event.get("type").and_then(serde_json::Value::as_str))
+        .collect::<Vec<_>>();
+
+    assert!(!types.contains(&"RecoveryDecision"), "events: {types:?}");
+    // The legacy recovery path is unchanged: it still recovers via refocus.
+    assert!(types.contains(&"RecoveryActionCompleted"), "events: {types:?}");
+    assert_eq!(outcome.status, "recovered");
+}
+
+// ---------------------------------------------------------------------------
+// Task 0.3 — TestSubstrate auto-approval gate (Requirement 20.3)
+//
+// An auto-approval HITL fixture must be REJECTED on the real session and only
+// honored inside the test substrate. These two tests pin both sides of the gate
+// through the same runtime path the live audit uses.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn auto_approve_fixture_is_rejected_on_real_session() {
+    let perception = FakePerception::new(Vec::new(), vec![control("push button", "Submit")]);
+    let executor = FakeExecutor::available(true);
+    let runtime = GuiCognitionRuntime::new(&perception, &executor);
+
+    let outcome = runtime
+        .run_turn(GuiTurnRequest {
+            session_id: "session-1".into(),
+            turn_id: "turn-substrate-real".into(),
+            workflow_id: "workflow-substrate-real".into(),
+            message: "Prepare to click a Submit button, but ask for approval before executing."
+                .into(),
+            route_path: "send_manual_tool_message".into(),
+            llm_tool_loop: false,
+            // An auto-approve fixture is supplied, but the environment is the
+            // user's real session — the gate must refuse to honor it.
+            hitl_decision_fixture: Some(GuiHitlDecisionFixture::Approve),
+            execution_environment: GuiExecutionEnvironment::RealSession,
+            execution_mode: GuiExecutionMode::SafetyOnly,
+            workflow_enabled: false,
+            resume_checkpoint: None,
+            resume_reason: None,
+        })
+        .await;
+
+    let types = outcome
+        .events
+        .iter()
+        .filter_map(|event| event.get("type").and_then(serde_json::Value::as_str))
+        .collect::<Vec<_>>();
+    // The fixture is rejected; the action stays gated and never executes.
+    assert!(
+        types.contains(&"HitlFixtureRejected"),
+        "expected HitlFixtureRejected on real session, events: {types:?}"
+    );
+    assert!(!types.contains(&"ActionStarted"));
+    assert!(!types.contains(&"ActionCompleted"));
+    assert_eq!(outcome.response["status"], "needs_approval");
+    assert_eq!(
+        outcome.response["gui_cognition"]["execution_environment"]["environment"],
+        "real_session"
+    );
+    assert_eq!(
+        outcome.response["gui_cognition"]["execution_environment"]["allows_auto_approval"],
+        false
+    );
+    assert_eq!(
+        outcome.response["gui_cognition"]["hitl_decision"]["reason"],
+        "auto_approval_requires_test_substrate"
+    );
+}
+
+#[tokio::test]
+async fn auto_approve_fixture_is_honored_in_test_substrate() {
+    let perception = FakePerception::new(Vec::new(), vec![control("push button", "Submit")]);
+    let executor = FakeExecutor::available(true);
+    let runtime = GuiCognitionRuntime::new(&perception, &executor);
+
+    let outcome = runtime
+        .run_turn(GuiTurnRequest {
+            session_id: "session-1".into(),
+            turn_id: "turn-substrate-isolated".into(),
+            workflow_id: "workflow-substrate-isolated".into(),
+            message: "Prepare to click a Submit button, but ask for approval before executing."
+                .into(),
+            route_path: "send_manual_tool_message".into(),
+            llm_tool_loop: false,
+            hitl_decision_fixture: Some(GuiHitlDecisionFixture::Approve),
+            // Inside an isolated substrate the auto-approval is permitted.
+            execution_environment: GuiExecutionEnvironment::TestSubstrate {
+                scratch_dir: None,
+                restore_clipboard: true,
+            },
+            // SafetyOnly keeps the executor from running, but the approval is
+            // still honored (status advances past needs_approval).
+            execution_mode: GuiExecutionMode::SafetyOnly,
+            workflow_enabled: false,
+            resume_checkpoint: None,
+            resume_reason: None,
+        })
+        .await;
+
+    let types = outcome
+        .events
+        .iter()
+        .filter_map(|event| event.get("type").and_then(serde_json::Value::as_str))
+        .collect::<Vec<_>>();
+    assert!(
+        !types.contains(&"HitlFixtureRejected"),
+        "fixture must NOT be rejected in substrate, events: {types:?}"
+    );
+    assert_eq!(
+        outcome.response["gui_cognition"]["execution_environment"]["environment"],
+        "test_substrate"
+    );
+    assert_eq!(
+        outcome.response["gui_cognition"]["execution_environment"]["allows_auto_approval"],
+        true
+    );
+    assert_eq!(outcome.response["status"], "approved_for_step7");
+}
+
+// ── Task 2.1: strict-validate + one repair-retry (Requirement 1.2) ───────────
+//
+// These T1 flow tests drive the full `run_turn` planner-selection path with the
+// `SequencedFixtureGuiLlmPlanner` (a different fixture per attempt) so we can
+// assert the constrained-decode + strict-validate + exactly-ONE-repair-retry
+// behavior and its `gui_cog_smart_planner` flag gate.
+
+/// Standard perception for the repair-retry flow: a Search text field plus
+/// Search/Submit buttons, matching the planner unit-test fixture context so a
+/// `ValidPlan` fixture validates as Valid.
+fn repair_flow_perception() -> FakePerception {
+    FakePerception::new(
+        vec![control("text", "Search")],
+        vec![control("push button", "Search"), control("push button", "Submit")],
+    )
+}
+
+fn repair_flow_request(turn_id: &str) -> GuiTurnRequest {
+    GuiTurnRequest {
+        session_id: "session-repair".into(),
+        turn_id: turn_id.into(),
+        workflow_id: "workflow-repair".into(),
+        message: "Click the visible safe button named Search.".into(),
+        route_path: "send_manual_tool_message".into(),
+        llm_tool_loop: false,
+        hitl_decision_fixture: None,
+        execution_environment: Default::default(),
+        execution_mode: GuiExecutionMode::SafetyOnly,
+        workflow_enabled: false,
+        resume_checkpoint: None,
+        resume_reason: None,
+    }
+}
+
+fn event_types(outcome: &kria_core::agent::gui_cognition::GuiTurnOutcome) -> Vec<String> {
+    outcome
+        .events
+        .iter()
+        .filter_map(|event| event.get("type").and_then(serde_json::Value::as_str))
+        .map(|value| value.to_string())
+        .collect()
+}
+
+#[tokio::test]
+async fn smart_planner_accepts_schema_valid_plan_first_try_without_retry() {
+    let perception = repair_flow_perception();
+    let executor = FakeExecutor::available(true);
+    let planner = SequencedFixtureGuiLlmPlanner::new(vec![GuiLlmPlannerFixture::ValidPlan]);
+    let planner_ref: &dyn GuiLlmPlanner = &planner;
+    let runtime = GuiCognitionRuntime::new(&perception, &executor)
+        .with_llm_planner(Some(planner_ref))
+        .with_smart_planner(GuiSmartPlannerConfig::enabled());
+
+    let outcome = runtime.run_turn(repair_flow_request("turn-valid-first")).await;
+    let types = event_types(&outcome);
+
+    assert!(types.contains(&"LlmPlanningStarted".to_string()));
+    assert!(types.contains(&"LlmPlanningCompleted".to_string()));
+    assert!(
+        !types.contains(&"LlmPlanRepairRetry".to_string()),
+        "no repair-retry when the first attempt is valid"
+    );
+    assert!(!types.contains(&"LlmPlanningFailed".to_string()));
+    assert_eq!(planner.call_count(), 1);
+    assert_eq!(planner.repair_call_count(), 0);
+    assert_eq!(outcome.response["gui_cognition"]["planner"]["mode"], "llm_schema");
+    assert_eq!(
+        outcome.response["gui_cognition"]["planner"]["llm_status"],
+        "completed"
+    );
+}
+
+#[tokio::test]
+async fn smart_planner_repairs_after_first_invalid_attempt() {
+    let perception = repair_flow_perception();
+    let executor = FakeExecutor::available(true);
+    // First attempt: invalid JSON (parse failure). Repair attempt: valid plan.
+    let planner = SequencedFixtureGuiLlmPlanner::new(vec![
+        GuiLlmPlannerFixture::InvalidJson,
+        GuiLlmPlannerFixture::ValidPlan,
+    ]);
+    let planner_ref: &dyn GuiLlmPlanner = &planner;
+    let runtime = GuiCognitionRuntime::new(&perception, &executor)
+        .with_llm_planner(Some(planner_ref))
+        .with_smart_planner(GuiSmartPlannerConfig::enabled());
+
+    let outcome = runtime.run_turn(repair_flow_request("turn-repair-ok")).await;
+    let types = event_types(&outcome);
+
+    assert!(
+        types.contains(&"LlmPlanRepairRetry".to_string()),
+        "a repair-retry is emitted after the first strict-validation failure"
+    );
+    assert!(
+        !types.contains(&"LlmPlanningFailed".to_string()),
+        "the repaired plan succeeds, so no terminal failure"
+    );
+    // The repaired plan is an accepted LLM plan, not a deterministic fallback.
+    assert_eq!(outcome.response["gui_cognition"]["planner"]["mode"], "llm_schema");
+    assert_eq!(
+        outcome.response["gui_cognition"]["planner"]["llm_status"],
+        "repaired"
+    );
+    assert_eq!(planner.call_count(), 2);
+    assert_eq!(planner.repair_call_count(), 1);
+}
+
+#[tokio::test]
+async fn smart_planner_falls_back_when_repair_also_invalid() {
+    let perception = repair_flow_perception();
+    let executor = FakeExecutor::available(true);
+    let planner = SequencedFixtureGuiLlmPlanner::new(vec![
+        GuiLlmPlannerFixture::InvalidJson,
+        GuiLlmPlannerFixture::InvalidJson,
+    ]);
+    let planner_ref: &dyn GuiLlmPlanner = &planner;
+    let runtime = GuiCognitionRuntime::new(&perception, &executor)
+        .with_llm_planner(Some(planner_ref))
+        .with_smart_planner(GuiSmartPlannerConfig::enabled());
+
+    let outcome = runtime.run_turn(repair_flow_request("turn-repair-fail")).await;
+    let types = event_types(&outcome);
+
+    assert!(types.contains(&"LlmPlanRepairRetry".to_string()));
+    assert!(types.contains(&"LlmPlanningFailed".to_string()));
+    let failed = outcome
+        .events
+        .iter()
+        .find(|event| {
+            event.get("type").and_then(serde_json::Value::as_str) == Some("LlmPlanningFailed")
+                && event.get("after_repair_retry").and_then(serde_json::Value::as_bool)
+                    == Some(true)
+        })
+        .expect("terminal failure is tagged after_repair_retry");
+    assert_eq!(failed["status"], "rejected");
+    // Deterministic fallback is used when the single repair also fails.
+    assert_eq!(
+        outcome.response["gui_cognition"]["planner"]["mode"],
+        "llm_rejected_fallback"
+    );
+    assert_eq!(planner.call_count(), 2);
+    assert_eq!(planner.repair_call_count(), 1);
+}
+
+#[tokio::test]
+async fn smart_planner_never_scrapes_prose_response() {
+    let perception = repair_flow_perception();
+    let executor = FakeExecutor::available(true);
+    // Both attempts return JSON wrapped in prose; the parser must reject both
+    // and the planner must NOT lenient-scrape the embedded object.
+    let planner = SequencedFixtureGuiLlmPlanner::new(vec![
+        GuiLlmPlannerFixture::ProseWrapper,
+        GuiLlmPlannerFixture::ProseWrapper,
+    ]);
+    let planner_ref: &dyn GuiLlmPlanner = &planner;
+    let runtime = GuiCognitionRuntime::new(&perception, &executor)
+        .with_llm_planner(Some(planner_ref))
+        .with_smart_planner(GuiSmartPlannerConfig::enabled());
+
+    let outcome = runtime.run_turn(repair_flow_request("turn-prose")).await;
+
+    // Prose is never accepted: the final plan is the deterministic fallback,
+    // not an llm_schema plan scraped from the prose.
+    assert_eq!(
+        outcome.response["gui_cognition"]["planner"]["mode"],
+        "llm_rejected_fallback"
+    );
+    assert_ne!(
+        outcome.response["gui_cognition"]["planner"]["llm_status"],
+        "completed"
+    );
+    assert_eq!(planner.repair_call_count(), 1);
+}
+
+#[tokio::test]
+async fn smart_planner_performs_at_most_one_repair_attempt() {
+    let perception = repair_flow_perception();
+    let executor = FakeExecutor::available(true);
+    // A third (valid) response is queued but must NEVER be consumed: only one
+    // repair-retry is allowed (Requirement 1.2 — "exactly ONE repair-retry").
+    let planner = SequencedFixtureGuiLlmPlanner::new(vec![
+        GuiLlmPlannerFixture::InvalidJson,
+        GuiLlmPlannerFixture::InvalidJson,
+        GuiLlmPlannerFixture::ValidPlan,
+    ]);
+    let planner_ref: &dyn GuiLlmPlanner = &planner;
+    let runtime = GuiCognitionRuntime::new(&perception, &executor)
+        .with_llm_planner(Some(planner_ref))
+        .with_smart_planner(GuiSmartPlannerConfig::enabled());
+
+    let outcome = runtime.run_turn(repair_flow_request("turn-one-repair")).await;
+
+    // Exactly two planner calls total (first + one repair); the queued valid
+    // third response is never reached.
+    assert_eq!(planner.call_count(), 2, "bounded to first attempt + one repair");
+    assert_eq!(planner.repair_call_count(), 1);
+    assert_eq!(
+        outcome.response["gui_cognition"]["planner"]["mode"],
+        "llm_rejected_fallback"
+    );
+}
+
+#[tokio::test]
+async fn smart_planner_off_preserves_single_attempt_no_repair() {
+    let perception = repair_flow_perception();
+    let executor = FakeExecutor::available(true);
+    // First attempt invalid; a valid repair response is queued but the flag is
+    // OFF so it must never be used (prior single-attempt behavior preserved).
+    let planner = SequencedFixtureGuiLlmPlanner::new(vec![
+        GuiLlmPlannerFixture::InvalidJson,
+        GuiLlmPlannerFixture::ValidPlan,
+    ]);
+    let planner_ref: &dyn GuiLlmPlanner = &planner;
+    // Default config is OFF; assert that explicitly via `disabled()`.
+    let runtime = GuiCognitionRuntime::new(&perception, &executor)
+        .with_llm_planner(Some(planner_ref))
+        .with_smart_planner(GuiSmartPlannerConfig::disabled());
+
+    let outcome = runtime.run_turn(repair_flow_request("turn-flag-off")).await;
+    let types = event_types(&outcome);
+
+    assert!(
+        !types.contains(&"LlmPlanRepairRetry".to_string()),
+        "no repair-retry when the flag is OFF"
+    );
+    assert!(types.contains(&"LlmPlanningFailed".to_string()));
+    assert_eq!(planner.call_count(), 1, "single attempt only when flag is OFF");
+    assert_eq!(planner.repair_call_count(), 0);
+    assert_eq!(
+        outcome.response["gui_cognition"]["planner"]["mode"],
+        "llm_rejected_fallback"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Task 9.3 (Requirements 10, 11, 12, 13, 14, 15, 22, 23) — approval-gated
+// actions: pause → execute ONLY on a fresh authorizing decision → NEVER on
+// deny / expired / hash-mismatch; auto-approve fixtures honored ONLY in the
+// TestSubstrate. The `gui_cog_safety_polish` flag adds the additive
+// `ApprovalLifecycle` telemetry (paused → decision → executed/blocked/gated
+// with verdict + hash-match/freshness status + carried decision id). While the
+// flag is OFF these events are absent and behavior is byte-for-byte unchanged.
+//
+// All CI-safe: deterministic fixtures, no live KRIA desktop / display / network.
+// Destructive/live approval coverage runs only in the substrate at the Task 9.7
+// live gate; here we prove the invariants with the HITL decision fixtures.
+// ---------------------------------------------------------------------------
+
+const APPROVAL_PROMPT: &str =
+    "Prepare to click a Submit button, but ask for approval before executing.";
+
+fn approval_request(
+    turn: &str,
+    fixture: Option<GuiHitlDecisionFixture>,
+    environment: GuiExecutionEnvironment,
+    mode: GuiExecutionMode,
+) -> GuiTurnRequest {
+    GuiTurnRequest {
+        session_id: "session-9-3".into(),
+        turn_id: turn.into(),
+        workflow_id: format!("workflow-{turn}"),
+        message: APPROVAL_PROMPT.into(),
+        route_path: "send_manual_tool_message".into(),
+        llm_tool_loop: false,
+        hitl_decision_fixture: fixture,
+        execution_environment: environment,
+        execution_mode: mode,
+        workflow_enabled: false,
+        resume_checkpoint: None,
+        resume_reason: None,
+    }
+}
+
+fn event_type_list(outcome: &kria_core::agent::gui_cognition::GuiTurnOutcome) -> Vec<String> {
+    outcome
+        .events
+        .iter()
+        .filter_map(|event| event.get("type").and_then(serde_json::Value::as_str))
+        .map(str::to_string)
+        .collect()
+}
+
+fn approval_lifecycle(
+    outcome: &kria_core::agent::gui_cognition::GuiTurnOutcome,
+) -> Option<serde_json::Value> {
+    outcome
+        .events
+        .iter()
+        .find(|event| {
+            event.get("type").and_then(serde_json::Value::as_str) == Some("ApprovalLifecycle")
+        })
+        .cloned()
+}
+
+fn substrate() -> GuiExecutionEnvironment {
+    GuiExecutionEnvironment::TestSubstrate {
+        scratch_dir: None,
+        restore_clipboard: true,
+    }
+}
+
+/// Flag discipline: the additive `ApprovalLifecycle` telemetry is emitted ONLY
+/// when `gui_cog_safety_polish` is ON. While OFF it is absent and the prior
+/// approval-gate behavior is byte-for-byte unchanged (still pauses, still
+/// emits the HITL events).
+#[tokio::test]
+async fn approval_lifecycle_telemetry_is_flag_gated() {
+    let perception = FakePerception::new(Vec::new(), vec![control("push button", "Submit")]);
+    let executor = FakeExecutor::available(true);
+
+    // Flag OFF (default): no ApprovalLifecycle event; gate still pauses.
+    let runtime_off = GuiCognitionRuntime::new(&perception, &executor);
+    let off = runtime_off
+        .run_turn(approval_request(
+            "turn-flag-off",
+            None,
+            GuiExecutionEnvironment::RealSession,
+            GuiExecutionMode::SafetyOnly,
+        ))
+        .await;
+    assert!(
+        approval_lifecycle(&off).is_none(),
+        "flag OFF must not emit ApprovalLifecycle, events: {:?}",
+        event_type_list(&off)
+    );
+    assert_eq!(off.response["status"], "needs_approval");
+
+    // Flag ON: the ApprovalLifecycle telemetry appears, paused awaiting human.
+    let runtime_on = GuiCognitionRuntime::new(&perception, &executor)
+        .with_safety_polish(GuiSafetyPolishConfig::enabled());
+    let on = runtime_on
+        .run_turn(approval_request(
+            "turn-flag-on",
+            None,
+            GuiExecutionEnvironment::RealSession,
+            GuiExecutionMode::SafetyOnly,
+        ))
+        .await;
+    let lifecycle = approval_lifecycle(&on).expect("flag ON must emit ApprovalLifecycle");
+    assert_eq!(lifecycle["paused"], true);
+    assert_eq!(lifecycle["executed"], false);
+    assert_eq!(lifecycle["outcome"], "gated_awaiting_human");
+    assert_eq!(lifecycle["can_execute"], false);
+    assert_eq!(on.response["status"], "needs_approval");
+}
+
+/// Approve in the substrate: the action executes on a FRESH authorizing
+/// decision whose proposal/target hashes match the bound proposal and whose
+/// decision id is carried into execution. The lifecycle telemetry records the
+/// authorizing, hash-matched, fresh decision and an executed outcome.
+#[tokio::test]
+async fn approval_gated_action_executes_on_fresh_approval_in_substrate() {
+    let perception = FakePerception::new(Vec::new(), vec![control("push button", "Submit")]);
+    let executor = FakeExecutor::available(true);
+    let runtime = GuiCognitionRuntime::new(&perception, &executor)
+        .with_safety_polish(GuiSafetyPolishConfig::enabled());
+
+    let outcome = runtime
+        .run_turn(GuiTurnRequest {
+            session_id: "session-9-3".into(),
+            turn_id: "turn-approve-exec".into(),
+            workflow_id: "workflow-approve-exec".into(),
+            // A real, resolvable control whose "Submit" identity risk-escalates
+            // the action so it is approval-gated (RED). On a fresh approval it
+            // must execute against that exact bound target.
+            message: "Click the visible button named Submit and verify the screen changed".into(),
+            route_path: "send_manual_tool_message".into(),
+            llm_tool_loop: false,
+            hitl_decision_fixture: Some(GuiHitlDecisionFixture::Approve),
+            execution_environment: substrate(),
+            execution_mode: GuiExecutionMode::ExecuteFixture,
+            workflow_enabled: false,
+            resume_checkpoint: None,
+            resume_reason: None,
+        })
+        .await;
+
+    let types = event_type_list(&outcome);
+    assert!(
+        !types.contains(&"HitlFixtureRejected".to_string()),
+        "fresh approval in substrate must not be rejected, events: {types:?}"
+    );
+    // It paused for approval first (the gate is real, not bypassed).
+    assert!(
+        types.contains(&"HitlRequired".to_string()),
+        "approval-gated action must pause for approval, events: {types:?}"
+    );
+    assert!(
+        types.contains(&"HitlDecisionRecorded".to_string()),
+        "a fresh approval decision must be recorded, events: {types:?}"
+    );
+    // The action proceeds past the gate: it started (executed on approval).
+    assert!(
+        types.contains(&"ActionStarted".to_string()),
+        "approval-gated action must execute on a fresh approval, events: {types:?}"
+    );
+
+    let lifecycle = approval_lifecycle(&outcome).expect("ApprovalLifecycle present");
+    assert_eq!(lifecycle["paused"], true);
+    assert_eq!(lifecycle["decision_verdict"], "approved");
+    assert_eq!(lifecycle["authorizing"], true);
+    assert_eq!(lifecycle["hash_matched"], true);
+    assert_eq!(lifecycle["fresh"], true);
+    assert_eq!(lifecycle["executed"], true);
+    assert_eq!(lifecycle["outcome"], "executed_on_fresh_approval");
+    // The carried decision id matches the recorded decision (bound to execution).
+    let recorded = outcome
+        .events
+        .iter()
+        .find(|e| e.get("type").and_then(serde_json::Value::as_str) == Some("HitlDecisionRecorded"))
+        .expect("recorded decision");
+    assert_eq!(lifecycle["decision_id"], recorded["decision_id"]);
+    // Task 9.2 integration: the executed approval-gated action is recorded in the
+    // append-only audit ledger with its authorization source + the SAME HITL
+    // decision id that authorized it.
+    let ledger = outcome
+        .events
+        .iter()
+        .find(|e| {
+            e.get("type").and_then(serde_json::Value::as_str)
+                == Some("GuiActionLedgerEntryRecorded")
+        })
+        .expect("ledger entry recorded for an executed approval-gated action");
+    assert_eq!(ledger["entry"]["authorization_source"], "hitl_approved");
+    assert_eq!(ledger["entry"]["hitl_decision_id"], recorded["decision_id"]);
+}
+
+/// Deny: the action NEVER executes. The gate blocks and the lifecycle records a
+/// non-authorizing `denied` verdict with no execution.
+#[tokio::test]
+async fn approval_gated_action_never_executes_on_deny() {
+    let perception = FakePerception::new(Vec::new(), vec![control("push button", "Submit")]);
+    let executor = FakeExecutor::available(true);
+    let runtime = GuiCognitionRuntime::new(&perception, &executor)
+        .with_safety_polish(GuiSafetyPolishConfig::enabled());
+
+    let outcome = runtime
+        .run_turn(approval_request(
+            "turn-deny",
+            Some(GuiHitlDecisionFixture::Deny),
+            substrate(),
+            GuiExecutionMode::ExecuteFixture,
+        ))
+        .await;
+
+    let types = event_type_list(&outcome);
+    assert!(
+        !types.contains(&"ActionStarted".to_string()),
+        "deny must never execute, events: {types:?}"
+    );
+    assert_eq!(outcome.response["status"], "blocked");
+
+    let lifecycle = approval_lifecycle(&outcome).expect("ApprovalLifecycle present");
+    assert_eq!(lifecycle["decision_verdict"], "denied");
+    assert_eq!(lifecycle["authorizing"], false);
+    assert_eq!(lifecycle["executed"], false);
+    assert_eq!(lifecycle["outcome"], "blocked_denied");
+}
+
+/// Expired / hash-mismatch decisions NEVER execute: each yields a truthful
+/// invalidated outcome (no `ActionStarted`), even inside the substrate. The
+/// lifecycle records the verdict with `fresh=false` (expired) or
+/// `hash_matched=false` (mismatch).
+#[tokio::test]
+async fn approval_gated_action_never_executes_on_expired_or_mismatch() {
+    let cases = [
+        (
+            "turn-expired",
+            GuiHitlDecisionFixture::ApproveExpired,
+            "expired",
+        ),
+        (
+            "turn-target-mismatch",
+            GuiHitlDecisionFixture::ApproveTargetMismatch,
+            "hash_mismatch_rejected",
+        ),
+        (
+            "turn-proposal-mismatch",
+            GuiHitlDecisionFixture::ApproveProposalMismatch,
+            "hash_mismatch_rejected",
+        ),
+    ];
+
+    for (turn, fixture, expected_verdict) in cases {
+        let perception = FakePerception::new(Vec::new(), vec![control("push button", "Submit")]);
+        let executor = FakeExecutor::available(true);
+        let runtime = GuiCognitionRuntime::new(&perception, &executor)
+            .with_safety_polish(GuiSafetyPolishConfig::enabled());
+
+        let outcome = runtime
+            .run_turn(approval_request(
+                turn,
+                Some(fixture),
+                // Even in the substrate (where auto-approve is allowed) an
+                // expired/mismatched decision is invalidated and never executes.
+                substrate(),
+                GuiExecutionMode::ExecuteFixture,
+            ))
+            .await;
+
+        let types = event_type_list(&outcome);
+        assert!(
+            types.contains(&"HitlDecisionInvalidated".to_string()),
+            "{turn}: expired/mismatch must invalidate, events: {types:?}"
+        );
+        assert!(
+            !types.contains(&"ActionStarted".to_string()),
+            "{turn}: invalidated decision must never execute, events: {types:?}"
+        );
+
+        let lifecycle = approval_lifecycle(&outcome).expect("ApprovalLifecycle present");
+        assert_eq!(lifecycle["decision_verdict"], expected_verdict, "{turn}");
+        assert_eq!(lifecycle["authorizing"], false, "{turn}");
+        assert_eq!(lifecycle["executed"], false, "{turn}");
+        assert_eq!(lifecycle["outcome"], "invalidated", "{turn}");
+        if expected_verdict == "expired" {
+            assert_eq!(lifecycle["fresh"], false, "{turn}: expired is not fresh");
+        } else {
+            assert_eq!(
+                lifecycle["hash_matched"], false,
+                "{turn}: mismatch must report hash_matched=false"
+            );
+        }
+    }
+}
+
+/// Auto-approval is honored ONLY in the TestSubstrate. On the real session a
+/// (would-be authorizing) fixture is rejected (`HitlFixtureRejected`), the
+/// action stays gated, and the lifecycle records the refusal — nothing executes.
+#[tokio::test]
+async fn auto_approve_fixture_rejected_on_real_session_lifecycle() {
+    let perception = FakePerception::new(Vec::new(), vec![control("push button", "Submit")]);
+    let executor = FakeExecutor::available(true);
+    let runtime = GuiCognitionRuntime::new(&perception, &executor)
+        .with_safety_polish(GuiSafetyPolishConfig::enabled());
+
+    let outcome = runtime
+        .run_turn(approval_request(
+            "turn-real-reject",
+            Some(GuiHitlDecisionFixture::Approve),
+            GuiExecutionEnvironment::RealSession,
+            GuiExecutionMode::ExecuteFixture,
+        ))
+        .await;
+
+    let types = event_type_list(&outcome);
+    assert!(
+        types.contains(&"HitlFixtureRejected".to_string()),
+        "auto-approval must be rejected on real session, events: {types:?}"
+    );
+    assert!(
+        !types.contains(&"ActionStarted".to_string()),
+        "rejected fixture must never execute, events: {types:?}"
+    );
+    assert_eq!(outcome.response["status"], "needs_approval");
+
+    let lifecycle = approval_lifecycle(&outcome).expect("ApprovalLifecycle present");
+    assert_eq!(lifecycle["executed"], false);
+    assert_eq!(lifecycle["outcome"], "fixture_rejected_outside_substrate");
+    assert_eq!(lifecycle["environment"], "real_session");
+}
+
+// ---------------------------------------------------------------------------
+// Task 9.4 (Requirements 10, 11, 12, 13, 14, 15, 22, 23) — ambiguity → ask
+// (never guess); boundaries strictly respected; verify-and-stop terminates
+// after verification. The `gui_cog_safety_polish` flag adds the additive
+// `AmbiguityNoGuess`, `BoundaryCheck`, and `VerifyAndStopTerminated` telemetry
+// that make each invariant inspectable. While the flag is OFF those events are
+// absent and the turn is byte-for-byte unchanged.
+//
+// All CI-safe: deterministic fixtures, no live KRIA desktop / display / network.
+// ---------------------------------------------------------------------------
+
+fn find_event(
+    outcome: &kria_core::agent::gui_cognition::GuiTurnOutcome,
+    event_type: &str,
+) -> Option<serde_json::Value> {
+    outcome
+        .events
+        .iter()
+        .find(|event| {
+            event.get("type").and_then(serde_json::Value::as_str) == Some(event_type)
+        })
+        .cloned()
+}
+
+fn workflow_request(turn: &str, message: &str, polish_on: bool) -> GuiTurnRequest {
+    let _ = polish_on;
+    GuiTurnRequest {
+        session_id: "session-9-4".into(),
+        turn_id: turn.into(),
+        workflow_id: format!("workflow-{turn}"),
+        message: message.into(),
+        route_path: "send_manual_tool_message".into(),
+        llm_tool_loop: false,
+        hitl_decision_fixture: None,
+        execution_environment: GuiExecutionEnvironment::TestSubstrate {
+            scratch_dir: None,
+            restore_clipboard: true,
+        },
+        execution_mode: GuiExecutionMode::ExecuteFixture,
+        workflow_enabled: true,
+        resume_checkpoint: None,
+        resume_reason: None,
+    }
+}
+
+/// AMBIGUITY → ASK, NEVER GUESS: when two controls match the named target, the
+/// runtime pauses and asks — it NEVER starts an action on a guessed target. The
+/// `AmbiguityNoGuess` telemetry (flag ON) records the no-guess decision; with the
+/// flag OFF the pause behavior is unchanged but no telemetry is emitted.
+#[tokio::test]
+async fn ambiguity_pauses_and_asks_never_guesses_flag_gated() {
+    // Two buttons share the same name → resolution is ambiguous (no unique
+    // target). A guess would pick one; KRIA must refuse to guess.
+    let perception = FakePerception::new(
+        Vec::new(),
+        vec![control("push button", "Save"), control("push button", "Save")],
+    );
+    let executor = FakeExecutor::available(true);
+
+    // Flag OFF: the run still pauses/blocks (never guesses) but emits no
+    // AmbiguityNoGuess telemetry.
+    let runtime_off = GuiCognitionRuntime::new(&perception, &executor);
+    let off = runtime_off
+        .run_turn(workflow_request(
+            "ambiguity-off",
+            "Click the visible button named Save and verify the screen changed",
+            false,
+        ))
+        .await;
+    assert!(
+        find_event(&off, "AmbiguityNoGuess").is_none(),
+        "flag OFF must not emit AmbiguityNoGuess, events: {:?}",
+        event_type_list(&off)
+    );
+    assert!(
+        !event_type_list(&off).contains(&"ActionStarted".to_string()),
+        "ambiguous target must NEVER start an action (no guessing), events: {:?}",
+        event_type_list(&off)
+    );
+
+    // Flag ON: the AmbiguityNoGuess telemetry appears with the no-guess flag set,
+    // and still no action is started on a guessed target.
+    let runtime_on = GuiCognitionRuntime::new(&perception, &executor)
+        .with_safety_polish(GuiSafetyPolishConfig::enabled());
+    let on = runtime_on
+        .run_turn(workflow_request(
+            "ambiguity-on",
+            "Click the visible button named Save and verify the screen changed",
+            true,
+        ))
+        .await;
+    let ambiguity = find_event(&on, "AmbiguityNoGuess")
+        .expect("flag ON must emit AmbiguityNoGuess for an ambiguous target");
+    assert_eq!(ambiguity["decision"], "ask");
+    assert_eq!(ambiguity["no_guess"], true);
+    assert_eq!(ambiguity["can_execute"], false);
+    assert!(
+        ambiguity["candidate_count"].as_u64().unwrap_or(0) >= 2,
+        "ambiguity telemetry must record the multiple candidates: {ambiguity}"
+    );
+    assert!(
+        !event_type_list(&on).contains(&"ActionStarted".to_string()),
+        "ambiguous target must NEVER start an action (no guessing), events: {:?}",
+        event_type_list(&on)
+    );
+}
+
+/// BOUNDARIES STRICTLY RESPECTED: a normal, in-scope action stays within the
+/// requested capability boundary. The `BoundaryCheck` telemetry (flag ON)
+/// records the within-bounds decision; with the flag OFF no boundary telemetry
+/// is emitted and the gate behavior is unchanged.
+#[tokio::test]
+async fn boundary_check_records_within_bounds_for_in_scope_action_flag_gated() {
+    let perception = FakePerception::new(Vec::new(), vec![control("push button", "Save")]);
+    let executor = FakeExecutor::available(true);
+
+    let request = |turn: &str| GuiTurnRequest {
+        session_id: "session-9-4".into(),
+        turn_id: turn.into(),
+        workflow_id: format!("workflow-{turn}"),
+        message: "Click the visible button named Save and verify the screen changed".into(),
+        route_path: "send_manual_tool_message".into(),
+        llm_tool_loop: false,
+        hitl_decision_fixture: None,
+        execution_environment: GuiExecutionEnvironment::RealSession,
+        execution_mode: GuiExecutionMode::SafetyOnly,
+        workflow_enabled: false,
+        resume_checkpoint: None,
+        resume_reason: None,
+    };
+
+    // Flag OFF: no BoundaryCheck telemetry.
+    let runtime_off = GuiCognitionRuntime::new(&perception, &executor);
+    let off = runtime_off.run_turn(request("boundary-off")).await;
+    assert!(
+        find_event(&off, "BoundaryCheck").is_none(),
+        "flag OFF must not emit BoundaryCheck, events: {:?}",
+        event_type_list(&off)
+    );
+
+    // Flag ON: BoundaryCheck telemetry appears, action stays within bounds and is
+    // not refused.
+    let runtime_on = GuiCognitionRuntime::new(&perception, &executor)
+        .with_safety_polish(GuiSafetyPolishConfig::enabled());
+    let on = runtime_on.run_turn(request("boundary-on")).await;
+    let boundary =
+        find_event(&on, "BoundaryCheck").expect("flag ON must emit BoundaryCheck at the gate");
+    assert_eq!(boundary["within_bounds"], true, "{boundary}");
+    assert_eq!(boundary["refused"], false, "{boundary}");
+    assert_eq!(boundary["crossing_kind"], serde_json::Value::Null);
+    assert_eq!(boundary["can_execute"], false);
+}
+
+/// VERIFY-AND-STOP TERMINATES AFTER VERIFICATION: a verify-and-stop intent
+/// observes → verifies → then STOPS with NO state-changing action. The
+/// `VerifyAndStopTerminated` telemetry (flag ON) asserts zero state-changing
+/// actions executed; with the flag OFF no such telemetry is emitted and the turn
+/// is unchanged. In both cases NO action is started.
+#[tokio::test]
+async fn verify_and_stop_terminates_after_verification_flag_gated() {
+    let perception = FakePerception::new(Vec::new(), vec![control("push button", "Save")]);
+    let executor = FakeExecutor::available(true);
+    let prompt =
+        "Verify that the Save button is visible and then stop without any further action";
+
+    // Flag OFF: no VerifyAndStopTerminated telemetry; still no action started.
+    let runtime_off = GuiCognitionRuntime::new(&perception, &executor);
+    let off = runtime_off
+        .run_turn(workflow_request("verify-stop-off", prompt, false))
+        .await;
+    assert!(
+        find_event(&off, "VerifyAndStopTerminated").is_none(),
+        "flag OFF must not emit VerifyAndStopTerminated, events: {:?}",
+        event_type_list(&off)
+    );
+    assert!(
+        !event_type_list(&off).contains(&"ActionStarted".to_string()),
+        "verify-and-stop must not start any state-changing action, events: {:?}",
+        event_type_list(&off)
+    );
+
+    // Flag ON: the VerifyAndStopTerminated telemetry asserts the turn observed →
+    // verified → stopped with zero state-changing actions executed.
+    let runtime_on = GuiCognitionRuntime::new(&perception, &executor)
+        .with_safety_polish(GuiSafetyPolishConfig::enabled());
+    let on = runtime_on
+        .run_turn(workflow_request("verify-stop-on", prompt, true))
+        .await;
+    let terminated = find_event(&on, "VerifyAndStopTerminated")
+        .expect("flag ON must emit VerifyAndStopTerminated for a verify-and-stop plan");
+    assert_eq!(terminated["verified_then_stopped"], true, "{terminated}");
+    assert_eq!(terminated["state_changing_actions_executed"], 0, "{terminated}");
+    assert_eq!(terminated["terminal_step_type"], "VerifyState");
+    assert!(
+        !event_type_list(&on).contains(&"ActionStarted".to_string()),
+        "verify-and-stop must not start any state-changing action, events: {:?}",
+        event_type_list(&on)
+    );
 }

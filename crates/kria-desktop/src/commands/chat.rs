@@ -329,7 +329,7 @@ async fn send_message_with_profile(
                 let _ = app_for_task.emit(&format!("{prefix}:done"), serde_json::json!({}));
                 return;
             };
-            let result = super::gui_cognition::desktop_gui_cognition_command_capture(
+            let result = super::gui_cognition::desktop_gui_cognition_command_capture_streamed(
                 message,
                 task_state,
                 None,
@@ -340,6 +340,12 @@ async fn send_message_with_profile(
                     workflow_enabled: true,
                     ..Default::default()
                 }),
+                // Task 10.1: supply the AppHandle so that, when the
+                // `gui_cog_stream_ux` flag is ON, each `gui_cognition:event`
+                // envelope is emitted to the frontend DURING the turn instead of
+                // only after it completes. While the flag is OFF this emitter is
+                // unused and the end-of-turn batch path is unchanged.
+                Some(app_for_task.clone()),
             )
             .await;
             match result {

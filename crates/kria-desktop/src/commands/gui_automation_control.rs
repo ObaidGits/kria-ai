@@ -348,3 +348,42 @@ pub async fn get_grounding_status(
     let grounder = LiveEnvironmentGrounder::new();
     Ok(grounder.grounding_status())
 }
+
+/// Task 1.2 (Requirement 21.1): cancel the active GUI Cognition turn for a
+/// session mid-flight. Cancellation is cooperative — the workflow loop checks
+/// the cancel token before each action, so this halts the turn *before its next
+/// action* without interrupting an action already in progress.
+///
+/// This is a NEW command (it does not replace the existing `cancel_turn` /
+/// `cancel_request` chat commands, which target the chat/agent loop). It reaches
+/// the active turn through the process-local GUI Cognition cancel registry keyed
+/// by `session_id`.
+///
+/// Returns `{ requested, found, reason }`:
+///   - `found = false` means no active GUI Cognition turn was registered for the
+///     session (nothing to cancel).
+#[tauri::command]
+pub async fn cancel_gui_cognition_turn(
+    session_id: String,
+    reason: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let reason = reason
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| {
+            kria_core::agent::gui_cognition::cancel::DEFAULT_CANCEL_REASON.to_string()
+        });
+    let found = kria_core::agent::gui_cognition::cancel::gui_cancel_registry()
+        .request_cancel(&session_id, &reason);
+    tracing::info!(
+        target: "gui_cognition_cancel",
+        session_id = %session_id,
+        found,
+        "GUI Cognition turn cancellation requested from UI/API"
+    );
+    Ok(serde_json::json!({
+        "requested": true,
+        "found": found,
+        "session_id": session_id,
+        "reason": reason,
+    }))
+}

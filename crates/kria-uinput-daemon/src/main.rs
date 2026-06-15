@@ -18,6 +18,107 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::time::Duration as TokioDuration;
 use tracing::{error, info, warn};
 
+mod uinput;
+
+// ============================================================================
+// Input backend selection (uinput / xdotool)
+// ============================================================================
+
+/// Which input injection backend to use.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Backend {
+    /// Try uinput, fall back to xdotool if the device is unavailable (default).
+    Auto,
+    /// Force the kernel uinput backend (error if unavailable).
+    Uinput,
+    /// Force the legacy xdotool backend (full rollback to prior behavior).
+    Xdotool,
+}
+
+/// Read the backend from `KRIA_INPUT_BACKEND` (auto | uinput | xdotool).
+fn selected_backend() -> Backend {
+    match std::env::var("KRIA_INPUT_BACKEND")
+        .ok()
+        .as_deref()
+        .map(|s| s.trim().to_lowercase())
+        .as_deref()
+    {
+        Some("uinput") => Backend::Uinput,
+        Some("xdotool") => Backend::Xdotool,
+        _ => Backend::Auto,
+    }
+}
+
+/// Lazily-created shared uinput device + cached creation outcome.
+struct UinputState {
+    device: Option<uinput::UinputDevice>,
+    attempted: bool,
+    last_error: Option<String>,
+}
+
+static UINPUT: std::sync::OnceLock<std::sync::Mutex<UinputState>> = std::sync::OnceLock::new();
+
+fn uinput_state() -> &'static std::sync::Mutex<UinputState> {
+    UINPUT.get_or_init(|| {
+        std::sync::Mutex::new(UinputState {
+            device: None,
+            attempted: false,
+            last_error: None,
+        })
+    })
+}
+
+/// Run a closure with the lazily-created uinput device.
+///
+/// On first use this attempts to create the device. If creation fails (e.g.
+/// `/dev/uinput` not accessible) the failure is cached and `Err(reason)` is
+/// returned on every call so callers can fall back to xdotool.
+fn with_uinput<F, R>(f: F) -> Result<R, String>
+where
+    F: FnOnce(&uinput::UinputDevice) -> std::io::Result<R>,
+{
+    let mut state = uinput_state()
+        .lock()
+        .map_err(|_| "uinput state poisoned".to_string())?;
+
+    if !state.attempted {
+        state.attempted = true;
+        match uinput::UinputDevice::new() {
+            Ok(dev) => {
+                info!("uinput backend: virtual device created");
+                state.device = Some(dev);
+            }
+            Err(e) => {
+                warn!(error = %e, "uinput backend unavailable; xdotool fallback will be used");
+                state.last_error = Some(e.to_string());
+            }
+        }
+    }
+
+    match &state.device {
+        Some(dev) => f(dev).map_err(|e| e.to_string()),
+        None => Err(state
+            .last_error
+            .clone()
+            .unwrap_or_else(|| "uinput device unavailable".to_string())),
+    }
+}
+
+/// Release uinput modifiers ONLY if the device already exists. Never creates
+/// the device (so passive/xdotool sessions don't spuriously open /dev/uinput).
+/// Used by the RFC 008 emergency path in ADDITION to xdotool keyups.
+fn release_uinput_modifiers_if_present() {
+    if let Ok(state) = uinput_state().lock() {
+        if let Some(dev) = &state.device {
+            if let Err(e) = dev.release_all_modifiers() {
+                warn!(error = %e, "uinput release_all_modifiers failed during emergency release");
+            } else {
+                info!("uinput backend: released all modifiers (RFC 008)");
+            }
+        }
+    }
+}
+
 // ============================================================================
 // IPC Protocol Definitions
 // ============================================================================
@@ -223,6 +324,37 @@ async fn handle_request(request: DaemonRequest) -> DaemonResponse {
     match request {
         DaemonRequest::Click { x, y, button } => {
             info!(x = x, y = y, button = %button, "Received click command");
+
+            // uinput cannot position the pointer absolutely (no EV_ABS), so
+            // absolute click(x, y) stays on xdotool. Only when the backend is
+            // FORCED to uinput do we emit a best-effort button press at the
+            // pointer's current location.
+            if selected_backend() == Backend::Uinput {
+                let button_code = match button.as_str() {
+                    "left" => 0x110u16,
+                    "right" => 0x111u16,
+                    "middle" => 0x112u16,
+                    _ => {
+                        return DaemonResponse::Error {
+                            message: format!("Invalid button: {}", button),
+                            code: Some("INVALID_BUTTON".to_string()),
+                        };
+                    }
+                };
+                warn!(
+                    "Backend forced to uinput: emitting button at CURRENT pointer location (no absolute positioning)"
+                );
+                return match with_uinput(|dev| dev.click_button(button_code)) {
+                    Ok(()) => DaemonResponse::Ok {
+                        data: Some(serde_json::json!({ "backend": "uinput", "positioned": false })),
+                    },
+                    Err(e) => DaemonResponse::Error {
+                        message: format!("uinput click failed: {}", e),
+                        code: Some("CLICK_FAILED".to_string()),
+                    },
+                };
+            }
+
             // Map button names to xdotool button numbers
             let button_num = match button.as_str() {
                 "left" => "1",
@@ -258,6 +390,29 @@ async fn handle_request(request: DaemonRequest) -> DaemonResponse {
 
         DaemonRequest::Type { text, interval_ms } => {
             info!(text_len = text.len(), interval_ms = ?interval_ms, "Received type command");
+
+            let backend = selected_backend();
+            // uinput path for auto/uinput
+            if backend != Backend::Xdotool {
+                match with_uinput(|dev| dev.type_text(&text)) {
+                    Ok(()) => {
+                        info!(chars_typed = text.len(), backend = "uinput", "Type command succeeded");
+                        return DaemonResponse::Ok {
+                            data: Some(serde_json::json!({ "typed_chars": text.len(), "backend": "uinput" })),
+                        };
+                    }
+                    Err(e) => {
+                        if backend == Backend::Uinput {
+                            error!(error = %e, "Type failed (backend forced to uinput)");
+                            return DaemonResponse::Error {
+                                message: format!("uinput type failed: {}", e),
+                                code: Some("TYPE_FAILED".to_string()),
+                            };
+                        }
+                        warn!(error = %e, "uinput type failed; falling back to xdotool");
+                    }
+                }
+            }
 
             // Escape text for xdotool - use double quotes and escape internal quotes
             let escaped_text = if text.contains('"') {
@@ -309,7 +464,48 @@ async fn handle_request(request: DaemonRequest) -> DaemonResponse {
             keys,
             hold_duration_ms,
         } => {
-            // Map key names
+            let backend = selected_backend();
+            // uinput path for auto/uinput: map names -> codes and inject chord.
+            if backend != Backend::Xdotool {
+                let mut codes = Vec::with_capacity(keys.len());
+                let mut unknown = None;
+                for key in &keys {
+                    match uinput::modifier_or_named_key(key) {
+                        Some(code) => codes.push(code),
+                        None => {
+                            unknown = Some(key.clone());
+                            break;
+                        }
+                    }
+                }
+
+                if let Some(bad) = unknown {
+                    // Unknown key: surface as error (xdotool would also reject it).
+                    return DaemonResponse::Error {
+                        message: format!("Invalid key '{}'", bad),
+                        code: Some("INVALID_KEY".to_string()),
+                    };
+                }
+
+                match with_uinput(|dev| dev.shortcut(&codes)) {
+                    Ok(()) => {
+                        info!(backend = "uinput", "Shortcut command succeeded");
+                        return DaemonResponse::Ok { data: None };
+                    }
+                    Err(e) => {
+                        if backend == Backend::Uinput {
+                            error!(error = %e, "Shortcut failed (backend forced to uinput)");
+                            return DaemonResponse::Error {
+                                message: format!("uinput shortcut failed: {}", e),
+                                code: Some("SHORTCUT_FAILED".to_string()),
+                            };
+                        }
+                        warn!(error = %e, "uinput shortcut failed; falling back to xdotool");
+                    }
+                }
+            }
+
+            // Map key names (xdotool fallback / legacy path)
             let mut mapped_keys = Vec::new();
             for key in &keys {
                 match map_key_name(key) {
@@ -342,6 +538,12 @@ async fn handle_request(request: DaemonRequest) -> DaemonResponse {
         }
 
         DaemonRequest::ReleaseAll => {
+            // RFC 008 safety: release modifiers on BOTH backends. uinput release
+            // only runs if the device was already created (we never create it
+            // here just to release). xdotool keyups are harmless no-ops on
+            // Wayland.
+            release_uinput_modifiers_if_present();
+
             // Release all modifier keys to prevent OS lockup.
             // xdotool syntax: `xdotool keyup <key>` (lowercase key names).
             let modifiers = ["shift", "ctrl", "alt", "super"];
@@ -632,6 +834,10 @@ fn get_active_window_via_proc() -> Option<WindowInfo> {
 async fn execute_emergency_release() -> Result<()> {
     error!("RFC 008: Executing EMERGENCY key release - clearing all modifiers");
 
+    // Also clear modifiers on the uinput backend if the device exists, so the
+    // dead-man's switch stays effective with the kernel backend (not just X11).
+    release_uinput_modifiers_if_present();
+
     let modifiers = [
         ("shift", "Shift"),
         ("ctrl", "Control"),
@@ -884,6 +1090,27 @@ async fn main() -> Result<()> {
     info!("KRIA uinput Daemon starting");
     info!("SECURITY: This daemon runs with elevated privileges for uinput access");
     info!("SECURITY: Socket created with chmod 777 for non-root client access");
+
+    // --selftest: validate uinput device creation WITHOUT starting the socket
+    // loop. Creates the virtual device, performs a harmless sync (no key
+    // injected), then destroys it via Drop. Prints a stable marker + exit code.
+    if std::env::args().any(|a| a == "--selftest") {
+        match uinput::UinputDevice::new() {
+            Ok(dev) => {
+                if let Err(e) = dev.flush() {
+                    println!("UINPUT_SELFTEST_FAIL: {}", e);
+                    std::process::exit(1);
+                }
+                drop(dev); // explicit UI_DEV_DESTROY + close
+                println!("UINPUT_SELFTEST_OK");
+                std::process::exit(0);
+            }
+            Err(e) => {
+                println!("UINPUT_SELFTEST_FAIL: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
 
     // Determine socket path, in priority order:
     //   1. `--socket <path>` CLI argument (preferred — survives sudo env scrubbing)

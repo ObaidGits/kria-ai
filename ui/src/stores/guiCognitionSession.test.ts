@@ -4,6 +4,7 @@ import {
   activeGuiCognitionSession,
   guiCognitionRoutingStatus,
   handleGuiCognitionEvent,
+  markGuiCognitionCancelled,
 } from "./guiCognitionSession";
 import type { GuiCognitionEnvelope, GuiCognitionEvent } from "../types/guiCognition";
 
@@ -1206,5 +1207,166 @@ describe("guiCognitionSession store", () => {
     ]);
     expect(session?.context.sourceBlockers[0]).toBe("[untrusted text redacted]");
     expect(session?.context.warnings[0]).toContain("[redacted]");
+  });
+
+  it("marks an active turn cancelled and reports a cancelled routing status", () => {
+    startTurn();
+    handleGuiCognitionEvent(envelope(2, { type: "ObservationStarted" }));
+    expect(activeGuiCognitionSession()?.lifecycle).toBe("observing");
+
+    markGuiCognitionCancelled("Turn cancelled by you.");
+
+    const session = activeGuiCognitionSession();
+    expect(session?.lifecycle).toBe("cancelled");
+    expect(session?.blocker?.reason).toBe("Turn cancelled by you.");
+    expect(guiCognitionRoutingStatus()).toBe("Cancelled");
+  });
+
+  it("does not downgrade an already-terminal turn to cancelled", () => {
+    startTurn();
+    handleGuiCognitionEvent(envelope(2, { type: "TurnCompleted", status: "completed" }));
+    expect(activeGuiCognitionSession()?.lifecycle).toBe("completed");
+
+    markGuiCognitionCancelled("late cancel");
+
+    // A late cancel must never rewrite a turn that already finished.
+    expect(activeGuiCognitionSession()?.lifecycle).toBe("completed");
+  });
+
+  it("is a no-op when there is no active turn", () => {
+    expect(activeGuiCognitionSession()).toBeNull();
+    markGuiCognitionCancelled("nothing to cancel");
+    expect(activeGuiCognitionSession()).toBeNull();
+  });
+
+  // Task 10.5 (Requirement 16.1): streaming. Envelopes arrive incrementally
+  // DURING the turn (observe → plan → per-step → terminal) and must update the
+  // store progressively, not as a single end batch. Stale / out-of-order
+  // envelopes encountered mid-stream must be rejected without losing progress.
+  describe("progressive streaming (Req 16.1)", () => {
+    it("updates the store after each envelope, not only at the terminal batch", () => {
+      // observe → plan → resolve → safety → execute → verify → complete, with a
+      // state assertion after EVERY envelope to prove progressive (not batched)
+      // updates.
+      startTurn();
+      expect(activeGuiCognitionSession()?.lifecycle).toBe("planning"); // TurnStarted
+
+      handleGuiCognitionEvent(envelope(2, { type: "ObservationStarted" }));
+      expect(activeGuiCognitionSession()?.lifecycle).toBe("observing");
+      expect(activeGuiCognitionSession()?.lastSequence).toBe(2);
+
+      handleGuiCognitionEvent(envelope(3, { type: "ObservationCompleted", active_window: "Editor" }));
+      expect(activeGuiCognitionSession()?.lifecycle).toBe("planning");
+      expect(activeGuiCognitionSession()?.observation.activeWindow).toBe("Editor");
+
+      handleGuiCognitionEvent(envelope(4, { type: "PlanCreated", steps: ["Focus field", "Type text"] }));
+      expect(activeGuiCognitionSession()?.planSteps).toEqual(["Focus field", "Type text"]);
+
+      handleGuiCognitionEvent(envelope(5, { type: "TargetResolutionStarted", query: "Search" }));
+      expect(activeGuiCognitionSession()?.lifecycle).toBe("resolving");
+
+      handleGuiCognitionEvent(envelope(6, { type: "TargetResolved", label: "Search", confidence: 0.9 }));
+      expect(activeGuiCognitionSession()?.target?.label).toBe("Search");
+
+      handleGuiCognitionEvent(envelope(7, { type: "ActionStarted", action_kind: "TypeText", target: "Search" }));
+      expect(activeGuiCognitionSession()?.lifecycle).toBe("executing");
+      expect(activeGuiCognitionSession()?.currentAction?.actionKind).toBe("TypeText");
+
+      handleGuiCognitionEvent(envelope(8, { type: "VerificationStarted", verification: "text_present" }));
+      expect(activeGuiCognitionSession()?.lifecycle).toBe("verifying");
+
+      handleGuiCognitionEvent(envelope(9, { type: "VerificationCompleted", status: "verified", confidence: 0.92 }));
+      expect(activeGuiCognitionSession()?.verification?.status).toBe("verified");
+
+      handleGuiCognitionEvent(envelope(10, { type: "TurnCompleted", status: "ok" }));
+      expect(activeGuiCognitionSession()?.lifecycle).toBe("completed");
+      expect(activeGuiCognitionSession()?.lastSequence).toBe(10);
+    });
+
+    it("advances per-step workflow counts incrementally as each step completes", () => {
+      startTurn();
+      handleGuiCognitionEvent(envelope(2, {
+        type: "WorkflowRunStarted",
+        workflow_run_id: "run-stream",
+        step_count: 2,
+        current_step_index: 0,
+      }));
+      expect(activeGuiCognitionSession()?.workflow?.stepCount).toBe(2);
+      expect(activeGuiCognitionSession()?.workflow?.completedStepCount ?? 0).toBe(0);
+
+      handleGuiCognitionEvent(envelope(3, {
+        type: "WorkflowStepStarted",
+        workflow_run_id: "run-stream",
+        step_index: 0,
+        step_type: "OpenApp",
+        status: "started",
+      }));
+      expect(activeGuiCognitionSession()?.workflow?.steps[0]?.status).toBe("started");
+
+      handleGuiCognitionEvent(envelope(4, {
+        type: "WorkflowStepCompleted",
+        workflow_run_id: "run-stream",
+        step_index: 0,
+        step_type: "OpenApp",
+        status: "completed",
+        receipt_id: "receipt-0",
+      }));
+      // First step is visibly done before the second one even starts.
+      expect(activeGuiCognitionSession()?.workflow?.steps[0]?.status).toBe("completed");
+
+      handleGuiCognitionEvent(envelope(5, {
+        type: "WorkflowStepStarted",
+        workflow_run_id: "run-stream",
+        step_index: 1,
+        step_type: "FocusField",
+        status: "started",
+      }));
+      expect(activeGuiCognitionSession()?.workflow?.steps.length).toBe(2);
+      expect(activeGuiCognitionSession()?.workflow?.steps[1]?.status).toBe("started");
+
+      handleGuiCognitionEvent(envelope(6, {
+        type: "WorkflowStepCompleted",
+        workflow_run_id: "run-stream",
+        step_index: 1,
+        step_type: "FocusField",
+        status: "completed",
+        receipt_id: "receipt-1",
+      }));
+      handleGuiCognitionEvent(envelope(7, {
+        type: "WorkflowRunCompleted",
+        workflow_run_id: "run-stream",
+        status: "completed",
+        completed_step_count: 2,
+        step_count: 2,
+      }));
+      expect(activeGuiCognitionSession()?.workflow?.completedStepCount).toBe(2);
+      expect(activeGuiCognitionSession()?.lifecycle).toBe("completed");
+    });
+
+    it("ignores a stale lower-sequence envelope mid-stream without losing progress", () => {
+      startTurn();
+      handleGuiCognitionEvent(envelope(5, { type: "ObservationCompleted", active_window: "fresh" }));
+      expect(activeGuiCognitionSession()?.observation.activeWindow).toBe("fresh");
+      expect(activeGuiCognitionSession()?.lastSequence).toBe(5);
+
+      // A late-arriving lower-sequence envelope for the same turn is rejected.
+      handleGuiCognitionEvent(envelope(3, { type: "ObservationCompleted", active_window: "stale" }));
+      expect(activeGuiCognitionSession()?.observation.activeWindow).toBe("fresh");
+      expect(activeGuiCognitionSession()?.lastSequence).toBe(5);
+
+      // Streaming continues correctly afterwards.
+      handleGuiCognitionEvent(envelope(6, { type: "TurnCompleted", status: "ok" }));
+      expect(activeGuiCognitionSession()?.lifecycle).toBe("completed");
+    });
+
+    it("ignores an envelope from a different turn mid-stream", () => {
+      startTurn();
+      handleGuiCognitionEvent(envelope(2, { type: "ObservationCompleted", active_window: "turn-1-window" }));
+      // Same/higher sequence but a different turn_id must not bleed into the
+      // active turn's record.
+      handleGuiCognitionEvent(envelope(3, { type: "ObservationCompleted", active_window: "other-turn" }, "turn-99"));
+      expect(activeGuiCognitionSession()?.turnId).toBe("turn-1");
+      expect(activeGuiCognitionSession()?.observation.activeWindow).toBe("turn-1-window");
+    });
   });
 });

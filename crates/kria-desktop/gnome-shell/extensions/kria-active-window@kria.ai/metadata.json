@@ -1,8 +1,8 @@
 {
   "uuid": "kria-active-window@kria.ai",
   "name": "KRIA Active Window Bridge",
-  "version": 1,
-  "description": "Exposes the focused GNOME window summary to KRIA over a bounded session D-Bus interface.",
+  "version": 2,
+  "description": "Window perception + control bridge for KRIA GUI Cognition. Read-only focused-window snapshot (GetActiveWindow, unauthenticated, back-compat) plus token-gated window enumeration, activation, and management (ListWindows/ActivateWindow/SetWindowState/MoveResizeWindow/MoveWindowToWorkspace/GetMonitors) over a bounded session D-Bus interface. Window-only; no input injection. GNOME Wayland + Xorg.",
   "shell-version": ["45", "46", "47", "48", "49", "50"],
   "url": "https://kria.ai"
 }

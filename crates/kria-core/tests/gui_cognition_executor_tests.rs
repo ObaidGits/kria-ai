@@ -119,6 +119,7 @@ fn authorized_low_risk_proposal_passes_preconditions() {
         None,
         &vault,
         1_500,
+        false,
     );
 
     assert!(report.can_start_action);
@@ -150,6 +151,7 @@ fn safety_only_backend_block_and_hash_mismatch_block_before_action() {
         None,
         &vault,
         1_500,
+        false,
     );
     assert!(!safety_only.can_start_action);
     assert!(safety_only.blockers.iter().any(|value| value.contains("safety_only")));
@@ -164,6 +166,7 @@ fn safety_only_backend_block_and_hash_mismatch_block_before_action() {
         None,
         &vault,
         1_500,
+        false,
     );
     assert!(!mismatch.can_start_action);
     assert!(mismatch
@@ -187,6 +190,7 @@ fn safety_only_backend_block_and_hash_mismatch_block_before_action() {
         None,
         &GuiPayloadVault::default(),
         1_500,
+        false,
     );
     assert!(!backend_blocked.can_start_action);
     assert!(backend_blocked
@@ -219,6 +223,7 @@ fn risky_action_requires_matching_hitl_decision() {
         Some(&denied),
         &vault,
         1_500,
+        false,
     );
     assert!(!denied_report.can_start_action);
 
@@ -240,6 +245,7 @@ fn risky_action_requires_matching_hitl_decision() {
         Some(&approved),
         &GuiPayloadVault::default(),
         1_500,
+        false,
     );
     assert!(approved_report.can_start_action);
 }
@@ -270,6 +276,7 @@ fn target_identity_payload_and_secret_outputs_are_enforced() {
         None,
         &vault,
         1_500,
+        false,
     );
     assert!(report.can_start_action);
 
@@ -285,6 +292,7 @@ fn target_identity_payload_and_secret_outputs_are_enforced() {
         None,
         &vault,
         1_500,
+        false,
     );
     assert!(!mismatch.can_start_action);
     assert!(mismatch

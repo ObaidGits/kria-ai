@@ -258,6 +258,7 @@ fn main() {
             commands::gui_automation_control::get_gui_automation_status,
             commands::gui_automation_control::set_gui_automation_enabled,
             commands::gui_automation_control::get_grounding_status,
+            commands::gui_automation_control::cancel_gui_cognition_turn,
             // Universal Model Provider System
             commands::providers::list_providers,
             commands::providers::get_active_provider,

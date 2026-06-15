@@ -5,7 +5,7 @@
 
 use super::config::ProviderConfig;
 use super::openai::OpenAIBackend;
-use crate::llm::{ChatMessage, LlmBackend, LlmResponse, ToolSchema};
+use crate::llm::{ChatMessage, LlmBackend, LlmResponse, StructuredOutputMode, ToolSchema};
 use async_trait::async_trait;
 use futures::Stream;
 use std::pin::Pin;
@@ -77,5 +77,30 @@ impl LlmBackend for OpenRouterBackend {
 
     async fn health_check(&self) -> bool {
         self.inner.health_check().await
+    }
+
+    fn structured_output_mode(&self) -> StructuredOutputMode {
+        self.inner.structured_output_mode()
+    }
+
+    fn supports_grammar(&self) -> bool {
+        self.inner.supports_grammar()
+    }
+
+    async fn detect_structured_output_mode(&self) -> StructuredOutputMode {
+        self.inner.detect_structured_output_mode().await
+    }
+
+    async fn chat_structured(
+        &self,
+        messages: &[ChatMessage],
+        json_schema: serde_json::Value,
+        schema_name: &str,
+        temperature: f32,
+        max_tokens: u32,
+    ) -> anyhow::Result<LlmResponse> {
+        self.inner
+            .chat_structured(messages, json_schema, schema_name, temperature, max_tokens)
+            .await
     }
 }

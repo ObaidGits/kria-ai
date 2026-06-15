@@ -60,9 +60,26 @@ pub struct AppManifest {
     pub exec_fingerprint: [u8; 32],
     /// URI schemes registered by this app (from `MimeType=x-scheme-handler/<scheme>`).
     pub registered_schemes: Vec<String>,
-    /// Additional name aliases (from `GenericName=`, `X-KDE-Aliases=`, etc.) used for
-    /// fuzzy resolution of LLM-supplied names like "chrome" → "chromium".
+    /// Additional SPECIFIC name aliases (from `Name=`, reverse-DNS last segment,
+    /// `X-KDE-Aliases=`, etc.) used for fuzzy resolution of LLM-supplied names
+    /// like "chrome" → "chromium". These identify THIS app and may override
+    /// built-ins / earlier entries (deterministic last-writer-wins for visible
+    /// apps).
     pub name_aliases: Vec<String>,
+    /// GENERIC, category-level aliases from `GenericName=` (e.g. "text editor",
+    /// "web browser", "file manager"). These are SHARED by many unrelated apps —
+    /// heavyweight IDEs (`code`, `kiro`, `devin-desktop`, `vim`) all advertise
+    /// `GenericName=Text Editor`. They must NEVER clobber a built-in class alias
+    /// or a dedicated app's claim, or "open the text editor" would launch
+    /// whichever IDE happened to be scanned last (the live OpenApp bug). Under
+    /// the `gui_cog_verify_live` flag these are registered NON-clobbering
+    /// (`or_insert`). See `load_manifests`.
+    pub generic_aliases: Vec<String>,
+    /// `true` when the `.desktop` entry sets `NoDisplay=true` — a hidden helper
+    /// (e.g. a `x-scheme-handler/*` URL-handler stub) that is launchable by its
+    /// own ID but should NEVER hijack a human-facing class alias ("text editor",
+    /// "editor", …) away from a real, visible application. See `load_manifests`.
+    pub no_display: bool,
 }
 
 // ─── InstalledAppRegistry ─────────────────────────────────────────────────────
@@ -127,6 +144,18 @@ impl InstalledAppRegistry {
     }
 
     async fn load_manifests(&self, manifests: Vec<AppManifest>) {
+        self.load_manifests_with_guard(manifests, generic_alias_guard_enabled())
+            .await
+    }
+
+    /// Issue #2 (live OpenApp): load manifests with explicit control over the
+    /// generic-category-alias guard, so tests are deterministic and don't race
+    /// on the process-global env var. `guard_enabled == true` (the desktop
+    /// default-on path) registers `GenericName`-derived aliases NON-clobbering
+    /// so a shared category like "text editor" cannot be hijacked away from a
+    /// built-in / dedicated app by a heavyweight IDE. `false` restores the prior
+    /// byte-for-byte behavior (generic aliases clobber like specific ones).
+    async fn load_manifests_with_guard(&self, manifests: Vec<AppManifest>, guard_enabled: bool) {
         let mut apps = self.apps.write().await;
         let mut aliases = self.aliases.write().await;
         let mut schemes = self.schemes.write().await;
@@ -145,14 +174,51 @@ impl InstalledAppRegistry {
         for manifest in manifests {
             let id_str = manifest.app_id.as_str().to_lowercase();
 
-            // Register aliases (case-insensitive). .desktop entries override builtins.
+            // The canonical-ID self-alias is always authoritative (it points to
+            // the app itself, so it can never shadow a different app).
             aliases.insert(id_str.clone(), id_str.clone());
-            aliases.insert(manifest.display_name.to_lowercase(), id_str.clone());
+
+            // Human-facing aliases (display name + GenericName/reverse-DNS).
+            // A `NoDisplay=true` helper (e.g. a `x-scheme-handler/*` URL-handler
+            // stub such as `devin-desktop-url-handler` with `GenericName=Text
+            // Editor`) must NEVER overwrite a human class alias ("text editor",
+            // "editor", …) that already resolves to a real, visible app — doing so
+            // makes `gio launch` run a URL handler that exits immediately instead
+            // of opening the editor. Hidden helpers therefore only register an
+            // alias when it is not already claimed; visible apps keep overriding
+            // built-ins and earlier entries as before (deterministic: a real app
+            // always wins over a hidden helper regardless of scan order).
+            let mut register_alias = |alias: String, force_no_clobber: bool| {
+                if alias.is_empty() {
+                    return;
+                }
+                if manifest.no_display || force_no_clobber {
+                    aliases.entry(alias).or_insert_with(|| id_str.clone());
+                } else {
+                    aliases.insert(alias, id_str.clone());
+                }
+            };
+            register_alias(manifest.display_name.to_lowercase(), false);
             for alias in &manifest.name_aliases {
-                aliases.insert(alias.to_lowercase(), id_str.clone());
+                register_alias(alias.to_lowercase(), false);
             }
 
-            // Register URI schemes.
+            // GenericName-derived category aliases ("text editor", "web browser",
+            // …) are SHARED across many unrelated apps. When the guard is ON they
+            // are registered NON-clobbering so they can only FILL an unclaimed
+            // alias — never steal a built-in class alias or a dedicated app's
+            // claim. This is what stops "open the text editor" from launching
+            // whichever IDE (`code`/`kiro`/`devin-desktop`/`vim`, all of which set
+            // `GenericName=Text Editor`) happened to be scanned last instead of
+            // the real GNOME Text Editor (the live OpenApp 20ms-no-op bug). When
+            // the guard is OFF the prior behavior is preserved byte-for-byte:
+            // generic aliases clobber exactly like specific ones did.
+            for alias in &manifest.generic_aliases {
+                register_alias(alias.to_lowercase(), guard_enabled);
+            }
+
+            // Register URI schemes (hidden URL-handlers are still valid scheme
+            // owners, so this is unaffected by the alias guard above).
             for scheme in &manifest.registered_schemes {
                 schemes.insert(scheme.clone(), id_str.clone());
             }
@@ -484,6 +550,24 @@ fn class_alias_candidates(normalized: &str) -> Option<&'static [&'static str]> {
 
 // ─── Desktop file parsing ─────────────────────────────────────────────────────
 
+/// Issue #2 (live OpenApp): whether the generic-category-alias guard is active.
+///
+/// Shares the Phase 1 `gui_cog_verify_live` flag (`KRIA_GUI_COG_VERIFY_LIVE`):
+/// the registry's "GenericName must not hijack a class alias" fix ships with the
+/// same live-verification wave. Default-ON (absent var ⇒ ON, matching the
+/// desktop's `from_env_default_on` wiring); an explicit falsy value
+/// (`0`/`false`/`no`/`off`/empty) is the documented rollback to the prior
+/// clobbering behavior.
+fn generic_alias_guard_enabled() -> bool {
+    match std::env::var("KRIA_GUI_COG_VERIFY_LIVE") {
+        Ok(v) => {
+            let v = v.trim().to_ascii_lowercase();
+            !matches!(v.as_str(), "0" | "false" | "no" | "off" | "")
+        }
+        Err(_) => true,
+    }
+}
+
 fn scan_all_desktop_files() -> Vec<AppManifest> {
     let mut manifests = Vec::new();
 
@@ -520,6 +604,7 @@ fn parse_desktop_file(path: &Path) -> Option<AppManifest> {
     let mut startup_wm_class = String::new();
     let mut mime_types: Vec<String> = Vec::new();
     let mut hidden = false;
+    let mut no_display = false;
 
     for line in content.lines() {
         // FIX #13: Trim \r to handle Windows-formatted .desktop files (CRLF line endings).
@@ -555,6 +640,9 @@ fn parse_desktop_file(path: &Path) -> Option<AppManifest> {
             if line == "Hidden=true" {
                 hidden = true;
             }
+            if line == "NoDisplay=true" {
+                no_display = true;
+            }
             // NoDisplay=true: still index the app (it's launchable by name)
             // but don't add it to the visible launcher list.
         }
@@ -580,10 +668,13 @@ fn parse_desktop_file(path: &Path) -> Option<AppManifest> {
 
     let exec_fingerprint = sha256_bytes(exec.as_bytes());
 
-    // Build aliases from display name and generic name.
+    // Build SPECIFIC aliases from display name (reverse-DNS added below). The
+    // GenericName is a SHARED category label and is kept separate so it can be
+    // registered non-clobbering (see `load_manifests`).
     let mut aliases = vec![name.to_lowercase()];
+    let mut generic_aliases: Vec<String> = Vec::new();
     if !generic_name.is_empty() {
-        aliases.push(generic_name.to_lowercase());
+        generic_aliases.push(generic_name.to_lowercase());
     }
 
     // Auto-extract Flatpak/reverse-DNS aliases.
@@ -624,6 +715,8 @@ fn parse_desktop_file(path: &Path) -> Option<AppManifest> {
         exec_fingerprint,
         registered_schemes: mime_types,
         name_aliases: aliases,
+        generic_aliases,
+        no_display,
     })
 }
 
@@ -766,6 +859,8 @@ mod tests {
                 exec_fingerprint: sha256_bytes(b"libreoffice --calc %U"),
                 registered_schemes: Vec::new(),
                 name_aliases: vec!["calc".to_string()],
+                generic_aliases: Vec::new(),
+                no_display: false,
             }])
             .await;
 
@@ -791,6 +886,8 @@ mod tests {
                 exec_fingerprint: sha256_bytes(b"gnome-control-center"),
                 registered_schemes: Vec::new(),
                 name_aliases: vec!["settings".to_string()],
+                generic_aliases: Vec::new(),
+                no_display: false,
             }])
             .await;
 
@@ -826,5 +923,146 @@ mod tests {
         let h1 = sha256_bytes(b"Exec=/usr/bin/chromium %U");
         let h2 = sha256_bytes(b"Exec=/tmp/malicious %U");
         assert_ne!(h1, h2);
+    }
+
+    /// Regression: a `NoDisplay=true` URL-handler stub (e.g.
+    /// `devin-desktop-url-handler` with `GenericName=Text Editor` + an
+    /// `x-scheme-handler/*` Exec) must NOT hijack the human-facing "text editor"
+    /// / "editor" aliases away from the real, visible GNOME Text Editor. If it
+    /// did, `gio launch` would run the handler stub (which exits immediately with
+    /// no URL) and no editor process would ever spawn — the live OpenApp bug.
+    #[tokio::test]
+    async fn editor_aliases_resolve_to_real_editor_not_hidden_url_handler() {
+        let registry = Arc::new(InstalledAppRegistry {
+            apps: Arc::new(RwLock::new(HashMap::new())),
+            aliases: Arc::new(RwLock::new(HashMap::new())),
+            schemes: Arc::new(RwLock::new(HashMap::new())),
+        });
+        // Order the hidden handler FIRST so the guard (not scan order) is what
+        // protects the alias.
+        registry
+            .load_manifests(vec![
+                AppManifest {
+                    app_id: CanonicalAppId::from_registry(
+                        "devin-desktop-url-handler".to_string(),
+                    ),
+                    display_name: "Devin - URL Handler".to_string(),
+                    desktop_path: PathBuf::from(
+                        "/usr/share/applications/devin-desktop-url-handler.desktop",
+                    ),
+                    exec_line: "/usr/share/devin-desktop/devin-desktop --open-url %U".to_string(),
+                    exec_fingerprint: sha256_bytes(b"devin --open-url %U"),
+                    registered_schemes: vec!["devin".to_string(), "windsurf".to_string()],
+                    // GenericName=Text Editor lands here as a generic category alias.
+                    name_aliases: Vec::new(),
+                    generic_aliases: vec!["text editor".to_string()],
+                    no_display: true,
+                },
+                AppManifest {
+                    app_id: CanonicalAppId::from_registry("org.gnome.texteditor".to_string()),
+                    display_name: "Text Editor".to_string(),
+                    desktop_path: PathBuf::from(
+                        "/usr/share/applications/org.gnome.TextEditor.desktop",
+                    ),
+                    exec_line: "gnome-text-editor %U".to_string(),
+                    exec_fingerprint: sha256_bytes(b"gnome-text-editor %U"),
+                    registered_schemes: Vec::new(),
+                    name_aliases: Vec::new(),
+                    generic_aliases: vec!["text editor".to_string()],
+                    no_display: false,
+                },
+            ])
+            .await;
+
+        // Bare "editor" resolves via the TEXT_EDITOR class-alias list.
+        let editor = registry
+            .resolve_alias("editor")
+            .expect("'editor' should resolve to the installed text editor");
+        assert_eq!(
+            editor.as_str(),
+            "org.gnome.texteditor",
+            "'editor' must map to the real editor, never the hidden URL handler"
+        );
+        // Explicit "text editor" must also resolve to the real editor.
+        let text_editor = registry
+            .resolve_alias("text editor")
+            .expect("'text editor' should resolve to the installed text editor");
+        assert_eq!(text_editor.as_str(), "org.gnome.texteditor");
+
+        // The hidden handler is still launchable by its own ID and still owns its
+        // URI scheme (the guard only protects human-facing class aliases).
+        assert_eq!(
+            registry
+                .resolve_alias("devin-desktop-url-handler")
+                .map(|id| id.as_str().to_string())
+                .as_deref(),
+            Some("devin-desktop-url-handler")
+        );
+        assert!(registry.registered_schemes().contains("devin"));
+    }
+
+    /// Issue #2 (the LIVE OpenApp bug): multiple **visible** heavyweight IDEs
+    /// (`devin-desktop`, `code`, `kiro`, `vim` — all `NoDisplay=false`) advertise
+    /// `GenericName=Text Editor`. With the guard ON they must NOT hijack the
+    /// "text editor" / "editor" class alias away from the dedicated GNOME Text
+    /// Editor, even when scanned LAST. The prior `no_display`-only guard did not
+    /// cover this (these are visible apps), so "open the text editor" launched
+    /// whichever IDE was scanned last and no-opped in ~20ms.
+    #[tokio::test]
+    async fn visible_ides_generic_name_does_not_hijack_text_editor_alias() {
+        let mk = |id: &str, name: &str| AppManifest {
+            app_id: CanonicalAppId::from_registry(id.to_string()),
+            display_name: name.to_string(),
+            desktop_path: PathBuf::from(format!("/usr/share/applications/{id}.desktop")),
+            exec_line: format!("/usr/bin/{id} %F"),
+            exec_fingerprint: sha256_bytes(id.as_bytes()),
+            registered_schemes: Vec::new(),
+            name_aliases: Vec::new(),
+            // Every IDE shares the SAME generic category label.
+            generic_aliases: vec!["text editor".to_string()],
+            no_display: false,
+        };
+        let registry = Arc::new(InstalledAppRegistry {
+            apps: Arc::new(RwLock::new(HashMap::new())),
+            aliases: Arc::new(RwLock::new(HashMap::new())),
+            schemes: Arc::new(RwLock::new(HashMap::new())),
+        });
+        // The real dedicated editor first, then IDEs scanned AFTER it.
+        let manifests = vec![
+            AppManifest {
+                generic_aliases: vec!["text editor".to_string()],
+                ..mk("org.gnome.texteditor", "Text Editor")
+            },
+            mk("devin-desktop", "Devin"),
+            mk("code", "Visual Studio Code"),
+            mk("kiro", "Kiro"),
+        ];
+
+        // Guard ON (default-on / desktop path): the built-in class alias +
+        // dedicated editor win; the IDE category labels only fill unclaimed keys.
+        registry
+            .load_manifests_with_guard(manifests.clone(), true)
+            .await;
+        assert_eq!(
+            registry.resolve_alias("text editor").map(|i| i.as_str().to_string()),
+            Some("org.gnome.texteditor".to_string()),
+            "'text editor' must resolve to the dedicated editor, not a heavyweight IDE"
+        );
+        assert_eq!(
+            registry.resolve_alias("editor").map(|i| i.as_str().to_string()),
+            Some("org.gnome.texteditor".to_string()),
+            "bare 'editor' must resolve to the dedicated editor, not a heavyweight IDE"
+        );
+
+        // Guard OFF (rollback): prior byte-for-byte behavior — generic aliases
+        // clobber, so the LAST-scanned visible IDE wins the shared category label.
+        registry
+            .load_manifests_with_guard(manifests, false)
+            .await;
+        assert_eq!(
+            registry.resolve_alias("text editor").map(|i| i.as_str().to_string()),
+            Some("kiro".to_string()),
+            "guard OFF must restore the prior last-writer-wins clobber behavior"
+        );
     }
 }

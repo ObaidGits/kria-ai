@@ -464,6 +464,31 @@ pub fn build_action_proposal_for_step(
                     .or_else(|| goal_contract.target_app_hint.clone())
                     .or_else(|| goal_contract.target_window_hint.clone())
                     .and_then(|value| nonempty(sanitize_text(&value, DISPLAY_LIMIT)))
+            } else if action_type.as_str() == "Scroll" {
+                // Task 4 (Issue #5): a Scroll is a SURFACE action, so the target
+                // resolver returns no control (`resolved_target: None`). Thread the
+                // scroll DIRECTION marker (`scroll:<dir>`, set on the step's
+                // `target_control_hint` from the goal contract behind the
+                // `gui_cog_primitives` flag) into `target_label` so it survives
+                // onto the desktop `GuiActionRequest.target_name`, where the
+                // executor picks the paging/arrow keys. Flag-OFF carries no marker
+                // (the hint is `None`), so this stays `None` and is unchanged.
+                step.as_ref()
+                    .and_then(|step| step.target_control_hint.clone())
+                    .or_else(|| goal_contract.target_control_hint.clone())
+                    .and_then(|value| nonempty(sanitize_text(&value, DISPLAY_LIMIT)))
+            } else if matches!(action_type.as_str(), "TypeText" | "FillField")
+                && step
+                    .as_ref()
+                    .and_then(|step| step.target_control_hint.as_deref())
+                    == Some(super::llm_planner::BROWSER_ADDRESSBAR_HINT)
+            {
+                // Task 2 (Issue #3): a browser address-bar type is a FOCUSED-SURFACE
+                // action (the address bar was focused by a prior Ctrl+L and is not a
+                // resolvable a11y control). Thread the sentinel hint onto
+                // `target_label` so it survives to the desktop request, where the
+                // executor types into the FOCUSED element (no control resolution).
+                Some(super::llm_planner::BROWSER_ADDRESSBAR_HINT.to_string())
             } else {
                 None
             }

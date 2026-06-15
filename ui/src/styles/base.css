@@ -1578,6 +1578,25 @@ details[open] .tool-raw-summary::before {
   border-color: var(--text-secondary);
 }
 
+/* Task 10.3: visible Stop/Cancel control for the active GUI Cognition turn. */
+.gui-cognition-stop {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--danger, #d9534f);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--danger, #d9534f);
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.25rem 0.6rem;
+  cursor: pointer;
+}
+
+.gui-cognition-stop:hover {
+  background: var(--danger, #d9534f);
+  color: #fff;
+}
+
 .gui-cognition-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));

@@ -437,3 +437,141 @@ pub fn step_blocked_event(
         "prompt_hash": run.prompt_hash,
     })
 }
+
+/// Task 1.2: emitted when the runtime guard stops a turn *before the next
+/// action* — either the GlobalSafetyHalt master kill-switch (Requirement 21.2)
+/// or a cooperative cancel (Requirement 21.1). `cause` is a stable tag
+/// (`"global_safety_halt"` / `"cancelled"`); `reason` is sanitized.
+pub fn run_aborted_event(
+    run: &GuiWorkflowRun,
+    cause: &str,
+    reason: &str,
+    pending_step_index: usize,
+) -> serde_json::Value {
+    serde_json::json!({
+        "type": "WorkflowRunAborted",
+        "workflow_run_id": run.workflow_run_id,
+        "plan_id": run.plan_id,
+        "goal_contract_id": run.goal_contract_id,
+        "cause": cause,
+        "reason": safe(reason),
+        "halted_before_step_index": pending_step_index,
+        "current_step_index": run.current_step_index,
+        "step_count": run.step_count,
+        "completed_step_count": run.completed_step_receipts.len(),
+        "prompt_hash": run.prompt_hash,
+    })
+}
+
+/// Task 3.1: emitted when the explicit per-step re-observe hook fires (only when
+/// the `gui_cog_reobserve` flag is ON). The hook obtains a FRESH `GuiContext`
+/// from the desktop-supplied perception provider between steps (Requirement 2)
+/// and is BOUNDED by the Task 1 runaway caps: `reobserve_count` and
+/// `max_reobserve` are surfaced so the cap binding is observable, and the loop's
+/// pre-action checkpoint aborts with `budget_max_reobserve` once the cap is hit
+/// (Requirement 19.4 / 21.3). `cause` is a stable tag describing why the
+/// re-observe was requested (e.g. `"pre_step_resolution"` / `"observe_step"`).
+pub fn reobserve_hook_event(
+    cause: &str,
+    step_index: usize,
+    reobserve_count: u32,
+    max_reobserve: u32,
+) -> serde_json::Value {
+    serde_json::json!({
+        "type": "WorkflowReobserveHook",
+        "cause": cause,
+        "step_index": step_index,
+        // Count BEFORE this re-observe is recorded; the loop cap is enforced at
+        // the pre-action checkpoint, never inside the hook itself.
+        "reobserve_count": reobserve_count,
+        "max_reobserve": max_reobserve,
+        "bounded_by_runaway_caps": true,
+    })
+}
+
+/// Task 3.3 (Requirement 2.5): emitted when the bounded readiness wait resolves
+/// (only when the `gui_cog_reobserve` flag is ON). Before resolving a step that
+/// depends on a window/app/page which may still be loading (e.g. after OpenApp /
+/// BrowserNavigate / any state-changing step), the runtime re-observes — bounded
+/// by the Task 1 caps — until the expected window/app/page becomes observable,
+/// THEN resolves. `ready=true` means the expected target became observable and
+/// the next step may resolve; `ready=false` means readiness was not reached
+/// within the bound and the workflow stops without resolving against an un-ready
+/// screen. `attempts` is the number of additional re-observes this wait spent;
+/// `reobserve_count`/`max_reobserve` surface the cap binding (the wait can never
+/// poll unbounded — Property 9). `expected_hint` is sanitized; `reason` is set
+/// only when `ready=false`.
+#[allow(clippy::too_many_arguments)]
+pub fn readiness_wait_event(
+    step_index: usize,
+    cause: &str,
+    expected_hint: Option<&str>,
+    ready: bool,
+    attempts: u32,
+    reobserve_count: u32,
+    max_reobserve: u32,
+    reason: Option<&str>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "type": "WorkflowReadinessWait",
+        "step_index": step_index,
+        "cause": cause,
+        "expected_hint": expected_hint.map(|hint| safe(hint)),
+        "ready": ready,
+        "attempts": attempts,
+        "reobserve_count": reobserve_count,
+        "max_reobserve": max_reobserve,
+        "bounded_by_runaway_caps": true,
+        "reason": reason.map(safe),
+    })
+}
+
+/// Task 3.4 (Requirement 2.3/2.4, Property 2/8): emitted when, after the
+/// per-step target resolution against the FRESH context fails to resolve a
+/// required control target, the runtime classifies whether the expected target
+/// is "present after change" (observable on the fresh screen, tolerant of a
+/// changed control_id after a re-render) or "genuinely absent" — and, when
+/// present, whether it was re-resolved so the workflow CONTINUES rather than
+/// emitting a false "resolved target is no longer present" stop.
+///
+/// Emitted only when the `gui_cog_reobserve` flag is ON (the caller gates it).
+/// The decision is driven by REAL observation evidence (the descriptor matched
+/// against the fresh context), NEVER the action kind (preserves the Task 2.5
+/// invariant). `decision` is a stable tag:
+/// - `present_after_change` — observable + re-resolved → continue (`resolved=true`);
+/// - `present_unresolved`    — observable but still not uniquely/safely
+///   resolvable → stop WITHOUT a false "no longer present";
+/// - `present_ambiguous`     — observable but multiple matches → pause + ask;
+/// - `genuinely_absent`      — not observable after a bounded readiness wait → stop.
+///
+/// Bounded by the Task 1 caps: `attempts` / `reobserve_count` / `max_reobserve`
+/// surface the cap binding so the classification can never poll unbounded
+/// (Property 9). `expected_hint` is sanitized; `reason` is set on every stop
+/// decision.
+#[allow(clippy::too_many_arguments)]
+pub fn target_presence_event(
+    step_index: usize,
+    expected_hint: Option<&str>,
+    decision: &str,
+    resolved: bool,
+    attempts: u32,
+    reobserve_count: u32,
+    max_reobserve: u32,
+    reason: Option<&str>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "type": "WorkflowTargetPresence",
+        "step_index": step_index,
+        "expected_hint": expected_hint.map(safe),
+        "decision": decision,
+        "resolved": resolved,
+        "attempts": attempts,
+        "reobserve_count": reobserve_count,
+        "max_reobserve": max_reobserve,
+        "bounded_by_runaway_caps": true,
+        // Presence is decided from observation evidence (role+label/descriptor
+        // matched against the fresh context), never the action kind.
+        "decided_from_observation_evidence": true,
+        "reason": reason.map(safe),
+    })
+}

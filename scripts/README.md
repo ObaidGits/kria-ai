@@ -25,6 +25,11 @@ Examples:
 - `docker-entrypoint.sh`
 - `uninstall.sh`, `uninstall.ps1`
 - `provision_n8n_stage2_6_workflows.sh`
+- `gui_cognition_test_substrate.sh` — stands up the isolated **TestSubstrate**
+  (nested compositor or Xvfb for CI) with a scratch `HOME`, sample files, and
+  clipboard save/restore, and marks the process (`KRIA_GUI_TEST_SUBSTRATE=1`) so
+  the GUI Cognition backend gates auto-approval fixtures to the substrate only.
+  See `docs/gui_cognition_test_substrate.md`.
 
 Do not add new test/eval entrypoints here. Add test command implementations
 under `testing/suites/<suite>/commands` and register them in that suite's

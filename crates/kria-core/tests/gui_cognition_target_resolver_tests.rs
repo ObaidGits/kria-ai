@@ -8,7 +8,6 @@ use kria_core::agent::gui_cognition::perception::{
     GuiObservationTimingSummary, GuiOcrDiagnostics, GuiPerceptionCapabilities, GuiSourceStatus,
 };
 use kria_core::agent::gui_cognition::resolver::resolve_plan_targets;
-
 fn control(role: &str, name: &str) -> GuiControlSummary {
     let mut control = GuiControlSummary::new(role, name, format!("/fixture/{role}/{name}"));
     control.bounds = Some(GuiBounds {
@@ -144,6 +143,7 @@ fn step(step_type: &str, target: Option<&str>) -> GuiTypedPlanStep {
         verification_strategy: "target_resolved".into(),
         risk_level: "low".into(),
         requires_approval: false,
+        idempotent: kria_core::agent::gui_cognition::default_idempotent_for(step_type),
         allowed_to_execute: false,
         confidence: 0.9,
         reason: "test".into(),
@@ -412,4 +412,62 @@ fn secret_labels_are_redacted_and_results_never_execute() {
     assert!(serialized.contains("[redacted]"));
     assert_eq!(summary.can_execute, false);
     assert!(summary.results.iter().all(|result| !result.can_execute));
+}
+
+// ── Task 2 (Issue #3): prepended app prerequisite is honored by the resolver ───
+mod auto_prereq_resolver_tests {
+    use super::{context_with, plan_with_steps, step, validation};
+    use kria_core::agent::gui_cognition::goal_contract::extract_gui_goal_contract;
+    use kria_core::agent::gui_cognition::llm_planner::{apply_auto_prerequisite, AppObservability};
+    use kria_core::agent::gui_cognition::perception::GuiCursorFocusSummary;
+    use kria_core::agent::gui_cognition::resolver::resolve_plan_targets;
+
+    /// End-to-end: a bare TypeText whose target app ("Calculator") is not the
+    /// active context ("Fixture App") gets an OpenApp prerequisite PREPENDED by
+    /// the auto-prereq pass, and the resolver then DEFERS the TypeText against
+    /// the planned-app prerequisite (it resolves once the app is observable),
+    /// while the OpenApp itself resolves.
+    #[test]
+    fn prepended_open_app_defers_subsequent_primitive() {
+        let ctx = context_with(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            GuiCursorFocusSummary::default(),
+        );
+
+        let contract = extract_gui_goal_contract("type hello", None).contract;
+
+        // A bare primitive targeting an app that is NOT the active window.
+        let mut typed = step("TypeText", Some("the text field"));
+        typed.target_app_hint = Some("Calculator".into());
+        typed.target_window_hint = None;
+        typed.text_payload_summary = Some("hello".into());
+        typed.text_payload_hash = Some("hello-hash".into());
+
+        let mut plan = plan_with_steps(vec![typed]);
+        plan.goal_action_type = Some("type_text".into());
+
+        // App not present in the fixture context → OpenApp prerequisite prepended.
+        let outcome =
+            apply_auto_prerequisite(&mut plan, &contract, |_app| AppObservability::NotPresent);
+        assert!(outcome.changed(), "expected a prerequisite to be prepended");
+        assert_eq!(plan.typed_steps[0].step_type, "OpenApp");
+        assert_eq!(plan.typed_steps[1].step_type, "TypeText");
+
+        let summary = resolve_plan_targets(&plan, &validation(), &ctx, "plan-target");
+        assert_eq!(summary.status, "resolved");
+        assert_eq!(summary.can_execute, false);
+        // OpenApp resolves; the TypeText defers until the planned app is present.
+        assert_eq!(summary.results[0].step_type, "OpenApp");
+        assert_eq!(summary.results[0].status, "resolved");
+        assert!(
+            summary
+                .results
+                .iter()
+                .skip(1)
+                .all(|result| result.status == "deferred"),
+            "expected later primitive(s) to defer: {summary:#?}"
+        );
+    }
 }

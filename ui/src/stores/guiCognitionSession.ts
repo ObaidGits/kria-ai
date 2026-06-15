@@ -84,6 +84,8 @@ export const guiCognitionRoutingStatus = createMemo(() => {
       return "Failed";
     case "completed":
       return "Completed";
+    case "cancelled":
+      return "Cancelled";
     default:
       return null;
   }
@@ -91,6 +93,39 @@ export const guiCognitionRoutingStatus = createMemo(() => {
 
 export function clearGuiCognitionSession(): void {
   setState("active", reconcile(emptySession()));
+}
+
+/**
+ * Task 10.3 (Requirement 16.6 / 21.1): mark the active GUI Cognition turn as
+ * cancelled. The backend cancel (Task 1 `CancelToken` via
+ * `cancel_gui_cognition_turn`) halts the loop before its next action; this is
+ * the optimistic UI counterpart that flips the panel into a clear "cancelled"
+ * state and clears the running indicator. It never downgrades an already-final
+ * state (completed/failed/blocked) so a late cancel cannot rewrite history, and
+ * it is a no-op when there is no active turn.
+ */
+export function markGuiCognitionCancelled(reason?: string): void {
+  setState(
+    produce((s) => {
+      const lifecycle = s.active.lifecycle;
+      if (
+        lifecycle === "idle" ||
+        lifecycle === "completed" ||
+        lifecycle === "failed" ||
+        lifecycle === "blocked" ||
+        lifecycle === "cancelled"
+      ) {
+        return;
+      }
+      s.active.lifecycle = "cancelled";
+      s.active.updatedAt = Date.now();
+      s.active.blocker = {
+        type: "turn",
+        reason: sanitizeText(reason, "Turn cancelled by you."),
+        options: [],
+      };
+    })
+  );
 }
 
 function sanitizeText(value: unknown, fallback = ""): string {

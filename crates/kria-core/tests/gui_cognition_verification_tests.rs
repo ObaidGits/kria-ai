@@ -360,6 +360,29 @@ fn screen_change_unobservable_is_inconclusive_not_success() {
 }
 
 #[test]
+fn scroll_screen_changed_verifies_only_on_screen_hash_change() {
+    // Task 4 (Issue #5): a surface Scroll verifies via `screen_changed`. The
+    // strategy mapping is stable, and a real screen_hash delta between the pre-
+    // and post-action observation is what proves the viewport actually moved.
+    assert_eq!(
+        select_verification_strategy(&GuiActionKind::Scroll, false),
+        GuiVerificationStrategy::ScreenChanged
+    );
+
+    let mut pre = Snap::new("App");
+    pre.screen_hash = Some("screen-before".into());
+    let pre = pre.build("obs-pre");
+    let mut post = Snap::new("App");
+    post.screen_hash = Some("screen-after".into());
+    let post = post.build("obs-post");
+
+    let req = request("Scroll", GuiVerificationStrategy::ScreenChanged, false);
+    let result = verify_post_action_detailed(&req, &pre, &post, true, None, 2_000);
+    assert_eq!(result.status, "verified");
+    assert!(result.matched_expected_state);
+}
+
+#[test]
 fn control_action_fails_when_bound_target_identity_changes() {
     let pre = Snap::new("App").build("obs-pre");
     let mut post = Snap::new("App");
@@ -382,4 +405,151 @@ fn control_action_fails_when_bound_target_identity_changes() {
     let result = verify_post_action_detailed(&req, &pre, &post, true, None, 2_000);
     assert_eq!(result.status, "verification_failed");
     assert!(!result.target_still_present);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Task 4 (Issue #10): ordered-evidence decoupling — weak/unavailable primary +
+// strong secondary ⇒ `verified`; all-weak ⇒ honest `inconclusive` (not a false
+// `failed`); ordering honored; OCR-only never yields a state-change `verified`;
+// flag-OFF parity. CI-safe pure-function tests at the crate boundary.
+// ─────────────────────────────────────────────────────────────────────────────
+mod ordered_evidence {
+    use kria_core::agent::gui_cognition::verifier::{
+        apply_ordered_evidence, ordered_evidence_for_strategy, verify_evidence_enabled_lookup,
+        GuiPostActionVerificationResult, GuiSecondaryEvidence, GuiVerificationEvidenceSource,
+        GuiVerificationStrategy, VERIFICATION_FAILED, VERIFICATION_INCONCLUSIVE,
+        VERIFICATION_VERIFIED,
+    };
+
+    fn result(status: &str, strategy: GuiVerificationStrategy) -> GuiPostActionVerificationResult {
+        GuiPostActionVerificationResult {
+            verification_id: "v".into(),
+            execution_id: "e".into(),
+            proposal_id: "p".into(),
+            status: status.into(),
+            verification_strategy: strategy.as_str().into(),
+            evidence: vec!["core evidence".into()],
+            pre_state_summary: "pre".into(),
+            post_state_summary: "post".into(),
+            matched_expected_state: status == VERIFICATION_VERIFIED,
+            target_still_present: true,
+            target_identity_matches: true,
+            confidence: if status == VERIFICATION_VERIFIED { 0.9 } else { 0.4 },
+            safe_error_summary: None,
+            recovery_hint: None,
+            can_retry: true,
+            prompt_hash: "ph".into(),
+        }
+    }
+
+    #[test]
+    fn weak_screenshot_strong_active_window_secondary_verifies() {
+        // ScreenChanged primary = observation; screenshot unavailable so the core
+        // verdict is inconclusive, but the active-window probe confirms.
+        let r = result(VERIFICATION_INCONCLUSIVE, GuiVerificationStrategy::ScreenChanged);
+        let ev = GuiSecondaryEvidence {
+            screen_changed: false,
+            active_window_changed: true,
+            process_running: false,
+            accessibility_ok: false,
+            screenshot_available: false,
+            active_window_probe_ok: true,
+        };
+        let out = apply_ordered_evidence(&r, &ev, true);
+        assert_eq!(out.status, VERIFICATION_VERIFIED);
+        assert!(out.confidence >= 0.8);
+    }
+
+    #[test]
+    fn weak_screenshot_strong_process_secondary_verifies_for_app_presence() {
+        // WindowVisible (OpenApp): no window observable, but the launched app's
+        // process is running ⇒ verified via the Process fallback.
+        let r = result(VERIFICATION_INCONCLUSIVE, GuiVerificationStrategy::WindowVisible);
+        let ev = GuiSecondaryEvidence {
+            screen_changed: false,
+            active_window_changed: false,
+            process_running: true,
+            accessibility_ok: false,
+            screenshot_available: false,
+            active_window_probe_ok: false,
+        };
+        let out = apply_ordered_evidence(&r, &ev, true);
+        assert_eq!(out.status, VERIFICATION_VERIFIED);
+        assert!(out.evidence.iter().any(|e| e.contains("process")));
+    }
+
+    #[test]
+    fn all_weak_evidence_is_inconclusive_not_false_failed() {
+        let r = result(VERIFICATION_FAILED, GuiVerificationStrategy::TextPresent);
+        let ev = GuiSecondaryEvidence {
+            screen_changed: false,
+            active_window_changed: false,
+            process_running: false,
+            accessibility_ok: false, // primary unreliable
+            screenshot_available: false,
+            active_window_probe_ok: false,
+        };
+        let out = apply_ordered_evidence(&r, &ev, true);
+        assert_eq!(out.status, VERIFICATION_INCONCLUSIVE);
+    }
+
+    #[test]
+    fn ordering_is_honored_primary_first_then_documented_fallbacks() {
+        assert_eq!(
+            ordered_evidence_for_strategy(GuiVerificationStrategy::WindowVisible),
+            vec![
+                GuiVerificationEvidenceSource::Observation,
+                GuiVerificationEvidenceSource::ActiveWindowProbe,
+                GuiVerificationEvidenceSource::Process,
+            ]
+        );
+        let text = ordered_evidence_for_strategy(GuiVerificationStrategy::TextPresent);
+        assert_eq!(text.first(), Some(&GuiVerificationEvidenceSource::Accessibility));
+        assert_eq!(text.get(1), Some(&GuiVerificationEvidenceSource::Observation));
+    }
+
+    #[test]
+    fn ocr_only_never_yields_state_change_verified() {
+        // No screen-hash change, no active-window change, no process: any OCR text
+        // present in the observation is not an evidence source and cannot verify.
+        let r = result(VERIFICATION_INCONCLUSIVE, GuiVerificationStrategy::StateChanged);
+        let ev = GuiSecondaryEvidence::default();
+        let out = apply_ordered_evidence(&r, &ev, true);
+        assert_ne!(out.status, VERIFICATION_VERIFIED);
+        // And the taxonomy structurally excludes OCR/coordinate sources.
+        for source in ordered_evidence_for_strategy(GuiVerificationStrategy::StateChanged) {
+            assert!(matches!(
+                source,
+                GuiVerificationEvidenceSource::Observation
+                    | GuiVerificationEvidenceSource::ActiveWindowProbe
+                    | GuiVerificationEvidenceSource::Process
+                    | GuiVerificationEvidenceSource::Accessibility
+                    | GuiVerificationEvidenceSource::BackendReceipt
+                    | GuiVerificationEvidenceSource::None
+            ));
+        }
+    }
+
+    #[test]
+    fn flag_off_parity_is_byte_for_byte() {
+        assert!(verify_evidence_enabled_lookup(|_| None), "default ON");
+        assert!(!verify_evidence_enabled_lookup(|_| Some("0".into())), "falsy rolls back");
+        let strong = GuiSecondaryEvidence {
+            screen_changed: true,
+            active_window_changed: true,
+            process_running: true,
+            accessibility_ok: false,
+            screenshot_available: false,
+            active_window_probe_ok: true,
+        };
+        for status in [VERIFICATION_FAILED, VERIFICATION_INCONCLUSIVE, VERIFICATION_VERIFIED] {
+            let r = result(status, GuiVerificationStrategy::ScreenChanged);
+            let out = apply_ordered_evidence(&r, &strong, false);
+            assert_eq!(
+                serde_json::to_string(&out.summary_json()).unwrap(),
+                serde_json::to_string(&r.summary_json()).unwrap(),
+                "flag-OFF must be byte-for-byte the prior verdict for status={status}"
+            );
+        }
+    }
 }

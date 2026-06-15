@@ -246,4 +246,52 @@ impl LlmBackend for OllamaBackend {
             .map(|r| r.status().is_success())
             .unwrap_or(false)
     }
+
+    /// Ollama's OpenAI-compatible endpoint honors `response_format`
+    /// `json_schema` (and native `format` json), so its structured-output mode
+    /// is `JsonSchema` (Requirement 0.3). `supports_grammar()` derives `false`
+    /// (grammar is the local llama.cpp-only mode) for back-compat.
+    fn structured_output_mode(&self) -> crate::llm::StructuredOutputMode {
+        crate::llm::StructuredOutputMode::JsonSchema
+    }
+
+    /// Structured-output path (Requirement 0.2/0.3): post a non-streaming
+    /// `response_format` `json_schema` request and return the JSON object.
+    async fn chat_structured(
+        &self,
+        messages: &[ChatMessage],
+        json_schema: serde_json::Value,
+        schema_name: &str,
+        temperature: f32,
+        max_tokens: u32,
+    ) -> anyhow::Result<LlmResponse> {
+        let url = format!("{}/v1/chat/completions", self.base_url);
+        let payload = serde_json::json!({
+            "model": self.model_id,
+            "messages": self.build_messages(messages),
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": false,
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": { "name": schema_name, "strict": true, "schema": json_schema }
+            }
+        });
+        let resp = self.client.post(&url).json(&payload).send().await?;
+        let body: serde_json::Value = resp.error_for_status()?.json().await?;
+        let message = &body["choices"][0]["message"];
+        let content = extract_openai_message_text(message);
+        let tool_calls = extract_openai_tool_calls(message);
+        let usage = body["usage"].as_object().map(|u| TokenUsage {
+            prompt_tokens: u["prompt_tokens"].as_u64().unwrap_or(0) as u32,
+            completion_tokens: u["completion_tokens"].as_u64().unwrap_or(0) as u32,
+            total_tokens: u["total_tokens"].as_u64().unwrap_or(0) as u32,
+        });
+        Ok(LlmResponse {
+            content,
+            model: self.model_id.clone(),
+            usage,
+            tool_calls,
+        })
+    }
 }
