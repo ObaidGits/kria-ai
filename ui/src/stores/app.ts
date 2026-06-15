@@ -608,11 +608,48 @@ let sessionHydrationRetryMs = 350;
 let hasResolvedInitialSessionHydration = false;
 let sessionHydrationAttempts = 0;
 const SESSION_HYDRATION_RETRY_MAX_MS = 5000;
+// Per-attempt timeout for the `list_sessions` invoke so a hung/deadlocked
+// backend command can never leave the sidebar spinner stuck forever.
+const LIST_SESSIONS_TIMEOUT_MS = 6000;
+// Absolute hard deadline: no matter what happens (hang, repeated failure,
+// missing Tauri runtime), the startup "Loading conversations..." spinner is
+// force-settled to the empty/loaded state by this time after boot.
+const SESSION_HYDRATION_HARD_DEADLINE_MS = 12000;
 // After this many failed attempts the backend is treated as unavailable for the
 // initial paint: stop showing the indefinite "Loading conversations..." spinner
 // and settle to the empty state. Background retries continue so sessions appear
 // if the backend recovers — but the UI never hangs on the loading state.
 const SESSION_HYDRATION_MAX_STARTUP_ATTEMPTS = 8;
+
+/**
+ * Invoke a Tauri command but reject if it does not settle within `timeoutMs`.
+ * Prevents a backend command that never returns (lock/deadlock) from hanging a
+ * UI flow that awaits it. The underlying command may still complete server-side;
+ * we just stop waiting on this call.
+ */
+function invokeWithTimeout<T>(
+  command: string,
+  args?: Record<string, unknown>,
+  timeoutMs = 6000,
+): Promise<T> {
+  const call = invoke<T>(command, args);
+  if (typeof window === "undefined") return call;
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      reject(new Error(`invoke('${command}') timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    call.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
 
 function scheduleSessionHydrationRetry() {
   if (typeof window === "undefined") {
@@ -2598,7 +2635,16 @@ function setHighlightThemeStylesheet(t: "dark" | "light") {
 // --- Session management ---
 async function loadSessions(): Promise<Session[] | null> {
   try {
-    const result = await invoke<{ id: string; title: string; turn_count: number; last_active: string }[]>("list_sessions");
+    // Guard against a backend command that never resolves (e.g. a lock/deadlock
+    // in `list_sessions`): a hanging invoke would otherwise leave the startup
+    // spinner ("Loading conversations...") on forever, because the retry/settle
+    // path only runs when the promise settles. Race it against a timeout so a
+    // stall is treated as a (retryable) failure instead of an infinite hang.
+    const result = await invokeWithTimeout<{ id: string; title: string; turn_count: number; last_active: string }[]>(
+      "list_sessions",
+      undefined,
+      LIST_SESSIONS_TIMEOUT_MS,
+    );
     const mapped: Session[] = result.map((s) => ({
       id: s.id,
       title: s.title || "Untitled",
@@ -3918,6 +3964,16 @@ initListeners();
 applyTheme(theme());
 // Load existing sessions on startup
 void initializeSessionPersistence();
+// Absolute safety net: no matter what (hung invoke, repeated failures, missing
+// Tauri runtime), force-settle the startup "Loading conversations..." spinner by
+// the hard deadline so the sidebar can never hang on the loading state. Harmless
+// when hydration already settled (markInitialSessionHydrationSettled is a no-op
+// once resolved); background retries continue and will still populate sessions.
+if (typeof window !== "undefined") {
+  window.setTimeout(() => {
+    markInitialSessionHydrationSettled();
+  }, SESSION_HYDRATION_HARD_DEADLINE_MS);
+}
 // Load settings on startup
 loadSettings();
 void loadTelegramConfig();
