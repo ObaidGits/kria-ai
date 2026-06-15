@@ -4657,15 +4657,22 @@ fn validate_plan_matches_contract(
             }
         }
     }
-    if let Some(expected_hash) = contract
-        .query_hash
-        .as_ref()
-        .or(contract.text_payload_hash.as_ref())
-    {
+    // Anti-injection: a TypeText step's typed text must come FROM the goal
+    // contract — it must match EITHER the contract's text-payload hash (a plain
+    // "type X into the field") OR the query hash (a browser / in-app search that
+    // types the query). It is a contradiction ONLY when the step's hash matches
+    // NEITHER (i.e. the plan would type something the user never asked for).
+    // (Preferring just one of the two caused false contradictions for prompts
+    // carrying both a typed text and a trailing query phrase.)
+    let contract_payload_hash = contract.text_payload_hash.as_deref();
+    let contract_query_hash = contract.query_hash.as_deref();
+    if contract_payload_hash.is_some() || contract_query_hash.is_some() {
         for step in typed_steps {
             if step.step_type == "TypeText" {
                 if let Some(actual_hash) = step.text_payload_hash.as_deref() {
-                    if actual_hash != expected_hash {
+                    let matches_contract = Some(actual_hash) == contract_payload_hash
+                        || Some(actual_hash) == contract_query_hash;
+                    if !matches_contract {
                         blocked_reasons
                             .push("LLM plan text/query hash contradicts goal contract.".into());
                     }

@@ -1317,13 +1317,14 @@ pub fn validate_execution_preconditions(
         // SKIP the control-identity sub-checks below. While the flag is OFF,
         // `surface_action` is false and these actions stay strict control actions
         // exactly as before (byte-for-byte).
-        let surface_action = surface_scroll_primitives
-            && (matches!(
+        let surface_action = (surface_scroll_primitives
+            && matches!(
                 action_kind,
                 GuiActionKind::Scroll | GuiActionKind::PressKey | GuiActionKind::Hotkey
-            ) || (matches!(action_kind, GuiActionKind::TypeText | GuiActionKind::FillField)
+            ))
+            || (matches!(action_kind, GuiActionKind::TypeText | GuiActionKind::FillField)
                 && proposal.target_label.as_deref()
-                    == Some(super::llm_planner::BROWSER_ADDRESSBAR_HINT)));
+                    == Some(super::llm_planner::BROWSER_ADDRESSBAR_HINT));
         if !surface_action {
             let Some(target) = target_resolution.resolved_target.as_ref() else {
                 blockers.push("resolved target missing".into());

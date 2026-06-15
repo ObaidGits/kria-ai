@@ -1521,6 +1521,17 @@ fn is_browser_search_intent(
     if lower.contains("focus") && contains_any(lower, &["input", "field", "search/input", "text"]) {
         return false;
     }
+    // A "type X into [the] ... field / input / box" is an in-app TYPE into a
+    // NAMED control (normal typing), NOT a web/browser search — even if the text
+    // or the field is called "search". (A browser search says "search for X" /
+    // "search the web", or types into the "address bar", never a named in-app
+    // "field".)
+    if lower.contains("type")
+        && contains_any(lower, &["field", "input", "textbox", "text box"])
+        && !contains_any(lower, &["address bar", "address-bar"])
+    {
+        return false;
+    }
     let has_search_phrase = contains_any(
         lower,
         &[

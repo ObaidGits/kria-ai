@@ -4091,6 +4091,30 @@ where
         // approval. Honors the same HITL fixture; on the real session (no
         // fixture) it pauses (CORRECTLY_GATED). Flag-gated by
         // `gui_cog_gate_determinism`; flag-OFF keeps prior per-step-only gating.
+        // Cancellation / global-halt takes PRECEDENCE over the goal-level
+        // approval gate: if the user has already stopped the turn (or a global
+        // halt is engaged) we abort immediately with the `cancelled`/halt cause —
+        // we never pause for approval on a turn the user already cancelled.
+        // Gated behind `gui_cog_runtime_guards` exactly like the per-step guard
+        // (flag OFF ⇒ `evaluate_pre_action_guard` returns `Proceed`, so behavior
+        // is byte-for-byte unchanged).
+        {
+            let guard =
+                evaluate_pre_action_guard(&self.runtime_guards, self.cancel_token.as_ref());
+            if let PreActionGuard::Halted { reason } | PreActionGuard::Cancelled { reason } =
+                &guard
+            {
+                run.status = "blocked".into();
+                run.blocked_reason = Some(reason.clone());
+                events.push(run_aborted_event(&run, guard.cause(), reason, 0));
+                events.push(run.run_terminal_event());
+                state.status = "blocked".into();
+                state.reply = format!("Workflow stopped safely: {reason}");
+                state.workflow_run = Some(run.summary_json());
+                return;
+            }
+        }
+
         if gate_determinism_enabled()
             && allows_execution
             && request.resume_checkpoint.is_none()
