@@ -349,10 +349,62 @@ pub async fn get_grounding_status(
     Ok(grounder.grounding_status())
 }
 
-/// Task 1.2 (Requirement 21.1): cancel the active GUI Cognition turn for a
-/// session mid-flight. Cancellation is cooperative — the workflow loop checks
-/// the cancel token before each action, so this halts the turn *before its next
-/// action* without interrupting an action already in progress.
+/// Whether the GUI Cognition "readiness safety gate" is currently BYPASSED.
+///
+/// The gate (in the core runtime) downgrades a live turn to `safety_only` when
+/// per-turn preconditions (uinput / AT-SPI / focus / display) are not yet ready —
+/// this is what produces "Workflow paused safely: execution_mode is safety_only"
+/// and is why a first action prompt after launch does nothing. The gate is the
+/// `KRIA_GUI_COG_RUNTIME_GUARDS` runtime-guard flag, read fresh each turn; an
+/// explicit falsy value bypasses it (and the other runaway guards).
+fn readiness_bypass_enabled() -> bool {
+    match std::env::var("KRIA_GUI_COG_RUNTIME_GUARDS") {
+        Ok(v) => matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "no" | "off" | ""
+        ),
+        Err(_) => false,
+    }
+}
+
+/// Read the current readiness-gate bypass state for the Settings toggle.
+#[tauri::command]
+pub async fn get_gui_cognition_readiness_bypass() -> Result<bool, String> {
+    Ok(readiness_bypass_enabled())
+}
+
+/// Enable/disable the GUI Cognition readiness-gate bypass (developer/test mode).
+///
+/// `enabled = true`  → set `KRIA_GUI_COG_RUNTIME_GUARDS=0`: GUI Cognition runs
+///   live actions on the FIRST prompt without waiting for the readiness
+///   preconditions (no `safety_only` downgrade). NOTE: this also relaxes the
+///   per-turn runaway guards (cancel/watchdog/abort budget), so it is a test/dev
+///   switch, not a production setting.
+/// `enabled = false` → set `KRIA_GUI_COG_RUNTIME_GUARDS=1`: restore the default
+///   safe behavior (readiness gate + runaway guards enforced).
+///
+/// The value is read fresh by the runtime at the start of every turn, so the
+/// change takes effect on the NEXT prompt (no restart needed). It is process
+/// scoped and resets to the safe default on app restart.
+#[tauri::command]
+pub async fn set_gui_cognition_readiness_bypass(enabled: bool) -> Result<bool, String> {
+    if enabled {
+        std::env::set_var("KRIA_GUI_COG_RUNTIME_GUARDS", "0");
+    } else {
+        std::env::set_var("KRIA_GUI_COG_RUNTIME_GUARDS", "1");
+    }
+    tracing::warn!(
+        target: "gui_cognition_safety",
+        bypass = enabled,
+        "GUI Cognition readiness-gate bypass toggled from Settings"
+    );
+    Ok(readiness_bypass_enabled())
+}
+
+/// Cancel the active GUI Cognition turn for a session mid-flight. Cancellation
+/// is cooperative — the workflow loop checks the cancel token before each
+/// action, so this halts the turn *before its next action* without interrupting
+/// an action already in progress.
 ///
 /// This is a NEW command (it does not replace the existing `cancel_turn` /
 /// `cancel_request` chat commands, which target the chat/agent loop). It reaches

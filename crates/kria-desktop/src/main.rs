@@ -271,6 +271,8 @@ fn main() {
             commands::openclaw::openclaw_substrate_restart,
             commands::gui_automation_control::get_gui_automation_status,
             commands::gui_automation_control::set_gui_automation_enabled,
+            commands::gui_automation_control::get_gui_cognition_readiness_bypass,
+            commands::gui_automation_control::set_gui_cognition_readiness_bypass,
             commands::gui_automation_control::get_grounding_status,
             commands::gui_automation_control::cancel_gui_cognition_turn,
             // Universal Model Provider System

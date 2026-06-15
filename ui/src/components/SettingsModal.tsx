@@ -148,6 +148,10 @@ const SettingsModal: Component = () => {
   const [guiAutomationStatus, setGuiAutomationStatus] = createSignal<GuiAutomationStatus | null>(null);
   const [guiAutomationBusy, setGuiAutomationBusy] = createSignal(false);
   const [guiAutomationError, setGuiAutomationError] = createSignal("");
+  // Developer/test toggle: bypass the GUI Cognition readiness safety gate so
+  // live actions run on the first prompt (no `safety_only` downgrade).
+  const [guiReadinessBypass, setGuiReadinessBypass] = createSignal(false);
+  const [guiReadinessBusy, setGuiReadinessBusy] = createSignal(false);
 
   async function loadGuiAutomationStatus() {
     try {
@@ -156,6 +160,12 @@ const SettingsModal: Component = () => {
       setGuiAutomationError("");
     } catch (e: any) {
       setGuiAutomationError(String(e?.message ?? e));
+    }
+    try {
+      const bypass = await invoke<boolean>("get_gui_cognition_readiness_bypass");
+      setGuiReadinessBypass(Boolean(bypass));
+    } catch {
+      /* non-fatal: leave previous value */
     }
   }
 
@@ -169,6 +179,18 @@ const SettingsModal: Component = () => {
       setGuiAutomationError(String(e?.message ?? e));
     } finally {
       setGuiAutomationBusy(false);
+    }
+  }
+
+  async function toggleGuiReadinessBypass(enabled: boolean) {
+    setGuiReadinessBusy(true);
+    try {
+      const next = await invoke<boolean>("set_gui_cognition_readiness_bypass", { enabled });
+      setGuiReadinessBypass(Boolean(next));
+    } catch (e: any) {
+      setGuiAutomationError(String(e?.message ?? e));
+    } finally {
+      setGuiReadinessBusy(false);
     }
   }
 
@@ -2158,6 +2180,37 @@ const SettingsModal: Component = () => {
                   </Show>
                 </div>
               </Show>
+
+              {/* Developer/test: bypass the readiness safety gate so GUI Cognition
+                  runs live actions on the first prompt (no safety_only downgrade). */}
+              <div class="settings-field" style={{ "margin-top": "14px", "padding": "12px", "background": "#241a2e", "border": "1px solid #4a356b", "border-radius": "6px" }}>
+                <label class="toggle-switch" style={{ "display": "inline-flex", "align-items": "center", "gap": "12px", "cursor": guiReadinessBusy() ? "wait" : "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={guiReadinessBypass()}
+                    disabled={guiReadinessBusy()}
+                    onChange={(e) => {
+                      void toggleGuiReadinessBypass((e.currentTarget as HTMLInputElement).checked);
+                    }}
+                  />
+                  <span style={{ "font-size": "15px", "font-weight": "600" }}>
+                    Force live execution (skip readiness gate)
+                  </span>
+                  <Show when={guiReadinessBypass()}>
+                    <span style={{ "background": "#5a3a20", "color": "#ffd86b", "padding": "3px 9px", "border-radius": "12px", "font-size": "11px", "font-weight": "700" }}>
+                      TEST MODE
+                    </span>
+                  </Show>
+                </label>
+                <p class="field-hint" style={{ "margin-top": "8px" }}>
+                  When ON, GUI Cognition runs the action on the <strong>first</strong> prompt without
+                  waiting for the readiness preconditions — this removes the
+                  "Workflow paused safely: execution_mode is safety_only" downgrade. It also relaxes
+                  the per-turn runaway guards (cancel/watchdog/abort), so use it for testing the
+                  feature, not as a permanent setting. Takes effect on the next prompt; resets to OFF
+                  on app restart.
+                </p>
+              </div>
 
               <Show when={guiAutomationError()}>
                 <div class="settings-field" style={{ "color": "#ff8080", "padding": "8px 12px", "background": "#2a1010", "border-radius": "4px" }}>
