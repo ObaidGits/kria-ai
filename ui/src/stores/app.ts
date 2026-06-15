@@ -606,11 +606,28 @@ let healthLoadQueued = false;
 let sessionHydrationRetryTimer: ReturnType<typeof setTimeout> | null = null;
 let sessionHydrationRetryMs = 350;
 let hasResolvedInitialSessionHydration = false;
+let sessionHydrationAttempts = 0;
 const SESSION_HYDRATION_RETRY_MAX_MS = 5000;
+// After this many failed attempts the backend is treated as unavailable for the
+// initial paint: stop showing the indefinite "Loading conversations..." spinner
+// and settle to the empty state. Background retries continue so sessions appear
+// if the backend recovers — but the UI never hangs on the loading state.
+const SESSION_HYDRATION_MAX_STARTUP_ATTEMPTS = 8;
 
 function scheduleSessionHydrationRetry() {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined") {
+    // No timer host (SSR/tests): never leave the UI stuck on "loading".
+    markInitialSessionHydrationSettled();
+    return;
+  }
   if (sessionHydrationRetryTimer) return;
+
+  sessionHydrationAttempts += 1;
+  if (sessionHydrationAttempts >= SESSION_HYDRATION_MAX_STARTUP_ATTEMPTS) {
+    // Give up on the *startup* spinner (show empty state) but keep retrying in
+    // the background at the max interval so a late backend still populates.
+    markInitialSessionHydrationSettled();
+  }
 
   const delayMs = sessionHydrationRetryMs;
   sessionHydrationRetryMs = Math.min(
@@ -630,6 +647,7 @@ function resetSessionHydrationRetryState() {
     sessionHydrationRetryTimer = null;
   }
   sessionHydrationRetryMs = 350;
+  sessionHydrationAttempts = 0;
 }
 
 function markInitialSessionHydrationSettled() {
@@ -1115,6 +1133,57 @@ function setScopedThinking(scope: StreamScope, value: boolean) {
     setPromptLabIsThinking(value);
   } else {
     setAssistantIsThinking(value);
+    // Defense-in-depth watchdog: the chat input is disabled while the assistant
+    // is "thinking". If a backend turn hangs and never emits `agent:done` (e.g.
+    // a server-side stall the per-task done-guard can't catch because the task
+    // is still alive), the input would freeze forever after the first prompt.
+    // Arm a generous watchdog on thinking=true that auto-clears the state if NO
+    // progress event arrives for a long window; any streamed event re-arms it
+    // (see pokeAssistantThinkingWatchdog), so a genuinely-progressing long turn
+    // never trips it.
+    if (value) {
+      armAssistantThinkingWatchdog();
+    } else {
+      clearAssistantThinkingWatchdog();
+    }
+  }
+}
+
+let assistantThinkingWatchdog: ReturnType<typeof setTimeout> | null = null;
+// Max idle time (ms) with NO assistant/GUI-cognition event before the thinking
+// state is force-cleared so the input can never hard-freeze. Generous because a
+// non-streaming GUI Cognition turn can legitimately run for a couple of minutes
+// on a busy/low-VRAM box before emitting its single terminal event.
+const ASSISTANT_THINKING_WATCHDOG_MS = 300_000;
+
+function clearAssistantThinkingWatchdog() {
+  if (assistantThinkingWatchdog) {
+    clearTimeout(assistantThinkingWatchdog);
+    assistantThinkingWatchdog = null;
+  }
+}
+
+function armAssistantThinkingWatchdog() {
+  if (typeof window === "undefined") return;
+  clearAssistantThinkingWatchdog();
+  assistantThinkingWatchdog = window.setTimeout(() => {
+    assistantThinkingWatchdog = null;
+    if (!assistantIsThinking()) return;
+    setAssistantIsThinking(false);
+    appendScopedMessage("assistant", {
+      id: crypto.randomUUID(),
+      role: "system",
+      content:
+        "The previous turn stopped responding, so I cleared the busy state. You can send your message again.",
+      timestamp: Date.now(),
+    });
+  }, ASSISTANT_THINKING_WATCHDOG_MS);
+}
+
+/** Re-arm the thinking watchdog on any sign of turn progress (streamed event). */
+function pokeAssistantThinkingWatchdog() {
+  if (assistantThinkingWatchdog && assistantIsThinking()) {
+    armAssistantThinkingWatchdog();
   }
 }
 
@@ -2962,6 +3031,7 @@ async function renameSession(sessionId: string, title: string) {
 function initListeners() {
   const registerStreamListeners = (eventPrefix: "agent" | "prompt_lab", scope: StreamScope) => {
     listen<{ text: string }>(`${eventPrefix}:token`, (event) => {
+      if (scope === "assistant") pokeAssistantThinkingWatchdog();
       updateScopedMessages(scope, (prev) => {
         const last = prev[prev.length - 1];
         if (last?.role === "assistant") {
@@ -3294,6 +3364,9 @@ function initListeners() {
   listen("gui_cognition:event", (event) => {
     try {
       handleGuiCognitionEvent(event.payload as any);
+      // Turn is making progress — re-arm the input watchdog so a long, actively
+      // streaming GUI Cognition turn never trips the idle auto-clear.
+      pokeAssistantThinkingWatchdog();
       // Task 10.2 (Requirement 16.2/16.3): safety net so the thinking indicator
       // NEVER sticks. The `agent:done` companion already clears it on the
       // batch/end path, but when `gui_cog_stream_ux` streams envelopes DURING

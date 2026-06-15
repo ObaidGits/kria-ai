@@ -1,5 +1,44 @@
 use super::*;
 
+/// Guarantees a `{prefix}:done` event is emitted for a GUI Cognition turn on
+/// EVERY exit path of the spawned task — normal completion, error, early
+/// return, OR a panic inside the (long, many-`.expect()`) turn pipeline. Without
+/// this, a panic/early-return left the frontend `isThinking` indicator stuck on
+/// forever, which froze the chat input after the first GUI Cognition prompt (no
+/// further prompt could be sent). Disarm after a path that already emitted
+/// `:done` (the normal success batch) to avoid a redundant emit; a duplicate is
+/// harmless either way (the frontend just clears `isThinking` again).
+struct GuiCognitionDoneGuard {
+    app: AppHandle,
+    prefix: String,
+    armed: bool,
+}
+
+impl GuiCognitionDoneGuard {
+    fn new(app: AppHandle, prefix: String) -> Self {
+        Self {
+            app,
+            prefix,
+            armed: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for GuiCognitionDoneGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            use tauri::Emitter as _;
+            let _ = self
+                .app
+                .emit(&format!("{}:done", self.prefix), serde_json::json!({}));
+        }
+    }
+}
+
 /// Parse "X of Y step(s)" patterns from completion messages.
 /// Returns (completed, total). Defaults to (0, 1) if no match.
 fn parse_partial_step_count(text: &str) -> (u32, u32) {
@@ -320,13 +359,18 @@ async fn send_message_with_profile(
         let app_for_task = app.clone();
         let prefix = event_scope_prefix.to_string();
         tauri::async_runtime::spawn(async move {
+            // Safety net: emit `{prefix}:done` on EVERY exit (incl. panic /
+            // early return) so the frontend `isThinking` state can never get
+            // stuck and freeze the chat input after the first GUI Cognition turn.
+            let mut done_guard =
+                GuiCognitionDoneGuard::new(app_for_task.clone(), prefix.clone());
             let cell = app_for_task.state::<AppStateCell>();
             let Some(task_state) = cell.get() else {
                 let _ = app_for_task.emit(
                     &format!("{prefix}:token"),
                     serde_json::json!({ "text": "GUI Cognition is still initializing — please try again in a moment." }),
                 );
-                let _ = app_for_task.emit(&format!("{prefix}:done"), serde_json::json!({}));
+                // done_guard emits `{prefix}:done` on drop.
                 return;
             };
             let result = super::gui_cognition::desktop_gui_cognition_command_capture_streamed(
@@ -353,13 +397,15 @@ async fn send_message_with_profile(
                     for event in &capture.events {
                         let _ = app_for_task.emit(&event.name, event.payload.clone());
                     }
+                    // The success batch already includes `{prefix}:done`.
+                    done_guard.disarm();
                 }
                 Err(error) => {
                     let _ = app_for_task.emit(
                         &format!("{prefix}:token"),
                         serde_json::json!({ "text": format!("GUI Cognition error: {error}") }),
                     );
-                    let _ = app_for_task.emit(&format!("{prefix}:done"), serde_json::json!({}));
+                    // done_guard emits `{prefix}:done` on drop.
                 }
             }
         });
