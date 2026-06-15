@@ -3135,9 +3135,19 @@ where
         state.execution_result = Some(result_summary);
         state.verification_result = Some(verification.clone());
 
-        // Step 9: Recovery loop runs only when verification did not confirm the
-        // expected state. Verified actions never trigger recovery.
-        if should_attempt_recovery(&verification.status) {
+        // Step 9 / Task 6 (Issue #13): smart bounded recovery runs only when
+        // verification did not confirm the expected state (verified actions never
+        // recover). The recovery POLICY (`assess_recovery`) is already
+        // bounded+idempotent-only: transient failures (load-not-ready, stale,
+        // inconclusive, focus-lost, wrong-window) get a single bounded
+        // re-observe / re-focus / switch-back / idempotent-retry capped by
+        // `RECOVERY_MAX_RETRY_COUNT`; risky / non-idempotent / denied / moved /
+        // ambiguous cases always STOP (never auto-retried). The
+        // `gui_cog_smart_recovery` flag (default ON) is a kill-switch: when OFF,
+        // recovery is skipped entirely and the turn stops on the unverified step
+        // (the pre-recovery behavior), so the bounded-retry path can be rolled
+        // back without a rebuild.
+        if smart_recovery_enabled() && should_attempt_recovery(&verification.status) {
             self.run_recovery_loop(
                 events,
                 proposal,
@@ -5545,6 +5555,29 @@ where
     }
 }
 
+/// Task 6 (Issue #13): whether smart bounded recovery is active. Default ON;
+/// rollback via `KRIA_GUI_COG_SMART_RECOVERY` set to a falsy value
+/// (`0`/`false`/`no`/`off`/empty), which skips the recovery loop so the turn
+/// stops on the unverified step (the pre-recovery behavior). An absent env value
+/// keeps the flag ON.
+fn smart_recovery_enabled() -> bool {
+    smart_recovery_enabled_lookup(|key| std::env::var(key).ok())
+}
+
+/// Testable core of [`smart_recovery_enabled`] with an injectable lookup.
+fn smart_recovery_enabled_lookup<F>(lookup: F) -> bool
+where
+    F: Fn(&str) -> Option<String>,
+{
+    match lookup("KRIA_GUI_COG_SMART_RECOVERY") {
+        Some(v) => !matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "no" | "off" | ""
+        ),
+        None => true,
+    }
+}
+
 /// Task 5 (Issue #12): the user-facing ROOT CAUSE for a workflow stop, mapped
 /// from the failing step + the bounded-guard reason. Replaces an opaque
 /// "screen state repeated N times" / "re-observe budget reached" with an
@@ -5741,6 +5774,26 @@ mod clear_failure_tests {
         )
         .expect("classified");
         assert_eq!(root.kind, "target_not_found");
+    }
+}
+
+#[cfg(test)]
+mod smart_recovery_tests {
+    //! Task 6 (Issue #13): the `gui_cog_smart_recovery` kill-switch — default ON,
+    //! falsy = rollback (recovery skipped). The recovery POLICY itself (bounded,
+    //! idempotent-only, risky→stop) lives in `recovery.rs` and is covered by the
+    //! `gui_cognition_recovery_tests` suite.
+    use super::*;
+
+    #[test]
+    fn smart_recovery_flag_defaults_on_and_rolls_back_on_falsy() {
+        assert!(smart_recovery_enabled_lookup(|_| None));
+        for raw in ["0", "false", "no", "off", "", " OFF "] {
+            assert!(!smart_recovery_enabled_lookup(|_| Some(raw.to_string())));
+        }
+        for raw in ["1", "true", "yes", "on", "anything"] {
+            assert!(smart_recovery_enabled_lookup(|_| Some(raw.to_string())));
+        }
     }
 }
 
