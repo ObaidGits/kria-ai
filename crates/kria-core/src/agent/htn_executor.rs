@@ -3269,6 +3269,8 @@ mod tests {
                 monitor_dimensions: vec![[screen_width, screen_height]],
                 timestamp: 1234567890,
                 visual_hash: format!("{:016x}", initial_hash),
+                model: String::new(),
+                degraded: false,
             },
         );
 

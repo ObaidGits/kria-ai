@@ -9,6 +9,11 @@ model to be swapped in without breaking the API contract.
 import io
 import time
 import uuid
+import os
+import json
+import base64
+import urllib.request
+import urllib.error
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 from datetime import datetime
@@ -50,6 +55,10 @@ class OmniParserOutput(BaseModel):
     monitor_dimensions: List[List[int]] = Field(..., description="Per-monitor dimensions")
     timestamp: int = Field(..., description="Unix timestamp")
     visual_hash: str = Field(..., description="Full-screen visual hash")
+    # Task 8 (Issue #1): honest model provenance + degraded flag so the Rust
+    # consumer never treats a stub/unavailable result as authoritative.
+    model: str = Field(default="", description="Model that produced these detections")
+    degraded: bool = Field(default=False, description="True when no real model served (stub/unavailable) — elements are NOT authoritative")
 
 
 class ParseResponse(BaseModel):
@@ -149,7 +158,12 @@ class DummyOmniParser:
             screen_dimensions=[width, height],
             monitor_dimensions=[[width, height]],
             timestamp=int(time.time()),
-            visual_hash=full_hash
+            visual_hash=full_hash,
+            # Task 8: the dummy is a STUB — report honestly so the Rust consumer
+            # degrades (vision_degraded) instead of treating these synthetic
+            # boxes as real detections.
+            model=self.model_name,
+            degraded=True,
         )
     
     def _calculate_phash(self, image: Image.Image, bbox: List[int]) -> str:
@@ -168,11 +182,151 @@ class DummyOmniParser:
 _model: Optional[DummyOmniParser] = None
 
 
-def get_model() -> DummyOmniParser:
-    """Get or initialize the OmniParser model."""
+# ============================================================================
+# Task 8 (Issue #1): Real VL-7B grounding model
+# ============================================================================
+
+class Vl7bOmniParser:
+    """
+    Real visual grounding via a locally-served Qwen2.5-VL-7B-Instruct
+    `llama-server` (OpenAI-compatible `/v1/chat/completions`, multimodal).
+
+    Sends a DOWNSCALED screenshot + a grounding instruction and parses a JSON
+    array of `{label, type, bbox}` detections. On ANY failure (server down,
+    OOM, malformed output) it returns an HONEST degraded result with NO
+    elements — it never fabricates detections (Requirement 1.2).
+
+    Selected only when `KRIA_VISION_MODEL=vl7b`; otherwise the dummy stub is
+    used (which reports `degraded=True`), so the contract is unchanged.
+    """
+
+    def __init__(self):
+        self.model_name = "qwen2.5-vl-7b"
+        self.endpoint = os.environ.get(
+            "KRIA_VL_ENDPOINT", "http://127.0.0.1:8090/v1/chat/completions"
+        )
+        # Longest-side downscale target (keeps grounding cheap + legible).
+        self.max_side = int(os.environ.get("KRIA_VL_MAX_SIDE", "1280"))
+
+    def parse(self, image: Image.Image, monitor_id: int = 0) -> OmniParserOutput:
+        width, height = image.size
+        full_hash = f"fullhash_{width}_{height}"
+        try:
+            elements = self._ground(image, monitor_id)
+            return OmniParserOutput(
+                elements=elements,
+                screen_dimensions=[width, height],
+                monitor_dimensions=[[width, height]],
+                timestamp=int(time.time()),
+                visual_hash=full_hash,
+                model=self.model_name,
+                degraded=False,
+            )
+        except Exception as exc:  # honest degrade — NEVER fabricate detections
+            print(f"[VISION] VL-7B grounding degraded: {exc}")
+            return OmniParserOutput(
+                elements=[],
+                screen_dimensions=[width, height],
+                monitor_dimensions=[[width, height]],
+                timestamp=int(time.time()),
+                visual_hash=full_hash,
+                model=self.model_name,
+                degraded=True,
+            )
+
+    def _ground(self, image: Image.Image, monitor_id: int) -> List[OmniElement]:
+        downscaled = self._downscale(image)
+        buf = io.BytesIO()
+        downscaled.save(buf, format="PNG")
+        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+        prompt = (
+            "You are a GUI grounding model. Return ONLY a compact JSON array of "
+            "the interactive on-screen controls you can see, each as "
+            '{"label": str, "type": one of [button,text,input,link,checkbox,tab,menu,dialog], '
+            '"bbox": [x1,y1,x2,y2]} in pixels of the provided image. No prose.'
+        )
+        payload = {
+            "model": self.model_name,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/png;base64,{b64}"},
+                        },
+                    ],
+                }
+            ],
+            "temperature": 0.0,
+            "max_tokens": 1024,
+        }
+        req = urllib.request.Request(
+            self.endpoint,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=float(os.environ.get("KRIA_VL_TIMEOUT", "20"))) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+        content = body["choices"][0]["message"]["content"]
+        # Scale detections back to the ORIGINAL image space.
+        sx = image.size[0] / max(1, downscaled.size[0])
+        sy = image.size[1] / max(1, downscaled.size[1])
+        raw = json.loads(self._extract_json_array(content))
+        elements: List[OmniElement] = []
+        for i, item in enumerate(raw):
+            bbox = item.get("bbox") or []
+            if len(bbox) != 4:
+                continue
+            x1, y1, x2, y2 = (int(bbox[0] * sx), int(bbox[1] * sy), int(bbox[2] * sx), int(bbox[3] * sy))
+            label = str(item.get("label", ""))[:200]
+            elements.append(
+                OmniElement(
+                    id=f"vl7b_{i}",
+                    element_type=str(item.get("type", "text")),
+                    label=label,
+                    label_wrapped=f"<evidence>{label}</evidence>",
+                    bbox=[x1, y1, x2, y2],
+                    confidence=0.9,
+                    monitor_id=monitor_id,
+                    dpi_scale=1.0,
+                    visual_hash=f"phash_{x1}_{y1}_{x2}_{y2}",
+                )
+            )
+        return elements
+
+    def _downscale(self, image: Image.Image) -> Image.Image:
+        w, h = image.size
+        longest = max(w, h)
+        if longest <= self.max_side:
+            return image
+        scale = self.max_side / longest
+        return image.resize((max(1, int(w * scale)), max(1, int(h * scale))))
+
+    @staticmethod
+    def _extract_json_array(text: str) -> str:
+        start = text.find("[")
+        end = text.rfind("]")
+        if start == -1 or end == -1 or end <= start:
+            return "[]"
+        return text[start : end + 1]
+
+
+def get_model():
+    """Get or initialize the vision model.
+
+    Selected by `KRIA_VISION_MODEL` (Task 8): `vl7b` → real VL-7B grounding;
+    anything else (default) → the dummy stub (which reports `degraded=True`).
+    """
     global _model
     if _model is None:
-        _model = DummyOmniParser()
+        mode = os.environ.get("KRIA_VISION_MODEL", "").strip().lower()
+        if mode == "vl7b":
+            _model = Vl7bOmniParser()
+        else:
+            _model = DummyOmniParser()
     return _model
 
 

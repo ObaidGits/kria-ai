@@ -113,6 +113,17 @@ pub struct OmniParserOutput {
     pub timestamp: u64,
     /// Full-screen visual hash for integrity
     pub visual_hash: String,
+    /// Task 8 (Issue #1): the model that produced these detections (e.g.
+    /// `qwen2.5-vl-7b`, or `dummy-omniparser-v0.1` for the stub). `#[serde(default)]`
+    /// so pre-Task-8 sidecar responses deserialize unchanged.
+    #[serde(default)]
+    pub model: String,
+    /// Task 8: whether this is a DEGRADED/stub result (no real model served).
+    /// When true the consumer must NOT treat `elements` as authoritative —
+    /// honest `vision_degraded`, never fabricated detections. `#[serde(default)]`
+    /// (false) preserves prior deserialization.
+    #[serde(default)]
+    pub degraded: bool,
 }
 
 /// Window information for verification.

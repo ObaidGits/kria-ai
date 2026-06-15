@@ -279,6 +279,37 @@ where
     }
 }
 
+/// Task 8 (Issue #1): real visual-perception mode. `Vl7b` (default) consumes
+/// real VL-7B grounding detections + honestly degrades when the sidecar reports
+/// a stub/unavailable model (never presents fabricated boxes as authoritative).
+/// `Light` is the OCR+heuristic fallback. `Off` restores the prior perception
+/// path byte-for-byte (the sidecar result is passed through unchanged).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GuiRealVisionMode {
+    Vl7b,
+    Light,
+    Off,
+}
+
+/// Parse the `gui_cog_real_vision` mode from an env value. Default (absent or
+/// unrecognized truthy) is `Vl7b`; `off`/falsy → `Off`; `light` → `Light`.
+fn gui_real_vision_mode_from(value: Option<&str>) -> GuiRealVisionMode {
+    match value.map(|v| v.trim().to_ascii_lowercase()) {
+        None => GuiRealVisionMode::Vl7b,
+        Some(v) => match v.as_str() {
+            "0" | "false" | "no" | "off" | "" => GuiRealVisionMode::Off,
+            "light" => GuiRealVisionMode::Light,
+            // "vl7b", "1", "true", "on", or any other truthy value -> VL-7B.
+            _ => GuiRealVisionMode::Vl7b,
+        },
+    }
+}
+
+/// The active `gui_cog_real_vision` mode from `KRIA_GUI_COG_REAL_VISION`.
+fn gui_real_vision_mode() -> GuiRealVisionMode {
+    gui_real_vision_mode_from(std::env::var("KRIA_GUI_COG_REAL_VISION").ok().as_deref())
+}
+
 /// Task 12: the observation profile for a turn. `FastAction` turns skip the slow
 /// OCR + vision probes (the verdict is the active-window / screen-change
 /// evidence, which the cheap probes still capture); `Full` turns run every
@@ -2640,13 +2671,52 @@ impl GuiPerceptionProvider for DesktopGuiPerceptionProvider<'_> {
                 })
             })
             .collect::<Vec<_>>();
-        GuiProbeResult::ok(serde_json::json!({
+        // Task 8 (Issue #1): honest real-vision gating. When the flag is NOT
+        // `off`, a sidecar that reports a stub/degraded model (e.g. the dummy
+        // parser, or a VL-7B OOM) must NOT have its detections presented as
+        // authoritative — emit an honest `vision_degraded` with NO elements
+        // rather than fabricated boxes. `off` keeps the prior pass-through
+        // (byte-for-byte). The real VL-7B path (non-degraded) flows through.
+        let mode = gui_real_vision_mode();
+        if !matches!(mode, GuiRealVisionMode::Off) && output.degraded {
+            return GuiProbeResult::ok(serde_json::json!({
+                "source": "vision_sidecar",
+                "visual_detector_status": "vision_degraded",
+                "real_vision_mode": match mode {
+                    GuiRealVisionMode::Vl7b => "vl7b",
+                    GuiRealVisionMode::Light => "light",
+                    GuiRealVisionMode::Off => "off",
+                },
+                "vision_model": output.model,
+                "visual_detector_total_ms": started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+                "screen_hash": Self::screenshot_hash(bytes.as_ref()),
+                "elements": [],
+                "notice": "vision model unavailable or stub; no authoritative visual detections (degraded honestly, not fabricated)",
+            }));
+        }
+        let mut result = serde_json::json!({
             "source": "vision_sidecar",
             "visual_detector_status": "completed",
             "visual_detector_total_ms": started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
             "screen_hash": Self::screenshot_hash(bytes.as_ref()),
             "elements": elements,
-        }))
+        });
+        // Additive telemetry: surface the active mode + reporting model when the
+        // flag is engaged (not `off`). `off` stays byte-for-byte.
+        if !matches!(mode, GuiRealVisionMode::Off) {
+            if let Some(object) = result.as_object_mut() {
+                object.insert(
+                    "real_vision_mode".into(),
+                    serde_json::json!(match mode {
+                        GuiRealVisionMode::Vl7b => "vl7b",
+                        GuiRealVisionMode::Light => "light",
+                        GuiRealVisionMode::Off => "off",
+                    }),
+                );
+                object.insert("vision_model".into(), serde_json::json!(output.model));
+            }
+        }
+        GuiProbeResult::ok(result)
     }
 
     fn observation_cache_policy(&self) -> &'static str {
@@ -6101,5 +6171,38 @@ mod local_planner_tests {
         for raw in ["1", "true", "yes", "on", "anything"] {
             assert!(local_planner_enabled_lookup(|_| Some(raw.to_string())));
         }
+    }
+}
+
+#[cfg(test)]
+mod real_vision_tests {
+    //! Task 8 (Issue #1): the `gui_cog_real_vision` mode parser. `Off` restores
+    //! prior perception byte-for-byte; `Vl7b` (default) + `Light` are the real-
+    //! vision modes that honestly degrade on a stub/unavailable model.
+    use super::{gui_real_vision_mode_from, GuiRealVisionMode};
+
+    #[test]
+    fn real_vision_defaults_to_vl7b_when_absent() {
+        assert_eq!(gui_real_vision_mode_from(None), GuiRealVisionMode::Vl7b);
+    }
+
+    #[test]
+    fn real_vision_off_for_falsy_values() {
+        for raw in ["off", "0", "false", "no", ""] {
+            assert_eq!(
+                gui_real_vision_mode_from(Some(raw)),
+                GuiRealVisionMode::Off,
+                "value {raw:?} must select Off (prior perception byte-for-byte)"
+            );
+        }
+    }
+
+    #[test]
+    fn real_vision_light_and_vl7b_modes() {
+        assert_eq!(gui_real_vision_mode_from(Some("light")), GuiRealVisionMode::Light);
+        assert_eq!(gui_real_vision_mode_from(Some("LIGHT")), GuiRealVisionMode::Light);
+        assert_eq!(gui_real_vision_mode_from(Some("vl7b")), GuiRealVisionMode::Vl7b);
+        assert_eq!(gui_real_vision_mode_from(Some("on")), GuiRealVisionMode::Vl7b);
+        assert_eq!(gui_real_vision_mode_from(Some("true")), GuiRealVisionMode::Vl7b);
     }
 }
