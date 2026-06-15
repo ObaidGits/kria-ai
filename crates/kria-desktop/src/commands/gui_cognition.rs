@@ -168,6 +168,20 @@ fn gui_observation_cache_policy_for_prompt(message: &str) -> GuiObservationCache
 /// pre/post observation) is enabled. Shares the `gui_cog_primitives` flag
 /// (`KRIA_GUI_COG_PRIMITIVES`, default-ON); an explicit falsy value
 /// (`0`/`false`/`no`/`off`/empty) restores the prior caching behavior.
+/// Task 7/8 (Issue #4/#1): per-observation budget (ms) for the visual-control
+/// detector (`detect_visual_controls`). Default 950 ms preserves the prior
+/// latency behavior byte-for-byte (a real VL-7B grounding that does not finish
+/// in time is honestly reported as `timeout`). Raise via
+/// `KRIA_GUI_COG_VISION_BUDGET_MS` when the resident VL-7B is served and real
+/// vision-resolved bounds are wanted (e.g. for the Task 7 abs-pointer click),
+/// trading latency for grounded detections. Clamped to [100, 60000].
+fn visual_detector_budget_ms() -> u64 {
+    match std::env::var("KRIA_GUI_COG_VISION_BUDGET_MS") {
+        Ok(v) => v.trim().parse::<u64>().unwrap_or(950).clamp(100, 60_000),
+        Err(_) => 950,
+    }
+}
+
 fn primitives_cache_bypass_enabled() -> bool {
     match std::env::var("KRIA_GUI_COG_PRIMITIVES") {
         Ok(v) => {
@@ -2628,7 +2642,7 @@ impl GuiPerceptionProvider for DesktopGuiPerceptionProvider<'_> {
             .unwrap_or_else(|_| "http://127.0.0.1:8080".into());
         let client = OmniParserClient::new(endpoint.clone());
         let output = match tokio::time::timeout(
-            Duration::from_millis(950),
+            Duration::from_millis(visual_detector_budget_ms()),
             client.parse_screenshot(bytes.as_ref()),
         )
         .await
@@ -4060,14 +4074,50 @@ impl GuiActionExecutor for DesktopGuiActionExecutor<'_> {
                 execution_from_tool_result("scroll", result)
             }
             _ => {
-                let role = request.role.clone();
-                let result = self
-                    .execute_tool(
-                        "click_ui_element",
-                        serde_json::json!({ "role": role, "name": request.target_name }),
-                    )
-                    .await;
-                execution_from_tool_result("click_ui_element", result)
+                // Task 7 (Issue #4): when the runtime resolved a TRUSTED
+                // absolute-pointer target for this click, dispatch via the
+                // uinput EV_ABS path (lands on native Wayland windows) instead
+                // of the AT-SPI role/name path (which cannot click a11y-off
+                // windows). `abs_click` is only ever Some when the abs-pointer
+                // flag is ON and trusted physical bounds were available — never
+                // an invented coordinate. On any abs-click failure we fall back
+                // to the role/name path (never a silent no-op).
+                if let Some(abs) = request.abs_click {
+                    let result = self
+                        .execute_tool(
+                            "click_mouse",
+                            serde_json::json!({
+                                "x": abs.x,
+                                "y": abs.y,
+                                "button": "left",
+                                "absolute": true,
+                            }),
+                        )
+                        .await;
+                    let execution = execution_from_tool_result("click_mouse_abs", result);
+                    if execution.success {
+                        execution
+                    } else {
+                        // Honest fallback to the role/name click path.
+                        let role = request.role.clone();
+                        let fallback = self
+                            .execute_tool(
+                                "click_ui_element",
+                                serde_json::json!({ "role": role, "name": request.target_name }),
+                            )
+                            .await;
+                        execution_from_tool_result("click_ui_element", fallback)
+                    }
+                } else {
+                    let role = request.role.clone();
+                    let result = self
+                        .execute_tool(
+                            "click_ui_element",
+                            serde_json::json!({ "role": role, "name": request.target_name }),
+                        )
+                        .await;
+                    execution_from_tool_result("click_ui_element", result)
+                }
             }
         };
         let completed_at_ms = unix_now_ms();
@@ -5697,6 +5747,7 @@ mod tests {
             target_name: target_name.into(),
             value: value.map(str::to_string),
             execution_hint: "scroll".into(),
+            abs_click: None,
         }
     }
 

@@ -33,7 +33,8 @@ use self::context::{GuiContext, GuiContextBuildRequest, GuiContextBuilder};
 use self::event_stream::{GuiEventStream, GuiEventStreamSink, GuiStreamUxConfig};
 use self::execution_environment::GuiExecutionEnvironment;
 use self::executor::{
-    build_execution_request_from_proposal, is_password_or_secure_field, physical_bounds_for_target,
+    abs_click_for_target, build_execution_request_from_proposal, gui_abs_pointer_enabled,
+    is_password_or_secure_field, physical_bounds_for_target,
     primitive_tier, validate_execution_preconditions, GuiActionBackendStatus, GuiActionExecution,
     GuiActionExecutor, GuiActionKind, GuiActionRequest, GuiExecutionMode,
     GuiExecutionAuthorizationSource, GuiExecutionPreconditionReport, GuiExecutionResult,
@@ -2457,12 +2458,30 @@ where
             .target_role
             .clone()
             .unwrap_or_else(|| role_for_action(&action_kind).into());
+        // Task 7 (Issue #4): for a ClickControl with TRUSTED logical bounds,
+        // compute the normalized absolute-pointer click target from the observed
+        // monitor layout so the desktop executor can land the click on a native
+        // Wayland window via the uinput EV_ABS path. Gated by the abs-pointer
+        // flag; `None` (no bounds / degraded layout / flag OFF) preserves the
+        // prior AT-SPI/role click path byte-for-byte (never an invented coord).
+        let abs_click = if matches!(action_kind, GuiActionKind::ClickControl)
+            && gui_abs_pointer_enabled()
+        {
+            target_resolution
+                .resolved_target
+                .as_ref()
+                .and_then(|t| t.bounds.as_ref())
+                .and_then(|bounds| abs_click_for_target(&context.monitor_layout, bounds, None))
+        } else {
+            None
+        };
         let action_request = GuiActionRequest {
             kind: action_kind.clone(),
             role,
             target_name: target_name.clone(),
             value: payload_value,
             execution_hint: gui_execution_hint_for(&action_kind, &target_name).into(),
+            abs_click,
         };
 
         // Task 4.2 (Requirement 3): when the `gui_cog_wayland_focus` flag is ON,
@@ -3489,6 +3508,7 @@ where
             target_name,
             value: None,
             execution_hint: execution_hint_for_action(&kind).into(),
+            abs_click: None,
         }
     }
 
@@ -3540,6 +3560,7 @@ where
                     target_name: target.name.clone(),
                     value: None,
                     execution_hint: "click_ui_element".into(),
+                    abs_click: None,
                 };
                 state.target = Some(serde_json::json!({
                     "role": target.role,
@@ -3632,6 +3653,7 @@ where
                     target_name: target.name.clone(),
                     value: intent.typed_text.clone(),
                     execution_hint: execution_hint.into(),
+                    abs_click: None,
                 };
                 state.target = Some(serde_json::json!({
                     "role": target.role,
@@ -3696,6 +3718,7 @@ where
                     target_name: target.name.clone(),
                     value: None,
                     execution_hint: "click_ui_element".into(),
+                    abs_click: None,
                 };
                 state.target = Some(serde_json::json!({
                     "role": target.role,

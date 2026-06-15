@@ -492,6 +492,110 @@ pub fn physical_bounds_for_target(
     })
 }
 
+/// Task 7 (Issue #4): the daemon ABS coordinate range maximum (must match
+/// `kria-uinput-daemon`'s `ABS_RANGE_MAX`). Both axes map [0, screen] →
+/// [0, ABS_RANGE_MAX].
+pub const GUI_ABS_RANGE_MAX: i32 = 65_535;
+
+/// Task 7 (Issue #4): whether the runtime should route a ClickControl through
+/// the absolute-pointer (uinput EV_ABS) path. Mirrors the daemon's
+/// `KRIA_GUI_COG_ABS_POINTER` (default ON; explicit falsy = rollback to the
+/// prior AT-SPI/role click path, byte-for-byte).
+pub fn gui_abs_pointer_enabled() -> bool {
+    gui_abs_pointer_enabled_lookup(|key| std::env::var(key).ok())
+}
+
+/// Testable core of [`gui_abs_pointer_enabled`] with an injectable env lookup.
+pub fn gui_abs_pointer_enabled_lookup<F>(lookup: F) -> bool
+where
+    F: Fn(&str) -> Option<String>,
+{
+    match lookup("KRIA_GUI_COG_ABS_POINTER") {
+        Some(v) => {
+            let v = v.trim().to_ascii_lowercase();
+            !matches!(v.as_str(), "0" | "false" | "no" | "off" | "")
+        }
+        None => true,
+    }
+}
+
+/// Map one physical-pixel coordinate to the normalized ABS range, clamped so a
+/// rounding/overflow can never produce an out-of-range value. A non-positive
+/// `screen_dim` maps to 0 (degenerate). Mirrors the daemon's `pixel_to_abs`.
+pub fn gui_pixel_to_abs(coord: i32, screen_dim: i32) -> i32 {
+    if screen_dim <= 0 {
+        return 0;
+    }
+    let clamped = coord.clamp(0, screen_dim);
+    let scaled = (clamped as i64 * GUI_ABS_RANGE_MAX as i64) / screen_dim as i64;
+    scaled.clamp(0, GUI_ABS_RANGE_MAX as i64) as i32
+}
+
+/// Total physical extent (width, height) of the desktop spanned by `monitors`,
+/// using the same per-monitor physical origin logic as
+/// [`physical_bounds_for_target`]. Returns `None` when no usable layout is
+/// available. The absolute-pointer device range maps onto THIS extent.
+pub fn desktop_physical_extent(monitors: &[GuiMonitorSummary]) -> Option<(i32, i32)> {
+    if monitors.is_empty() {
+        return None;
+    }
+    let scale_of = |m: &GuiMonitorSummary| {
+        if m.scale_factor.is_finite() && m.scale_factor > 0.0 {
+            m.scale_factor
+        } else {
+            1.0
+        }
+    };
+    let mut total_w = 0i32;
+    let mut total_h = 0i32;
+    for m in monitors {
+        let mut origin_x = 0i32;
+        let mut origin_y = 0i32;
+        for other in monitors {
+            if other.id == m.id {
+                continue;
+            }
+            let os = scale_of(other);
+            if other.bounds.x < m.bounds.x {
+                origin_x += (other.bounds.width as f64 * os).round() as i32;
+            }
+            if other.bounds.y < m.bounds.y {
+                origin_y += (other.bounds.height as f64 * os).round() as i32;
+            }
+        }
+        let s = scale_of(m);
+        let right = origin_x + (m.bounds.width as f64 * s).round() as i32;
+        let bottom = origin_y + (m.bounds.height as f64 * s).round() as i32;
+        total_w = total_w.max(right);
+        total_h = total_h.max(bottom);
+    }
+    if total_w <= 0 || total_h <= 0 {
+        None
+    } else {
+        Some((total_w, total_h))
+    }
+}
+
+/// Compute the normalized [`GuiAbsClick`] for a control's TRUSTED logical
+/// `bounds`, using the observed `monitors` layout. Returns `None` (honest — no
+/// invented coordinate) when the layout is unavailable or degenerate, so the
+/// caller falls back to the prior AT-SPI/role click path.
+pub fn abs_click_for_target(
+    monitors: &[GuiMonitorSummary],
+    bounds: &GuiBounds,
+    monitor_id: Option<&str>,
+) -> Option<GuiAbsClick> {
+    let physical = physical_bounds_for_target(monitors, bounds, monitor_id)?;
+    let (total_w, total_h) = desktop_physical_extent(monitors)?;
+    let gp = &physical.global_physical;
+    let center_x = gp.x + gp.width / 2;
+    let center_y = gp.y + gp.height / 2;
+    Some(GuiAbsClick {
+        x: gui_pixel_to_abs(center_x, total_w),
+        y: gui_pixel_to_abs(center_y, total_h),
+    })
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GuiExecutorCapabilityMatrix {
     pub observe: bool,
@@ -1395,6 +1499,23 @@ pub struct GuiActionRequest {
     pub target_name: String,
     pub value: Option<String>,
     pub execution_hint: String,
+    /// Task 7 (Issue #4): when present, a ClickControl carries the target's
+    /// center NORMALIZED to the absolute-pointer range [0, 65535] (computed in
+    /// the runtime from trusted physical bounds + the observed monitor layout —
+    /// never an invented coordinate). The desktop executor routes it through the
+    /// uinput EV_ABS click path so the click lands on native Wayland windows.
+    /// `None` (the default) preserves the prior AT-SPI/role click path
+    /// byte-for-byte (serde default keeps old payloads deserializing unchanged).
+    #[serde(default)]
+    pub abs_click: Option<GuiAbsClick>,
+}
+
+/// Task 7 (Issue #4): a normalized absolute-pointer click target in the daemon
+/// EV_ABS range [0, 65535] for both axes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct GuiAbsClick {
+    pub x: i32,
+    pub y: i32,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -1829,6 +1950,92 @@ mod primitives_tests {
         let physical = physical_bounds_for_target(&monitors, &bounds, None).expect("transform");
         assert_eq!(physical.scale_factor, 1.0);
         assert_eq!(physical.monitor_local, bounds);
+    }
+
+    // ── Task 7 (Issue #4): absolute-pointer click normalization ─────────────
+
+    #[test]
+    fn abs_pointer_flag_defaults_on_and_rolls_back() {
+        assert!(gui_abs_pointer_enabled_lookup(|_| None));
+        for raw in ["0", "false", "no", "off", "", " OFF "] {
+            assert!(!gui_abs_pointer_enabled_lookup(|_| Some(raw.to_string())));
+        }
+        for raw in ["1", "true", "yes", "on", "anything"] {
+            assert!(gui_abs_pointer_enabled_lookup(|_| Some(raw.to_string())));
+        }
+    }
+
+    #[test]
+    fn gui_pixel_to_abs_center_edges_and_degenerate() {
+        // Center of a 1920-wide screen → half of the normalized range.
+        assert_eq!(gui_pixel_to_abs(960, 1920), GUI_ABS_RANGE_MAX / 2);
+        // Edges.
+        assert_eq!(gui_pixel_to_abs(0, 1920), 0);
+        assert_eq!(gui_pixel_to_abs(1920, 1920), GUI_ABS_RANGE_MAX);
+        // Out-of-range clamps to the edge.
+        assert_eq!(gui_pixel_to_abs(5000, 1920), GUI_ABS_RANGE_MAX);
+        assert_eq!(gui_pixel_to_abs(-10, 1920), 0);
+        // Degenerate screen dim → 0 (never out of range).
+        assert_eq!(gui_pixel_to_abs(100, 0), 0);
+    }
+
+    #[test]
+    fn desktop_extent_single_and_dual_monitor() {
+        // No layout → None.
+        assert!(desktop_physical_extent(&[]).is_none());
+        // Single 1920x1200 @1.0 → that extent.
+        let one = [monitor("M", 0, 0, 1920, 1200, 1.0, true)];
+        assert_eq!(desktop_physical_extent(&one), Some((1920, 1200)));
+        // A @1.0 (1920x1080) left of B @2.0 (2560x1440) → width = 1920 + 5120,
+        // height = max(1080, 2880).
+        let two = [
+            monitor("A", 0, 0, 1920, 1080, 1.0, true),
+            monitor("B", 1920, 0, 2560, 1440, 2.0, false),
+        ];
+        assert_eq!(desktop_physical_extent(&two), Some((1920 + 5120, 2880)));
+    }
+
+    #[test]
+    fn abs_click_for_target_maps_center_to_normalized_range() {
+        // Single 1920x1200 monitor; a control centered at (960, 600).
+        let monitors = [monitor("M", 0, 0, 1920, 1200, 1.0, true)];
+        let bounds = GuiBounds {
+            x: 860,
+            y: 500,
+            width: 200,
+            height: 200,
+        };
+        let abs = abs_click_for_target(&monitors, &bounds, None).expect("abs click");
+        // center (960,600): x → half range, y → half range.
+        assert_eq!(abs.x, GUI_ABS_RANGE_MAX / 2);
+        assert_eq!(abs.y, GUI_ABS_RANGE_MAX / 2);
+    }
+
+    #[test]
+    fn abs_click_for_target_none_without_layout() {
+        // No monitor layout → no invented coordinate.
+        let bounds = GuiBounds {
+            x: 10,
+            y: 10,
+            width: 20,
+            height: 20,
+        };
+        assert!(abs_click_for_target(&[], &bounds, None).is_none());
+    }
+
+    #[test]
+    fn abs_click_serde_default_absent_is_none() {
+        // A request payload WITHOUT abs_click (prior schema) deserializes with
+        // abs_click = None (serde default) — flag-OFF byte-for-byte contract.
+        let json = serde_json::json!({
+            "kind": "ClickControl",
+            "role": "push button",
+            "target_name": "Save",
+            "value": null,
+            "execution_hint": "click_ui_element"
+        });
+        let req: GuiActionRequest = serde_json::from_value(json).expect("deserialize");
+        assert!(req.abs_click.is_none());
     }
 
     // ── Task 6.3: tier classification + tier↔idempotent consistency ─────────

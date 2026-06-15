@@ -1319,6 +1319,13 @@ impl ToolHandler for ClickMouse {
             _ => return ToolResult::err(format!("Invalid button: {}", button)),
         };
 
+        // Task 7 (Issue #4): when `absolute` is set, x/y are NORMALIZED to the
+        // daemon ABS range [0, 65535] (computed by the runtime from trusted
+        // physical bounds) and the click is dispatched via the uinput EV_ABS
+        // path so it lands on native Wayland windows. Default (absent/false)
+        // keeps the prior relative-coordinate click path byte-for-byte.
+        let absolute = params["absolute"].as_bool().unwrap_or(false);
+
         // Create interceptor (kill switch + rate limiting)
         let cancellation = CancellationToken::new();
         let interceptor = KillSwitchInterceptor::new(cancellation, Arc::clone(&self.state.backend));
@@ -1346,12 +1353,18 @@ impl ToolHandler for ClickMouse {
             MouseButton::Middle => "middle",
         };
 
-        match self.state.backend.click_mouse(x, y, button).await {
+        let click_result = if absolute {
+            self.state.backend.click_mouse_abs(x, y, button).await
+        } else {
+            self.state.backend.click_mouse(x, y, button).await
+        };
+        match click_result {
             Ok(_) => ToolResult::ok(serde_json::json!({
                 "clicked": true,
                 "x": x,
                 "y": y,
-                "button": button_str
+                "button": button_str,
+                "absolute": absolute
             })),
             Err(e) => ToolResult::err(format!("Click failed: {}", e)),
         }
