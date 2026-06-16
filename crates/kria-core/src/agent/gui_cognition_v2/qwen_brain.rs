@@ -162,7 +162,87 @@ pub(crate) fn build_messages(task: &str, obs: &Observation, history: &[TurnStep]
     ]
 }
 
-/// Extract the first balanced JSON object from model output (tolerates fences/prose).
+/// Detect a STANDARD follow-up action named in the task (token-based, the same
+/// universal set V2 Hands resolves). Returns the semantic key name (e.g.
+/// `new_tab`) that Hands maps to a combo. App-agnostic, not per-prompt hardcode.
+pub(crate) fn task_followup_action(task: &str) -> Option<&'static str> {
+    let tokens: std::collections::HashSet<String> = task
+        .to_ascii_lowercase()
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|t| !t.is_empty())
+        .map(|t| t.to_string())
+        .collect();
+    let has = |w: &str| tokens.contains(w);
+    let all = |ws: &[&str]| ws.iter().all(|w| has(w));
+    if has("reopen") || all(&["restore", "tab"]) {
+        return Some("reopen_tab");
+    }
+    if all(&["close", "tab"]) {
+        return Some("close_tab");
+    }
+    if all(&["new", "tab"]) {
+        return Some("new_tab");
+    }
+    if all(&["new", "window"]) {
+        return Some("new_window");
+    }
+    if all(&["zoom", "in"]) {
+        return Some("zoom_in");
+    }
+    if all(&["zoom", "out"]) {
+        return Some("zoom_out");
+    }
+    if all(&["select", "all"]) {
+        return Some("select_all");
+    }
+    if has("reload") || has("refresh") {
+        return Some("reload");
+    }
+    if has("redo") {
+        return Some("redo");
+    }
+    if has("undo") {
+        return Some("undo");
+    }
+    if has("print") {
+        return Some("print");
+    }
+    None
+}
+
+/// Deterministic multi-step assist: a 7B Brain often opens the app then REPEATS
+/// `open_app` (or prematurely says `done`) instead of advancing to a named
+/// follow-up like "create a new tab". When (a) the task names a standard
+/// follow-up action, (b) it has NOT been done yet in history, and (c) the app
+/// was already opened in a prior step, override an `OpenApp`/`Done` decision
+/// with the follow-up `Key`. Pure + testable. Leaves all other decisions
+/// untouched (so genuine clicks/types/scrolls are never overridden).
+pub(crate) fn apply_followup_assist(
+    decision: Decision,
+    task: &str,
+    history: &[TurnStep],
+) -> Decision {
+    let Some(combo) = task_followup_action(task) else {
+        return decision;
+    };
+    let already_done = history.iter().any(|s| {
+        matches!(&s.decision.action, Action::Key { combo: c } if c.eq_ignore_ascii_case(combo))
+    });
+    let app_opened = history
+        .iter()
+        .any(|s| matches!(&s.decision.action, Action::OpenApp { .. }) && s.result.ok);
+    if already_done || !app_opened {
+        return decision;
+    }
+    match &decision.action {
+        Action::OpenApp { .. } | Action::Done { .. } => Decision {
+            action: Action::Key { combo: combo.into() },
+            reason: format!("advancing to the requested follow-up action ({combo})"),
+            risk_hint: None,
+        },
+        _ => decision,
+    }
+}
 fn extract_json_object(content: &str) -> Option<&str> {
     let bytes = content.as_bytes();
     let mut depth = 0i32;
@@ -310,6 +390,7 @@ impl GuiBrain for QwenBrain {
         };
 
         parse_decision_json(&response.content, observation)
+            .map(|decision| apply_followup_assist(decision, task, history))
     }
 
     fn label(&self) -> &str {
@@ -344,6 +425,70 @@ mod tests {
             som_image_path: None,
             source: "omniparser".into(),
         }
+    }
+
+    #[test]
+    fn followup_assist_advances_open_then_new_tab() {
+        use crate::agent::gui_cognition_v2::types::{ActionResult, TurnStep};
+        // History: chrome was opened (ok). Task asks to also create a new tab.
+        let history = vec![TurnStep {
+            step_index: 0,
+            decision: Decision {
+                action: Action::OpenApp { app: "chrome".into() },
+                reason: String::new(),
+                risk_hint: None,
+            },
+            result: ActionResult::ok("uinput"),
+            target_label: None,
+        }];
+        // The 7B Brain wrongly repeats open_app...
+        let repeated = Decision {
+            action: Action::OpenApp { app: "chrome".into() },
+            reason: String::new(),
+            risk_hint: None,
+        };
+        let fixed = apply_followup_assist(repeated, "open chrome and create a new tab", &history);
+        assert_eq!(fixed.action, Action::Key { combo: "new_tab".into() });
+
+        // ...and a premature Done is also advanced to the follow-up.
+        let done = Decision { action: Action::Done { summary: "ok".into() }, reason: String::new(), risk_hint: None };
+        let fixed2 = apply_followup_assist(done, "open chrome and create a new tab", &history);
+        assert_eq!(fixed2.action, Action::Key { combo: "new_tab".into() });
+    }
+
+    #[test]
+    fn followup_assist_does_not_fire_without_a_prior_open_or_when_done() {
+        use crate::agent::gui_cognition_v2::types::{ActionResult, TurnStep};
+        // No prior OpenApp → do not inject (the app isn't open yet).
+        let open = Decision { action: Action::OpenApp { app: "chrome".into() }, reason: String::new(), risk_hint: None };
+        let same = apply_followup_assist(open.clone(), "open chrome and create a new tab", &[]);
+        assert_eq!(same.action, Action::OpenApp { app: "chrome".into() });
+
+        // Already did new_tab → do not repeat; leave the decision (e.g. Done).
+        let history = vec![
+            TurnStep { step_index: 0, decision: Decision { action: Action::OpenApp { app: "chrome".into() }, reason: String::new(), risk_hint: None }, result: ActionResult::ok("uinput"), target_label: None },
+            TurnStep { step_index: 1, decision: Decision { action: Action::Key { combo: "new_tab".into() }, reason: String::new(), risk_hint: None }, result: ActionResult::ok("uinput"), target_label: None },
+        ];
+        let done = Decision { action: Action::Done { summary: "ok".into() }, reason: String::new(), risk_hint: None };
+        let kept = apply_followup_assist(done, "open chrome and create a new tab", &history);
+        assert!(matches!(kept.action, Action::Done { .. }));
+    }
+
+    #[test]
+    fn followup_assist_leaves_non_open_non_done_decisions_untouched() {
+        use crate::agent::gui_cognition_v2::types::{ActionResult, TurnStep};
+        let history = vec![TurnStep { step_index: 0, decision: Decision { action: Action::OpenApp { app: "x".into() }, reason: String::new(), risk_hint: None }, result: ActionResult::ok("uinput"), target_label: None }];
+        let typing = Decision { action: Action::Type { text: "hi".into() }, reason: String::new(), risk_hint: None };
+        let kept = apply_followup_assist(typing, "open editor and create a new tab", &history);
+        assert_eq!(kept.action, Action::Type { text: "hi".into() });
+    }
+
+    #[test]
+    fn task_followup_action_token_matches() {
+        assert_eq!(task_followup_action("open chrome and create a new tab"), Some("new_tab"));
+        assert_eq!(task_followup_action("open chrome and reload the page"), Some("reload"));
+        assert_eq!(task_followup_action("open chrome and close the current tab"), Some("close_tab"));
+        assert_eq!(task_followup_action("just open the calculator"), None);
     }
 
     #[test]
