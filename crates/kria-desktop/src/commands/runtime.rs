@@ -1788,7 +1788,32 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
                     );
 
                     // Start idle-release monitor if enabled.
-                    if orch.config.idle_release_enabled {
+                    //
+                    // ─── TEMPORARY: idle auto-sleep DISABLED (user request) ──────────
+                    // The idle/stale auto-release below unloads the local
+                    // llama-server + model after `idle_release_after_secs` of no
+                    // activity (default 300s). That behaviour belongs to an
+                    // UNFINISHED feature and was causing issues, so it is turned OFF
+                    // for now. While disabled, the local llama-server + model stay
+                    // RESIDENT for the whole app session and only stop when the app
+                    // is closed — they will NOT sleep/stop on idle, session end, or
+                    // stop. This flag overrides config/hardware-tier so it holds on
+                    // every tier.
+                    //
+                    // TO RE-ENABLE (once the feature is finished): set
+                    // `IDLE_RELEASE_TEMPORARILY_DISABLED = false` (or delete it and
+                    // its use below so the original
+                    // `if orch.config.idle_release_enabled` guard applies again).
+                    // ─────────────────────────────────────────────────────────────────
+                    let idle_release_temporarily_disabled = true; // IDLE_RELEASE_TEMPORARILY_DISABLED
+                    if idle_release_temporarily_disabled {
+                        tracing::info!(
+                            "orchestrator: idle release monitor TEMPORARILY DISABLED — \
+                             local llama-server + model stay resident for the whole \
+                             session (only stop on app close)"
+                        );
+                    }
+                    if orch.config.idle_release_enabled && !idle_release_temporarily_disabled {
                         let idle_after_secs = orch.config.idle_release_after_secs.max(30);
                         let check_interval_secs =
                             orch.config.idle_release_check_interval_secs.max(1);
