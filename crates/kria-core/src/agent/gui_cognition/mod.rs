@@ -47,6 +47,7 @@ use self::llm_planner::{
     ensure_step_payloads, ensure_step_verification_strategies, parse_llm_plan, plan_summary_json,
     planner_summary_json, typed_plan_steps, validate_llm_plan, validate_plan_for_resolution,
     apply_auto_prerequisite, AppObservability,
+    repair_shortcut_steps, shortcut_repair_enabled,
     GuiLlmPlan, GuiLlmPlanner, GuiLlmPlannerRequest, GuiPlanValidationReport,
     GuiPlanValidationStatus, GuiPlannerCapability, GuiPlannerHealthSignal, GuiPlannerHealthTracker,
     GuiPlannerMode, GuiPlannerSelection, GuiSmartPlannerConfig, GuiStepCompletenessConfig,
@@ -1476,7 +1477,18 @@ where
     ) -> PlanAttempt {
         match planner.plan(request.clone()).await {
             Ok(raw) => match parse_llm_plan(&raw.content) {
-                Ok(plan) => {
+                Ok(mut plan) => {
+                    // Deterministic shortcut-repair (default ON): convert an
+                    // ungroundable standard-action click ("new tab", "save",
+                    // "reload", ...) into a PressKey carrying the universal
+                    // shortcut, so a valid multi-step LLM plan is KEPT instead of
+                    // being rejected → falling back to "open app only". Rollback:
+                    // `KRIA_GUI_COG_SHORTCUT_REPAIR=0`.
+                    let shortcut_repaired = if shortcut_repair_enabled() {
+                        repair_shortcut_steps(&mut plan)
+                    } else {
+                        0
+                    };
                     let validation = validate_llm_plan(&plan, request);
                     events.push(serde_json::json!({
                         "type": "LlmPlanningCompleted",
@@ -1486,6 +1498,7 @@ where
                         "confidence": plan.confidence,
                         "step_count": plan.typed_steps.len().max(plan.steps.len()),
                         "risk_level": plan.risk_level,
+                        "shortcut_repaired": shortcut_repaired,
                     }));
                     if matches!(validation.status, GuiPlanValidationStatus::Blocked) {
                         let reason = validation

@@ -4721,6 +4721,152 @@ fn action_requires_context_target(action_kind: &str) -> bool {
     )
 }
 
+/// Universal, app-agnostic action → keyboard-shortcut table (the SAME standard
+/// set used by GUI Cognition V2 Hands). Maps a recognized standard UI action
+/// phrase to its keyboard combo. This is NOT per-prompt hardcoding — it is the
+/// universal desktop shortcut set every major app honors.
+///
+/// Returns the combo (e.g. `"ctrl+t"`) for the FIRST matched action, else `None`.
+/// Order matters: more specific phrases are checked first.
+pub fn standard_shortcut_for_action(text: &str) -> Option<&'static str> {
+    let t = text.to_ascii_lowercase();
+    const TABLE: &[(&[&str], &str)] = &[
+        (&["reopen", "restore tab", "reopen closed tab"], "ctrl+shift+t"),
+        (&["close tab", "close the tab", "close current tab"], "ctrl+w"),
+        (
+            &[
+                "new tab",
+                "open a new tab",
+                "create a new tab",
+                "create new tab",
+                "add a new tab",
+                "add a tab",
+                "open new tab",
+            ],
+            "ctrl+t",
+        ),
+        (&["new window", "open a new window"], "ctrl+n"),
+        (&["reset zoom", "actual size", "default zoom"], "ctrl+0"),
+        (&["zoom in", "increase zoom", "zoom-in"], "ctrl+plus"),
+        (&["zoom out", "decrease zoom", "zoom-out"], "ctrl+minus"),
+        (&["select all"], "ctrl+a"),
+        (&["reload", "refresh the page", "refresh page", "refresh"], "ctrl+r"),
+        (&["print"], "ctrl+p"),
+        (&["redo"], "ctrl+shift+z"),
+        (&["undo"], "ctrl+z"),
+        (&["save"], "ctrl+s"),
+    ];
+    for (phrases, combo) in TABLE {
+        if phrases.iter().any(|p| t.contains(p)) {
+            return Some(*combo);
+        }
+    }
+    None
+}
+
+/// Kill switch for the shortcut-repair pass ([`repair_shortcut_steps`]).
+/// Default **ON** (it is a fix); set `KRIA_GUI_COG_SHORTCUT_REPAIR` to a falsy
+/// value (`0`/`false`/`no`/`off`/empty) to restore the prior behavior
+/// byte-for-byte (LLM plans with ungroundable standard-action clicks are
+/// rejected and fall back to the deterministic plan).
+pub fn shortcut_repair_enabled() -> bool {
+    shortcut_repair_enabled_lookup(|key| std::env::var(key).ok())
+}
+
+/// Testable core of [`shortcut_repair_enabled`].
+pub fn shortcut_repair_enabled_lookup<F>(lookup: F) -> bool
+where
+    F: Fn(&str) -> Option<String>,
+{
+    match lookup("KRIA_GUI_COG_SHORTCUT_REPAIR")
+        .map(|v| v.trim().to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("0") | Some("false") | Some("no") | Some("off") | Some("") => false,
+        _ => true,
+    }
+}
+
+/// Repair an LLM plan that expresses a STANDARD UI action ("new tab", "close
+/// tab", "save", "reload", "zoom in", ...) as an ungroundable click/activation.
+///
+/// On a vision-less / accessibility-limited desktop (e.g. GNOME Wayland) the
+/// model often plans such an action as a `ClickControl`/`InAppSearch` on a
+/// control it cannot ground (no resolvable target), which the strict validator
+/// rejects — discarding the WHOLE multi-step plan and falling back to a
+/// deterministic "open app only" plan (so "open chrome and create a new tab"
+/// only opens chrome). This pass converts those steps into a `PressKey` carrying
+/// the universal keyboard shortcut (the same app-agnostic table V2 Hands uses),
+/// which needs no control grounding and executes reliably through uinput.
+///
+/// Conservative: it ONLY touches `ClickControl`/`InAppSearch` steps whose own
+/// summary/control-hint denotes a recognized universal action. A genuine click
+/// on a non-standard control (e.g. "Submit") is never altered. Returns the
+/// number of steps converted.
+pub fn repair_shortcut_steps(plan: &mut GuiLlmPlan) -> usize {
+    let mut converted = 0usize;
+
+    for step in &mut plan.typed_steps {
+        if !matches!(step.step_type.as_str(), "ClickControl" | "InAppSearch") {
+            continue;
+        }
+        let phrase = format!(
+            "{} {}",
+            step.summary,
+            step.target_control_hint.as_deref().unwrap_or("")
+        );
+        if let Some(combo) = standard_shortcut_for_action(&phrase) {
+            step.step_type = "PressKey".into();
+            step.target_control_hint = None;
+            // The combo flows: typed PressKey step → proposal.text_payload_summary
+            // → desktop GuiActionRequest.value → press_shortcut (split on '+').
+            step.text_payload_summary = Some(combo.to_string());
+            step.text_payload_hash = None;
+            step.verification_strategy = "screen_changed".into();
+            converted += 1;
+        }
+    }
+
+    // The legacy `steps` representation has a coarse `action_kind` enum with NO
+    // `PressKey` variant, and typed steps drive execution — so for the legacy
+    // mirror we only neutralize the blockers a standard-action ClickControl
+    // would raise ("missing target query" / "not supported by current context")
+    // so the plan validates and its repaired typed steps are kept.
+    for step in &mut plan.steps {
+        if step.action_kind != "ClickControl" {
+            continue;
+        }
+        let phrase = format!(
+            "{} {}",
+            step.description,
+            step.target_query.label.as_deref().unwrap_or("")
+        );
+        if standard_shortcut_for_action(&phrase).is_some() {
+            step.target_query.must_match_context = false;
+            if step
+                .target_query
+                .label
+                .as_deref()
+                .unwrap_or("")
+                .trim()
+                .is_empty()
+                && step
+                    .target_query
+                    .role
+                    .as_deref()
+                    .unwrap_or("")
+                    .trim()
+                    .is_empty()
+            {
+                step.target_query.label = Some("keyboard shortcut".into());
+            }
+        }
+    }
+
+    converted
+}
+
+
 fn is_clarification_step(step: &GuiLlmPlanStep) -> bool {
     step.action_kind == "AskClarification"
 }
@@ -6630,5 +6776,172 @@ mod browser_addressbar_ctrl_l_tests {
         assert_eq!(det3.verification_strategy, "text_present");
 
         std::env::remove_var("KRIA_GUI_COG_BROWSER_ADDRESSBAR");
+    }
+}
+
+#[cfg(test)]
+mod shortcut_repair_tests {
+    //! Deterministic shortcut-repair: an ungroundable standard-action click
+    //! ("new tab", "save", "reload", ...) is converted to a `PressKey` carrying
+    //! the universal keyboard shortcut, so a valid multi-step LLM plan is KEPT
+    //! instead of being rejected → falling back to "open app only".
+    use super::*;
+
+    fn contract() -> GuiGoalContract {
+        super::super::goal_contract::extract_gui_goal_contract("open chrome and create a new tab", None)
+            .contract
+    }
+
+    fn click_step(id: &str, summary: &str, control_hint: Option<&str>) -> GuiTypedPlanStep {
+        let c = contract();
+        let mut s = typed_step(
+            id,
+            "ClickControl",
+            summary,
+            "the app is focused",
+            "the control was activated",
+            "result_visible",
+            &c,
+        );
+        s.target_control_hint = control_hint.map(str::to_string);
+        s
+    }
+
+    fn plan_with_typed(steps: Vec<GuiTypedPlanStep>) -> GuiLlmPlan {
+        GuiLlmPlan {
+            plan_id: Some("plan-sc".into()),
+            goal_contract_id: None,
+            observation_id: None,
+            context_id: None,
+            prompt_hash: None,
+            goal_action_type: None,
+            plan_status: Some("valid".into()),
+            planner_mode: "llm".into(),
+            plan_summary: "shortcut repair plan".into(),
+            confidence: 0.7,
+            risk_level: "low".into(),
+            requires_user_approval: false,
+            ambiguity_count: 0,
+            validation_errors: Vec::new(),
+            source_evidence: Vec::new(),
+            steps: Vec::new(),
+            typed_steps: steps,
+            clarification_question: None,
+        }
+    }
+
+    #[test]
+    fn standard_shortcut_table_maps_universal_actions() {
+        assert_eq!(standard_shortcut_for_action("create a new tab"), Some("ctrl+t"));
+        assert_eq!(standard_shortcut_for_action("Open New Tab"), Some("ctrl+t"));
+        assert_eq!(standard_shortcut_for_action("close the tab"), Some("ctrl+w"));
+        assert_eq!(standard_shortcut_for_action("reopen closed tab"), Some("ctrl+shift+t"));
+        assert_eq!(standard_shortcut_for_action("save the file"), Some("ctrl+s"));
+        assert_eq!(standard_shortcut_for_action("reload the page"), Some("ctrl+r"));
+        assert_eq!(standard_shortcut_for_action("zoom in"), Some("ctrl+plus"));
+        assert_eq!(standard_shortcut_for_action("new window"), Some("ctrl+n"));
+        // Non-standard control → no conversion.
+        assert_eq!(standard_shortcut_for_action("the Submit button"), None);
+        assert_eq!(standard_shortcut_for_action("a contact named Alice"), None);
+    }
+
+    #[test]
+    fn repairs_ungroundable_new_tab_click_to_presskey() {
+        let mut plan = plan_with_typed(vec![
+            click_step("s1", "click the new tab button", Some("new tab button")),
+        ]);
+        let n = repair_shortcut_steps(&mut plan);
+        assert_eq!(n, 1);
+        let step = &plan.typed_steps[0];
+        assert_eq!(step.step_type, "PressKey");
+        assert_eq!(step.text_payload_summary.as_deref(), Some("ctrl+t"));
+        assert!(step.target_control_hint.is_none());
+        assert_eq!(step.verification_strategy, "screen_changed");
+    }
+
+    #[test]
+    fn leaves_genuine_control_clicks_untouched() {
+        let mut plan = plan_with_typed(vec![
+            click_step("s1", "click the Submit button", Some("Submit")),
+        ]);
+        let n = repair_shortcut_steps(&mut plan);
+        assert_eq!(n, 0);
+        assert_eq!(plan.typed_steps[0].step_type, "ClickControl");
+    }
+
+    #[test]
+    fn repaired_plan_passes_the_validator_instead_of_being_rejected() {
+        // A ClickControl with no resolvable target is the exact case that the
+        // validator rejects ("missing target hint"). After repair it is a
+        // PressKey (no target needed) and validates.
+        let c = contract();
+        let request = GuiLlmPlannerRequest {
+            contract: c.clone(),
+            observation_id: "obs".into(),
+            context_id: "ctx".into(),
+            active_window: "Chrome".into(),
+            active_app: Some("chrome".into()),
+            context_freshness: "fresh".into(),
+            control_count: 0,
+            text_field_count: 0,
+            button_count: 0,
+            dialog_count: 0,
+            monitor_count: 1,
+            ocr_available: false,
+            ocr_block_count: 0,
+            ocr_injection_count: 0,
+            accessibility_available: true,
+            accessibility_control_count: 0,
+            controls: Vec::new(),
+            deterministic_steps: Vec::new(),
+            safety_constraints: Vec::new(),
+            repair_feedback: None,
+        };
+
+        let open = typed_step(
+            "s1",
+            "OpenApp",
+            "open the browser",
+            "browser is available",
+            "browser window is visible",
+            "window_visible",
+            &c,
+        );
+        // No control hint → ungroundable ClickControl (the exact case the
+        // validator rejects). The action intent lives in the summary.
+        let mut new_tab = click_step("s2", "create a new tab", None);
+        new_tab.target_control_hint = None;
+
+        let mut plan = plan_with_typed(vec![open, new_tab]);
+        let before = validate_llm_plan(&plan, &request);
+        assert_eq!(
+            before.status,
+            GuiPlanValidationStatus::Blocked,
+            "an ungroundable new-tab ClickControl should block before repair"
+        );
+
+        let n = repair_shortcut_steps(&mut plan);
+        assert_eq!(n, 1);
+        let after = validate_llm_plan(&plan, &request);
+        assert_ne!(
+            after.status,
+            GuiPlanValidationStatus::Blocked,
+            "after repair the PressKey plan must validate (kept, not discarded)"
+        );
+        // The multi-step plan is preserved: OpenApp + PressKey(ctrl+t).
+        assert_eq!(plan.typed_steps.len(), 2);
+        assert_eq!(plan.typed_steps[1].step_type, "PressKey");
+        assert_eq!(plan.typed_steps[1].text_payload_summary.as_deref(), Some("ctrl+t"));
+    }
+
+    #[test]
+    fn flag_defaults_on_and_rolls_back_on_falsy() {
+        assert!(shortcut_repair_enabled_lookup(|_| None));
+        for raw in ["1", "true", "yes", "on", "anything"] {
+            assert!(shortcut_repair_enabled_lookup(|_| Some(raw.into())));
+        }
+        for raw in ["0", "false", "no", "off", ""] {
+            assert!(!shortcut_repair_enabled_lookup(|_| Some(raw.into())));
+        }
     }
 }
