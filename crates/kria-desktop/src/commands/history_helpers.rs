@@ -1,5 +1,20 @@
 use super::*;
 
+/// Read a chat-management feature flag from the environment.
+///
+/// Defaults to ON (enabled). Treats the usual falsy spellings as a disable so a
+/// behaviour can be rolled back to legacy without a rebuild, matching the
+/// `KRIA_GUI_COG_*` runtime-flag convention used elsewhere.
+pub(super) fn chat_flag_enabled(var: &str) -> bool {
+    match std::env::var(var) {
+        Ok(v) => !matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "off" | "no" | ""
+        ),
+        Err(_) => true,
+    }
+}
+
 pub(super) fn memory_turn_write(
     session_id: impl Into<String>,
     user_prompt: impl Into<String>,
@@ -131,5 +146,37 @@ pub(super) fn append_recent_turns_for_llm(
                 *idx -= 1;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod flag_tests {
+    use super::chat_flag_enabled;
+
+    #[test]
+    fn unset_flag_defaults_on() {
+        let var = "KRIA_TEST_FLAG_UNSET_XYZ";
+        std::env::remove_var(var);
+        assert!(chat_flag_enabled(var));
+    }
+
+    #[test]
+    fn falsy_values_disable() {
+        let var = "KRIA_TEST_FLAG_FALSY_XYZ";
+        for v in ["0", "false", "off", "no", "", " OFF "] {
+            std::env::set_var(var, v);
+            assert!(!chat_flag_enabled(var), "{v:?} should disable");
+        }
+        std::env::remove_var(var);
+    }
+
+    #[test]
+    fn truthy_values_enable() {
+        let var = "KRIA_TEST_FLAG_TRUTHY_XYZ";
+        for v in ["1", "true", "on", "yes", "anything"] {
+            std::env::set_var(var, v);
+            assert!(chat_flag_enabled(var), "{v:?} should enable");
+        }
+        std::env::remove_var(var);
     }
 }

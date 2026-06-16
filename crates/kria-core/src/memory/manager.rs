@@ -29,6 +29,7 @@ pub struct MemoryTurnWrite {
 pub trait MemoryManager: Send + Sync {
     fn store_turn(&self, turn: &MemoryTurnWrite) -> anyhow::Result<i64>;
     fn delete_session(&self, session_id: &str) -> anyhow::Result<usize>;
+    fn delete_session_preferences(&self, session_id: &str) -> anyhow::Result<usize>;
     fn store_fact(&self, fact: &MemoryFact) -> anyhow::Result<i64>;
     fn update_fact_access(&self, id: i64) -> anyhow::Result<()>;
     fn update_fact_decay(&self, id: i64, new_score: f64) -> anyhow::Result<()>;
@@ -182,6 +183,10 @@ impl MemoryManager for MemoryStore {
 
     fn delete_session(&self, session_id: &str) -> anyhow::Result<usize> {
         MemoryStore::delete_session(self, session_id)
+    }
+
+    fn delete_session_preferences(&self, session_id: &str) -> anyhow::Result<usize> {
+        MemoryStore::delete_session_preferences(self, session_id)
     }
 
     fn store_fact(&self, fact: &MemoryFact) -> anyhow::Result<i64> {

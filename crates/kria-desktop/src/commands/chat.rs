@@ -587,6 +587,23 @@ async fn send_message_with_profile(
     let session_id = state.current_session_id.read().await.clone();
     let memory_writer: Arc<dyn MemoryManager> = memory_store.clone();
 
+    // Chat-management gates (flag-gated, default ON; falsy env ⇒ legacy persist-always).
+    // `session_temporary`: this chat is incognito — skip ALL persistence + facts so it
+    // vanishes and leaves no row. `long_term_memory_enabled`: when the user turned memory
+    // off, conversation turns still persist but no long-term facts are extracted.
+    let session_is_temporary = chat_flag_enabled("KRIA_CHAT_TEMPORARY")
+        && memory_store
+            .get_preference(&format!("session_temporary:{}", session_id))
+            .unwrap_or(None)
+            .as_deref()
+            == Some("1");
+    let long_term_memory_enabled = !(chat_flag_enabled("KRIA_CHAT_MEMORY_CONTROL")
+        && memory_store
+            .get_preference("memory_enabled")
+            .unwrap_or(None)
+            .as_deref()
+            == Some("0"));
+
     emit_agent_stage(
         &app,
         "building_message_history",
@@ -620,15 +637,17 @@ async fn send_message_with_profile(
         images: None,
     });
 
-    // Persist user turn
-    let _ = memory_writer.store_turn(&memory_turn_write(
-        session_id.clone(),
-        message.clone(),
-        String::new(),
-        None,
-        None,
-        None,
-    ));
+    // Persist user turn (skipped for temporary/incognito chats)
+    if !session_is_temporary {
+        let _ = memory_writer.store_turn(&memory_turn_write(
+            session_id.clone(),
+            message.clone(),
+            String::new(),
+            None,
+            None,
+            None,
+        ));
+    }
 
     emit_agent_stage(
         &app,
@@ -640,7 +659,7 @@ async fn send_message_with_profile(
     );
 
     // Auto-title: if this is the first message in the session, generate a title
-    {
+    if !session_is_temporary {
         let title_key = format!("session_title:{}", session_id);
         if memory_store
             .get_preference(&title_key)
@@ -912,21 +931,23 @@ async fn send_message_with_profile(
                         "result": result,
                         "metadata": metadata,
                     });
-                    let _ = memory_writer_clone.store_turn(&memory_turn_write(
-                        session_id_clone.clone(),
-                        String::new(),
-                        summarize_tool_turn_for_history(
-                            &name,
-                            success,
-                            &result,
-                            persisted_payload
-                                .get("metadata")
-                                .unwrap_or(&serde_json::Value::Null),
-                        ),
-                        Some(name),
-                        Some(persisted_payload.to_string()),
-                        None,
-                    ));
+                    if !session_is_temporary {
+                        let _ = memory_writer_clone.store_turn(&memory_turn_write(
+                            session_id_clone.clone(),
+                            String::new(),
+                            summarize_tool_turn_for_history(
+                                &name,
+                                success,
+                                &result,
+                                persisted_payload
+                                    .get("metadata")
+                                    .unwrap_or(&serde_json::Value::Null),
+                            ),
+                            Some(name),
+                            Some(persisted_payload.to_string()),
+                            None,
+                        ));
+                    }
                 }
                 StreamEvent::ToolProgress {
                     call_id,
@@ -1437,44 +1458,49 @@ async fn send_message_with_profile(
 
         // Persist assistant response (skip transient runtime errors so they don't bloat future context)
         if !full_response.is_empty() && !is_transient_llm_error_text(&full_response) {
-            let _ = memory_writer_clone.store_turn(&memory_turn_write(
-                session_id_clone,
-                String::new(),
-                full_response.clone(),
-                None,
-                None,
-                None,
-            ));
+            if !session_is_temporary {
+                let _ = memory_writer_clone.store_turn(&memory_turn_write(
+                    session_id_clone.clone(),
+                    String::new(),
+                    full_response.clone(),
+                    None,
+                    None,
+                    None,
+                ));
 
-            emit_agent_stage(
-                &app_handle,
-                "assistant_turn_saved",
-                "Assistant response stored in session memory",
-                Some(serde_json::json!({
-                    "response_chars": full_response.chars().count(),
-                })),
-            );
+                emit_agent_stage(
+                    &app_handle,
+                    "assistant_turn_saved",
+                    "Assistant response stored in session memory",
+                    Some(serde_json::json!({
+                        "response_chars": full_response.chars().count(),
+                    })),
+                );
+            }
 
-            // Automatic fact extraction from user message + assistant response
-            let fact_mgr = kria_core::memory::facts::FactManager::new(
-                memory_store_clone.as_ref(),
-                &vectors_clone,
-                &embeddings_clone,
-            );
-            match fact_mgr.extract_from_turn(&user_message_clone, &full_response) {
-                Ok(ids) if !ids.is_empty() => {
-                    tracing::info!(count = ids.len(), "auto-extracted facts from conversation");
-                    emit_agent_stage(
-                        &app_handle,
-                        "facts_extracted",
-                        "New user facts extracted from the conversation",
-                        Some(serde_json::json!({
-                            "fact_count": ids.len(),
-                        })),
-                    );
+            // Automatic fact extraction from user message + assistant response.
+            // Suppressed for temporary chats and when the user turned memory off.
+            if !session_is_temporary && long_term_memory_enabled {
+                let fact_mgr = kria_core::memory::facts::FactManager::new(
+                    memory_store_clone.as_ref(),
+                    &vectors_clone,
+                    &embeddings_clone,
+                );
+                match fact_mgr.extract_from_turn(&user_message_clone, &full_response) {
+                    Ok(ids) if !ids.is_empty() => {
+                        tracing::info!(count = ids.len(), "auto-extracted facts from conversation");
+                        emit_agent_stage(
+                            &app_handle,
+                            "facts_extracted",
+                            "New user facts extracted from the conversation",
+                            Some(serde_json::json!({
+                                "fact_count": ids.len(),
+                            })),
+                        );
+                    }
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!("fact extraction failed: {}", e),
                 }
-                Ok(_) => {}
-                Err(e) => tracing::warn!("fact extraction failed: {}", e),
             }
         }
 

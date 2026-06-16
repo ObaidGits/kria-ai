@@ -249,3 +249,67 @@ fn embedding_differs_for_different_input() {
     let b = model.embed("text b").unwrap();
     assert_ne!(a, b);
 }
+
+// ── Chat & memory management — preference cleanup (spec: chat-memory-management) ──
+
+#[test]
+fn delete_session_preferences_removes_only_managed_keys() {
+    let store = MemoryStore::open(Path::new(":memory:")).unwrap();
+    let sid = "sess-pref";
+
+    // Seed the six managed per-session keys plus an unrelated key.
+    for (k, v) in [
+        (format!("session_title:{sid}"), "Hello"),
+        (format!("session_title_manual:{sid}"), "1"),
+        (format!("session_created_at:{sid}"), "2026-01-01T00:00:00Z"),
+        (format!("session_pinned:{sid}"), "1"),
+        (format!("session_archived:{sid}"), "0"),
+        (format!("session_temporary:{sid}"), "1"),
+        ("unrelated_global_key".to_string(), "keep-me"),
+        (format!("session_title:other-{sid}"), "other"),
+    ] {
+        store.set_preference(&k, v).unwrap();
+    }
+
+    let removed = store.delete_session_preferences(sid).unwrap();
+    assert_eq!(removed, 6, "should remove exactly the six managed keys");
+
+    // Managed keys gone.
+    for k in [
+        format!("session_title:{sid}"),
+        format!("session_title_manual:{sid}"),
+        format!("session_created_at:{sid}"),
+        format!("session_pinned:{sid}"),
+        format!("session_archived:{sid}"),
+        format!("session_temporary:{sid}"),
+    ] {
+        assert_eq!(store.get_preference(&k).unwrap(), None, "{k} should be gone");
+    }
+
+    // Unrelated keys preserved.
+    assert_eq!(
+        store.get_preference("unrelated_global_key").unwrap(),
+        Some("keep-me".to_string())
+    );
+    assert_eq!(
+        store.get_preference(&format!("session_title:other-{sid}")).unwrap(),
+        Some("other".to_string()),
+        "another session's prefs must not be touched"
+    );
+}
+
+#[test]
+fn delete_session_preferences_is_idempotent_for_unknown_session() {
+    let store = MemoryStore::open(Path::new(":memory:")).unwrap();
+    let removed = store.delete_session_preferences("does-not-exist").unwrap();
+    assert_eq!(removed, 0);
+}
+
+#[test]
+fn delete_preference_removes_single_key() {
+    let store = MemoryStore::open(Path::new(":memory:")).unwrap();
+    store.set_preference("k1", "v1").unwrap();
+    assert_eq!(store.delete_preference("k1").unwrap(), 1);
+    assert_eq!(store.get_preference("k1").unwrap(), None);
+    assert_eq!(store.delete_preference("k1").unwrap(), 0);
+}

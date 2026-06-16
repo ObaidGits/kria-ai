@@ -31,6 +31,27 @@ pub async fn get_session_history(
     Ok(messages)
 }
 
+/// Remove rows that repeat a session id, keeping the first occurrence.
+///
+/// Acts as a backend safety net so the session list never carries a duplicate
+/// id regardless of how the synthetic "current" row is injected. Rows without a
+/// usable id are passed through unchanged.
+fn dedupe_session_rows(rows: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        let id = row
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if id.is_empty() || seen.insert(id) {
+            out.push(row);
+        }
+    }
+    out
+}
+
 fn normalize_session_title(raw: &str) -> Option<String> {
     const SESSION_TITLE_MAX_CHARS: usize = 72;
 
@@ -107,6 +128,18 @@ pub async fn list_sessions(
                 .get_preference(&format!("session_title:{}", id))
                 .unwrap_or(None)
                 .unwrap_or_else(|| format!("Session ({})", &id[..8]));
+            let pinned = state
+                .memory_store
+                .get_preference(&format!("session_pinned:{}", id))
+                .unwrap_or(None)
+                .as_deref()
+                == Some("1");
+            let archived = state
+                .memory_store
+                .get_preference(&format!("session_archived:{}", id))
+                .unwrap_or(None)
+                .as_deref()
+                == Some("1");
             serde_json::json!({
                 "id": id,
                 "title": title,
@@ -114,6 +147,8 @@ pub async fn list_sessions(
                 "message_count": count,
                 "last_active": last_active,
                 "is_current": id == current,
+                "pinned": pinned,
+                "archived": archived,
             })
         })
         .collect();
@@ -143,8 +178,14 @@ pub async fn list_sessions(
                 "message_count": 0,
                 "last_active": created_at,
                 "is_current": true,
+                "pinned": false,
+                "archived": false,
             }),
         );
+    }
+
+    if chat_flag_enabled("KRIA_CHAT_COHERENT_SESSIONS") {
+        result = dedupe_session_rows(result);
     }
 
     Ok(result)
@@ -202,6 +243,15 @@ pub async fn delete_session(
         .map_err(|e| e.to_string())?;
     let memory_writer: Arc<dyn MemoryManager> = state.memory_store.clone();
 
+    // Best-effort cleanup of session-scoped preferences so deleting a chat
+    // leaves no orphaned title/flag/pin/archive metadata behind. Never block the
+    // delete on a preference failure.
+    if chat_flag_enabled("KRIA_CHAT_PREF_CLEANUP") {
+        if let Err(e) = memory_writer.delete_session_preferences(&session_id) {
+            tracing::warn!(session_id = %session_id, error = %e, "failed to clean session preferences on delete");
+        }
+    }
+
     let mut replacement_session_id: Option<String> = None;
 
     // If we deleted the current session, create a new one
@@ -245,17 +295,24 @@ pub async fn clear_all_chat_sessions(
     let deleted_session_count = sessions.len();
     let mut deleted_turn_count = 0_usize;
 
+    let cleanup_prefs = chat_flag_enabled("KRIA_CHAT_PREF_CLEANUP");
+    let memory_writer: Arc<dyn MemoryManager> = state.memory_store.clone();
+
     for (session_id, _, _) in sessions {
         deleted_turn_count += state
             .memory_store
             .delete_session(&session_id)
             .map_err(|e| e.to_string())?;
+        if cleanup_prefs {
+            if let Err(e) = memory_writer.delete_session_preferences(&session_id) {
+                tracing::warn!(session_id = %session_id, error = %e, "failed to clean session preferences on clear-all");
+            }
+        }
     }
 
     let new_id = uuid::Uuid::new_v4().to_string();
     *state.current_session_id.write().await = new_id.clone();
 
-    let memory_writer: Arc<dyn MemoryManager> = state.memory_store.clone();
     let _ = memory_writer.set_preference(&preference_record(
         format!("session_title:{}", new_id),
         "New chat",
@@ -400,4 +457,141 @@ pub async fn search_sessions(
         })
         .collect();
     Ok(items)
+}
+
+#[tauri::command]
+pub async fn set_session_pinned(
+    session_id: String,
+    pinned: bool,
+    state: State<'_, AppStateCell>,
+) -> Result<(), String> {
+    let state = state
+        .get()
+        .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
+    let session_id = session_id.trim().to_string();
+    if session_id.is_empty() {
+        return Err("Session id cannot be empty".into());
+    }
+    let memory_writer: Arc<dyn MemoryManager> = state.memory_store.clone();
+    memory_writer
+        .set_preference(&preference_record(
+            format!("session_pinned:{}", session_id),
+            if pinned { "1" } else { "0" },
+        ))
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_session_archived(
+    session_id: String,
+    archived: bool,
+    state: State<'_, AppStateCell>,
+) -> Result<(), String> {
+    let state = state
+        .get()
+        .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
+    let session_id = session_id.trim().to_string();
+    if session_id.is_empty() {
+        return Err("Session id cannot be empty".into());
+    }
+    let memory_writer: Arc<dyn MemoryManager> = state.memory_store.clone();
+    memory_writer
+        .set_preference(&preference_record(
+            format!("session_archived:{}", session_id),
+            if archived { "1" } else { "0" },
+        ))
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_session_temporary(
+    session_id: String,
+    temporary: bool,
+    state: State<'_, AppStateCell>,
+) -> Result<(), String> {
+    let state = state
+        .get()
+        .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
+    let session_id = session_id.trim().to_string();
+    if session_id.is_empty() {
+        return Err("Session id cannot be empty".into());
+    }
+    let memory_writer: Arc<dyn MemoryManager> = state.memory_store.clone();
+    memory_writer
+        .set_preference(&preference_record(
+            format!("session_temporary:{}", session_id),
+            if temporary { "1" } else { "0" },
+        ))
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_memory_enabled(state: State<'_, AppStateCell>) -> Result<bool, String> {
+    let state = state
+        .get()
+        .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
+    // Default ON: only an explicit "0" disables long-term memory writes.
+    let enabled = state
+        .memory_store
+        .get_preference("memory_enabled")
+        .map_err(|e| e.to_string())?
+        .as_deref()
+        != Some("0");
+    Ok(enabled)
+}
+
+#[tauri::command]
+pub async fn set_memory_enabled(
+    enabled: bool,
+    state: State<'_, AppStateCell>,
+) -> Result<(), String> {
+    let state = state
+        .get()
+        .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
+    let memory_writer: Arc<dyn MemoryManager> = state.memory_store.clone();
+    memory_writer
+        .set_preference(&preference_record(
+            "memory_enabled",
+            if enabled { "1" } else { "0" },
+        ))
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod dedupe_tests {
+    use super::dedupe_session_rows;
+
+    fn row(id: &str) -> serde_json::Value {
+        serde_json::json!({ "id": id, "title": id })
+    }
+
+    #[test]
+    fn dedupe_keeps_first_occurrence_only() {
+        let rows = vec![row("a"), row("b"), row("a"), row("c"), row("b")];
+        let out = dedupe_session_rows(rows);
+        let ids: Vec<&str> = out
+            .iter()
+            .map(|r| r.get("id").and_then(|v| v.as_str()).unwrap())
+            .collect();
+        assert_eq!(ids, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn dedupe_passes_through_unique_rows() {
+        let rows = vec![row("x"), row("y")];
+        let out = dedupe_session_rows(rows);
+        assert_eq!(out.len(), 2);
+    }
+
+    #[test]
+    fn dedupe_keeps_rows_without_id() {
+        let rows = vec![serde_json::json!({ "title": "no-id" }), row("a"), row("a")];
+        let out = dedupe_session_rows(rows);
+        // Two kept: the id-less row and the first "a".
+        assert_eq!(out.len(), 2);
+    }
 }

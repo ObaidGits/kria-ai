@@ -169,7 +169,9 @@ pub use runtime_status::{
 #[allow(unused_imports)]
 pub use sessions::{
     auto_rename_session, clear_all_chat_sessions, create_session, delete_session,
-    get_session_history, list_sessions, rename_session, search_sessions, switch_session,
+    get_memory_enabled, get_session_history, list_sessions, rename_session, search_sessions,
+    set_memory_enabled, set_session_archived, set_session_pinned, set_session_temporary,
+    switch_session,
 };
 #[allow(unused_imports)]
 pub use telegram::{

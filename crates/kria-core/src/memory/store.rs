@@ -560,6 +560,35 @@ impl MemoryStore {
         Ok(prefs)
     }
 
+    /// Delete a single preference by key. Returns the number of rows removed (0 or 1).
+    pub fn delete_preference(&self, key: &str) -> anyhow::Result<usize> {
+        let conn = self.conn.lock().unwrap();
+        let n = conn.execute("DELETE FROM preferences WHERE key = ?1", params![key])?;
+        Ok(n)
+    }
+
+    /// Remove all session-scoped preference rows for a given session id.
+    ///
+    /// Covers the five managed per-session keys so deleting a chat leaves no
+    /// orphaned metadata behind (titles, manual-title flag, created-at, pin,
+    /// archive). Best-effort callers may ignore the count; it is provided for
+    /// tests and observability.
+    pub fn delete_session_preferences(&self, session_id: &str) -> anyhow::Result<usize> {
+        let conn = self.conn.lock().unwrap();
+        let n = conn.execute(
+            "DELETE FROM preferences WHERE key IN (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                format!("session_title:{session_id}"),
+                format!("session_title_manual:{session_id}"),
+                format!("session_created_at:{session_id}"),
+                format!("session_pinned:{session_id}"),
+                format!("session_archived:{session_id}"),
+                format!("session_temporary:{session_id}"),
+            ],
+        )?;
+        Ok(n)
+    }
+
     // ── Audit ───────────────────────────────────────────────────────
 
     pub fn log_audit(&self, entry: &AuditEntry) -> anyhow::Result<()> {
