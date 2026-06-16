@@ -169,10 +169,11 @@ each behind `KRIA_GUI_COG_V2`, never fake-pass, external verify):
     `GuiExecutionEnvironment::from_env()`.
   - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5_
 
-- [ ] 15. A4 — verification reuse (re-observe / screenshot-diff)
-  - Strengthen the loop's post-action verification beyond `screen_changed`: reuse the
-    fresh re-observe + a screenshot/signature diff so a "did nothing" action is caught.
-    Keep it honest (INCONCLUSIVE where the environment blocks it).
+- [x] 15. A4 — verification reuse (re-observe / screenshot-diff)
+  - The loop now records an honest per-step `screen_changed` by diffing the
+    re-observed screen signature against what the previous action acted on (the
+    same signal drives the no-progress guard). A "did nothing" action is flagged
+    `screen_changed = Some(false)`. Test: `records_screen_changed_on_each_executed_step`.
   - _Requirements: 5.5, 9.3, 9.4_
 
 - [ ] 16. A5 — V2 live eval (held-out) must pass

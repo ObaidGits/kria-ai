@@ -159,11 +159,18 @@ pub async fn run_turn_v2(
             }
         };
 
-        // No-progress detection: a prior state-changing action left the screen
-        // unchanged (Requirement 5.3).
-        if config.no_progress_limit > 0 {
-            if let Some(prev) = &prev_executed_sig {
-                if *prev == observation.signature() {
+        // Post-action verification (A4): compare the re-observed screen against
+        // the signature the previous action acted on. Records an honest per-step
+        // `screen_changed` and drives the no-progress guard (Requirement 5.5/5.3).
+        if let Some(prev) = &prev_executed_sig {
+            let changed = *prev != observation.signature();
+            if let Some(last) = steps.last_mut() {
+                last.result.screen_changed = Some(changed);
+            }
+            if config.no_progress_limit > 0 {
+                if changed {
+                    no_progress_count = 0;
+                } else {
                     no_progress_count += 1;
                     if no_progress_count >= config.no_progress_limit {
                         return TurnOutcomeV2 {
@@ -172,8 +179,6 @@ pub async fn run_turn_v2(
                             steps,
                         };
                     }
-                } else {
-                    no_progress_count = 0;
                 }
             }
         }
@@ -304,6 +309,51 @@ mod tests {
             reason: "x".into(),
             risk_hint: None,
         }
+    }
+
+    #[tokio::test]
+    async fn records_screen_changed_on_each_executed_step() {
+        use super::super::types::{Bbox, UiElement};
+        use std::sync::atomic::{AtomicU32, Ordering};
+        // A Sight whose active window changes every observe → each executed step
+        // is verified as having changed the screen.
+        struct ChangingSight {
+            n: AtomicU32,
+        }
+        #[async_trait::async_trait]
+        impl Sight for ChangingSight {
+            async fn observe(&self, _want_som: bool) -> anyhow::Result<Observation> {
+                let i = self.n.fetch_add(1, Ordering::SeqCst);
+                Ok(Observation {
+                    observation_id: format!("obs-{i}"),
+                    screenshot_path: String::new(),
+                    screen_w: 1920,
+                    screen_h: 1080,
+                    active_window: Some(format!("Window {i}")),
+                    elements: vec![UiElement {
+                        id: 1,
+                        bbox: Bbox { x: 0, y: 0, width: 10, height: 10 },
+                        monitor_index: 0,
+                        kind: "button".into(),
+                        label: "Btn".into(),
+                        interactable: true,
+                        confidence: 0.9,
+                    }],
+                    som_image_path: None,
+                    source: "fake".into(),
+                })
+            }
+        }
+        let sight = ChangingSight { n: AtomicU32::new(0) };
+        let brain = FakeBrain::click_then_done();
+        let hands = FakeHands::default();
+        let outcome =
+            run_turn_v2(&sight, &brain, &hands, "x", LoopConfig::default(), &LoopGuards::none())
+                .await;
+        assert_eq!(outcome.status, TurnStatus::Completed);
+        assert_eq!(outcome.steps.len(), 1);
+        // The click step was verified against the next (changed) observation.
+        assert_eq!(outcome.steps[0].result.screen_changed, Some(true));
     }
 
     #[tokio::test]
