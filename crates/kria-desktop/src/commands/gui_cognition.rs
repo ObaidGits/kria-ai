@@ -6761,6 +6761,7 @@ pub(super) async fn run_gui_cognition_v2(
             serde_json::json!({
                 "step_index": s.step_index,
                 "action": s.decision.action.kind(),
+                "action_detail": s.decision.action.detail(),
                 "reason": s.decision.reason,
                 "target_label": s.target_label,
                 "ok": s.result.ok,
@@ -6799,6 +6800,7 @@ pub(super) async fn run_gui_cognition_v2(
                 "type": "V2Step",
                 "step_index": step.step_index,
                 "action": step.decision.action.kind(),
+                "action_detail": step.decision.action.detail(),
                 "target_label": step.target_label,
                 "ok": step.result.ok,
                 "error": step.result.error,

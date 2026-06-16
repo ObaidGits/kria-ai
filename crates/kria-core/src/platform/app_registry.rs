@@ -370,6 +370,10 @@ impl InstalledAppRegistry {
 fn normalize_alias(name: &str) -> String {
     name.trim()
         .to_ascii_lowercase()
+        // Treat underscores as spaces: LLM/tool callers often snake_case app
+        // names (e.g. "files_manager"), but registry aliases are space-separated
+        // ("files manager"). Normalizing here lets both forms resolve identically.
+        .replace('_', " ")
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
@@ -457,6 +461,25 @@ mod alias_tests {
     fn strip_filler_no_change() {
         let candidates = strip_filler_words("chrome");
         assert_eq!(candidates, vec!["chrome".to_string()]);
+    }
+
+    #[test]
+    fn normalize_alias_treats_underscore_as_space() {
+        // LLM/tool callers often snake_case the app name; it must normalize to
+        // the same space-separated form the registry aliases use.
+        assert_eq!(normalize_alias("files_manager"), "files manager");
+        assert_eq!(normalize_alias("system_settings"), "system settings");
+        assert_eq!(normalize_alias("  text__editor  "), "text editor");
+    }
+
+    #[test]
+    fn underscored_file_manager_maps_to_candidates() {
+        // The exact failure seen live: Brain emitted OpenApp{app:"files_manager"}.
+        let normalized = normalize_alias("files_manager");
+        assert!(
+            class_alias_candidates(&normalized).is_some_and(|c| c.contains(&"nautilus")),
+            "normalized {normalized:?} should map to the file-manager candidate set"
+        );
     }
 
     #[test]

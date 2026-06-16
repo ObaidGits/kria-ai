@@ -47,6 +47,7 @@ def v2(resp: dict) -> dict:
         "engine": g.get("engine"),
         "status": g.get("status"),
         "actions": [s.get("action") for s in steps],
+        "details": [f"{s.get('action')}={s.get('action_detail')!r}" for s in steps],
         "executed": any(s.get("ok") for s in steps),
         "reply": (resp.get("reply") or "")[:140],
     }
@@ -115,10 +116,11 @@ def main():
                 detail = f"focused='{t[:45]}'"
             verdict = "PASS" if (real and r["executed"]) else ("MISMATCH" if r["status"] == "completed" and not real else ("BLOCKED" if not r["executed"] else "FAIL"))
         except Exception as e:
-            r = {"status": "error", "actions": [], "executed": False, "reply": str(e)}
+            r = {"status": "error", "actions": [], "details": [], "executed": False, "reply": str(e)}
             verdict, detail = "INCONCLUSIVE", str(e)
         rows.append((prompt, verdict, r["status"], r["actions"], detail))
         print(f"   status={r['status']} actions={r['actions']}")
+        print(f"   details={r.get('details')}")
         print(f"   reality: {detail} -> {verdict}\n", flush=True)
 
     print("## A5 Summary\n| Prompt | Verdict | V2 status | actions | reality |\n|--|--|--|--|--|")

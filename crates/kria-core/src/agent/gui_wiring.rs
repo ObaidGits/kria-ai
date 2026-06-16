@@ -88,7 +88,13 @@ pub async fn validate_gui_tool_registry(registry: &ToolRegistry) -> Vec<String> 
         (
             "open_application",
             serde_json::json!({
-                "name": "__kria_selftest_nonexistent__"
+                // Must NOT resolve to any installed app — we only test that the
+                // dispatch path runs, never that it launches something. Keep this a
+                // single nonsense token with no real-word/app-name substrings (and no
+                // underscores): alias normalization treats `_` as a space and can
+                // first-token-match a multi-word value, so e.g. a "kria"-containing
+                // name would resolve to the desktop app itself and self-launch.
+                "name": "zzqqnonexistentselftestapp"
             }),
         ),
     ];

@@ -176,15 +176,22 @@ each behind `KRIA_GUI_COG_V2`, never fake-pass, external verify):
     `screen_changed = Some(false)`. Test: `records_screen_changed_on_each_executed_step`.
   - _Requirements: 5.5, 9.3, 9.4_
 
-- [~] 16. A5 — V2 live eval (held-out) — RAN; partial pass, A6 GATED
-  - `scripts/gui_cog_e2e_v2.py` (V2-aware: engine/status/steps) ran a held-out set in
-    test_substrate with `KRIA_GUI_COG_V2=1`, external compositor/pgrep truth. Result:
-    **3 PASS, 0 FAIL, 1 MISMATCH (artifact: app already open), 2 BLOCKED (real gaps)**.
-  - Gaps found (must fix before A6): (1) app-registry alias misses some names ("files
-    manager" did not resolve to nautilus — shared infra); (2) the Brain occasionally returns
-    Ask upfront on some multi-action phrasings ("open chrome then close the tab").
-  - Loop fix landed from this eval: a FAILING action now arms no-progress (a repeatedly
-    unresolvable open stops at the no-progress limit instead of the step cap).
+- [x] 16. A5 — V2 live eval (held-out) — CLEAN PASS
+  - `scripts/gui_cog_e2e_v2.py` (V2-aware: engine/status/steps + `action_detail`) ran a
+    held-out set in test_substrate with `KRIA_GUI_COG_V2=1`, external compositor/pgrep truth.
+    **Result: 6 PASS, 0 FAIL, 0 MISMATCH, 0 BLOCKED, 0 INCONCLUSIVE.**
+  - Root-caused + fixed the last BLOCKED case ("open the files manager"): the Brain emits
+    `OpenApp{app:"files_manager"}` (snake_case), but `app_registry::normalize_alias` never
+    treated `_` as a space, so resolution failed. Fix: normalize `_`→space in
+    `normalize_alias` (shared infra — benefits V1, V2, and every app-launch tool). Added 2
+    regression tests. Externally verified live: nautilus 0→1.
+  - Hardened the startup self-test (`gui_wiring::validate_gui_tool_registry`): its
+    `open_application` probe name `__kria_selftest_nonexistent__` would, after the new `_`
+    normalization, first-token-match "kria" → `com.kria.desktop` and self-launch the app at
+    boot (single-instance race → panic). Changed the probe to an inert nonsense token.
+  - Added `Action::detail()` + `action_detail` to V2 step telemetry so the exact OpenApp app
+    string (and combo/text/point) is visible for diagnostics — this is what surfaced the bug.
+  - Loop fix landed earlier: a FAILING action now arms no-progress.
   - _Requirements: 7.4, 9.3, 9.4, 9.5, 10.2_
 
 - [ ] 17. A6 — flip default (Task 12) + remove V1 over-built pipeline (Task 13) — BLOCKED on A5

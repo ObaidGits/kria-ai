@@ -158,6 +158,25 @@ impl Action {
             Action::Ask { .. } => "ask",
         }
     }
+
+    /// Human/telemetry-friendly payload detail (the app name, combo, text, point,
+    /// scroll direction, summary, or question). Used for diagnostics so a step's
+    /// actual target is visible — e.g. WHICH app string an `OpenApp` tried.
+    pub fn detail(&self) -> String {
+        match self {
+            Action::OpenApp { app } => app.clone(),
+            Action::Click { element_id } => format!("#{element_id}"),
+            Action::ClickPoint { x, y } => format!("({x},{y})"),
+            Action::Type { text } => text.clone(),
+            Action::Key { combo } => combo.clone(),
+            Action::Scroll { direction, amount } => match amount {
+                Some(a) => format!("{direction} {a}"),
+                None => direction.clone(),
+            },
+            Action::Done { summary } => summary.clone(),
+            Action::Ask { question } => question.clone(),
+        }
+    }
 }
 
 /// The Brain's decision for one step.
