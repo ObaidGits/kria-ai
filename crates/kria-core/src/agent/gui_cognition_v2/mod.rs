@@ -26,7 +26,7 @@ pub mod types;
 pub use hands_uinput::{InputSink, UinputHands};
 pub use loop_engine::{run_turn_v2, LoopConfig, LoopGuards, TurnOutcomeV2, TurnStatus};
 pub use qwen_brain::QwenBrain;
-pub use sight_omniparser::OmniParserSight;
+pub use sight_omniparser::{OmniParserSight, ScreenCapturer};
 pub use traits::{GateDecision, GuiBrain, GuiHands, SafetyGate, Sight};
 pub use types::{Action, ActionResult, Bbox, Decision, Observation, TurnStep, UiElement};
 

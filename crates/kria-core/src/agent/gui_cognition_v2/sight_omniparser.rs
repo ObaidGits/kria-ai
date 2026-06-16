@@ -18,30 +18,47 @@ use super::types::{Observation, UiElement};
 
 const MAX_LABEL_CHARS: usize = 200;
 
+/// Optional screen-capture seam. On GNOME Wayland the standalone tools
+/// (grim/mss) cannot capture; the desktop layer provides a capturer backed by
+/// KRIA's working extension capture (`capture_screenshot_bytes`). When a
+/// capturer is set, `OmniParserSight` sends the captured PNG to the sidecar;
+/// otherwise the sidecar self-captures (mss — fine on X11/wlroots).
+#[async_trait]
+pub trait ScreenCapturer: Send + Sync {
+    /// Return the current screen as a base64-encoded PNG, or `None` if capture
+    /// failed. (Base64 is produced by the caller's layer to keep kria-core
+    /// dependency-light.)
+    async fn capture_png_base64(&self) -> Option<String>;
+}
+
 /// Sight backed by the OmniParser sidecar `/parse` endpoint.
 pub struct OmniParserSight {
     base_url: String,
     client: reqwest::Client,
     timeout: Duration,
     monitor_id: u32,
+    capturer: Option<std::sync::Arc<dyn ScreenCapturer>>,
 }
 
 #[derive(Serialize)]
 struct ParseRequest {
     want_som: bool,
     monitor_id: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    screenshot_b64: Option<String>,
 }
 
 impl OmniParserSight {
     /// Construct a Sight pointed at the sidecar base URL (e.g.
-    /// `http://127.0.0.1:8080`). The sidecar captures the screen itself when no
-    /// screenshot is supplied.
+    /// `http://127.0.0.1:8080`). Without a capturer the sidecar captures the
+    /// screen itself.
     pub fn new(base_url: impl Into<String>) -> Self {
         Self {
             base_url: base_url.into().trim_end_matches('/').to_string(),
             client: reqwest::Client::new(),
             timeout: Duration::from_secs(15),
             monitor_id: 0,
+            capturer: None,
         }
     }
 
@@ -56,10 +73,17 @@ impl OmniParserSight {
         self.monitor_id = monitor_id;
         self
     }
+
+    /// Provide a screen capturer (KRIA's working capture on GNOME Wayland). The
+    /// captured PNG is sent to the sidecar instead of relying on sidecar mss.
+    pub fn with_capturer(mut self, capturer: std::sync::Arc<dyn ScreenCapturer>) -> Self {
+        self.capturer = Some(capturer);
+        self
+    }
 }
 
 /// Build an honest degraded observation carrying the reason.
-pub(crate) fn degraded_observation(reason: impl AsRef<str>) -> Observation {
+pub fn degraded_observation(reason: impl AsRef<str>) -> Observation {
     Observation {
         observation_id: uuid::Uuid::new_v4().to_string(),
         screenshot_path: String::new(),
@@ -75,7 +99,7 @@ pub(crate) fn degraded_observation(reason: impl AsRef<str>) -> Observation {
 /// Sanitize an UNTRUSTED element label: collapse whitespace, drop control
 /// characters, neutralize obvious prompt-injection markers, and bound length.
 /// The label is descriptive data only — never an instruction (Requirement 2.4).
-pub(crate) fn sanitize_label(raw: &str) -> String {
+pub fn sanitize_label(raw: &str) -> String {
     // Collapse whitespace + strip control chars.
     let collapsed: String = raw
         .chars()
@@ -122,7 +146,7 @@ pub(crate) fn sanitize_label(raw: &str) -> String {
 
 /// Deserialize a `/parse` response body into an [`Observation`] and sanitize all
 /// element labels. Pure (no I/O) so it is fully unit-testable.
-pub(crate) fn observation_from_parse_json(body: &str) -> anyhow::Result<Observation> {
+pub fn observation_from_parse_json(body: &str) -> anyhow::Result<Observation> {
     let mut obs: Observation = serde_json::from_str(body)?;
     obs.elements = obs
         .elements
@@ -139,9 +163,23 @@ pub(crate) fn observation_from_parse_json(body: &str) -> anyhow::Result<Observat
 impl Sight for OmniParserSight {
     async fn observe(&self, want_som: bool) -> anyhow::Result<Observation> {
         let url = format!("{}/parse", self.base_url);
+
+        // Capture via KRIA's working capture when a capturer is provided; else
+        // let the sidecar self-capture.
+        let screenshot_b64 = match self.capturer.as_ref() {
+            Some(c) => match c.capture_png_base64().await {
+                Some(b64) => Some(b64),
+                None => {
+                    return Ok(degraded_observation("capture_failed"));
+                }
+            },
+            None => None,
+        };
+
         let req = ParseRequest {
             want_som,
             monitor_id: self.monitor_id,
+            screenshot_b64,
         };
 
         let resp = match self
@@ -241,5 +279,23 @@ mod tests {
     #[test]
     fn invalid_json_is_an_error_for_the_pure_mapper() {
         assert!(observation_from_parse_json("not json").is_err());
+    }
+
+    struct FailCapturer;
+    #[async_trait]
+    impl ScreenCapturer for FailCapturer {
+        async fn capture_png_base64(&self) -> Option<String> {
+            None
+        }
+    }
+
+    #[tokio::test]
+    async fn capture_failure_yields_degraded_without_hitting_sidecar() {
+        // base_url points nowhere; capture fails first → degraded:capture_failed,
+        // proving the capturer short-circuits before any HTTP call.
+        let sight = OmniParserSight::new("http://127.0.0.1:1")
+            .with_capturer(std::sync::Arc::new(FailCapturer));
+        let obs = sight.observe(false).await.unwrap();
+        assert_eq!(obs.source, "degraded:capture_failed");
     }
 }
