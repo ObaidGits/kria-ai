@@ -569,10 +569,10 @@ impl MemoryStore {
 
     /// Remove all session-scoped preference rows for a given session id.
     ///
-    /// Covers the five managed per-session keys so deleting a chat leaves no
+    /// Covers the six managed per-session keys so deleting a chat leaves no
     /// orphaned metadata behind (titles, manual-title flag, created-at, pin,
-    /// archive). Best-effort callers may ignore the count; it is provided for
-    /// tests and observability.
+    /// archive, temporary). Best-effort callers may ignore the count; it is
+    /// provided for tests and observability.
     pub fn delete_session_preferences(&self, session_id: &str) -> anyhow::Result<usize> {
         let conn = self.conn.lock().unwrap();
         let n = conn.execute(

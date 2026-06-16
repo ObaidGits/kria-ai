@@ -73,7 +73,7 @@ function normalizeFontScaleValue(value: unknown): string {
 }
 
 const SettingsModal: Component = () => {
-  const { setShowSettings, settings, loadSettings, saveSettings, models, loadModels, audioDevices, loadAudioDevices, theme, applyTheme, mcpServers, loadMcpServers, addMcpServer, removeMcpServer, toggleMcpServer, healthInfo, loadHealth, scheduledTasks, loadScheduledTasks, addScheduledTask, removeScheduledTask, macros, loadMacros, deleteMacro, workflows, loadWorkflows, deleteWorkflow, hardwareInfo, loadHardwareInfo, knowledgeBase, loadKnowledgeBase, sessions, clearAllChatSessions, telegramConfig, telegramBotInfo, loadTelegramConfig, saveTelegramConfig, testTelegramConnection, startTelegramMcp, stopTelegramMcp, googleStatus, loadGoogleStatus, setGoogleAccount, connectGoogle, disconnectGoogle, colabStatus, loadColabStatus, connectColab, disconnectColab, setColabNotebook, reconcileMcpRuntime, restartMcpServerRuntime, ironcladStatus, loadIroncladStatus, getIroncladConfig, updateIroncladConfig, requestIroncladSoftReset, requestIroncladHardReset, loadIroncladForensics, ironcladForensicsTotal, developerMode, setDeveloperMode } = appStore;
+  const { setShowSettings, settings, loadSettings, saveSettings, models, loadModels, audioDevices, loadAudioDevices, theme, applyTheme, mcpServers, loadMcpServers, addMcpServer, removeMcpServer, toggleMcpServer, healthInfo, loadHealth, scheduledTasks, loadScheduledTasks, addScheduledTask, removeScheduledTask, macros, loadMacros, deleteMacro, workflows, loadWorkflows, deleteWorkflow, hardwareInfo, loadHardwareInfo, knowledgeBase, loadKnowledgeBase, sessions, clearAllChatSessions, telegramConfig, telegramBotInfo, loadTelegramConfig, saveTelegramConfig, testTelegramConnection, startTelegramMcp, stopTelegramMcp, googleStatus, loadGoogleStatus, setGoogleAccount, connectGoogle, disconnectGoogle, colabStatus, loadColabStatus, connectColab, disconnectColab, setColabNotebook, reconcileMcpRuntime, restartMcpServerRuntime, ironcladStatus, loadIroncladStatus, getIroncladConfig, updateIroncladConfig, requestIroncladSoftReset, requestIroncladHardReset, loadIroncladForensics, ironcladForensicsTotal, developerMode, setDeveloperMode, memoryEnabled, setMemoryEnabled } = appStore;
 
   const [activeTab, setActiveTab] = createSignal<Tab>("llm");
   const [activeLayer, setActiveLayer] = createSignal<SettingsLayer>("basic");
@@ -3102,6 +3102,34 @@ const SettingsModal: Component = () => {
                 </table>
               </Show>
               <p class="settings-hint">{knowledgeBase().length} document(s) in knowledge base</p>
+
+              <div class="settings-section-heading" style={{ "margin-top": "1.2rem" }}>
+                <div>
+                  <h3>Memory</h3>
+                  <p class="settings-hint">
+                    When ON, KRIA learns long-term facts from your conversations to personalize
+                    replies. When OFF, no new facts are saved — your chats still appear in history
+                    but won't add to long-term memory. Takes effect on your next message.
+                  </p>
+                </div>
+              </div>
+              <div class="settings-field">
+                <label style={{ display: "flex", "align-items": "center", gap: "10px", cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={memoryEnabled()}
+                    onChange={(e) => void setMemoryEnabled((e.currentTarget as HTMLInputElement).checked)}
+                  />
+                  <span style={{ "font-weight": "600" }}>
+                    {memoryEnabled() ? "Memory: ON" : "Memory: OFF"}
+                  </span>
+                </label>
+                <span class="field-hint">
+                  This controls long-term facts only. To erase saved conversations, use "Clear all
+                  chat sessions" below.
+                </span>
+              </div>
+
               <div class="settings-section-heading" style={{ "margin-top": "1.2rem" }}>
                 <div>
                   <h3>Chat Sessions</h3>

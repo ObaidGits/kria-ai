@@ -140,6 +140,24 @@ function setDeveloperMode(enabled: boolean) {
   setDeveloperModeSignal(enabled);
   writeStorageValue(STORAGE_KEYS.developerMode, enabled ? "true" : null);
 }
+
+// Chat & memory management feature flags (spec: chat-memory-management).
+// Default ON; flip to false to fall back to legacy behaviour byte-for-byte.
+const CHAT_FLAGS = {
+  coherentSessions: true, // dedupe session rows by id in loadSessions
+  reuseEmpty: true, // "New chat" reuses an already-empty chat
+  search: true, // sidebar search box
+  organize: true, // time groups + pin/archive
+  temporary: true, // temporary/incognito chat entry point
+} as const;
+
+// Temporary/incognito chat: when active, the current chat is never persisted
+// (backend skips turns + title + facts) and vanishes on end. Runtime-only state.
+const [temporaryChatActive, setTemporaryChatActive] = createSignal<boolean>(false);
+
+// Long-term memory on/off. Source of truth is the backend `memory_enabled`
+// preference; this signal mirrors it for reactive UI. Default ON.
+const [memoryEnabled, setMemoryEnabledSignal] = createSignal<boolean>(true);
 const [mcpServers, setMcpServers] = createSignal<McpServer[]>([]);
 const [healthInfo, setHealthInfo] = createSignal<Record<string, any> | null>(null);
 const [runtimeStatus, setRuntimeStatus] = createSignal<RuntimeStatusPayload | null>(null);
@@ -805,6 +823,8 @@ export interface Session {
   title: string;
   updatedAt: number;
   turnCount?: number;
+  pinned?: boolean;
+  archived?: boolean;
 }
 
 export interface HitlRequest {
@@ -2645,6 +2665,62 @@ function setHighlightThemeStylesheet(t: "dark" | "light") {
 }
 
 // --- Session management ---
+export interface SessionGroups {
+  pinned: Session[];
+  today: Session[];
+  yesterday: Session[];
+  previous7Days: Session[];
+  older: Session[];
+  archived: Session[];
+}
+
+/**
+ * Bucket sessions into ChatGPT/Gemini-style groups. Pinned (non-archived)
+ * sessions float to their own group; archived sessions are separated; the rest
+ * are bucketed by recency. Each group is sorted newest-first. Pure + testable.
+ */
+export function groupSessionsByRecency(list: Session[], now: number = Date.now()): SessionGroups {
+  const startOfToday = new Date(now);
+  startOfToday.setHours(0, 0, 0, 0);
+  const todayStart = startOfToday.getTime();
+  const yesterdayStart = todayStart - 86_400_000;
+  const prev7Start = todayStart - 7 * 86_400_000;
+
+  const groups: SessionGroups = {
+    pinned: [],
+    today: [],
+    yesterday: [],
+    previous7Days: [],
+    older: [],
+    archived: [],
+  };
+
+  for (const s of list) {
+    if (s.archived) {
+      groups.archived.push(s);
+      continue;
+    }
+    if (s.pinned) {
+      groups.pinned.push(s);
+      continue;
+    }
+    const t = s.updatedAt;
+    if (t >= todayStart) groups.today.push(s);
+    else if (t >= yesterdayStart) groups.yesterday.push(s);
+    else if (t >= prev7Start) groups.previous7Days.push(s);
+    else groups.older.push(s);
+  }
+
+  const byNewest = (a: Session, b: Session) => b.updatedAt - a.updatedAt;
+  groups.pinned.sort(byNewest);
+  groups.today.sort(byNewest);
+  groups.yesterday.sort(byNewest);
+  groups.previous7Days.sort(byNewest);
+  groups.older.sort(byNewest);
+  groups.archived.sort(byNewest);
+  return groups;
+}
+
 async function loadSessions(): Promise<Session[] | null> {
   try {
     // Guard against a backend command that never resolves (e.g. a lock/deadlock
@@ -2652,7 +2728,7 @@ async function loadSessions(): Promise<Session[] | null> {
     // spinner ("Loading conversations...") on forever, because the retry/settle
     // path only runs when the promise settles. Race it against a timeout so a
     // stall is treated as a (retryable) failure instead of an infinite hang.
-    const result = await invokeWithTimeout<{ id: string; title: string; turn_count: number; last_active: string }[]>(
+    const result = await invokeWithTimeout<{ id: string; title: string; turn_count: number; last_active: string; pinned?: boolean; archived?: boolean }[]>(
       "list_sessions",
       undefined,
       LIST_SESSIONS_TIMEOUT_MS,
@@ -2662,6 +2738,8 @@ async function loadSessions(): Promise<Session[] | null> {
       title: s.title || "Untitled",
       updatedAt: new Date(s.last_active).getTime() || Date.now(),
       turnCount: typeof s.turn_count === "number" ? s.turn_count : 0,
+      pinned: Boolean(s.pinned),
+      archived: Boolean(s.archived),
     }));
 
     const previousById = new Map(sessions().map((session) => [session.id, session]));
@@ -2670,6 +2748,31 @@ async function loadSessions(): Promise<Session[] | null> {
       promptLabCurrentSession(),
     ].filter((id): id is string => Boolean(id && id.trim()));
 
+    if (CHAT_FLAGS.coherentSessions) {
+      // Coherent single current-session model: merge keyed by id so a session
+      // already present in the backend list is never appended again, even when
+      // both scopes point at the same id. This kills the "2-3 duplicate New chat
+      // rows on one click" bug.
+      const byId = new Map<string, Session>();
+      for (const session of mapped) byId.set(session.id, session);
+      for (const sessionId of activeSessionIds) {
+        if (byId.has(sessionId)) continue;
+        byId.set(
+          sessionId,
+          previousById.get(sessionId) ?? {
+            id: sessionId,
+            title: "New chat",
+            updatedAt: Date.now(),
+            turnCount: 0,
+          }
+        );
+      }
+      const merged = [...byId.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+      setSessions(merged);
+      return merged;
+    }
+
+    // Legacy behaviour (flag off): push-if-missing, may duplicate.
     for (const sessionId of activeSessionIds) {
       if (mapped.some((session) => session.id === sessionId)) continue;
       const previous = previousById.get(sessionId);
@@ -2744,9 +2847,34 @@ async function autoRenameSessionFromPrompt(sessionId: string, prompt: string) {
   }
 }
 
+/**
+ * True when the current chat for `scope` has no content yet: no local messages
+ * and (per the session list) zero persisted turns. Used so "New chat" reuses an
+ * already-empty chat instead of spawning blank duplicates.
+ */
+function isScopedSessionEmpty(scope: StreamScope): boolean {
+  const id = getScopedCurrentSession(scope);
+  if (!id) return false;
+  const msgs = scope === "prompt_lab" ? promptLabMessages() : assistantMessages();
+  if (msgs.length > 0) return false;
+  const row = sessions().find((s) => s.id === id);
+  return !row || (row.turnCount ?? 0) === 0;
+}
+
 async function createSession() {
   try {
     const scope = scopeFromEnvironment();
+
+    // Reuse-empty: if the current chat is already blank, don't create another
+    // one — just make sure it's in a clean, ready state. Prevents blank-chat
+    // pileup and duplicate rows.
+    if (CHAT_FLAGS.reuseEmpty && !temporaryChatActive() && isScopedSessionEmpty(scope)) {
+      setScopedToolChoice(scope, null);
+      setScopedThinking(scope, false);
+      setInputText("");
+      return;
+    }
+
     await cancelScopedTurnIfActive(scope);
     const result = await invoke<{ session_id: string }>("create_session");
     setScopedCurrentSession(scope, result.session_id);
@@ -2758,6 +2886,137 @@ async function createSession() {
     await loadSessions();
   } catch (e) {
     console.error("Failed to create session:", e);
+  }
+}
+
+export interface SessionSearchHit {
+  sessionId: string;
+  role: string;
+  content: string;
+  timestamp: string;
+}
+
+/**
+ * Full-text search across persisted conversations. Falls back to client-side
+ * title filtering if the backend search errors or times out, so the sidebar
+ * never hangs.
+ */
+async function searchSessionsQuery(query: string): Promise<SessionSearchHit[]> {
+  const q = query.trim();
+  if (!q) return [];
+  try {
+    const rows = await invokeWithTimeout<
+      { session_id: string; role: string; content: string; timestamp: string }[]
+    >("search_sessions", { query: q }, LIST_SESSIONS_TIMEOUT_MS);
+    return rows.map((r) => ({
+      sessionId: r.session_id,
+      role: r.role,
+      content: r.content,
+      timestamp: r.timestamp,
+    }));
+  } catch (e) {
+    console.warn("search_sessions failed, falling back to title filter:", e);
+    const lower = q.toLowerCase();
+    return sessions()
+      .filter((s) => s.title.toLowerCase().includes(lower))
+      .map((s) => ({ sessionId: s.id, role: "title", content: s.title, timestamp: "" }));
+  }
+}
+
+async function setSessionPinned(sessionId: string, pinned: boolean): Promise<void> {
+  try {
+    await invoke("set_session_pinned", { sessionId, pinned });
+    setSessions((prev) =>
+      prev.map((s) => (s.id === sessionId ? { ...s, pinned } : s))
+    );
+  } catch (e) {
+    console.error("Failed to set session pinned:", e);
+  }
+}
+
+async function setSessionArchived(sessionId: string, archived: boolean): Promise<void> {
+  try {
+    await invoke("set_session_archived", { sessionId, archived });
+    setSessions((prev) =>
+      prev.map((s) => (s.id === sessionId ? { ...s, archived } : s))
+    );
+  } catch (e) {
+    console.error("Failed to set session archived:", e);
+  }
+}
+
+async function loadMemoryEnabled(): Promise<void> {
+  try {
+    const enabled = await invoke<boolean>("get_memory_enabled");
+    setMemoryEnabledSignal(Boolean(enabled));
+  } catch (e) {
+    console.warn("Failed to load memory_enabled, defaulting ON:", e);
+    setMemoryEnabledSignal(true);
+  }
+}
+
+async function setMemoryEnabled(enabled: boolean): Promise<void> {
+  // Optimistic: reflect immediately, revert on failure.
+  const previous = memoryEnabled();
+  setMemoryEnabledSignal(enabled);
+  try {
+    await invoke("set_memory_enabled", { enabled });
+  } catch (e) {
+    console.error("Failed to set memory_enabled:", e);
+    setMemoryEnabledSignal(previous);
+  }
+}
+
+/**
+ * Start a temporary/incognito chat: a fresh session marked temporary so the
+ * backend skips all persistence (turns, title, facts). It leaves no row and
+ * vanishes when ended.
+ */
+async function startTemporaryChat(): Promise<void> {
+  if (!CHAT_FLAGS.temporary) return;
+  try {
+    const scope = scopeFromEnvironment();
+    await cancelScopedTurnIfActive(scope);
+    const result = await invoke<{ session_id: string }>("create_session");
+    await invoke("set_session_temporary", { sessionId: result.session_id, temporary: true });
+    setScopedCurrentSession(scope, result.session_id);
+    backendActiveSessionId = result.session_id;
+    updateScopedMessages(scope, () => []);
+    setScopedToolChoice(scope, null);
+    setScopedThinking(scope, false);
+    setInputText("");
+    setTemporaryChatActive(true);
+    // Intentionally do NOT call loadSessions(): the temporary chat must not
+    // appear in the sidebar list.
+  } catch (e) {
+    console.error("Failed to start temporary chat:", e);
+  }
+}
+
+/**
+ * End the active temporary chat: discard its (in-memory only) messages, delete
+ * the throwaway session so its temporary preference is cleaned up, and drop back
+ * into a fresh normal chat.
+ */
+async function endTemporaryChat(): Promise<void> {
+  const scope = scopeFromEnvironment();
+  const tempId = getScopedCurrentSession(scope);
+  setTemporaryChatActive(false);
+  try {
+    if (tempId) {
+      // No turns were persisted, so this just cleans the session_temporary pref.
+      await invoke("delete_session", { sessionId: tempId }).catch(() => {});
+    }
+    const result = await invoke<{ session_id: string }>("create_session");
+    setScopedCurrentSession(scope, result.session_id);
+    backendActiveSessionId = result.session_id;
+    updateScopedMessages(scope, () => []);
+    setScopedToolChoice(scope, null);
+    setScopedThinking(scope, false);
+    setInputText("");
+    await loadSessions();
+  } catch (e) {
+    console.error("Failed to end temporary chat:", e);
   }
 }
 
@@ -2941,6 +3200,7 @@ async function switchSession(sessionId: string) {
     await invoke("switch_session", { sessionId });
     backendActiveSessionId = sessionId;
     setScopedCurrentSession(scope, sessionId);
+    setTemporaryChatActive(false);
     let mapped = await loadMappedSessionHistory(sessionId);
     if (wasAlreadyCurrent) {
       mapped = mergeHistoryWithLocalMessages(mapped, localMessages);
@@ -3988,6 +4248,7 @@ if (typeof window !== "undefined") {
 }
 // Load settings on startup
 loadSettings();
+void loadMemoryEnabled();
 void loadTelegramConfig();
 loadAudioDevices();
 void loadColabStatus();
@@ -4078,6 +4339,16 @@ export const appStore = {
   deleteSession,
   clearAllChatSessions,
   renameSession,
+  searchSessionsQuery,
+  setSessionPinned,
+  setSessionArchived,
+  startTemporaryChat,
+  endTemporaryChat,
+  temporaryChatActive,
+  memoryEnabled,
+  loadMemoryEnabled,
+  setMemoryEnabled,
+  chatFlags: CHAT_FLAGS,
   loadSettings,
   loadAudioDevices,
   saveSettings,

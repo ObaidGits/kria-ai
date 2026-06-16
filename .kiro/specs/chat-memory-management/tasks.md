@@ -35,7 +35,7 @@ is flag-gated default-ON; falsy flag ⇒ legacy behaviour.
 
 ## Tasks
 
-- [ ] 1. Backend: preference cleanup helper + clean deletes
+- [x] 1. Backend: preference cleanup helper + clean deletes
   - Add `delete_session_preferences(session_id)` to `crates/kria-core/src/memory/store.rs`
     deleting the five managed keys (`session_title`, `session_title_manual`,
     `session_created_at`, `session_pinned`, `session_archived`).
@@ -46,14 +46,14 @@ is flag-gated default-ON; falsy flag ⇒ legacy behaviour.
     (flag on) and turns-only (flag off).
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5_
 
-- [ ] 2. Backend: coherent single current-session injection
+- [x] 2. Backend: coherent single current-session injection
   - In `list_sessions`, guard the synthetic-current injection behind
     `KRIA_CHAT_COHERENT_SESSIONS` (default on): inject only when the id is absent;
     preserve legacy injection when flag off.
   - Add unit test: no synthetic row when id already present; exactly one when absent.
   - _Requirements: 1.1, 1.4, 1.5_
 
-- [ ] 3. Backend: pin/archive preference commands + list_sessions fields
+- [x] 3. Backend: pin/archive preference commands + list_sessions fields
   - Add Tauri commands `set_session_pinned(session_id, pinned)` and
     `set_session_archived(session_id, archived)` writing `session_pinned:*` /
     `session_archived:*` prefs.
@@ -62,7 +62,7 @@ is flag-gated default-ON; falsy flag ⇒ legacy behaviour.
   - Add unit tests: pin/archive round-trip reflects in `list_sessions`; cleared on delete.
   - _Requirements: 7.2, 7.3, 7.4_
 
-- [ ] 4. Backend: memory on/off commands + fact-write gate
+- [x] 4. Backend: memory on/off commands + fact-write gate
   - Add `get_memory_enabled` / `set_memory_enabled` commands persisting `memory_enabled`
     pref ("0"/"1", default "1"); register in `main.rs`.
   - Gate the fact-write boundary (where `store_fact` is called from the agent/memory path)
@@ -71,7 +71,7 @@ is flag-gated default-ON; falsy flag ⇒ legacy behaviour.
   - Add unit test: fact write suppressed when disabled; conversation turn still written.
   - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5_
 
-- [ ] 5. Backend: temporary-chat persistence guard
+- [x] 5. Backend: temporary-chat persistence guard
   - Add optional `temporary: Option<bool>` (`#[serde(default)]`) to the desktop chat
     command payload struct; thread to the persistence boundary so `store_turn` and
     `store_fact` are skipped when `temporary == true` (gated by `chatTemporaryEnabled`
@@ -80,7 +80,7 @@ is flag-gated default-ON; falsy flag ⇒ legacy behaviour.
     unchanged.
   - _Requirements: 5.1, 5.3, 5.4, 5.5_
 
-- [ ] 6. Frontend: dedup merge in loadSessions
+- [x] 6. Frontend: dedup merge in loadSessions
   - Replace the push-if-missing loop in `loadSessions` (`ui/src/stores/app.ts`) with a
     `Map<id, Session>` keyed merge that dedupes by id; carry `pinned`/`archived` through.
   - Gate behind `chatCoherentSessions()` persisted signal (default true); keep legacy loop
@@ -88,7 +88,7 @@ is flag-gated default-ON; falsy flag ⇒ legacy behaviour.
   - Add vitest: two scopes sharing an id ⇒ single row; backend row not re-appended.
   - _Requirements: 1.2, 1.3, 8.2_
 
-- [ ] 7. Frontend: reuse empty chat in createSession
+- [x] 7. Frontend: reuse empty chat in createSession
   - Add `isScopedSessionEmpty(scope)` helper and make `createSession` a no-op (focus
     composer, clear draft/tool-choice) when the current scoped session is empty and
     `chatReuseEmpty()` is on; otherwise create as before.
@@ -96,7 +96,7 @@ is flag-gated default-ON; falsy flag ⇒ legacy behaviour.
     session still creates.
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5_
 
-- [ ] 8. Frontend: sidebar search box
+- [x] 8. Frontend: sidebar search box
   - Add a debounced (250 ms) search `<input>` above the list in
     `ui/src/components/SessionSidebar.tsx`; add `searchSessionsQuery(q)` in `app.ts`
     calling `search_sessions` via `invokeWithTimeout`.
@@ -105,7 +105,7 @@ is flag-gated default-ON; falsy flag ⇒ legacy behaviour.
   - Add vitest: debounce + empty-restore + error fallback.
   - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5_
 
-- [ ] 9. Frontend: time grouping + pin/archive rendering
+- [x] 9. Frontend: time grouping + pin/archive rendering
   - Group sessions into Today / Yesterday / Previous 7 Days / Older by `updatedAt`; render
     a pinned group first and hide archived behind an "Archived" toggle.
   - Wire pin/archive actions to `set_session_pinned` / `set_session_archived` and refresh.
@@ -113,7 +113,7 @@ is flag-gated default-ON; falsy flag ⇒ legacy behaviour.
   - Add vitest: bucket assignment + pinned-first ordering + archived hidden by default.
   - _Requirements: 7.1, 7.2, 7.3, 7.5_
 
-- [ ] 10. Frontend: temporary chat UI
+- [x] 10. Frontend: temporary chat UI
   - Add `temporaryChatActive` signal + in-memory `temporaryMessages`; add a "Temporary
     chat" entry point and a visible badge in header/composer.
   - Send `temporary: true` on chat turns while active; keep messages out of history; clear
@@ -122,13 +122,13 @@ is flag-gated default-ON; falsy flag ⇒ legacy behaviour.
   - Add vitest: temporary messages never sent to history and cleared on end.
   - _Requirements: 5.1, 5.2, 5.3, 5.5_
 
-- [ ] 11. Frontend: memory toggle in Settings
+- [x] 11. Frontend: memory toggle in Settings
   - Add a "Memory" toggle to `ui/src/components/SettingsModal.tsx` bound to
     `get_memory_enabled` / `set_memory_enabled`; persisted, effective next turn.
   - Add vitest: toggle reads/writes the setting and reflects state.
   - _Requirements: 6.1, 6.4_
 
-- [ ] 12. Verification + commit
+- [x] 12. Verification + commit
   - Run `cargo test -p kria-core`, `cargo test -p kria-desktop`, and the `ui` vitest suite;
     fix failures.
   - Locally verify P5 (temporary non-persistence) and P6 (memory-off) by inspecting SQLite
