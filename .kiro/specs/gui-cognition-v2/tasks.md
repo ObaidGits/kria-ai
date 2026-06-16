@@ -67,7 +67,7 @@ Order is strict: Phase 0 → 1 → 2 → 3 → 4 → 5 → 6. Within a phase, bu
   - No Brain/Hands involved.
   - _Requirements: 2.5, 9.1, 9.4_
 
-- [ ] 4. Phase 2 build — Brain (QwenBrain, text-first, pluggable)
+- [x] 4. Phase 2 build — Brain (QwenBrain, text-first, pluggable)
   - Implement `QwenBrain` behind `GuiBrain`: prompt = task + numbered element list (+ SoM
     image only when `KRIA_GUI_COG_V2_SOM` ON) + bounded history → grammar-constrained
     `Decision`. Reject targets absent from the observation; return `Ask`/`Done` when no safe
@@ -75,7 +75,7 @@ Order is strict: Phase 0 → 1 → 2 → 3 → 4 → 5 → 6. Within a phase, bu
   - Keep all Qwen-specific logic inside the impl (no leakage to loop/Sight/Hands).
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.7, 7.1, 7.3, 8.2_
 
-- [ ] 5. Phase 2 test — Brain isolation (mock observations)
+- [x] 5. Phase 2 test — Brain isolation (mock observations)
   - Build a fixture set of mock `Observation`s + tasks covering SEEN and UNSEEN prompts
     (open/new-tab/click-control/navigate/ambiguous/destructive-ask).
   - Assert the Brain selects the correct element id/action (or `Ask` when ambiguous),
