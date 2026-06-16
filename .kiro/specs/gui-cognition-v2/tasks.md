@@ -90,7 +90,7 @@ Order is strict: Phase 0 → 1 → 2 → 3 → 4 → 5 → 6. Within a phase, bu
   - Integration test on real screens: decisions are sane; mismatch source is identifiable.
   - _Requirements: 9.2, 11.1_
 
-- [ ] 7. Phase 4 build — Hands (UinputHands)
+- [x] 7. Phase 4 build — Hands (UinputHands)
   - Implement `UinputHands` behind `GuiHands`: `Click{element_id}` → resolve in supplied obs
     → bbox center → physical px (reuse monitor_layout/DPI math) → uinput click;
     `ClickPoint{x,y}` → direct click; `Key{combo}` → standard shortcut table (new_tab/zoom/
@@ -98,7 +98,7 @@ Order is strict: Phase 0 → 1 → 2 → 3 → 4 → 5 → 6. Within a phase, bu
   - Missing element id → explicit failure, no fallback click.
   - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.6_
 
-- [ ] 8. Phase 4 test — Hands isolation (external verify)
+- [x] 8. Phase 4 test — Hands isolation (external verify)
   - Feed FIXED Decisions (known bbox click, ClickPoint, Key ctrl+t, Type) → execute →
     verify via EXTERNAL observer (xdotool/wmctrl/screenshot-diff). No Brain.
   - Assert coordinate landing (where environment allows) and key effect; missing-id case
