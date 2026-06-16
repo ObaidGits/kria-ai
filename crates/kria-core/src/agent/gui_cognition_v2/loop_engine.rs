@@ -133,6 +133,9 @@ pub async fn run_turn_v2(
     // action was based on; used to detect "no screen change after acting".
     let mut prev_executed_sig: Option<String> = None;
     let mut no_progress_count: u32 = 0;
+    // The app of the most recent successfully-executed OpenApp; re-opening the
+    // SAME app is never useful, so a repeat short-circuits to completion.
+    let mut last_opened_app: Option<String> = None;
 
     for step_index in 0..config.max_steps {
         // Cancellation — check before any work each iteration.
@@ -206,7 +209,18 @@ pub async fn run_turn_v2(
             _ => {}
         }
 
-        // 3. SAFETY GATE — never execute an action the gate does not allow
+        // Deterministic backstop: re-opening the SAME app is a no-op intent — the
+        // app is already open, so treat the task as complete instead of spawning
+        // duplicate windows (bounds a Brain that fails to emit `Done`).
+        if let Action::OpenApp { app } = &decision.action {
+            if last_opened_app.as_deref() == Some(app.as_str()) {
+                return TurnOutcomeV2 {
+                    status: TurnStatus::Completed,
+                    reply: format!("{app} is already open."),
+                    steps,
+                };
+            }
+        }
         // (Property 5). Only executable actions are gated.
         if decision.action.is_executable() {
             if let Some(gate) = guards.safety.as_ref() {
@@ -240,12 +254,21 @@ pub async fn run_turn_v2(
             _ => None,
         };
         let executed_ok = result.ok;
+        let opened_app = match &decision.action {
+            Action::OpenApp { app } => Some(app.clone()),
+            _ => None,
+        };
         steps.push(TurnStep {
             step_index,
             decision,
             result,
             target_label,
         });
+        if executed_ok {
+            if let Some(app) = opened_app {
+                last_opened_app = Some(app);
+            }
+        }
 
         // Arm no-progress tracking: remember the signature the action acted on,
         // so the next observe can detect whether the screen actually changed.
@@ -281,6 +304,24 @@ mod tests {
             reason: "x".into(),
             risk_hint: None,
         }
+    }
+
+    #[tokio::test]
+    async fn repeated_open_app_short_circuits_to_completed() {
+        // A Brain that keeps emitting OpenApp{chrome} must not spawn duplicates:
+        // the second identical OpenApp short-circuits to Completed.
+        let sight = FakeSight::one_button("x");
+        let brain = FakeBrain::new(vec![
+            Decision { action: Action::OpenApp { app: "chrome".into() }, reason: "open".into(), risk_hint: None },
+            Decision { action: Action::OpenApp { app: "chrome".into() }, reason: "again".into(), risk_hint: None },
+        ]);
+        let hands = FakeHands::default();
+        let outcome =
+            run_turn_v2(&sight, &brain, &hands, "open chrome", LoopConfig::default(), &LoopGuards::none())
+                .await;
+        assert_eq!(outcome.status, TurnStatus::Completed);
+        // Only ONE open executed (the second was short-circuited).
+        assert_eq!(hands.executed.lock().unwrap().len(), 1);
     }
 
     #[tokio::test]
