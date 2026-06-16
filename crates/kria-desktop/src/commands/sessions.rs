@@ -127,7 +127,10 @@ pub async fn list_sessions(
                 .memory_store
                 .get_preference(&format!("session_title:{}", id))
                 .unwrap_or(None)
-                .unwrap_or_else(|| format!("Session ({})", &id[..8]));
+                .unwrap_or_else(|| {
+                    let short: String = id.chars().take(8).collect();
+                    format!("Session ({})", short)
+                });
             let pinned = state
                 .memory_store
                 .get_preference(&format!("session_pinned:{}", id))
