@@ -5178,6 +5178,23 @@ pub(super) async fn desktop_gui_cognition_command_capture_streamed(
         Some(value) => value,
         None => app_state.current_session_id.read().await.clone(),
     };
+
+    // GUI Cognition V2 routing (Part B). When `KRIA_GUI_COG_V2` is truthy the
+    // turn runs through the new Sight/Brain/Hands loop (`run_gui_cognition_v2`)
+    // instead of the V1 runtime below. Read live per turn from the server-side
+    // environment so a client cannot toggle it. Default OFF → V1 byte-for-byte.
+    if kria_core::agent::gui_cognition_v2::v2_enabled() {
+        return run_gui_cognition_v2(
+            message,
+            app_state,
+            session_id,
+            event_scope_prefix,
+            options,
+            event_emitter,
+        )
+        .await;
+    }
+
     let turn_id = Uuid::new_v4().to_string();
     let workflow_id = Uuid::new_v4().to_string();
 
@@ -6255,5 +6272,526 @@ mod real_vision_tests {
         assert_eq!(gui_real_vision_mode_from(Some("vl7b")), GuiRealVisionMode::Vl7b);
         assert_eq!(gui_real_vision_mode_from(Some("on")), GuiRealVisionMode::Vl7b);
         assert_eq!(gui_real_vision_mode_from(Some("true")), GuiRealVisionMode::Vl7b);
+    }
+}
+
+// ============================================================================
+// GUI Cognition V2 — desktop glue (Part B)
+//
+// Wires the decoupled kria-core V2 layers (Sight/Brain/Hands + bounded loop)
+// to the real desktop substrate:
+//   - `V2DesktopScreenCapturer` → KRIA's GNOME-extension screen capture
+//     (`kria_ext::ext_capture_screen`), the only capture path that works on this
+//     GNOME Wayland box. Records the captured PNG dimensions so the input sink
+//     can normalize absolute clicks.
+//   - `V2DesktopInputSink` → the existing uinput daemon backend (`YdotoolBackend`),
+//     the same input substrate V1 uses. On Wayland clicks go through the daemon's
+//     absolute-coordinate path ([0,65535] normalized) so they land on native
+//     Wayland windows.
+//   - `V2DesktopSafetyGate` → an HONEST gate over the existing global safety halt
+//     + the GUI-automation master switch. It NEVER fabricates an approval; a
+//     denial stops the turn. (A full HITL pause/approve round-trip is a follow-up;
+//     the loop already halts safely on `Deny`.)
+//   - `run_gui_cognition_v2` → builds the three layers + guards and runs ONE
+//     bounded turn, streaming per-step `gui_cognition:event` envelopes on the
+//     existing channel and returning the same `DesktopChatCommandCapture` shape
+//     as the V1 path.
+//
+// Reached only when `KRIA_GUI_COG_V2` is truthy (default OFF → V1 unchanged).
+// ============================================================================
+
+/// Shared per-turn screen dimensions, written by the capturer (from the captured
+/// PNG) and read by the input sink for absolute-coordinate normalization.
+#[derive(Default)]
+struct V2ScreenDims {
+    w: std::sync::atomic::AtomicU32,
+    h: std::sync::atomic::AtomicU32,
+}
+
+impl V2ScreenDims {
+    fn store(&self, w: u32, h: u32) {
+        self.w.store(w, std::sync::atomic::Ordering::SeqCst);
+        self.h.store(h, std::sync::atomic::Ordering::SeqCst);
+    }
+    fn get(&self) -> Option<(u32, u32)> {
+        let w = self.w.load(std::sync::atomic::Ordering::SeqCst);
+        let h = self.h.load(std::sync::atomic::Ordering::SeqCst);
+        (w > 0 && h > 0).then_some((w, h))
+    }
+}
+
+/// Decode PNG width/height from the IHDR chunk (big-endian at bytes 16..24).
+/// `None` if the buffer is not a PNG. Cheap — no full decode.
+fn v2_png_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
+    const SIG: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
+    if bytes.len() < 24 || &bytes[0..8] != SIG {
+        return None;
+    }
+    let w = u32::from_be_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]);
+    let h = u32::from_be_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]);
+    (w > 0 && h > 0).then_some((w, h))
+}
+
+fn v2_base64_png(bytes: &[u8]) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+fn v2_is_wayland() -> bool {
+    std::env::var("WAYLAND_DISPLAY").is_ok()
+        || std::env::var("XDG_SESSION_TYPE")
+            .map(|v| v.eq_ignore_ascii_case("wayland"))
+            .unwrap_or(false)
+}
+
+fn v2_env_truthy(key: &str) -> bool {
+    std::env::var(key)
+        .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false)
+}
+
+/// V2 `ScreenCapturer` backed by KRIA's working GNOME-extension capture.
+struct V2DesktopScreenCapturer {
+    dims: StdArc<V2ScreenDims>,
+}
+
+#[async_trait::async_trait]
+impl kria_core::agent::gui_cognition_v2::ScreenCapturer for V2DesktopScreenCapturer {
+    async fn capture_png_base64(&self) -> Option<String> {
+        let bytes = kria_ext::ext_capture_screen().await?;
+        if let Some((w, h)) = v2_png_dimensions(&bytes) {
+            self.dims.store(w, h);
+        }
+        Some(v2_base64_png(&bytes))
+    }
+}
+
+/// Map a single combo token (e.g. `ctrl`, `shift`, `t`, `plus`) to a [`Key`].
+fn v2_key_from_token(tok: &str) -> Option<kria_core::tools::gui_automation::Key> {
+    use kria_core::tools::gui_automation::Key;
+    Some(match tok.trim().to_ascii_lowercase().as_str() {
+        "ctrl" | "control" => Key::Control,
+        "shift" => Key::Shift,
+        "alt" => Key::Alt,
+        "super" | "win" | "cmd" | "command" | "meta" => Key::Super,
+        "enter" | "return" => Key::Enter,
+        "escape" | "esc" => Key::Escape,
+        "tab" => Key::Tab,
+        "space" => Key::Space,
+        "backspace" | "bksp" => Key::Backspace,
+        "delete" | "del" => Key::Delete,
+        "home" => Key::Home,
+        "end" => Key::End,
+        "pageup" | "page_up" | "pgup" => Key::PageUp,
+        "pagedown" | "page_down" | "pgdn" => Key::PageDown,
+        "up" | "arrowup" => Key::ArrowUp,
+        "down" | "arrowdown" => Key::ArrowDown,
+        "left" | "arrowleft" => Key::ArrowLeft,
+        "right" | "arrowright" => Key::ArrowRight,
+        "plus" => Key::Char('+'),
+        "minus" => Key::Char('-'),
+        "f1" => Key::F1,
+        "f2" => Key::F2,
+        "f3" => Key::F3,
+        "f4" => Key::F4,
+        "f5" => Key::F5,
+        "f6" => Key::F6,
+        "f7" => Key::F7,
+        "f8" => Key::F8,
+        "f9" => Key::F9,
+        "f10" => Key::F10,
+        "f11" => Key::F11,
+        "f12" => Key::F12,
+        other if other.chars().count() == 1 => Key::Char(other.chars().next().unwrap()),
+        _ => return None,
+    })
+}
+
+/// Parse a `+`-separated combo (e.g. `ctrl+shift+t`) into an ordered key list.
+fn v2_parse_combo(combo: &str) -> Vec<kria_core::tools::gui_automation::Key> {
+    combo.split('+').filter_map(v2_key_from_token).collect()
+}
+
+/// V2 `InputSink` over the existing uinput daemon backend.
+struct V2DesktopInputSink {
+    backend: StdArc<dyn kria_core::tools::gui_automation::GuiBackend>,
+    dims: StdArc<V2ScreenDims>,
+    wayland: bool,
+}
+
+#[async_trait::async_trait]
+impl kria_core::agent::gui_cognition_v2::InputSink for V2DesktopInputSink {
+    async fn click(&self, x: i32, y: i32) -> anyhow::Result<()> {
+        use kria_core::tools::gui_automation::MouseButton;
+        // On Wayland a relative-position click cannot be placed reliably; use the
+        // daemon's absolute path with [0,65535] normalization from the current
+        // screen size (the same contract V1 uses for native Wayland clicks).
+        if self.wayland {
+            if let Some((w, h)) = self.dims.get() {
+                let nx = ((x as i64 * 65_535) / (w.max(1) as i64)).clamp(0, 65_535) as i32;
+                let ny = ((y as i64 * 65_535) / (h.max(1) as i64)).clamp(0, 65_535) as i32;
+                self.backend
+                    .click_mouse_abs(nx, ny, MouseButton::Left)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("abs click failed: {e}"))?;
+                return Ok(());
+            }
+        }
+        self.backend
+            .click_mouse(x, y, MouseButton::Left)
+            .await
+            .map_err(|e| anyhow::anyhow!("click failed: {e}"))?;
+        Ok(())
+    }
+
+    async fn type_text(&self, text: &str) -> anyhow::Result<()> {
+        self.backend
+            .type_text(text, None)
+            .await
+            .map_err(|e| anyhow::anyhow!("type failed: {e}"))?;
+        Ok(())
+    }
+
+    async fn key(&self, combo: &str) -> anyhow::Result<()> {
+        let keys = v2_parse_combo(combo);
+        if keys.is_empty() {
+            anyhow::bail!("unrecognized key combo: {combo}");
+        }
+        self.backend
+            .press_shortcut(&keys, None)
+            .await
+            .map_err(|e| anyhow::anyhow!("key failed: {e}"))?;
+        Ok(())
+    }
+
+    async fn scroll(&self, direction: &str, _amount: i32) -> anyhow::Result<()> {
+        // Reuse V1's app-agnostic direction → shortcut mapping (PageDown/Up,
+        // Ctrl+End/Home) so scrolling works without per-app coordinates.
+        let keys: Vec<kria_core::tools::gui_automation::Key> = scroll_keys_for_direction(direction)
+            .iter()
+            .filter_map(|k| v2_key_from_token(k))
+            .collect();
+        if keys.is_empty() {
+            anyhow::bail!("unsupported scroll direction: {direction}");
+        }
+        self.backend
+            .press_shortcut(&keys, None)
+            .await
+            .map_err(|e| anyhow::anyhow!("scroll failed: {e}"))?;
+        Ok(())
+    }
+
+    fn backend_label(&self) -> &str {
+        "uinput"
+    }
+}
+
+/// V2 `SafetyGate` over the existing global safety halt + automation switch.
+/// Honest: it only ever `Allow`s or `Deny`s — it never fabricates a human
+/// approval. A `Deny` halts the turn (the loop guarantees no execution).
+struct V2DesktopSafetyGate {
+    automation_enabled: bool,
+}
+
+#[async_trait::async_trait]
+impl kria_core::agent::gui_cognition_v2::SafetyGate for V2DesktopSafetyGate {
+    async fn evaluate(
+        &self,
+        _decision: &kria_core::agent::gui_cognition_v2::Decision,
+        _observation: &kria_core::agent::gui_cognition_v2::Observation,
+    ) -> kria_core::agent::gui_cognition_v2::GateDecision {
+        use kria_core::agent::gui_cognition_v2::GateDecision;
+        if kria_core::safety::is_halted() {
+            return GateDecision::Deny(
+                kria_core::safety::halt_reason()
+                    .unwrap_or_else(|| "global safety halt engaged".into()),
+            );
+        }
+        if !self.automation_enabled {
+            return GateDecision::Deny("GUI automation is disabled (master switch off)".into());
+        }
+        GateDecision::Allow
+    }
+}
+
+/// Build a minimal error capture (used when a prerequisite layer is unavailable).
+fn v2_error_capture(event_scope_prefix: &str, reply: &str) -> super::chat::DesktopChatCommandCapture {
+    let events = vec![
+        super::chat::desktop_chat_event(
+            format!("{event_scope_prefix}:token"),
+            serde_json::json!({ "text": reply }),
+        ),
+        super::chat::desktop_chat_event(format!("{event_scope_prefix}:done"), serde_json::json!({})),
+    ];
+    super::chat::DesktopChatCommandCapture {
+        status_code: 200,
+        status: "processing".into(),
+        reply: reply.to_string(),
+        response: serde_json::json!({
+            "gui_cognition": { "engine": "v2", "status": "stopped_error", "error": reply }
+        }),
+        events,
+    }
+}
+
+/// Run ONE GUI Cognition V2 turn end-to-end over the real desktop substrate.
+pub(super) async fn run_gui_cognition_v2(
+    message: String,
+    app_state: &AppState,
+    session_id: String,
+    event_scope_prefix: &str,
+    options: Option<GuiCognitionCommandOptions>,
+    event_emitter: Option<AppHandle>,
+) -> Result<super::chat::DesktopChatCommandCapture, String> {
+    use kria_core::agent::gui_cognition_v2 as v2;
+    use kria_core::agent::gui_cognition_v2::GuiBrain as _; // for `brain.label()`
+
+    // V2 reads its configuration from the server-side environment; the V1
+    // fixture options are not (yet) modeled in V2.
+    let _ = options;
+    let turn_id = Uuid::new_v4().to_string();
+    let workflow_id = Uuid::new_v4().to_string();
+
+    let want_som = v2_env_truthy("KRIA_GUI_COG_V2_SOM");
+    let max_steps = std::env::var("KRIA_GUI_COG_V2_MAX_STEPS")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(12);
+    let observe_timeout_secs = std::env::var("KRIA_GUI_COG_V2_OBSERVE_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(300);
+
+    // --- Sight (OmniParser sidecar + KRIA extension capture) ---
+    let dims = StdArc::new(V2ScreenDims::default());
+    let endpoint = std::env::var("KRIA_OMNIPARSER_ENDPOINT")
+        .unwrap_or_else(|_| "http://127.0.0.1:8080".to_string());
+    let capturer: StdArc<dyn v2::ScreenCapturer> =
+        StdArc::new(V2DesktopScreenCapturer { dims: dims.clone() });
+    let sight = v2::OmniParserSight::new(endpoint)
+        .with_timeout(Duration::from_secs(observe_timeout_secs))
+        .with_capturer(capturer);
+
+    // --- Brain (local Qwen via the model router) ---
+    let backend = match app_state.model_router.route("gui_cognition_planner").await {
+        Some(backend) => backend,
+        None => {
+            return Ok(v2_error_capture(
+                event_scope_prefix,
+                "The reasoning model is not available; cannot run GUI Cognition V2.",
+            ));
+        }
+    };
+    let brain = v2::QwenBrain::new(backend).with_som(want_som);
+    let brain_label = brain.label().to_string();
+
+    // --- Hands (existing uinput daemon backend) ---
+    let socket_path = kria_core::agent::gui_services::default_uinput_socket_path();
+    let gui_backend: StdArc<dyn kria_core::tools::gui_automation::GuiBackend> =
+        StdArc::new(kria_core::tools::gui_automation::YdotoolBackend::new(socket_path));
+    let sink = V2DesktopInputSink {
+        backend: gui_backend,
+        dims: dims.clone(),
+        wayland: v2_is_wayland(),
+    };
+    let hands = v2::UinputHands::new(sink);
+
+    // --- Guards: safety gate + cancel bridge ---
+    let automation_enabled = match app_state.gui_orchestrator.as_ref() {
+        Some(orch) => orch.status().await.automation_enabled,
+        None => false,
+    };
+    let gate: StdArc<dyn v2::SafetyGate> = StdArc::new(V2DesktopSafetyGate { automation_enabled });
+
+    let cancel_flag = StdArc::new(std::sync::atomic::AtomicBool::new(false));
+    let cancel_token =
+        kria_core::agent::gui_cognition::cancel::gui_cancel_registry().register(&session_id);
+    {
+        // Bridge the existing GUI cancel token (driven by the desktop cancel
+        // command) into the V2 loop's cooperative cancel flag.
+        let flag = cancel_flag.clone();
+        let raw = cancel_token.raw().clone();
+        tokio::spawn(async move {
+            raw.cancelled().await;
+            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+    }
+    let guards = v2::LoopGuards::none()
+        .with_safety(gate)
+        .with_cancel(cancel_flag);
+
+    let config = v2::LoopConfig { max_steps, want_som, no_progress_limit: 2 };
+
+    // Emit the `:thinking` state up front so the UI ordering matches V1.
+    if let Some(app) = event_emitter.as_ref() {
+        let _ = app.emit(
+            &format!("{event_scope_prefix}:thinking"),
+            serde_json::json!({ "status": "processing", "mode": "gui_cognition" }),
+        );
+    }
+
+    let outcome = v2::run_turn_v2(&sight, &brain, &hands, &message, config, &guards).await;
+
+    kria_core::agent::gui_cognition::cancel::gui_cancel_registry().unregister(&session_id);
+
+    // --- Build the per-step receipts + response payload ---
+    let steps_json: Vec<serde_json::Value> = outcome
+        .steps
+        .iter()
+        .map(|s| {
+            serde_json::json!({
+                "step_index": s.step_index,
+                "action": s.decision.action.kind(),
+                "reason": s.decision.reason,
+                "target_label": s.target_label,
+                "ok": s.result.ok,
+                "error": s.result.error,
+                "backend_used": s.result.backend_used,
+            })
+        })
+        .collect();
+    let response = serde_json::json!({
+        "gui_cognition": {
+            "engine": "v2",
+            "status": outcome.status.as_str(),
+            "brain": brain_label,
+            "step_count": outcome.steps.len(),
+            "steps": steps_json,
+        }
+    });
+
+    // --- Events: stream live when an emitter is present, else return the batch ---
+    let streaming = event_emitter.is_some();
+    let mut events: Vec<super::chat::DesktopChatCommandEvent> = if streaming {
+        Vec::new()
+    } else {
+        vec![super::chat::desktop_chat_event(
+            format!("{event_scope_prefix}:thinking"),
+            serde_json::json!({ "status": "processing", "mode": "gui_cognition" }),
+        )]
+    };
+    for (index, step) in outcome.steps.iter().enumerate() {
+        let payload = gui_cognition_event_payload(
+            &session_id,
+            &turn_id,
+            &workflow_id,
+            (index + 1) as u64,
+            serde_json::json!({
+                "type": "V2Step",
+                "step_index": step.step_index,
+                "action": step.decision.action.kind(),
+                "target_label": step.target_label,
+                "ok": step.result.ok,
+                "error": step.result.error,
+                "backend_used": step.result.backend_used,
+            }),
+        );
+        if streaming {
+            if let Some(app) = event_emitter.as_ref() {
+                let _ = app.emit("gui_cognition:event", payload);
+            }
+        } else {
+            events.push(super::chat::desktop_chat_event("gui_cognition:event", payload));
+        }
+    }
+
+    // Persist the turn to memory (mirrors the V1 path).
+    let memory_writer: Arc<dyn MemoryManager> = app_state.memory_store.clone();
+    let _ = memory_writer.store_turn(&memory_turn_write(
+        session_id.clone(),
+        message,
+        String::new(),
+        None,
+        None,
+        None,
+    ));
+    let _ = memory_writer.store_turn(&memory_turn_write(
+        session_id,
+        String::new(),
+        outcome.reply.clone(),
+        Some("gui_cognition".into()),
+        Some(response["gui_cognition"].to_string()),
+        None,
+    ));
+
+    events.push(super::chat::desktop_chat_stage_event(
+        "gui_cognition_mode_handled",
+        "GUI Cognition prompt handled by the V2 Sight/Brain/Hands loop",
+        Some(serde_json::json!({
+            "engine": "v2",
+            "status": outcome.status.as_str(),
+            "workflow_id": workflow_id,
+        })),
+    ));
+    events.push(super::chat::desktop_chat_event(
+        format!("{event_scope_prefix}:token"),
+        serde_json::json!({ "text": outcome.reply.clone() }),
+    ));
+    events.push(super::chat::desktop_chat_event(
+        format!("{event_scope_prefix}:tool_result"),
+        serde_json::json!({ "tool": "gui_cognition", "result": response.clone() }),
+    ));
+    events.push(super::chat::desktop_chat_event(
+        format!("{event_scope_prefix}:done"),
+        serde_json::json!({}),
+    ));
+
+    Ok(super::chat::DesktopChatCommandCapture {
+        status_code: 200,
+        status: "processing".into(),
+        reply: outcome.reply,
+        response,
+        events,
+    })
+}
+
+#[cfg(test)]
+mod gui_cognition_v2_glue_tests {
+    use super::*;
+
+    #[test]
+    fn png_dimensions_reads_ihdr() {
+        // Minimal 1920x1200 PNG header (signature + IHDR length/type + w/h).
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"\x89PNG\r\n\x1a\n");
+        bytes.extend_from_slice(&[0, 0, 0, 13]); // IHDR length
+        bytes.extend_from_slice(b"IHDR");
+        bytes.extend_from_slice(&1920u32.to_be_bytes());
+        bytes.extend_from_slice(&1200u32.to_be_bytes());
+        bytes.extend_from_slice(&[8, 2, 0, 0, 0]); // bit depth/color/...
+        assert_eq!(v2_png_dimensions(&bytes), Some((1920, 1200)));
+    }
+
+    #[test]
+    fn png_dimensions_rejects_non_png() {
+        assert_eq!(v2_png_dimensions(b"not a png buffer at all...."), None);
+        assert_eq!(v2_png_dimensions(&[0u8; 4]), None);
+    }
+
+    #[test]
+    fn screen_dims_roundtrip() {
+        let d = V2ScreenDims::default();
+        assert_eq!(d.get(), None);
+        d.store(1920, 1200);
+        assert_eq!(d.get(), Some((1920, 1200)));
+    }
+
+    #[test]
+    fn parse_combo_maps_modifiers_and_keys() {
+        use kria_core::tools::gui_automation::Key;
+        assert_eq!(v2_parse_combo("ctrl+t"), vec![Key::Control, Key::Char('t')]);
+        assert_eq!(
+            v2_parse_combo("ctrl+shift+z"),
+            vec![Key::Control, Key::Shift, Key::Char('z')]
+        );
+        assert_eq!(v2_parse_combo("ctrl+plus"), vec![Key::Control, Key::Char('+')]);
+        assert_eq!(v2_parse_combo("ctrl+l"), vec![Key::Control, Key::Char('l')]);
+        assert_eq!(v2_parse_combo("enter"), vec![Key::Enter]);
+    }
+
+    #[test]
+    fn parse_combo_drops_unknown_tokens() {
+        // An unmappable multi-char token yields no key for that segment.
+        assert!(v2_parse_combo("kaboom").is_empty());
     }
 }

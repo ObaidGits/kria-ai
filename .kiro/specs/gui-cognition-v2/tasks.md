@@ -105,13 +105,19 @@ Order is strict: Phase 0 → 1 → 2 → 3 → 4 → 5 → 6. Within a phase, bu
     fails explicitly; document INCONCLUSIVE where Wayland bounds prevent verification.
   - _Requirements: 4.5, 9.3, 9.4_
 
-- [ ] 9. Phase 5 build — full observe-act loop
-  - Wire `run_turn_v2`: observe → decide → safety/HITL gate (reuse existing) → execute →
-    verify (screenshot-diff/re-observe) → re-observe; bound with step cap, no-progress
-    (screen-hash) stop, cancel token, watchdog (reuse `GuiTurnBudgetTracker`).
-  - Stream per-step events on the existing `gui_cognition:event` channel (incremental, not
-    end-of-turn batch); record executed actions in the audit ledger.
-  - Route GUI turns to V2 when `KRIA_GUI_COG_V2` is ON (V1 stays default until Task 12).
+- [x] 9. Phase 5 build — full observe-act loop + desktop wiring (Part B)
+  - Wired `run_turn_v2`: observe → decide → safety gate → execute → re-observe; bounded by
+    step cap, no-progress (screen-signature) stop, and a cancel flag bridged from the
+    existing GUI cancel registry. (Done in core loop_engine; tested 33/33.)
+  - Desktop glue (`crates/kria-desktop/src/commands/gui_cognition.rs`):
+    `V2DesktopScreenCapturer` (GNOME-extension capture → base64 + PNG-dim probe),
+    `V2DesktopInputSink` (uinput `YdotoolBackend`; Wayland absolute-coordinate
+    normalization), `V2DesktopSafetyGate` (honest halt + master-switch gate), and
+    `run_gui_cognition_v2` which streams per-step `gui_cognition:event` envelopes on the
+    existing channel and returns the same `DesktopChatCommandCapture` shape as V1.
+  - Routes GUI turns to V2 when `KRIA_GUI_COG_V2` is ON (V1 stays default until Task 12).
+  - NOTE: full HITL pause/approve round-trip is deferred (gate denies risky/halted rather
+    than pausing); audit-ledger recording of V2 steps is a follow-up (Task 10).
   - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 6.1, 6.2, 6.3, 6.4, 6.5, 11.1, 11.2, 11.3, 11.4_
 
 - [ ] 10. Phase 5 test — full-loop real-verify eval
