@@ -255,6 +255,68 @@ pub(crate) fn apply_followup_assist(
         _ => decision,
     }
 }
+
+/// Extract the app the task asks to OPEN (after open/launch/start/switch verbs),
+/// up to a connector ("then"/"and"). Returns a 1–2 word app name (articles
+/// stripped) — e.g. "open the system settings and ..." → "system settings".
+pub(crate) fn task_open_app_target(task: &str) -> Option<String> {
+    let lower = task.to_ascii_lowercase();
+    for verb in ["open ", "launch ", "start ", "switch to ", "go to "] {
+        let Some(idx) = lower.find(verb) else { continue };
+        let rest = &task[idx + verb.len()..];
+        let mut words: Vec<String> = Vec::new();
+        for raw in rest.split_whitespace() {
+            let w: String = raw
+                .chars()
+                .filter(|c| c.is_alphanumeric() || *c == '-')
+                .collect();
+            let wl = w.to_ascii_lowercase();
+            if wl.is_empty() {
+                continue;
+            }
+            if matches!(wl.as_str(), "then" | "and" | "to" | "but" | "after" | "before") {
+                break;
+            }
+            if words.is_empty() && matches!(wl.as_str(), "the" | "a" | "an" | "my" | "up") {
+                continue;
+            }
+            words.push(w);
+            if words.len() >= 2 {
+                break;
+            }
+        }
+        let name = words.join(" ").trim().to_string();
+        if !name.is_empty() {
+            return Some(name);
+        }
+    }
+    None
+}
+
+/// Deterministic OPEN assist: if nothing has been opened yet and the Brain
+/// stalls (Ask/Done) on a task that clearly names an app to open, emit
+/// `OpenApp{that app}` instead. Bounds a 7B that asks for clarification on an
+/// unambiguous "open X" task. Pure + testable.
+pub(crate) fn apply_open_assist(decision: Decision, task: &str, history: &[TurnStep]) -> Decision {
+    let already_opened = history
+        .iter()
+        .any(|s| matches!(&s.decision.action, Action::OpenApp { .. }) && s.result.ok);
+    if already_opened {
+        return decision;
+    }
+    match &decision.action {
+        Action::Ask { .. } | Action::Done { .. } => match task_open_app_target(task) {
+            Some(app) => Decision {
+                action: Action::OpenApp { app },
+                reason: "task names an app to open; launching it".into(),
+                risk_hint: None,
+            },
+            None => decision,
+        },
+        _ => decision,
+    }
+}
+
 fn extract_json_object(content: &str) -> Option<&str> {
     let bytes = content.as_bytes();
     let mut depth = 0i32;
@@ -401,8 +463,12 @@ impl GuiBrain for QwenBrain {
             Err(_) => anyhow::bail!("brain timed out"),
         };
 
-        parse_decision_json(&response.content, observation)
-            .map(|decision| apply_followup_assist(decision, task, history))
+        parse_decision_json(&response.content, observation).map(|decision| {
+            // Deterministic assists for a weak 7B: open the named app if it
+            // stalls upfront, then advance to a named follow-up once open.
+            let decision = apply_open_assist(decision, task, history);
+            apply_followup_assist(decision, task, history)
+        })
     }
 
     fn label(&self) -> &str {
@@ -437,6 +503,34 @@ mod tests {
             som_image_path: None,
             source: "omniparser".into(),
         }
+    }
+
+    #[test]
+    fn task_open_app_target_extracts_app_name() {
+        assert_eq!(task_open_app_target("open chrome then close the tab").as_deref(), Some("chrome"));
+        assert_eq!(task_open_app_target("open the system settings").as_deref(), Some("system settings"));
+        assert_eq!(task_open_app_target("launch the calculator app").as_deref(), Some("calculator app"));
+        assert_eq!(task_open_app_target("scroll down the page"), None);
+    }
+
+    #[test]
+    fn open_assist_launches_when_brain_stalls_on_open_task() {
+        // No prior open; Brain wrongly asked → override to OpenApp{chrome}.
+        let ask = Decision { action: Action::Ask { question: "?".into() }, reason: String::new(), risk_hint: None };
+        let fixed = apply_open_assist(ask, "open chrome then close the tab", &[]);
+        assert_eq!(fixed.action, Action::OpenApp { app: "chrome".into() });
+    }
+
+    #[test]
+    fn open_assist_noop_after_open_or_for_non_open_task() {
+        use crate::agent::gui_cognition_v2::types::{ActionResult, TurnStep};
+        // Already opened → don't override a later Ask.
+        let history = vec![TurnStep { step_index: 0, decision: Decision { action: Action::OpenApp { app: "chrome".into() }, reason: String::new(), risk_hint: None }, result: ActionResult::ok("uinput"), target_label: None }];
+        let ask = Decision { action: Action::Ask { question: "?".into() }, reason: String::new(), risk_hint: None };
+        assert!(matches!(apply_open_assist(ask, "open chrome", &history).action, Action::Ask { .. }));
+        // Non-open task → no override.
+        let ask2 = Decision { action: Action::Ask { question: "?".into() }, reason: String::new(), risk_hint: None };
+        assert!(matches!(apply_open_assist(ask2, "scroll down", &[]).action, Action::Ask { .. }));
     }
 
     #[test]

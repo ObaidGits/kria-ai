@@ -458,6 +458,16 @@ mod alias_tests {
         let candidates = strip_filler_words("chrome");
         assert_eq!(candidates, vec!["chrome".to_string()]);
     }
+
+    #[test]
+    fn file_manager_aliases_resolve_to_candidates() {
+        for name in ["file manager", "files manager", "file browser", "file explorer", "files app"] {
+            assert!(
+                class_alias_candidates(name).is_some_and(|c| c.contains(&"nautilus")),
+                "{name:?} should map to the file-manager candidate set"
+            );
+        }
+    }
 }
 
 fn resolve_class_alias(
@@ -530,17 +540,26 @@ fn class_alias_candidates(normalized: &str) -> Option<&'static [&'static str]> {
         Some(SPREADSHEET)
     } else if matches!(
         normalized,
-        "text editor" | "editor" | "plain text editor" | "document editor"
+        "text editor" | "editor" | "plain text editor" | "document editor" | "notepad" | "text edit"
     ) {
         Some(TEXT_EDITOR)
     } else if matches!(
         normalized,
-        "file manager" | "files" | "home folder" | "folder viewer"
+        "file manager"
+            | "files manager"
+            | "files"
+            | "files app"
+            | "file browser"
+            | "files browser"
+            | "file explorer"
+            | "files explorer"
+            | "home folder"
+            | "folder viewer"
     ) {
         Some(FILE_MANAGER)
     } else if matches!(
         normalized,
-        "code" | "code editor" | "ide" | "editor for code"
+        "code" | "code editor" | "ide" | "editor for code" | "code ide"
     ) {
         Some(IDE)
     } else {
