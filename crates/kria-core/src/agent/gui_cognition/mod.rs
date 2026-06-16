@@ -1158,6 +1158,36 @@ where
                 selection.ladder_rung = Some(ladder_rung::CONFIGURED_LLM.into());
                 return;
             }
+
+            // Multi-step preservation (gui_cog_plan_prereq_merge, default ON):
+            // before discarding a schema-valid LLM plan that merely OMITS the
+            // leading app action, try to REPAIR it by prepending the inferred
+            // OpenApp/SwitchWindow prerequisite — the same auto-prerequisite pass
+            // that already runs post-selection. If the repaired plan now pursues
+            // the goal action, KEEP it: this preserves the LLM's additional steps
+            // (e.g. "create a new tab", "go to Wi-Fi options") instead of
+            // collapsing to the open-only deterministic plan. Reuses existing
+            // machinery; never fabricates steps; falsy env rolls back to the
+            // prior discard-and-substitute behavior byte-for-byte.
+            if self.auto_prereq.is_enabled() && plan_prereq_merge_enabled() {
+                let outcome = apply_auto_prerequisite(
+                    &mut selection.plan,
+                    &request.contract,
+                    |app| app_observability(context, app),
+                );
+                if outcome.changed() && llm_plan_pursues_goal_action(&selection.plan, request) {
+                    events.push(serde_json::json!({
+                        "type": "PlannerLadderRungAttempt",
+                        "rung": ladder_rung::CONFIGURED_LLM,
+                        "reason": "LLM plan repaired with an app-open prerequisite; multi-step plan preserved",
+                        "auto_prereq_outcome": outcome.as_str(),
+                        "context_id": request.context_id,
+                    }));
+                    selection.ladder_rung = Some(ladder_rung::CONFIGURED_LLM.into());
+                    return;
+                }
+            }
+
             events.push(serde_json::json!({
                 "type": "PlannerLadderRungAttempt",
                 "rung": ladder_rung::DETERMINISTIC,
@@ -5601,6 +5631,41 @@ where
     }
 }
 
+/// Issue (multi-step prompt regression): whether the capability ladder, instead
+/// of DISCARDING a schema-valid LLM plan that merely omits the leading app
+/// action, first tries to REPAIR it by prepending the inferred
+/// `OpenApp`/`SwitchWindow` prerequisite (the same `apply_auto_prerequisite`
+/// machinery used post-selection) and KEEPS the multi-step LLM plan when the
+/// repair makes it pursue the goal action.
+///
+/// Why this matters: a prompt like "Open Chrome and create a new tab" produces
+/// an LLM plan whose primitive ("new tab") may not lead with an explicit
+/// `OpenApp`. The prior behavior discarded the whole plan and substituted the
+/// open-only deterministic plan, so the second action ("new tab") was silently
+/// dropped. With the merge, the app-open step is prepended and the LLM's extra
+/// steps survive.
+///
+/// Default ON; an explicit falsy value (`0`/`false`/`no`/`off`/empty) in
+/// `KRIA_GUI_COG_PLAN_PREREQ_MERGE` rolls the behavior back to the prior
+/// discard-and-substitute path byte-for-byte.
+fn plan_prereq_merge_enabled() -> bool {
+    plan_prereq_merge_enabled_lookup(|key| std::env::var(key).ok())
+}
+
+/// Testable core of [`plan_prereq_merge_enabled`] with an injectable lookup.
+fn plan_prereq_merge_enabled_lookup<F>(lookup: F) -> bool
+where
+    F: Fn(&str) -> Option<String>,
+{
+    match lookup("KRIA_GUI_COG_PLAN_PREREQ_MERGE") {
+        Some(v) => !matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "no" | "off" | ""
+        ),
+        None => true,
+    }
+}
+
 /// Task 10 (Issue #8): whether the consolidated honest AT-SPI health signal
 /// (`accessibility_resolution_trustworthy`) is surfaced in the observation
 /// event. Default ON; an explicit falsy value (`0`/`false`/`no`/`off`/empty) in
@@ -5840,6 +5905,17 @@ mod smart_recovery_tests {
         }
         for raw in ["1", "true", "yes", "on", "anything"] {
             assert!(smart_recovery_enabled_lookup(|_| Some(raw.to_string())));
+        }
+    }
+
+    #[test]
+    fn plan_prereq_merge_flag_defaults_on_and_rolls_back_on_falsy() {
+        assert!(plan_prereq_merge_enabled_lookup(|_| None));
+        for raw in ["0", "false", "no", "off", "", " OFF "] {
+            assert!(!plan_prereq_merge_enabled_lookup(|_| Some(raw.to_string())));
+        }
+        for raw in ["1", "true", "yes", "on", "anything"] {
+            assert!(plan_prereq_merge_enabled_lookup(|_| Some(raw.to_string())));
         }
     }
 }

@@ -1237,6 +1237,7 @@ fn quality_contract(action_type: GuiActionType) -> GuiGoalContract {
         extractor_mode: GuiGoalExtractionMode::Deterministic,
         cross_app_clipboard: None,
         file_manager_select: None,
+        full_instruction: Some("quality bar goal".into()),
     }
 }
 

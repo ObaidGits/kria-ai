@@ -249,6 +249,15 @@ pub struct GuiGoalContract {
     /// so the contract is byte-for-byte unchanged while the flag is OFF.
     #[serde(default)]
     pub file_manager_select: Option<FileManagerSelectFlow>,
+    /// Multi-action fix: the sanitized FULL user instruction (bounded), so the
+    /// LLM planner can decompose EVERY requested action — not just the primary
+    /// one captured by `action_type`/`goal_summary`. `goal_summary` stays the
+    /// short templated phrase (used by deterministic/display); this carries the
+    /// complete intent (e.g. "Open Chrome and create a new tab"). `#[serde(default)]`
+    /// keeps older serialized contracts loadable; `None` falls back to the prior
+    /// behavior (planner sees only `goal_summary`).
+    #[serde(default)]
+    pub full_instruction: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -319,6 +328,9 @@ impl GuiGoalContract {
         };
         scrub(&mut self.goal_summary);
         scrub(&mut self.desired_final_state);
+        if let Some(instruction) = self.full_instruction.as_mut() {
+            scrub(instruction);
+        }
         for evidence in &mut self.source_evidence {
             scrub(&mut evidence.summary);
         }
@@ -553,6 +565,10 @@ pub fn extract_gui_goal_contract(
         // Task 8.3: file-manager select flow is OFF by default; the runtime
         // enriches it only when the `gui_cog_crossapp` flag is ON.
         file_manager_select: None,
+        // Multi-action fix: carry the sanitized FULL instruction so the LLM
+        // planner can decompose every requested action, not just the primary
+        // one reflected in `goal_summary`.
+        full_instruction: Some(safe_prompt.text.clone()),
     };
     let mut warnings = Vec::new();
     if safe_prompt.redaction_applied {
