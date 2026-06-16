@@ -83,6 +83,25 @@ impl Observation {
     pub fn is_degraded(&self) -> bool {
         self.source.starts_with("degraded")
     }
+
+    /// A stable content signature used for no-progress detection: screen size +
+    /// each element's kind/label/bbox. Independent of the random
+    /// `observation_id`/`screenshot_path`, so two observations of an UNCHANGED
+    /// screen compare equal.
+    pub fn signature(&self) -> String {
+        let mut parts: Vec<String> = self
+            .elements
+            .iter()
+            .map(|e| {
+                format!(
+                    "{}:{}:{},{},{},{}",
+                    e.kind, e.label, e.bbox.x, e.bbox.y, e.bbox.width, e.bbox.height
+                )
+            })
+            .collect();
+        parts.sort();
+        format!("{}x{}|{}", self.screen_w, self.screen_h, parts.join("|"))
+    }
 }
 
 /// One bounded next action chosen by the Brain.

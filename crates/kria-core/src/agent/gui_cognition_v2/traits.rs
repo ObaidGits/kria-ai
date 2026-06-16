@@ -54,3 +54,23 @@ pub trait GuiHands: Send + Sync {
         observation: &Observation,
     ) -> anyhow::Result<ActionResult>;
 }
+
+/// Outcome of the safety gate for one decided action (Requirement 6.1, 6.2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GateDecision {
+    /// Safe to execute now.
+    Allow,
+    /// Blocked — do not execute; stop the turn with this sanitized reason.
+    /// In the desktop integration a risky action routes through HITL; a denial
+    /// (or denied/expired approval) surfaces here as `Deny`.
+    Deny(String),
+}
+
+/// Safety gate seam: decides whether a decided action may execute. The desktop
+/// integration backs this with the existing safety policy + HITL; tests inject
+/// a fake. The loop NEVER executes an action the gate does not `Allow`
+/// (Property 5).
+#[async_trait]
+pub trait SafetyGate: Send + Sync {
+    async fn evaluate(&self, decision: &Decision, observation: &Observation) -> GateDecision;
+}
