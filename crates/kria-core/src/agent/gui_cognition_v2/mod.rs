@@ -17,6 +17,7 @@
 
 pub mod fakes;
 pub mod hands_uinput;
+pub mod decide_only;
 pub mod loop_engine;
 pub mod qwen_brain;
 pub mod sight_omniparser;
@@ -24,6 +25,7 @@ pub mod traits;
 pub mod types;
 
 pub use hands_uinput::{InputSink, UinputHands};
+pub use decide_only::{attribute, decide_only, DecisionDiagnostic, OutcomeAttribution};
 pub use loop_engine::{run_turn_v2, LoopConfig, LoopGuards, TurnOutcomeV2, TurnStatus};
 pub use qwen_brain::QwenBrain;
 pub use sight_omniparser::{OmniParserSight, ScreenCapturer};

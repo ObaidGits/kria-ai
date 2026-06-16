@@ -82,12 +82,15 @@ Order is strict: Phase 0 → 1 → 2 → 3 → 4 → 5 → 6. Within a phase, bu
     purely from fixtures — no real screen, no execution.
   - _Requirements: 3.5, 7.2, 7.4, 9.1_
 
-- [ ] 6. Phase 3 — Sight + Brain decision-only integration (no execution)
-  - Pipe real `OmniParserSight` output into `QwenBrain`; log the `Decision` and the matched
-    element; do NOT execute.
-  - Add a diagnostic that attributes a wrong outcome to Sight (target element missing) vs
-    Brain (wrong pick among present elements).
-  - Integration test on real screens: decisions are sane; mismatch source is identifiable.
+- [x] 6. Phase 3 — Sight + Brain decision-only integration (no execution)
+  - Implemented `decide_only(sight, brain, task, want_som, expected_label)` in
+    `gui_cognition_v2/decide_only.rs`: observes with the real `Sight`, decides with the real
+    `GuiBrain`, returns the `Decision` + matched element label WITHOUT executing.
+  - `OutcomeAttribution` + pure `attribute(...)` diagnose a wrong outcome to the responsible
+    layer: `TargetMissingFromSight`/`DegradedSight` (Sight) vs `BrainPickedAbsentElement`/
+    `BrainPickedWrongElement` (Brain), with `blame_layer()` + layman `human()`.
+  - Tests (7) cover correct pick, target-missing→sight, wrong-pick→brain, absent-id→brain,
+    degraded→sight, direct/terminal→none, and decide_only end-to-end with fakes.
   - _Requirements: 9.2, 11.1_
 
 - [x] 7. Phase 4 build — Hands (UinputHands)
@@ -156,3 +159,32 @@ Order is strict: Phase 0 → 1 → 2 → 3 → 4 → 5 → 6. Within a phase, bu
   impl so UI-TARS (or any future model) drops in with no other changes.
 - Do not touch `~/.kria/kria.db`, `~/.kria/secrets/`, `~/.kria/config.toml`.
 - Commit when green; keep V2 behind the flag until Task 12.
+
+## Honest status (do not fake-complete)
+
+Done: Phase 0–4 (Tasks 1–5, 7, 8), Phase 3 decision-only (Task 6), and Phase 5 loop +
+desktop wiring (Task 9). All behind `KRIA_GUI_COG_V2` (default OFF). Core V2 unit tests +
+desktop glue tests green.
+
+Real-verify harness (Task 10 infra) is BUILT — `scripts/gui_cog_eval.py` (plan-level) and
+`scripts/gui_cog_e2e_live.py` (live, auto-approve + ExecuteLive, external compositor truth
+via the GNOME extension + pgrep). It has been run live against the DEFAULT (V1) path and
+found + fixed real execution bugs (OpenApp app-hint backfill; ungroundable-shortcut repair).
+
+Tasks 10 (V2 baseline), 11, 12, 13 are intentionally LEFT OPEN — they are gated and would
+REGRESS the product if forced now:
+
+- **V2 capability gap**: the V2 `Action` set has no app-launch action (no `OpenApp`), and
+  Sight depends on the OmniParser sidecar (CPU-slow, ~180s/full-desktop, not live-viable as
+  configured). So V2 cannot yet open apps or run a fast live turn — it is NOT at parity with
+  the now-working V1 path.
+- **Task 10 (V2 baseline)**: blocked until V2 can launch apps + has a viable fast Sight.
+- **Task 11 (UI-TARS Brain)**: optional/future; needs the model + orchestrator swap.
+- **Task 12 (flip default to V2)**: MUST NOT flip until V2 passes the live eval bar.
+  Flipping now regresses real behavior (the fixed V1 path is what works live today).
+- **Task 13 (remove V1 overhead)**: MUST NOT delete V1 until Task 12 is done and proven —
+  V1 is the live, externally-verified working path.
+
+Path to truly finishing V2: give V2 an app-launch action + a fast Sight (e.g. reuse the
+existing fast perception, or a Qwen-VL multimodal Brain), pass `gui_cog_e2e_live.py` on a
+held-out prompt set, THEN flip default (12) and remove V1 (13).
