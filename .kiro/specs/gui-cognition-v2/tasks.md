@@ -48,7 +48,7 @@ Order is strict: Phase 0 → 1 → 2 → 3 → 4 → 5 → 6. Within a phase, bu
     `Done`/cap.
   - _Requirements: 1.1, 1.2, 1.3, 1.5, 5.1, 10.1_
 
-- [ ] 2. Phase 1 build — Sight (OmniParser sidecar + client)
+- [x] 2. Phase 1 build — Sight (OmniParser sidecar + client)
   - Add OmniParser to the `kria-vision` sidecar: `POST /parse { screenshot, want_som }` →
     JSON Observation (elements id/bbox/kind/label/confidence) + optional Set-of-Mark PNG.
     Keep detection light (CPU or <1 GB GPU).
@@ -59,7 +59,7 @@ Order is strict: Phase 0 → 1 → 2 → 3 → 4 → 5 → 6. Within a phase, bu
     crash.
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.6, 8.1_
 
-- [ ] 3. Phase 1 test — Sight isolation
+- [x] 3. Phase 1 test — Sight isolation
   - Isolation tests with static screenshots (Chrome, Settings, file manager): assert
     elements > 0, a known control detected + correctly labeled, Set-of-Mark overlay
     produced; measure latency.

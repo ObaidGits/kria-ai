@@ -17,10 +17,12 @@
 
 pub mod fakes;
 pub mod loop_engine;
+pub mod sight_omniparser;
 pub mod traits;
 pub mod types;
 
 pub use loop_engine::{run_turn_v2, LoopConfig, TurnOutcomeV2, TurnStatus};
+pub use sight_omniparser::OmniParserSight;
 pub use traits::{GuiBrain, GuiHands, Sight};
 pub use types::{Action, ActionResult, Bbox, Decision, Observation, TurnStep, UiElement};
 

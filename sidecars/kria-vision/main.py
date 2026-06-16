@@ -314,16 +314,153 @@ class Vl7bOmniParser:
         return text[start : end + 1]
 
 
+# ============================================================================
+# Real OmniParser backend (lightweight): YOLO icon detector + optional caption.
+#
+# Selected with `KRIA_VISION_MODEL=omniparser`. Weights are loaded lazily from
+# `KRIA_OMNIPARSER_WEIGHTS` (an ultralytics-compatible .pt icon detector). When
+# ultralytics / the weights are unavailable, `parse` returns an HONEST degraded
+# result (no fabricated elements) so the V2 Sight layer degrades cleanly. An
+# optional caption model (`KRIA_OMNIPARSER_CAPTION`, a Florence-2 dir via
+# transformers) labels each detected region; without it, the detector class name
+# is used as the label.
+# ============================================================================
+
+class OmniParser:
+    def __init__(self):
+        self.model_name = "omniparser"
+        self.weights = os.environ.get("KRIA_OMNIPARSER_WEIGHTS", "").strip()
+        self.caption_dir = os.environ.get("KRIA_OMNIPARSER_CAPTION", "").strip()
+        self._detector = None
+        self._caption = None
+        self._caption_proc = None
+        self._load_error: Optional[str] = None
+
+    def _ensure_loaded(self):
+        if self._detector is not None or self._load_error is not None:
+            return
+        try:
+            from ultralytics import YOLO  # type: ignore
+
+            if not self.weights or not os.path.exists(self.weights):
+                raise RuntimeError(
+                    f"icon-detector weights not found (KRIA_OMNIPARSER_WEIGHTS={self.weights!r})"
+                )
+            self._detector = YOLO(self.weights)
+        except Exception as exc:
+            self._load_error = f"omniparser detector unavailable: {exc}"
+            return
+        # Caption model is optional; failure here is non-fatal.
+        if self.caption_dir:
+            try:
+                from transformers import AutoModelForCausalLM, AutoProcessor  # type: ignore
+
+                self._caption = AutoModelForCausalLM.from_pretrained(
+                    self.caption_dir, trust_remote_code=True
+                )
+                self._caption_proc = AutoProcessor.from_pretrained(
+                    self.caption_dir, trust_remote_code=True
+                )
+            except Exception as exc:
+                print(f"[VISION] OmniParser caption disabled (non-fatal): {exc}")
+
+    def parse(self, image: Image.Image, monitor_id: int = 0) -> OmniParserOutput:
+        width, height = image.size
+        full_hash = f"fullhash_{width}_{height}"
+        self._ensure_loaded()
+        if self._load_error is not None:
+            print(f"[VISION] OmniParser degraded: {self._load_error}")
+            return OmniParserOutput(
+                elements=[],
+                screen_dimensions=[width, height],
+                monitor_dimensions=[[width, height]],
+                timestamp=int(time.time()),
+                visual_hash=full_hash,
+                model=self.model_name,
+                degraded=True,
+            )
+        try:
+            elements = self._detect(image, monitor_id)
+            return OmniParserOutput(
+                elements=elements,
+                screen_dimensions=[width, height],
+                monitor_dimensions=[[width, height]],
+                timestamp=int(time.time()),
+                visual_hash=full_hash,
+                model=self.model_name,
+                degraded=False,
+            )
+        except Exception as exc:
+            print(f"[VISION] OmniParser detect degraded: {exc}")
+            return OmniParserOutput(
+                elements=[],
+                screen_dimensions=[width, height],
+                monitor_dimensions=[[width, height]],
+                timestamp=int(time.time()),
+                visual_hash=full_hash,
+                model=self.model_name,
+                degraded=True,
+            )
+
+    def _detect(self, image: Image.Image, monitor_id: int) -> List[OmniElement]:
+        results = self._detector.predict(image, verbose=False)  # type: ignore
+        elements: List[OmniElement] = []
+        idx = 0
+        for result in results:
+            boxes = getattr(result, "boxes", None)
+            if boxes is None:
+                continue
+            names = getattr(result, "names", {}) or {}
+            for box in boxes:
+                xyxy = [int(v) for v in box.xyxy[0].tolist()]
+                conf = float(box.conf[0].item()) if box.conf is not None else 0.0
+                cls_id = int(box.cls[0].item()) if box.cls is not None else -1
+                cls_name = names.get(cls_id, "icon")
+                label = self._caption_region(image, xyxy) or cls_name
+                elements.append(
+                    OmniElement(
+                        id=f"omni_{idx}",
+                        element_type=cls_name,
+                        label=label,
+                        label_wrapped=f"<evidence>{label}</evidence>",
+                        bbox=xyxy,
+                        confidence=conf,
+                        monitor_id=monitor_id,
+                        dpi_scale=1.0,
+                        visual_hash=f"phash_{xyxy[0]}_{xyxy[1]}_{xyxy[2]}_{xyxy[3]}",
+                    )
+                )
+                idx += 1
+        return elements
+
+    def _caption_region(self, image: Image.Image, bbox: List[int]) -> Optional[str]:
+        if self._caption is None or self._caption_proc is None:
+            return None
+        try:
+            x1, y1, x2, y2 = bbox
+            crop = image.crop((x1, y1, max(x1 + 1, x2), max(y1 + 1, y2)))
+            prompt = "<CAPTION>"
+            inputs = self._caption_proc(text=prompt, images=crop, return_tensors="pt")
+            out = self._caption.generate(**inputs, max_new_tokens=32, num_beams=1)
+            text = self._caption_proc.batch_decode(out, skip_special_tokens=True)[0]
+            return text.strip()[:200] or None
+        except Exception:
+            return None
+
+
 def get_model():
     """Get or initialize the vision model.
 
-    Selected by `KRIA_VISION_MODEL` (Task 8): `vl7b` → real VL-7B grounding;
-    anything else (default) → the dummy stub (which reports `degraded=True`).
+    Selected by `KRIA_VISION_MODEL`: `omniparser` → lightweight YOLO icon
+    detector (+ optional caption); `vl7b` → VL-7B grounding; anything else
+    (default) → the dummy stub (which reports `degraded=True`).
     """
     global _model
     if _model is None:
         mode = os.environ.get("KRIA_VISION_MODEL", "").strip().lower()
-        if mode == "vl7b":
+        if mode == "omniparser":
+            _model = OmniParser()
+        elif mode == "vl7b":
             _model = Vl7bOmniParser()
         else:
             _model = DummyOmniParser()
@@ -457,3 +594,193 @@ if __name__ == "__main__":
     import os
     port = int(os.environ.get("KRIA_VISION_PORT", "8080"))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
+
+# ============================================================================
+# GUI Cognition V2 — Sight layer (/parse)
+#
+# A clean, V2-shaped endpoint that returns the canonical `Observation` the Rust
+# `OmniParserSight` consumes directly (ids as ints, bbox as {x,y,width,height},
+# kind/label/interactable/confidence), plus an optional Set-of-Mark overlay.
+#
+# It reuses the existing model backends (DummyOmniParser / Vl7bOmniParser /
+# OmniParser) via `get_model()`. A real, lightweight OmniParser backend
+# (YOLO icon detector + caption) is added below and selected with
+# `KRIA_VISION_MODEL=omniparser`; when its weights/deps are missing it degrades
+# HONESTLY (no fabricated elements). The original /parse_screen endpoint and the
+# V1 contract are left untouched.
+# ============================================================================
+
+from PIL import ImageDraw, ImageFont  # noqa: E402
+
+
+class V2Bbox(BaseModel):
+    x: int
+    y: int
+    width: int
+    height: int
+
+
+class V2Element(BaseModel):
+    id: int
+    bbox: V2Bbox
+    monitor_index: int = 0
+    kind: str
+    label: str
+    interactable: bool = True
+    confidence: float = 0.0
+
+
+class V2Observation(BaseModel):
+    observation_id: str
+    screenshot_path: str = ""
+    screen_w: int
+    screen_h: int
+    active_window: Optional[str] = None
+    elements: List[V2Element] = Field(default_factory=list)
+    som_image_path: Optional[str] = None
+    source: str = ""
+
+
+class ParseV2Request(BaseModel):
+    """JSON body for /parse. If `screenshot_b64` is absent the sidecar captures
+    the screen itself (via mss) — degrading honestly if capture is unavailable."""
+    screenshot_b64: Optional[str] = None
+    want_som: bool = False
+    monitor_id: int = 0
+
+
+def _kind_from_element_type(element_type: str) -> str:
+    et = (element_type or "").strip().lower()
+    mapping = {
+        "input": "text_field",
+        "textbox": "text_field",
+        "text_field": "text_field",
+        "button": "button",
+        "link": "link",
+        "checkbox": "checkbox",
+        "tab": "tab",
+        "menu": "menu",
+        "dialog": "dialog",
+        "icon": "icon",
+        "text": "text",
+    }
+    return mapping.get(et, et or "unknown")
+
+
+def _interactable(kind: str) -> bool:
+    return kind in {"button", "text_field", "link", "checkbox", "tab", "menu", "icon"}
+
+
+def _capture_screen() -> Image.Image:
+    """Capture the primary screen. Raises if no capture backend is available so
+    the caller can degrade honestly (NEVER fabricate a blank screen)."""
+    try:
+        import mss  # type: ignore
+
+        with mss.mss() as sct:
+            monitor = sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0]
+            raw = sct.grab(monitor)
+            return Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")
+    except Exception as exc:
+        raise RuntimeError(f"screen capture unavailable: {exc}")
+
+
+def _render_set_of_mark(image: Image.Image, elements: List[V2Element]) -> str:
+    """Draw numbered boxes for each element and save a PNG; return its path."""
+    annotated = image.convert("RGB").copy()
+    draw = ImageDraw.Draw(annotated)
+    for el in elements:
+        b = el.bbox
+        x1, y1, x2, y2 = b.x, b.y, b.x + b.width, b.y + b.height
+        draw.rectangle([x1, y1, x2, y2], outline=(255, 0, 0), width=2)
+        tag = str(el.id)
+        # Small filled label box at the top-left corner of the element.
+        draw.rectangle([x1, max(0, y1 - 16), x1 + 8 * len(tag) + 6, y1], fill=(255, 0, 0))
+        draw.text((x1 + 3, max(0, y1 - 15)), tag, fill=(255, 255, 255))
+    out_dir = os.environ.get("KRIA_VISION_SOM_DIR", "/tmp")
+    path = os.path.join(out_dir, f"kria_som_{uuid.uuid4().hex}.png")
+    annotated.save(path)
+    return path
+
+
+@app.post("/parse", response_model=V2Observation)
+async def parse_v2(req: ParseV2Request):
+    """GUI Cognition V2 Sight endpoint: screen → canonical Observation."""
+    observation_id = uuid.uuid4().hex
+
+    # 1. Obtain the screenshot (provided or captured). Degrade honestly on failure.
+    try:
+        if req.screenshot_b64:
+            raw = base64.b64decode(req.screenshot_b64)
+            img = Image.open(io.BytesIO(raw))
+        else:
+            img = _capture_screen()
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+    except Exception as exc:
+        print(f"[VISION] /parse capture degraded: {exc}")
+        return V2Observation(
+            observation_id=observation_id,
+            screen_w=0,
+            screen_h=0,
+            elements=[],
+            source=f"degraded:capture_unavailable:{exc}",
+        )
+
+    width, height = img.size
+
+    # 2. Run the selected model backend; convert to V2 elements.
+    try:
+        model = get_model()
+        output = model.parse(img, monitor_id=req.monitor_id)
+        if getattr(output, "degraded", False):
+            return V2Observation(
+                observation_id=observation_id,
+                screen_w=width,
+                screen_h=height,
+                elements=[],
+                source=f"degraded:model_unavailable:{getattr(output, 'model', 'unknown')}",
+            )
+        elements: List[V2Element] = []
+        for i, e in enumerate(output.elements, start=1):
+            x1, y1, x2, y2 = e.bbox[0], e.bbox[1], e.bbox[2], e.bbox[3]
+            kind = _kind_from_element_type(e.element_type)
+            elements.append(
+                V2Element(
+                    id=i,
+                    bbox=V2Bbox(x=x1, y=y1, width=max(0, x2 - x1), height=max(0, y2 - y1)),
+                    monitor_index=getattr(e, "monitor_id", 0),
+                    kind=kind,
+                    label=e.label,
+                    interactable=_interactable(kind),
+                    confidence=e.confidence,
+                )
+            )
+    except Exception as exc:
+        print(f"[VISION] /parse model degraded: {exc}")
+        return V2Observation(
+            observation_id=observation_id,
+            screen_w=width,
+            screen_h=height,
+            elements=[],
+            source=f"degraded:model_error:{exc}",
+        )
+
+    # 3. Optional Set-of-Mark overlay.
+    som_path: Optional[str] = None
+    if req.want_som and elements:
+        try:
+            som_path = _render_set_of_mark(img, elements)
+        except Exception as exc:
+            print(f"[VISION] /parse SoM render failed (non-fatal): {exc}")
+
+    return V2Observation(
+        observation_id=observation_id,
+        screen_w=width,
+        screen_h=height,
+        active_window=None,
+        elements=elements,
+        som_image_path=som_path,
+        source=f"omniparser:{getattr(output, 'model', 'unknown')}",
+    )

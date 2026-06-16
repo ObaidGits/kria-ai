@@ -21,3 +21,14 @@ python-multipart>=0.0.9
 # onnxruntime>=1.16.0
 # transformers>=4.35.0
 # opencv-python>=4.8.0
+
+# GUI Cognition V2 — Sight (/parse) optional dependencies.
+# The /parse endpoint and its degraded path work without these. Enable them for
+# the real OmniParser backend (KRIA_VISION_MODEL=omniparser) and self-capture:
+#   mss            -> screen capture when no screenshot is supplied
+#   ultralytics    -> YOLO icon detector (KRIA_OMNIPARSER_WEIGHTS=<.pt>)
+#   transformers   -> optional Florence-2 caption (KRIA_OMNIPARSER_CAPTION=<dir>)
+# Missing deps/weights degrade honestly (no fabricated elements).
+# mss>=9.0.0
+# ultralytics>=8.0.0
+# transformers>=4.35.0
