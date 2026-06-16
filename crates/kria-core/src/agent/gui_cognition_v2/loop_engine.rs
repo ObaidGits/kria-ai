@@ -277,7 +277,10 @@ pub async fn run_turn_v2(
 
         // Arm no-progress tracking: remember the signature the action acted on,
         // so the next observe can detect whether the screen actually changed.
-        if executed_ok && config.no_progress_limit > 0 {
+        // Armed on EVERY executed step (success OR failure) so a repeatedly
+        // FAILING action (e.g. an app name that won't resolve) trips the
+        // no-progress stop instead of running to the step cap.
+        if config.no_progress_limit > 0 {
             prev_executed_sig = Some(observation.signature());
         }
 

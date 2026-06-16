@@ -176,19 +176,23 @@ each behind `KRIA_GUI_COG_V2`, never fake-pass, external verify):
     `screen_changed = Some(false)`. Test: `records_screen_changed_on_each_executed_step`.
   - _Requirements: 5.5, 9.3, 9.4_
 
-- [ ] 16. A5 — V2 live eval (held-out) must pass
-  - Make `scripts/gui_cog_e2e_live.py` V2-aware (parse the V2 response shape: engine/status/
-    steps) and run a held-out prompt set (apps + multi-action + a destructive-ask case) in
-    `test_substrate` with `KRIA_GUI_COG_V2=1`. External compositor/pgrep truth; record
-    PASS/FAIL/MISMATCH honestly. Must clear the bar before A6.
+- [~] 16. A5 — V2 live eval (held-out) — RAN; partial pass, A6 GATED
+  - `scripts/gui_cog_e2e_v2.py` (V2-aware: engine/status/steps) ran a held-out set in
+    test_substrate with `KRIA_GUI_COG_V2=1`, external compositor/pgrep truth. Result:
+    **3 PASS, 0 FAIL, 1 MISMATCH (artifact: app already open), 2 BLOCKED (real gaps)**.
+  - Gaps found (must fix before A6): (1) app-registry alias misses some names ("files
+    manager" did not resolve to nautilus — shared infra); (2) the Brain occasionally returns
+    Ask upfront on some multi-action phrasings ("open chrome then close the tab").
+  - Loop fix landed from this eval: a FAILING action now arms no-progress (a repeatedly
+    unresolvable open stops at the no-progress limit instead of the step cap).
   - _Requirements: 7.4, 9.3, 9.4, 9.5, 10.2_
 
-- [ ] 17. A6 — flip default (Task 12) + remove V1 over-built pipeline (Task 13)
-  - Only after A5 passes: flip `KRIA_GUI_COG_V2` default ON (falsy = documented V1 rollback),
-    then delete the V1 over-built pipeline (dual representation, capability ladder,
-    goal-pursuit guard, heavy validators, upfront planner, large contract) while KEEPING
-    shared infra (uinput, capture, app-registry, safety/HITL, audit, cancel, verification,
-    orchestration). Re-run all suites + GUI live eval; `cargo build` clean.
+- [ ] 17. A6 — flip default (Task 12) + remove V1 over-built pipeline (Task 13) — BLOCKED on A5
+  - GATED: A5 has not cleanly passed yet (app-name resolution + occasional Brain Ask). Do NOT
+    flip default or delete V1 until A5 is green — flipping now would regress. Only after A5
+    passes: flip `KRIA_GUI_COG_V2` default ON (falsy = V1 rollback), then delete the V1
+    over-built pipeline while KEEPING shared infra (uinput, capture, app-registry, safety/HITL,
+    audit, cancel, verification, orchestration). Re-run all suites + GUI live eval.
   - _Requirements: 10.2, 10.3, 10.4, 10.5_
 
 ## Notes
