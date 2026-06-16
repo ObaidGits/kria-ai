@@ -4726,40 +4726,61 @@ fn action_requires_context_target(action_kind: &str) -> bool {
 /// phrase to its keyboard combo. This is NOT per-prompt hardcoding — it is the
 /// universal desktop shortcut set every major app honors.
 ///
-/// Returns the combo (e.g. `"ctrl+t"`) for the FIRST matched action, else `None`.
-/// Order matters: more specific phrases are checked first.
+/// Matching is TOKEN-based (whole words), so filler words and articles do not
+/// break it: "close the current tab" and "close tab" both map to Ctrl+W. A rule
+/// matches when ALL of its required word tokens are present. Rules are checked
+/// most-specific first. Returns the combo (e.g. `"ctrl+t"`) or `None`.
 pub fn standard_shortcut_for_action(text: &str) -> Option<&'static str> {
-    let t = text.to_ascii_lowercase();
-    const TABLE: &[(&[&str], &str)] = &[
-        (&["reopen", "restore tab", "reopen closed tab"], "ctrl+shift+t"),
-        (&["close tab", "close the tab", "close current tab"], "ctrl+w"),
-        (
-            &[
-                "new tab",
-                "open a new tab",
-                "create a new tab",
-                "create new tab",
-                "add a new tab",
-                "add a tab",
-                "open new tab",
-            ],
-            "ctrl+t",
-        ),
-        (&["new window", "open a new window"], "ctrl+n"),
-        (&["reset zoom", "actual size", "default zoom"], "ctrl+0"),
-        (&["zoom in", "increase zoom", "zoom-in"], "ctrl+plus"),
-        (&["zoom out", "decrease zoom", "zoom-out"], "ctrl+minus"),
-        (&["select all"], "ctrl+a"),
-        (&["reload", "refresh the page", "refresh page", "refresh"], "ctrl+r"),
-        (&["print"], "ctrl+p"),
-        (&["redo"], "ctrl+shift+z"),
-        (&["undo"], "ctrl+z"),
-        (&["save"], "ctrl+s"),
-    ];
-    for (phrases, combo) in TABLE {
-        if phrases.iter().any(|p| t.contains(p)) {
-            return Some(*combo);
-        }
+    // Normalize to a set of lowercase alphanumeric word tokens.
+    let tokens: std::collections::HashSet<String> = text
+        .to_ascii_lowercase()
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|t| !t.is_empty())
+        .map(|t| t.to_string())
+        .collect();
+    let has = |w: &str| tokens.contains(w);
+    let all = |ws: &[&str]| ws.iter().all(|w| has(w));
+
+    // Order: most specific first so e.g. "close tab" wins over "new tab" and
+    // "reopen" wins over "new".
+    if has("reopen") || all(&["restore", "tab"]) {
+        return Some("ctrl+shift+t");
+    }
+    if all(&["close", "tab"]) {
+        return Some("ctrl+w");
+    }
+    if all(&["new", "tab"]) {
+        return Some("ctrl+t");
+    }
+    if all(&["new", "window"]) {
+        return Some("ctrl+n");
+    }
+    if all(&["reset", "zoom"]) || all(&["actual", "size"]) {
+        return Some("ctrl+0");
+    }
+    if all(&["zoom", "in"]) {
+        return Some("ctrl+plus");
+    }
+    if all(&["zoom", "out"]) {
+        return Some("ctrl+minus");
+    }
+    if all(&["select", "all"]) {
+        return Some("ctrl+a");
+    }
+    if has("reload") || has("refresh") {
+        return Some("ctrl+r");
+    }
+    if has("redo") {
+        return Some("ctrl+shift+z");
+    }
+    if has("undo") {
+        return Some("ctrl+z");
+    }
+    if has("print") {
+        return Some("ctrl+p");
+    }
+    if has("save") {
+        return Some("ctrl+s");
     }
     None
 }
@@ -4803,7 +4824,7 @@ where
 /// summary/control-hint denotes a recognized universal action. A genuine click
 /// on a non-standard control (e.g. "Submit") is never altered. Returns the
 /// number of steps converted.
-pub fn repair_shortcut_steps(plan: &mut GuiLlmPlan) -> usize {
+pub fn repair_shortcut_steps(plan: &mut GuiLlmPlan, contract: &GuiGoalContract) -> usize {
     let mut converted = 0usize;
 
     for step in &mut plan.typed_steps {
@@ -4859,6 +4880,40 @@ pub fn repair_shortcut_steps(plan: &mut GuiLlmPlan) -> usize {
                     .is_empty()
             {
                 step.target_query.label = Some("keyboard shortcut".into());
+            }
+        }
+    }
+
+    // Safety-net for model OMISSION: a natural "open <app> and <standard action>"
+    // prompt sometimes yields a plan that drops the trailing action entirely
+    // (only OpenApp). If the FULL instruction names a universal shortcut action
+    // that is NOT already in the plan, append the PressKey so the second action
+    // is not silently lost. Scoped to the "open/switch then act" shape to avoid
+    // synthesizing steps for unrelated prompts.
+    if let Some(instruction) = contract.full_instruction.as_deref() {
+        if let Some(combo) = standard_shortcut_for_action(instruction) {
+            let has_opener = plan
+                .typed_steps
+                .iter()
+                .any(|s| matches!(s.step_type.as_str(), "OpenApp" | "SwitchWindow"));
+            let already_present = plan.typed_steps.iter().any(|s| {
+                s.step_type == "PressKey" && s.text_payload_summary.as_deref() == Some(combo)
+            });
+            if has_opener && !already_present {
+                let mut step = typed_step(
+                    "shortcut-net-1",
+                    "PressKey",
+                    "Perform the requested keyboard shortcut",
+                    "the target window is focused",
+                    "the screen responds to the shortcut",
+                    "screen_changed",
+                    contract,
+                );
+                step.target_control_hint = None;
+                step.text_payload_summary = Some(combo.to_string());
+                step.text_payload_hash = None;
+                plan.typed_steps.push(step);
+                converted += 1;
             }
         }
     }
@@ -6835,14 +6890,21 @@ mod shortcut_repair_tests {
         assert_eq!(standard_shortcut_for_action("create a new tab"), Some("ctrl+t"));
         assert_eq!(standard_shortcut_for_action("Open New Tab"), Some("ctrl+t"));
         assert_eq!(standard_shortcut_for_action("close the tab"), Some("ctrl+w"));
+        // Token-based: filler words ("the", "current") must not break matching.
+        assert_eq!(standard_shortcut_for_action("close the current tab"), Some("ctrl+w"));
         assert_eq!(standard_shortcut_for_action("reopen closed tab"), Some("ctrl+shift+t"));
         assert_eq!(standard_shortcut_for_action("save the file"), Some("ctrl+s"));
         assert_eq!(standard_shortcut_for_action("reload the page"), Some("ctrl+r"));
+        assert_eq!(standard_shortcut_for_action("refresh this page"), Some("ctrl+r"));
         assert_eq!(standard_shortcut_for_action("zoom in"), Some("ctrl+plus"));
-        assert_eq!(standard_shortcut_for_action("new window"), Some("ctrl+n"));
-        // Non-standard control → no conversion.
+        assert_eq!(standard_shortcut_for_action("open a new window"), Some("ctrl+n"));
+        assert_eq!(standard_shortcut_for_action("select all the text"), Some("ctrl+a"));
+        // "close tab" must win over "new tab" when both words could appear.
+        assert_eq!(standard_shortcut_for_action("close the current browser tab"), Some("ctrl+w"));
+        // Non-standard control → no conversion. "saved" is a different token to "save".
         assert_eq!(standard_shortcut_for_action("the Submit button"), None);
         assert_eq!(standard_shortcut_for_action("a contact named Alice"), None);
+        assert_eq!(standard_shortcut_for_action("open saved searches"), None);
     }
 
     #[test]
@@ -6850,7 +6912,7 @@ mod shortcut_repair_tests {
         let mut plan = plan_with_typed(vec![
             click_step("s1", "click the new tab button", Some("new tab button")),
         ]);
-        let n = repair_shortcut_steps(&mut plan);
+        let n = repair_shortcut_steps(&mut plan, &contract());
         assert_eq!(n, 1);
         let step = &plan.typed_steps[0];
         assert_eq!(step.step_type, "PressKey");
@@ -6861,12 +6923,69 @@ mod shortcut_repair_tests {
 
     #[test]
     fn leaves_genuine_control_clicks_untouched() {
+        // A non-standard control click in a plan with no opener: neither the
+        // conversion nor the omission safety-net should fire.
+        let c = super::super::goal_contract::extract_gui_goal_contract(
+            "click the Submit button",
+            None,
+        )
+        .contract;
         let mut plan = plan_with_typed(vec![
             click_step("s1", "click the Submit button", Some("Submit")),
         ]);
-        let n = repair_shortcut_steps(&mut plan);
+        let n = repair_shortcut_steps(&mut plan, &c);
         assert_eq!(n, 0);
         assert_eq!(plan.typed_steps[0].step_type, "ClickControl");
+    }
+
+    #[test]
+    fn omission_safety_net_appends_missing_trailing_shortcut() {
+        // Model dropped the trailing action: plan is OpenApp-only, but the full
+        // instruction asks to reload. The net appends PressKey ctrl+r.
+        let c = super::super::goal_contract::extract_gui_goal_contract(
+            "open chrome and reload the page",
+            None,
+        )
+        .contract;
+        let open = typed_step(
+            "s1",
+            "OpenApp",
+            "open the browser",
+            "browser available",
+            "browser visible",
+            "window_visible",
+            &c,
+        );
+        let mut plan = plan_with_typed(vec![open]);
+        let n = repair_shortcut_steps(&mut plan, &c);
+        assert_eq!(n, 1);
+        assert_eq!(plan.typed_steps.len(), 2);
+        assert_eq!(plan.typed_steps[1].step_type, "PressKey");
+        assert_eq!(plan.typed_steps[1].text_payload_summary.as_deref(), Some("ctrl+r"));
+    }
+
+    #[test]
+    fn omission_net_does_not_double_add_when_action_present() {
+        // The action is already in the plan (converted) → net must not duplicate.
+        let c = super::super::goal_contract::extract_gui_goal_contract(
+            "open chrome and create a new tab",
+            None,
+        )
+        .contract;
+        let open = typed_step(
+            "s1", "OpenApp", "open chrome", "pre", "post", "window_visible", &c,
+        );
+        let mut new_tab = click_step("s2", "create a new tab", None);
+        new_tab.target_control_hint = None;
+        let mut plan = plan_with_typed(vec![open, new_tab]);
+        repair_shortcut_steps(&mut plan, &c);
+        let presskeys: Vec<_> = plan
+            .typed_steps
+            .iter()
+            .filter(|s| s.step_type == "PressKey")
+            .collect();
+        assert_eq!(presskeys.len(), 1, "must not duplicate the ctrl+t step");
+        assert_eq!(presskeys[0].text_payload_summary.as_deref(), Some("ctrl+t"));
     }
 
     #[test]
@@ -6920,7 +7039,7 @@ mod shortcut_repair_tests {
             "an ungroundable new-tab ClickControl should block before repair"
         );
 
-        let n = repair_shortcut_steps(&mut plan);
+        let n = repair_shortcut_steps(&mut plan, &c);
         assert_eq!(n, 1);
         let after = validate_llm_plan(&plan, &request);
         assert_ne!(

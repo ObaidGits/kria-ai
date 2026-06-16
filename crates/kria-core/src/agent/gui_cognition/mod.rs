@@ -1485,7 +1485,7 @@ where
                     // being rejected → falling back to "open app only". Rollback:
                     // `KRIA_GUI_COG_SHORTCUT_REPAIR=0`.
                     let shortcut_repaired = if shortcut_repair_enabled() {
-                        repair_shortcut_steps(&mut plan)
+                        repair_shortcut_steps(&mut plan, &request.contract)
                     } else {
                         0
                     };
