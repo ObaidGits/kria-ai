@@ -6572,21 +6572,27 @@ impl kria_core::agent::gui_cognition_v2::InputSink for V2DesktopInputSink {
     }
 }
 
-/// V2 `SafetyGate` over the existing global safety halt + automation switch.
-/// Honest: it only ever `Allow`s or `Deny`s — it never fabricates a human
-/// approval. A `Deny` halts the turn (the loop guarantees no execution).
+/// V2 `SafetyGate` over the existing global safety halt + automation switch +
+/// per-action risk classification (A3 parity). Honest: it never fabricates an
+/// approval. `Black` is always blocked; `Red` requires approval (auto-approved
+/// only inside the test substrate, else denied with a clear "needs approval"
+/// reason — the safe floor: a risky action NEVER executes unapproved); `Green`/
+/// `Yellow` proceed. A `Deny` halts the turn (the loop guarantees no execution).
 struct V2DesktopSafetyGate {
     automation_enabled: bool,
+    /// Whether risky (`Red`) actions may be auto-approved here (test substrate only).
+    auto_approve: bool,
 }
 
 #[async_trait::async_trait]
 impl kria_core::agent::gui_cognition_v2::SafetyGate for V2DesktopSafetyGate {
     async fn evaluate(
         &self,
-        _decision: &kria_core::agent::gui_cognition_v2::Decision,
-        _observation: &kria_core::agent::gui_cognition_v2::Observation,
+        decision: &kria_core::agent::gui_cognition_v2::Decision,
+        observation: &kria_core::agent::gui_cognition_v2::Observation,
     ) -> kria_core::agent::gui_cognition_v2::GateDecision {
         use kria_core::agent::gui_cognition_v2::GateDecision;
+        use kria_core::safety::RiskLevel;
         if kria_core::safety::is_halted() {
             return GateDecision::Deny(
                 kria_core::safety::halt_reason()
@@ -6596,7 +6602,23 @@ impl kria_core::agent::gui_cognition_v2::SafetyGate for V2DesktopSafetyGate {
         if !self.automation_enabled {
             return GateDecision::Deny("GUI automation is disabled (master switch off)".into());
         }
-        GateDecision::Allow
+        match kria_core::agent::gui_cognition_v2::assess_action_risk(decision, observation) {
+            RiskLevel::Black => GateDecision::Deny(
+                "This action is blocked by KRIA's safety blacklist and cannot be performed.".into(),
+            ),
+            RiskLevel::Red => {
+                if self.auto_approve {
+                    GateDecision::Allow
+                } else {
+                    GateDecision::Deny(
+                        "This looks like a risky/destructive action; it needs your explicit \
+                         approval before I can do it."
+                            .into(),
+                    )
+                }
+            }
+            RiskLevel::Green | RiskLevel::Yellow => GateDecision::Allow,
+        }
     }
 }
 
@@ -6693,7 +6715,11 @@ pub(super) async fn run_gui_cognition_v2(
         Some(orch) => orch.status().await.automation_enabled,
         None => false,
     };
-    let gate: StdArc<dyn v2::SafetyGate> = StdArc::new(V2DesktopSafetyGate { automation_enabled });
+    let gate: StdArc<dyn v2::SafetyGate> = StdArc::new(V2DesktopSafetyGate {
+        automation_enabled,
+        auto_approve: kria_core::agent::gui_cognition::execution_environment::GuiExecutionEnvironment::from_env()
+            .allows_auto_approval(),
+    });
 
     let cancel_flag = StdArc::new(std::sync::atomic::AtomicBool::new(false));
     let cancel_token =

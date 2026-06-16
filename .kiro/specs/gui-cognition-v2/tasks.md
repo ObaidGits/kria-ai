@@ -151,6 +151,45 @@ Order is strict: Phase 0 → 1 → 2 → 3 → 4 → 5 → 6. Within a phase, bu
   - Re-run core/desktop/UI suites + GUI real-verify; `cargo build` clean.
   - _Requirements: 10.3, 10.4, 10.5_
 
+## Parity-to-default queue (A3–A6) — bring V2 to parity, then flip + remove V1
+
+Status so far: Tasks 1–9 done; plus parity increments already landed + live-proven —
+app-launch (`OpenApp`), fast perception-light Sight, dedup-open, and the deterministic
+multi-action follow-up assist. Remaining queue (do strictly in order, build→test→commit;
+each behind `KRIA_GUI_COG_V2`, never fake-pass, external verify):
+
+- [x] 14. A3 — Safety/HITL parity (must-do before default)
+  - `gui_cognition_v2/safety.rs`: pure `assess_action_risk(decision, observation) -> RiskLevel`
+    (reuses `kria_core::safety::{RiskLevel, BlacklistChecker}`): typed text / clicked label /
+    key combo → `Black` (hardcoded blacklist e.g. `rm -rf /`), `Red` (destructive verbs:
+    delete/remove/send/pay/format/shutdown/… whole-word), else `Green`. 5 unit tests.
+  - `V2DesktopSafetyGate` now: halt + master-switch deny; `Black` always denied; `Red`
+    auto-approved ONLY in `test_substrate` else denied with "needs your approval" (safe floor —
+    risky never executes unapproved); `Green`/`Yellow` allow. `auto_approve` derived from
+    `GuiExecutionEnvironment::from_env()`.
+  - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5_
+
+- [ ] 15. A4 — verification reuse (re-observe / screenshot-diff)
+  - Strengthen the loop's post-action verification beyond `screen_changed`: reuse the
+    fresh re-observe + a screenshot/signature diff so a "did nothing" action is caught.
+    Keep it honest (INCONCLUSIVE where the environment blocks it).
+  - _Requirements: 5.5, 9.3, 9.4_
+
+- [ ] 16. A5 — V2 live eval (held-out) must pass
+  - Make `scripts/gui_cog_e2e_live.py` V2-aware (parse the V2 response shape: engine/status/
+    steps) and run a held-out prompt set (apps + multi-action + a destructive-ask case) in
+    `test_substrate` with `KRIA_GUI_COG_V2=1`. External compositor/pgrep truth; record
+    PASS/FAIL/MISMATCH honestly. Must clear the bar before A6.
+  - _Requirements: 7.4, 9.3, 9.4, 9.5, 10.2_
+
+- [ ] 17. A6 — flip default (Task 12) + remove V1 over-built pipeline (Task 13)
+  - Only after A5 passes: flip `KRIA_GUI_COG_V2` default ON (falsy = documented V1 rollback),
+    then delete the V1 over-built pipeline (dual representation, capability ladder,
+    goal-pursuit guard, heavy validators, upfront planner, large contract) while KEEPING
+    shared infra (uinput, capture, app-registry, safety/HITL, audit, cancel, verification,
+    orchestration). Re-run all suites + GUI live eval; `cargo build` clean.
+  - _Requirements: 10.2, 10.3, 10.4, 10.5_
+
 ## Notes
 - Read backend env flags live per turn (matching `KRIA_GUI_COG_*`); flip without rebuild.
 - Each phase: build before test; isolation before integration; external verify, never
