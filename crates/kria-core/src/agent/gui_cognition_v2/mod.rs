@@ -42,7 +42,13 @@ pub use types::{Action, ActionResult, Bbox, Decision, Observation, TurnStep, UiE
 /// (`1`/`true`/`yes`/`on`) enable it; everything else (including absent) is OFF.
 pub const V2_ENV_FLAG: &str = "KRIA_GUI_COG_V2";
 
-/// Whether the V2 pipeline is enabled (default OFF — see [`V2_ENV_FLAG`]).
+/// Whether the V2 pipeline is enabled.
+///
+/// DEFAULT-ON as of the A6 flip (Task 12): V2 passed the held-out live eval
+/// (`scripts/gui_cog_e2e_v2.py` — 6/6, external compositor/pgrep truth), so it is
+/// now the live GUI-cognition path. An explicit falsy value
+/// (`0`/`false`/`no`/`off`/empty) is the documented rollback to the byte-for-byte
+/// V1 pipeline; any other value (including absent) is V2.
 pub fn v2_enabled() -> bool {
     v2_enabled_lookup(|key| std::env::var(key).ok())
 }
@@ -52,11 +58,13 @@ pub fn v2_enabled_lookup<F>(lookup: F) -> bool
 where
     F: Fn(&str) -> Option<String>,
 {
-    matches!(
+    // Default-ON with a falsy rollback (mirrors the desktop `from_env_default_on`
+    // convention): only an explicit falsy value routes back to V1.
+    !matches!(
         lookup(V2_ENV_FLAG)
             .map(|v| v.trim().to_ascii_lowercase())
             .as_deref(),
-        Some("1") | Some("true") | Some("yes") | Some("on")
+        Some("0") | Some("false") | Some("no") | Some("off") | Some("")
     )
 }
 
@@ -65,14 +73,16 @@ mod flag_tests {
     use super::*;
 
     #[test]
-    fn v2_flag_defaults_off_and_enables_on_truthy() {
-        // Absent => OFF (V1 default until proven).
-        assert!(!v2_enabled_lookup(|_| None));
-        for raw in ["1", "true", "TRUE", "yes", "on", " On "] {
-            assert!(v2_enabled_lookup(|_| Some(raw.to_string())), "{raw:?} should enable");
+    fn v2_flag_defaults_on_and_rolls_back_on_falsy() {
+        // Absent => ON (V2 is now the default after the A6 flip).
+        assert!(v2_enabled_lookup(|_| None));
+        // Truthy => ON.
+        for raw in ["1", "true", "TRUE", "yes", "on", " On ", "maybe"] {
+            assert!(v2_enabled_lookup(|_| Some(raw.to_string())), "{raw:?} should be V2");
         }
-        for raw in ["0", "false", "no", "off", "", "maybe"] {
-            assert!(!v2_enabled_lookup(|_| Some(raw.to_string())), "{raw:?} should stay off");
+        // Explicit falsy => documented V1 rollback.
+        for raw in ["0", "false", "no", "off", "", "  Off "] {
+            assert!(!v2_enabled_lookup(|_| Some(raw.to_string())), "{raw:?} should roll back to V1");
         }
     }
 }

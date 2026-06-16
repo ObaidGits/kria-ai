@@ -137,10 +137,11 @@ Order is strict: Phase 0 → 1 → 2 → 3 → 4 → 5 → 6. Within a phase, bu
   - A/B against Qwen+OmniParser on the eval harness; no changes to Sight/Hands/loop.
   - _Requirements: 3.6, 8.3, 8.4_
 
-- [ ] 12. Phase 6 — flip V2 to default
-  - After V2 meets the eval bar, flip `KRIA_GUI_COG_V2` to default ON (falsy = documented
-    V1 rollback). Verify safety/HITL, audit, cancel/watchdog, verification, eval harness,
-    uinput, model-swap all remain intact and green.
+- [x] 12. Phase 6 — flip V2 to default
+  - DONE: `v2_enabled()` is now default-ON (falsy `KRIA_GUI_COG_V2` = documented V1
+    rollback, covered by `flag_tests`). Verified live in default mode (no flag): `engine=v2`,
+    held-out eval 6 PASS / 0 FAIL / 0 MISMATCH / 0 BLOCKED. Safety/HITL (A3), verification
+    re-observe (A4), cancel/no-progress, audit, uinput, model-swap all intact.
   - _Requirements: 10.2, 10.5_
 
 - [ ] 13. Phase 6 — remove V1 over-built logic
@@ -194,12 +195,24 @@ each behind `KRIA_GUI_COG_V2`, never fake-pass, external verify):
   - Loop fix landed earlier: a FAILING action now arms no-progress.
   - _Requirements: 7.4, 9.3, 9.4, 9.5, 10.2_
 
-- [ ] 17. A6 — flip default (Task 12) + remove V1 over-built pipeline (Task 13) — BLOCKED on A5
-  - GATED: A5 has not cleanly passed yet (app-name resolution + occasional Brain Ask). Do NOT
-    flip default or delete V1 until A5 is green — flipping now would regress. Only after A5
-    passes: flip `KRIA_GUI_COG_V2` default ON (falsy = V1 rollback), then delete the V1
-    over-built pipeline while KEEPING shared infra (uinput, capture, app-registry, safety/HITL,
-    audit, cancel, verification, orchestration). Re-run all suites + GUI live eval.
+- [~] 17. A6 — flip default (Task 12 DONE) + remove V1 over-built pipeline (Task 13 PENDING)
+  - **Task 12 — DONE + verified.** `v2_enabled()` flipped to DEFAULT-ON (falsy
+    `KRIA_GUI_COG_V2` = byte-for-byte V1 rollback; logic covered by `flag_tests`).
+    Verified LIVE in default mode (no env flag set): `engine=v2`, held-out eval
+    6 PASS / 0 FAIL / 0 MISMATCH / 0 BLOCKED. Desktop routing reads core `v2_enabled()`,
+    so the flip propagates; stale "default OFF" doc comments updated.
+  - **Known V2 quality gap (not a flip regression):** multi-action follow-up
+    (e.g. "open chrome AND new tab/reload/close tab") is INCONSISTENT — the 7B Brain
+    sometimes returns `needs_clarification` after the open instead of chaining the
+    follow-up `Key`. App-launch + single-action are solid. This should be hardened
+    (stronger `apply_followup_assist` / Brain prompt) before V1 is deleted.
+  - **Task 13 — PENDING (gated on confirmation + soak).** Deleting the V1 over-built
+    pipeline (dual representation, capability ladder, goal-pursuit guard, heavy
+    validators, upfront planner, large contract) is a large destructive change. With V2
+    only just flipped to default and multi-action chaining still variable, removing the
+    V1 rollback net now is high-risk. Recommendation: let V2 soak as default + harden
+    multi-action first, then delete V1 in a dedicated change. KEEP shared infra (uinput,
+    capture, app-registry, safety/HITL, audit, cancel, verification, orchestration).
   - _Requirements: 10.2, 10.3, 10.4, 10.5_
 
 ## Notes

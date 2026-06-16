@@ -5179,10 +5179,11 @@ pub(super) async fn desktop_gui_cognition_command_capture_streamed(
         None => app_state.current_session_id.read().await.clone(),
     };
 
-    // GUI Cognition V2 routing (Part B). When `KRIA_GUI_COG_V2` is truthy the
-    // turn runs through the new Sight/Brain/Hands loop (`run_gui_cognition_v2`)
-    // instead of the V1 runtime below. Read live per turn from the server-side
-    // environment so a client cannot toggle it. Default OFF → V1 byte-for-byte.
+    // GUI Cognition V2 routing (Part B). V2 is now the DEFAULT path (A6 flip,
+    // Task 12): the turn runs through the Sight/Brain/Hands loop
+    // (`run_gui_cognition_v2`) instead of the V1 runtime below. Read live per
+    // turn from the server-side environment so a client cannot toggle it. An
+    // explicit falsy `KRIA_GUI_COG_V2` rolls back to V1 byte-for-byte.
     if kria_core::agent::gui_cognition_v2::v2_enabled() {
         return run_gui_cognition_v2(
             message,
@@ -6297,7 +6298,8 @@ mod real_vision_tests {
 //     existing channel and returning the same `DesktopChatCommandCapture` shape
 //     as the V1 path.
 //
-// Reached only when `KRIA_GUI_COG_V2` is truthy (default OFF → V1 unchanged).
+// Reached by default (A6 flip, Task 12); an explicit falsy `KRIA_GUI_COG_V2`
+// rolls back to the V1 path unchanged.
 // ============================================================================
 
 /// Shared per-turn screen dimensions, written by the capturer (from the captured
