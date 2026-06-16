@@ -47,7 +47,7 @@ use self::llm_planner::{
     ensure_step_payloads, ensure_step_verification_strategies, parse_llm_plan, plan_summary_json,
     planner_summary_json, typed_plan_steps, validate_llm_plan, validate_plan_for_resolution,
     apply_auto_prerequisite, AppObservability,
-    repair_shortcut_steps, shortcut_repair_enabled,
+    repair_shortcut_steps, shortcut_repair_enabled, backfill_open_app_hints,
     GuiLlmPlan, GuiLlmPlanner, GuiLlmPlannerRequest, GuiPlanValidationReport,
     GuiPlanValidationStatus, GuiPlannerCapability, GuiPlannerHealthSignal, GuiPlannerHealthTracker,
     GuiPlannerMode, GuiPlannerSelection, GuiSmartPlannerConfig, GuiStepCompletenessConfig,
@@ -1489,6 +1489,8 @@ where
                     } else {
                         0
                     };
+                    let app_backfilled = backfill_open_app_hints(&mut plan, &request.contract);
+                    let _ = app_backfilled;
                     let validation = validate_llm_plan(&plan, request);
                     events.push(serde_json::json!({
                         "type": "LlmPlanningCompleted",

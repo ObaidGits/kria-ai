@@ -4921,6 +4921,39 @@ pub fn repair_shortcut_steps(plan: &mut GuiLlmPlan, contract: &GuiGoalContract) 
     converted
 }
 
+/// Backfill a missing `target_app_hint` on `OpenApp`/`SwitchWindow` typed steps
+/// from the goal contract. The planner model sometimes emits an `OpenApp` step
+/// WITHOUT the app hint (the contract captured it, but the step did not), and
+/// the executor then refuses with "OpenApp has no app hint to resolve" — so the
+/// app never opens. This deterministically copies the contract's
+/// `target_app_hint` into any opener step that lacks one. Returns the count.
+pub fn backfill_open_app_hints(plan: &mut GuiLlmPlan, contract: &GuiGoalContract) -> usize {
+    let hint = match contract
+        .target_app_hint
+        .as_deref()
+        .map(str::trim)
+        .filter(|h| !h.is_empty())
+    {
+        Some(h) => h.to_string(),
+        None => return 0,
+    };
+    let mut n = 0usize;
+    for step in &mut plan.typed_steps {
+        if matches!(step.step_type.as_str(), "OpenApp" | "SwitchWindow")
+            && step
+                .target_app_hint
+                .as_deref()
+                .map(str::trim)
+                .unwrap_or("")
+                .is_empty()
+        {
+            step.target_app_hint = Some(hint.clone());
+            n += 1;
+        }
+    }
+    n
+}
+
 
 fn is_clarification_step(step: &GuiLlmPlanStep) -> bool {
     step.action_kind == "AskClarification"
@@ -7051,6 +7084,18 @@ mod shortcut_repair_tests {
         assert_eq!(plan.typed_steps.len(), 2);
         assert_eq!(plan.typed_steps[1].step_type, "PressKey");
         assert_eq!(plan.typed_steps[1].text_payload_summary.as_deref(), Some("ctrl+t"));
+    }
+
+    #[test]
+    fn backfills_missing_open_app_hint_from_contract() {
+        let c = super::super::goal_contract::extract_gui_goal_contract("open the calculator", None).contract;
+        // The model emitted an OpenApp step with NO app hint.
+        let mut open = typed_step("s1", "OpenApp", "open the app", "pre", "post", "window_visible", &c);
+        open.target_app_hint = None;
+        let mut plan = plan_with_typed(vec![open]);
+        let n = backfill_open_app_hints(&mut plan, &c);
+        assert_eq!(n, 1);
+        assert_eq!(plan.typed_steps[0].target_app_hint.as_deref(), Some("calculator"));
     }
 
     #[test]
