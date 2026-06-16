@@ -100,7 +100,15 @@ impl Observation {
             })
             .collect();
         parts.sort();
-        format!("{}x{}|{}", self.screen_w, self.screen_h, parts.join("|"))
+        // Include the active window so progress is detected even for element-free
+        // (perception-light) observations where only the focused window changes.
+        format!(
+            "{}x{}|{}|{}",
+            self.screen_w,
+            self.screen_h,
+            self.active_window.as_deref().unwrap_or(""),
+            parts.join("|")
+        )
     }
 }
 

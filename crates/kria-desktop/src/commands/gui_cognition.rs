@@ -6366,6 +6366,60 @@ impl kria_core::agent::gui_cognition_v2::ScreenCapturer for V2DesktopScreenCaptu
     }
 }
 
+/// V2 `Sight` reusing KRIA's FAST working perception: the active window (GNOME
+/// extension) + screen dimensions (from the extension capture). It returns NO
+/// detected elements (element-free) — perfect for `OpenApp`/`Key`/`Type` tasks
+/// that need no on-screen grounding, and FAST (no OmniParser). For tasks that
+/// truly need to click a detected control, select the OmniParser Sight via
+/// `KRIA_GUI_COG_V2_SIGHT=omniparser`. Honest: when capture fails it degrades.
+struct V2DesktopPerceptionSight {
+    dims: StdArc<V2ScreenDims>,
+}
+
+#[async_trait::async_trait]
+impl kria_core::agent::gui_cognition_v2::Sight for V2DesktopPerceptionSight {
+    async fn observe(
+        &self,
+        _want_som: bool,
+    ) -> anyhow::Result<kria_core::agent::gui_cognition_v2::Observation> {
+        use kria_core::agent::gui_cognition_v2 as v2;
+        // Active window via the GNOME extension (compositor truth).
+        let active_window = match kria_ext::read_ext_token() {
+            Some(token) => kria_ext::ext_call("GetFocusedWindow", &[token.as_str()], 1200)
+                .await
+                .and_then(|v| {
+                    v.get("window")
+                        .and_then(|w| w.get("title"))
+                        .and_then(|t| t.as_str())
+                        .map(|s| s.to_string())
+                }),
+            None => None,
+        };
+        // Screen dimensions from the working extension capture (also feeds the
+        // input sink's absolute-coordinate normalization).
+        let (mut w, mut h) = self.dims.get().unwrap_or((0, 0));
+        if w == 0 || h == 0 {
+            if let Some(bytes) = kria_ext::ext_capture_screen().await {
+                if let Some((cw, ch)) = v2_png_dimensions(&bytes) {
+                    self.dims.store(cw, ch);
+                    w = cw;
+                    h = ch;
+                }
+            }
+        }
+        Ok(v2::Observation {
+            observation_id: uuid::Uuid::new_v4().to_string(),
+            screenshot_path: String::new(),
+            screen_w: w,
+            screen_h: h,
+            active_window,
+            elements: Vec::new(),
+            som_image_path: None,
+            source: "perception_light".into(),
+        })
+    }
+}
+
 /// Map a single combo token (e.g. `ctrl`, `shift`, `t`, `plus`) to a [`Key`].
 fn v2_key_from_token(tok: &str) -> Option<kria_core::tools::gui_automation::Key> {
     use kria_core::tools::gui_automation::Key;
@@ -6594,15 +6648,20 @@ pub(super) async fn run_gui_cognition_v2(
         .and_then(|v| v.parse::<u64>().ok())
         .unwrap_or(300);
 
-    // --- Sight (OmniParser sidecar + KRIA extension capture) ---
+    // --- Sight: fast perception-light by default (active window + screen dims,
+    // no OmniParser); OmniParser opt-in via KRIA_GUI_COG_V2_SIGHT=omniparser for
+    // element-grounding (click-by-control) tasks. ---
     let dims = StdArc::new(V2ScreenDims::default());
+    let sight_mode = std::env::var("KRIA_GUI_COG_V2_SIGHT")
+        .map(|v| v.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    let omniparser_sight = sight_mode == "omniparser";
     let endpoint = std::env::var("KRIA_OMNIPARSER_ENDPOINT")
         .unwrap_or_else(|_| "http://127.0.0.1:8080".to_string());
-    let capturer: StdArc<dyn v2::ScreenCapturer> =
-        StdArc::new(V2DesktopScreenCapturer { dims: dims.clone() });
-    let sight = v2::OmniParserSight::new(endpoint)
+    let omni = v2::OmniParserSight::new(endpoint)
         .with_timeout(Duration::from_secs(observe_timeout_secs))
-        .with_capturer(capturer);
+        .with_capturer(StdArc::new(V2DesktopScreenCapturer { dims: dims.clone() }));
+    let light = V2DesktopPerceptionSight { dims: dims.clone() };
 
     // --- Brain (local Qwen via the model router) ---
     let backend = match app_state.model_router.route("gui_cognition_planner").await {
@@ -6663,7 +6722,8 @@ pub(super) async fn run_gui_cognition_v2(
         );
     }
 
-    let outcome = v2::run_turn_v2(&sight, &brain, &hands, &message, config, &guards).await;
+    let sight: &dyn v2::Sight = if omniparser_sight { &omni } else { &light };
+    let outcome = v2::run_turn_v2(sight, &brain, &hands, &message, config, &guards).await;
 
     kria_core::agent::gui_cognition::cancel::gui_cancel_registry().unregister(&session_id);
 
