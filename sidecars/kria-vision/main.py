@@ -350,16 +350,21 @@ class OmniParser:
         except Exception as exc:
             self._load_error = f"omniparser detector unavailable: {exc}"
             return
-        # Caption model is optional; failure here is non-fatal.
+        # Caption model is optional; failure here is non-fatal. OmniParser ships
+        # the caption as fine-tuned WEIGHTS only — the processor must come from
+        # the base Florence-2 repo (the local dir has no processor config).
         if self.caption_dir:
             try:
                 from transformers import AutoModelForCausalLM, AutoProcessor  # type: ignore
 
+                base = os.environ.get(
+                    "KRIA_OMNIPARSER_CAPTION_BASE", "microsoft/Florence-2-base-ft"
+                )
                 self._caption = AutoModelForCausalLM.from_pretrained(
                     self.caption_dir, trust_remote_code=True
                 )
                 self._caption_proc = AutoProcessor.from_pretrained(
-                    self.caption_dir, trust_remote_code=True
+                    base, trust_remote_code=True
                 )
             except Exception as exc:
                 print(f"[VISION] OmniParser caption disabled (non-fatal): {exc}")
@@ -438,13 +443,28 @@ class OmniParser:
             return None
         try:
             x1, y1, x2, y2 = bbox
-            crop = image.crop((x1, y1, max(x1 + 1, x2), max(y1 + 1, y2)))
-            prompt = "<CAPTION>"
-            inputs = self._caption_proc(text=prompt, images=crop, return_tensors="pt")
-            out = self._caption.generate(**inputs, max_new_tokens=32, num_beams=1)
-            text = self._caption_proc.batch_decode(out, skip_special_tokens=True)[0]
-            return text.strip()[:200] or None
-        except Exception:
+            crop = image.crop((x1, y1, max(x1 + 1, x2), max(y1 + 1, y2))).convert("RGB")
+            task = "<CAPTION>"
+            inputs = self._caption_proc(text=task, images=crop, return_tensors="pt")
+            out = self._caption.generate(
+                input_ids=inputs["input_ids"],
+                pixel_values=inputs["pixel_values"],
+                max_new_tokens=48,
+                num_beams=3,
+                do_sample=False,
+            )
+            raw = self._caption_proc.batch_decode(out, skip_special_tokens=False)[0]
+            # Florence-2 requires task-aware post-processing to extract the text.
+            parsed = self._caption_proc.post_process_generation(
+                raw, task=task, image_size=(crop.width, crop.height)
+            )
+            text = ""
+            if isinstance(parsed, dict):
+                val = parsed.get(task)
+                text = (val if isinstance(val, str) else str(val)).strip()
+            return text[:200] or None
+        except Exception as exc:
+            print(f"[VISION] caption region failed (non-fatal): {exc}")
             return None
 
 
@@ -584,16 +604,10 @@ async def root():
         "endpoints": [
             "/health",
             "/parse_screen",
+            "/parse",
             "/verify_hash"
         ]
     }
-
-
-if __name__ == "__main__":
-    import uvicorn
-    import os
-    port = int(os.environ.get("KRIA_VISION_PORT", "8080"))
-    uvicorn.run(app, host="0.0.0.0", port=port)
 
 
 # ============================================================================
@@ -784,3 +798,10 @@ async def parse_v2(req: ParseV2Request):
         som_image_path=som_path,
         source=f"omniparser:{getattr(output, 'model', 'unknown')}",
     )
+
+
+if __name__ == "__main__":
+    import uvicorn
+    import os
+    port = int(os.environ.get("KRIA_VISION_PORT", "8080"))
+    uvicorn.run(app, host="0.0.0.0", port=port)
