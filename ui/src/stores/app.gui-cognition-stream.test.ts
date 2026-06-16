@@ -58,9 +58,6 @@ import {
   activeGuiCognitionSession,
 } from "./guiCognitionSession";
 
-const TURN_BUSY_MESSAGE =
-  "A request is already running. Wait for it to finish or press Stop before sending another prompt.";
-
 function emit(eventName: string, payload: any) {
   const callback = listenerMap.get(eventName);
   if (!callback) throw new Error(`Missing listener for ${eventName}`);
@@ -184,7 +181,7 @@ describe("appStore sequential-turn busy handling (Req 16.2/16.3)", () => {
     await activateAssistant("gui-busy-session");
   });
 
-  it("notifies 'busy' and does not dispatch or interleave an overlapping prompt", async () => {
+  it("queues an overlapping prompt and auto-dispatches it when the turn finishes", async () => {
     appStore.setManualToolMode("gui_cognition");
 
     // First turn occupies the assistant scope.
@@ -199,7 +196,7 @@ describe("appStore sequential-turn busy handling (Req 16.2/16.3)", () => {
     await appStore.sendMessage("Open the Screenshot tool");
     await flushAsync(4);
 
-    // It is NOT dispatched and NOT recorded as a user turn.
+    // It is NOT dispatched yet and NOT recorded as a user turn — it is queued.
     expect(invokeMock).not.toHaveBeenCalledWith(
       "send_manual_tool_message",
       expect.objectContaining({ message: "Open the Screenshot tool" }),
@@ -208,20 +205,28 @@ describe("appStore sequential-turn busy handling (Req 16.2/16.3)", () => {
       appStore.messages().some((m) => m.role === "user" && m.content === "Open the Screenshot tool"),
     ).toBe(false);
 
-    // The user is explicitly told the assistant is busy.
-    const busyMessages = appStore
-      .messages()
-      .filter((m) => m.role === "system" && m.content === TURN_BUSY_MESSAGE);
-    expect(busyMessages.length).toBe(1);
+    // The user sees a single "queued" notice (never silently dropped).
+    const queuedNotices = () =>
+      appStore.messages().filter((m) => m.role === "system" && m.content.startsWith("Queued —"));
+    expect(queuedNotices().length).toBe(1);
 
-    // A third overlapping attempt is de-duplicated (no transcript spam).
+    // A third overlapping prompt is also queued; the notice is de-duplicated
+    // (still a single notice, not transcript spam).
     await appStore.sendMessage("Open the Files app");
     await flushAsync(4);
-    expect(
-      appStore.messages().filter((m) => m.role === "system" && m.content === TURN_BUSY_MESSAGE).length,
-    ).toBe(1);
+    expect(queuedNotices().length).toBe(1);
 
+    // When the active turn finishes, the FIRST queued prompt auto-dispatches.
+    invokeMock.mockClear();
     emit("agent:done", {});
+    await flushAsync(8);
+    expect(invokeMock).toHaveBeenCalledWith(
+      "send_manual_tool_message",
+      expect.objectContaining({ message: "Open the Screenshot tool" }),
+    );
+    expect(
+      appStore.messages().some((m) => m.role === "user" && m.content === "Open the Screenshot tool"),
+    ).toBe(true);
   });
 });
 

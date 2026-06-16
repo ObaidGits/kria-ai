@@ -95,6 +95,13 @@ const [promptLabCurrentSession, setPromptLabCurrentSession] = createSignal<strin
   readStorageValue(STORAGE_KEYS.promptLabSession)
 );
 const [assistantIsThinking, setAssistantIsThinking] = createSignal(false);
+// Per-scope sequential prompt queue. When a turn is active, additional prompts
+// are QUEUED (not silently dropped) and auto-sent in order when the turn
+// finishes. Each item is tagged with the session it was queued in so a queued
+// prompt can never leak into a different session the user switched to.
+type QueuedPrompt = { text: string; sessionId: string | null };
+const [assistantPromptQueue, setAssistantPromptQueue] = createSignal<QueuedPrompt[]>([]);
+const [promptLabPromptQueue, setPromptLabPromptQueue] = createSignal<QueuedPrompt[]>([]);
 const [promptLabIsThinking, setPromptLabIsThinking] = createSignal(false);
 const [showSettings, setShowSettings] = createSignal(false);
 const [assistantShowHitl, setAssistantShowHitl] = createSignal(false);
@@ -1288,6 +1295,112 @@ function notifyTurnBusy(scope: StreamScope): void {
   });
 }
 
+// ── Sequential prompt queue ────────────────────────────────────────────────
+//
+// Replaces the old "busy → silently drop the prompt" behavior. A prompt sent
+// while a turn is active is appended to the scope's queue and dispatched
+// automatically (in order) the moment the active turn finishes (`:done`). This
+// is what lets the user fire several GUI Cognition prompts back-to-back and have
+// every one run + appear in the transcript — instead of resending and losing
+// prompts during a slow turn.
+
+const QUEUE_NOTICE_PREFIX = "Queued —";
+
+function getScopedPromptQueue(scope: StreamScope): QueuedPrompt[] {
+  return scope === "prompt_lab" ? promptLabPromptQueue() : assistantPromptQueue();
+}
+
+function setScopedPromptQueueValue(scope: StreamScope, value: QueuedPrompt[]): void {
+  if (scope === "prompt_lab") {
+    setPromptLabPromptQueue(value);
+  } else {
+    setAssistantPromptQueue(value);
+  }
+}
+
+/** Remove any existing queue-notice system message for the scope. */
+function removeQueueNotice(scope: StreamScope): void {
+  updateScopedMessages(scope, (msgs) =>
+    msgs.filter((m) => !(m.role === "system" && m.content.startsWith(QUEUE_NOTICE_PREFIX)))
+  );
+}
+
+/** Show (or refresh) a single, de-duplicated "N queued" notice for the scope. */
+function showQueueNotice(scope: StreamScope, count: number): void {
+  if (count <= 0) {
+    removeQueueNotice(scope);
+    return;
+  }
+  const content =
+    `${QUEUE_NOTICE_PREFIX} your message is waiting (${count} in queue). ` +
+    `I'll send ${count > 1 ? "them" : "it"} automatically when the current request finishes. ` +
+    `Press Stop to cancel the running turn.`;
+  updateScopedMessages(scope, (msgs) => {
+    const filtered = msgs.filter(
+      (m) => !(m.role === "system" && m.content.startsWith(QUEUE_NOTICE_PREFIX))
+    );
+    return [
+      ...filtered,
+      { id: crypto.randomUUID(), role: "system", content, timestamp: Date.now() },
+    ];
+  });
+}
+
+/**
+ * Queue a prompt for sequential dispatch instead of dropping it. The input box
+ * is cleared (the prompt is captured) and a single notice reflects the depth.
+ */
+function enqueueScopedPrompt(scope: StreamScope, text: string): void {
+  const trimmed = text.trim();
+  if (!trimmed) return;
+  const sessionId = getScopedCurrentSession(scope);
+  const item: QueuedPrompt = { text: trimmed, sessionId };
+  const updated = [...getScopedPromptQueue(scope), item];
+  setScopedPromptQueueValue(scope, updated);
+  setInputText("");
+  showQueueNotice(scope, updated.filter((i) => i.sessionId === sessionId).length);
+}
+
+/** Discard any queued prompts for the scope (used when the session changes). */
+function clearScopedPromptQueue(scope: StreamScope): void {
+  if (getScopedPromptQueue(scope).length === 0) return;
+  setScopedPromptQueueValue(scope, []);
+  removeQueueNotice(scope);
+}
+
+/**
+ * Dispatch the next queued prompt for the scope when no turn is active. Items
+ * queued in a now-different session are dropped (never sent to the wrong chat).
+ * Called when a turn completes (`:done`) so the queue drains one-at-a-time.
+ */
+function drainScopedPromptQueue(scope: StreamScope): void {
+  if (isScopedThinking(scope)) return;
+  const queue = getScopedPromptQueue(scope);
+  if (queue.length === 0) return;
+
+  const currentSession = getScopedCurrentSession(scope);
+  // Skip past any items belonging to a session the user has since left.
+  let rest = queue;
+  let next: QueuedPrompt | undefined;
+  while (rest.length > 0) {
+    const [head, ...tail] = rest;
+    rest = tail;
+    if (head.sessionId === currentSession) {
+      next = head;
+      break;
+    }
+  }
+  setScopedPromptQueueValue(scope, rest);
+  showQueueNotice(scope, rest.filter((i) => i.sessionId === currentSession).length);
+
+  if (!next) return;
+  if (scope === "prompt_lab") {
+    void sendLabMessage(next.text, lastPromptLabProfile());
+  } else {
+    void sendMessage(next.text);
+  }
+}
+
 async function cancelScopedTurnIfActive(scope: StreamScope): Promise<void> {
   const sessionId = getScopedCurrentSession(scope);
   if (!sessionId || !isScopedThinking(scope)) return;
@@ -1423,10 +1536,9 @@ function formatColabDispatchWarning(stage: AgentStageEvent): string {
 async function sendMessage(text: string) {
   if (!text.trim()) return;
   if (isScopedThinking("assistant")) {
-    notifyTurnBusy("assistant");
+    enqueueScopedPrompt("assistant", text);
     return;
   }
-
   setScopedToolChoice("assistant", null);
   const selectedMode = selectedManualToolMode();
   const manualProfile = buildManualToolProfile(selectedMode.id);
@@ -1475,7 +1587,7 @@ async function sendMessage(text: string) {
 async function sendLabMessage(text: string, profile?: PromptLabProfile) {
   if (!text.trim()) return;
   if (isScopedThinking("prompt_lab")) {
-    notifyTurnBusy("prompt_lab");
+    enqueueScopedPrompt("prompt_lab", text);
     return;
   }
 
@@ -3196,6 +3308,9 @@ async function switchSession(sessionId: string) {
     const localMessages = scope === "prompt_lab" ? promptLabMessages() : assistantMessages();
     if (activeSession && activeSession !== sessionId) {
       await cancelScopedTurnIfActive(scope);
+      // Drop any prompts queued for the session we are leaving so they never
+      // dispatch into the newly-opened chat.
+      clearScopedPromptQueue(scope);
     }
     await invoke("switch_session", { sessionId });
     backendActiveSessionId = sessionId;
@@ -3378,6 +3493,9 @@ function initListeners() {
       setScopedThinking(scope, false);
       loadSessions();
       loadHealth();
+      // Sequential queue: a turn just finished, so dispatch the next queued
+      // prompt for this scope (if any). Drains one-at-a-time as each turn ends.
+      drainScopedPromptQueue(scope);
     });
 
     listen<HitlRequest>(`${eventPrefix}:approval_required`, (event) => {
