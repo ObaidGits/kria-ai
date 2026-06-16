@@ -108,6 +108,9 @@ impl Observation {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Action {
+    /// Launch or focus an application by name (resolved via the app registry).
+    /// V2's only "open an app" primitive — needs no on-screen grounding.
+    OpenApp { app: String },
     /// Click an element by its per-observation id.
     Click { element_id: u32 },
     /// Click a raw physical-pixel point (for coordinate-emitting brains, e.g. UI-TARS).
@@ -137,6 +140,7 @@ impl Action {
     /// Stable short tag for telemetry.
     pub fn kind(&self) -> &'static str {
         match self {
+            Action::OpenApp { .. } => "open_app",
             Action::Click { .. } => "click",
             Action::ClickPoint { .. } => "click_point",
             Action::Type { .. } => "type",

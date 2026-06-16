@@ -6417,6 +6417,9 @@ struct V2DesktopInputSink {
     backend: StdArc<dyn kria_core::tools::gui_automation::GuiBackend>,
     dims: StdArc<V2ScreenDims>,
     wayland: bool,
+    /// The existing `open_application` tool handler (app-registry resolution +
+    /// launch), reused so V2 launches apps exactly like V1 — no new logic.
+    open_app_handler: Option<StdArc<dyn kria_core::tools::registry::ToolHandler>>,
 }
 
 #[async_trait::async_trait]
@@ -6483,6 +6486,35 @@ impl kria_core::agent::gui_cognition_v2::InputSink for V2DesktopInputSink {
 
     fn backend_label(&self) -> &str {
         "uinput"
+    }
+
+    async fn open_app(&self, app: &str) -> anyhow::Result<()> {
+        // Reuse the existing app-registry-backed launcher (same path V1 uses):
+        // the `open_application` tool resolves the name and launches it.
+        let handler = self
+            .open_app_handler
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("open_application tool is not available"))?;
+        let result = handler
+            .execute(serde_json::json!({ "name": app, "args": [] }))
+            .await;
+        if !result.success {
+            anyhow::bail!(
+                "open_application failed: {}",
+                result.error.clone().unwrap_or_else(|| "unknown error".into())
+            );
+        }
+        // Best-effort: on Wayland, ACTIVATE the just-opened/existing window via the
+        // GNOME extension so the NEXT in-app step resolves against the right window
+        // (mirrors V1's open-then-act focus guarantee). Never fails the open.
+        if self.wayland {
+            if let Some(token) = read_ext_token() {
+                if ext_available(&token).await {
+                    let _ = ext_activate_target_with_retry(&token, app, 5, 500).await;
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -6593,6 +6625,7 @@ pub(super) async fn run_gui_cognition_v2(
         backend: gui_backend,
         dims: dims.clone(),
         wayland: v2_is_wayland(),
+        open_app_handler: app_state.tool_registry.get_handler("open_application"),
     };
     let hands = v2::UinputHands::new(sink);
 

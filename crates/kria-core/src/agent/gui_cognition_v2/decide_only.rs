@@ -104,9 +104,11 @@ pub fn attribute(
     }
     match &decision.action {
         Action::Done { .. } | Action::Ask { .. } => OutcomeAttribution::Terminal,
-        Action::ClickPoint { .. } | Action::Type { .. } | Action::Key { .. } | Action::Scroll { .. } => {
-            OutcomeAttribution::DirectAction
-        }
+        Action::OpenApp { .. }
+        | Action::ClickPoint { .. }
+        | Action::Type { .. }
+        | Action::Key { .. }
+        | Action::Scroll { .. } => OutcomeAttribution::DirectAction,
         Action::Click { element_id } => {
             let expected_present =
                 expected_label.is_some_and(|exp| observation_contains_label(observation, exp));

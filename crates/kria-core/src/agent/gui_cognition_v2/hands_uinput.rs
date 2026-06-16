@@ -27,6 +27,12 @@ pub trait InputSink: Send + Sync {
     async fn type_text(&self, text: &str) -> anyhow::Result<()>;
     async fn key(&self, combo: &str) -> anyhow::Result<()>;
     async fn scroll(&self, direction: &str, amount: i32) -> anyhow::Result<()>;
+    /// Launch or focus an application by name (resolved via the app registry by
+    /// the desktop implementation). Default: unsupported, so existing test sinks
+    /// compile unchanged. The production desktop sink overrides it.
+    async fn open_app(&self, _app: &str) -> anyhow::Result<()> {
+        anyhow::bail!("open_app is not supported by this input sink")
+    }
     fn backend_label(&self) -> &str {
         "uinput"
     }
@@ -97,6 +103,15 @@ impl<S: InputSink> GuiHands for UinputHands<S> {
     ) -> anyhow::Result<ActionResult> {
         let backend = self.sink.backend_label().to_string();
         match &decision.action {
+            Action::OpenApp { app } => {
+                if app.trim().is_empty() {
+                    return Ok(ActionResult::failed(backend, "open_app with empty app name"));
+                }
+                match self.sink.open_app(app).await {
+                    Ok(()) => Ok(ActionResult::ok(backend)),
+                    Err(e) => Ok(ActionResult::failed(backend, e.to_string())),
+                }
+            }
             Action::Click { element_id } => {
                 let Some((x, y)) = resolve_click_point(observation, *element_id) else {
                     // No invented target — explicit failure, no fallback click.
@@ -169,6 +184,10 @@ mod tests {
             self.events.lock().unwrap().push(format!("scroll {direction} {amount}"));
             Ok(())
         }
+        async fn open_app(&self, app: &str) -> anyhow::Result<()> {
+            self.events.lock().unwrap().push(format!("open_app {app}"));
+            Ok(())
+        }
         fn backend_label(&self) -> &str {
             "fake_uinput"
         }
@@ -215,6 +234,18 @@ mod tests {
         // Literal combo passes through (normalized lowercase).
         assert_eq!(resolve_shortcut("Ctrl+Shift+P"), "ctrl+shift+p");
         assert_eq!(resolve_shortcut("enter"), "enter");
+    }
+
+    #[tokio::test]
+    async fn open_app_dispatches_to_sink() {
+        let sink = RecordingSink::default();
+        let hands = UinputHands::new(sink);
+        let r = hands
+            .execute(&decide(Action::OpenApp { app: "chrome".into() }), &obs())
+            .await
+            .unwrap();
+        assert!(r.ok);
+        assert_eq!(hands.sink.events.lock().unwrap().as_slice(), ["open_app chrome"]);
     }
 
     #[tokio::test]
