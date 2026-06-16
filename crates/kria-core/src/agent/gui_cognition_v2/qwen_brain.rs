@@ -231,8 +231,20 @@ pub(crate) fn apply_followup_assist(
     let app_opened = history
         .iter()
         .any(|s| matches!(&s.decision.action, Action::OpenApp { .. }) && s.result.ok);
-    if already_done || !app_opened {
+    if !app_opened {
         return decision;
+    }
+    if already_done {
+        // The standard follow-up is satisfied. If the model now stalls (repeats
+        // open_app or emits a degenerate Ask), the open+action task is complete.
+        return match &decision.action {
+            Action::OpenApp { .. } | Action::Ask { .. } => Decision {
+                action: Action::Done { summary: "Task complete.".into() },
+                reason: "task already satisfied (app opened + follow-up done)".into(),
+                risk_hint: None,
+            },
+            _ => decision,
+        };
     }
     match &decision.action {
         Action::OpenApp { .. } | Action::Done { .. } => Decision {
