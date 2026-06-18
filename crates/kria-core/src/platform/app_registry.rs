@@ -82,8 +82,66 @@ pub struct AppManifest {
     pub no_display: bool,
 }
 
-// ─── InstalledAppRegistry ─────────────────────────────────────────────────────
+/// Outcome of a fuzzy app-name match (Requirement 6: mistyped/ambiguous/closest).
+#[derive(Debug, Clone, PartialEq)]
+pub enum AppMatch {
+    /// One confident match — `alias` is a registry alias key (resolve it to an id).
+    Closest { alias: String, score: f32 },
+    /// Several plausible matches — ask the user which one.
+    Ambiguous(Vec<String>),
+    /// No confident match — nearest suggestions for an honest "not installed" reply.
+    None(Vec<String>),
+}
 
+/// Similarity score in [0,1] between a query and a candidate app name. Combines
+/// substring containment (strong) with a normalized edit-distance ratio so both
+/// typos ("chrohme"→"chrome") and partials ("explorer"→"file explorer") score high.
+fn name_match_score(query: &str, candidate: &str) -> f32 {
+    if query == candidate {
+        return 1.0;
+    }
+    let lev = levenshtein_ratio(query, candidate);
+    // Containment only counts when the SHORTER string is substantial (≥4 chars)
+    // and the two are length-comparable — otherwise a short alias that happens to
+    // be a substring (e.g. "bar" inside "foobar123") would falsely match.
+    let shorter = query.len().min(candidate.len());
+    let contains = (candidate.contains(query) || query.contains(candidate)) && shorter >= 4;
+    if contains {
+        let len_ratio = (shorter as f32) / (query.len().max(candidate.len()) as f32);
+        if len_ratio >= 0.5 {
+            return (0.88 + 0.12 * len_ratio).max(lev);
+        }
+    }
+    lev
+}
+
+/// Normalized Levenshtein ratio in [0,1] (1.0 == identical).
+fn levenshtein_ratio(a: &str, b: &str) -> f32 {
+    let max = a.chars().count().max(b.chars().count());
+    if max == 0 {
+        return 1.0;
+    }
+    let dist = levenshtein(a, b);
+    1.0 - (dist as f32 / max as f32)
+}
+
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut cur = vec![0usize; b.len() + 1];
+    for (i, &ca) in a.iter().enumerate() {
+        cur[0] = i + 1;
+        for (j, &cb) in b.iter().enumerate() {
+            let cost = if ca == cb { 0 } else { 1 };
+            cur[j + 1] = (prev[j + 1] + 1).min(cur[j] + 1).min(prev[j] + cost);
+        }
+        std::mem::swap(&mut prev, &mut cur);
+    }
+    prev[b.len()]
+}
+
+// ─── InstalledAppRegistry ─────────────────────────────────────────────────────
 /// Thread-safe, self-refreshing registry of installed desktop applications.
 pub struct InstalledAppRegistry {
     /// `CanonicalAppId.as_str()` → `AppManifest`
@@ -330,6 +388,73 @@ impl InstalledAppRegistry {
                 None
             }
         }
+    }
+
+    /// Fuzzy-match a user-supplied app name against installed apps + aliases for
+    /// robust resolution when an exact alias lookup fails (Requirement 6:
+    /// mistyped / synonym / closest-match). Returns a confident `Closest`, an
+    /// `Ambiguous` set, or `None` with nearest suggestions for an honest reply.
+    /// Pure scoring (containment + edit distance); no I/O beyond a try_read.
+    pub fn fuzzy_match(&self, name: &str) -> AppMatch {
+        let query = name.trim().to_ascii_lowercase();
+        if query.is_empty() {
+            return AppMatch::None(Vec::new());
+        }
+        // Candidate (label → canonical app id) pairs from alias keys + display names.
+        let mut labeled: Vec<(String, String)> = Vec::new();
+        if let Ok(aliases) = self.aliases.try_read() {
+            for (alias, id) in aliases.iter() {
+                labeled.push((alias.clone(), id.to_ascii_lowercase()));
+            }
+        }
+        if let Ok(apps) = self.apps.try_read() {
+            for (id, m) in apps.iter() {
+                labeled.push((m.display_name.to_ascii_lowercase(), id.clone()));
+            }
+        }
+        if labeled.is_empty() {
+            return AppMatch::None(Vec::new());
+        }
+        // Score each label, then GROUP BY canonical id keeping the best score +
+        // label, so multiple aliases of the SAME app are one candidate (not
+        // false-ambiguous, e.g. "explorer"/"file explorer"/"files" → one app).
+        let mut best_by_id: HashMap<String, (String, f32)> = HashMap::new();
+        for (label, id) in labeled {
+            let score = name_match_score(&query, &label);
+            best_by_id
+                .entry(id)
+                .and_modify(|e| {
+                    if score > e.1 {
+                        *e = (label.clone(), score);
+                    }
+                })
+                .or_insert((label, score));
+        }
+        let mut scored: Vec<(String, f32)> = best_by_id.into_values().collect();
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        const STRONG: f32 = 0.84;
+        const WEAK: f32 = 0.45;
+        let top = scored.first().cloned().unwrap_or_default();
+        let strong: Vec<String> = scored
+            .iter()
+            .filter(|(_, s)| *s >= STRONG)
+            .map(|(c, _)| c.clone())
+            .collect();
+        if top.1 >= STRONG {
+            let second = scored.get(1).map(|(_, s)| *s).unwrap_or(0.0);
+            if strong.len() == 1 || top.1 - second >= 0.08 {
+                return AppMatch::Closest { alias: top.0, score: top.1 };
+            }
+            return AppMatch::Ambiguous(strong.into_iter().take(4).collect());
+        }
+        let suggestions: Vec<String> = scored
+            .into_iter()
+            .filter(|(_, s)| *s >= WEAK)
+            .take(3)
+            .map(|(c, _)| c)
+            .collect();
+        AppMatch::None(suggestions)
     }
 
     /// Return all URI schemes registered by installed applications.
@@ -831,6 +956,9 @@ pub fn builtin_alias_map() -> HashMap<String, String> {
         // Files
         ("files", "org.gnome.Nautilus"),
         ("file manager", "org.gnome.Nautilus"),
+        ("file explorer", "org.gnome.Nautilus"),
+        ("explorer", "org.gnome.Nautilus"),
+        ("file browser", "org.gnome.Nautilus"),
         ("nautilus", "org.gnome.Nautilus"),
         ("thunar", "thunar"),
         ("dolphin", "org.kde.dolphin"),
@@ -910,6 +1038,58 @@ mod tests {
             .resolve_alias("Excel or Calc")
             .expect("spreadsheet class alias should resolve");
         assert_eq!(resolved.as_str(), "libreoffice-calc");
+    }
+
+    #[tokio::test]
+    async fn fuzzy_match_handles_typo_partial_ambiguous_and_unknown() {
+        let registry = Arc::new(InstalledAppRegistry {
+            apps: Arc::new(RwLock::new(HashMap::new())),
+            aliases: Arc::new(RwLock::new(HashMap::new())),
+            schemes: Arc::new(RwLock::new(HashMap::new())),
+        });
+        let mk = |id: &str, name: &str, aliases: Vec<String>| AppManifest {
+            app_id: CanonicalAppId::from_registry(id.to_string()),
+            display_name: name.to_string(),
+            desktop_path: PathBuf::from(format!("/tmp/{id}.desktop")),
+            exec_line: id.to_string(),
+            exec_fingerprint: sha256_bytes(id.as_bytes()),
+            registered_schemes: Vec::new(),
+            name_aliases: aliases,
+            generic_aliases: Vec::new(),
+            no_display: false,
+        };
+        registry
+            .load_manifests(vec![
+                mk("google-chrome", "Google Chrome", vec!["chrome".into()]),
+                mk("org.gnome.Nautilus", "Files", vec!["file explorer".into(), "file manager".into()]),
+                mk("code", "Visual Studio Code", vec!["code".into()]),
+                // A short alias that is a substring of "foobar123" — must NOT match.
+                mk("org.x.bar", "Bar", vec!["bar".into()]),
+            ])
+            .await;
+
+        // Typo → closest (chrome).
+        match registry.fuzzy_match("chrohme") {
+            AppMatch::Closest { alias, .. } => assert!(alias.contains("chrome")),
+            other => panic!("expected Closest for typo, got {other:?}"),
+        }
+        // Partial → closest (file explorer → nautilus alias).
+        match registry.fuzzy_match("explorer") {
+            AppMatch::Closest { alias, .. } => {
+                assert!(registry.resolve_alias(&alias).is_some(), "closest must resolve");
+            }
+            other => panic!("expected Closest for partial, got {other:?}"),
+        }
+        // Unknown → None with (possibly empty) suggestions, never a wrong match.
+        match registry.fuzzy_match("foobar123xyz") {
+            AppMatch::None(_) => {}
+            other => panic!("expected None for unknown app, got {other:?}"),
+        }
+        // A query containing a SHORT alias substring ("bar") must NOT false-match.
+        match registry.fuzzy_match("foobar123") {
+            AppMatch::None(_) => {}
+            other => panic!("'foobar123' must not match short alias 'bar', got {other:?}"),
+        }
     }
 
     #[tokio::test]

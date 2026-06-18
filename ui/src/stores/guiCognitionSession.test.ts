@@ -29,6 +29,38 @@ describe("guiCognitionSession store", () => {
     __resetGuiCognitionSessionForTests();
   });
 
+  it("seeds sub-goals from PlanCreated and updates them on SubGoalUpdated", () => {
+    startTurn();
+    handleGuiCognitionEvent(
+      envelope(2, {
+        type: "PlanCreated",
+        summary: "2 step plan",
+        steps: ["open Settings", "go to Wi-Fi"],
+      })
+    );
+    let session = activeGuiCognitionSession();
+    expect(session?.subGoals?.length).toBe(2);
+    expect(session?.subGoals?.[0]).toMatchObject({ index: 0, goal: "open Settings", status: "pending" });
+
+    handleGuiCognitionEvent(
+      envelope(3, { type: "SubGoalUpdated", index: 0, total: 2, goal: "open Settings", status: "verified" })
+    );
+    session = activeGuiCognitionSession();
+    expect(session?.subGoals?.[0].status).toBe("verified");
+    expect(session?.subGoals?.[1].status).toBe("pending");
+  });
+
+  it("shows a benign recovery note on RecoveryAttempted", () => {
+    startTurn();
+    handleGuiCognitionEvent(
+      envelope(2, { type: "RecoveryAttempted", rung: "grounded_reobserve", ok: true })
+    );
+    expect(activeGuiCognitionSession()?.recoveryNote).toContain("Looking closer");
+    // Exhausted recovery clears the note (turn will stop with a reason).
+    handleGuiCognitionEvent(envelope(3, { type: "RecoveryAttempted", rung: "exhausted", ok: false }));
+    expect(activeGuiCognitionSession()?.recoveryNote).toBeUndefined();
+  });
+
   it("handles a healthy observation and plan sequence", () => {
     startTurn();
     handleGuiCognitionEvent(envelope(2, { type: "RouteConfirmed", path: "send_manual_tool_message", llm_tool_loop: false }));

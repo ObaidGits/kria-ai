@@ -1,0 +1,15 @@
+{
+  "generated_at": "2026-06-17T09:23:04.348883+00:00",
+  "base_url": "http://127.0.0.1:3001",
+  "runs_per_prompt": 1,
+  "total": 2,
+  "overall": {
+    "PASS": 2
+  },
+  "by_category": {
+    "navigation": {
+      "PASS": 2
+    }
+  },
+  "pass_rate": 1.0
+}

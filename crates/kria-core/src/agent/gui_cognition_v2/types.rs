@@ -125,6 +125,13 @@ pub enum Action {
     ClickPoint { x: i32, y: i32 },
     /// Type text into the focused field.
     Type { text: String },
+    /// Type text into the focused field, then submit it (press Enter). Use for a
+    /// URL/search/command that must be EXECUTED, so the brain never leaves text
+    /// unsent (fixes "typed but never submitted").
+    TypeAndSubmit { text: String },
+    /// Navigate a browser to a URL: focus the address bar, type the URL, submit.
+    /// App-agnostic browser navigation primitive (no per-site recipe).
+    Navigate { url: String },
     /// Press a keyboard shortcut: a semantic name ("new_tab") or a literal combo ("ctrl+t").
     Key { combo: String },
     /// Scroll the active view: "up"/"down"/"left"/"right".
@@ -152,6 +159,8 @@ impl Action {
             Action::Click { .. } => "click",
             Action::ClickPoint { .. } => "click_point",
             Action::Type { .. } => "type",
+            Action::TypeAndSubmit { .. } => "type_and_submit",
+            Action::Navigate { .. } => "navigate",
             Action::Key { .. } => "key",
             Action::Scroll { .. } => "scroll",
             Action::Done { .. } => "done",
@@ -168,6 +177,8 @@ impl Action {
             Action::Click { element_id } => format!("#{element_id}"),
             Action::ClickPoint { x, y } => format!("({x},{y})"),
             Action::Type { text } => text.clone(),
+            Action::TypeAndSubmit { text } => text.clone(),
+            Action::Navigate { url } => url.clone(),
             Action::Key { combo } => combo.clone(),
             Action::Scroll { direction, amount } => match amount {
                 Some(a) => format!("{direction} {a}"),
@@ -237,6 +248,85 @@ pub struct TurnStep {
     /// Sanitized label of the element acted on, if any (semantic, not an id).
     #[serde(default)]
     pub target_label: Option<String>,
+}
+
+/// Coarse kind of a planned sub-goal. Drives which external-signal verifier
+/// (see `verifier.rs`) proves the sub-goal complete, and whether the loop
+/// executes it as a GUI action or routes it through the cross-substrate bridge.
+///
+/// Defined in the canonical contracts module so BOTH the planner (producer) and
+/// the verifier (consumer) share one representation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SubGoalKind {
+    /// Launch/focus an application.
+    OpenApp,
+    /// Click an on-screen control.
+    Click,
+    /// Type text into the focused field.
+    Type,
+    /// Navigate a browser to a URL / submit a search.
+    Navigate,
+    /// Run a shell command (cross-substrate bridge).
+    RunCommand,
+    /// Create/write a file (cross-substrate bridge).
+    WriteFile,
+    /// Read/surface an output (cross-substrate bridge).
+    ReadOutput,
+    /// A pure verification checkpoint with no action.
+    Verify,
+    /// Anything not yet categorized.
+    Other,
+}
+
+impl SubGoalKind {
+    /// Whether this sub-goal executes via the cross-substrate bridge (shell/file)
+    /// rather than as a GUI action.
+    pub fn is_bridged(&self) -> bool {
+        matches!(self, SubGoalKind::RunCommand | SubGoalKind::WriteFile | SubGoalKind::ReadOutput)
+    }
+}
+
+/// One ordered, verifiable unit of intent produced by the planner. The loop
+/// drives a cursor over a `Vec<SubGoal>`, marking each `done` only when its
+/// external-signal verifier returns `Verified`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SubGoal {
+    /// Human-readable intent (e.g. "open Chrome", "navigate to youtube.com").
+    pub intent: String,
+    pub kind: SubGoalKind,
+    /// Optional concrete target the verifier keys on: app name, URL, file path,
+    /// expected text, or element label. Untrusted if screen-derived.
+    #[serde(default)]
+    pub target_hint: Option<String>,
+    /// Optional expected content/substring a verifier should confirm (e.g. file
+    /// content, command output marker, on-screen result like "3328").
+    #[serde(default)]
+    pub expect_contains: Option<String>,
+    #[serde(default)]
+    pub done: bool,
+}
+
+impl SubGoal {
+    pub fn new(intent: impl Into<String>, kind: SubGoalKind) -> Self {
+        Self {
+            intent: intent.into(),
+            kind,
+            target_hint: None,
+            expect_contains: None,
+            done: false,
+        }
+    }
+
+    pub fn with_target(mut self, target: impl Into<String>) -> Self {
+        self.target_hint = Some(target.into());
+        self
+    }
+
+    pub fn expecting(mut self, contains: impl Into<String>) -> Self {
+        self.expect_contains = Some(contains.into());
+        self
+    }
 }
 
 #[cfg(test)]

@@ -1,0 +1,49 @@
+{
+  "ready": false,
+  "generated_at": "2026-06-17T06:56:26.783757+00:00",
+  "base_url": "http://127.0.0.1:3001",
+  "vision_url": "http://127.0.0.1:8080",
+  "components": [
+    {
+      "name": "display",
+      "ok": true,
+      "detail": "session_type=wayland DISPLAY=:1 WAYLAND_DISPLAY=wayland-0",
+      "port": null,
+      "version": null,
+      "required": true
+    },
+    {
+      "name": "uinput_daemon",
+      "ok": false,
+      "detail": "socket=/run/user/1000/kria-uinput.sock exists=False | no socket & no daemon process",
+      "port": null,
+      "version": null,
+      "required": true
+    },
+    {
+      "name": "kria_desktop",
+      "ok": false,
+      "detail": "http://127.0.0.1:3001/api/health -> unreachable: <urlopen error [Errno 111] Connection refused>",
+      "port": 3001,
+      "version": null,
+      "required": true
+    },
+    {
+      "name": "kria_vision_sidecar",
+      "ok": false,
+      "detail": "http://127.0.0.1:8080/health -> unreachable: <urlopen error [Errno 111] Connection refused>",
+      "port": 8080,
+      "version": null,
+      "required": true
+    },
+    {
+      "name": "model_server",
+      "ok": false,
+      "detail": "process=not found",
+      "port": null,
+      "version": null,
+      "required": true
+    }
+  ],
+  "reason": "Unhealthy required component(s): uinput_daemon, kria_desktop, kria_vision_sidecar, model_server. Fix or start them (try --auto-start), then re-run preflight."
+}

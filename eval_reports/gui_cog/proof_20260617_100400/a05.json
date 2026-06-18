@@ -1,0 +1,29 @@
+{
+  "id": "a05",
+  "category": "app_resolution",
+  "prompt": "Open the file explorer",
+  "final": "PASS",
+  "run_classes": [
+    "PASS"
+  ],
+  "runs": [
+    {
+      "ok_request": true,
+      "request_error": null,
+      "reply": "explorer is already open.",
+      "sub_verdicts": [
+        {
+          "outcome": "VERIFIED",
+          "confidence": 0.95,
+          "detail": "window 'Files' present+focused",
+          "sub_goal": {
+            "kind": "open_app",
+            "target_hint": "files",
+            "expect_contains": null
+          }
+        }
+      ],
+      "classification": "PASS"
+    }
+  ]
+}

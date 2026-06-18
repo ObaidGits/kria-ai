@@ -35,6 +35,80 @@ pub struct KriaConfig {
     pub n8n: crate::n8n::N8nConfig,
     // ─── Universal Model Provider System ───
     pub providers: crate::llm::provider::config::ProvidersConfig,
+    // ─── Mobile prompt-control (Phase 4.5) ───
+    pub mobile: MobileConfig,
+    pub ntfy: crate::notify::NtfyConfig,
+    // ─── Remote desktop view & takeover (Phase 4.6) ───
+    pub remote_desktop: RemoteDesktopConfig,
+}
+
+/// Remote desktop view & takeover configuration (Phase 4.6).
+///
+/// RDP via gnome-remote-desktop (screen-share of the *current* session) — works
+/// on both X11 and Wayland on GNOME. See `planning_docs/phase4_6_remote_desktop_v2_plan.md`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RemoteDesktopConfig {
+    /// Enable the remote-desktop capability (highest-risk feature — off by default).
+    pub enabled: bool,
+    /// Idle seconds before an active session auto-expires and tears down.
+    pub idle_timeout_secs: i64,
+    /// Cap the streamed frame rate (portal capture can push 100+ fps; encoding
+    /// every frame is wasteful). 0 = uncapped.
+    pub max_fps: u32,
+    /// Cap the streamed resolution (longest edge, px); the capture is scaled
+    /// down to fit. 0 = native.
+    pub max_dimension: u32,
+    /// Video encoder for the WebRTC stream: "vp8" (default, universal browser
+    /// decode), "vp9", or "h264". Hardware acceleration is opt-in (Phase 6+).
+    pub video_encoder: String,
+}
+
+impl Default for RemoteDesktopConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            idle_timeout_secs: 300,
+            max_fps: 30,
+            max_dimension: 1600,
+            video_encoder: "vp8".to_string(),
+        }
+    }
+}
+
+/// Mobile prompt-control configuration (Phase 4.5).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MobileConfig {
+    /// Enable the mobile prompt-control path (device pairing + token auth).
+    pub enabled: bool,
+    /// Require a valid signed device token on the agent WebSocket.
+    pub require_device_auth: bool,
+    /// Dedicated port for the phone-facing gateway (kept separate from
+    /// `server.port`, which the desktop's local API bridge already uses).
+    pub port: u16,
+    /// Host/interface address `kria-server` binds to for the mobile path.
+    ///
+    /// Keep this bound to the private WireGuard/Tailscale interface (e.g. the
+    /// tailnet IP) — never `0.0.0.0`. Empty = fall back to `server.host`.
+    pub bind_interface: String,
+    /// Device-token lifetime in seconds.
+    pub token_ttl_secs: i64,
+    /// Pairing-code lifetime in seconds.
+    pub pairing_ttl_secs: i64,
+}
+
+impl Default for MobileConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            require_device_auth: true,
+            port: 8787,
+            bind_interface: String::new(),
+            token_ttl_secs: 24 * 3600,
+            pairing_ttl_secs: 5 * 60,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

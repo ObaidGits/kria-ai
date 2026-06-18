@@ -1,0 +1,39 @@
+{
+  "id": "m05",
+  "category": "multi_step",
+  "prompt": "Open the Files manager and go to the Downloads folder",
+  "final": "FAIL",
+  "run_classes": [
+    "FAIL"
+  ],
+  "runs": [
+    {
+      "ok_request": true,
+      "request_error": null,
+      "reply": "Done: open_app; click.",
+      "sub_verdicts": [
+        {
+          "outcome": "VERIFIED",
+          "confidence": 0.95,
+          "detail": "window 'Files' present+focused",
+          "sub_goal": {
+            "kind": "open_app",
+            "target_hint": "files",
+            "expect_contains": null
+          }
+        },
+        {
+          "outcome": "FAILED",
+          "confidence": 0.7,
+          "detail": "page title 'Oops! Something went wrong.' does not show 'downloads' (page not loaded?)",
+          "sub_goal": {
+            "kind": "navigate",
+            "target_hint": "Downloads",
+            "expect_contains": "Downloads"
+          }
+        }
+      ],
+      "classification": "FAIL"
+    }
+  ]
+}

@@ -7,8 +7,10 @@ import SkillMarketplace from "./SkillMarketplace";
 import SubstrateStatus from "./SubstrateStatus";
 import ProviderSettings from "./ProviderSettings";
 import N8nSettings from "./N8nSettings";
+import BriefingBuilder from "./BriefingBuilder";
+import MobileRemotePanel from "./MobileRemotePanel";
 
-type Tab = "llm" | "voice" | "safety" | "ui" | "assistant" | "labs" | "search" | "services" | "telegram" | "n8n" | "automation" | "gui_automation" | "hardware" | "knowledge" | "google" | "colab" | "ironclad" | "marketplace" | "developer";
+type Tab = "llm" | "voice" | "safety" | "ui" | "assistant" | "labs" | "search" | "services" | "telegram" | "mobile" | "n8n" | "automation" | "gui_automation" | "hardware" | "knowledge" | "google" | "colab" | "ironclad" | "marketplace" | "developer" | "briefing";
 type SettingsLayer = "basic" | "workflow" | "integrations" | "advanced" | "developer";
 
 interface SettingsTabDefinition {
@@ -805,6 +807,13 @@ const SettingsModal: Component = () => {
           layer: "basic",
         },
         {
+          id: "briefing",
+          label: "Briefing",
+          icon: "B",
+          description: "Customise your morning briefing: which sources, filters, counts, and schedule.",
+          layer: "basic",
+        },
+        {
           id: "labs",
           label: "Labs",
           icon: "L",
@@ -828,6 +837,13 @@ const SettingsModal: Component = () => {
           label: "Telegram",
           icon: "T",
           description: "Connect a Telegram bot for mobile chat and remote assistant access.",
+          layer: "integrations",
+        },
+        {
+          id: "mobile",
+          label: "Mobile & Remote",
+          icon: "M",
+          description: "Pair your phone, run the mobile gateway, and control remote desktop (Phase 4.5/4.6).",
           layer: "integrations",
         },
         {
@@ -1947,6 +1963,11 @@ const SettingsModal: Component = () => {
             <N8nSettings />
           </Show>
 
+          {/* Mobile & Remote Desktop Tab (Phase 4.5 / 4.6) */}
+          <Show when={activeTab() === "mobile"}>
+            <MobileRemotePanel />
+          </Show>
+
           {/* Automation Tab */}
           <Show when={activeTab() === "automation"}>
             <section class="settings-section">
@@ -2403,6 +2424,10 @@ const SettingsModal: Component = () => {
           </Show>
 
           {/* Google Workspace Tab */}
+          <Show when={activeTab() === "briefing"}>
+            <BriefingBuilder />
+          </Show>
+
           <Show when={activeTab() === "google"}>
             <section class="settings-section">
               <h3>Google Workspace</h3>

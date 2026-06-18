@@ -1,0 +1,39 @@
+{
+  "id": "m14",
+  "category": "multi_step",
+  "prompt": "Open the calculator and compute 100 divided by 4",
+  "final": "PASS",
+  "run_classes": [
+    "PASS"
+  ],
+  "runs": [
+    {
+      "ok_request": true,
+      "request_error": null,
+      "reply": "The screen did not change after the last action; stopping to avoid looping.",
+      "sub_verdicts": [
+        {
+          "outcome": "VERIFIED",
+          "confidence": 0.95,
+          "detail": "window 'Calculator' present+focused",
+          "sub_goal": {
+            "kind": "open_app",
+            "target_hint": "calculator",
+            "expect_contains": null
+          }
+        },
+        {
+          "outcome": "VERIFIED",
+          "confidence": 0.75,
+          "detail": "screen shows '25'",
+          "sub_goal": {
+            "kind": "type",
+            "target_hint": "100/4=",
+            "expect_contains": "25"
+          }
+        }
+      ],
+      "classification": "PASS"
+    }
+  ]
+}

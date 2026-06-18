@@ -1,0 +1,49 @@
+{
+  "id": "c03",
+  "category": "cross_substrate",
+  "prompt": "Open the terminal, list the home directory and show me",
+  "final": "INCONCLUSIVE",
+  "run_classes": [
+    "INCONCLUSIVE"
+  ],
+  "runs": [
+    {
+      "ok_request": true,
+      "request_error": null,
+      "reply": "Text already entered; nothing more to type.",
+      "sub_verdicts": [
+        {
+          "outcome": "VERIFIED",
+          "confidence": 0.95,
+          "detail": "window 'Terminal' present+focused",
+          "sub_goal": {
+            "kind": "open_app",
+            "target_hint": "terminal",
+            "expect_contains": null
+          }
+        },
+        {
+          "outcome": "INCONCLUSIVE",
+          "confidence": 0.0,
+          "detail": "no expected output to externally confirm",
+          "sub_goal": {
+            "kind": "run_command",
+            "target_hint": "ls ~",
+            "expect_contains": ""
+          }
+        },
+        {
+          "outcome": "INCONCLUSIVE",
+          "confidence": 0.0,
+          "detail": "no expected output to externally confirm",
+          "sub_goal": {
+            "kind": "read_output",
+            "target_hint": null,
+            "expect_contains": null
+          }
+        }
+      ],
+      "classification": "INCONCLUSIVE"
+    }
+  ]
+}

@@ -2,8 +2,15 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>K.R.I.A.</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="theme-color" content="#0b0f14" />
+  <link rel="icon" type="image/svg+xml" href="/icons/icon.svg" />
+  <link rel="apple-touch-icon" href="/icons/icon.svg" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="KRIA" />
   <script>
     (function () {
       try {
@@ -12,9 +19,58 @@
       } catch (_) {
         document.documentElement.setAttribute("data-theme", "light");
       }
+
+      // ── Service worker policy (permanent blank-screen fix) ──────────────
+      // The PWA service worker must ONLY ever run for the standalone mobile
+      // shell at "/m". Anywhere else (the desktop app, the Vite dev server, the
+      // site root) a registered SW intercepts Vite's JS-module requests and can
+      // replay them with the wrong MIME type — e.g. "'text/css' is not a valid
+      // JavaScript MIME type" — which white-screens the app. Worse, once
+      // registered a SW persists across reloads, so the breakage recurs.
+      //
+      // Policy:
+      //   * mobile PWA ("/m", not inside Tauri)  → register the SW;
+      //   * everywhere else                      → aggressively unregister any
+      //     existing SW, clear its caches, and reload ONCE so the page comes
+      //     back clean. This self-heals machines that already have a stuck SW.
+      if ("serviceWorker" in navigator) {
+        var path = window.location.pathname.replace(/\/+$/, "");
+        var isMobileShell = path.endsWith("/m");
+        var isTauri = "__TAURI__" in window || "__TAURI_INTERNALS__" in window;
+        var wantSW = isMobileShell && !isTauri;
+
+        if (wantSW) {
+          window.addEventListener("load", function () {
+            navigator.serviceWorker
+              .register("/sw.js", { scope: "/m" })
+              .catch(function (e) {
+                console.warn("KRIA service worker registration failed:", e);
+              });
+          });
+        } else {
+          navigator.serviceWorker.getRegistrations().then(function (regs) {
+            if (!regs.length) return;
+            Promise.all(regs.map(function (r) { return r.unregister(); }))
+              .then(function () {
+                return ("caches" in window)
+                  ? caches.keys().then(function (keys) {
+                      return Promise.all(keys.map(function (k) { return caches.delete(k); }));
+                    })
+                  : null;
+              })
+              .then(function () {
+                // Reload once to escape control of the now-removed SW.
+                if (!sessionStorage.getItem("kria_sw_cleaned")) {
+                  sessionStorage.setItem("kria_sw_cleaned", "1");
+                  window.location.reload();
+                }
+              })
+              .catch(function () { /* best-effort cleanup */ });
+          });
+        }
+      }
     })();
   </script>
-  <link rel="stylesheet" href="/src/styles/global.css" />
 </head>
 <body>
   <div id="root"></div>

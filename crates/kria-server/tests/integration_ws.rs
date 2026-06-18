@@ -22,6 +22,12 @@ async fn spawn_ws_server() -> String {
         fleet,
         executive_sender: None,
         turn_admission: std::sync::Arc::new(kria_core::agent::TurnAdmission::new()),
+        agent_loop: None,
+        device_registry: None,
+        notifier: None,
+        session_store: None,
+        remote_desktop: None,
+        remote_desktop_backend: None,
     });
     let app = kria_server::build_router(state);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -59,7 +65,9 @@ async fn ws_sends_welcome_on_connect() {
 // ── Chat messages ───────────────────────────────────────────────────
 
 #[tokio::test]
-async fn ws_chat_returns_ack_then_done() {
+async fn ws_chat_without_agent_returns_error() {
+    // The test server is built with `agent_loop: None`, so a chat frame must
+    // return a clear "agent runtime not initialized" error rather than a stub.
     let url = spawn_ws_server().await;
     let (ws, _) = connect_async(&url).await.unwrap();
     let (mut sink, mut stream) = ws.split();
@@ -70,13 +78,12 @@ async fn ws_chat_returns_ack_then_done() {
     let msg = serde_json::json!({ "type": "chat", "message": "Hello!" });
     sink.send(Message::Text(msg.to_string())).await.unwrap();
 
-    let ack = next_text(&mut stream).await;
-    assert_eq!(ack["type"], "ack");
-    assert_eq!(ack["message"], "Hello!");
-
-    let done = next_text(&mut stream).await;
-    assert_eq!(done["type"], "done");
-    assert!(done["text"].as_str().unwrap().contains("Hello!"));
+    let resp = next_text(&mut stream).await;
+    assert_eq!(resp["type"], "error");
+    assert!(resp["message"]
+        .as_str()
+        .unwrap()
+        .contains("agent runtime not initialized"));
 }
 
 // ── HITL approve/deny ───────────────────────────────────────────────

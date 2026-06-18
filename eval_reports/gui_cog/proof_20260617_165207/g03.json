@@ -1,0 +1,39 @@
+{
+  "id": "g03",
+  "category": "generality",
+  "prompt": "Open Postman and describe the screen",
+  "final": "FAIL",
+  "run_classes": [
+    "FAIL"
+  ],
+  "runs": [
+    {
+      "ok_request": true,
+      "request_error": null,
+      "reply": "I couldn't find or open 'Postman' \u2014 it doesn't appear to be installed on this system.",
+      "sub_verdicts": [
+        {
+          "outcome": "FAILED",
+          "confidence": 0.9,
+          "detail": "no window matching 'postman' among 14 windows after settle",
+          "sub_goal": {
+            "kind": "open_app",
+            "target_hint": "postman",
+            "expect_contains": null
+          }
+        },
+        {
+          "outcome": "INCONCLUSIVE",
+          "confidence": 0.0,
+          "detail": "no expected output to externally confirm",
+          "sub_goal": {
+            "kind": "read_output",
+            "target_hint": null,
+            "expect_contains": ""
+          }
+        }
+      ],
+      "classification": "FAIL"
+    }
+  ]
+}

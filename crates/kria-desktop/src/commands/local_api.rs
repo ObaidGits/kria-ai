@@ -146,27 +146,11 @@ struct LocalApiDesktopChatCommandRequest {
     gui_cognition_test: Option<LocalApiGuiCognitionTestOptions>,
 }
 
+/// Test knobs for the desktop GUI-cognition command. The V2 loop reads its
+/// configuration from the environment and ignores these, but the request shape
+/// is retained for backward compatibility (unknown sub-fields are ignored).
 #[derive(Debug, Clone, serde::Deserialize)]
-struct LocalApiGuiCognitionTestOptions {
-    #[serde(default)]
-    llm_planner_fixture: Option<kria_core::agent::gui_cognition::llm_planner::GuiLlmPlannerFixture>,
-    #[serde(default)]
-    disable_live_llm_planner: Option<bool>,
-    #[serde(default)]
-    action_backend_fixture: Option<super::gui_cognition::GuiActionBackendFixture>,
-    #[serde(default)]
-    perception_fixture: Option<super::gui_cognition::GuiPerceptionFixture>,
-    #[serde(default)]
-    hitl_decision_fixture: Option<kria_core::agent::gui_cognition::safety_hitl::GuiHitlDecisionFixture>,
-    #[serde(default)]
-    execution_mode: Option<kria_core::agent::gui_cognition::executor::GuiExecutionMode>,
-    #[serde(default)]
-    workflow: Option<bool>,
-    #[serde(default)]
-    workflow_resume: Option<bool>,
-    #[serde(default)]
-    resume_reason: Option<String>,
-}
+struct LocalApiGuiCognitionTestOptions {}
 
 #[derive(Debug, Clone)]
 pub(super) struct LocalApiN8nPendingSuggestion {
@@ -413,18 +397,8 @@ async fn local_api_desktop_chat_command(
             app_state,
             request.session_id,
             "agent",
-            request.gui_cognition_test.map(|options| {
-                super::gui_cognition::GuiCognitionCommandOptions {
-                    llm_planner_fixture: options.llm_planner_fixture,
-                    disable_live_llm_planner: options.disable_live_llm_planner.unwrap_or(false),
-                    action_backend_fixture: options.action_backend_fixture,
-                    perception_fixture: options.perception_fixture,
-                    hitl_decision_fixture: options.hitl_decision_fixture,
-                    execution_mode: options.execution_mode.unwrap_or_default(),
-                    workflow_enabled: options.workflow.unwrap_or(false),
-                    workflow_resume: options.workflow_resume.unwrap_or(false),
-                    resume_reason: options.resume_reason,
-                }
+            request.gui_cognition_test.map(|_options| {
+                super::gui_cognition::GuiCognitionCommandOptions {}
             }),
         )
         .await
@@ -536,14 +510,14 @@ async fn local_api_gui_automation_status(
     };
 
     let action_backend =
-        super::gui_cognition::build_gui_action_backend_status(app_state, None).await;
+        super::gui_cognition::build_gui_action_backend_status(app_state).await;
     let capabilities = serde_json::to_value(&action_backend.capabilities)
         .unwrap_or_else(|_| serde_json::json!({}));
 
     // Task 13 (Issue #11): surface the window-focus/capture/activate backend
     // availability + honest capability notice (additive; flag-OFF omits it).
     let gui_backend_status =
-        if kria_core::agent::gui_cognition::window_focus::backend_status_enabled() {
+        if kria_core::agent::gui_cognition::backend_status::backend_status_enabled() {
             let is_wayland = action_backend.session_type.eq_ignore_ascii_case("wayland");
             let status = super::gui_cognition::assess_gui_backend_status(
                 action_backend.uinput_available,

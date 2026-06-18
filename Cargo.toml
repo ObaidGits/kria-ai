@@ -50,6 +50,8 @@ once_cell = "1"
 
 # Time & IDs
 chrono = { version = "0.4", features = ["serde"] }
+# Natural-language English date parsing (maintained chrono-english fork)
+interim = { version = "0.1", features = ["chrono"] }
 uuid = { version = "1", features = ["v4", "v7"] }
 
 # Durable embedded queue (inbox pipeline)
@@ -82,6 +84,11 @@ image = { version = "0.25", features = ["png"] }
 sha2 = "0.10"
 hmac = "0.12"
 rand = "0.8"
+
+# Secrets vault (encrypted credential storage)
+aes-gcm = "0.10"
+argon2 = "0.5"
+zeroize = "1"
 
 # Web scraping
 scraper = "0.21"

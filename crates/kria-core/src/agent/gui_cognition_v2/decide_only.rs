@@ -107,6 +107,8 @@ pub fn attribute(
         Action::OpenApp { .. }
         | Action::ClickPoint { .. }
         | Action::Type { .. }
+        | Action::TypeAndSubmit { .. }
+        | Action::Navigate { .. }
         | Action::Key { .. }
         | Action::Scroll { .. } => OutcomeAttribution::DirectAction,
         Action::Click { element_id } => {

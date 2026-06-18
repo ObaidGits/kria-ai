@@ -23,7 +23,8 @@ import ToolCallBadge from "./ToolCallBadge";
 import GuiWorkflowViewer from "./GuiWorkflowViewer";
 import type { GuiWorkflow } from "../types/guiAutomation";
 
-function inferExecutionSource(toolName: string): "native" | "mcp" | "openclaw" | "cloud" {
+function inferExecutionSource(toolName: string | undefined | null): "native" | "mcp" | "openclaw" | "cloud" {
+  if (!toolName) return "native";
   if (toolName.startsWith("oc_")) return "openclaw";
   if (toolName.startsWith("gw_")) return "cloud";
   if (toolName.startsWith("mcp_") || toolName.includes("_mcp")) return "mcp";

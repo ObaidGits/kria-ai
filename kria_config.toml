@@ -58,3 +58,31 @@ enabled = true
 [curiosity]
 enabled = true
 max_cpu_percent = 10
+
+# ─── Phase 4.5 — Mobile prompt-control ───
+[mobile]
+enabled = true
+require_device_auth = true
+# Empty → uses [server].host (default 0.0.0.0 = LAN-reachable for testing).
+# For production, install Tailscale and set this to the laptop's tailnet IP.
+bind_interface = ""
+token_ttl_secs = 86400
+pairing_ttl_secs = 300
+
+# ─── Phase 4.6 — Remote desktop view & takeover (portal ScreenCast + WebRTC) ───
+[remote_desktop]
+enabled = true
+# Capture via xdg-desktop-portal ScreenCast + PipeWire (X11 + Wayland), streamed
+# to the phone over WebRTC. No RDP / no gnome-remote-desktop — same live session.
+idle_timeout_secs = 300
+max_fps = 30
+max_dimension = 1600
+video_encoder = "vp8"
+
+# ─── Phase 4.5.5 — ntfy push (optional) ───
+[ntfy]
+enabled = false
+server_url = "https://ntfy.sh"
+topic = ""
+auth_token = ""
+default_priority = "default"

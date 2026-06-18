@@ -69,6 +69,40 @@ const hashPreview = (value: string | undefined) => {
   return value.length > 16 ? `${value.slice(0, 8)}...${value.slice(-6)}` : value;
 };
 
+/** Task 12: map a sub-goal status to a coarse visual tone. */
+const subGoalTone = (status: string): string => {
+  const s = status.toLowerCase();
+  if (s === "verified" || s === "bridged") return "done";
+  if (s === "failed" || s === "bridge_failed") return "failed";
+  if (s === "pending") return "pending";
+  return "active";
+};
+
+/** Task 12: a small status glyph for a sub-goal. */
+const subGoalIcon = (status: string): string => {
+  switch (subGoalTone(status)) {
+    case "done":
+      return "✓";
+    case "failed":
+      return "✗";
+    case "pending":
+      return "○";
+    default:
+      return "◔";
+  }
+};
+
+/** Task 12: a short human label for a sub-goal status. */
+const subGoalStatusLabel = (status: string): string => {
+  const s = status.toLowerCase();
+  if (s === "verified") return "done";
+  if (s === "bridged") return "ran";
+  if (s === "bridge_failed") return "failed";
+  if (s === "pending") return "pending";
+  if (s === "in_progress") return "working";
+  return s;
+};
+
 const backendReadinessLabel = (backend: GuiCognitionSessionState["actionBackend"]) => {
   if (!backend) return "unknown";
   if (backend.canExecuteActions) return "ready";
@@ -164,6 +198,38 @@ export const GuiCognitionPanel: Component<GuiCognitionPanelProps> = (props) => {
         </Show>
         <Show when={summary().nextStep}>
           <div class="gui-cognition-summary-next">Next: {summary().nextStep}</div>
+        </Show>
+        {/* Collapsible "thinking": the Brain's sanitized rationale for the current
+            step (streamed live as the plan summary). Collapsed by default to
+            avoid cognitive overload; never raw chain-of-thought. */}
+        <Show when={props.session.planSummary}>
+          <details class="gui-cognition-thinking">
+            <summary class="gui-cognition-thinking-summary">🧠 Thinking</summary>
+            <p class="gui-cognition-thinking-text">{props.session.planSummary}</p>
+          </details>
+        </Show>
+        {/* Task 12: live sub-goal plan with per-goal status. Each sub-goal shows
+            a state badge (pending → verified/bridged/failed) so the user sees the
+            plan progress in real time. */}
+        <Show when={(props.session.subGoals?.length ?? 0) > 0}>
+          <ol class="gui-cognition-subgoals" aria-label="Plan sub-goals">
+            <For each={props.session.subGoals}>
+              {(sg) => (
+                <li class={`gui-cognition-subgoal gui-cognition-subgoal-${subGoalTone(sg.status)}`}>
+                  <span class="gui-cognition-subgoal-icon" aria-hidden="true">
+                    {subGoalIcon(sg.status)}
+                  </span>
+                  <span class="gui-cognition-subgoal-text">{sg.goal}</span>
+                  <span class="gui-cognition-subgoal-status">{subGoalStatusLabel(sg.status)}</span>
+                </li>
+              )}
+            </For>
+          </ol>
+        </Show>
+        <Show when={props.session.recoveryNote}>
+          <div class="gui-cognition-recovery-note" role="status">
+            🔄 {props.session.recoveryNote}
+          </div>
         </Show>
       </div>
 

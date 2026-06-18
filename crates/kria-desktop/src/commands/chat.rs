@@ -358,6 +358,13 @@ async fn send_message_with_profile(
         use tauri::Manager as _;
         let app_for_task = app.clone();
         let prefix = event_scope_prefix.to_string();
+        // Bind the turn to the session that is current RIGHT NOW, before the
+        // detached task runs. Passing this snapshot (instead of `None`, which made
+        // the task re-read `current_session_id` later) closes the create→switch
+        // race so the turn's events + persisted memory can never land in a
+        // different session the user navigated to mid-turn.
+        let bound_session_id = state.current_session_id.read().await.clone();
+        let task_session_id = bound_session_id.clone();
         tauri::async_runtime::spawn(async move {
             // Safety net: emit `{prefix}:done` on EVERY exit (incl. panic /
             // early return) so the frontend `isThinking` state can never get
@@ -376,14 +383,9 @@ async fn send_message_with_profile(
             let result = super::gui_cognition::desktop_gui_cognition_command_capture_streamed(
                 message,
                 task_state,
-                None,
+                Some(task_session_id),
                 &prefix,
-                Some(super::gui_cognition::GuiCognitionCommandOptions {
-                    execution_mode:
-                        kria_core::agent::gui_cognition::executor::GuiExecutionMode::ExecuteLive,
-                    workflow_enabled: true,
-                    ..Default::default()
-                }),
+                Some(super::gui_cognition::GuiCognitionCommandOptions {}),
                 // Task 10.1: supply the AppHandle so that, when the
                 // `gui_cog_stream_ux` flag is ON, each `gui_cognition:event`
                 // envelope is emitted to the frontend DURING the turn instead of
@@ -412,6 +414,7 @@ async fn send_message_with_profile(
         return Ok(serde_json::json!({
             "status": "processing",
             "mode": "gui_cognition",
+            "session_id": bound_session_id,
         }));
     }
 
@@ -832,6 +835,10 @@ async fn send_message_with_profile(
                         &ev_token,
                         serde_json::json!({
                             "text": text,
+                            // Stamp the owning session so the frontend can ignore a
+                            // token that belongs to a session the user has navigated
+                            // away from (cross-session isolation).
+                            "session_id": session_id_clone,
                         }),
                     );
                 }
@@ -1511,7 +1518,7 @@ async fn send_message_with_profile(
             None,
         );
 
-        let _ = app_handle.emit(&ev_done, serde_json::json!({}));
+        let _ = app_handle.emit(&ev_done, serde_json::json!({ "session_id": session_id_clone }));
         decrement_active_turn_counter(&active_turns_for_tracking);
         touch_orchestrator_activity(&last_activity_for_tracking).await;
     });

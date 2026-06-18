@@ -1,0 +1,39 @@
+{
+  "id": "m12",
+  "category": "multi_step",
+  "prompt": "open bookmarks tab in chrome",
+  "final": "INCONCLUSIVE",
+  "run_classes": [
+    "INCONCLUSIVE"
+  ],
+  "runs": [
+    {
+      "ok_request": true,
+      "request_error": null,
+      "reply": "chrome is already open.",
+      "sub_verdicts": [
+        {
+          "outcome": "VERIFIED",
+          "confidence": 0.95,
+          "detail": "window 'Google Chrome' present+focused",
+          "sub_goal": {
+            "kind": "open_app",
+            "target_hint": "chrome",
+            "expect_contains": null
+          }
+        },
+        {
+          "outcome": "INCONCLUSIVE",
+          "confidence": 0.3,
+          "detail": "could not confirm click effect for 'bookmarks'",
+          "sub_goal": {
+            "kind": "click",
+            "target_hint": "bookmarks",
+            "expect_contains": null
+          }
+        }
+      ],
+      "classification": "INCONCLUSIVE"
+    }
+  ]
+}

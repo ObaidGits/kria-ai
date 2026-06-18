@@ -1,0 +1,39 @@
+{
+  "generated_at": "2026-06-17T15:38:39.981811+00:00",
+  "base_url": "http://127.0.0.1:3001",
+  "runs_per_prompt": 1,
+  "total": 58,
+  "overall": {
+    "PASS": 28,
+    "FAIL": 22,
+    "INCONCLUSIVE": 8
+  },
+  "by_category": {
+    "open_only": {
+      "PASS": 12,
+      "FAIL": 2
+    },
+    "multi_step": {
+      "INCONCLUSIVE": 5,
+      "PASS": 8,
+      "FAIL": 1
+    },
+    "navigation": {
+      "FAIL": 9,
+      "PASS": 1
+    },
+    "app_resolution": {
+      "PASS": 7,
+      "FAIL": 1
+    },
+    "cross_substrate": {
+      "FAIL": 4,
+      "INCONCLUSIVE": 2
+    },
+    "generality": {
+      "FAIL": 5,
+      "INCONCLUSIVE": 1
+    }
+  },
+  "pass_rate": 0.483
+}

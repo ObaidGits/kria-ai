@@ -1,8 +1,9 @@
-import { Component, Show, For, createSignal, createMemo, createEffect, onMount, onCleanup, lazy, Suspense } from "solid-js";
+import { Component, Show, For, createSignal, createMemo, createEffect, onMount, onCleanup, lazy, Suspense, ErrorBoundary } from "solid-js";
 import { listen } from "@tauri-apps/api/event";
 import { appStore } from "./stores/app";
 import { provisioningStore } from "./stores/provisioning";
 import ChatView from "./components/ChatView";
+import TasksView from "./components/TasksView";
 import AddTargetModal from "./components/AddTargetModal";
 import EditTargetModal from "./components/EditTargetModal";
 import PromptLabView from "./components/PromptLabView";
@@ -37,13 +38,14 @@ export function addToast(message: string, type: Toast["type"] = "info") {
 const [toasts, setToasts] = createSignal<Toast[]>([]);
 const CONTROL_PANEL_EXPANDED_STORAGE_KEY = "kria_control_panel_expanded";
 const FLEET_MATRIX_VISIBLE_STORAGE_KEY = "kria_fleet_matrix_visible";
-type AppRoute = "home" | "dashboard" | "vm-management" | "settings";
+type AppRoute = "home" | "dashboard" | "vm-management" | "settings" | "tasks";
 
 function routeFromHash(hash: string): AppRoute {
   const clean = hash.replace(/^#/, "").trim();
   if (clean === "/dashboard") return "dashboard";
   if (clean === "/vm-management") return "vm-management";
   if (clean === "/settings") return "settings";
+  if (clean === "/tasks") return "tasks";
   return "home";
 }
 
@@ -51,6 +53,7 @@ function hashForRoute(route: AppRoute): string {
   if (route === "dashboard") return "#/dashboard";
   if (route === "vm-management") return "#/vm-management";
   if (route === "settings") return "#/settings";
+  if (route === "tasks") return "#/tasks";
   return "#/";
 }
 
@@ -595,6 +598,7 @@ const App: Component = () => {
             <button type="button" class={`modern-nav-btn ${route() === "home" ? "active" : ""}`} onClick={() => navigate("home")}>Home</button>
             <button type="button" class={`modern-nav-btn ${route() === "dashboard" ? "active" : ""}`} onClick={() => navigate("dashboard")}>Dashboard</button>
             <button type="button" class={`modern-nav-btn ${route() === "vm-management" ? "active" : ""}`} onClick={() => navigate("vm-management")}>VM Management</button>
+            <button type="button" class={`modern-nav-btn ${route() === "tasks" ? "active" : ""}`} onClick={() => navigate("tasks")}>Tasks</button>
             <button type="button" class={`modern-nav-btn ${route() === "settings" ? "active" : ""}`} onClick={() => { navigate("settings"); setShowSettings(true); }}>Settings</button>
           </div>
 
@@ -607,6 +611,30 @@ const App: Component = () => {
             <div class="startup-warning-banner">
               <strong>OCR Warning:</strong> {ocrStartupWarning()}
             </div>
+          </Show>
+
+          {/* Per-route error isolation: a render crash in any routed view (VM
+              Management / Dashboard / Settings / Home) is caught here so it can
+              NEVER wedge navigation. "Back to Home" resets the boundary and
+              re-navigates, guaranteeing the user can always return. */}
+          <ErrorBoundary
+            fallback={(err, reset) => (
+              <section class="ironclad-strip route-error-boundary">
+                <div class="ironclad-strip-top">
+                  <div class="ironclad-strip-title">
+                    <span>This view hit an error</span>
+                    <span class="ironclad-strip-subtitle">{String((err && (err as Error).message) || err)}</span>
+                  </div>
+                  <div class="ironclad-strip-actions">
+                    <button class="btn-secondary" onClick={() => reset()}>Reload view</button>
+                    <button class="btn-secondary" onClick={() => { reset(); navigate("home"); }}>Back to Home</button>
+                  </div>
+                </div>
+              </section>
+            )}
+          >
+          <Show when={route() === "tasks"}>
+            <TasksView />
           </Show>
 
           <Show when={route() === "dashboard"}>
@@ -859,6 +887,7 @@ const App: Component = () => {
               </div>
             </section>
           </Show>
+          </ErrorBoundary>
           <div class="status-bar modern-statusbar">
             <div class="status-item">
               <span class={statusDotClass()} />

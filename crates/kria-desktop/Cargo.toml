@@ -11,6 +11,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 kria-core = { path = "../kria-core" }
 kria-connection-control = { path = "../kria-connection-control" }
+kria-server = { path = "../kria-server" }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"

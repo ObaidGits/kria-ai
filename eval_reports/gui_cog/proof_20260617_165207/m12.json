@@ -1,0 +1,39 @@
+{
+  "id": "m12",
+  "category": "multi_step",
+  "prompt": "open bookmarks tab in chrome",
+  "final": "FAIL",
+  "run_classes": [
+    "FAIL"
+  ],
+  "runs": [
+    {
+      "ok_request": true,
+      "request_error": null,
+      "reply": "I couldn't find or open 'Chrome' \u2014 it doesn't appear to be installed on this system.",
+      "sub_verdicts": [
+        {
+          "outcome": "FAILED",
+          "confidence": 0.9,
+          "detail": "no window matching 'chrome' among 10 windows after settle",
+          "sub_goal": {
+            "kind": "open_app",
+            "target_hint": "chrome",
+            "expect_contains": null
+          }
+        },
+        {
+          "outcome": "INCONCLUSIVE",
+          "confidence": 0.3,
+          "detail": "could not confirm click effect for 'bookmarks'",
+          "sub_goal": {
+            "kind": "click",
+            "target_hint": "bookmarks",
+            "expect_contains": null
+          }
+        }
+      ],
+      "classification": "FAIL"
+    }
+  ]
+}

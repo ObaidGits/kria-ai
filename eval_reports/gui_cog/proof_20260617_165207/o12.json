@@ -1,0 +1,29 @@
+{
+  "id": "o12",
+  "category": "open_only",
+  "prompt": "Bring up the software store",
+  "final": "PASS",
+  "run_classes": [
+    "PASS"
+  ],
+  "runs": [
+    {
+      "ok_request": true,
+      "request_error": null,
+      "reply": "Done: open_app.",
+      "sub_verdicts": [
+        {
+          "outcome": "VERIFIED",
+          "confidence": 0.95,
+          "detail": "window 'Software' present+focused",
+          "sub_goal": {
+            "kind": "open_app",
+            "target_hint": "software",
+            "expect_contains": null
+          }
+        }
+      ],
+      "classification": "PASS"
+    }
+  ]
+}

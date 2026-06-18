@@ -41,7 +41,23 @@ async fn main() -> anyhow::Result<()> {
     let config = kria_core::config::KriaConfig::load(None)?;
     initialize_fleet_schema().await?;
     let fleet = Arc::new(kria_server::inventory::FleetRuntime::initialize(&config).await?);
-    let bind_addr = format!("{}:{}", config.server.host, config.server.port,);
+
+    // ─── Mobile prompt-control bind address (Phase 4.5.4) ─────────────
+    // Prefer the private mesh interface when configured; loudly warn if the
+    // mobile path is exposed on a wildcard address (whole-machine blast radius).
+    let bind_host = if config.mobile.enabled && !config.mobile.bind_interface.trim().is_empty() {
+        config.mobile.bind_interface.trim().to_string()
+    } else {
+        config.server.host.clone()
+    };
+    if config.mobile.enabled && (bind_host == "0.0.0.0" || bind_host == "::") {
+        tracing::warn!(
+            "mobile prompt-control is enabled but bound to {bind_host} — this exposes the \
+             agent to every network. Bind [mobile].bind_interface to your private \
+             Tailscale/WireGuard address instead."
+        );
+    }
+    let bind_addr = format!("{}:{}", bind_host, config.server.port);
 
     // ─── Executive Controller (feature-gated) ─────────────────────────
     let executive_sender = if config.executive.enabled {
@@ -77,11 +93,127 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let turn_admission = Arc::new(kria_core::agent::TurnAdmission::new());
+    // Phase 0.4: build the minimal headless agent loop so /ws streams the real
+    // agent (chat + core tools), unblocking the mobile PWA path (Phase 4.5).
+    let agent_loop: Option<Arc<kria_core::agent::AgentLoop>> =
+        match kria_core::agent::headless_runtime::build_minimal(&config) {
+            Ok(rt) => {
+                tracing::info!("headless agent runtime ready — /ws chat is live");
+                Some(rt.agent_loop)
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "headless agent runtime unavailable; /ws chat will report \
+                     'agent runtime not initialized'"
+                );
+                None
+            }
+        };
+
+    // ─── Mobile prompt-control wiring (Phase 4.5) ─────────────────────
+    // Device registry (4.5.4): reuses the encrypted vault for the token
+    // signing key. Built only when the mobile path is enabled.
+    let device_registry: Option<Arc<kria_core::mobile::DeviceRegistry>> = if config.mobile.enabled {
+        match kria_core::auth::SecretsVault::open_default() {
+            Ok(vault) => {
+                let vault = Arc::new(vault);
+                match kria_core::mobile::DeviceRegistry::open(
+                    paths.data_dir.join("devices.db"),
+                    &vault,
+                ) {
+                    Ok(reg) => {
+                        let reg = reg
+                            .with_token_ttl(config.mobile.token_ttl_secs)
+                            .with_pairing_ttl(config.mobile.pairing_ttl_secs);
+                        tracing::info!("mobile device registry ready — pairing endpoints live");
+                        Some(Arc::new(reg))
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "failed to open device registry");
+                        None
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "failed to open secrets vault for mobile auth");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // ntfy push client (4.5.5): no-op when disabled/unconfigured.
+    let notifier: Option<Arc<kria_core::notify::NtfyClient>> = if config.ntfy.enabled {
+        tracing::info!("ntfy push enabled");
+        Some(Arc::new(kria_core::notify::NtfyClient::new(
+            config.ntfy.clone(),
+        )))
+    } else {
+        None
+    };
+
+    // Shared conversation store (4.5.6): co-located with the desktop DB so a
+    // session begun on one surface can resume on the other.
+    let session_store: Option<Arc<kria_core::memory::MemoryStore>> =
+        match kria_core::memory::MemoryStore::open(&paths.data_dir.join("kria.db")) {
+            Ok(store) => {
+                tracing::info!("server session store ready — /ws conversations persist");
+                Some(Arc::new(store))
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "session store unavailable; /ws history disabled");
+                None
+            }
+        };
+
+    // Remote desktop view & takeover (Phase 4.6): off unless explicitly enabled.
+    let mut remote_desktop_backend: Option<
+        Arc<kria_server::desktop_stream::PortalWebRtcBackend>,
+    > = None;
+    let remote_desktop: Option<Arc<kria_core::remote_desktop::RemoteDesktopManager>> =
+        if config.remote_desktop.enabled {
+            let audit =
+                kria_core::remote_desktop::audit_logger_at(&paths.data_dir.join("audit.db"));
+            let backend = Arc::new(kria_server::desktop_stream::PortalWebRtcBackend::new(
+                config.remote_desktop.clone(),
+            ));
+            remote_desktop_backend = Some(backend.clone());
+            let mgr = Arc::new(kria_core::remote_desktop::RemoteDesktopManager::with_backend(
+                config.remote_desktop.clone(),
+                backend,
+                audit,
+            ));
+            // Idle / kill-switch enforcement loop.
+            let mgr_loop = mgr.clone();
+            tokio::spawn(async move {
+                let mut tick = tokio::time::interval(std::time::Duration::from_secs(15));
+                loop {
+                    tick.tick().await;
+                    mgr_loop.enforce_idle();
+                }
+            });
+            tracing::warn!(
+                "remote desktop ENABLED — highest-risk capability. Sessions are HITL-gated, \
+                 idle-expiring, and audited. Ensure the server is bound to the private mesh."
+            );
+            Some(mgr)
+        } else {
+            None
+        };
+
     let state = Arc::new(ServerState {
         config,
         fleet,
         executive_sender,
         turn_admission,
+        agent_loop,
+        device_registry,
+        notifier,
+        session_store,
+        remote_desktop,
+        remote_desktop_backend,
     });
     let app = build_router(state);
 

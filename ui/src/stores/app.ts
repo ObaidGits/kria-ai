@@ -1172,9 +1172,14 @@ async function syncEnvironmentSession(environment: "assistant" | "prompt_lab") {
     const hasMessages = scope === "prompt_lab" ? promptLabMessages().length > 0 : assistantMessages().length > 0;
     await invoke("switch_session", { sessionId });
     backendActiveSessionId = sessionId;
-    if (!hasMessages) {
+    // Never blind-replace the transcript while a turn is in flight, and always
+    // MERGE backend history with any local (optimistic / streamed) messages so a
+    // just-sent prompt or a streamed GUI reply can't be wiped by a hydration that
+    // races the persistence write (audit issue #3).
+    if (!hasMessages && !isScopedThinking(scope)) {
       const mapped = await loadMappedSessionHistory(sessionId);
-      updateScopedMessages(scope, () => mapped);
+      const local = scope === "prompt_lab" ? promptLabMessages() : assistantMessages();
+      updateScopedMessages(scope, () => mergeHistoryWithLocalMessages(mapped, local));
     }
   } catch (e) {
     console.error("Failed to sync environment session:", e);
@@ -1227,10 +1232,12 @@ function setScopedThinking(scope: StreamScope, value: boolean) {
 
 let assistantThinkingWatchdog: ReturnType<typeof setTimeout> | null = null;
 // Max idle time (ms) with NO assistant/GUI-cognition event before the thinking
-// state is force-cleared so the input can never hard-freeze. Generous because a
-// non-streaming GUI Cognition turn can legitimately run for a couple of minutes
-// on a busy/low-VRAM box before emitting its single terminal event.
-const ASSISTANT_THINKING_WATCHDOG_MS = 300_000;
+// state is force-cleared so the input can never hard-freeze. With V2 live phase
+// streaming (observe/decide/gate/execute/verify each emit an event that re-arms
+// this via pokeAssistantThinkingWatchdog), a genuinely-progressing turn pokes the
+// watchdog frequently, so a 60s idle ceiling is safe and recovers a stalled turn
+// ~5x faster than the old 5-minute window.
+const ASSISTANT_THINKING_WATCHDOG_MS = 60_000;
 
 function clearAssistantThinkingWatchdog() {
   if (assistantThinkingWatchdog) {
@@ -2525,6 +2532,230 @@ async function disconnectGoogle(account?: string) {
   await loadGoogleStatus(account);
 }
 
+// ── Phase 2: Tasks + durable reminders ───────────────────────────────────
+export interface Task {
+  id: number;
+  title: string;
+  notes: string | null;
+  source: string;
+  status: string;
+  priority_bucket: string;
+  priority_score: number;
+  due_at: string | null;
+  external_ref: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Reminder {
+  id: number;
+  message: string;
+  fire_at: string;
+  fired: boolean;
+  task_id: number | null;
+  recurrence: string | null;
+  created_at: string;
+}
+
+export interface ProductivityStats {
+  total: number;
+  open: number;
+  in_progress: number;
+  blocked: number;
+  waiting: number;
+  done: number;
+  overdue: number;
+  done_today: number;
+  urgent: number;
+  important: number;
+}
+
+// ── Phase 1.5: Configurable briefing ─────────────────────────────────────
+export interface BriefingSection {
+  source: string;
+  enabled: boolean;
+  query?: string | null;
+  max?: number | null;
+  account?: string | null;
+  window?: string | null;
+  include_conflicts?: boolean | null;
+  tool?: string | null;
+  filter?: string | null;
+}
+
+export interface BriefingSchedule {
+  auto: boolean;
+  time: string;
+  delivery: string[];
+}
+
+export interface BriefingConfig {
+  sections: BriefingSection[];
+  schedule: BriefingSchedule;
+}
+
+const [tasks, setTasks] = createSignal<Task[]>([]);
+const [taskStats, setTaskStats] = createSignal<ProductivityStats | null>(null);
+const [reminders, setReminders] = createSignal<Reminder[]>([]);
+const [briefingConfig, setBriefingConfigSignal] = createSignal<BriefingConfig | null>(null);
+
+async function loadTasks(filter?: {
+  status?: string;
+  bucket?: string;
+  activeOnly?: boolean;
+}): Promise<Task[]> {
+  try {
+    const r = await invoke<Task[]>("task_list", {
+      status: filter?.status ?? null,
+      bucket: filter?.bucket ?? null,
+      activeOnly: filter?.activeOnly ?? null,
+    });
+    setTasks(r);
+    return r;
+  } catch (e) {
+    console.error("Failed to load tasks:", e);
+    return [];
+  }
+}
+
+async function loadTaskStats(): Promise<ProductivityStats | null> {
+  try {
+    const r = await invoke<ProductivityStats>("task_stats");
+    setTaskStats(r);
+    return r;
+  } catch (e) {
+    console.error("Failed to load task stats:", e);
+    return null;
+  }
+}
+
+async function addTask(
+  title: string,
+  notes?: string,
+  dueAt?: string,
+  source?: string
+): Promise<Task> {
+  const r = await invoke<Task>("task_add", {
+    title,
+    notes: notes ?? null,
+    dueAt: dueAt ?? null,
+    source: source ?? null,
+  });
+  await loadTasks();
+  await loadTaskStats();
+  return r;
+}
+
+async function updateTaskStatus(id: number, status: string): Promise<void> {
+  await invoke("task_update_status", { id, status });
+  await loadTasks();
+  await loadTaskStats();
+}
+
+async function deleteTask(id: number): Promise<void> {
+  await invoke("task_delete", { id });
+  await loadTasks();
+  await loadTaskStats();
+}
+
+async function loadReminders(includeFired?: boolean): Promise<Reminder[]> {
+  try {
+    const r = await invoke<Reminder[]>("reminder_list", {
+      includeFired: includeFired ?? null,
+    });
+    setReminders(r);
+    return r;
+  } catch (e) {
+    console.error("Failed to load reminders:", e);
+    return [];
+  }
+}
+
+async function setReminder(
+  message: string,
+  opts?: { when?: string; fireInMinutes?: number; recurrence?: string }
+): Promise<Reminder> {
+  const r = await invoke<Reminder>("reminder_set", {
+    message,
+    when: opts?.when ?? null,
+    fireInMinutes: opts?.fireInMinutes ?? null,
+    fireAt: null,
+    recurrence: opts?.recurrence ?? null,
+  });
+  await loadReminders();
+  return r;
+}
+
+async function snoozeReminder(id: number, minutes?: number): Promise<void> {
+  await invoke("reminder_snooze", { id, minutes: minutes ?? null });
+  await loadReminders();
+}
+
+async function cancelReminder(id: number): Promise<void> {
+  await invoke("reminder_cancel", { id });
+  await loadReminders();
+}
+
+async function editTask(
+  id: number,
+  patch: { title?: string; notes?: string; dueAt?: string; clearDue?: boolean }
+): Promise<Task | null> {
+  const r = await invoke<Task | null>("task_edit", {
+    id,
+    title: patch.title ?? null,
+    notes: patch.notes ?? null,
+    dueAt: patch.dueAt ?? null,
+    clearDue: patch.clearDue ?? null,
+  });
+  await loadTasks();
+  await loadTaskStats();
+  return r;
+}
+
+async function completeTaskByText(text: string): Promise<Task | null> {
+  const r = await invoke<Task | null>("task_complete", { text });
+  await loadTasks();
+  await loadTaskStats();
+  return r;
+}
+
+async function planMyDay(opts?: {
+  workStart?: string;
+  workEnd?: string;
+  slotMinutes?: number;
+}): Promise<{ window: { start: string; end: string }; planned: PlannedBlock[]; unscheduled_task_ids: number[] }> {
+  return invoke("plan_my_day", {
+    workStart: opts?.workStart ?? null,
+    workEnd: opts?.workEnd ?? null,
+    slotMinutes: opts?.slotMinutes ?? null,
+  });
+}
+
+export interface PlannedBlock {
+  task_id: number;
+  title: string;
+  start: string;
+  end: string;
+  minutes: number;
+}
+
+async function loadBriefingConfig(): Promise<BriefingConfig | null> {
+  try {
+    const r = await invoke<BriefingConfig>("get_briefing_config");
+    setBriefingConfigSignal(r);
+    return r;
+  } catch (e) {
+    console.error("Failed to load briefing config:", e);
+    return null;
+  }
+}
+
+async function saveBriefingConfig(config: BriefingConfig): Promise<BriefingConfig> {
+  const r = await invoke<BriefingConfig>("set_briefing_config", { config });
+  setBriefingConfigSignal(r);
+  return r;
+}
+
 // --- Colab Tier ---
 async function loadColabStatus(): Promise<ColabTierStatus | null> {
   try {
@@ -3463,7 +3694,17 @@ async function renameSession(sessionId: string, title: string) {
 // --- Event listeners (set up once) ---
 function initListeners() {
   const registerStreamListeners = (eventPrefix: "agent" | "prompt_lab", scope: StreamScope) => {
-    listen<{ text: string }>(`${eventPrefix}:token`, (event) => {
+    // Cross-session isolation: a streaming event stamped with a `session_id`
+    // that is NOT the scope's current session belongs to a turn the user has
+    // navigated away from. Such message-appending events (token/tool) are
+    // dropped so they never pollute the current transcript. (We deliberately do
+    // NOT gate `:done`/`:thinking` on this — those control the shared per-scope
+    // thinking flag and must always be free to clear it.)
+    const isForeignSession = (sid: unknown): boolean =>
+      typeof sid === "string" && sid.length > 0 && sid !== getScopedCurrentSession(scope);
+
+    listen<{ text: string; session_id?: string }>(`${eventPrefix}:token`, (event) => {
+      if (isForeignSession(event.payload?.session_id)) return;
       if (scope === "assistant") pokeAssistantThinkingWatchdog();
       updateScopedMessages(scope, (prev) => {
         const last = prev[prev.length - 1];
@@ -3507,8 +3748,11 @@ function initListeners() {
       setScopedThinking(scope, false);
     });
 
-    listen<{ name: string; params: Record<string, unknown> }>(`${eventPrefix}:tool_call`, (event) => {
-      const { name, params } = event.payload;
+    listen<{ name: string; params: Record<string, unknown>; session_id?: string }>(`${eventPrefix}:tool_call`, (event) => {
+      if (isForeignSession(event.payload?.session_id)) return;
+      const { params } = event.payload;
+      // Guarantee a string name (see tool_result handler).
+      const name = event.payload?.name ?? "tool";
       updateScopedMessages(scope, (prev) => {
         const last = prev[prev.length - 1];
         if (last?.role === "assistant") {
@@ -3544,10 +3788,15 @@ function initListeners() {
       conversational_summary?: string;
       human_readable?: string;
       execution_metadata?: ExecutionMetadata;
+      session_id?: string;
     }>(`${eventPrefix}:tool_result`, (event) => {
+      if (isForeignSession(event.payload?.session_id)) return;
       const { name, result, success, metadata, conversational_summary, human_readable, execution_metadata } = event.payload;
       const completedToolCall: ToolCall = {
-        name,
+        // Guarantee a string name: a tool_result with a missing `name` would
+        // otherwise create a nameless ToolCall and crash MessageBubble
+        // (`name.startsWith(...)` on undefined). Defaults keep the UI safe.
+        name: name ?? "tool",
         args: {},
         status: (success ? "done" : "error") as ToolCall["status"],
         result,
@@ -4511,6 +4760,26 @@ export const appStore = {
   setGoogleAccount,
   connectGoogle,
   disconnectGoogle,
+  // Phase 2: Tasks + reminders
+  tasks,
+  taskStats,
+  reminders,
+  loadTasks,
+  loadTaskStats,
+  addTask,
+  updateTaskStatus,
+  deleteTask,
+  loadReminders,
+  setReminder,
+  snoozeReminder,
+  cancelReminder,
+  editTask,
+  completeTaskByText,
+  planMyDay,
+  // Phase 1.5: Briefing config
+  briefingConfig,
+  loadBriefingConfig,
+  saveBriefingConfig,
   colabStatus,
   latestAgentStage,
   colabDispatchWarning,

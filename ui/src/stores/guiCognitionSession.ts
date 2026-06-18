@@ -12,6 +12,7 @@ import type {
   GuiCognitionProbeTiming,
   GuiCognitionSessionState,
   GuiCognitionSourceAttempt,
+  GuiCognitionSubGoalState,
   GuiCognitionTargetCandidateState,
   GuiCognitionTargetState,
   GuiCognitionTypedPlanStepState,
@@ -40,6 +41,7 @@ function emptySession(): GuiCognitionSessionState {
       warnings: [],
     },
     planSteps: [],
+    subGoals: [],
     typedPlanSteps: [],
     planSourceEvidence: [],
     planBlockedReasons: [],
@@ -732,11 +734,67 @@ export function handleGuiCognitionEvent(envelope: GuiCognitionEnvelope): void {
           s.active.plannerConfidence = numberValue(event.confidence) ?? s.active.plannerConfidence;
           s.active.planRequiresUserApproval = booleanValue(event.requires_user_approval);
           s.active.planSteps = sanitizeList(event.steps);
+          // Task 12: seed the live sub-goal tracker from the plan steps (each
+          // starts "pending"; SubGoalUpdated flips them to verified/bridged/etc.).
+          const seededGoals = sanitizeList(event.steps);
+          if (seededGoals.length > 0) {
+            s.active.subGoals = seededGoals.map((goal, index) => ({
+              index,
+              total: seededGoals.length,
+              goal,
+              status: "pending",
+            }));
+          }
           s.active.typedPlanSteps = sanitizeTypedPlanSteps(event.typed_steps);
           s.active.planSourceEvidence = sanitizeGoalEvidence(event.source_evidence);
           if (Array.isArray(event.validation_errors) && event.validation_errors.length > 0) {
             s.active.planBlockedReasons = sanitizeList(event.validation_errors);
           }
+        })
+      );
+      break;
+
+    case "SubGoalUpdated":
+      setState(
+        produce((s) => {
+          const index = numberValue(event.index);
+          const total = numberValue(event.total);
+          const goal = sanitizeText(event.goal);
+          const status = sanitizeText(event.status, "in_progress") ?? "in_progress";
+          if (index === undefined) return;
+          if (!Array.isArray(s.active.subGoals)) s.active.subGoals = [];
+          // Ensure the slot exists (the plan may not have been seeded yet).
+          const existing = s.active.subGoals.find((g) => g.index === index);
+          if (existing) {
+            existing.status = status;
+            if (goal) existing.goal = goal;
+            if (total !== undefined) existing.total = total;
+          } else {
+            s.active.subGoals.push({
+              index,
+              total: total ?? index + 1,
+              goal: goal ?? `Step ${index + 1}`,
+              status,
+            });
+            s.active.subGoals.sort((a, b) => a.index - b.index);
+          }
+          // A sub-goal advancing clears any stale recovery note.
+          if (status === "verified") s.active.recoveryNote = undefined;
+        })
+      );
+      break;
+
+    case "RecoveryAttempted":
+      setState(
+        produce((s) => {
+          const rung = sanitizeText(event.rung, "recovery");
+          // Show recovery as benign in-progress, never a hard failure (R11.x/11.4).
+          s.active.recoveryNote =
+            rung === "grounded_reobserve"
+              ? "Looking closer at the screen to recover…"
+              : rung === "exhausted"
+                ? undefined
+                : `Recovering (${rung})…`;
         })
       );
       break;

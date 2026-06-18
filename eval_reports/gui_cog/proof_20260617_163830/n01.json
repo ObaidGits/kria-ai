@@ -1,0 +1,39 @@
+{
+  "id": "n01",
+  "category": "navigation",
+  "prompt": "Open Google Chrome and go to youtube.com",
+  "final": "FAIL",
+  "run_classes": [
+    "FAIL"
+  ],
+  "runs": [
+    {
+      "ok_request": true,
+      "request_error": null,
+      "reply": "I couldn't find or open 'Google Chrome' \u2014 it doesn't appear to be installed on this system.",
+      "sub_verdicts": [
+        {
+          "outcome": "FAILED",
+          "confidence": 0.9,
+          "detail": "no window matching 'chrome' among 4 windows after settle",
+          "sub_goal": {
+            "kind": "open_app",
+            "target_hint": "chrome",
+            "expect_contains": null
+          }
+        },
+        {
+          "outcome": "FAILED",
+          "confidence": 0.7,
+          "detail": "page title 'K.R.I.A.' does not show 'youtube' (page not loaded?)",
+          "sub_goal": {
+            "kind": "navigate",
+            "target_hint": "youtube.com",
+            "expect_contains": "youtube"
+          }
+        }
+      ],
+      "classification": "FAIL"
+    }
+  ]
+}

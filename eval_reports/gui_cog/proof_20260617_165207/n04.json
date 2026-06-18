@@ -1,0 +1,39 @@
+{
+  "id": "n04",
+  "category": "navigation",
+  "prompt": "Open Chrome and search for the latest Ubuntu version",
+  "final": "FAIL",
+  "run_classes": [
+    "FAIL"
+  ],
+  "runs": [
+    {
+      "ok_request": true,
+      "request_error": null,
+      "reply": "I couldn't find or open 'Chrome' \u2014 it doesn't appear to be installed on this system.",
+      "sub_verdicts": [
+        {
+          "outcome": "FAILED",
+          "confidence": 0.9,
+          "detail": "no window matching 'chrome' among 10 windows after settle",
+          "sub_goal": {
+            "kind": "open_app",
+            "target_hint": "chrome",
+            "expect_contains": null
+          }
+        },
+        {
+          "outcome": "VERIFIED",
+          "confidence": 0.85,
+          "detail": "loaded page title 'obaid@obaid-ubuntu: /media/obaid/SSD/KRIA' contains 'ubuntu'",
+          "sub_goal": {
+            "kind": "navigate",
+            "target_hint": "search latest Ubuntu version",
+            "expect_contains": "ubuntu"
+          }
+        }
+      ],
+      "classification": "FAIL"
+    }
+  ]
+}

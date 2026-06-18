@@ -335,6 +335,17 @@ class OmniParser:
         self._caption = None
         self._caption_proc = None
         self._load_error: Optional[str] = None
+        # Task 6: fast OCR labelling (default ON). Florence-2 captioning is
+        # accurate but far too slow on CPU for the many boxes a desktop screen
+        # yields, so by default each detected box is labelled from OCR text that
+        # falls inside it, and un-boxed OCR lines are surfaced as `text` elements
+        # so "describe the screen" / text verification works for ANY app.
+        import shutil as _shutil
+
+        self.ocr_enabled = os.environ.get("KRIA_OMNIPARSER_OCR", "1") != "0"
+        self._tesseract = _shutil.which("tesseract")
+        self.detect_conf = float(os.environ.get("KRIA_OMNIPARSER_CONF", "0.05"))
+        self.max_elements = int(os.environ.get("KRIA_OMNIPARSER_MAX_ELEMENTS", "200"))
 
     def _ensure_loaded(self):
         if self._detector is not None or self._load_error is not None:
@@ -408,9 +419,15 @@ class OmniParser:
             )
 
     def _detect(self, image: Image.Image, monitor_id: int) -> List[OmniElement]:
-        results = self._detector.predict(image, verbose=False)  # type: ignore
-        elements: List[OmniElement] = []
-        idx = 0
+        results = self._detector.predict(  # type: ignore
+            image, conf=self.detect_conf, verbose=False
+        )
+        # Run OCR ONCE over the whole frame (fast on CPU); reuse for every box
+        # label and for surfacing un-boxed text regions. Caption (if loaded) wins
+        # over OCR for a box, since it describes icons OCR can't read.
+        ocr_words = self._ocr_words(image) if self.ocr_enabled else []
+
+        boxed: List[Tuple[List[int], str, str, float]] = []  # (xyxy, kind, label, conf)
         for result in results:
             boxes = getattr(result, "boxes", None)
             if boxes is None:
@@ -421,22 +438,144 @@ class OmniParser:
                 conf = float(box.conf[0].item()) if box.conf is not None else 0.0
                 cls_id = int(box.cls[0].item()) if box.cls is not None else -1
                 cls_name = names.get(cls_id, "icon")
-                label = self._caption_region(image, xyxy) or cls_name
-                elements.append(
-                    OmniElement(
-                        id=f"omni_{idx}",
-                        element_type=cls_name,
-                        label=label,
-                        label_wrapped=f"<evidence>{label}</evidence>",
-                        bbox=xyxy,
-                        confidence=conf,
-                        monitor_id=monitor_id,
-                        dpi_scale=1.0,
-                        visual_hash=f"phash_{xyxy[0]}_{xyxy[1]}_{xyxy[2]}_{xyxy[3]}",
-                    )
+                label = (
+                    self._caption_region(image, xyxy)
+                    or self._label_from_ocr(xyxy, ocr_words)
+                    or cls_name
                 )
-                idx += 1
-        return elements
+                boxed.append((xyxy, cls_name, label, conf))
+
+        elements: List[OmniElement] = []
+        idx = 0
+        for xyxy, cls_name, label, conf in boxed:
+            elements.append(self._mk_element(idx, cls_name, label, xyxy, conf, monitor_id))
+            idx += 1
+
+        # Surface OCR text LINES that don't already sit inside a detected box, as
+        # read-only `text` elements. This makes the screen describable/verifiable
+        # for apps the icon detector under-covers (canvas/Electron/unseen apps),
+        # WITHOUT fabricating interactivity (interactable=False for these).
+        for line_text, lb in self._ocr_lines(ocr_words):
+            if not line_text.strip():
+                continue
+            if any(self._overlaps(lb, b[0]) for b in boxed):
+                continue
+            elements.append(self._mk_element(idx, "text", line_text, lb, 0.5, monitor_id))
+            idx += 1
+            if idx >= self.max_elements:
+                break
+
+        return elements[: self.max_elements]
+
+    def _mk_element(
+        self, idx: int, cls_name: str, label: str, xyxy: List[int], conf: float, monitor_id: int
+    ) -> OmniElement:
+        label = (label or cls_name)[:200]
+        return OmniElement(
+            id=f"omni_{idx}",
+            element_type=cls_name,
+            label=label,
+            label_wrapped=f"<evidence>{label}</evidence>",
+            bbox=[int(xyxy[0]), int(xyxy[1]), int(xyxy[2]), int(xyxy[3])],
+            confidence=conf,
+            monitor_id=monitor_id,
+            dpi_scale=1.0,
+            visual_hash=f"phash_{xyxy[0]}_{xyxy[1]}_{xyxy[2]}_{xyxy[3]}",
+        )
+
+    @staticmethod
+    def _overlaps(a: List[int], b: List[int]) -> bool:
+        """True when box `a`'s center lies inside box `b` (cheap containment)."""
+        cx = (a[0] + a[2]) / 2.0
+        cy = (a[1] + a[3]) / 2.0
+        return b[0] <= cx <= b[2] and b[1] <= cy <= b[3]
+
+    def _label_from_ocr(self, box: List[int], words: List[dict]) -> Optional[str]:
+        """Join OCR words whose center falls inside `box` (left→right, top→bottom)."""
+        inside = [
+            w for w in words
+            if box[0] <= (w["x"] + w["w"] / 2.0) <= box[2]
+            and box[1] <= (w["y"] + w["h"] / 2.0) <= box[3]
+        ]
+        if not inside:
+            return None
+        inside.sort(key=lambda w: (round(w["y"] / 12.0), w["x"]))
+        text = " ".join(w["text"] for w in inside).strip()
+        return text or None
+
+    def _ocr_words(self, image: Image.Image) -> List[dict]:
+        """Run tesseract (sparse-text TSV) over the full frame. Returns a list of
+        {text,x,y,w,h,line} dicts. Empty list on any failure (degrade silently —
+        boxes still carry class-name labels)."""
+        if not self._tesseract:
+            return []
+        import subprocess
+        import tempfile
+
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=True) as tf:
+                image.convert("RGB").save(tf.name)
+                proc = subprocess.run(
+                    [self._tesseract, tf.name, "stdout", "--psm", "11", "tsv"],
+                    capture_output=True,
+                    timeout=float(os.environ.get("KRIA_OMNIPARSER_OCR_TIMEOUT", "8")),
+                )
+            out = proc.stdout.decode("utf-8", "ignore")
+        except Exception as exc:
+            print(f"[VISION] OCR unavailable (non-fatal): {exc}")
+            return []
+        words: List[dict] = []
+        lines = out.splitlines()
+        if not lines:
+            return words
+        header = lines[0].split("\t")
+        try:
+            ci = {name: header.index(name) for name in
+                  ["left", "top", "width", "height", "conf", "text", "line_num", "block_num", "par_num"]}
+        except ValueError:
+            return words
+        for row in lines[1:]:
+            cols = row.split("\t")
+            if len(cols) <= ci["text"]:
+                continue
+            text = cols[ci["text"]].strip()
+            if not text:
+                continue
+            try:
+                conf = float(cols[ci["conf"]])
+            except ValueError:
+                conf = -1.0
+            if conf < 30:
+                continue
+            try:
+                words.append({
+                    "text": text,
+                    "x": int(cols[ci["left"]]),
+                    "y": int(cols[ci["top"]]),
+                    "w": int(cols[ci["width"]]),
+                    "h": int(cols[ci["height"]]),
+                    "line": (cols[ci["block_num"]], cols[ci["par_num"]], cols[ci["line_num"]]),
+                })
+            except ValueError:
+                continue
+        return words
+
+    @staticmethod
+    def _ocr_lines(words: List[dict]) -> List[Tuple[str, List[int]]]:
+        """Group OCR words into text lines with a bounding box."""
+        groups: dict = {}
+        for w in words:
+            groups.setdefault(w["line"], []).append(w)
+        out: List[Tuple[str, List[int]]] = []
+        for ws in groups.values():
+            ws.sort(key=lambda w: w["x"])
+            text = " ".join(w["text"] for w in ws).strip()
+            x1 = min(w["x"] for w in ws)
+            y1 = min(w["y"] for w in ws)
+            x2 = max(w["x"] + w["w"] for w in ws)
+            y2 = max(w["y"] + w["h"] for w in ws)
+            out.append((text, [x1, y1, x2, y2]))
+        return out
 
     def _caption_region(self, image: Image.Image, bbox: List[int]) -> Optional[str]:
         if self._caption is None or self._caption_proc is None:

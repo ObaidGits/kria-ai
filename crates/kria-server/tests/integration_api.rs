@@ -28,6 +28,12 @@ async fn build_test_app() -> Router {
         fleet,
         executive_sender: None,
         turn_admission: Arc::new(kria_core::agent::TurnAdmission::new()),
+        agent_loop: None,
+        device_registry: None,
+        notifier: None,
+        session_store: None,
+        remote_desktop: None,
+        remote_desktop_backend: None,
     });
 
     kria_server::build_router(state)

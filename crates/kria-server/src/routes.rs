@@ -145,8 +145,28 @@ async fn chat(
     Json(response)
 }
 
-async fn list_sessions() -> Json<Vec<serde_json::Value>> {
-    Json(vec![])
+async fn list_sessions(State(state): State<Arc<ServerState>>) -> Json<Vec<serde_json::Value>> {
+    let Some(store) = state.session_store.as_ref() else {
+        return Json(vec![]);
+    };
+    match store.list_sessions() {
+        Ok(sessions) => Json(
+            sessions
+                .into_iter()
+                .map(|(session_id, turns, last_active)| {
+                    serde_json::json!({
+                        "session_id": session_id,
+                        "turns": turns,
+                        "last_active": last_active,
+                    })
+                })
+                .collect(),
+        ),
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to list sessions");
+            Json(vec![])
+        }
+    }
 }
 
 async fn list_models(State(state): State<Arc<ServerState>>) -> Json<serde_json::Value> {

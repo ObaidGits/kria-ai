@@ -284,6 +284,15 @@ impl ServiceOrchestrator {
             .env("KRIA_VISION_PORT", port.to_string())
             .kill_on_drop(true);
 
+        // Task 6: REAL grounding by default with ZERO user env. If the bundled
+        // OmniParser v2 icon-detector weights are present under the workspace and
+        // the operator has not explicitly chosen a backend, default the sidecar to
+        // the lightweight `omniparser` backend (CPU-friendly YOLO detector +
+        // OCR labels) so click/find tasks ground on real on-screen controls. When
+        // the weights are missing we leave the backend unset → the sidecar falls
+        // back to its honest, clearly-degraded stub (never silently "blind").
+        self.apply_vision_backend_env(&mut cmd);
+
         let child = cmd
             .spawn()
             .with_context(|| format!("failed to spawn vision sidecar: {}", python))?;
@@ -353,6 +362,52 @@ impl ServiceOrchestrator {
                 );
             }
         }
+    }
+
+    /// Task 6: set the vision-backend env on the sidecar command. Picks the
+    /// real, lightweight `omniparser` backend by default when its weights are
+    /// bundled, unless the operator has explicitly set `KRIA_VISION_MODEL`
+    /// (honoured as-is) — and never forces a backend when the weights are
+    /// absent, so the sidecar degrades honestly instead of faking detections.
+    /// Pure env wiring (no I/O beyond a weights existence check) so it is safe
+    /// to call on every (re)spawn.
+    fn apply_vision_backend_env(&self, cmd: &mut Command) {
+        // Operator override wins — do not second-guess an explicit choice.
+        if std::env::var_os("KRIA_VISION_MODEL").is_some() {
+            return;
+        }
+        let weights = self
+            .config
+            .workspace_root
+            .join("models/omniparser/icon_detect/model.pt");
+        if !weights.exists() {
+            tracing::warn!(
+                target: "orchestrator",
+                weights = %weights.display(),
+                "OmniParser weights not found; vision sidecar will run its honest degraded stub (no real grounding)"
+            );
+            return;
+        }
+        cmd.env("KRIA_VISION_MODEL", "omniparser");
+        cmd.env("KRIA_OMNIPARSER_WEIGHTS", weights.to_string_lossy().to_string());
+        // Optional caption weights (Florence-2) — wired only if the operator
+        // points at them, since per-region captioning is costly on CPU. Default
+        // labelling comes from fast OCR inside the sidecar (no caption needed).
+        let caption = self
+            .config
+            .workspace_root
+            .join("models/omniparser/icon_caption");
+        if std::env::var_os("KRIA_OMNIPARSER_CAPTION").is_none()
+            && caption.join("model.safetensors").exists()
+            && std::env::var("KRIA_OMNIPARSER_ENABLE_CAPTION").as_deref() == Ok("1")
+        {
+            cmd.env("KRIA_OMNIPARSER_CAPTION", caption.to_string_lossy().to_string());
+        }
+        tracing::info!(
+            target: "orchestrator",
+            weights = %weights.display(),
+            "vision sidecar defaulting to OmniParser real grounding backend"
+        );
     }
 
     /// Detect which python to use for the vision sidecar.

@@ -125,6 +125,38 @@ rollback_max_age_days = 30
 host = "127.0.0.1"
 port = 3001
 
+# ─── Phase 4.5 — Mobile prompt-control ───
+[mobile]
+enabled = true
+require_device_auth = true
+# Dedicated gateway port (separate from server.port=3001 used by the desktop
+# local API bridge). The phone connects here.
+port = 8787
+# Bound to the Tailscale (tailnet) IP: reachable from the phone over the private
+# WireGuard mesh from ANY network, and not exposed on the local LAN. Install the
+# Tailscale app on the phone (same account) and open http://100.67.153.62:8787/m
+bind_interface = "100.67.153.62"
+token_ttl_secs = 86400
+pairing_ttl_secs = 300
+
+# ─── Phase 4.6 — Remote desktop view & takeover (portal ScreenCast + WebRTC) ───
+[remote_desktop]
+enabled = true
+# Capture is via xdg-desktop-portal ScreenCast + PipeWire (X11 + Wayland),
+# streamed to the phone over WebRTC. No RDP / no gnome-remote-desktop.
+idle_timeout_secs = 300
+max_fps = 30
+max_dimension = 1600
+video_encoder = "vp8"
+
+# ─── Phase 4.5.5 — ntfy push (optional) ───
+[ntfy]
+enabled = false
+server_url = "https://ntfy.sh"
+topic = ""
+auth_token = ""
+default_priority = "default"
+
 [telegram]
 enabled = false
 bot_token = ""

@@ -2436,4 +2436,29 @@ mod tests {
         cache.invalidate().await;
         assert!(!cache.is_unresponsive("org.test.SlowApp").await);
     }
+
+    /// LIVE probe (ignored): captures a real AT-SPI snapshot from the running
+    /// session and reports element count + how many carry usable bounds. Run with
+    /// `cargo test -p kria-core atspi_live_probe -- --ignored --nocapture`.
+    #[tokio::test]
+    #[ignore]
+    async fn atspi_live_probe() {
+        if !AtSpiEngine::is_available().await {
+            eprintln!("ATSPI_PROBE: unavailable");
+            return;
+        }
+        let engine = AtSpiEngine::new();
+        let snap = engine.capture_snapshot(AtSpiSnapshotRequest::default()).await;
+        let with_bounds = snap.elements.iter().filter(|e| {
+            e.bounds.map(|b| b[2] > 0 && b[3] > 0).unwrap_or(false)
+        }).count();
+        eprintln!(
+            "ATSPI_PROBE: status={} focused_window={:?} elements={} with_bounds={} node_count={}",
+            snap.status, snap.focused_window, snap.elements.len(), with_bounds, snap.node_count
+        );
+        for e in snap.elements.iter().take(8) {
+            eprintln!("  - role={} name={:?} bounds={:?} visible={} enabled={}",
+                e.role, e.name, e.bounds, e.visible, e.enabled);
+        }
+    }
 }

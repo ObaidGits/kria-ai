@@ -1,0 +1,39 @@
+{
+  "id": "n01",
+  "category": "navigation",
+  "prompt": "Open Google Chrome and go to youtube.com",
+  "final": "PASS",
+  "run_classes": [
+    "PASS"
+  ],
+  "runs": [
+    {
+      "ok_request": true,
+      "request_error": null,
+      "reply": "Task complete.",
+      "sub_verdicts": [
+        {
+          "outcome": "VERIFIED",
+          "confidence": 0.95,
+          "detail": "window 'Google Chrome' present+focused",
+          "sub_goal": {
+            "kind": "open_app",
+            "target_hint": "chrome",
+            "expect_contains": null
+          }
+        },
+        {
+          "outcome": "VERIFIED",
+          "confidence": 0.85,
+          "detail": "loaded page title 'YouTube - Google Chrome' contains 'youtube'",
+          "sub_goal": {
+            "kind": "navigate",
+            "target_hint": "youtube.com",
+            "expect_contains": "youtube"
+          }
+        }
+      ],
+      "classification": "PASS"
+    }
+  ]
+}

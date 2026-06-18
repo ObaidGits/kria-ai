@@ -1,0 +1,49 @@
+{
+  "id": "m10",
+  "category": "multi_step",
+  "prompt": "Open the text editor, type a note, and save it",
+  "final": "INCONCLUSIVE",
+  "run_classes": [
+    "INCONCLUSIVE"
+  ],
+  "runs": [
+    {
+      "ok_request": true,
+      "request_error": null,
+      "reply": "I couldn't complete typing for 'type'.",
+      "sub_verdicts": [
+        {
+          "outcome": "VERIFIED",
+          "confidence": 0.95,
+          "detail": "window 'Text Editor' present+focused",
+          "sub_goal": {
+            "kind": "open_app",
+            "target_hint": "text editor",
+            "expect_contains": null
+          }
+        },
+        {
+          "outcome": "VERIFIED",
+          "confidence": 0.75,
+          "detail": "screen shows 'note'",
+          "sub_goal": {
+            "kind": "type",
+            "target_hint": null,
+            "expect_contains": "note"
+          }
+        },
+        {
+          "outcome": "INCONCLUSIVE",
+          "confidence": 0.3,
+          "detail": "could not confirm click effect for 'save'",
+          "sub_goal": {
+            "kind": "click",
+            "target_hint": "save",
+            "expect_contains": null
+          }
+        }
+      ],
+      "classification": "INCONCLUSIVE"
+    }
+  ]
+}

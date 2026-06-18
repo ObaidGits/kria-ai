@@ -64,6 +64,7 @@ pub(crate) fn resolve_shortcut(combo: &str) -> String {
         "zoom_out" | "zoomout" => "ctrl+minus",
         "zoom_reset" => "ctrl+0",
         "save" => "ctrl+s",
+        "print" => "ctrl+p",
         "reload" | "refresh" => "ctrl+r",
         "find" => "ctrl+f",
         "select_all" | "selectall" => "ctrl+a",
@@ -133,6 +134,39 @@ impl<S: InputSink> GuiHands for UinputHands<S> {
                 Ok(()) => Ok(ActionResult::ok(backend)),
                 Err(e) => Ok(ActionResult::failed(backend, e.to_string())),
             },
+            Action::TypeAndSubmit { text } => {
+                if text.is_empty() {
+                    return Ok(ActionResult::failed(backend, "type_and_submit with empty text"));
+                }
+                if let Err(e) = self.sink.type_text(text).await {
+                    return Ok(ActionResult::failed(backend, e.to_string()));
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                match self.sink.key("enter").await {
+                    Ok(()) => Ok(ActionResult::ok(backend)),
+                    Err(e) => Ok(ActionResult::failed(backend, e.to_string())),
+                }
+            }
+            Action::Navigate { url } => {
+                if url.trim().is_empty() {
+                    return Ok(ActionResult::failed(backend, "navigate with empty url"));
+                }
+                // App-agnostic browser navigation: focus the address bar (ctrl+l),
+                // SETTLE so focus lands (else the first chars are dropped, e.g.
+                // "stackoverflow"→"ckoverflow"), type the URL, settle, submit.
+                if let Err(e) = self.sink.key("ctrl+l").await {
+                    return Ok(ActionResult::failed(backend, e.to_string()));
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(350)).await;
+                if let Err(e) = self.sink.type_text(url).await {
+                    return Ok(ActionResult::failed(backend, e.to_string()));
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                match self.sink.key("enter").await {
+                    Ok(()) => Ok(ActionResult::ok(backend)),
+                    Err(e) => Ok(ActionResult::failed(backend, e.to_string())),
+                }
+            }
             Action::Key { combo } => {
                 let resolved = resolve_shortcut(combo);
                 if resolved.is_empty() {
@@ -216,6 +250,33 @@ mod tests {
 
     fn decide(action: Action) -> Decision {
         Decision { action, reason: String::new(), risk_hint: None }
+    }
+
+    #[tokio::test]
+    async fn type_and_submit_types_then_enters() {
+        let sink = RecordingSink::default();
+        let hands = UinputHands::new(sink);
+        let r = hands
+            .execute(&decide(Action::TypeAndSubmit { text: "ls -la".into() }), &obs())
+            .await
+            .unwrap();
+        assert!(r.ok);
+        assert_eq!(hands.sink.events.lock().unwrap().as_slice(), ["type ls -la", "key enter"]);
+    }
+
+    #[tokio::test]
+    async fn navigate_focuses_address_bar_types_url_then_enters() {
+        let sink = RecordingSink::default();
+        let hands = UinputHands::new(sink);
+        let r = hands
+            .execute(&decide(Action::Navigate { url: "youtube.com".into() }), &obs())
+            .await
+            .unwrap();
+        assert!(r.ok);
+        assert_eq!(
+            hands.sink.events.lock().unwrap().as_slice(),
+            ["key ctrl+l", "type youtube.com", "key enter"]
+        );
     }
 
     #[test]

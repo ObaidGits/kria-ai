@@ -78,6 +78,45 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     let memory_store_backend = Arc::new(MemoryStore::open(&paths.db_path)?);
     let memory_store: Arc<dyn MemoryRuntime> = memory_store_backend.clone();
 
+    // ── Durable reminder scheduler (Phase 2.3) ────────────────────────────────
+    // Polls the persistent `reminders` table; fires due reminders via notify-send.
+    // Survives restart: overdue reminders fire on the first poll after boot.
+    match kria_core::tasks::TaskStore::open(&paths.db_path) {
+        Ok(reminder_store) => {
+            let dbus_addr = std::env::var("DBUS_SESSION_BUS_ADDRESS")
+                .or_else(|_| {
+                    std::env::var("XDG_RUNTIME_DIR").map(|d| format!("unix:path={}/bus", d))
+                })
+                .unwrap_or_else(|_| "unix:path=/run/user/1000/bus".to_string());
+            let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":1".to_string());
+            kria_core::tasks::spawn_reminder_scheduler(
+                Arc::new(reminder_store),
+                move |reminder| {
+                    let _ = std::process::Command::new("notify-send")
+                        .env("DBUS_SESSION_BUS_ADDRESS", &dbus_addr)
+                        .env("DISPLAY", &display)
+                        .args([
+                            "-a",
+                            "KRIA",
+                            "-u",
+                            "critical",
+                            "-t",
+                            "0",
+                            "--icon=alarm",
+                            "\u{23f0} KRIA Reminder",
+                            &reminder.message,
+                        ])
+                        .spawn();
+                },
+                std::time::Duration::from_secs(30),
+            );
+            tracing::info!("[reminders] durable reminder scheduler armed (30s poll)");
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "[reminders] durable scheduler disabled");
+        }
+    }
+
     // Initialize OpenClaw subsystem (synchronous — creates skills.db with both
     // `installed_skills` and `audit_log` tables immediately on boot).
     let openclaw_subsystem = match kria_core::openclaw::OpenClawSubsystem::boot(&paths.data_dir) {
@@ -664,8 +703,14 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     // This is passed to register() so gw_* tools exist in the registry
     // regardless of whether the MCP server connects successfully.
     let gw_client_ref = gw::new_client_ref();
+    let github_client_ref = gw::new_github_client_ref();
     tracing::info!("[GW] created lazy GwClientRef — registering Google Workspace tools now");
-    gw::register(&tool_registry_inner, gw_client_ref.clone(), sidecar.clone());
+    gw::register(
+        &tool_registry_inner,
+        gw_client_ref.clone(),
+        github_client_ref.clone(),
+        sidecar.clone(),
+    );
 
     let workflow_registry_path = kria_core::n8n::default_workflow_registry_store_path();
     let (workflow_registry_store, migrated_legacy_n8n_workflows) =
@@ -1575,7 +1620,6 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
             kria_core::agent::gui_cognition::safety_hitl::GuiHitlProposalStore::default(),
         )),
         gui_orchestrator,
-        gui_cognition_observation_cache: Arc::new(tokio::sync::Mutex::new(None)),
         world_model,
     };
 
@@ -1992,6 +2036,7 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         let tool_reg_bg = tool_registry.clone();
         let mcp_mgr_bg = mcp_manager.clone();
         let gw_ref_bg = gw_client_ref.clone();
+        let github_ref_bg = github_client_ref.clone();
         let colab_runtime_bg = colab_runtime.clone();
         let health_bg = health.clone();
         let handle_bg = handle.clone();
@@ -2014,6 +2059,17 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
                 tracing::warn!(
                     "[GW] gworkspace MCP server not available. \
                      Google Workspace tools will return 'not connected' errors."
+                );
+            }
+
+            // Wire GitHub client if the github server started successfully.
+            if let Some(gh_client) = mgr.get_client("github") {
+                gw::set_github_client(&github_ref_bg, gh_client.clone()).await;
+                tracing::info!("[GH] GhClientRef populated — GitHub MCP is now active");
+            } else {
+                tracing::info!(
+                    "[GH] github MCP server not available (set GITHUB_PERSONAL_ACCESS_TOKEN \
+                     and ensure Docker is running). GitHub briefing section will be skipped."
                 );
             }
 

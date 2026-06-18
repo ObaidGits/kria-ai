@@ -5,11 +5,12 @@
 //! exchange ONLY the canonical [`Observation`], [`Decision`], and
 //! [`ActionResult`] types. Dependencies are injected so tests can substitute
 //! fakes (Requirement 1). The Brain trait is the pluggable seam — a future
-//! `UiTarsBrain` implements the SAME trait and drops in with no changes to
+//! `VisionBrain` implements the SAME trait and drops in with no changes to
 //! Sight, Hands, or the loop (Requirement 3.6).
 
 use async_trait::async_trait;
 
+use super::planner::Plan;
 use super::types::{ActionResult, Decision, Observation, TurnStep};
 
 /// Perception layer: screenshot → structured [`Observation`].
@@ -20,7 +21,40 @@ pub trait Sight: Send + Sync {
     /// failure the implementation SHOULD return a degraded (but non-error)
     /// observation rather than crash the turn (Requirement 2.3); `Err` is
     /// reserved for unrecoverable internal faults.
+    ///
+    /// This is the CHEAP, default observation. Implementations MAY return an
+    /// element-free observation here (e.g. just the active window) and reserve
+    /// heavier element detection for [`observe_grounded`](Sight::observe_grounded).
     async fn observe(&self, want_som: bool) -> anyhow::Result<Observation>;
+
+    /// Whether this Sight can produce an element-GROUNDED observation on demand
+    /// (e.g. an OmniParser-backed parse with detected, clickable controls).
+    ///
+    /// Default `false`: the loop will NOT attempt a grounding escalation against
+    /// this Sight, so cheap/fake/test sights behave exactly as before.
+    fn supports_grounding(&self) -> bool {
+        false
+    }
+
+    /// Capture an element-GROUNDED observation (heavier; detects on-screen
+    /// controls). The loop calls this ONLY when the cheap [`observe`] gave the
+    /// Brain nothing to act on (it could only `Ask`), so the cost is paid only
+    /// when a task genuinely needs to click/find a control.
+    ///
+    /// Default delegates to [`observe`], so a Sight that does not override
+    /// [`supports_grounding`] is completely unaffected by escalation.
+    async fn observe_grounded(&self, want_som: bool) -> anyhow::Result<Observation> {
+        self.observe(want_som).await
+    }
+}
+
+/// Turn-level PLANNER seam: decompose a task into an ordered [`Plan`] of
+/// verifiable sub-goals. Injected so the loop can run plan-driven (with verified
+/// completion) and tests can substitute a fake. `LlmPlanner` implements this;
+/// it always returns a non-empty plan (deterministic fallback on model failure).
+#[async_trait]
+pub trait GuiPlanner: Send + Sync {
+    async fn plan(&self, task: &str) -> Plan;
 }
 
 /// Cognition layer: (task, observation, history) → one next [`Decision`].

@@ -1,0 +1,384 @@
+/* Standalone mobile PWA shell styles (Phase 4.5 / 4.6). */
+.mobile-app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  background: #0b0f14;
+  color: #e2e8f0;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.mobile-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #1e293b;
+}
+.mobile-brand {
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+.mobile-server {
+  font-size: 11px;
+  color: #64748b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.mobile-tabs {
+  display: flex;
+  border-top: 1px solid #1e293b;
+}
+.mobile-tabs button {
+  flex: 1;
+  padding: 14px;
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 14px;
+}
+.mobile-tabs button.active {
+  color: #38bdf8;
+  border-top: 2px solid #38bdf8;
+}
+
+/* Pairing + settings */
+.mobile-pairing,
+.mobile-settings {
+  padding: 24px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.mobile-pairing label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: #94a3b8;
+}
+.mobile-pairing input {
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  background: #111827;
+  color: #e2e8f0;
+  font-size: 15px;
+}
+.mobile-hint {
+  font-size: 13px;
+  color: #94a3b8;
+  line-height: 1.5;
+}
+.mobile-error {
+  background: #7f1d1d;
+  color: #fecaca;
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+button {
+  cursor: pointer;
+}
+.mobile-pairing button,
+.mobile-settings button,
+.mobile-desktop button {
+  padding: 12px 16px;
+  border-radius: 8px;
+  border: none;
+  background: #38bdf8;
+  color: #0b0f14;
+  font-weight: 600;
+  font-size: 15px;
+}
+button.danger {
+  background: #ef4444 !important;
+  color: #fff !important;
+}
+
+/* Chat */
+.mobile-chat {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.mobile-chat-log {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mobile-line {
+  padding: 10px 12px;
+  border-radius: 12px;
+  max-width: 85%;
+  font-size: 14px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.mobile-line.user {
+  align-self: flex-end;
+  background: #1d4ed8;
+}
+.mobile-line.assistant {
+  align-self: flex-start;
+  background: #1e293b;
+}
+.mobile-line.system {
+  align-self: center;
+  background: #422006;
+  color: #fed7aa;
+  font-size: 12px;
+}
+.mobile-chat-input {
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+  border-top: 1px solid #1e293b;
+}
+.mobile-chat-input input {
+  flex: 1;
+  padding: 12px;
+  border-radius: 999px;
+  border: 1px solid #334155;
+  background: #111827;
+  color: #e2e8f0;
+}
+.mobile-chat-input button {
+  padding: 0 18px;
+  border-radius: 999px;
+  border: none;
+  background: #38bdf8;
+  color: #0b0f14;
+  font-weight: 600;
+}
+
+.mobile-approval {
+  margin: 0 10px 8px;
+  padding: 12px;
+  border-radius: 10px;
+  background: #422006;
+  color: #fed7aa;
+  font-size: 13px;
+}
+.mobile-approval-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+/* Remote desktop */
+.mobile-desktop {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  position: relative;
+}
+.mobile-desktop-banner {
+  background: #7f1d1d;
+  color: #fff;
+  text-align: center;
+  padding: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.mobile-desktop-start,
+.mobile-desktop-confirm {
+  padding: 24px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.mobile-desktop-screen {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+  position: relative;
+  background: #000;
+}
+.mobile-desktop-canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  background: #000;
+  touch-action: none; /* we own all touch gestures */
+  outline: none;
+  image-rendering: auto;
+  will-change: transform;
+}
+.mobile-desktop-toolbar {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 6px 8px;
+  background: #0b0f14;
+  border-bottom: 1px solid #1e293b;
+  align-items: center;
+}
+.mobile-desktop-toolbar button {
+  flex: 0 0 auto;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 8px 12px;
+  font-size: 15px;
+  background: #1e293b;
+  color: #e2e8f0;
+  border: 1px solid #334155;
+  border-radius: 8px;
+}
+.mobile-desktop-toolbar button.active {
+  background: #2563eb;
+  border-color: #3b82f6;
+  color: #fff;
+}
+.mobile-desktop-toolbar-disconnect.danger {
+  margin-left: auto;
+  background: #7f1d1d;
+  border-color: #b91c1c;
+  color: #fff;
+}
+.mobile-desktop-toolbar-more {
+  position: relative;
+}
+.mobile-desktop-toolbar-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  background: #0b0f14;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  min-width: 180px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.mobile-desktop-toolbar-menu button {
+  width: 100%;
+  text-align: left;
+  min-height: 44px;
+}
+.mobile-desktop-toolbar-handle {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 15;
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: 22px;
+  background: rgba(11, 15, 20, 0.8);
+  color: #e2e8f0;
+  border: 1px solid #334155;
+  font-size: 18px;
+}
+.mobile-desktop-keybar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 8px;
+  background: #0b0f14;
+  border-top: 1px solid #1e293b;
+}
+.mobile-desktop-keybar-row {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  overflow-x: auto;
+}
+.mobile-desktop-keybar button {
+  flex: 0 0 auto;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 8px 10px;
+  font-size: 14px;
+  background: #1e293b;
+  color: #e2e8f0;
+  border: 1px solid #334155;
+  border-radius: 8px;
+}
+.mobile-desktop-keybar button.active {
+  background: #2563eb;
+  border-color: #3b82f6;
+  color: #fff;
+}
+.mobile-desktop-stats {
+  font-size: 11px;
+  color: #cbd5e1;
+  background: rgba(11, 15, 20, 0.85);
+  padding: 3px 10px;
+  font-family: monospace;
+  border-bottom: 1px solid #1e293b;
+}
+.mobile-desktop-resume {
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 12px;
+  background: #0b0f14;
+}
+.mobile-desktop-meta {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-size: 11px;
+  color: #94a3b8;
+  font-family: monospace;
+  padding-left: 8px;
+}
+.mobile-desktop-hidden-input {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0.01;
+  border: 0;
+  padding: 0;
+}
+.mobile-killswitch {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  z-index: 5;
+}
+
+/* Larger screens (tablet / desktop browser): roomier controls. */
+@media (min-width: 768px) {
+  .mobile-desktop-toolbar button,
+  .mobile-desktop-keybar button {
+    font-size: 16px;
+    padding: 10px 14px;
+  }
+  .mobile-desktop-start,
+  .mobile-desktop-confirm {
+    max-width: 560px;
+    margin: 0 auto;
+  }
+}
+
+.mobile-desktop-debug {
+  font-size: 11px;
+  color: #94a3b8;
+  background: #0b0f14;
+  padding: 4px 10px;
+  border-bottom: 1px solid #1e293b;
+  font-family: monospace;
+}

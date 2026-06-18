@@ -1,0 +1,29 @@
+{
+  "id": "o11",
+  "category": "open_only",
+  "prompt": "Launch the disks utility",
+  "final": "PASS",
+  "run_classes": [
+    "PASS"
+  ],
+  "runs": [
+    {
+      "ok_request": true,
+      "request_error": null,
+      "reply": "Done: open_app.",
+      "sub_verdicts": [
+        {
+          "outcome": "VERIFIED",
+          "confidence": 0.95,
+          "detail": "window 'Disks' present+focused",
+          "sub_goal": {
+            "kind": "open_app",
+            "target_hint": "disks",
+            "expect_contains": null
+          }
+        }
+      ],
+      "classification": "PASS"
+    }
+  ]
+}

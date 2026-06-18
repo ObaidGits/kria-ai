@@ -1,0 +1,39 @@
+{
+  "id": "n02",
+  "category": "navigation",
+  "prompt": "Open Google Chrome and open Gmail",
+  "final": "FAIL",
+  "run_classes": [
+    "FAIL"
+  ],
+  "runs": [
+    {
+      "ok_request": true,
+      "request_error": null,
+      "reply": "I couldn't find or open 'Google Chrome' \u2014 it doesn't appear to be installed on this system.",
+      "sub_verdicts": [
+        {
+          "outcome": "FAILED",
+          "confidence": 0.9,
+          "detail": "no window matching 'chrome' among 18 windows after settle",
+          "sub_goal": {
+            "kind": "open_app",
+            "target_hint": "chrome",
+            "expect_contains": null
+          }
+        },
+        {
+          "outcome": "FAILED",
+          "confidence": 0.7,
+          "detail": "page title 'obaid@obaid-ubuntu: /media/obaid/SSD/KRIA' does not show 'gmail' (page not loaded?)",
+          "sub_goal": {
+            "kind": "navigate",
+            "target_hint": "gmail",
+            "expect_contains": "gmail"
+          }
+        }
+      ],
+      "classification": "FAIL"
+    }
+  ]
+}

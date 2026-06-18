@@ -23,6 +23,14 @@ TOKEN = open(os.path.expanduser("~/.kria/api_token")).read().strip()
 ETOK = open(os.path.expanduser("~/.kria/gui_ext_token")).read().strip()
 ENV = dict(os.environ, DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/1000/bus")
 
+# Where to write the machine + human baseline report (Task 10). The active Brain
+# (qwen | ui_tars) is read from the env so an A/B run (Task 11) is recorded under
+# a distinct filename and labeled in the report.
+BRAIN = (os.environ.get("KRIA_GUI_COG_V2_BRAIN") or "qwen").strip().lower() or "qwen"
+REPORT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)))
+REPORT_MD = os.path.join(REPORT_DIR, f"gui_cog_v2_baseline_{BRAIN}.md")
+REPORT_JSON = os.path.join(REPORT_DIR, f"gui_cog_v2_baseline_{BRAIN}.json")
+
 
 def run_prompt(prompt: str, execute: bool) -> dict:
     body = {
@@ -80,6 +88,10 @@ def pgrep(p: str) -> int:
 
 
 # Held-out SAFE cases: (prompt, settle, kind, key, expect_substr_or_proc)
+# Single-action + MULTI-STEP held-out UNSEEN phrasings (Task 10): each is a
+# different wording from the prompts used while tuning, exercising open + a
+# standard follow-up (new tab / reload / close tab) so the multi-action chain is
+# part of the recorded baseline.
 CASES = [
     ("launch the calculator app", 3.0, "pgrep", "gnome-calculator"),
     ("open the system settings", 3.0, "focus", "settings"),
@@ -87,6 +99,9 @@ CASES = [
     ("open google chrome then reload the page", 4.0, "focus", "chrome"),
     ("open chrome and open a new tab", 4.0, "focus", "new tab"),
     ("open chrome and close the current tab", 4.0, "focus", "chrome"),
+    # Multi-step held-out (UNSEEN phrasings):
+    ("start the calculator program for me", 3.0, "pgrep", "gnome-calculator"),
+    ("bring up chrome and then create a fresh tab", 4.0, "focus", "new tab"),
 ]
 
 
@@ -129,7 +144,39 @@ def main():
     counts = {}
     for _p, v, *_ in rows:
         counts[v] = counts.get(v, 0) + 1
-    print("\n", {k: counts.get(k, 0) for k in ["PASS", "FAIL", "MISMATCH", "BLOCKED", "INCONCLUSIVE"]})
+    summary = {k: counts.get(k, 0) for k in ["PASS", "FAIL", "MISMATCH", "BLOCKED", "INCONCLUSIVE"]}
+    print("\n", summary)
+
+    # --- Baseline report artifact (Task 10) ---
+    ts = time.strftime("%Y-%m-%d %H:%M:%S %Z")
+    total = len(rows)
+    clean = summary["FAIL"] == 0 and summary["MISMATCH"] == 0 and summary["INCONCLUSIVE"] == 0
+    report = {
+        "generated_at": ts,
+        "engine": pf["engine"],
+        "brain": BRAIN,
+        "total_cases": total,
+        "summary": summary,
+        "clean_pass": clean,
+        "cases": [
+            {"prompt": p, "verdict": v, "status": st, "actions": acts, "reality": d}
+            for (p, v, st, acts, d) in rows
+        ],
+    }
+    with open(REPORT_JSON, "w") as f:
+        json.dump(report, f, indent=2)
+    with open(REPORT_MD, "w") as f:
+        f.write(f"# GUI Cognition V2 — live baseline ({BRAIN} brain)\n\n")
+        f.write(f"- Generated: {ts}\n- Engine: `{pf['engine']}`  Brain: `{BRAIN}`\n")
+        f.write(f"- Cases: {total}  Result: {summary}\n")
+        f.write(f"- Clean pass (no FAIL/MISMATCH/INCONCLUSIVE): **{clean}**\n\n")
+        f.write("| Prompt | Verdict | V2 status | actions | reality |\n|--|--|--|--|--|\n")
+        for p, v, st, acts, d in rows:
+            f.write(f"| {p} | {v} | {st} | {'+'.join(acts)} | {d[:40]} |\n")
+        f.write("\n> External truth: GNOME extension (GetFocusedWindow/ListWindows) + pgrep. "
+                "Verdicts are honest; MISMATCH = reply claims success but reality disagrees; "
+                "INCONCLUSIVE = environment blocked verification.\n")
+    print(f"\n[report] wrote {REPORT_MD} and {REPORT_JSON}")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,39 @@
+{
+  "id": "n04",
+  "category": "navigation",
+  "prompt": "Open Chrome and search for the latest Ubuntu version",
+  "final": "PASS",
+  "run_classes": [
+    "PASS"
+  ],
+  "runs": [
+    {
+      "ok_request": true,
+      "request_error": null,
+      "reply": "The screen did not change after the last action; stopping to avoid looping.",
+      "sub_verdicts": [
+        {
+          "outcome": "VERIFIED",
+          "confidence": 0.95,
+          "detail": "window 'Google Chrome' present+focused",
+          "sub_goal": {
+            "kind": "open_app",
+            "target_hint": "chrome",
+            "expect_contains": null
+          }
+        },
+        {
+          "outcome": "VERIFIED",
+          "confidence": 0.85,
+          "detail": "loaded page title 'the latest Ubuntu version - Google Search - Google Chrome' contains 'ubuntu'",
+          "sub_goal": {
+            "kind": "navigate",
+            "target_hint": "search latest Ubuntu version",
+            "expect_contains": "ubuntu"
+          }
+        }
+      ],
+      "classification": "PASS"
+    }
+  ]
+}

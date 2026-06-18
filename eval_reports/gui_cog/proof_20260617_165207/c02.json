@@ -1,0 +1,39 @@
+{
+  "id": "c02",
+  "category": "cross_substrate",
+  "prompt": "Create a file hello.txt with the text Hello KRIA and show it",
+  "final": "INCONCLUSIVE",
+  "run_classes": [
+    "INCONCLUSIVE"
+  ],
+  "runs": [
+    {
+      "ok_request": true,
+      "request_error": null,
+      "reply": "Done: open_app; write_file; read_output.",
+      "sub_verdicts": [
+        {
+          "outcome": "VERIFIED",
+          "confidence": 0.95,
+          "detail": "/home/obaid/hello.txt contains 'Hello KRIA'",
+          "sub_goal": {
+            "kind": "write_file",
+            "target_hint": "hello.txt",
+            "expect_contains": "Hello KRIA"
+          }
+        },
+        {
+          "outcome": "INCONCLUSIVE",
+          "confidence": 0.3,
+          "detail": "could not OCR-confirm 'Hello KRIA' (terminal text may be unreadable)",
+          "sub_goal": {
+            "kind": "read_output",
+            "target_hint": null,
+            "expect_contains": "Hello KRIA"
+          }
+        }
+      ],
+      "classification": "INCONCLUSIVE"
+    }
+  ]
+}

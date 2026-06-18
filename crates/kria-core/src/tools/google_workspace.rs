@@ -22,6 +22,7 @@ use crate::infra::ToolResult;
 use crate::mcp::McpClient;
 use crate::safety::RiskLevel;
 use crate::sidecar::SidecarBridge;
+use crate::tools::availability;
 use crate::tools::google_workspace_contract as gw_contract;
 use crate::tools::registry::{ParamDef, ToolDef, ToolHandler, ToolRegistry};
 use async_trait::async_trait;
@@ -45,6 +46,20 @@ pub fn new_client_ref() -> GwClientRef {
 pub async fn set_client(gw_ref: &GwClientRef, client: Arc<McpClient>) {
     tracing::info!("[GW] wiring live McpClient into GwClientRef");
     *gw_ref.write().await = Some(client);
+}
+
+/// Lazy reference to the GitHub MCP client (mirrors [`GwClientRef`]).
+pub type GhClientRef = GwClientRef;
+
+/// Create an empty lazy GitHub client reference.
+pub fn new_github_client_ref() -> GhClientRef {
+    new_client_ref()
+}
+
+/// Wire in the live GitHub MCP client after the `github` server connects.
+pub async fn set_github_client(gh_ref: &GhClientRef, client: Arc<McpClient>) {
+    tracing::info!("[GH] wiring live McpClient into GhClientRef");
+    *gh_ref.write().await = Some(client);
 }
 
 fn param(name: &str, ty: &str, desc: &str, required: bool) -> ParamDef {
@@ -1357,6 +1372,259 @@ impl ToolHandler for GwGmailDelete {
 
 // ── New Gmail tools ────────────────────────────────────────────────────────────
 
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DraftCreateInput {
+    to: String,
+    subject: String,
+    body: String,
+    #[serde(default)]
+    cc: Option<String>,
+    #[serde(default)]
+    account: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SendDraftInput {
+    draft_id: String,
+    #[serde(default)]
+    account: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct BulkSendInput {
+    recipients: Vec<String>,
+    subject: String,
+    body: String,
+    #[serde(default)]
+    cc: Option<String>,
+    #[serde(default)]
+    account: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct AccountSwitchInput {
+    account: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CalendarUpdateInput {
+    event_id: String,
+    #[serde(default)]
+    summary: Option<String>,
+    #[serde(default)]
+    start: Option<String>,
+    #[serde(default)]
+    end: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    location: Option<String>,
+    #[serde(default)]
+    account: Option<String>,
+}
+
+const BULK_SEND_CAP: usize = 50;
+
+fn gmail_preview_markdown(to: &str, subject: &str, body: &str, cc: Option<&str>) -> String {
+    let cc_line = cc
+        .filter(|c| !c.trim().is_empty())
+        .map(|c| format!("**Cc:** {c}\n"))
+        .unwrap_or_default();
+    format!("**To:** {to}\n{cc_line}**Subject:** {subject}\n\n{body}")
+}
+
+
+struct GwGmailDraftCreate(GwBridge);
+#[async_trait]
+impl ToolHandler for GwGmailDraftCreate {
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let input: DraftCreateInput = match parse_input(params) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        if let Err(e) = require_non_empty(&input.to, "to") {
+            return e;
+        }
+        let mut args = serde_json::json!({
+            "to": input.to,
+            "subject": input.subject,
+            "body": input.body,
+        });
+        if let Some(cc) = input.cc.as_deref().filter(|c| !c.trim().is_empty()) {
+            args["cc"] = serde_json::json!(cc);
+        }
+        if let Some(acc) = input.account.as_deref().filter(|a| !a.trim().is_empty()) {
+            args["account"] = serde_json::json!(acc);
+        }
+        let res = self.0.mcp_call("createGmailDraft", args).await;
+        if !res.success {
+            return res;
+        }
+        let draft_id = extract_gmail_draft_id(&res.data);
+        let preview =
+            gmail_preview_markdown(&input.to, &input.subject, &input.body, input.cc.as_deref());
+        ToolResult::ok(serde_json::json!({
+            "draft_id": draft_id,
+            "to": input.to,
+            "subject": input.subject,
+            "body": input.body,
+            "preview_markdown": preview,
+            "sent": false,
+            "hint": "Use gw_gmail_send_draft with this draft_id to send.",
+        }))
+    }
+}
+
+struct GwGmailSendDraft(GwBridge);
+#[async_trait]
+impl ToolHandler for GwGmailSendDraft {
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let input: SendDraftInput = match parse_input(params) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        if let Err(e) = require_non_empty(&input.draft_id, "draft_id") {
+            return e;
+        }
+        let mut args = serde_json::json!({ "draftId": input.draft_id });
+        if let Some(acc) = input.account.as_deref().filter(|a| !a.trim().is_empty()) {
+            args["account"] = serde_json::json!(acc);
+        }
+        self.0.mcp_call("sendGmailDraft", args).await
+    }
+}
+
+struct GwGmailSendBulk(GwBridge);
+#[async_trait]
+impl ToolHandler for GwGmailSendBulk {
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let input: BulkSendInput = match parse_input(params) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        let recipients: Vec<String> = input
+            .recipients
+            .into_iter()
+            .map(|r| r.trim().to_string())
+            .filter(|r| !r.is_empty())
+            .collect();
+        if recipients.is_empty() {
+            return ToolResult::err("recipients must be a non-empty list");
+        }
+        if recipients.len() > BULK_SEND_CAP {
+            return ToolResult::err(format!(
+                "bulk send capped at {BULK_SEND_CAP} recipients (got {})",
+                recipients.len()
+            ));
+        }
+
+        let mut results = Vec::new();
+        let mut sent_count = 0usize;
+        for to in &recipients {
+            let mut draft_args = serde_json::json!({
+                "to": to,
+                "subject": input.subject,
+                "body": input.body,
+            });
+            if let Some(cc) = input.cc.as_deref().filter(|c| !c.trim().is_empty()) {
+                draft_args["cc"] = serde_json::json!(cc);
+            }
+            if let Some(acc) = input.account.as_deref().filter(|a| !a.trim().is_empty()) {
+                draft_args["account"] = serde_json::json!(acc);
+            }
+            let draft = self.0.mcp_call("createGmailDraft", draft_args).await;
+            if !draft.success {
+                results.push(serde_json::json!({ "to": to, "sent": false, "error": draft.error }));
+                continue;
+            }
+            match extract_gmail_draft_id(&draft.data) {
+                Some(id) => {
+                    let mut send_args = serde_json::json!({ "draftId": id });
+                    if let Some(acc) = input.account.as_deref().filter(|a| !a.trim().is_empty()) {
+                        send_args["account"] = serde_json::json!(acc);
+                    }
+                    let sent = self.0.mcp_call("sendGmailDraft", send_args).await;
+                    if sent.success {
+                        sent_count += 1;
+                        results.push(serde_json::json!({ "to": to, "sent": true }));
+                    } else {
+                        results.push(serde_json::json!({ "to": to, "sent": false, "error": sent.error }));
+                    }
+                }
+                None => results.push(serde_json::json!({
+                    "to": to, "sent": false, "error": "draftId not found"
+                })),
+            }
+        }
+
+        ToolResult::ok(serde_json::json!({
+            "total": recipients.len(),
+            "sent_count": sent_count,
+            "failed_count": recipients.len() - sent_count,
+            "subject": input.subject,
+            "results": results,
+        }))
+    }
+}
+
+struct GwAccountSwitch;
+#[async_trait]
+impl ToolHandler for GwAccountSwitch {
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let input: AccountSwitchInput = match parse_input(params) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        if let Err(e) = require_non_empty(&input.account, "account") {
+            return e;
+        }
+        std::env::set_var("KRIA_GW_ACCOUNT", input.account.trim());
+        ToolResult::ok(serde_json::json!({
+            "active_account": input.account.trim(),
+            "note": "Default Google account switched for subsequent tool calls.",
+        }))
+    }
+}
+
+struct GwCalendarUpdate(GwBridge);
+#[async_trait]
+impl ToolHandler for GwCalendarUpdate {
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let input: CalendarUpdateInput = match parse_input(params) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        if let Err(e) = require_non_empty(&input.event_id, "event_id") {
+            return e;
+        }
+        let mut args = serde_json::json!({ "eventId": input.event_id });
+        if let Some(s) = input.summary.as_deref().filter(|v| !v.trim().is_empty()) {
+            args["summary"] = serde_json::json!(s);
+        }
+        if let Some(s) = input.start.as_deref().filter(|v| !v.trim().is_empty()) {
+            args["start"] = serde_json::json!({ "dateTime": s });
+        }
+        if let Some(s) = input.end.as_deref().filter(|v| !v.trim().is_empty()) {
+            args["end"] = serde_json::json!({ "dateTime": s });
+        }
+        if let Some(s) = input.description.as_deref() {
+            args["description"] = serde_json::json!(s);
+        }
+        if let Some(s) = input.location.as_deref() {
+            args["location"] = serde_json::json!(s);
+        }
+        if let Some(acc) = input.account.as_deref().filter(|a| !a.trim().is_empty()) {
+            args["account"] = serde_json::json!(acc);
+        }
+        self.0.mcp_call("updateCalendarEvent", args).await
+    }
+}
+
 struct GwGmailReply(GwBridge);
 #[async_trait]
 impl ToolHandler for GwGmailReply {
@@ -1676,6 +1944,270 @@ impl ToolHandler for GwCalendarSearch {
     }
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct AvailabilityInput {
+    #[serde(default)]
+    time_min: Option<String>,
+    #[serde(default)]
+    time_max: Option<String>,
+    #[serde(default)]
+    min_slot_minutes: Option<i64>,
+}
+
+fn parse_rfc3339_utc(value: Option<&str>) -> Option<chrono::DateTime<chrono::Utc>> {
+    let raw = value?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    chrono::DateTime::parse_from_rfc3339(raw)
+        .ok()
+        .map(|dt| dt.with_timezone(&chrono::Utc))
+}
+
+fn start_of_today_utc() -> chrono::DateTime<chrono::Utc> {
+    let now = chrono::Utc::now();
+    let midnight = now
+        .date_naive()
+        .and_hms_opt(0, 0, 0)
+        .expect("valid midnight");
+    chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(midnight, chrono::Utc)
+}
+
+/// Compute free slots + scheduling conflicts for a time window.
+struct GwCalendarAvailability(GwBridge);
+#[async_trait]
+impl ToolHandler for GwCalendarAvailability {
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let input: AvailabilityInput = match parse_input(params) {
+            Ok(value) => value,
+            Err(err) => return err,
+        };
+
+        let now = chrono::Utc::now();
+        let window_start = parse_rfc3339_utc(input.time_min.as_deref()).unwrap_or(now);
+        let window_end = parse_rfc3339_utc(input.time_max.as_deref())
+            .unwrap_or_else(|| window_start + chrono::Duration::hours(24));
+        let min_slot = input.min_slot_minutes.unwrap_or(15).max(1);
+
+        if window_end <= window_start {
+            return ToolResult::err("time_max must be after time_min".to_string());
+        }
+
+        let args = serde_json::json!({
+            "timeMin": window_start.to_rfc3339(),
+            "timeMax": window_end.to_rfc3339(),
+            "maxResults": 250,
+        });
+        let raw = self.0.mcp_call_raw("listCalendarEvents", args).await;
+        if !raw.success {
+            return raw;
+        }
+        let raw_text = raw.data.as_str().unwrap_or("").to_string();
+        let payload = parse_json_or_text(&raw_text);
+        let events = availability::parse_google_events(&payload);
+        let free = availability::free_slots(window_start, window_end, &events, min_slot);
+        let conflicts = availability::detect_conflicts(&events);
+
+        let data = serde_json::json!({
+            "window": {
+                "start": window_start.to_rfc3339(),
+                "end": window_end.to_rfc3339(),
+            },
+            "min_slot_minutes": min_slot,
+            "busy_count": events.len(),
+            "free_slots": free,
+            "conflicts": conflicts,
+        });
+        ToolResult {
+            success: true,
+            data: envelope_result("gw_calendar_availability", data, Some(&raw_text)),
+            error: None,
+        }
+    }
+}
+
+/// Best-effort GitHub section for the morning briefing. Calls the GitHub MCP
+/// (if connected) via a configurable read tool (`KRIA_GH_BRIEFING_TOOL`,
+/// default `list_notifications`). Always degrades gracefully — never fails the
+/// briefing if GitHub is unavailable or the tool name doesn't match.
+async fn github_briefing_section(
+    github: &GhClientRef,
+    tool_override: Option<&str>,
+) -> serde_json::Value {
+    let client = {
+        let guard = github.read().await;
+        match guard.as_ref() {
+            Some(c) => c.clone(),
+            None => return serde_json::json!({ "connected": false }),
+        }
+    };
+
+    let tool = tool_override
+        .map(|s| s.to_string())
+        .or_else(|| std::env::var("KRIA_GH_BRIEFING_TOOL").ok())
+        .unwrap_or_else(|| "list_notifications".to_string());
+
+    let call = tokio::time::timeout(
+        Duration::from_secs(MCP_REQUEST_TIMEOUT_SECS),
+        client.call_tool(&tool, Some(serde_json::json!({}))),
+    )
+    .await;
+
+    match call {
+        Ok(Ok(result)) => {
+            let text: String = result
+                .content
+                .iter()
+                .filter_map(|c| c.text.as_deref())
+                .collect::<Vec<_>>()
+                .join("\n");
+            if result.is_error {
+                serde_json::json!({ "connected": true, "tool": tool, "error": text })
+            } else {
+                serde_json::json!({ "connected": true, "tool": tool, "data": parse_json_or_text(&text) })
+            }
+        }
+        Ok(Err(error)) => {
+            serde_json::json!({ "connected": true, "tool": tool, "error": error.to_string() })
+        }
+        Err(_) => serde_json::json!({ "connected": true, "tool": tool, "error": "github mcp timeout" }),
+    }
+}
+
+async fn briefing_gmail_section(gw: &GwBridge, query: &str, max: u64) -> serde_json::Value {
+    let res = gw.grounded_gmail_search(query.to_string(), max).await;
+    serde_json::json!({ "ok": res.success, "query": query, "data": res.data })
+}
+
+async fn briefing_calendar_section(
+    gw: &GwBridge,
+    window: &str,
+    include_conflicts: bool,
+) -> serde_json::Value {
+    let (win_start, win_end) = if window == "next24h" {
+        let now = chrono::Utc::now();
+        (now, now + chrono::Duration::hours(24))
+    } else {
+        let start = start_of_today_utc();
+        (start, start + chrono::Duration::days(1))
+    };
+    let args = serde_json::json!({
+        "timeMin": win_start.to_rfc3339(),
+        "timeMax": win_end.to_rfc3339(),
+        "maxResults": 50,
+    });
+    let raw = gw.mcp_call_raw("listCalendarEvents", args).await;
+    let events = if raw.success {
+        availability::parse_google_events(&parse_json_or_text(raw.data.as_str().unwrap_or("")))
+    } else {
+        Vec::new()
+    };
+    let conflicts = if include_conflicts {
+        availability::detect_conflicts(&events)
+    } else {
+        Vec::new()
+    };
+    serde_json::json!({
+        "window": window,
+        "event_count": events.len(),
+        "events": events,
+        "conflicts": conflicts,
+    })
+}
+
+fn briefing_tasks_section(filter: &str) -> serde_json::Value {
+    let paths = crate::platform::paths::KriaPaths::resolve();
+    let store = match crate::tasks::TaskStore::open(&paths.db_path) {
+        Ok(s) => s,
+        Err(e) => return serde_json::json!({ "error": e.to_string() }),
+    };
+    let tasks = match filter {
+        "all" => store.list_tasks(&crate::tasks::TaskFilter::default()),
+        _ => store.list_tasks(&crate::tasks::TaskFilter {
+            active_only: true,
+            ..Default::default()
+        }),
+    }
+    .unwrap_or_default();
+
+    let now = chrono::Utc::now();
+    let selected: Vec<_> = if filter == "urgent_and_overdue" {
+        tasks
+            .into_iter()
+            .filter(|t| {
+                t.priority_bucket == "urgent"
+                    || t.due_at.map(|d| d < now).unwrap_or(false)
+            })
+            .collect()
+    } else {
+        tasks
+    };
+    serde_json::json!({ "count": selected.len(), "tasks": selected })
+}
+
+/// Configurable daily briefing — reads the user's BriefingConfig and renders
+/// each enabled section (gmail / calendar / github / tasks).
+struct GwMorningBriefing {
+    gw: GwBridge,
+    github: GhClientRef,
+}
+#[async_trait]
+impl ToolHandler for GwMorningBriefing {
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let _: EmptyInput = match parse_input(params) {
+            Ok(value) => value,
+            Err(err) => return err,
+        };
+
+        let paths = crate::platform::paths::KriaPaths::resolve();
+        let config = crate::briefing::BriefingStore::open(&paths.db_path)
+            .map(|s| s.get())
+            .unwrap_or_default();
+
+        let mut sections_out = Vec::new();
+        for section in config.sections.iter().filter(|s| s.enabled) {
+            let block = match section.source.as_str() {
+                "gmail" => {
+                    briefing_gmail_section(
+                        &self.gw,
+                        section.query.as_deref().unwrap_or("is:unread"),
+                        section.max.unwrap_or(10),
+                    )
+                    .await
+                }
+                "calendar" => {
+                    briefing_calendar_section(
+                        &self.gw,
+                        section.window.as_deref().unwrap_or("today"),
+                        section.include_conflicts.unwrap_or(true),
+                    )
+                    .await
+                }
+                "github" => github_briefing_section(&self.github, section.tool.as_deref()).await,
+                "tasks" => {
+                    briefing_tasks_section(section.filter.as_deref().unwrap_or("urgent_and_overdue"))
+                }
+                other => serde_json::json!({ "error": format!("unknown source: {other}") }),
+            };
+            sections_out.push(serde_json::json!({
+                "source": section.source,
+                "data": block,
+            }));
+        }
+
+        let data = serde_json::json!({
+            "generated_at": chrono::Utc::now().to_rfc3339(),
+            "section_count": sections_out.len(),
+            "sections": sections_out,
+        });
+        ToolResult {
+            success: true,
+            data: envelope_result("gw_morning_briefing", data, None),
+            error: None,
+        }
+    }
+}
 struct GwCalendarCreate(GwBridge);
 #[async_trait]
 impl ToolHandler for GwCalendarCreate {
@@ -2252,7 +2784,7 @@ impl ToolHandler for GwFormsCreate {
 /// Always registers all curated Google Workspace tools regardless of whether the MCP server is up.
 /// Pass the `GwClientRef` returned by `new_client_ref()`; call `set_client()`
 /// after the MCP server connects so handlers start forwarding requests.
-pub fn register(reg: &ToolRegistry, mcp_ref: GwClientRef, sidecar: Arc<SidecarBridge>) {
+pub fn register(reg: &ToolRegistry, mcp_ref: GwClientRef, github_ref: GhClientRef, sidecar: Arc<SidecarBridge>) {
     tracing::info!(
         "[GW] registering Google Workspace tools (account source=KRIA_GW_ACCOUNT, lazy MCP ref)"
     );
@@ -2330,6 +2862,35 @@ pub fn register(reg: &ToolRegistry, mcp_ref: GwClientRef, sidecar: Arc<SidecarBr
                 ],
             },
             Arc::new(GwCalendarSearch(gw.clone())),
+        ),
+        (
+            ToolDef {
+                name: "gw_calendar_availability".into(),
+                description: "Find free time slots and scheduling conflicts in Google Calendar for a window (e.g. 'when am I free tomorrow', 'do I have any clashes today').".into(),
+                category: "google_workspace".into(),
+                default_tier: RiskLevel::Green,
+                min_tier: "lite",
+                parameters: vec![
+                    param("time_min", "string", "Window start (ISO 8601). Defaults to now.", false),
+                    param("time_max", "string", "Window end (ISO 8601). Defaults to now + 24h.", false),
+                    param("min_slot_minutes", "number", "Minimum free slot length in minutes (default 15).", false),
+                ],
+            },
+            Arc::new(GwCalendarAvailability(gw.clone())),
+        ),
+        (
+            ToolDef {
+                name: "gw_morning_briefing".into(),
+                description: "Daily briefing: unread Gmail messages plus today's Google Calendar events (and any conflicts) in one summary.".into(),
+                category: "google_workspace".into(),
+                default_tier: RiskLevel::Green,
+                min_tier: "lite",
+                parameters: vec![],
+            },
+            Arc::new(GwMorningBriefing {
+                gw: gw.clone(),
+                github: github_ref.clone(),
+            }),
         ),
         (
             ToolDef {
@@ -2598,6 +3159,84 @@ pub fn register(reg: &ToolRegistry, mcp_ref: GwClientRef, sidecar: Arc<SidecarBr
         ),
         (
             ToolDef {
+                name: "gw_gmail_draft_create".into(),
+                description: "Create a Gmail DRAFT (does NOT send). Returns draft_id + a formatted preview (to/subject/body). Use gw_gmail_send_draft to send it later.".into(),
+                category: "google_workspace".into(),
+                default_tier: RiskLevel::Yellow,
+                min_tier: "lite",
+                parameters: vec![
+                    param("to", "string", "Recipient email", true),
+                    param("subject", "string", "Subject", true),
+                    param("body", "string", "Body text", true),
+                    param("cc", "string", "Optional Cc", false),
+                    param("account", "string", "Optional Google account override", false),
+                ],
+            },
+            Arc::new(GwGmailDraftCreate(gw.clone())),
+        ),
+        (
+            ToolDef {
+                name: "gw_gmail_send_draft".into(),
+                description: "Send a previously created Gmail draft by its draft_id. Requires HITL approval.".into(),
+                category: "google_workspace".into(),
+                default_tier: RiskLevel::Red,
+                min_tier: "lite",
+                parameters: vec![
+                    param("draft_id", "string", "Draft id from gw_gmail_draft_create", true),
+                    param("account", "string", "Optional Google account override", false),
+                ],
+            },
+            Arc::new(GwGmailSendDraft(gw.clone())),
+        ),
+        (
+            ToolDef {
+                name: "gw_gmail_send_bulk".into(),
+                description: "Send the same email to multiple recipients (max 50). Each is drafted then sent. Requires HITL approval.".into(),
+                category: "google_workspace".into(),
+                default_tier: RiskLevel::Red,
+                min_tier: "lite",
+                parameters: vec![
+                    param("recipients", "array", "List of recipient emails", true),
+                    param("subject", "string", "Subject", true),
+                    param("body", "string", "Body text", true),
+                    param("cc", "string", "Optional Cc on all", false),
+                    param("account", "string", "Optional Google account override", false),
+                ],
+            },
+            Arc::new(GwGmailSendBulk(gw.clone())),
+        ),
+        (
+            ToolDef {
+                name: "gw_account_switch".into(),
+                description: "Switch the active Google account used for subsequent Google Workspace tool calls.".into(),
+                category: "google_workspace".into(),
+                default_tier: RiskLevel::Green,
+                min_tier: "lite",
+                parameters: vec![param("account", "string", "Account name (e.g. personal, work)", true)],
+            },
+            Arc::new(GwAccountSwitch),
+        ),
+        (
+            ToolDef {
+                name: "gw_calendar_update".into(),
+                description: "Update/reschedule an existing Google Calendar event (time, title, description, location). Requires HITL approval.".into(),
+                category: "google_workspace".into(),
+                default_tier: RiskLevel::Yellow,
+                min_tier: "lite",
+                parameters: vec![
+                    param("event_id", "string", "Calendar event id", true),
+                    param("summary", "string", "New title", false),
+                    param("start", "string", "New start (ISO 8601)", false),
+                    param("end", "string", "New end (ISO 8601)", false),
+                    param("description", "string", "New description", false),
+                    param("location", "string", "New location", false),
+                    param("account", "string", "Optional Google account override", false),
+                ],
+            },
+            Arc::new(GwCalendarUpdate(gw.clone())),
+        ),
+        (
+            ToolDef {
                 name: "gw_gmail_mark_read".into(),
                 description: "Mark a Gmail message as read or unread.".into(),
                 category: "google_workspace".into(),
@@ -2702,9 +3341,21 @@ mod tests {
     use super::{
         build_google_resource_url, calendar_create_args, envelope_result, extract_gmail_draft_id,
         extract_google_resource_id, gmail_max_results, gmail_messages_from_payload,
-        gmail_next_page_token, looks_like_drive_listing_phrase, normalize_gmail_inbox_query,
-        parse_gmail_messages_from_text, parse_gw_error, CreateCalendarEventInput,
+        gmail_next_page_token, gmail_preview_markdown, looks_like_drive_listing_phrase,
+        normalize_gmail_inbox_query, parse_gmail_messages_from_text, parse_gw_error,
+        CreateCalendarEventInput,
     };
+
+    #[test]
+    fn gmail_preview_includes_cc_when_present() {
+        let p = gmail_preview_markdown("a@x.com", "Hi", "Body", Some("c@x.com"));
+        assert!(p.contains("**To:** a@x.com"));
+        assert!(p.contains("**Cc:** c@x.com"));
+        assert!(p.contains("**Subject:** Hi"));
+        assert!(p.ends_with("Body"));
+        let no_cc = gmail_preview_markdown("a@x.com", "Hi", "Body", None);
+        assert!(!no_cc.contains("Cc:"));
+    }
 
     #[test]
     fn gmail_inbox_query_defaults_to_inbox() {

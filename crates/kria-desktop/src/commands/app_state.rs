@@ -155,9 +155,6 @@ pub struct AppState {
     /// `None` if orchestrator failed to start (e.g. missing binaries); automation will
     /// be globally halted in that case.
     pub gui_orchestrator: Option<Arc<kria_core::orchestrator::ServiceOrchestrator>>,
-    /// Short-lived GUI Cognition observation cache for repeated observe/plan prompts.
-    pub gui_cognition_observation_cache:
-        Arc<tokio::sync::Mutex<Option<super::gui_cognition::DesktopGuiObservationCacheEntry>>>,
     /// Batch 1: PSDG handle — persistent semantic desktop cognition graph.
     ///
     /// Provides access to `WorldModelStore` (SQLite-backed Bayesian (s,p,o) triple store)

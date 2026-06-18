@@ -123,18 +123,33 @@ Order is strict: Phase 0 → 1 → 2 → 3 → 4 → 5 → 6. Within a phase, bu
     than pausing); audit-ledger recording of V2 steps is a follow-up (Task 10).
   - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 6.1, 6.2, 6.3, 6.4, 6.5, 11.1, 11.2, 11.3, 11.4_
 
-- [ ] 10. Phase 5 test — full-loop real-verify eval
-  - Extend the real-verify harness with V2 cases: multi-step + held-out UNSEEN natural
-    prompts; external truth (wmctrl/pgrep/filesystem/screenshot-diff); flag MISMATCH when
-    the reply claims success but reality disagrees.
-  - Record PASS/FAIL/INCONCLUSIVE honestly; produce a baseline report for the V2 default flip.
+- [x] 10. Phase 5 test — full-loop real-verify eval
+  - DONE (via A5/Task 16 + this task's report artifact). `scripts/gui_cog_e2e_v2.py`
+    runs a held-out set including multi-step + UNSEEN natural phrasings ("start the
+    calculator program for me", "bring up chrome and then create a fresh tab"); external
+    truth via GNOME extension (GetFocusedWindow/ListWindows) + pgrep; MISMATCH flagged when
+    the reply claims success but reality disagrees; INCONCLUSIVE when the environment blocks
+    verification.
+  - The harness now writes a machine + human baseline report
+    (`scripts/gui_cog_v2_baseline_<brain>.{md,json}`) and a committed baseline summary lives
+    at `docs/gui-cognition-v2-baseline.md` (recorded result that gated the flip:
+    6 PASS / 0 FAIL / 0 MISMATCH / 0 BLOCKED / 0 INCONCLUSIVE on the qwen brain).
   - _Requirements: 7.4, 9.3, 9.4, 9.5_
 
-- [ ] 11. Phase 5b — optional UI-TARS Brain (pluggable)
-  - Implement `UiTarsBrain` behind the SAME `GuiBrain` trait (consumes raw screenshot;
-    emits `ClickPoint`/`Type`/`Key`). Select via `KRIA_GUI_COG_V2_BRAIN=ui_tars`; trigger
-    the orchestrator to swap the resident model for the GUI turn and restore after.
-  - A/B against Qwen+OmniParser on the eval harness; no changes to Sight/Hands/loop.
+- [x] 11. Phase 5b — optional UI-TARS Brain (pluggable)
+  - DONE. `gui_cognition_v2/ui_tars_brain.rs` implements `UiTarsBrain` behind the SAME
+    `GuiBrain` trait — vision-first: consumes the raw screenshot (injected `ScreenCapturer`
+    or `observation.screenshot_path`) and emits `ClickPoint{x,y}`/`Type`/`Key`/`Scroll`
+    grounded coordinate actions; reuses the shared `decision_schema` + `parse_decision_json`
+    so decisions are validated identically. Off-screen `ClickPoint` downgrades to `Ask`
+    (coordinate "no invented target" floor). 6 unit tests.
+  - Selection via `KRIA_GUI_COG_V2_BRAIN=ui_tars` (pure `brain_choice()` helper in
+    `mod.rs`, 1 test). Desktop wiring (`run_gui_cognition_v2`) constructs a
+    `Box<dyn GuiBrain>` — Qwen (text-first, default, routed to the planner backend) or
+    UI-TARS (routed to a vision-capable backend via `model_router.route_vision()`, so the
+    orchestrator serves the vision path for the GUI turn — Requirement 8.3). NO changes to
+    Sight/Hands/loop (pluggable-seam property proven). A/B is recorded per-brain by the eval
+    harness (`gui_cog_v2_baseline_ui_tars.{md,json}`).
   - _Requirements: 3.6, 8.3, 8.4_
 
 - [x] 12. Phase 6 — flip V2 to default
@@ -144,12 +159,29 @@ Order is strict: Phase 0 → 1 → 2 → 3 → 4 → 5 → 6. Within a phase, bu
     re-observe (A4), cancel/no-progress, audit, uinput, model-swap all intact.
   - _Requirements: 10.2, 10.5_
 
-- [ ] 13. Phase 6 — remove V1 over-built logic
-  - Delete the over-built V1 paths (code AND logic): dual plan representation (typed_steps +
-    legacy steps/action_kind), capability ladder, goal-pursuit guard, heavy upfront
-    validators, upfront multi-step planner, large contract extraction. Collapse to V2's
-    single representation and single code path; no dead branches.
-  - Re-run core/desktop/UI suites + GUI real-verify; `cargo build` clean.
+- [x] 13. Phase 6 — remove V1 over-built logic
+  - DONE. Collapsed the desktop GUI-turn entry
+    (`desktop_gui_cognition_command_capture_streamed`) to a SINGLE unconditional
+    `run_gui_cognition_v2` call, then deleted the over-built V1 pipeline: 19 core modules
+    (`audit_ledger`, `browser`, `checkpoint`, `clipboard`, `context`, `event_stream`,
+    `executor`, `goal_contract`, `llm_planner`, `planner`, `preconditions`, `recovery`,
+    `resolver`, `safety`, `safety_polish`, `validator`, `verifier`, `window_focus`,
+    `workflow_runtime`) plus the `GuiCognitionRuntime` spine (`mod.rs` 6956 → 27 lines, thin
+    module). Removed ~5.6k lines of dead V1 desktop plumbing (perception providers, executor,
+    OCR/observation caches, checkpoint store, focus-authority, V1 flag fns + their test mods)
+    and 29 orphaned V1 integration tests. Net: `gui_cognition/` 35,840 → 6,090 LOC.
+  - Single representation + single code path: V2's `Observation`/`Decision`/`ActionResult`
+    is the only model; no dual `typed_steps`/legacy-steps, no capability ladder, no
+    goal-pursuit guard, no upfront planner/validators/contract.
+  - PRESERVED shared infra: `cancel`, `execution_environment`, `perception` (data types +
+    `sanitize_gui_text`), `turn_budget` (guard config), trimmed `safety_hitl` (HITL
+    proposal/decision store backing the desktop approve/deny commands, 960 → 304 lines), and
+    a new lean `backend_status` (extracted backend-availability surface for the live
+    `gui-automation-status` endpoint). uinput/capture/app-registry/audit/verification live in
+    the V2 path + outside `gui_cognition`.
+  - Verified: `cargo build --workspace` clean, **0 warnings**; `cargo test --workspace
+    --no-run` compiles all targets; `cargo test -p kria-core --lib gui_cognition` 129 passed;
+    kept integration tests 3+23 passed; desktop glue 5 passed.
   - _Requirements: 10.3, 10.4, 10.5_
 
 ## Parity-to-default queue (A3–A6) — bring V2 to parity, then flip + remove V1
@@ -195,24 +227,18 @@ each behind `KRIA_GUI_COG_V2`, never fake-pass, external verify):
   - Loop fix landed earlier: a FAILING action now arms no-progress.
   - _Requirements: 7.4, 9.3, 9.4, 9.5, 10.2_
 
-- [~] 17. A6 — flip default (Task 12 DONE) + remove V1 over-built pipeline (Task 13 PENDING)
-  - **Task 12 — DONE + verified.** `v2_enabled()` flipped to DEFAULT-ON (falsy
-    `KRIA_GUI_COG_V2` = byte-for-byte V1 rollback; logic covered by `flag_tests`).
-    Verified LIVE in default mode (no env flag set): `engine=v2`, held-out eval
-    6 PASS / 0 FAIL / 0 MISMATCH / 0 BLOCKED. Desktop routing reads core `v2_enabled()`,
-    so the flip propagates; stale "default OFF" doc comments updated.
-  - **Known V2 quality gap (not a flip regression):** multi-action follow-up
-    (e.g. "open chrome AND new tab/reload/close tab") is INCONSISTENT — the 7B Brain
-    sometimes returns `needs_clarification` after the open instead of chaining the
-    follow-up `Key`. App-launch + single-action are solid. This should be hardened
-    (stronger `apply_followup_assist` / Brain prompt) before V1 is deleted.
-  - **Task 13 — PENDING (gated on confirmation + soak).** Deleting the V1 over-built
-    pipeline (dual representation, capability ladder, goal-pursuit guard, heavy
-    validators, upfront planner, large contract) is a large destructive change. With V2
-    only just flipped to default and multi-action chaining still variable, removing the
-    V1 rollback net now is high-risk. Recommendation: let V2 soak as default + harden
-    multi-action first, then delete V1 in a dedicated change. KEEP shared infra (uinput,
-    capture, app-registry, safety/HITL, audit, cancel, verification, orchestration).
+- [x] 17. A6 — flip default (Task 12 DONE) + remove V1 over-built pipeline (Task 13 DONE)
+  - **Task 12 — DONE + verified.** `v2_enabled()` is DEFAULT-ON; the desktop entry now
+    routes EVERY GUI turn through `run_gui_cognition_v2` (V1 fallback removed). Held-out eval
+    6 PASS / 0 FAIL / 0 MISMATCH / 0 BLOCKED.
+  - **Multi-action follow-up — HARDENED.** `task_followup_action` grounds UNSEEN synonyms
+    (fresh/another/additional tab, refresh→reload, shut/dismiss tab→close) and
+    `task_open_app_target` accepts more open verbs ("bring up", "pull up", "start … for me");
+    `apply_followup_assist` advances a stalled open→follow-up Key. Held-out multi-step cases
+    added to the eval harness. (qwen_brain unit tests green.)
+  - **Task 13 — DONE.** Over-built V1 pipeline removed (see Task 13 above): `gui_cognition/`
+    35,840 → 6,090 LOC, V2 is the single code path, shared infra preserved, `cargo build
+    --workspace` clean with 0 warnings, all suites green.
   - _Requirements: 10.2, 10.3, 10.4, 10.5_
 
 ## Notes

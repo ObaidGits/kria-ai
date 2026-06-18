@@ -8,6 +8,7 @@ use crate::infra::environment::{
 
 pub mod app_lifecycle;
 pub mod atspi_tools;
+pub mod availability;
 pub mod browser_agent;
 pub mod cognition_tools;
 pub mod communication;
@@ -43,6 +44,7 @@ pub mod shell;
 pub mod subprocess_executor;
 pub mod system_config;
 pub mod system_info;
+pub mod tasks;
 pub mod vision;
 pub mod vision_automation;
 

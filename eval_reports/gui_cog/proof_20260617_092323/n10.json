@@ -1,0 +1,39 @@
+{
+  "id": "n10",
+  "category": "navigation",
+  "prompt": "Open Chrome and search for python tutorials",
+  "final": "PASS",
+  "run_classes": [
+    "PASS"
+  ],
+  "runs": [
+    {
+      "ok_request": true,
+      "request_error": null,
+      "reply": "The screen did not change after the last action; stopping to avoid looping.",
+      "sub_verdicts": [
+        {
+          "outcome": "VERIFIED",
+          "confidence": 0.95,
+          "detail": "window 'Google Chrome' present+focused",
+          "sub_goal": {
+            "kind": "open_app",
+            "target_hint": "chrome",
+            "expect_contains": null
+          }
+        },
+        {
+          "outcome": "VERIFIED",
+          "confidence": 0.85,
+          "detail": "loaded page title 'python tutorials - Google Search - Google Chrome' contains 'python'",
+          "sub_goal": {
+            "kind": "navigate",
+            "target_hint": "python tutorials",
+            "expect_contains": "python"
+          }
+        }
+      ],
+      "classification": "PASS"
+    }
+  ]
+}

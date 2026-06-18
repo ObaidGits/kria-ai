@@ -1,0 +1,29 @@
+{
+  "id": "o05",
+  "category": "open_only",
+  "prompt": "Open the Settings app",
+  "final": "FAIL",
+  "run_classes": [
+    "FAIL"
+  ],
+  "runs": [
+    {
+      "ok_request": true,
+      "request_error": null,
+      "reply": "Could not decide the next action: ui_tars brain timed out",
+      "sub_verdicts": [
+        {
+          "outcome": "FAILED",
+          "confidence": 0.9,
+          "detail": "no window matching 'settings' among 5 windows after settle",
+          "sub_goal": {
+            "kind": "open_app",
+            "target_hint": "settings",
+            "expect_contains": null
+          }
+        }
+      ],
+      "classification": "FAIL"
+    }
+  ]
+}

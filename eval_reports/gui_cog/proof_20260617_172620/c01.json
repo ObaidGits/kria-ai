@@ -1,0 +1,59 @@
+{
+  "id": "c01",
+  "category": "cross_substrate",
+  "prompt": "Write a pascal's triangle program in VS Code, run it and show me the output",
+  "final": "INCONCLUSIVE",
+  "run_classes": [
+    "INCONCLUSIVE"
+  ],
+  "runs": [
+    {
+      "ok_request": true,
+      "request_error": null,
+      "reply": "Done: write kria_script.py; show_output.",
+      "sub_verdicts": [
+        {
+          "outcome": "VERIFIED",
+          "confidence": 0.75,
+          "detail": "window 'Visual Studio Code' present (not focused)",
+          "sub_goal": {
+            "kind": "open_app",
+            "target_hint": "visual studio code",
+            "expect_contains": null
+          }
+        },
+        {
+          "outcome": "VERIFIED",
+          "confidence": 0.9,
+          "detail": "recent .py file 'kria_script.py' matches expected content",
+          "sub_goal": {
+            "kind": "write_file",
+            "target_hint": "pascal.py",
+            "expect_contains": "def"
+          }
+        },
+        {
+          "outcome": "VERIFIED",
+          "confidence": 0.7,
+          "detail": "screen shows '1'",
+          "sub_goal": {
+            "kind": "run_command",
+            "target_hint": "python3 pascal.py",
+            "expect_contains": "1"
+          }
+        },
+        {
+          "outcome": "INCONCLUSIVE",
+          "confidence": 0.0,
+          "detail": "no expected output to externally confirm",
+          "sub_goal": {
+            "kind": "read_output",
+            "target_hint": null,
+            "expect_contains": null
+          }
+        }
+      ],
+      "classification": "INCONCLUSIVE"
+    }
+  ]
+}

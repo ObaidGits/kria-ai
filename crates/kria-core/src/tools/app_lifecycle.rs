@@ -97,16 +97,53 @@ impl ToolHandler for OpenApplication {
             .unwrap_or("no-session")
             .to_string();
 
-        // Resolve name alias → CanonicalAppId.
-        let app_id = match self.registry.resolve_alias(name) {
-            Some(id) => id,
-            None => {
-                return ToolResult::err(format!(
-                    "application '{}' is not found in the installed app registry",
-                    name
-                ))
-            }
+        // Resolve name alias → CanonicalAppId. On an exact-miss, fall back to a
+        // fuzzy match (Requirement 6: mistyped/synonym/closest) and, when nothing
+        // is confident, return an HONEST "not installed" with nearest suggestions
+        // instead of a bare error. `name` is shadowed with the resolved alias so
+        // the focus/launch path below uses the corrected name.
+        let (app_id, resolved_name) = match self.registry.resolve_alias(name) {
+            Some(id) => (id, name.to_string()),
+            None => match self.registry.fuzzy_match(name) {
+                crate::platform::app_registry::AppMatch::Closest { alias, score } => {
+                    match self.registry.resolve_alias(&alias) {
+                        Some(id) => {
+                            tracing::info!(
+                                target: "app_lifecycle",
+                                requested = name, resolved = %alias, score,
+                                "open_application: fuzzy-resolved an inexact app name"
+                            );
+                            (id, alias)
+                        }
+                        None => {
+                            return ToolResult::err(format!(
+                                "application '{}' is not installed",
+                                name
+                            ))
+                        }
+                    }
+                }
+                crate::platform::app_registry::AppMatch::Ambiguous(cands) => {
+                    return ToolResult::err(format!(
+                        "Several apps match '{}': {}. Which one did you mean?",
+                        name,
+                        cands.join(", ")
+                    ))
+                }
+                crate::platform::app_registry::AppMatch::None(suggestions) => {
+                    let hint = if suggestions.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" Did you mean: {}?", suggestions.join(", "))
+                    };
+                    return ToolResult::err(format!(
+                        "'{}' is not installed.{}",
+                        name, hint
+                    ));
+                }
+            },
         };
+        let name = resolved_name.as_str();
 
         // Check if the app is already running before launching a new instance.
         // This prevents duplicate windows and respects single-instance apps.
@@ -125,15 +162,18 @@ impl ToolHandler for OpenApplication {
             // X11: wmctrl -a <name> (brings window to foreground)
             // Wayland: no reliable cross-compositor focus API; log and continue
             let session = std::env::var("XDG_SESSION_TYPE").unwrap_or_default();
-            if session != "wayland" {
-                let _ = tokio::process::Command::new("wmctrl")
+            let focus_confirmed = if session != "wayland" {
+                let ok = tokio::process::Command::new("wmctrl")
                     .args(["-a", name])
                     .output()
-                    .await;
+                    .await
+                    .map(|o| o.status.success())
+                    .unwrap_or(false);
                 // Post-focus delay: X11 WM focus commits are async (EWMH round-trip).
-                // Without this sleep the WindowFocused verifier polls immediately and
-                // still sees the old focused window (KRIA chat), causing a false failure.
-                tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+                if ok {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+                }
+                ok
             } else {
                 // Wayland: try XWayland path (works for Electron/VSCode and other
                 // XWayland-backed apps). xdotool --sync waits for WM to process the event.
@@ -150,19 +190,28 @@ impl ToolHandler for OpenApplication {
                         "Wayland+XWayland: focused existing window via xdotool"
                     );
                     tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
-                } else {
-                    tracing::debug!(
-                        target: "app_lifecycle",
-                        app = name,
-                        "Wayland session: xdotool focus unsuccessful (pure Wayland or app not on XWayland display)"
-                    );
                 }
+                xdotool_ok
+            };
+            if focus_confirmed {
+                return ToolResult::ok(serde_json::json!({
+                    "application": name,
+                    "already_running": true,
+                    "action": "focused_existing_window",
+                }));
             }
-            return ToolResult::ok(serde_json::json!({
-                "application": name,
-                "already_running": true,
-                "action": "focused_existing_window",
-            }));
+            // Focus could NOT be confirmed — the "running" process may be a
+            // background/helper process (e.g. Chrome's crashpad/GPU helpers) with
+            // NO visible window, or a native-Wayland window xdotool cannot reach.
+            // Returning a false "focused" here is the bug that left the user with
+            // no visible window. FALL THROUGH to launch: for a single-instance app
+            // this raises/creates a window; for a stale background process it
+            // brings up a fresh, visible instance.
+            tracing::info!(
+                target: "app_lifecycle",
+                app = name,
+                "running process had no focusable window — launching a visible instance instead"
+            );
         }
 
         // Build SafeArg list from the params "args" array.

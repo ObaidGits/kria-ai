@@ -260,6 +260,20 @@ export type GuiCognitionEvent =
       typed_steps?: GuiCognitionTypedPlanStepState[];
     }
   | {
+      // Task 9/12: per-sub-goal status update as the plan-driven loop advances.
+      type: "SubGoalUpdated";
+      index?: number;
+      total?: number;
+      goal?: string;
+      status?: string;
+    }
+  | {
+      // Task 11/12: a bounded no-progress recovery rung was attempted.
+      type: "RecoveryAttempted";
+      rung?: string;
+      ok?: boolean;
+    }
+  | {
       type: "PlanValidationCompleted";
       validation_id?: string;
       plan_id?: string;
@@ -1117,6 +1131,14 @@ export interface GuiCognitionGoalContractState {
   extractorMode?: string;
 }
 
+export interface GuiCognitionSubGoalState {
+  index: number;
+  total: number;
+  goal: string;
+  /** pending | verified | bridged | bridge_failed | failed | in_progress */
+  status: string;
+}
+
 export interface GuiCognitionTypedPlanStepState {
   stepId?: string;
   stepType?: string;
@@ -1191,6 +1213,10 @@ export interface GuiCognitionSessionState {
   planRequiresUserApproval?: boolean;
   planSummary?: string;
   planSteps: string[];
+  /** Task 12: live per-sub-goal status for the plan-driven loop. */
+  subGoals?: GuiCognitionSubGoalState[];
+  /** Task 12: transient recovery note ("looking closer…") when a rung is tried. */
+  recoveryNote?: string;
   typedPlanSteps: GuiCognitionTypedPlanStepState[];
   planSourceEvidence: GuiCognitionGoalEvidenceState[];
   riskLevel?: string;

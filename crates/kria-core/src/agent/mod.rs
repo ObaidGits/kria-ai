@@ -73,6 +73,7 @@ pub mod failure_analyzer;
 pub mod gui_cognition;
 pub mod gui_cognition_v2;
 pub mod gui_wiring;
+pub mod headless_runtime;
 pub mod htn_executor;
 pub mod htn_integration;
 pub mod ide_cognition;

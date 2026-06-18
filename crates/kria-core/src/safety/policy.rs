@@ -292,6 +292,8 @@ static GREEN_ACTIONS: Lazy<HashSet<&str>> = Lazy::new(|| {
         "gw_gmail_read",
         "gw_calendar_today",
         "gw_calendar_search",
+        "gw_calendar_availability",
+        "gw_morning_briefing",
         "gw_drive_search",
         "gw_drive_list",
         "gw_drive_read",
@@ -299,6 +301,19 @@ static GREEN_ACTIONS: Lazy<HashSet<&str>> = Lazy::new(|| {
         "gw_sheets_read",
         "gw_slides_read",
         "gw_forms_list",
+        "gw_account_switch",
+        "task_add",
+        "task_list",
+        "task_update_status",
+        "task_next",
+        "task_stats",
+        "reminder_set",
+        "reminder_list",
+        "task_edit",
+        "task_complete",
+        "reminder_snooze",
+        "reminder_cancel",
+        "plan_my_day",
     ]
     .into_iter()
     .collect()

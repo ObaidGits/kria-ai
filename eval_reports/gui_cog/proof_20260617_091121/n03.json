@@ -1,0 +1,39 @@
+{
+  "id": "n03",
+  "category": "navigation",
+  "prompt": "Open Google Chrome and go to github.com",
+  "final": "FAIL",
+  "run_classes": [
+    "FAIL"
+  ],
+  "runs": [
+    {
+      "ok_request": true,
+      "request_error": null,
+      "reply": "The screen did not change after the last action; stopping to avoid looping.",
+      "sub_verdicts": [
+        {
+          "outcome": "VERIFIED",
+          "confidence": 0.95,
+          "detail": "window 'Google Chrome' present+focused",
+          "sub_goal": {
+            "kind": "open_app",
+            "target_hint": "chrome",
+            "expect_contains": null
+          }
+        },
+        {
+          "outcome": "FAILED",
+          "confidence": 0.7,
+          "detail": "page title 'Practice | GeeksforGeeks | A computer science portal for geeks - Google Chrome' does not show 'github' (page not loaded?)",
+          "sub_goal": {
+            "kind": "navigate",
+            "target_hint": "github.com",
+            "expect_contains": "github"
+          }
+        }
+      ],
+      "classification": "FAIL"
+    }
+  ]
+}

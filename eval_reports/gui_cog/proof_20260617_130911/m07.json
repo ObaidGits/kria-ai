@@ -1,0 +1,39 @@
+{
+  "id": "m07",
+  "category": "multi_step",
+  "prompt": "Open the Terminal and run echo hello-kria",
+  "final": "PASS",
+  "run_classes": [
+    "PASS"
+  ],
+  "runs": [
+    {
+      "ok_request": true,
+      "request_error": null,
+      "reply": "The screen did not change after the last action; stopping to avoid looping.",
+      "sub_verdicts": [
+        {
+          "outcome": "VERIFIED",
+          "confidence": 0.95,
+          "detail": "window 'Terminal' present+focused",
+          "sub_goal": {
+            "kind": "open_app",
+            "target_hint": "terminal",
+            "expect_contains": null
+          }
+        },
+        {
+          "outcome": "VERIFIED",
+          "confidence": 0.7,
+          "detail": "screen shows 'hello-kria'",
+          "sub_goal": {
+            "kind": "run_command",
+            "target_hint": "echo hello-kria",
+            "expect_contains": "hello-kria"
+          }
+        }
+      ],
+      "classification": "PASS"
+    }
+  ]
+}

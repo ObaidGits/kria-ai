@@ -1,0 +1,29 @@
+{
+  "id": "g01",
+  "category": "generality",
+  "prompt": "Open Foobar123",
+  "final": "INCONCLUSIVE",
+  "run_classes": [
+    "INCONCLUSIVE"
+  ],
+  "runs": [
+    {
+      "ok_request": true,
+      "request_error": null,
+      "reply": "Reached the step limit (16) without completing the task.",
+      "sub_verdicts": [
+        {
+          "outcome": "INCONCLUSIVE",
+          "confidence": 0.3,
+          "detail": "reply not clearly an honest refusal: 'Reached the step limit (16) without completing the task.'",
+          "sub_goal": {
+            "kind": "negative:honest_not_installed",
+            "target_hint": "foobar123",
+            "expect_contains": ""
+          }
+        }
+      ],
+      "classification": "INCONCLUSIVE"
+    }
+  ]
+}

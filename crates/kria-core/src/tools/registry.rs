@@ -408,6 +408,7 @@ pub fn build_registry_full_with_psdg_wcr(
     super::process::register(&reg);
     super::documents::register(&reg);
     super::communication::register(&reg);
+    super::tasks::register(&reg);
     super::interaction::register(&reg);
     super::disk::register(&reg);
     super::packages::register(&reg);
@@ -425,8 +426,9 @@ pub fn build_registry_full_with_psdg_wcr(
     // not connected yet. Desktop runtime will later wire a live client into its
     // own GwClientRef and can re-register with the active sidecar bridge.
     let gw_ref = super::google_workspace::new_client_ref();
+    let gh_ref = super::google_workspace::new_github_client_ref();
     let gw_sidecar = std::sync::Arc::new(crate::sidecar::SidecarBridge::new("python3", None));
-    super::google_workspace::register(&reg, gw_ref, gw_sidecar);
+    super::google_workspace::register(&reg, gw_ref, gh_ref, gw_sidecar);
 
     if let Some(rag_engine) = rag {
         super::rag::register(&reg, rag_engine);

@@ -224,6 +224,21 @@ def classify(prompt: Prompt, g: dict[str, Any], reply: str) -> tuple[str, str, d
     return "UNEXPECTED", f"Pipeline produced no plan. reply={reply[:80]!r}", facts
 
 
+def preflight_ready() -> tuple[bool, str]:
+    """Read the latest environment-preflight artifact (spec Task 0 / Req 14.4).
+    Returns (ready, reason). Missing artifact → not ready (run preflight first)."""
+    latest = Path("eval_reports/gui_cog/preflight_latest.json")
+    if not latest.exists():
+        return False, "no preflight artifact (run scripts/gui_cog_preflight.py first)"
+    try:
+        rec = json.loads(latest.read_text())
+    except Exception as exc:  # noqa: BLE001
+        return False, f"unreadable preflight artifact: {exc}"
+    if rec.get("ready") is True:
+        return True, "ready"
+    return False, rec.get("reason", "preflight not ready")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", default="execute_live",
@@ -233,7 +248,18 @@ def main() -> int:
     ap.add_argument("--out", default="planning_docs/gui_cognition_live_eval_report.md")
     ap.add_argument("--raw-dir", default="planning_docs/gui_cognition_live_eval_raw")
     ap.add_argument("--only", default=None, help="comma-separated prompt ids to run")
+    ap.add_argument("--skip-preflight", action="store_true",
+                    help="bypass the environment preflight gate (NOT recommended)")
     args = ap.parse_args()
+
+    # Preflight gate (spec Req 14.4): refuse to run unless the latest environment
+    # preflight is ready, so a half-up stack never yields fabricated results.
+    if not args.skip_preflight:
+        ok, reason = preflight_ready()
+        if not ok:
+            print(f"FATAL: environment preflight not ready: {reason}")
+            print("Run: python3 scripts/gui_cog_preflight.py --auto-start  (or pass --skip-preflight)")
+            return 3
 
     if not health(args.base_url):
         print(f"FATAL: desktop API not healthy at {args.base_url}")

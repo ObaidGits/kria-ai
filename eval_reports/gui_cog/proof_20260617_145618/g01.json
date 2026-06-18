@@ -1,0 +1,29 @@
+{
+  "id": "g01",
+  "category": "generality",
+  "prompt": "Open Foobar123",
+  "final": "FAIL",
+  "run_classes": [
+    "FAIL"
+  ],
+  "runs": [
+    {
+      "ok_request": true,
+      "request_error": null,
+      "reply": "Reached the step limit (16) without completing the task.",
+      "sub_verdicts": [
+        {
+          "outcome": "FAILED",
+          "confidence": 0.9,
+          "detail": "no window matching 'foobar123' among 6 windows after settle",
+          "sub_goal": {
+            "kind": "open_app",
+            "target_hint": "foobar123",
+            "expect_contains": null
+          }
+        }
+      ],
+      "classification": "FAIL"
+    }
+  ]
+}

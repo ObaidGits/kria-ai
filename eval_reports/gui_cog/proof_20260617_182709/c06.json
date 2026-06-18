@@ -1,0 +1,39 @@
+{
+  "id": "c06",
+  "category": "cross_substrate",
+  "prompt": "Write a bash script that prints the date and run it",
+  "final": "PASS",
+  "run_classes": [
+    "PASS"
+  ],
+  "runs": [
+    {
+      "ok_request": true,
+      "request_error": null,
+      "reply": "Done: write kria_script.sh.",
+      "sub_verdicts": [
+        {
+          "outcome": "VERIFIED",
+          "confidence": 0.9,
+          "detail": "recent .sh file 'kria_script.sh' matches expected content",
+          "sub_goal": {
+            "kind": "write_file",
+            "target_hint": "showdate.sh",
+            "expect_contains": "date"
+          }
+        },
+        {
+          "outcome": "VERIFIED",
+          "confidence": 0.8,
+          "detail": "agent's script kria_script.sh runs and produces '20'",
+          "sub_goal": {
+            "kind": "run_command",
+            "target_hint": "bash showdate.sh",
+            "expect_contains": "20"
+          }
+        }
+      ],
+      "classification": "PASS"
+    }
+  ]
+}

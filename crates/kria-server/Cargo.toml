@@ -27,6 +27,11 @@ dirs = { workspace = true }
 async-stream = "0.3"
 tokio-stream = "0.1"
 tokio-postgres = "0.7"
+# Remote desktop (Phase 4.6 v3) — portal ScreenCast capture + WebRTC stream
+gstreamer = "0.23"
+gstreamer-webrtc = "0.23"
+gstreamer-sdp = "0.23"
+ashpd = { version = "0.13", default-features = false, features = ["tokio", "screencast", "remote_desktop"] }
 
 [dev-dependencies]
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }

@@ -1,0 +1,39 @@
+{
+  "id": "n08",
+  "category": "navigation",
+  "prompt": "Open Chrome and go to wikipedia.org",
+  "final": "FAIL",
+  "run_classes": [
+    "FAIL"
+  ],
+  "runs": [
+    {
+      "ok_request": false,
+      "request_error": "URLError: <urlopen error [Errno 111] Connection refused>",
+      "reply": "",
+      "sub_verdicts": [
+        {
+          "outcome": "FAILED",
+          "confidence": 0.9,
+          "detail": "no window matching 'chrome' among 3 windows after settle",
+          "sub_goal": {
+            "kind": "open_app",
+            "target_hint": "chrome",
+            "expect_contains": null
+          }
+        },
+        {
+          "outcome": "FAILED",
+          "confidence": 0.7,
+          "detail": "page title 'tasks.md - KRIA - Kiro' does not show 'wikipedia' (page not loaded?)",
+          "sub_goal": {
+            "kind": "navigate",
+            "target_hint": "wikipedia.org",
+            "expect_contains": "wikipedia"
+          }
+        }
+      ],
+      "classification": "FAIL"
+    }
+  ]
+}

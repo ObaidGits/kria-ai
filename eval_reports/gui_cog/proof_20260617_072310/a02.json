@@ -1,0 +1,29 @@
+{
+  "id": "a02",
+  "category": "app_resolution",
+  "prompt": "Open code",
+  "final": "FAIL",
+  "run_classes": [
+    "FAIL"
+  ],
+  "runs": [
+    {
+      "ok_request": true,
+      "request_error": null,
+      "reply": "code is already open.",
+      "sub_verdicts": [
+        {
+          "outcome": "FAILED",
+          "confidence": 0.9,
+          "detail": "no window matching 'visual studio code' among 11 windows",
+          "sub_goal": {
+            "kind": "open_app",
+            "target_hint": "visual studio code",
+            "expect_contains": null
+          }
+        }
+      ],
+      "classification": "FAIL"
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "id": "o02",
+  "category": "open_only",
+  "prompt": "Open the Files manager",
+  "final": "PASS",
+  "run_classes": [
+    "PASS"
+  ],
+  "runs": [
+    {
+      "ok_request": true,
+      "request_error": null,
+      "reply": "Done: open_app.",
+      "sub_verdicts": [
+        {
+          "outcome": "VERIFIED",
+          "confidence": 0.95,
+          "detail": "window 'Files' present+focused",
+          "sub_goal": {
+            "kind": "open_app",
+            "target_hint": "files",
+            "expect_contains": null
+          }
+        }
+      ],
+      "classification": "PASS"
+    }
+  ]
+}

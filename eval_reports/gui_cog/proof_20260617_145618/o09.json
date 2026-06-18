@@ -1,0 +1,29 @@
+{
+  "id": "o09",
+  "category": "open_only",
+  "prompt": "Open the Screenshot tool",
+  "final": "FAIL",
+  "run_classes": [
+    "FAIL"
+  ],
+  "runs": [
+    {
+      "ok_request": true,
+      "request_error": null,
+      "reply": "Reached the step limit (16) without completing the task.",
+      "sub_verdicts": [
+        {
+          "outcome": "FAILED",
+          "confidence": 0.9,
+          "detail": "no window matching 'screenshot' among 12 windows after settle",
+          "sub_goal": {
+            "kind": "open_app",
+            "target_hint": "screenshot",
+            "expect_contains": null
+          }
+        }
+      ],
+      "classification": "FAIL"
+    }
+  ]
+}

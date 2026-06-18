@@ -467,6 +467,21 @@ pub async fn process_message(
     // denial for any RED-tier action.
     is_owner: bool,
 ) -> String {
+    // Phase 4.5.1: audit every inbound remote command with originating identity
+    // and authority, before any processing — so the trail exists even if the
+    // turn later fails. Never logs secrets; message is preview-truncated.
+    crate::infra::pipeline_trace::log_pipeline_step(
+        &format!("telegram_{chat_id}"),
+        "telegram_message_received",
+        "Inbound Telegram command accepted into agent loop",
+        Some(serde_json::json!({
+            "chat_id": chat_id,
+            "from": from_name,
+            "is_owner": is_owner,
+            "message_preview": crate::infra::pipeline_trace::sanitize_text_for_logs(text, 220),
+        })),
+    );
+
     let memory_writer: Arc<dyn MemoryManager> = Arc::clone(memory_store) as Arc<dyn MemoryManager>;
 
     // Build system prompt (similar to desktop send_message)

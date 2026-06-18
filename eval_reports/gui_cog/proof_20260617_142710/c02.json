@@ -1,0 +1,39 @@
+{
+  "id": "c02",
+  "category": "cross_substrate",
+  "prompt": "Create a file hello.txt with the text Hello KRIA and show it",
+  "final": "FAIL",
+  "run_classes": [
+    "FAIL"
+  ],
+  "runs": [
+    {
+      "ok_request": true,
+      "request_error": null,
+      "reply": "Couldn't complete 'write_file': write_file failed: hello.txt: io error during write_file::canonicalize_parent: No such file or directory (os error 2) ()",
+      "sub_verdicts": [
+        {
+          "outcome": "FAILED",
+          "confidence": 0.85,
+          "detail": "file 'hello.txt' not found in common dirs",
+          "sub_goal": {
+            "kind": "write_file",
+            "target_hint": "hello.txt",
+            "expect_contains": "Hello KRIA"
+          }
+        },
+        {
+          "outcome": "INCONCLUSIVE",
+          "confidence": 0.3,
+          "detail": "could not OCR-confirm 'Hello KRIA' (terminal text may be unreadable)",
+          "sub_goal": {
+            "kind": "read_output",
+            "target_hint": null,
+            "expect_contains": "Hello KRIA"
+          }
+        }
+      ],
+      "classification": "FAIL"
+    }
+  ]
+}

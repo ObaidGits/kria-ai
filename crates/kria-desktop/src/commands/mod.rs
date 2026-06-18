@@ -4,6 +4,7 @@ pub(crate) mod api_hitl;
 pub(crate) mod app_commands;
 pub(crate) mod app_state;
 pub(crate) mod automation;
+pub(crate) mod briefing;
 pub(crate) mod chat;
 pub(crate) mod colab;
 pub(crate) mod colab_dispatch;
@@ -20,6 +21,7 @@ pub(crate) mod image_chat;
 pub(crate) mod local_api;
 pub(crate) mod mcp;
 pub(crate) mod media;
+pub(crate) mod mobile_gateway;
 pub(crate) mod n8n;
 pub(crate) mod openclaw;
 pub(crate) mod orchestrator_helpers;
@@ -28,6 +30,7 @@ pub(crate) mod provisioning;
 pub(crate) mod runtime;
 pub(crate) mod runtime_status;
 pub(crate) mod sessions;
+pub(crate) mod tasks;
 pub(crate) mod telegram;
 pub(crate) mod test_runner;
 pub(crate) mod tool_result_helpers;
@@ -107,6 +110,12 @@ pub use mcp::{
 #[allow(unused_imports)]
 pub use media::{
     get_session_media, open_html_for_print, read_local_image, save_export_file, save_uploaded_image,
+};
+#[allow(unused_imports)]
+pub use mobile_gateway::{
+    get_mobile_config, mobile_begin_pairing, mobile_gateway_start, mobile_gateway_status,
+    mobile_gateway_stop, mobile_list_devices, mobile_revoke_device, remote_desktop_kill,
+    remote_desktop_status, set_mobile_config,
 };
 #[allow(unused_imports)]
 pub use n8n::{

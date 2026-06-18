@@ -27,6 +27,8 @@ const DESTRUCTIVE_TERMS: &[&str] = &[
 fn risk_texts(decision: &Decision, observation: &Observation) -> Vec<String> {
     match &decision.action {
         Action::Type { text } => vec![text.clone()],
+        Action::TypeAndSubmit { text } => vec![text.clone()],
+        Action::Navigate { url } => vec![url.clone()],
         Action::Key { combo } => vec![combo.clone()],
         Action::Click { element_id } => observation
             .element(*element_id)

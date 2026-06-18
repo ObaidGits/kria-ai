@@ -1,0 +1,29 @@
+{
+  "id": "a07",
+  "category": "app_resolution",
+  "prompt": "Open the browser",
+  "final": "PASS",
+  "run_classes": [
+    "PASS"
+  ],
+  "runs": [
+    {
+      "ok_request": true,
+      "request_error": null,
+      "reply": "Reached the step limit (16) without completing the task.",
+      "sub_verdicts": [
+        {
+          "outcome": "VERIFIED",
+          "confidence": 0.75,
+          "detail": "window 'Firefox' present (not focused)",
+          "sub_goal": {
+            "kind": "open_app",
+            "target_hint": "chrome",
+            "expect_contains": null
+          }
+        }
+      ],
+      "classification": "PASS"
+    }
+  ]
+}

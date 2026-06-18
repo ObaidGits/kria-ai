@@ -33,6 +33,27 @@
       }
     },
     {
+      "name": "github",
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-e", "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "ghcr.io/github/github-mcp-server"
+      ],
+      "enabled": true,
+      "trust_level": "YELLOW",
+      "tool_overrides": {
+        "create_issue": "YELLOW",
+        "create_pull_request": "YELLOW",
+        "add_issue_comment": "YELLOW",
+        "create_or_update_file": "YELLOW",
+        "update_pull_request": "YELLOW",
+        "merge_pull_request": "RED",
+        "delete_file": "RED"
+      }
+    },
+    {
       "name": "colab-mcp",
       "transport": "stdio",
       "command": "uvx",
