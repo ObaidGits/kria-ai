@@ -32,10 +32,18 @@ pub struct BridgeOutcome {
 
 impl BridgeOutcome {
     pub fn ok(output: impl Into<String>) -> Self {
-        Self { ok: true, output: output.into(), detail: String::new() }
+        Self {
+            ok: true,
+            output: output.into(),
+            detail: String::new(),
+        }
     }
     pub fn failed(detail: impl Into<String>) -> Self {
-        Self { ok: false, output: String::new(), detail: detail.into() }
+        Self {
+            ok: false,
+            output: String::new(),
+            detail: detail.into(),
+        }
     }
 }
 

@@ -397,9 +397,9 @@ async fn local_api_desktop_chat_command(
             app_state,
             request.session_id,
             "agent",
-            request.gui_cognition_test.map(|_options| {
-                super::gui_cognition::GuiCognitionCommandOptions {}
-            }),
+            request
+                .gui_cognition_test
+                .map(|_options| super::gui_cognition::GuiCognitionCommandOptions {}),
         )
         .await
         {
@@ -509,8 +509,7 @@ async fn local_api_gui_automation_status(
         );
     };
 
-    let action_backend =
-        super::gui_cognition::build_gui_action_backend_status(app_state).await;
+    let action_backend = super::gui_cognition::build_gui_action_backend_status(app_state).await;
     let capabilities = serde_json::to_value(&action_backend.capabilities)
         .unwrap_or_else(|_| serde_json::json!({}));
 

@@ -10,8 +10,8 @@ async fn build_manager(api_root: &str, request_timeout_secs: u64) -> LlamaServer
 
     let mgr = LlamaServerManager::new(
         config,
-        "/tmp/qwen2.5-vl-7b-q4_k_m.gguf".to_string(),
-        Some("/tmp/mmproj-F16.gguf".to_string()),
+        "/tmp/Qwen3VL-4B-Instruct-Q4_K_M.gguf".to_string(),
+        Some("/tmp/mmproj-Qwen3VL-4B-Instruct-F16.gguf".to_string()),
     );
     mgr.set_api_url_for_testing(format!("{api_root}/v1")).await;
     mgr
@@ -24,7 +24,7 @@ async fn api_unload_model_calls_v1_models_unload_endpoint() {
     Mock::given(method("POST"))
         .and(path("/v1/models/unload"))
         .and(body_json(serde_json::json!({
-            "model": "qwen2.5-vl-7b-q4_k_m.gguf"
+            "model": "Qwen3VL-4B-Instruct-Q4_K_M.gguf"
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "ok": true

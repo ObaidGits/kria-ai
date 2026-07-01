@@ -124,7 +124,10 @@ pub(crate) fn build_messages(
     if let Some(win) = obs.active_window.as_deref() {
         lines.push(format!("Active window: {}", win));
     }
-    lines.push(format!("Screen size: {}x{} pixels", obs.screen_w, obs.screen_h));
+    lines.push(format!(
+        "Screen size: {}x{} pixels",
+        obs.screen_w, obs.screen_h
+    ));
     if screenshot_b64.is_none() {
         lines.push(
             "(No screenshot is available this step — if you cannot ground an action, ask.)"
@@ -263,7 +266,10 @@ mod tests {
         assert_eq!(msgs.len(), 2);
         assert!(msgs[1].content.contains("click new tab"));
         assert!(msgs[1].content.contains("1920x1080"));
-        assert!(msgs[1].has_images(), "screenshot should be attached as an image");
+        assert!(
+            msgs[1].has_images(),
+            "screenshot should be attached as an image"
+        );
     }
 
     #[test]
@@ -293,19 +299,29 @@ mod tests {
                 risk_hint: None,
             };
             let out = validate_coordinate_decision(d, &obs());
-            assert!(matches!(out.action, Action::Ask { .. }), "({x},{y}) must downgrade to Ask");
+            assert!(
+                matches!(out.action, Action::Ask { .. }),
+                "({x},{y}) must downgrade to Ask"
+            );
         }
     }
 
     #[test]
     fn non_click_actions_pass_through() {
         let d = Decision {
-            action: Action::Key { combo: "ctrl+t".into() },
+            action: Action::Key {
+                combo: "ctrl+t".into(),
+            },
             reason: String::new(),
             risk_hint: None,
         };
         let out = validate_coordinate_decision(d, &obs());
-        assert_eq!(out.action, Action::Key { combo: "ctrl+t".into() });
+        assert_eq!(
+            out.action,
+            Action::Key {
+                combo: "ctrl+t".into()
+            }
+        );
     }
 
     #[test]

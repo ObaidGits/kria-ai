@@ -20,6 +20,7 @@ pub mod stt_trace;
 pub mod tier;
 pub mod transcript_authority;
 pub mod tts;
+pub mod turn_diagnostics;
 pub mod turn_ownership;
 pub mod ux_refinement;
 pub mod v2;

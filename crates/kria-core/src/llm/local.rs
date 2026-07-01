@@ -1,5 +1,5 @@
 use crate::infra::circuit_breaker::{CircuitBreaker, CircuitBreakerError, CircuitState};
-use crate::llm::orchestrator::server_manager::{LlamaServerManager, STATE_READY};
+use crate::llm::orchestrator::server_manager::{LlamaServerManager, StreamActivityGuard, STATE_READY};
 use crate::llm::{
     extract_openai_content_text, extract_openai_message_text, extract_openai_tool_calls,
     trim_messages_for_context, ChatMessage, ContextTooLargeError, LlmBackend, LlmResponse,
@@ -193,6 +193,20 @@ impl LocalBackend {
             || (lower.contains("mmproj") && lower.contains("vision"))
     }
 
+    /// Detects the llama.cpp/llama-server failure where it cannot build a grammar/parser for the
+    /// supplied tool (function) JSON schema — e.g. "Unable to generate parser for this template",
+    /// "Automatic parser generation failed", "Unrecognized schema". This is a REQUEST-SHAPE problem
+    /// (the model/template can't do native tool-calling), NOT a server-health failure. We recover by
+    /// retrying the same turn WITHOUT tools (text mode); the agent loop then parses tool calls from
+    /// text. This must never trip the circuit breaker.
+    fn looks_like_tool_schema_unsupported_response(body: &str) -> bool {
+        let lower = body.to_ascii_lowercase();
+        (lower.contains("parser") && lower.contains("template"))
+            || lower.contains("automatic parser generation failed")
+            || lower.contains("unrecognized schema")
+            || lower.contains("json schema conversion failed")
+    }
+
     fn looks_like_transport_connectivity_error(message: &str) -> bool {
         let lower = message.to_ascii_lowercase();
         lower.contains("error sending request")
@@ -367,7 +381,7 @@ impl LocalBackend {
             })
             .collect();
 
-        let mut payload = serde_json::json!({
+        let base_payload = serde_json::json!({
             "model": self.model_label,
             "messages": wire_messages,
             "temperature": temperature,
@@ -375,34 +389,82 @@ impl LocalBackend {
             "stream": false,
         });
 
-        if let Some(t) = tools {
-            if !t.is_empty() {
-                let tool_defs: Vec<serde_json::Value> = t
-                    .iter()
-                    .map(|ts| {
-                        serde_json::json!({
-                            "type": "function",
-                            "function": {
-                                "name": ts.name,
-                                "description": ts.description,
-                                "parameters": ts.parameters,
-                            }
+        let tool_defs: Option<Vec<serde_json::Value>> = tools.and_then(|t| {
+            if t.is_empty() {
+                None
+            } else {
+                Some(
+                    t.iter()
+                        .map(|ts| {
+                            serde_json::json!({
+                                "type": "function",
+                                "function": {
+                                    "name": ts.name,
+                                    "description": ts.description,
+                                    "parameters": ts.parameters,
+                                }
+                            })
                         })
-                    })
-                    .collect();
-                payload["tools"] = serde_json::Value::Array(tool_defs);
+                        .collect(),
+                )
             }
-        }
+        });
+
+        let build_payload = |with_tools: bool| -> serde_json::Value {
+            let mut payload = base_payload.clone();
+            if with_tools {
+                if let Some(ref defs) = tool_defs {
+                    payload["tools"] = serde_json::Value::Array(defs.clone());
+                }
+            }
+            payload
+        };
 
         let url = format!("{}/chat/completions", self.resolve_api_url());
-        let resp = self
-            .client
-            .post(&url)
-            .json(&payload)
-            .send()
-            .await
-            .map_err(|e| anyhow::anyhow!("local LLM transport error to {url}: {e}"))?;
-        let status = resp.status();
+        let had_tools = tool_defs.is_some();
+
+        let send = |payload: serde_json::Value| {
+            let client = self.client.clone();
+            let url = url.clone();
+            async move {
+                client
+                    .post(&url)
+                    .json(&payload)
+                    .send()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("local LLM transport error to {url}: {e}"))
+            }
+        };
+
+        let mut resp = send(build_payload(had_tools)).await?;
+        let mut status = resp.status();
+
+        // Tool-schema recovery: if the server cannot build a grammar/parser for the tool schema,
+        // retry the SAME turn without tools (text-mode tool parsing downstream). This is a
+        // request-shape issue, not a server-health failure, so it must not trip the circuit.
+        if had_tools && !status.is_success() {
+            let body_text = resp.text().await.unwrap_or_default();
+            if Self::looks_like_tool_schema_unsupported_response(&body_text) {
+                tracing::warn!(
+                    status = %status,
+                    "local LLM rejected native tool schema (parser generation failed); \
+                     retrying without tools — tool calls will be parsed from text"
+                );
+                resp = send(build_payload(false)).await?;
+                status = resp.status();
+            } else if Self::looks_like_context_overflow_response(status, &body_text) {
+                return Err(ContextTooLargeError.into());
+            } else if Self::looks_like_vision_not_supported_response(&body_text) {
+                anyhow::bail!("local LLM vision unavailable: {body_text}");
+            } else {
+                tracing::error!(
+                    status = %status,
+                    response_body = %body_text,
+                    "local LLM request failed with non-overflow error"
+                );
+                anyhow::bail!("local LLM API error (status {status}): {body_text}");
+            }
+        }
 
         if !status.is_success() {
             let body_text = resp.text().await.unwrap_or_default();
@@ -481,6 +543,10 @@ impl LlmBackend for LocalBackend {
         temperature: f32,
         max_tokens: u32,
     ) -> anyhow::Result<LlmResponse> {
+        // Mark this foreground turn active so the watchdog defers non-emergency swaps until it
+        // finishes (HRA Task 12 / A4: never interrupt an active answer).
+        let _stream_guard = self.server_manager().map(StreamActivityGuard::new);
+
         // ─── Pre-flight memory check ───────────────────────────────────────
         // Estimate the approximate context size and refuse if available RAM is
         // insufficient. Prevents silent OOM in llama-server.
@@ -686,46 +752,51 @@ impl LlmBackend for LocalBackend {
 
         // V13: Build cancellable stream using select! on CancellationToken
         let cancel = self.cancel_token();
+        // Keep the foreground-active marker alive for the whole stream lifetime (A4).
+        let stream_guard = self.server_manager().map(StreamActivityGuard::new);
 
-        let stream = futures::stream::unfold((resp, cancel), |(mut resp, cancel)| async move {
-            // If we have a cancel token, use select! to abort on cancellation
-            let chunk_result = if let Some(ref token) = cancel {
-                tokio::select! {
-                    biased;
-                    _ = token.cancelled() => {
-                        tracing::info!("local LLM stream: cancelled by orchestrator swap");
-                        return None;
+        let stream = futures::stream::unfold(
+            (resp, cancel, stream_guard),
+            |(mut resp, cancel, stream_guard)| async move {
+                // If we have a cancel token, use select! to abort on cancellation
+                let chunk_result = if let Some(ref token) = cancel {
+                    tokio::select! {
+                        biased;
+                        _ = token.cancelled() => {
+                            tracing::info!("local LLM stream: cancelled by orchestrator swap");
+                            return None;
+                        }
+                        result = resp.chunk() => result,
                     }
-                    result = resp.chunk() => result,
-                }
-            } else {
-                resp.chunk().await
-            };
+                } else {
+                    resp.chunk().await
+                };
 
-            match chunk_result {
-                Ok(Some(chunk)) => {
-                    let text = String::from_utf8_lossy(&chunk).to_string();
-                    // Parse SSE: lines starting with "data: "
-                    let mut tokens = String::new();
-                    for line in text.lines() {
-                        if let Some(data) = line.strip_prefix("data: ") {
-                            if data == "[DONE]" {
-                                continue;
-                            }
-                            if let Ok(v) = serde_json::from_str::<serde_json::Value>(data) {
-                                let delta_content = &v["choices"][0]["delta"]["content"];
-                                let tok = extract_openai_content_text(delta_content);
-                                if !tok.is_empty() {
-                                    tokens.push_str(&tok);
+                match chunk_result {
+                    Ok(Some(chunk)) => {
+                        let text = String::from_utf8_lossy(&chunk).to_string();
+                        // Parse SSE: lines starting with "data: "
+                        let mut tokens = String::new();
+                        for line in text.lines() {
+                            if let Some(data) = line.strip_prefix("data: ") {
+                                if data == "[DONE]" {
+                                    continue;
+                                }
+                                if let Ok(v) = serde_json::from_str::<serde_json::Value>(data) {
+                                    let delta_content = &v["choices"][0]["delta"]["content"];
+                                    let tok = extract_openai_content_text(delta_content);
+                                    if !tok.is_empty() {
+                                        tokens.push_str(&tok);
+                                    }
                                 }
                             }
                         }
+                        Some((tokens, (resp, cancel, stream_guard)))
                     }
-                    Some((tokens, (resp, cancel)))
+                    _ => None,
                 }
-                _ => None,
-            }
-        });
+            },
+        );
 
         Ok(Box::pin(stream))
     }

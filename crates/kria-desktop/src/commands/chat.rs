@@ -369,8 +369,7 @@ async fn send_message_with_profile(
             // Safety net: emit `{prefix}:done` on EVERY exit (incl. panic /
             // early return) so the frontend `isThinking` state can never get
             // stuck and freeze the chat input after the first GUI Cognition turn.
-            let mut done_guard =
-                GuiCognitionDoneGuard::new(app_for_task.clone(), prefix.clone());
+            let mut done_guard = GuiCognitionDoneGuard::new(app_for_task.clone(), prefix.clone());
             let cell = app_for_task.state::<AppStateCell>();
             let Some(task_state) = cell.get() else {
                 let _ = app_for_task.emit(
@@ -1518,7 +1517,10 @@ async fn send_message_with_profile(
             None,
         );
 
-        let _ = app_handle.emit(&ev_done, serde_json::json!({ "session_id": session_id_clone }));
+        let _ = app_handle.emit(
+            &ev_done,
+            serde_json::json!({ "session_id": session_id_clone }),
+        );
         decrement_active_turn_counter(&active_turns_for_tracking);
         touch_orchestrator_activity(&last_activity_for_tracking).await;
     });

@@ -26,7 +26,12 @@ impl FakeSight {
                 active_window: Some("Fake Window".into()),
                 elements: vec![UiElement {
                     id: 1,
-                    bbox: Bbox { x: 10, y: 20, width: 100, height: 40 },
+                    bbox: Bbox {
+                        x: 10,
+                        y: 20,
+                        width: 100,
+                        height: 40,
+                    },
                     monitor_index: 0,
                     kind: "button".into(),
                     label: label.into(),
@@ -68,7 +73,9 @@ impl FakeBrain {
                 risk_hint: None,
             },
             Decision {
-                action: Action::Done { summary: "fake done".into() },
+                action: Action::Done {
+                    summary: "fake done".into(),
+                },
                 reason: "fake done".into(),
                 risk_hint: None,
             },
@@ -86,7 +93,9 @@ impl GuiBrain for FakeBrain {
     ) -> anyhow::Result<Decision> {
         let mut script = self.script.lock().unwrap();
         Ok(script.pop_front().unwrap_or(Decision {
-            action: Action::Done { summary: "script exhausted".into() },
+            action: Action::Done {
+                summary: "script exhausted".into(),
+            },
             reason: "fake".into(),
             risk_hint: None,
         }))

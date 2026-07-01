@@ -132,7 +132,10 @@ impl NtfyClient {
         );
         let mut headers = vec![
             ("Title".to_string(), sanitize_header(&msg.title)),
-            ("Priority".to_string(), msg.priority.header_value().to_string()),
+            (
+                "Priority".to_string(),
+                msg.priority.header_value().to_string(),
+            ),
         ];
         if !msg.tags.is_empty() {
             headers.push(("Tags".to_string(), msg.tags.join(",")));
@@ -217,7 +220,10 @@ mod tests {
             .headers
             .iter()
             .any(|(k, v)| k == "Authorization" && v == "Bearer tok_123"));
-        assert!(parts.headers.iter().any(|(k, v)| k == "Tags" && v == "white_check_mark"));
+        assert!(parts
+            .headers
+            .iter()
+            .any(|(k, v)| k == "Tags" && v == "white_check_mark"));
         assert_eq!(parts.body, "Report ready");
     }
 

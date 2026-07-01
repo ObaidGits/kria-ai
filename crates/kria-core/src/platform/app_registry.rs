@@ -444,7 +444,10 @@ impl InstalledAppRegistry {
         if top.1 >= STRONG {
             let second = scored.get(1).map(|(_, s)| *s).unwrap_or(0.0);
             if strong.len() == 1 || top.1 - second >= 0.08 {
-                return AppMatch::Closest { alias: top.0, score: top.1 };
+                return AppMatch::Closest {
+                    alias: top.0,
+                    score: top.1,
+                };
             }
             return AppMatch::Ambiguous(strong.into_iter().take(4).collect());
         }
@@ -609,7 +612,13 @@ mod alias_tests {
 
     #[test]
     fn file_manager_aliases_resolve_to_candidates() {
-        for name in ["file manager", "files manager", "file browser", "file explorer", "files app"] {
+        for name in [
+            "file manager",
+            "files manager",
+            "file browser",
+            "file explorer",
+            "files app",
+        ] {
             assert!(
                 class_alias_candidates(name).is_some_and(|c| c.contains(&"nautilus")),
                 "{name:?} should map to the file-manager candidate set"
@@ -688,7 +697,12 @@ fn class_alias_candidates(normalized: &str) -> Option<&'static [&'static str]> {
         Some(SPREADSHEET)
     } else if matches!(
         normalized,
-        "text editor" | "editor" | "plain text editor" | "document editor" | "notepad" | "text edit"
+        "text editor"
+            | "editor"
+            | "plain text editor"
+            | "document editor"
+            | "notepad"
+            | "text edit"
     ) {
         Some(TEXT_EDITOR)
     } else if matches!(
@@ -1061,7 +1075,11 @@ mod tests {
         registry
             .load_manifests(vec![
                 mk("google-chrome", "Google Chrome", vec!["chrome".into()]),
-                mk("org.gnome.Nautilus", "Files", vec!["file explorer".into(), "file manager".into()]),
+                mk(
+                    "org.gnome.Nautilus",
+                    "Files",
+                    vec!["file explorer".into(), "file manager".into()],
+                ),
                 mk("code", "Visual Studio Code", vec!["code".into()]),
                 // A short alias that is a substring of "foobar123" — must NOT match.
                 mk("org.x.bar", "Bar", vec!["bar".into()]),
@@ -1076,7 +1094,10 @@ mod tests {
         // Partial → closest (file explorer → nautilus alias).
         match registry.fuzzy_match("explorer") {
             AppMatch::Closest { alias, .. } => {
-                assert!(registry.resolve_alias(&alias).is_some(), "closest must resolve");
+                assert!(
+                    registry.resolve_alias(&alias).is_some(),
+                    "closest must resolve"
+                );
             }
             other => panic!("expected Closest for partial, got {other:?}"),
         }
@@ -1165,9 +1186,7 @@ mod tests {
         registry
             .load_manifests(vec![
                 AppManifest {
-                    app_id: CanonicalAppId::from_registry(
-                        "devin-desktop-url-handler".to_string(),
-                    ),
+                    app_id: CanonicalAppId::from_registry("devin-desktop-url-handler".to_string()),
                     display_name: "Devin - URL Handler".to_string(),
                     desktop_path: PathBuf::from(
                         "/usr/share/applications/devin-desktop-url-handler.desktop",
@@ -1266,23 +1285,27 @@ mod tests {
             .load_manifests_with_guard(manifests.clone(), true)
             .await;
         assert_eq!(
-            registry.resolve_alias("text editor").map(|i| i.as_str().to_string()),
+            registry
+                .resolve_alias("text editor")
+                .map(|i| i.as_str().to_string()),
             Some("org.gnome.texteditor".to_string()),
             "'text editor' must resolve to the dedicated editor, not a heavyweight IDE"
         );
         assert_eq!(
-            registry.resolve_alias("editor").map(|i| i.as_str().to_string()),
+            registry
+                .resolve_alias("editor")
+                .map(|i| i.as_str().to_string()),
             Some("org.gnome.texteditor".to_string()),
             "bare 'editor' must resolve to the dedicated editor, not a heavyweight IDE"
         );
 
         // Guard OFF (rollback): prior byte-for-byte behavior — generic aliases
         // clobber, so the LAST-scanned visible IDE wins the shared category label.
-        registry
-            .load_manifests_with_guard(manifests, false)
-            .await;
+        registry.load_manifests_with_guard(manifests, false).await;
         assert_eq!(
-            registry.resolve_alias("text editor").map(|i| i.as_str().to_string()),
+            registry
+                .resolve_alias("text editor")
+                .map(|i| i.as_str().to_string()),
             Some("kiro".to_string()),
             "guard OFF must restore the prior last-writer-wins clobber behavior"
         );

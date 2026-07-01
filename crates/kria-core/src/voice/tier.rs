@@ -78,14 +78,16 @@ impl VoiceTier {
 
     /// Recommended STT engine identifier.
     ///
-    /// Returns the *preferred* engine for the tier; the actual engine used
-    /// at runtime is the intersection of this preference and what is
-    /// compiled in via cargo features (see `kria-voice` Cargo.toml).
+    /// Returns the *preferred* engine for the tier. Voice System v3 (Wave A)
+    /// makes the faster-whisper sidecar the default for every tier: it is
+    /// sub-second on GPU (CUDA INT8 `small`), falls back to CPU INT8, and is
+    /// the only measured engine that is both fast AND Hinglish-capable. GPU vs
+    /// CPU selection + VRAM coordination happen inside the sidecar.
     pub fn stt_engine(self) -> &'static str {
         match self {
-            Self::S => "whisper-rs-cuda",
-            Self::A => "whisper-rs-cuda", // falls back to vulkan / cpu if unavailable
-            Self::C => "whisper-rs",
+            Self::S => "faster-whisper",
+            Self::A => "faster-whisper",
+            Self::C => "faster-whisper",
         }
     }
 

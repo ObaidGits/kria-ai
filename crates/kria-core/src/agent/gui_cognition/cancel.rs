@@ -262,7 +262,9 @@ where
     }
     if let Some(token) = cancel {
         if token.is_cancelled() {
-            let reason = token.reason().unwrap_or_else(|| DEFAULT_CANCEL_REASON.to_string());
+            let reason = token
+                .reason()
+                .unwrap_or_else(|| DEFAULT_CANCEL_REASON.to_string());
             return PreActionGuard::Cancelled { reason };
         }
     }
@@ -368,8 +370,7 @@ mod tests {
     fn guard_on_reports_cancel_when_not_halted() {
         let token = GuiCancelToken::new();
         token.cancel("user stop");
-        let guard =
-            evaluate_pre_action_guard_with(&guards_on(), Some(&token), || false, || None);
+        let guard = evaluate_pre_action_guard_with(&guards_on(), Some(&token), || false, || None);
         assert_eq!(guard.cause(), "cancelled");
         assert_eq!(guard.reason(), Some("user stop"));
         assert!(guard.should_abort());
@@ -378,8 +379,7 @@ mod tests {
     #[test]
     fn guard_on_proceeds_when_no_signal() {
         let token = GuiCancelToken::new();
-        let guard =
-            evaluate_pre_action_guard_with(&guards_on(), Some(&token), || false, || None);
+        let guard = evaluate_pre_action_guard_with(&guards_on(), Some(&token), || false, || None);
         assert_eq!(guard, PreActionGuard::Proceed);
     }
 

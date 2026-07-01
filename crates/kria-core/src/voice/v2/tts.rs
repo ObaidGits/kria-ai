@@ -103,6 +103,139 @@ impl Tts for CliPiperTts {
     }
 }
 
+// ─── Kokoro sidecar (Wave 5) ───────────────────────────────────────────────
+
+/// Higher-quality multilingual TTS via the Kokoro Python sidecar
+/// (`sidecars/kria-tts`). Streams a sentence's text to the sidecar and pushes
+/// the returned 24 kHz f32 PCM. When the sidecar/model is unavailable it
+/// delegates to the guaranteed `fallback` engine (Piper) — Requirement 7.4.
+pub struct KokoroTts {
+    base_url: String,
+    sample_rate: u32,
+    voice: String,
+    client: reqwest::Client,
+    fallback: Arc<dyn Tts>,
+}
+
+impl KokoroTts {
+    pub fn new(fallback: Arc<dyn Tts>) -> Self {
+        let client = reqwest::Client::builder()
+            .pool_idle_timeout(std::time::Duration::from_secs(90))
+            .build()
+            .unwrap_or_default();
+        Self {
+            base_url: super::tts_sidecar::base_url(),
+            sample_rate: 24_000,
+            voice: std::env::var("KRIA_TTS_VOICE")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .unwrap_or_else(|| "af_heart".to_string()),
+            client,
+            fallback,
+        }
+    }
+
+    async fn synth_via_sidecar(&self, sentence: &str) -> anyhow::Result<Vec<f32>> {
+        let ready = super::tts_sidecar::ensure_ready(
+            &self.client,
+            &self.base_url,
+            std::time::Duration::from_secs(30),
+        )
+        .await;
+        if !ready {
+            anyhow::bail!("kokoro tts sidecar not ready");
+        }
+        let url = format!(
+            "{}/synthesize?voice={}",
+            self.base_url.trim_end_matches('/'),
+            self.voice
+        );
+        let resp = self
+            .client
+            .post(&url)
+            .header("Content-Type", "text/plain; charset=utf-8")
+            .body(sentence.to_string())
+            .timeout(std::time::Duration::from_secs(30))
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("kokoro request failed: {e}"))?;
+        if !resp.status().is_success() {
+            anyhow::bail!("kokoro sidecar returned status {}", resp.status());
+        }
+        let bytes = resp
+            .bytes()
+            .await
+            .map_err(|e| anyhow::anyhow!("kokoro response read failed: {e}"))?;
+        if bytes.len() % 4 != 0 {
+            anyhow::bail!("kokoro pcm length not a multiple of 4");
+        }
+        let pcm: Vec<f32> = bytes
+            .chunks_exact(4)
+            .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            .collect();
+        Ok(pcm)
+    }
+}
+
+#[async_trait]
+impl Tts for KokoroTts {
+    fn engine_id(&self) -> &'static str {
+        "kokoro"
+    }
+
+    fn sample_rate(&self) -> TtsSampleRate {
+        TtsSampleRate(self.sample_rate)
+    }
+
+    async fn synthesize_sentence(
+        self: Arc<Self>,
+        sentence: String,
+        pcm_tx: mpsc::Sender<Vec<f32>>,
+        mut abort_rx: tokio::sync::watch::Receiver<bool>,
+    ) -> anyhow::Result<()> {
+        if *abort_rx.borrow() {
+            return Ok(());
+        }
+        let this = self.clone();
+        let sentence_for_synth = sentence.clone();
+        let mut synth =
+            tokio::spawn(async move { this.synth_via_sidecar(&sentence_for_synth).await });
+
+        tokio::select! {
+            biased;
+            _ = abort_rx.changed() => {
+                synth.abort();
+                Ok(())
+            }
+            res = &mut synth => {
+                match res {
+                    Ok(Ok(pcm)) => {
+                        if !*abort_rx.borrow() && !pcm.is_empty() {
+                            let _ = pcm_tx.send(pcm).await;
+                        }
+                        Ok(())
+                    }
+                    Ok(Err(e)) => {
+                        // Sidecar/model unavailable → guaranteed Piper fallback.
+                        tracing::warn!(error = %e, "kokoro tts failed; falling back to piper");
+                        self.fallback
+                            .clone()
+                            .synthesize_sentence(sentence, pcm_tx, abort_rx)
+                            .await
+                    }
+                    Err(join_err) => {
+                        tracing::warn!(error = %join_err, "kokoro synth task join failed; falling back to piper");
+                        self.fallback
+                            .clone()
+                            .synthesize_sentence(sentence, pcm_tx, abort_rx)
+                            .await
+                    }
+                }
+            }
+        }
+    }
+}
+
 // ─── piper-rs (feature-gated) ──────────────────────────────────────────────
 
 #[cfg(feature = "voice-piper-rs")]

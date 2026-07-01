@@ -138,11 +138,8 @@ fn env_vars_override_config_values() {
 fn auto_select_model_maps_tiers_correctly() {
     assert_eq!(auto_select_model(HardwareTier::Lite), "qwen2.5-3b");
     assert_eq!(auto_select_model(HardwareTier::Standard), "phi-4-mini");
-    assert_eq!(
-        auto_select_model(HardwareTier::Performance),
-        "qwen2.5-vl-7b"
-    );
-    assert_eq!(auto_select_model(HardwareTier::High), "qwen2.5-vl-7b");
+    assert_eq!(auto_select_model(HardwareTier::Performance), "qwen3-vl-4b");
+    assert_eq!(auto_select_model(HardwareTier::High), "qwen3-vl-4b");
 }
 
 // ── Serialization roundtrip ─────────────────────────────────────────

@@ -245,7 +245,7 @@ impl VisionSidecar {
         anyhow::anyhow!("vision GPU lease unavailable: {error}. {hint}")
     }
 
-    fn acquire_vision_lease(&self, turn_label: &str) -> anyhow::Result<Option<GpuLeaseGuard>> {
+    async fn acquire_vision_lease(&self, turn_label: &str) -> anyhow::Result<Option<GpuLeaseGuard>> {
         if self.sidecar.is_none() {
             return Ok(None);
         }
@@ -254,10 +254,20 @@ impl VisionSidecar {
             return Ok(None);
         };
 
-        gpu_lease
-            .acquire_guard(GpuOwner::Vision, turn_label, Some(Duration::from_secs(120)))
-            .map(Some)
-            .map_err(Self::map_gpu_lease_error)
+        // HRA cutover: route through the authority when enforcing (shadow = legacy, unchanged).
+        // Vision is interactive-background (yields to chat/voice). On HRA denial, run via the
+        // sidecar without a GPU lease rather than hard-failing.
+        match gpu_lease
+            .acquire_guard_gated(GpuOwner::Vision, turn_label, Some(Duration::from_secs(120)), 1500)
+            .await
+        {
+            Ok(guard) => Ok(Some(guard)),
+            Err(GpuLeaseError::Busy { owner }) => {
+                tracing::info!(?owner, "vision: GPU admission denied by HRA; running sidecar without lease");
+                Ok(None)
+            }
+            Err(other) => Err(Self::map_gpu_lease_error(other)),
+        }
     }
 
     fn reconcile_vision_lease_idle(&self) {
@@ -303,7 +313,7 @@ impl VisionSidecar {
             Some(guard) => guard,
             None => return Ok(None),
         };
-        let lease_guard = self.acquire_vision_lease("vision_ocr")?;
+        let lease_guard = self.acquire_vision_lease("vision_ocr").await?;
         let bridge = guard.lock().await;
         let mut payload = serde_json::Map::new();
         payload.insert("file".into(), serde_json::json!(path));
@@ -333,7 +343,7 @@ impl VisionSidecar {
             Some(guard) => guard,
             None => return Ok(None),
         };
-        let lease_guard = self.acquire_vision_lease("vision_analyze")?;
+        let lease_guard = self.acquire_vision_lease("vision_analyze").await?;
         let bridge = guard.lock().await;
         let mut payload = serde_json::Map::new();
         payload.insert("file".into(), serde_json::json!(path));

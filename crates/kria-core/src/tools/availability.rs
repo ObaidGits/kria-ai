@@ -107,7 +107,11 @@ pub fn free_slots(
 fn push_slot(out: &mut Vec<FreeSlot>, start: DateTime<Utc>, end: DateTime<Utc>, min_minutes: i64) {
     let minutes = (end - start).num_minutes();
     if minutes >= min_minutes {
-        out.push(FreeSlot { start, end, minutes });
+        out.push(FreeSlot {
+            start,
+            end,
+            minutes,
+        });
     }
 }
 
@@ -213,7 +217,9 @@ mod tests {
     use chrono::{Duration, TimeZone};
 
     fn t(h: i64, m: i64) -> DateTime<Utc> {
-        Utc.with_ymd_and_hms(2026, 6, 18, 0, 0, 0).unwrap() + Duration::hours(h) + Duration::minutes(m)
+        Utc.with_ymd_and_hms(2026, 6, 18, 0, 0, 0).unwrap()
+            + Duration::hours(h)
+            + Duration::minutes(m)
     }
 
     fn ev(sh: i64, eh: i64, title: &str) -> BusyInterval {

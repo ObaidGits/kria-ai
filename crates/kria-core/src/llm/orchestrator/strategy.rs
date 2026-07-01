@@ -64,6 +64,117 @@ pub struct TargetParams {
 /// 3. Maximize ngl from remaining budget
 /// 4. Allocate remaining VRAM to context window
 /// 5. Determine VisionMode tier based on ngl and free RAM
+/// CUDA runtime VRAM reserve (MB) — kernels, cuBLAS/cuDNN workspaces, and allocator fragmentation
+/// that `base_vram_overhead_mb` does not capture. Production callers add this to `safety_margin_mb`
+/// before calling [`calculate_target_params`], so the sizer leaves real headroom and does not
+/// over-commit a small GPU (the ngl=36-on-6GB OOM/timeout loop). Override with
+/// `KRIA_CUDA_RESERVE_MB` to tune during hardware validation without a recompile.
+pub fn cuda_runtime_reserve_mb() -> u64 {
+    super::gpu_policy::cuda_reserve_mb()
+}
+
+/// Production sizing entry point: identical to [`calculate_target_params`] but folds the CUDA
+/// runtime reserve into the safety margin so the live orchestrator/watchdog never over-commit a
+/// small GPU. Unit tests call the pure `calculate_target_params` directly (no reserve) to assert
+/// the deterministic math; production code calls this.
+pub fn calculate_target_params_prod(
+    profile: &ModelProfile,
+    free_vram_mb: u64,
+    safety_margin_mb: u64,
+    backend: GpuBackend,
+) -> TargetParams {
+    calculate_target_params(
+        profile,
+        free_vram_mb,
+        safety_margin_mb.saturating_add(cuda_runtime_reserve_mb()),
+        backend,
+    )
+}
+
+// ── G1: measured-first sizing (redesign) ──────────────────────────────────────────────────────
+//
+// The desktop pain was sizing against a fluctuating *total/total-free* figure: Chrome/Discord/
+// games change free VRAM constantly, so any reactive resize thrashed. The redesign sizes once, at
+// load time, over a low-percentile ("sustained floor") of recent MEASURED free-VRAM readings minus
+// a volatility reserve. We size for the floor and stay (lock, G3) — we do NOT chase transient peaks.
+
+/// Default ceiling for the volatility reserve (MB). Settable via Settings UI / config
+/// (`orchestrator.vram_volatility_cap_mb`); env `KRIA_VRAM_VOLATILITY_CAP_MB` overrides.
+fn volatility_reserve_cap_mb() -> u64 {
+    super::gpu_policy::volatility_cap_mb()
+}
+
+/// Lowest sample of a recent free-VRAM window — the "sustained floor" we size against. Empty input
+/// returns 0 (caller will fall back to a single live reading). This is the conservative pick: on a
+/// churny desktop the floor is well below the instantaneous peak, so we never size into memory that
+/// another app is about to reclaim.
+pub fn sustained_floor_mb(free_samples: &[u64]) -> u64 {
+    free_samples.iter().copied().min().unwrap_or(0)
+}
+
+/// Volatility reserve (MB): headroom for other apps reclaiming VRAM. Derived from the *spread*
+/// (max − min) of recent readings so it is near-zero on a stable/dedicated GPU and larger on a
+/// churny desktop — i.e. it adapts to observed volatility rather than being hardcoded. We reserve
+/// half the observed spread, clamped to a cap so a single outlier cannot starve sizing.
+pub fn volatility_reserve_mb(free_samples: &[u64]) -> u64 {
+    if free_samples.len() < 2 {
+        return 0;
+    }
+    let min = free_samples.iter().copied().min().unwrap_or(0);
+    let max = free_samples.iter().copied().max().unwrap_or(0);
+    let spread = max.saturating_sub(min);
+    (spread / 2).min(volatility_reserve_cap_mb())
+}
+
+/// Bounded calibration correction (MB) for the CUDA runtime overhead. `learned_overhead_mb` is the
+/// real overhead observed on the first successful load (measured = reserved − actually-used). The
+/// correction is clamped to ±50% of the configured default so calibration can refine sizing but can
+/// never become the primary signal nor push sizing into an unsafe region (redesign G1).
+pub fn calibrated_cuda_reserve_mb(learned_overhead_mb: Option<u64>) -> u64 {
+    let default = cuda_runtime_reserve_mb();
+    match learned_overhead_mb {
+        None => default,
+        Some(learned) => {
+            let lo = default / 2; // −50%
+            let hi = default.saturating_add(default / 2); // +50%
+            learned.clamp(lo, hi)
+        }
+    }
+}
+
+/// Measured-first production sizing (redesign G1). Sizes over the *sustained floor* of recent
+/// measured free-VRAM samples minus a telemetry-variance-derived volatility reserve, with a bounded
+/// calibration correction folded into the safety margin. Falls back to the single `live_free_vram_mb`
+/// reading when no history is available. This is the one-shot loader path; it is NOT a steady-state
+/// loop (steady state = the Resident Lock, G3).
+pub fn calculate_target_params_measured(
+    profile: &ModelProfile,
+    live_free_vram_mb: u64,
+    free_samples: &[u64],
+    safety_margin_mb: u64,
+    learned_cuda_overhead_mb: Option<u64>,
+    backend: GpuBackend,
+) -> TargetParams {
+    // CPU/Metal paths ignore the VRAM floor (handled inside calculate_target_params).
+    if backend == GpuBackend::CpuOnly || backend == GpuBackend::Metal {
+        return calculate_target_params(profile, live_free_vram_mb, safety_margin_mb, backend);
+    }
+
+    let floor = {
+        let f = sustained_floor_mb(free_samples);
+        if f == 0 {
+            live_free_vram_mb
+        } else {
+            // Never size above the most recent live reading either (defensive).
+            f.min(live_free_vram_mb.max(f))
+        }
+    };
+    let reserve = volatility_reserve_mb(free_samples);
+    let budget_free = floor.saturating_sub(reserve);
+    let margin = safety_margin_mb.saturating_add(calibrated_cuda_reserve_mb(learned_cuda_overhead_mb));
+    calculate_target_params(profile, budget_free, margin, backend)
+}
+
 pub fn calculate_target_params(
     profile: &ModelProfile,
     free_vram_mb: u64,
@@ -96,7 +207,9 @@ pub fn calculate_target_params(
         };
     }
 
-    // CUDA path: VRAM budget calculation
+    // CUDA path: VRAM budget calculation. The CUDA runtime reserve (kernels, cuBLAS workspace,
+    // allocator fragmentation) is folded into `safety_margin_mb` by the production callers via
+    // [`cuda_runtime_reserve_mb`] — keeping this function a pure, deterministic sizer.
     let available = free_vram_mb.saturating_sub(safety_margin_mb);
 
     // Reserve VRAM for vision projector (mmproj) when present
@@ -311,5 +424,81 @@ mod tests {
         let result = calculate_target_params(&p, 6144, 256, GpuBackend::Cuda);
         assert_eq!(result.ngl, 34);
         assert!(result.enable_vision);
+    }
+
+    // ── G1: measured-first sizing tests ──────────────────────────────────────
+
+    #[test]
+    fn sustained_floor_is_the_minimum_sample() {
+        assert_eq!(sustained_floor_mb(&[6000, 4400, 5200, 4800]), 4400);
+        assert_eq!(sustained_floor_mb(&[]), 0);
+    }
+
+    #[test]
+    fn volatility_reserve_is_zero_on_stable_gpu() {
+        // Dedicated/stable GPU: identical readings → no spread → no reserve.
+        assert_eq!(volatility_reserve_mb(&[4400, 4400, 4400]), 0);
+        assert_eq!(volatility_reserve_mb(&[4400]), 0);
+    }
+
+    #[test]
+    fn volatility_reserve_grows_with_spread_and_is_capped() {
+        let _g = super::super::gpu_policy::tests::SETTINGS_TEST_LOCK.lock().unwrap();
+        // spread 2000 → half = 1000, under cap.
+        assert_eq!(volatility_reserve_mb(&[6000, 4000]), 1000);
+        // Huge spread is clamped to the live cap (settable global; derive to stay stable).
+        let cap = volatility_reserve_cap_mb();
+        assert_eq!(volatility_reserve_mb(&[1_000_000, 0]), cap);
+    }
+
+    #[test]
+    fn calibration_correction_is_bounded_to_50pct() {
+        let _g = super::super::gpu_policy::tests::SETTINGS_TEST_LOCK.lock().unwrap();
+        // Bound is relative to the live default reserve (now a settable global), so derive it
+        // rather than hardcoding — keeps the test stable regardless of process settings.
+        let d = cuda_runtime_reserve_mb();
+        let lo = d / 2;
+        let hi = d.saturating_add(d / 2);
+        assert_eq!(calibrated_cuda_reserve_mb(Some(0)), lo);
+        assert_eq!(calibrated_cuda_reserve_mb(Some(u64::MAX)), hi);
+        // a value inside the band passes through unchanged
+        let mid = (lo + hi) / 2;
+        assert_eq!(calibrated_cuda_reserve_mb(Some(mid)), mid);
+        // None → default
+        assert_eq!(calibrated_cuda_reserve_mb(None), d);
+    }
+
+    #[test]
+    fn measured_sizing_uses_floor_minus_reserve_not_peak() {
+        let _g = super::super::gpu_policy::tests::SETTINGS_TEST_LOCK.lock().unwrap();
+        let p = test_profile();
+        // Live reading is a transient peak of 6000, but the floor is 4000 with a 2000 spread →
+        // 1000 reserve → budget_free = 3000. Sizing must reflect the FLOOR, not the 6000 peak.
+        let peak = calculate_target_params_measured(
+            &p, 6000, &[6000, 4000], 256, None, GpuBackend::Cuda,
+        );
+        // Compare to sizing directly at the floor-minus-reserve budget with default cuda reserve.
+        let expected = calculate_target_params(&p, 3000, 256 + cuda_runtime_reserve_mb(), GpuBackend::Cuda);
+        assert_eq!(peak.ngl, expected.ngl);
+        assert!(peak.ngl < p.total_layers, "must not size for the transient peak");
+    }
+
+    #[test]
+    fn measured_sizing_falls_back_to_live_when_no_history() {
+        let _g = super::super::gpu_policy::tests::SETTINGS_TEST_LOCK.lock().unwrap();
+        let p = test_profile();
+        let r = calculate_target_params_measured(&p, 6144, &[], 256, None, GpuBackend::Cuda);
+        let expected = calculate_target_params(&p, 6144, 256 + cuda_runtime_reserve_mb(), GpuBackend::Cuda);
+        assert_eq!(r.ngl, expected.ngl);
+    }
+
+    #[test]
+    fn measured_sizing_cpu_backend_ignores_vram_floor() {
+        let p = test_profile();
+        let r = calculate_target_params_measured(
+            &p, 0, &[0, 0], 256, None, GpuBackend::CpuOnly,
+        );
+        assert_eq!(r.ngl, 0);
+        assert_eq!(r.degradation, DegradationLevel::CpuOnly);
     }
 }

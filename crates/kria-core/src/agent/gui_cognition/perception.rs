@@ -694,13 +694,13 @@ pub fn app_alias_group(name: &str) -> Vec<String> {
             "chromium-browser",
             "org.chromium.chromium",
         ],
-        &["firefox", "mozilla firefox", "firefox-esr", "org.mozilla.firefox"],
         &[
-            "files",
-            "nautilus",
-            "file manager",
-            "org.gnome.nautilus",
+            "firefox",
+            "mozilla firefox",
+            "firefox-esr",
+            "org.mozilla.firefox",
         ],
+        &["files", "nautilus", "file manager", "org.gnome.nautilus"],
         &[
             "terminal",
             "gnome-terminal",
@@ -774,20 +774,9 @@ pub fn app_process_alias_group(name: &str) -> Vec<String> {
         // calculator → gnome-calculator / kcalc
         &["calculator", "gnome-calculator", "kcalc"],
         // text editor → gedit / gnome-text-editor / kate
-        &[
-            "text editor",
-            "gedit",
-            "gnome-text-editor",
-            "kate",
-        ],
+        &["text editor", "gedit", "gnome-text-editor", "kate"],
         // terminal → gnome-terminal / konsole / xterm / kgx
-        &[
-            "terminal",
-            "gnome-terminal",
-            "konsole",
-            "xterm",
-            "kgx",
-        ],
+        &["terminal", "gnome-terminal", "konsole", "xterm", "kgx"],
         // chrome → chrome / google-chrome / chromium
         &[
             "chrome",
@@ -3378,8 +3367,14 @@ mod app_alias_tests {
     fn chrome_aliases_are_mutually_tolerant() {
         // chrome ↔ chromium ↔ google-chrome all resolve to the same group.
         for name in ["chrome", "chromium", "google-chrome", "Google Chrome"] {
-            assert!(group_contains(name, "chrome"), "{name} should map to chrome");
-            assert!(group_contains(name, "chromium"), "{name} should map to chromium");
+            assert!(
+                group_contains(name, "chrome"),
+                "{name} should map to chrome"
+            );
+            assert!(
+                group_contains(name, "chromium"),
+                "{name} should map to chromium"
+            );
             assert!(
                 group_contains(name, "google-chrome"),
                 "{name} should map to google-chrome"
@@ -3458,6 +3453,9 @@ mod cache_coherence_flag_tests {
 
     #[test]
     fn observation_freshness_default_is_default_variant() {
-        assert_eq!(ObservationFreshness::default(), ObservationFreshness::Default);
+        assert_eq!(
+            ObservationFreshness::default(),
+            ObservationFreshness::Default
+        );
     }
 }

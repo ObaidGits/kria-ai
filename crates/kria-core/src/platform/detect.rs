@@ -142,7 +142,7 @@ impl HardwareTier {
         match self {
             Self::Lite => "qwen2.5-3b-q4_k_m",
             Self::Standard => "phi-4-mini-q4_k_m",
-            Self::Performance | Self::High => "qwen2.5-vl-7b-q4_k_m",
+            Self::Performance | Self::High => "qwen3-vl-4b-q4_k_m",
         }
     }
 }
@@ -310,13 +310,27 @@ fn detect_gpu() -> (Option<u64>, Option<String>) {
 }
 
 /// Determine hardware tier from RAM + VRAM.
-fn classify_tier(ram_mb: u64, vram_mb: Option<u64>) -> HardwareTier {
+///
+/// CANONICAL tier classifier (HRA Task 1). This is the single source of truth used by both
+/// `detect_hardware()` and `infra::hardware_profiler`. It uses AND logic so a machine is only
+/// promoted to a tier when BOTH its VRAM and RAM meet the bar (matches `detect_hardware.sh`):
+/// - High:        VRAM >= 8 GB AND RAM >= 16 GB
+/// - Performance: VRAM >= 4 GB AND RAM >= 12 GB
+/// - Standard:    RAM  >= 8 GB (regardless of GPU)
+/// - Lite:        otherwise
+///
+/// Rationale for AND (resolving the prior OR/AND divergence): a GPU-rich/RAM-poor box cannot
+/// actually hold a high-tier working set, and a RAM-rich/GPU-poor box cannot run high-tier GPU
+/// inference. Promoting on either axis alone (the old `detect.rs` OR logic) produced plans the
+/// hardware could not honor. Fine-grained per-resource placement is handled by the Capability
+/// Vector (HRA Task 24); this coarse tier remains only as a display/default label.
+pub fn classify_tier(ram_mb: u64, vram_mb: Option<u64>) -> HardwareTier {
     let vram = vram_mb.unwrap_or(0);
-    if vram >= 8192 || ram_mb >= 16384 {
+    if vram >= 8192 && ram_mb >= 16384 {
         HardwareTier::High
-    } else if vram >= 4096 || ram_mb >= 12288 {
+    } else if vram >= 4096 && ram_mb >= 12288 {
         HardwareTier::Performance
-    } else if vram >= 2048 || ram_mb >= 8192 {
+    } else if ram_mb >= 8192 {
         HardwareTier::Standard
     } else {
         HardwareTier::Lite
@@ -333,6 +347,17 @@ pub fn detect_hardware() -> HardwareInfo {
     let (vram_mb, gpu_name) = detect_gpu();
     let tier = classify_tier(total_ram_mb, vram_mb);
     let hostname = System::host_name().unwrap_or_else(|| "unknown".into());
+
+    tracing::info!(
+        target: "hardware",
+        os = ?get_os(),
+        tier = tier.as_str(),
+        cpu_cores,
+        total_ram_mb,
+        vram_mb = ?vram_mb,
+        gpu = ?gpu_name,
+        "hardware: detect_hardware — CPU/RAM/GPU probed"
+    );
 
     HardwareInfo {
         os: get_os(),

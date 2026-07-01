@@ -389,7 +389,10 @@ impl ServiceOrchestrator {
             return;
         }
         cmd.env("KRIA_VISION_MODEL", "omniparser");
-        cmd.env("KRIA_OMNIPARSER_WEIGHTS", weights.to_string_lossy().to_string());
+        cmd.env(
+            "KRIA_OMNIPARSER_WEIGHTS",
+            weights.to_string_lossy().to_string(),
+        );
         // Optional caption weights (Florence-2) — wired only if the operator
         // points at them, since per-region captioning is costly on CPU. Default
         // labelling comes from fast OCR inside the sidecar (no caption needed).
@@ -401,7 +404,10 @@ impl ServiceOrchestrator {
             && caption.join("model.safetensors").exists()
             && std::env::var("KRIA_OMNIPARSER_ENABLE_CAPTION").as_deref() == Ok("1")
         {
-            cmd.env("KRIA_OMNIPARSER_CAPTION", caption.to_string_lossy().to_string());
+            cmd.env(
+                "KRIA_OMNIPARSER_CAPTION",
+                caption.to_string_lossy().to_string(),
+            );
         }
         tracing::info!(
             target: "orchestrator",

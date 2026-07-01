@@ -205,7 +205,9 @@ impl DeviceRegistry {
             return Err(MobileError::InvalidTokenFormat);
         }
         let device_id = parts[1];
-        let exp: i64 = parts[2].parse().map_err(|_| MobileError::InvalidTokenFormat)?;
+        let exp: i64 = parts[2]
+            .parse()
+            .map_err(|_| MobileError::InvalidTokenFormat)?;
         let payload = format!("{device_id}.{exp}");
         let expected = self.sign(&payload);
         // Constant-time-ish compare via HMAC verify.
@@ -277,8 +279,8 @@ impl DeviceRegistry {
     }
 
     fn sign(&self, payload: &str) -> String {
-        let mut mac = HmacSha256::new_from_slice(&self.signing_key)
-            .expect("HMAC accepts any key length");
+        let mut mac =
+            HmacSha256::new_from_slice(&self.signing_key).expect("HMAC accepts any key length");
         mac.update(payload.as_bytes());
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes())
     }
@@ -288,8 +290,8 @@ impl DeviceRegistry {
             Ok(s) => s,
             Err(_) => return false,
         };
-        let mut mac = HmacSha256::new_from_slice(&self.signing_key)
-            .expect("HMAC accepts any key length");
+        let mut mac =
+            HmacSha256::new_from_slice(&self.signing_key).expect("HMAC accepts any key length");
         mac.update(payload.as_bytes());
         mac.verify_slice(&sig).is_ok()
     }
@@ -328,8 +330,7 @@ mod tests {
     fn registry() -> (tempfile::TempDir, DeviceRegistry) {
         std::env::set_var("KRIA_VAULT_PASSPHRASE", "mobile-test-pass-000000");
         let dir = tempfile::tempdir().unwrap();
-        let vault =
-            Arc::new(SecretsVault::open(dir.path().join("vault.enc"), dir.path()).unwrap());
+        let vault = Arc::new(SecretsVault::open(dir.path().join("vault.enc"), dir.path()).unwrap());
         let reg = DeviceRegistry::open(dir.path().join("devices.db"), &vault).unwrap();
         (dir, reg)
     }
@@ -362,7 +363,10 @@ mod tests {
         let challenge = reg.begin_pairing("h");
         let (info, token) = reg.complete_pairing(&challenge.code, "dev").unwrap();
         assert!(reg.revoke(&info.id).unwrap());
-        assert!(matches!(reg.verify_token(&token), Err(MobileError::Revoked)));
+        assert!(matches!(
+            reg.verify_token(&token),
+            Err(MobileError::Revoked)
+        ));
     }
 
     #[test]
@@ -401,6 +405,9 @@ mod tests {
         let payload = format!("{device}.{exp}");
         let sig = reg.sign(&payload);
         let token = format!("v1.{payload}.{sig}");
-        assert!(matches!(reg.verify_token(&token), Err(MobileError::Expired)));
+        assert!(matches!(
+            reg.verify_token(&token),
+            Err(MobileError::Expired)
+        ));
     }
 }

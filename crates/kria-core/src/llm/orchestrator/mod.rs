@@ -5,7 +5,9 @@
 //! no GPU is present.
 
 pub mod child_guard;
+pub mod gpu_policy;
 pub mod gpu_watchdog;
+pub mod ra_adapter;
 pub mod runtime;
 pub mod server_manager;
 pub mod strategy;
@@ -42,6 +44,54 @@ fn is_router_mode_unavailable_error(err: &str) -> bool {
     err.contains("Router Mode not supported")
         || err.contains("Router Mode not active")
         || err.contains("cached HTTP 404/501")
+}
+
+// ── Safe-ngl persistence (startup backoff seed) ───────────────────────────────────────────────
+//
+// Remembers the highest `n-gpu-layers` that actually LOADED for a given model, so subsequent boots
+// start straight at the known-good value instead of re-probing a too-high ngl that hangs (the
+// Vulkan-laptop quirk). Best-effort: any IO/parse error is ignored and the ladder falls back to its
+// full→down sweep. Keyed by model filename so different models don't cross-contaminate.
+
+fn safe_ngl_cache_path() -> Option<std::path::PathBuf> {
+    let paths = crate::platform::paths::KriaPaths::resolve();
+    Some(paths.data_dir.join("llm_safe_ngl.json"))
+}
+
+fn safe_ngl_model_key(model_path: &str) -> String {
+    std::path::Path::new(model_path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(model_path)
+        .to_string()
+}
+
+fn read_cached_safe_ngl(model_path: &str) -> Option<u32> {
+    let path = safe_ngl_cache_path()?;
+    let bytes = std::fs::read(&path).ok()?;
+    let map: std::collections::HashMap<String, u32> = serde_json::from_slice(&bytes).ok()?;
+    map.get(&safe_ngl_model_key(model_path)).copied()
+}
+
+fn write_cached_safe_ngl(model_path: &str, ngl: u32) {
+    let Some(path) = safe_ngl_cache_path() else {
+        return;
+    };
+    let mut map: std::collections::HashMap<String, u32> = std::fs::read(&path)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default();
+    let key = safe_ngl_model_key(model_path);
+    if map.get(&key).copied() == Some(ngl) {
+        return; // unchanged
+    }
+    map.insert(key, ngl);
+    if let Ok(json) = serde_json::to_vec_pretty(&map) {
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(&path, json);
+    }
 }
 
 /// Which GPU backend is available on this platform.
@@ -541,6 +591,11 @@ pub struct Orchestrator {
     pub server_manager: Arc<server_manager::LlamaServerManager>,
     gpu_lease: Arc<GpuLeaseManager>,
     l1_lease_token: StdMutex<Option<LeaseToken>>,
+    /// HRA cutover: when enforcing, the LLM holds an HRA co-residency admission while GPU-resident
+    /// (acquired/released in `reconcile_l1_lease`). `None` in shadow mode — the legacy private lease
+    /// (`gpu_lease` + `l1_lease_token`) remains the executor. This makes HRA the owner of the LLM's
+    /// GPU residency decision under enforce.
+    l1_hra_admission: tokio::sync::Mutex<Option<crate::resource::authority::AdmissionGuard>>,
     telemetry: Arc<dyn telemetry::GpuTelemetry>,
     event_bus: Arc<EventBus>,
     health: Arc<HealthRegistry>,
@@ -599,9 +654,11 @@ impl Orchestrator {
             Some(format!("GPU backend detected: {:?}", backend)),
         );
 
-        // Start the TelemetryActor: a dedicated OS thread that owns NVML/sysinfo
-        // and publishes snapshots via a watch channel. All async consumers read
-        // from WatchTelemetry (zero-cost borrow) — no executor blocking.
+        // Start the TelemetryActor: a dedicated OS thread that owns NVML/sysinfo (with an
+        // nvidia-smi CLI fallback that works even without the `nvidia` feature compiled). The
+        // orchestrator MUST use this rather than the TelemetryHub's `build_profiler`, because the
+        // hub profiler is NVML-feature-gated and returns a Null/0-VRAM reading under
+        // `--no-default-features` — which would make sizing read RAM-as-VRAM and over-allocate ngl.
         let poll_interval = Duration::from_secs(config.poll_interval_secs.max(1));
         let (telemetry_actor, telemetry) = tokio::task::spawn_blocking(move || {
             telemetry::create_telemetry_actor(backend, poll_interval)
@@ -614,10 +671,46 @@ impl Orchestrator {
             Some(format!("Telemetry online ({})", telemetry.source_name())),
         );
 
-        // Calculate initial parameters from pre-spawn telemetry
-        let initial_snapshot = telemetry.snapshot().await;
+        // Calculate initial parameters from pre-spawn telemetry.
+        let mut initial_snapshot = telemetry.snapshot().await;
+        // COLD-START GUARD (root-cause fix for the first-prompt "LLM not reachable" flap):
+        // the telemetry actor polls on an interval, so the VERY FIRST snapshot here can still be the
+        // pre-sample default (free=0, total=0). Sizing on that wrongly lands the model on CPU
+        // (ngl=0). The watchdog then sees real free VRAM and tries to scale the model onto the GPU
+        // by restarting llama-server — over and over — which is exactly the between-/first-turn
+        // "Optimizing GPU layers / LLM server not reachable" flapping. On a GPU backend, force a
+        // FRESH synchronous VRAM read (shared hub → else one-shot CLI profiler) before sizing so the
+        // model is sized onto the GPU once, at startup, and never needs a scale-up restart.
+        if backend != GpuBackend::CpuOnly && initial_snapshot.total_vram_mb == 0 {
+            let fresh = if let Some(hub) = crate::resource::global_telemetry_hub() {
+                let s = hub.sample_now().await;
+                s.gpus.first().map(|g| (g.free_vram_mb, g.total_vram_mb))
+            } else {
+                None
+            };
+            let (free, total) = match fresh {
+                Some((f, t)) if t > 0 => (f, t),
+                _ => {
+                    let snap = crate::platform::vram::build_profiler().snapshot().await;
+                    (snap.free_mb, snap.total_mb)
+                }
+            };
+            if total > 0 {
+                tracing::info!(
+                    free_vram_mb = free,
+                    total_vram_mb = total,
+                    "orchestrator: cold-start fresh VRAM read (telemetry actor not warm yet) — sizing on GPU, not CPU"
+                );
+                initial_snapshot.free_vram_mb = free;
+                initial_snapshot.total_vram_mb = total;
+            } else {
+                tracing::warn!(
+                    "orchestrator: fresh VRAM read still 0 on a GPU backend — sizing may fall back to CPU"
+                );
+            }
+        }
         let total_vram_mb = initial_snapshot.total_vram_mb;
-        let initial_params = strategy::calculate_target_params(
+        let initial_params = strategy::calculate_target_params_prod(
             &config.model_profile,
             initial_snapshot.free_vram_mb,
             config.safety_margin_mb,
@@ -632,6 +725,7 @@ impl Orchestrator {
         );
 
         // Create and spawn llama-server
+        let model_path_for_cache = model_path.clone();
         let server_manager = Arc::new(server_manager::LlamaServerManager::new(
             config.clone(),
             model_path,
@@ -647,27 +741,118 @@ impl Orchestrator {
             )),
         );
 
-        if let Err(e) = server_manager
-            .spawn(
-                initial_params.ngl,
-                initial_params.context,
-                initial_params.vision_mode,
-                event_bus.clone(),
-            )
-            .await
-        {
+        // STARTUP SPAWN with ngl BACKOFF (root-cause fix for "LLM won't start").
+        //
+        // Some llama-server builds (e.g. the Vulkan laptop build that enumerates both an Intel iGPU
+        // and the NVIDIA dGPU) HANG indefinitely during model load at a high `n-gpu-layers` even
+        // though VRAM is plentiful — verified on an RTX 4050 where ngl≥30 stalls but ngl≤28 loads in
+        // ~2 s. A single spawn at the computed full-offload ngl then trips the port-discovery
+        // timeout and the orchestrator never comes up. Instead we try a descending ngl ladder with a
+        // SHORT per-attempt timeout (a healthy load is ~2 s, a hang is forever, so a short probe is
+        // safe), backing off until the server reports a listening port. The final rung is CPU
+        // (ngl=0) which always loads — so the LLM is ALWAYS available, just slower in the worst case.
+        let mut ladder: Vec<u32> = Vec::new();
+        let full = initial_params.ngl;
+        // Seed from the persisted known-good ngl so we start fast at a value that loaded before,
+        // instead of re-probing a too-high ngl that hangs.
+        let cached = read_cached_safe_ngl(&model_path_for_cache)
+            .filter(|&n| n > 0 && (full == 0 || n <= full));
+        if let Some(c) = cached {
+            ladder.push(c);
+        }
+        if full > 0 && !ladder.contains(&full) {
+            ladder.push(full);
+            for frac in [3u32, 2, 1] {
+                let n = full * frac / 4;
+                if n > 0 && !ladder.contains(&n) {
+                    ladder.push(n);
+                }
+            }
+        }
+        ladder.push(0); // CPU fallback — always fits.
+
+        // Short probe for GPU attempts so a hang costs ~20 s, not the full discovery timeout.
+        const GPU_PROBE_SECS: u64 = 20;
+        let mut loaded_ngl: Option<u32> = None;
+        let mut last_err: Option<anyhow::Error> = None;
+        for (idx, &cand_ngl) in ladder.iter().enumerate() {
+            // GPU attempts get the short probe; the CPU fallback gets the full configured timeout
+            // (clear override) because a cold CPU load can legitimately take longer.
+            server_manager.set_spawn_timeout_override(if cand_ngl == 0 { 0 } else { GPU_PROBE_SECS });
+            // On retries, cap context to a conservative 4096 to reduce load time/footprint.
+            let cand_ctx = if idx == 0 {
+                initial_params.context
+            } else {
+                initial_params.context.min(4096)
+            };
             health.update(
                 "llama-server",
-                crate::infra::health::ServiceStatus::Degraded,
-                Some(format!("startup spawn failed: {e}")),
+                crate::infra::health::ServiceStatus::Starting,
+                Some(format!(
+                    "Spawning llama-server (attempt {}/{}, ngl={}, ctx={})",
+                    idx + 1,
+                    ladder.len(),
+                    cand_ngl,
+                    cand_ctx
+                )),
             );
-            health.update(
-                "orchestrator",
-                crate::infra::health::ServiceStatus::Degraded,
-                Some("startup aborted".into()),
+            tracing::info!(
+                attempt = idx + 1,
+                of = ladder.len(),
+                ngl = cand_ngl,
+                ctx = cand_ctx,
+                "orchestrator: startup spawn attempt"
             );
-            return Err(e);
+            match server_manager
+                .spawn(
+                    cand_ngl,
+                    cand_ctx,
+                    initial_params.vision_mode,
+                    event_bus.clone(),
+                )
+                .await
+            {
+                Ok(()) => {
+                    loaded_ngl = Some(cand_ngl);
+                    // Persist the working GPU ngl so the next boot starts here (skip the hang probe).
+                    if cand_ngl > 0 {
+                        write_cached_safe_ngl(&model_path_for_cache, cand_ngl);
+                    }
+                    if cand_ngl != full {
+                        tracing::warn!(
+                            requested_ngl = full,
+                            loaded_ngl = cand_ngl,
+                            "orchestrator: backed off to a lower ngl that loads (higher ngl hung/failed)"
+                        );
+                    }
+                    break;
+                }
+                Err(e) => {
+                    tracing::warn!(ngl = cand_ngl, error = %e, "orchestrator: spawn attempt failed — backing off");
+                    last_err = Some(e);
+                }
+            }
         }
+        server_manager.set_spawn_timeout_override(0); // restore config defaults for later swaps
+
+        let loaded_ngl = match loaded_ngl {
+            Some(n) => n,
+            None => {
+                let e = last_err
+                    .unwrap_or_else(|| anyhow::anyhow!("llama-server failed to start at any ngl"));
+                health.update(
+                    "llama-server",
+                    crate::infra::health::ServiceStatus::Degraded,
+                    Some(format!("startup spawn failed at every ngl: {e}")),
+                );
+                health.update(
+                    "orchestrator",
+                    crate::infra::health::ServiceStatus::Degraded,
+                    Some("startup aborted".into()),
+                );
+                return Err(e);
+            }
+        };
 
         health.update(
             "llama-server",
@@ -723,6 +908,7 @@ impl Orchestrator {
             server_manager,
             gpu_lease,
             l1_lease_token: StdMutex::new(None),
+            l1_hra_admission: tokio::sync::Mutex::new(None),
             telemetry,
             event_bus,
             health,
@@ -741,12 +927,10 @@ impl Orchestrator {
             _telemetry_actor: Some(telemetry_actor),
         });
 
-        if initial_params.ngl > 0 {
+        if loaded_ngl > 0 {
             orchestrator.claim_l1_lease("startup_initial_spawn");
         }
-        orchestrator
-            .reconcile_l1_lease(initial_params.ngl > 0)
-            .await;
+        orchestrator.reconcile_l1_lease(loaded_ngl > 0).await;
 
         Ok(orchestrator)
     }
@@ -983,6 +1167,53 @@ impl Orchestrator {
     async fn reconcile_l1_lease(&self, l1_gpu_resident: bool) {
         let snapshot = self.build_resource_snapshot(l1_gpu_resident).await;
         self.gpu_lease.reconcile(&snapshot);
+
+        // HRA cutover (enforce-only): tie the LLM's HRA co-residency admission to its GPU residency.
+        // When the LLM becomes GPU-resident we acquire an InteractiveFg admission (so it co-resides
+        // with / preempts background image/vision under the VRAM budget); when it leaves the GPU we
+        // release it. In shadow mode this is a no-op and the legacy private lease is unchanged.
+        if let Some(hra) = crate::resource::authority::global_hra() {
+            if !hra.is_shadow_only() {
+                let mut held = self.l1_hra_admission.lock().await;
+                if l1_gpu_resident {
+                    if held.is_none() {
+                        let (_, total) = self.server_manager.current_params();
+                        let vram_hint = self.config.model_profile.per_layer_vram_mb as u64
+                            * self.server_manager.current_params().0.max(1) as u64
+                            + self.config.model_profile.base_vram_overhead_mb as u64;
+                        let _ = total;
+                        let req = crate::resource::authority::ResourceRequest {
+                            consumer: crate::resource::authority::ConsumerId::Llm,
+                            class: crate::resource::authority::PriorityClass::InteractiveFg,
+                            need: crate::resource::authority::ResourceNeed {
+                                vram_mb: vram_hint.max(512),
+                                ram_mb: 0,
+                                cpu_threads: 0,
+                                exclusivity: false,
+                                model_id: None,
+                                est_ms: 0,
+                            },
+                            constraints: Default::default(),
+                            turn_id: crate::resource::authority::TurnId("l1_residency".into()),
+                        };
+                        match hra
+                            .admit_gpu(&req, crate::resource::authority::ResidencyTarget::Hot)
+                            .await
+                        {
+                            Ok(g) => {
+                                tracing::info!(target: "hra", "[HRA][LLM] GPU Residency admitted (enforce)");
+                                *held = Some(g);
+                            }
+                            Err(e) => {
+                                tracing::warn!(target: "hra", reason = ?e, "[HRA][LLM] residency admission denied");
+                            }
+                        }
+                    }
+                } else if held.take().is_some() {
+                    tracing::info!(target: "hra", "[HRA][LLM] GPU Residency released (left VRAM)");
+                }
+            }
+        }
     }
 
     /// Get the current API URL of the running llama-server.
@@ -1074,7 +1305,7 @@ impl Orchestrator {
         }
 
         let snapshot = self.telemetry.snapshot().await;
-        let target = strategy::calculate_target_params(
+        let target = strategy::calculate_target_params_prod(
             &self.config.model_profile,
             snapshot.free_vram_mb,
             self.config.safety_margin_mb,
@@ -1288,7 +1519,7 @@ impl Orchestrator {
         }
 
         let snapshot = self.telemetry.snapshot().await;
-        let target = strategy::calculate_target_params(
+        let target = strategy::calculate_target_params_prod(
             &self.config.model_profile,
             snapshot.free_vram_mb,
             self.config.safety_margin_mb,
@@ -1790,7 +2021,7 @@ impl Orchestrator {
         // Recompute target params from the *current* free VRAM so we don't
         // demand more layers than the freshly-released GPU can hold.
         let snapshot = self.telemetry.snapshot().await;
-        let target = strategy::calculate_target_params(
+        let target = strategy::calculate_target_params_prod(
             &self.config.model_profile,
             snapshot.free_vram_mb,
             self.config.safety_margin_mb,
@@ -1965,6 +2196,7 @@ mod tests {
             )),
             gpu_lease: Arc::new(GpuLeaseManager::default()),
             l1_lease_token: StdMutex::new(None),
+            l1_hra_admission: tokio::sync::Mutex::new(None),
             telemetry: Arc::new(TestTelemetry),
             event_bus: Arc::new(EventBus::new(16)),
             health,

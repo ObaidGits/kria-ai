@@ -323,10 +323,92 @@ impl VramProfiler for NullProfiler {
     }
 }
 
+// ─── nvidia-smi CLI profiler (C1 — removes the NVML-feature blind spot) ────────
+
+/// NVIDIA profiler via the `nvidia-smi` CLI, used when the `nvidia` NVML feature is NOT compiled
+/// (e.g. `--no-default-features`) but the NVIDIA driver + `nvidia-smi` are present. This is the fix
+/// for the "blind 0 VRAM" failure mode: without it, `build_profiler` fell straight to `NullProfiler`
+/// on a CUDA laptop, poisoning the HRA hub + shared lease with 0-VRAM readings.
+///
+/// The subprocess runs through `tokio::process` (async, non-blocking) — same pattern as
+/// `RocmProfiler` — so it never blocks a Tokio worker. On any failure it returns a
+/// `vendor: Unknown, total_mb: 0` snapshot, which downstream treats as **Unknown ≠ Zero** (the
+/// `total_mb == 0` sentinel), never as "GPU full".
+pub struct CliVramProfiler;
+
+impl CliVramProfiler {
+    /// Probe for a working `nvidia-smi`. Sync (called from the sync `build_profiler`); one-time
+    /// ~tens-of-ms cost at startup.
+    pub fn try_new() -> Option<Arc<dyn VramProfiler>> {
+        let ok = std::process::Command::new("nvidia-smi")
+            .args(["--query-gpu=memory.free", "--format=csv,noheader,nounits"])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if ok {
+            tracing::info!("nvidia-smi found — using CliVramProfiler (CLI VRAM telemetry, no NVML feature)");
+            Some(Arc::new(Self))
+        } else {
+            None
+        }
+    }
+}
+
+#[async_trait]
+impl VramProfiler for CliVramProfiler {
+    async fn snapshot(&self) -> VramSnapshot {
+        let result = tokio::process::Command::new("nvidia-smi")
+            .args([
+                "--query-gpu=memory.free,memory.total",
+                "--format=csv,noheader,nounits",
+            ])
+            .output()
+            .await;
+        match result {
+            Ok(out) if out.status.success() => {
+                let (free_mb, total_mb) = parse_nvidia_smi_mem(&out.stdout);
+                if total_mb == 0 {
+                    // Driver responded but gave no usable total → Unknown, not zero.
+                    return VramSnapshot {
+                        free_mb: 0,
+                        total_mb: 0,
+                        reserved_mb: 0,
+                        vendor: GpuVendor::Unknown,
+                    };
+                }
+                VramSnapshot {
+                    free_mb,
+                    total_mb,
+                    reserved_mb: 0,
+                    vendor: GpuVendor::Nvidia,
+                }
+            }
+            // nvidia-smi failed/absent at sample time → Unknown (total_mb == 0 sentinel).
+            _ => VramSnapshot {
+                free_mb: 0,
+                total_mb: 0,
+                reserved_mb: 0,
+                vendor: GpuVendor::Unknown,
+            },
+        }
+    }
+}
+
+/// Parse the first line of `nvidia-smi --query-gpu=memory.free,memory.total
+/// --format=csv,noheader,nounits` (values already in MiB). Returns `(free_mb, total_mb)`.
+fn parse_nvidia_smi_mem(bytes: &[u8]) -> (u64, u64) {
+    let text = std::str::from_utf8(bytes).unwrap_or("");
+    let line = text.lines().next().unwrap_or("");
+    let mut parts = line.split(',').map(|s| s.trim());
+    let free = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+    let total = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+    (free, total)
+}
+
 // ─── Factory ──────────────────────────────────────────────────────────────────
 
 /// Build the best available `VramProfiler` for the current host.
-/// Priority: NVML (NVIDIA) → ROCm (AMD) → Null.
+/// Priority: NVML (NVIDIA, feature) → ROCm (AMD) → nvidia-smi CLI (NVIDIA, no feature) → Null.
 pub fn build_profiler() -> Arc<dyn VramProfiler> {
     #[cfg(feature = "nvidia")]
     if let Some(p) = NvmlProfiler::try_new(0) {
@@ -334,6 +416,13 @@ pub fn build_profiler() -> Arc<dyn VramProfiler> {
     }
 
     if let Some(p) = RocmProfiler::try_new() {
+        return p;
+    }
+
+    // C1: nvidia-smi CLI fallback — works even without the `nvidia` NVML feature compiled. This is
+    // what keeps the HRA hub / shared lease / image barrier from going blind (0 VRAM) on a CUDA
+    // host built with `--no-default-features`.
+    if let Some(p) = CliVramProfiler::try_new() {
         return p;
     }
 
@@ -420,5 +509,33 @@ impl VramBarrier {
             last_free = snap.free_mb;
             tokio::time::sleep(self.poll_interval).await;
         }
+    }
+}
+
+#[cfg(test)]
+mod cli_profiler_tests {
+    use super::*;
+
+    #[test]
+    fn parse_nvidia_smi_mem_reads_free_and_total() {
+        // nvidia-smi --query-gpu=memory.free,memory.total --format=csv,noheader,nounits
+        let (free, total) = parse_nvidia_smi_mem(b"4396, 6141\n");
+        assert_eq!(free, 4396);
+        assert_eq!(total, 6141);
+    }
+
+    #[test]
+    fn parse_nvidia_smi_mem_handles_garbage() {
+        assert_eq!(parse_nvidia_smi_mem(b""), (0, 0));
+        assert_eq!(parse_nvidia_smi_mem(b"not numbers"), (0, 0));
+    }
+
+    #[tokio::test]
+    async fn null_profiler_is_unknown_not_zero_gpu() {
+        // Unknown ≠ Zero: total_mb == 0 + vendor Unknown is the sentinel downstream relies on.
+        let s = NullProfiler::new().snapshot().await;
+        assert_eq!(s.total_mb, 0);
+        assert_eq!(s.vendor, GpuVendor::Unknown);
+        assert!(!s.is_real());
     }
 }

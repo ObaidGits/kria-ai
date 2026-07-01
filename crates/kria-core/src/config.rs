@@ -194,9 +194,13 @@ pub struct VoiceConfig {
     /// Hardware tier override: `"auto" | "s" | "a" | "c"`. `auto` = derive from
     /// `HardwareTier` at startup.
     pub tier: String,
-    /// Optional explicit STT engine: `"auto" | "whisper-rs" | "whisper-cuda" | "sidecar"`.
+    /// Optional explicit STT engine. Default `"auto"` selects the
+    /// faster-whisper sidecar (Voice System v3, Wave A). Other values:
+    /// `"faster-whisper"` (alias of auto/default), `"whisper-rs"` /
+    /// `"whisper-rs-cuda"` (in-process rollback), `"sidecar"`.
     pub stt_engine: String,
-    /// Optional explicit TTS engine: `"auto" | "piper-cli" | "piper-rs"`.
+    /// Optional explicit TTS engine: `"auto" | "piper-cli" | "piper-rs" | "kokoro"`.
+    /// `"kokoro"` uses the Kokoro sidecar (Wave 5) with automatic Piper fallback.
     pub tts_engine: String,
     pub wake_word: WakeWordConfig,
     pub aec: AecConfig,
@@ -486,6 +490,20 @@ pub struct OrchestratorConfig {
     pub macos_recover_ram_mb: u64,
     /// Model profile for VRAM budget calculations.
     pub model_profile: ModelProfile,
+    /// GPU policy (redesign G1/G2) — also settable from the Settings UI.
+    /// Allow the watchdog to opportunistically scale the LLM UP (a restart) when free VRAM rises.
+    /// Default OFF: the LLM keeps its startup size and never spontaneously restarts (kills the
+    /// between-session "Optimizing GPU layers" flapping). Env `KRIA_GPU_AUTOSCALE` overrides.
+    #[serde(default)]
+    pub gpu_autoscale: bool,
+    /// CUDA runtime VRAM reserve (MB) left free for driver/kernels/allocator so a small GPU is not
+    /// over-committed at sizing time. Default 1024. Env `KRIA_CUDA_RESERVE_MB` overrides.
+    #[serde(default = "default_cuda_reserve_mb")]
+    pub cuda_reserve_mb: u64,
+    /// Ceiling (MB) for the adaptive volatility reserve that protects against other GPU apps
+    /// reclaiming VRAM on a desktop. Default 1536. Env `KRIA_VRAM_VOLATILITY_CAP_MB` overrides.
+    #[serde(default = "default_vram_volatility_cap_mb")]
+    pub vram_volatility_cap_mb: u64,
 }
 
 /// Per-model memory profile used by the layer strategy calculator.
@@ -557,6 +575,9 @@ impl Default for OrchestratorConfig {
             macos_emergency_ram_mb: 1024,
             macos_recover_ram_mb: 4096,
             model_profile: ModelProfile::default(),
+            gpu_autoscale: false,
+            cuda_reserve_mb: default_cuda_reserve_mb(),
+            vram_volatility_cap_mb: default_vram_volatility_cap_mb(),
         }
     }
 }
@@ -666,15 +687,15 @@ impl OrchestratorConfig {
 impl Default for ModelProfile {
     fn default() -> Self {
         Self {
-            total_layers: 28,
-            per_layer_vram_mb: 165,
+            total_layers: 36,
+            per_layer_vram_mb: 100,
             base_vram_overhead_mb: 200,
-            kv_per_1k_ctx_mb: 100,
+            kv_per_1k_ctx_mb: 80,
             min_context: 2048,
             max_context: 8192,
             has_vision_projector: true,
             vision_min_ngl: 15,
-            mmproj_vram_mb: 1300,
+            mmproj_vram_mb: 840,
         }
     }
 }
@@ -689,6 +710,14 @@ fn default_trust_level() -> String {
 
 fn default_vision_min_ngl() -> u32 {
     15
+}
+
+fn default_cuda_reserve_mb() -> u64 {
+    crate::llm::orchestrator::gpu_policy::DEFAULT_CUDA_RESERVE_MB
+}
+
+fn default_vram_volatility_cap_mb() -> u64 {
+    crate::llm::orchestrator::gpu_policy::DEFAULT_VOLATILITY_CAP_MB
 }
 
 fn parse_env_bool(value: &str) -> Option<bool> {
@@ -921,6 +950,155 @@ impl Default for ColabConfig {
             auto_escalate: true,
             fallback_to_local: true,
         }
+    }
+}
+
+impl VoiceConfig {
+    /// Wave 7.3: apply environment-variable overrides on top of the loaded
+    /// (default + user) config. Establishes the documented precedence
+    /// **env > user config > project default > code default**: file values are
+    /// already merged by `load_config`; this applies env last so it wins.
+    ///
+    /// Recognized voice env vars:
+    /// - `KRIA_VOICE_MODE` (push_to_talk|continuous|wake_word|headphone)
+    /// - `KRIA_VOICE_STT_ENGINE`, `KRIA_VOICE_TTS_ENGINE`
+    /// - `KRIA_VOICE_LANGUAGE`
+    /// - `KRIA_VOICE_ENABLE_PARTIALS` (bool)
+    /// - `KRIA_VOICE_BARGE_IN` (bool)
+    /// - `KRIA_VOICE_ENABLED` (bool)
+    pub fn apply_env_overrides(&mut self) {
+        if let Ok(v) = std::env::var("KRIA_VOICE_MODE") {
+            if !v.trim().is_empty() {
+                self.mode = v.trim().to_string();
+            }
+        }
+        if let Ok(v) = std::env::var("KRIA_VOICE_STT_ENGINE") {
+            if !v.trim().is_empty() {
+                self.stt_engine = v.trim().to_string();
+            }
+        }
+        if let Ok(v) = std::env::var("KRIA_VOICE_TTS_ENGINE") {
+            if !v.trim().is_empty() {
+                self.tts_engine = v.trim().to_string();
+            }
+        }
+        if let Ok(v) = std::env::var("KRIA_VOICE_LANGUAGE") {
+            if !v.trim().is_empty() {
+                self.language = v.trim().to_string();
+            }
+        }
+        if let Ok(v) = std::env::var("KRIA_VOICE_ENABLE_PARTIALS") {
+            if let Some(b) = parse_env_bool(&v) {
+                self.enable_partial_transcripts = b;
+            }
+        }
+        if let Ok(v) = std::env::var("KRIA_VOICE_BARGE_IN") {
+            if let Some(b) = parse_env_bool(&v) {
+                self.barge_in.enabled = b;
+            }
+        }
+        if let Ok(v) = std::env::var("KRIA_VOICE_ENABLED") {
+            if let Some(b) = parse_env_bool(&v) {
+                self.enabled = b;
+            }
+        }
+    }
+}
+
+impl VoiceConfig {
+    /// Wave 7: configuration integrity validation. Returns a list of
+    /// human-readable warnings for settings that are unknown, inconsistent, or
+    /// will be silently overridden — so the UI can surface them instead of the
+    /// runtime ignoring them. Empty vec = clean config.
+    pub fn validate(&self) -> Vec<String> {
+        let mut warnings = Vec::new();
+
+        let mode = self.mode.trim().to_ascii_lowercase();
+        if !matches!(
+            mode.as_str(),
+            "push_to_talk" | "continuous" | "wake_word" | "headphone"
+        ) {
+            warnings.push(format!(
+                "voice.mode = '{}' is unknown; runtime falls back to a default mode",
+                self.mode
+            ));
+        }
+
+        let stt = self.stt_engine.trim().to_ascii_lowercase();
+        if !matches!(
+            stt.as_str(),
+            "" | "auto"
+                | "faster-whisper"
+                | "faster_whisper"
+                | "fasterwhisper"
+                | "fw"
+                | "sidecar"
+                | "whisper-rs"
+                | "whisper-rs-cuda"
+                | "whisper-cuda"
+                | "whisper-rs-vulkan"
+        ) {
+            warnings.push(format!(
+                "voice.stt_engine = '{}' is unknown; runtime uses the faster-whisper default",
+                self.stt_engine
+            ));
+        }
+
+        let tts = self.tts_engine.trim().to_ascii_lowercase();
+        if !matches!(
+            tts.as_str(),
+            "" | "auto" | "piper-cli" | "piper-rs" | "kokoro"
+        ) {
+            warnings.push(format!(
+                "voice.tts_engine = '{}' is unknown; runtime uses Piper",
+                self.tts_engine
+            ));
+        }
+        if tts == "kokoro" {
+            warnings.push(
+                "voice.tts_engine = 'kokoro' requires the Kokoro sidecar + model; falls back to Piper when unavailable".to_string(),
+            );
+        }
+
+        if self.enable_partial_transcripts {
+            warnings.push(
+                "voice.enable_partial_transcripts = true is forced OFF on the low-RAM (C) tier"
+                    .to_string(),
+            );
+        }
+
+        if self.barge_in.enabled && self.barge_in.min_speech_ms == 0 {
+            warnings.push(
+                "voice.barge_in.min_speech_ms = 0 may cause false barge-ins from transient noise"
+                    .to_string(),
+            );
+        }
+
+        if self.energy_threshold <= 0.0 {
+            warnings.push("voice.energy_threshold <= 0 disables energy gating".to_string());
+        }
+
+        if !(0.0..=1.0).contains(&self.confidence_threshold) {
+            warnings.push(format!(
+                "voice.confidence_threshold = {} is outside [0,1]",
+                self.confidence_threshold
+            ));
+        }
+
+        if self.wake_word.enabled && !(0.0..=1.0).contains(&self.wake_word.sensitivity) {
+            warnings.push(format!(
+                "voice.wake_word.sensitivity = {} is outside [0,1]",
+                self.wake_word.sensitivity
+            ));
+        }
+
+        if mode == "wake_word" && !self.wake_word.enabled {
+            warnings.push(
+                "voice.mode = 'wake_word' but voice.wake_word.enabled = false; wake gating will be inactive".to_string(),
+            );
+        }
+
+        warnings
     }
 }
 
@@ -1220,6 +1398,8 @@ pub fn load_config(
             config.hardware.tier = v;
         }
     }
+    // Wave 7.3: voice env overrides (env > user > default > code).
+    config.voice.apply_env_overrides();
     if let Ok(v) = std::env::var("KRIA_AGENT_AUTONOMY_PROFILE") {
         if !v.trim().is_empty() {
             config.agent.autonomy_profile = v;
@@ -2003,4 +2183,88 @@ impl Default for BrowserAgentConfig {
             max_steps: 20,
         }
     }
+}
+
+#[cfg(test)]
+mod voice_validate_tests {
+    use super::VoiceConfig;
+
+    #[test]
+    fn default_config_is_clean_except_documented() {
+        let cfg = VoiceConfig::default();
+        // Default mode/engines/thresholds are all valid → no warnings.
+        let warnings = cfg.validate();
+        assert!(
+            warnings.is_empty(),
+            "default voice config should validate clean, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn flags_unknown_mode_and_engines() {
+        let mut cfg = VoiceConfig::default();
+        cfg.mode = "telepathy".into();
+        cfg.stt_engine = "nonsense".into();
+        cfg.tts_engine = "robovoice".into();
+        let warnings = cfg.validate();
+        assert!(warnings.iter().any(|w| w.contains("voice.mode")));
+        assert!(warnings.iter().any(|w| w.contains("voice.stt_engine")));
+        assert!(warnings.iter().any(|w| w.contains("voice.tts_engine")));
+    }
+
+    #[test]
+    fn flags_kokoro_dependency_and_wake_mismatch() {
+        let mut cfg = VoiceConfig::default();
+        cfg.tts_engine = "kokoro".into();
+        cfg.mode = "wake_word".into();
+        cfg.wake_word.enabled = false;
+        let warnings = cfg.validate();
+        assert!(warnings.iter().any(|w| w.to_lowercase().contains("kokoro")));
+        assert!(warnings.iter().any(|w| w.contains("wake_word")));
+    }
+
+    #[test]
+    fn env_overrides_win_over_loaded_values() {
+        // Serialize env mutation to avoid cross-test races on process env.
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var("KRIA_VOICE_MODE", "continuous");
+        std::env::set_var("KRIA_VOICE_STT_ENGINE", "whisper-rs");
+        std::env::set_var("KRIA_VOICE_BARGE_IN", "false");
+        std::env::set_var("KRIA_VOICE_ENABLE_PARTIALS", "true");
+
+        let mut cfg = VoiceConfig::default(); // simulates loaded user/default values
+        cfg.mode = "push_to_talk".into();
+        cfg.barge_in.enabled = true;
+        cfg.apply_env_overrides();
+
+        assert_eq!(cfg.mode, "continuous");
+        assert_eq!(cfg.stt_engine, "whisper-rs");
+        assert!(!cfg.barge_in.enabled);
+        assert!(cfg.enable_partial_transcripts);
+
+        for k in [
+            "KRIA_VOICE_MODE",
+            "KRIA_VOICE_STT_ENGINE",
+            "KRIA_VOICE_BARGE_IN",
+            "KRIA_VOICE_ENABLE_PARTIALS",
+        ] {
+            std::env::remove_var(k);
+        }
+    }
+
+    #[test]
+    fn env_overrides_noop_when_unset() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        for k in ["KRIA_VOICE_MODE", "KRIA_VOICE_STT_ENGINE"] {
+            std::env::remove_var(k);
+        }
+        let mut cfg = VoiceConfig::default();
+        let before_mode = cfg.mode.clone();
+        let before_stt = cfg.stt_engine.clone();
+        cfg.apply_env_overrides();
+        assert_eq!(cfg.mode, before_mode);
+        assert_eq!(cfg.stt_engine, before_stt);
+    }
+
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 }

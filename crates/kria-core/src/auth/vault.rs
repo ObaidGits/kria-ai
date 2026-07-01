@@ -262,16 +262,16 @@ fn warn_keyfile() {
 }
 
 fn seal_aead(key: &[u8; KEY_LEN], nonce: &[u8; NONCE_LEN], plaintext: &[u8]) -> Result<Vec<u8>> {
-    let cipher = Aes256Gcm::new_from_slice(key)
-        .map_err(|e| AuthError::Crypto(format!("aes init: {e}")))?;
+    let cipher =
+        Aes256Gcm::new_from_slice(key).map_err(|e| AuthError::Crypto(format!("aes init: {e}")))?;
     cipher
         .encrypt(Nonce::from_slice(nonce), plaintext)
         .map_err(|_| AuthError::Crypto("aes-gcm encrypt failed".into()))
 }
 
 fn open_aead(key: &[u8; KEY_LEN], nonce: &[u8; NONCE_LEN], ciphertext: &[u8]) -> Result<Vec<u8>> {
-    let cipher = Aes256Gcm::new_from_slice(key)
-        .map_err(|e| AuthError::Crypto(format!("aes init: {e}")))?;
+    let cipher =
+        Aes256Gcm::new_from_slice(key).map_err(|e| AuthError::Crypto(format!("aes init: {e}")))?;
     cipher
         .decrypt(Nonce::from_slice(nonce), ciphertext)
         .map_err(|_| AuthError::Decrypt)

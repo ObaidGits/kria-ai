@@ -46,7 +46,9 @@ pub struct MetricsBuilder {
     vad_trigger: Option<Duration>,
     stt_first_token: Option<Duration>,
     llm_first_token: Option<Duration>,
+    llm_complete: Option<Duration>,
     tts_first_chunk: Option<Duration>,
+    tts_complete: Option<Duration>,
     first_partial: Option<Duration>,
     final_transcript: Option<Duration>,
     post_edit: Option<Duration>,
@@ -71,7 +73,9 @@ impl MetricsBuilder {
             vad_trigger: None,
             stt_first_token: None,
             llm_first_token: None,
+            llm_complete: None,
             tts_first_chunk: None,
+            tts_complete: None,
             first_partial: None,
             final_transcript: None,
             post_edit: None,
@@ -153,6 +157,19 @@ impl MetricsBuilder {
         if self.tts_first_chunk.is_none() {
             self.tts_first_chunk = Some(self.started.elapsed());
         }
+    }
+
+    /// Mark when the LLM token stream completes (last token received).
+    pub fn mark_llm_complete(&mut self) {
+        if self.llm_complete.is_none() {
+            self.llm_complete = Some(self.started.elapsed());
+        }
+    }
+
+    /// Mark when TTS synthesis for the turn completes (last sentence synthesized).
+    pub fn mark_tts_complete(&mut self) {
+        // Always update to the latest — the last synth completion wins.
+        self.tts_complete = Some(self.started.elapsed());
     }
 
     /// Compute partial stability: fraction of updates that are prefix
@@ -238,7 +255,9 @@ impl MetricsBuilder {
             t_vad_trigger_ms: self.vad_trigger.map(|d| d.as_millis() as u64),
             t_stt_first_token_ms: self.stt_first_token.map(|d| d.as_millis() as u64),
             t_llm_first_token_ms: self.llm_first_token.map(|d| d.as_millis() as u64),
+            t_llm_complete_ms: self.llm_complete.map(|d| d.as_millis() as u64),
             t_tts_first_chunk_ms: self.tts_first_chunk.map(|d| d.as_millis() as u64),
+            t_tts_complete_ms: self.tts_complete.map(|d| d.as_millis() as u64),
             t_first_partial_ms: self.first_partial.map(|d| d.as_millis() as u64),
             t_final_ms: self.final_transcript.map(|d| d.as_millis() as u64),
             t_post_edit_ms: if self.post_edit_skipped {
@@ -307,7 +326,9 @@ pub struct VoiceMetrics {
     pub t_vad_trigger_ms: Option<u64>,
     pub t_stt_first_token_ms: Option<u64>,
     pub t_llm_first_token_ms: Option<u64>,
+    pub t_llm_complete_ms: Option<u64>,
     pub t_tts_first_chunk_ms: Option<u64>,
+    pub t_tts_complete_ms: Option<u64>,
     pub t_first_partial_ms: Option<u64>,
     pub t_final_ms: Option<u64>,
     /// `None` if `post_edit_skipped` is true OR if post-edit hasn't fired yet.
@@ -344,6 +365,62 @@ impl VoiceMetrics {
         self.t_first_audio_out_ms
             .map(|t| t > self.ttfa_budget_ms)
             .unwrap_or(false)
+    }
+
+    // ─── Derived latencies (all relative to speech-end = turn t0) ─────────
+    // Each returns `None` unless the underlying milestones were actually
+    // measured — never a placeholder.
+
+    /// STT latency: speech-end → final transcript (the dominant STT cost).
+    pub fn stt_latency_ms(&self) -> Option<u64> {
+        self.t_final_ms
+    }
+
+    /// Partial-transcript latency: speech-end → first advisory partial.
+    pub fn partial_latency_ms(&self) -> Option<u64> {
+        self.t_first_partial_ms
+    }
+
+    /// LLM time-to-first-token: final transcript → first LLM token.
+    pub fn llm_ttft_ms(&self) -> Option<u64> {
+        match (self.t_final_ms, self.t_llm_first_token_ms) {
+            (Some(f), Some(l)) if l >= f => Some(l - f),
+            _ => None,
+        }
+    }
+
+    /// TTS generation latency: first LLM token → first synthesized PCM chunk.
+    pub fn tts_gen_ms(&self) -> Option<u64> {
+        match (self.t_llm_first_token_ms, self.t_tts_first_chunk_ms) {
+            (Some(l), Some(t)) if t >= l => Some(t - l),
+            _ => None,
+        }
+    }
+
+    /// LLM completion latency: final transcript → last LLM token.
+    pub fn llm_completion_ms(&self) -> Option<u64> {
+        match (self.t_final_ms, self.t_llm_complete_ms) {
+            (Some(f), Some(c)) if c >= f => Some(c - f),
+            _ => None,
+        }
+    }
+
+    /// Total TTS synthesis span: first chunk → last synthesis completion.
+    pub fn tts_total_ms(&self) -> Option<u64> {
+        match (self.t_tts_first_chunk_ms, self.t_tts_complete_ms) {
+            (Some(s), Some(e)) if e >= s => Some(e - s),
+            _ => None,
+        }
+    }
+
+    /// Playback-start latency: speech-end → first audio out (== TTFA).
+    pub fn playback_start_ms(&self) -> Option<u64> {
+        self.t_first_audio_out_ms
+    }
+
+    /// End-to-end latency the user perceives: speech-end → first audio out.
+    pub fn end_to_end_ms(&self) -> Option<u64> {
+        self.t_first_audio_out_ms
     }
 }
 
@@ -402,7 +479,9 @@ mod tests {
             t_vad_trigger_ms: Some(20),
             t_stt_first_token_ms: Some(100),
             t_llm_first_token_ms: Some(200),
+            t_llm_complete_ms: Some(250),
             t_tts_first_chunk_ms: Some(300),
+            t_tts_complete_ms: Some(400),
             t_first_partial_ms: Some(100),
             t_final_ms: Some(200),
             t_post_edit_ms: None,
@@ -432,7 +511,9 @@ mod tests {
             t_vad_trigger_ms: Some(20),
             t_stt_first_token_ms: None,
             t_llm_first_token_ms: None,
+            t_llm_complete_ms: None,
             t_tts_first_chunk_ms: None,
+            t_tts_complete_ms: None,
             t_first_partial_ms: None,
             t_final_ms: None,
             t_post_edit_ms: None,

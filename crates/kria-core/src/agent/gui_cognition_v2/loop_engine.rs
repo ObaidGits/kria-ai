@@ -150,7 +150,12 @@ pub fn detect_manual_step(observation: &Observation) -> Option<&'static str> {
     if has_password_field || any("enter your password") {
         return Some("This looks like a sign-in screen. Please enter your credentials, then ask me to continue.");
     }
-    if any("verification code") || any("one-time") || any("2fa") || any("two-factor") || any("authenticator") {
+    if any("verification code")
+        || any("one-time")
+        || any("2fa")
+        || any("two-factor")
+        || any("authenticator")
+    {
         return Some("This needs a verification/2FA code only you have. Please complete it, then ask me to continue.");
     }
     if any("captcha") || any("i'm not a robot") || any("im not a robot") {
@@ -160,7 +165,9 @@ pub fn detect_manual_step(observation: &Observation) -> Option<&'static str> {
         || any("grant permission")
         || any("requires permission")
     {
-        return Some("This needs a permission you must grant. Please approve it, then ask me to continue.");
+        return Some(
+            "This needs a permission you must grant. Please approve it, then ask me to continue.",
+        );
     }
     None
 }
@@ -424,11 +431,15 @@ async fn run_turn_v2_inner(
     let mut done_with_unverified: u32 = 0;
     // Task 10: which bridged sub-goals have already been EXECUTED (at-most-once,
     // so a shell command/file write is never re-run with side effects).
-    let mut bridged_attempted: Vec<bool> =
-        plan.as_ref().map(|p| vec![false; p.sub_goals.len()]).unwrap_or_default();
+    let mut bridged_attempted: Vec<bool> = plan
+        .as_ref()
+        .map(|p| vec![false; p.sub_goals.len()])
+        .unwrap_or_default();
     // Per-sub-goal no-progress attempt counters (plan-mode honest-stop budget).
-    let mut subgoal_attempts: Vec<u32> =
-        plan.as_ref().map(|p| vec![0u32; p.sub_goals.len()]).unwrap_or_default();
+    let mut subgoal_attempts: Vec<u32> = plan
+        .as_ref()
+        .map(|p| vec![0u32; p.sub_goals.len()])
+        .unwrap_or_default();
 
     for step_index in 0..config.max_steps {
         // Cancellation — check before any work each iteration.
@@ -467,7 +478,11 @@ async fn run_turn_v2_inner(
                         index: idx,
                         total,
                         goal: p.sub_goals[idx].intent.clone(),
-                        status: if outcome.ok { "bridged" } else { "bridge_failed" },
+                        status: if outcome.ok {
+                            "bridged"
+                        } else {
+                            "bridge_failed"
+                        },
                     });
                     // Verify via the SHARED verifier (probe reads the bridge's
                     // working-context output / filesystem). If it can't confirm
@@ -676,9 +691,11 @@ async fn run_turn_v2_inner(
                 // some remain, verify-now; if all pass, complete; otherwise give
                 // the turn another bounded step to satisfy the rest (premature-
                 // completion fix at the plan level, Requirement 3.1/15.3).
-                if let (Some(p), Some(verifier), Some(probe)) =
-                    (plan.as_mut(), guards.verifier.as_ref(), guards.probe.as_ref())
-                {
+                if let (Some(p), Some(verifier), Some(probe)) = (
+                    plan.as_mut(),
+                    guards.verifier.as_ref(),
+                    guards.probe.as_ref(),
+                ) {
                     verify_and_advance(p, verifier.as_ref(), probe.as_ref(), guards).await;
                     if p.sub_goals.iter().all(|s| s.done) {
                         return TurnOutcomeV2 {
@@ -749,9 +766,11 @@ async fn run_turn_v2_inner(
                 // sub-goal yet. Verify against external signals; if it now passes,
                 // advance; otherwise count an attempt and stop HONESTLY once the
                 // budget is spent (e.g. a not-installed app never opens a window).
-                if let (Some(p), Some(verifier), Some(probe)) =
-                    (plan.as_mut(), guards.verifier.as_ref(), guards.probe.as_ref())
-                {
+                if let (Some(p), Some(verifier), Some(probe)) = (
+                    plan.as_mut(),
+                    guards.verifier.as_ref(),
+                    guards.probe.as_ref(),
+                ) {
                     verify_and_advance(p, verifier.as_ref(), probe.as_ref(), guards).await;
                     if p.sub_goals.iter().all(|s| s.done) {
                         return TurnOutcomeV2 {
@@ -901,9 +920,11 @@ async fn run_turn_v2_inner(
         // (Requirement 15.3). If every sub-goal is verified, the turn is complete
         // — even if the Brain has not yet said `Done` (drives multi-step to a
         // real, proven finish). Any progress resets the Done-stall counter.
-        if let (Some(p), Some(verifier), Some(probe)) =
-            (plan.as_mut(), guards.verifier.as_ref(), guards.probe.as_ref())
-        {
+        if let (Some(p), Some(verifier), Some(probe)) = (
+            plan.as_mut(),
+            guards.verifier.as_ref(),
+            guards.probe.as_ref(),
+        ) {
             let before = p.sub_goals.iter().filter(|s| s.done).count();
             verify_and_advance(p, verifier.as_ref(), probe.as_ref(), guards).await;
             let after = p.sub_goals.iter().filter(|s| s.done).count();
@@ -1068,13 +1089,21 @@ fn unachievable_reply(sg: &SubGoal) -> String {
         }
         SubGoalKind::Click => {
             if target.is_empty() {
-                "I couldn't find that option on the screen — it doesn't appear to be available.".into()
+                "I couldn't find that option on the screen — it doesn't appear to be available."
+                    .into()
             } else {
                 format!("I couldn't find the '{target}' option on the screen — it doesn't appear to be available here.")
             }
         }
         SubGoalKind::Navigate => {
-            format!("I couldn't load '{}' in the browser.", if target.is_empty() { "that page" } else { target })
+            format!(
+                "I couldn't load '{}' in the browser.",
+                if target.is_empty() {
+                    "that page"
+                } else {
+                    target
+                }
+            )
         }
         SubGoalKind::Type => format!("I couldn't complete typing for '{}'.", sg.intent),
         _ => format!("I couldn't complete '{}'.", sg.intent),
@@ -1127,7 +1156,12 @@ mod tests {
                     active_window: Some(format!("Window {i}")),
                     elements: vec![UiElement {
                         id: 1,
-                        bbox: Bbox { x: 0, y: 0, width: 10, height: 10 },
+                        bbox: Bbox {
+                            x: 0,
+                            y: 0,
+                            width: 10,
+                            height: 10,
+                        },
                         monitor_index: 0,
                         kind: "button".into(),
                         label: "Btn".into(),
@@ -1139,12 +1173,20 @@ mod tests {
                 })
             }
         }
-        let sight = ChangingSight { n: AtomicU32::new(0) };
+        let sight = ChangingSight {
+            n: AtomicU32::new(0),
+        };
         let brain = FakeBrain::click_then_done();
         let hands = FakeHands::default();
-        let outcome =
-            run_turn_v2(&sight, &brain, &hands, "x", LoopConfig::default(), &LoopGuards::none())
-                .await;
+        let outcome = run_turn_v2(
+            &sight,
+            &brain,
+            &hands,
+            "x",
+            LoopConfig::default(),
+            &LoopGuards::none(),
+        )
+        .await;
         assert_eq!(outcome.status, TurnStatus::Completed);
         assert_eq!(outcome.steps.len(), 1);
         // The click step was verified against the next (changed) observation.
@@ -1161,14 +1203,42 @@ mod tests {
         // never changes, which would otherwise trip no-progress first).
         let sight = FakeSight::one_button("x");
         let brain = FakeBrain::new(vec![
-            Decision { action: Action::OpenApp { app: "chrome".into() }, reason: "open".into(), risk_hint: None },
-            Decision { action: Action::OpenApp { app: "chrome".into() }, reason: "again".into(), risk_hint: None },
-            Decision { action: Action::OpenApp { app: "chrome".into() }, reason: "again2".into(), risk_hint: None },
+            Decision {
+                action: Action::OpenApp {
+                    app: "chrome".into(),
+                },
+                reason: "open".into(),
+                risk_hint: None,
+            },
+            Decision {
+                action: Action::OpenApp {
+                    app: "chrome".into(),
+                },
+                reason: "again".into(),
+                risk_hint: None,
+            },
+            Decision {
+                action: Action::OpenApp {
+                    app: "chrome".into(),
+                },
+                reason: "again2".into(),
+                risk_hint: None,
+            },
         ]);
         let hands = FakeHands::default();
         let outcome = run_turn_v2(
-            &sight, &brain, &hands, "open chrome",
-            LoopConfig { max_steps: 12, want_som: false, no_progress_limit: 0, start_grounded: false, use_plan: false, steps_per_sub_goal: 0 },
+            &sight,
+            &brain,
+            &hands,
+            "open chrome",
+            LoopConfig {
+                max_steps: 12,
+                want_som: false,
+                no_progress_limit: 0,
+                start_grounded: false,
+                use_plan: false,
+                steps_per_sub_goal: 0,
+            },
             &LoopGuards::none(),
         )
         .await;
@@ -1185,15 +1255,49 @@ mod tests {
         // multi-part task is not prematurely completed by a redundant open.
         let sight = FakeSight::one_button("x");
         let brain = FakeBrain::new(vec![
-            Decision { action: Action::OpenApp { app: "chrome".into() }, reason: "open".into(), risk_hint: None },
-            Decision { action: Action::OpenApp { app: "chrome".into() }, reason: "dup".into(), risk_hint: None },
-            Decision { action: Action::Key { combo: "new_tab".into() }, reason: "follow-up".into(), risk_hint: None },
-            Decision { action: Action::Done { summary: "done".into() }, reason: "done".into(), risk_hint: None },
+            Decision {
+                action: Action::OpenApp {
+                    app: "chrome".into(),
+                },
+                reason: "open".into(),
+                risk_hint: None,
+            },
+            Decision {
+                action: Action::OpenApp {
+                    app: "chrome".into(),
+                },
+                reason: "dup".into(),
+                risk_hint: None,
+            },
+            Decision {
+                action: Action::Key {
+                    combo: "new_tab".into(),
+                },
+                reason: "follow-up".into(),
+                risk_hint: None,
+            },
+            Decision {
+                action: Action::Done {
+                    summary: "done".into(),
+                },
+                reason: "done".into(),
+                risk_hint: None,
+            },
         ]);
         let hands = FakeHands::default();
         let outcome = run_turn_v2(
-            &sight, &brain, &hands, "open chrome and a new tab",
-            LoopConfig { max_steps: 12, want_som: false, no_progress_limit: 0, start_grounded: false, use_plan: false, steps_per_sub_goal: 0 },
+            &sight,
+            &brain,
+            &hands,
+            "open chrome and a new tab",
+            LoopConfig {
+                max_steps: 12,
+                want_som: false,
+                no_progress_limit: 0,
+                start_grounded: false,
+                use_plan: false,
+                steps_per_sub_goal: 0,
+            },
             &LoopGuards::none(),
         )
         .await;
@@ -1201,7 +1305,10 @@ mod tests {
         // open executed once + the follow-up Key executed = 2 (no duplicate open).
         let executed = hands.executed.lock().unwrap();
         assert_eq!(executed.len(), 2);
-        assert!(matches!(executed[1].action, Action::Key { .. }), "follow-up must run");
+        assert!(
+            matches!(executed[1].action, Action::Key { .. }),
+            "follow-up must run"
+        );
     }
 
     #[tokio::test]
@@ -1209,9 +1316,15 @@ mod tests {
         let sight = FakeSight::one_button("New Tab");
         let brain = FakeBrain::click_then_done();
         let hands = FakeHands::default();
-        let outcome =
-            run_turn_v2(&sight, &brain, &hands, "click it", LoopConfig::default(), &LoopGuards::none())
-                .await;
+        let outcome = run_turn_v2(
+            &sight,
+            &brain,
+            &hands,
+            "click it",
+            LoopConfig::default(),
+            &LoopGuards::none(),
+        )
+        .await;
         assert_eq!(outcome.status, TurnStatus::Completed);
         assert_eq!(outcome.steps.len(), 1);
         assert_eq!(outcome.steps[0].target_label.as_deref(), Some("New Tab"));
@@ -1243,7 +1356,14 @@ mod tests {
             &AlwaysClick,
             &hands,
             "loop",
-            LoopConfig { max_steps: 3, want_som: false, no_progress_limit: 0, start_grounded: false, use_plan: false, steps_per_sub_goal: 0 },
+            LoopConfig {
+                max_steps: 3,
+                want_som: false,
+                no_progress_limit: 0,
+                start_grounded: false,
+                use_plan: false,
+                steps_per_sub_goal: 0,
+            },
             &LoopGuards::none(),
         )
         .await;
@@ -1262,7 +1382,14 @@ mod tests {
             &AlwaysClick,
             &hands,
             "loop",
-            LoopConfig { max_steps: 20, want_som: false, no_progress_limit: 2, start_grounded: false, use_plan: false, steps_per_sub_goal: 0 },
+            LoopConfig {
+                max_steps: 20,
+                want_som: false,
+                no_progress_limit: 2,
+                start_grounded: false,
+                use_plan: false,
+                steps_per_sub_goal: 0,
+            },
             &LoopGuards::none(),
         )
         .await;
@@ -1275,14 +1402,22 @@ mod tests {
     async fn loop_asks_on_ambiguity() {
         let sight = FakeSight::one_button("Btn");
         let brain = FakeBrain::new(vec![Decision {
-            action: Action::Ask { question: "which one?".into() },
+            action: Action::Ask {
+                question: "which one?".into(),
+            },
             reason: "ambiguous".into(),
             risk_hint: None,
         }]);
         let hands = FakeHands::default();
-        let outcome =
-            run_turn_v2(&sight, &brain, &hands, "do x", LoopConfig::default(), &LoopGuards::none())
-                .await;
+        let outcome = run_turn_v2(
+            &sight,
+            &brain,
+            &hands,
+            "do x",
+            LoopConfig::default(),
+            &LoopGuards::none(),
+        )
+        .await;
         assert_eq!(outcome.status, TurnStatus::NeedsClarification);
         assert_eq!(outcome.reply, "which one?");
         assert!(outcome.steps.is_empty());
@@ -1293,9 +1428,15 @@ mod tests {
         let sight = FakeSight::one_button("Btn");
         let brain = FakeBrain::new(vec![click(99)]);
         let hands = FakeHands::default();
-        let outcome =
-            run_turn_v2(&sight, &brain, &hands, "do x", LoopConfig::default(), &LoopGuards::none())
-                .await;
+        let outcome = run_turn_v2(
+            &sight,
+            &brain,
+            &hands,
+            "do x",
+            LoopConfig::default(),
+            &LoopGuards::none(),
+        )
+        .await;
         assert_eq!(outcome.steps.len(), 1);
         assert!(!outcome.steps[0].result.ok);
         assert_eq!(hands.executed.lock().unwrap().len(), 0);
@@ -1315,8 +1456,15 @@ mod tests {
         let brain = FakeBrain::new(vec![click(1)]);
         let hands = FakeHands::default();
         let guards = LoopGuards::none().with_safety(Arc::new(DenyGate));
-        let outcome =
-            run_turn_v2(&sight, &brain, &hands, "delete it", LoopConfig::default(), &guards).await;
+        let outcome = run_turn_v2(
+            &sight,
+            &brain,
+            &hands,
+            "delete it",
+            LoopConfig::default(),
+            &guards,
+        )
+        .await;
         assert_eq!(outcome.status, TurnStatus::StoppedSafety);
         // Action never executed (Property 5).
         assert_eq!(hands.executed.lock().unwrap().len(), 0);
@@ -1350,13 +1498,23 @@ mod tests {
             log2.lock().unwrap().push(tag);
         });
         let guards = LoopGuards::none().with_observer(observer);
-        let outcome =
-            run_turn_v2(&sight, &brain, &hands, "click it", LoopConfig::default(), &guards).await;
+        let outcome = run_turn_v2(
+            &sight,
+            &brain,
+            &hands,
+            "click it",
+            LoopConfig::default(),
+            &guards,
+        )
+        .await;
         assert_eq!(outcome.status, TurnStatus::Completed);
         let events = log.lock().unwrap().clone();
         // First event is always TurnStarted; last is always TurnEnded.
         assert_eq!(events.first().map(String::as_str), Some("turn_started"));
-        assert_eq!(events.last().map(String::as_str), Some("turn_ended:completed"));
+        assert_eq!(
+            events.last().map(String::as_str),
+            Some("turn_ended:completed")
+        );
         // The click step streamed the full phase sequence.
         assert!(events.contains(&"observe_started".to_string()));
         assert!(events.contains(&"observe_completed".to_string()));
@@ -1391,7 +1549,9 @@ mod tests {
         });
         let guards = LoopGuards::none().with_observer(observer);
         let outcome = run_turn_v2(
-            &ErrSight { n: AtomicU32::new(0) },
+            &ErrSight {
+                n: AtomicU32::new(0),
+            },
             &brain,
             &hands,
             "x",
@@ -1400,7 +1560,10 @@ mod tests {
         )
         .await;
         assert_eq!(outcome.status, TurnStatus::StoppedError);
-        assert_eq!(log.lock().unwrap().clone(), vec!["stopped_error".to_string()]);
+        assert_eq!(
+            log.lock().unwrap().clone(),
+            vec!["stopped_error".to_string()]
+        );
     }
 
     // ── Lazy grounding escalation ────────────────────────────────────────────
@@ -1421,10 +1584,17 @@ mod tests {
 
     impl HybridFakeSight {
         fn new() -> Self {
-            Self { light_calls: AtomicU32::new(0), grounded_calls: AtomicU32::new(0), grounded_degraded: false }
+            Self {
+                light_calls: AtomicU32::new(0),
+                grounded_calls: AtomicU32::new(0),
+                grounded_degraded: false,
+            }
         }
         fn degraded() -> Self {
-            Self { grounded_degraded: true, ..Self::new() }
+            Self {
+                grounded_degraded: true,
+                ..Self::new()
+            }
         }
         fn base(active: &str) -> Observation {
             Observation {
@@ -1452,13 +1622,21 @@ mod tests {
         async fn observe_grounded(&self, _want_som: bool) -> anyhow::Result<Observation> {
             self.grounded_calls.fetch_add(1, Ordering::SeqCst);
             if self.grounded_degraded {
-                return Ok(Observation { source: "degraded:sidecar_unreachable".into(), ..Self::base("Settings") });
+                return Ok(Observation {
+                    source: "degraded:sidecar_unreachable".into(),
+                    ..Self::base("Settings")
+                });
             }
             let mut obs = Self::base("Settings");
             obs.source = "omniparser".into();
             obs.elements = vec![UiElement {
                 id: 1,
-                bbox: Bbox { x: 10, y: 20, width: 100, height: 40 },
+                bbox: Bbox {
+                    x: 10,
+                    y: 20,
+                    width: 100,
+                    height: 40,
+                },
                 monitor_index: 0,
                 kind: "button".into(),
                 label: "Wi-Fi".into(),
@@ -1479,10 +1657,17 @@ mod tests {
     }
     #[async_trait::async_trait]
     impl GuiBrain for GroundingDependentBrain {
-        async fn decide(&self, _t: &str, o: &Observation, _h: &[TurnStep]) -> anyhow::Result<Decision> {
+        async fn decide(
+            &self,
+            _t: &str,
+            o: &Observation,
+            _h: &[TurnStep],
+        ) -> anyhow::Result<Decision> {
             if o.elements.is_empty() {
                 return Ok(Decision {
-                    action: Action::Ask { question: "I can't see any controls. What should I click?".into() },
+                    action: Action::Ask {
+                        question: "I can't see any controls. What should I click?".into(),
+                    },
                     reason: "no elements".into(),
                     risk_hint: None,
                 });
@@ -1491,7 +1676,9 @@ mod tests {
                 Ok(click(1))
             } else {
                 Ok(Decision {
-                    action: Action::Done { summary: "clicked Wi-Fi".into() },
+                    action: Action::Done {
+                        summary: "clicked Wi-Fi".into(),
+                    },
                     reason: "done".into(),
                     risk_hint: None,
                 })
@@ -1522,14 +1709,24 @@ mod tests {
             &GroundingDependentBrain::default(),
             &hands,
             "click the Wi-Fi toggle",
-            LoopConfig { max_steps: 4, want_som: false, no_progress_limit: 0, start_grounded: false, use_plan: false, steps_per_sub_goal: 0 },
+            LoopConfig {
+                max_steps: 4,
+                want_som: false,
+                no_progress_limit: 0,
+                start_grounded: false,
+                use_plan: false,
+                steps_per_sub_goal: 0,
+            },
             &guards,
         )
         .await;
         // The escalation fired and the click executed against the grounded view.
         assert_eq!(log.lock().unwrap().clone(), vec!["escalated".to_string()]);
         assert_eq!(hands.executed.lock().unwrap().len(), 1);
-        assert_eq!(outcome.steps.first().unwrap().decision.action, Action::Click { element_id: 1 });
+        assert_eq!(
+            outcome.steps.first().unwrap().decision.action,
+            Action::Click { element_id: 1 }
+        );
         assert!(sight.grounded_calls.load(Ordering::SeqCst) >= 1);
     }
 
@@ -1570,7 +1767,14 @@ mod tests {
             &GroundingDependentBrain::default(),
             &hands,
             "click the Wi-Fi toggle",
-            LoopConfig { max_steps: 4, want_som: false, no_progress_limit: 0, start_grounded: false, use_plan: false, steps_per_sub_goal: 0 },
+            LoopConfig {
+                max_steps: 4,
+                want_som: false,
+                no_progress_limit: 0,
+                start_grounded: false,
+                use_plan: false,
+                steps_per_sub_goal: 0,
+            },
             &LoopGuards::none(),
         )
         .await;
@@ -1583,16 +1787,38 @@ mod tests {
     #[test]
     fn decision_needs_grounding_predicate() {
         let empty = HybridFakeSight::base("X");
-        let ask = Decision { action: Action::Ask { question: "?".into() }, reason: String::new(), risk_hint: None };
+        let ask = Decision {
+            action: Action::Ask {
+                question: "?".into(),
+            },
+            reason: String::new(),
+            risk_hint: None,
+        };
         assert!(decision_needs_grounding(&ask, &empty));
         // A non-Ask decision on an empty screen does not trigger escalation.
         assert!(!decision_needs_grounding(&click(1), &empty));
         // A degraded observation cannot be helped by escalation.
-        let degraded = Observation { source: "degraded:x".into(), ..HybridFakeSight::base("X") };
+        let degraded = Observation {
+            source: "degraded:x".into(),
+            ..HybridFakeSight::base("X")
+        };
         assert!(!decision_needs_grounding(&ask, &degraded));
         // An observation that already has elements means the Ask is genuine.
         let mut with_el = HybridFakeSight::base("X");
-        with_el.elements = vec![UiElement { id: 1, bbox: Bbox { x: 0, y: 0, width: 1, height: 1 }, monitor_index: 0, kind: "button".into(), label: "OK".into(), interactable: true, confidence: 0.9 }];
+        with_el.elements = vec![UiElement {
+            id: 1,
+            bbox: Bbox {
+                x: 0,
+                y: 0,
+                width: 1,
+                height: 1,
+            },
+            monitor_index: 0,
+            kind: "button".into(),
+            label: "OK".into(),
+            interactable: true,
+            confidence: 0.9,
+        }];
         assert!(!decision_needs_grounding(&ask, &with_el));
     }
 
@@ -1640,7 +1866,14 @@ mod tests {
     }
 
     fn plan_cfg() -> LoopConfig {
-        LoopConfig { max_steps: 8, want_som: false, no_progress_limit: 0, start_grounded: false, use_plan: true, steps_per_sub_goal: 0 }
+        LoopConfig {
+            max_steps: 8,
+            want_som: false,
+            no_progress_limit: 0,
+            start_grounded: false,
+            use_plan: true,
+            steps_per_sub_goal: 0,
+        }
     }
 
     #[tokio::test]
@@ -1650,14 +1883,32 @@ mod tests {
         // completes via VERIFIED state (not the Brain's word).
         let sight = FakeSight::one_button("x");
         let brain = FakeBrain::new(vec![
-            Decision { action: Action::OpenApp { app: "calc".into() }, reason: "open".into(), risk_hint: None },
-            Decision { action: Action::Done { summary: "done".into() }, reason: "d".into(), risk_hint: None },
+            Decision {
+                action: Action::OpenApp { app: "calc".into() },
+                reason: "open".into(),
+                risk_hint: None,
+            },
+            Decision {
+                action: Action::Done {
+                    summary: "done".into(),
+                },
+                reason: "d".into(),
+                risk_hint: None,
+            },
         ]);
         let hands = FakeHands::default();
-        let plan = Plan::new(vec![SubGoal::new("open calc", SubGoalKind::OpenApp).with_target("calc")]);
+        let plan = Plan::new(vec![
+            SubGoal::new("open calc", SubGoalKind::OpenApp).with_target("calc")
+        ]);
         let guards = LoopGuards::none()
             .with_planner(Arc::new(FixedPlanner(plan)))
-            .with_verifier(Arc::new(StandardVerifier), Arc::new(ConfigProbe { window_ok: true, title: None }));
+            .with_verifier(
+                Arc::new(StandardVerifier),
+                Arc::new(ConfigProbe {
+                    window_ok: true,
+                    title: None,
+                }),
+            );
         let outcome = run_turn_v2(&sight, &brain, &hands, "open calc", plan_cfg(), &guards).await;
         assert_eq!(outcome.status, TurnStatus::Completed);
         assert!(outcome.reply.contains("open calc"));
@@ -1671,22 +1922,65 @@ mod tests {
         // honestly naming the unverified sub-goal (premature-completion fix).
         let sight = FakeSight::one_button("x");
         let brain = FakeBrain::new(vec![
-            Decision { action: Action::OpenApp { app: "chrome".into() }, reason: "open".into(), risk_hint: None },
-            Decision { action: Action::Done { summary: "done".into() }, reason: "d1".into(), risk_hint: None },
-            Decision { action: Action::Done { summary: "done".into() }, reason: "d2".into(), risk_hint: None },
-            Decision { action: Action::Done { summary: "done".into() }, reason: "d3".into(), risk_hint: None },
+            Decision {
+                action: Action::OpenApp {
+                    app: "chrome".into(),
+                },
+                reason: "open".into(),
+                risk_hint: None,
+            },
+            Decision {
+                action: Action::Done {
+                    summary: "done".into(),
+                },
+                reason: "d1".into(),
+                risk_hint: None,
+            },
+            Decision {
+                action: Action::Done {
+                    summary: "done".into(),
+                },
+                reason: "d2".into(),
+                risk_hint: None,
+            },
+            Decision {
+                action: Action::Done {
+                    summary: "done".into(),
+                },
+                reason: "d3".into(),
+                risk_hint: None,
+            },
         ]);
         let hands = FakeHands::default();
         let plan = Plan::new(vec![
             SubGoal::new("open chrome", SubGoalKind::OpenApp).with_target("chrome"),
-            SubGoal::new("navigate to youtube.com", SubGoalKind::Navigate).with_target("youtube.com"),
+            SubGoal::new("navigate to youtube.com", SubGoalKind::Navigate)
+                .with_target("youtube.com"),
         ]);
         let guards = LoopGuards::none()
             .with_planner(Arc::new(FixedPlanner(plan)))
-            .with_verifier(Arc::new(StandardVerifier), Arc::new(ConfigProbe { window_ok: true, title: Some("New Tab".into()) }));
-        let outcome = run_turn_v2(&sight, &brain, &hands, "open chrome and go to youtube.com", plan_cfg(), &guards).await;
+            .with_verifier(
+                Arc::new(StandardVerifier),
+                Arc::new(ConfigProbe {
+                    window_ok: true,
+                    title: Some("New Tab".into()),
+                }),
+            );
+        let outcome = run_turn_v2(
+            &sight,
+            &brain,
+            &hands,
+            "open chrome and go to youtube.com",
+            plan_cfg(),
+            &guards,
+        )
+        .await;
         assert_eq!(outcome.status, TurnStatus::StoppedNoProgress);
-        assert!(outcome.reply.to_lowercase().contains("youtube"), "reply names the unverified goal: {}", outcome.reply);
+        assert!(
+            outcome.reply.to_lowercase().contains("youtube"),
+            "reply names the unverified goal: {}",
+            outcome.reply
+        );
     }
 
     #[tokio::test]
@@ -1696,7 +1990,15 @@ mod tests {
         let sight = FakeSight::one_button("x");
         let brain = FakeBrain::click_then_done();
         let hands = FakeHands::default();
-        let outcome = run_turn_v2(&sight, &brain, &hands, "click it", plan_cfg(), &LoopGuards::none()).await;
+        let outcome = run_turn_v2(
+            &sight,
+            &brain,
+            &hands,
+            "click it",
+            plan_cfg(),
+            &LoopGuards::none(),
+        )
+        .await;
         assert_eq!(outcome.status, TurnStatus::Completed);
     }
 
@@ -1721,23 +2023,65 @@ mod tests {
         struct AlwaysOpen;
         #[async_trait::async_trait]
         impl GuiBrain for AlwaysOpen {
-            async fn decide(&self, _t: &str, _o: &Observation, _h: &[TurnStep]) -> anyhow::Result<Decision> {
-                Ok(Decision { action: Action::OpenApp { app: "foobar123".into() }, reason: "x".into(), risk_hint: None })
+            async fn decide(
+                &self,
+                _t: &str,
+                _o: &Observation,
+                _h: &[TurnStep],
+            ) -> anyhow::Result<Decision> {
+                Ok(Decision {
+                    action: Action::OpenApp {
+                        app: "foobar123".into(),
+                    },
+                    reason: "x".into(),
+                    risk_hint: None,
+                })
             }
-            fn label(&self) -> &str { "always_open" }
+            fn label(&self) -> &str {
+                "always_open"
+            }
         }
         let hands = FakeHands::default();
-        let plan = Plan::new(vec![SubGoal::new("open foobar123", SubGoalKind::OpenApp).with_target("foobar123")]);
+        let plan = Plan::new(vec![
+            SubGoal::new("open foobar123", SubGoalKind::OpenApp).with_target("foobar123")
+        ]);
         let guards = LoopGuards::none()
             .with_planner(Arc::new(FixedPlanner(plan)))
-            .with_verifier(Arc::new(StandardVerifier), Arc::new(ConfigProbe { window_ok: false, title: None }));
-        let outcome = run_turn_v2(&sight, &AlwaysOpen, &hands, "Open foobar123",
-            LoopConfig { max_steps: 16, want_som: false, no_progress_limit: 0, start_grounded: false, use_plan: true, steps_per_sub_goal: 3 },
-            &guards).await;
+            .with_verifier(
+                Arc::new(StandardVerifier),
+                Arc::new(ConfigProbe {
+                    window_ok: false,
+                    title: None,
+                }),
+            );
+        let outcome = run_turn_v2(
+            &sight,
+            &AlwaysOpen,
+            &hands,
+            "Open foobar123",
+            LoopConfig {
+                max_steps: 16,
+                want_som: false,
+                no_progress_limit: 0,
+                start_grounded: false,
+                use_plan: true,
+                steps_per_sub_goal: 3,
+            },
+            &guards,
+        )
+        .await;
         assert_eq!(outcome.status, TurnStatus::NeedsClarification);
-        assert!(outcome.reply.to_lowercase().contains("foobar123"), "honest reply names the app: {}", outcome.reply);
-        assert!(outcome.reply.to_lowercase().contains("installed") || outcome.reply.to_lowercase().contains("couldn't find"),
-            "honest refusal wording: {}", outcome.reply);
+        assert!(
+            outcome.reply.to_lowercase().contains("foobar123"),
+            "honest reply names the app: {}",
+            outcome.reply
+        );
+        assert!(
+            outcome.reply.to_lowercase().contains("installed")
+                || outcome.reply.to_lowercase().contains("couldn't find"),
+            "honest refusal wording: {}",
+            outcome.reply
+        );
     }
 
     // ---- Task 11: recovery ladder test ----
@@ -1756,7 +2100,12 @@ mod tests {
                 .enumerate()
                 .map(|(i, (k, l))| UiElement {
                     id: i as u32 + 1,
-                    bbox: Bbox { x: 0, y: 0, width: 5, height: 5 },
+                    bbox: Bbox {
+                        x: 0,
+                        y: 0,
+                        width: 5,
+                        height: 5,
+                    },
                     monitor_index: 0,
                     kind: (*k).into(),
                     label: (*l).into(),
@@ -1774,13 +2123,27 @@ mod tests {
         // Password field → sign-in pause.
         assert!(detect_manual_step(&obs_with_labels(&[("text_field", "Password")])).is_some());
         // 2FA / verification code.
-        assert!(detect_manual_step(&obs_with_labels(&[("text", "Enter the verification code")])).is_some());
+        assert!(
+            detect_manual_step(&obs_with_labels(&[("text", "Enter the verification code")]))
+                .is_some()
+        );
         // CAPTCHA.
-        assert!(detect_manual_step(&obs_with_labels(&[("text", "Please complete the CAPTCHA")])).is_some());
+        assert!(
+            detect_manual_step(&obs_with_labels(&[("text", "Please complete the CAPTCHA")]))
+                .is_some()
+        );
         // Permission dialog.
-        assert!(detect_manual_step(&obs_with_labels(&[("button", "Allow"), ("text", "wants permission")])).is_some());
+        assert!(detect_manual_step(&obs_with_labels(&[
+            ("button", "Allow"),
+            ("text", "wants permission")
+        ]))
+        .is_some());
         // A normal page with just a "Sign in" LINK does NOT trip it (conservative).
-        assert!(detect_manual_step(&obs_with_labels(&[("link", "Sign in"), ("button", "Search")])).is_none());
+        assert!(detect_manual_step(&obs_with_labels(&[
+            ("link", "Sign in"),
+            ("button", "Search")
+        ]))
+        .is_none());
         // Empty observation never trips.
         assert!(detect_manual_step(&obs_with_labels(&[])).is_none());
     }
@@ -1803,34 +2166,73 @@ mod tests {
                     screen_w: 100,
                     screen_h: 100,
                     active_window: Some("Frozen".into()),
-                    elements: vec![UiElement { id: 1, bbox: Bbox { x: 0, y: 0, width: 5, height: 5 }, monitor_index: 0, kind: "button".into(), label: "B".into(), interactable: true, confidence: 0.9 }],
+                    elements: vec![UiElement {
+                        id: 1,
+                        bbox: Bbox {
+                            x: 0,
+                            y: 0,
+                            width: 5,
+                            height: 5,
+                        },
+                        monitor_index: 0,
+                        kind: "button".into(),
+                        label: "B".into(),
+                        interactable: true,
+                        confidence: 0.9,
+                    }],
                     som_image_path: None,
                     source: "fake".into(),
                 })
             }
-            fn supports_grounding(&self) -> bool { true }
+            fn supports_grounding(&self) -> bool {
+                true
+            }
             async fn observe_grounded(&self, _want_som: bool) -> anyhow::Result<Observation> {
                 self.grounded_calls.fetch_add(1, Ordering::SeqCst);
                 // SAME observation → still no change (forces the stop after recovery).
                 self.observe(false).await
             }
         }
-        let sight = StallSight { grounded_calls: AtomicU32::new(0) };
+        let sight = StallSight {
+            grounded_calls: AtomicU32::new(0),
+        };
         let brain = AlwaysClick; // always emits a state-changing click
         let hands = FakeHands::default();
-        let log: std::sync::Arc<std::sync::Mutex<Vec<String>>> = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log: std::sync::Arc<std::sync::Mutex<Vec<String>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let log2 = log.clone();
         let observer: super::LoopObserver = std::sync::Arc::new(move |ev: LoopEvent| {
             if let LoopEvent::RecoveryAttempted { rung, .. } = ev {
                 log2.lock().unwrap().push(rung.to_string());
             }
         });
-        let cfg = LoopConfig { max_steps: 12, want_som: false, no_progress_limit: 2, start_grounded: false, use_plan: false, steps_per_sub_goal: 0 };
-        let outcome = run_turn_v2(&sight, &brain, &hands, "click", cfg, &LoopGuards::none().with_observer(observer)).await;
+        let cfg = LoopConfig {
+            max_steps: 12,
+            want_som: false,
+            no_progress_limit: 2,
+            start_grounded: false,
+            use_plan: false,
+            steps_per_sub_goal: 0,
+        };
+        let outcome = run_turn_v2(
+            &sight,
+            &brain,
+            &hands,
+            "click",
+            cfg,
+            &LoopGuards::none().with_observer(observer),
+        )
+        .await;
         assert_eq!(outcome.status, TurnStatus::StoppedNoProgress);
         let rungs = log.lock().unwrap().clone();
-        assert!(rungs.contains(&"grounded_reobserve".to_string()), "a grounded recovery must be attempted: {rungs:?}");
-        assert!(sight.grounded_calls.load(Ordering::SeqCst) >= 1, "recovery must escalate to grounded observe");
+        assert!(
+            rungs.contains(&"grounded_reobserve".to_string()),
+            "a grounded recovery must be attempted: {rungs:?}"
+        );
+        assert!(
+            sight.grounded_calls.load(Ordering::SeqCst) >= 1,
+            "recovery must escalate to grounded observe"
+        );
     }
 
     #[tokio::test]
@@ -1841,8 +2243,20 @@ mod tests {
         let sight = FakeSight::one_button("x");
         // Brain only ever needs to open the app; the command is bridged.
         let brain = FakeBrain::new(vec![
-            Decision { action: Action::OpenApp { app: "terminal".into() }, reason: "open".into(), risk_hint: None },
-            Decision { action: Action::Done { summary: "done".into() }, reason: "d".into(), risk_hint: None },
+            Decision {
+                action: Action::OpenApp {
+                    app: "terminal".into(),
+                },
+                reason: "open".into(),
+                risk_hint: None,
+            },
+            Decision {
+                action: Action::Done {
+                    summary: "done".into(),
+                },
+                reason: "d".into(),
+                risk_hint: None,
+            },
         ]);
         let hands = FakeHands::default();
         let plan = Plan::new(vec![
@@ -1851,9 +2265,23 @@ mod tests {
         ]);
         let guards = LoopGuards::none()
             .with_planner(Arc::new(FixedPlanner(plan)))
-            .with_verifier(Arc::new(StandardVerifier), Arc::new(ConfigProbe { window_ok: true, title: None }))
+            .with_verifier(
+                Arc::new(StandardVerifier),
+                Arc::new(ConfigProbe {
+                    window_ok: true,
+                    title: None,
+                }),
+            )
             .with_bridge(Arc::new(FakeBridge));
-        let outcome = run_turn_v2(&sight, &brain, &hands, "open terminal and run ls", plan_cfg(), &guards).await;
+        let outcome = run_turn_v2(
+            &sight,
+            &brain,
+            &hands,
+            "open terminal and run ls",
+            plan_cfg(),
+            &guards,
+        )
+        .await;
         assert_eq!(outcome.status, TurnStatus::Completed);
         assert!(outcome.reply.contains("run ls"));
         // Exactly ONE GUI action executed (the open); the command did NOT go

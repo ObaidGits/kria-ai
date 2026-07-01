@@ -36,7 +36,11 @@ pub struct Signal<T> {
 
 impl<T> Signal<T> {
     pub fn new(value: T, confidence: f32, detail: impl Into<String>) -> Self {
-        Self { value, confidence, detail: detail.into() }
+        Self {
+            value,
+            confidence,
+            detail: detail.into(),
+        }
     }
 }
 
@@ -58,13 +62,25 @@ pub struct Verdict {
 
 impl Verdict {
     pub fn verified(confidence: f32, detail: impl Into<String>) -> Self {
-        Self { outcome: VerifyOutcome::Verified, confidence, detail: detail.into() }
+        Self {
+            outcome: VerifyOutcome::Verified,
+            confidence,
+            detail: detail.into(),
+        }
     }
     pub fn failed(confidence: f32, detail: impl Into<String>) -> Self {
-        Self { outcome: VerifyOutcome::Failed, confidence, detail: detail.into() }
+        Self {
+            outcome: VerifyOutcome::Failed,
+            confidence,
+            detail: detail.into(),
+        }
     }
     pub fn unverified(detail: impl Into<String>) -> Self {
-        Self { outcome: VerifyOutcome::Unverified, confidence: 0.0, detail: detail.into() }
+        Self {
+            outcome: VerifyOutcome::Unverified,
+            confidence: 0.0,
+            detail: detail.into(),
+        }
     }
 
     pub fn is_verified(&self) -> bool {
@@ -75,7 +91,9 @@ impl Verdict {
     /// the floor is downgraded to `Unverified` (never a low-confidence pass/fail).
     fn with_floor(self) -> Self {
         match self.outcome {
-            VerifyOutcome::Verified | VerifyOutcome::Failed if self.confidence < CONFIDENCE_FLOOR => {
+            VerifyOutcome::Verified | VerifyOutcome::Failed
+                if self.confidence < CONFIDENCE_FLOOR =>
+            {
                 Verdict::unverified(format!(
                     "low confidence {:.2} < floor {:.2}: {}",
                     self.confidence, CONFIDENCE_FLOOR, self.detail
@@ -115,7 +133,9 @@ pub async fn verify_sub_goal(sub_goal: &SubGoal, probe: &dyn VerificationProbe) 
     let target = sub_goal.target_hint.as_deref().unwrap_or("");
     let verdict = match sub_goal.kind {
         SubGoalKind::OpenApp => match probe.window_present_focused(target).await {
-            Some(s) if s.value => Verdict::verified(s.confidence, format!("window focused: {}", s.detail)),
+            Some(s) if s.value => {
+                Verdict::verified(s.confidence, format!("window focused: {}", s.detail))
+            }
             Some(s) => Verdict::failed(s.confidence, format!("window not focused: {}", s.detail)),
             None => Verdict::unverified("no window signal"),
         },
@@ -128,14 +148,23 @@ pub async fn verify_sub_goal(sub_goal: &SubGoal, probe: &dyn VerificationProbe) 
                     .unwrap_or(target)
                     .to_ascii_lowercase();
                 if !needle.is_empty() && hay.contains(&needle) {
-                    Verdict::verified(s.confidence, format!("loaded page title '{}' matches '{}'", s.value, needle))
+                    Verdict::verified(
+                        s.confidence,
+                        format!("loaded page title '{}' matches '{}'", s.value, needle),
+                    )
                 } else {
                     // STRICT (Requirement 15/22): a Navigate is verified ONLY by the
                     // loaded page (window title / URL), NEVER by arbitrary on-screen
                     // text — otherwise the typed-but-unsubmitted address-bar text
                     // would falsely "match" and report success for a page that never
                     // loaded. No OCR fallback here.
-                    Verdict::failed(s.confidence, format!("page title '{}' does not show '{}' (not loaded?)", s.value, needle))
+                    Verdict::failed(
+                        s.confidence,
+                        format!(
+                            "page title '{}' does not show '{}' (not loaded?)",
+                            s.value, needle
+                        ),
+                    )
                 }
             }
             None => Verdict::unverified("no active-title signal"),
@@ -158,9 +187,16 @@ pub async fn verify_sub_goal(sub_goal: &SubGoal, probe: &dyn VerificationProbe) 
             None => Verdict::unverified("no command-output signal"),
         },
         SubGoalKind::WriteFile => {
-            match probe.file_matches(target, sub_goal.expect_contains.as_deref()).await {
-                Some(s) if s.value => Verdict::verified(s.confidence, format!("file ok: {}", s.detail)),
-                Some(s) => Verdict::failed(s.confidence, format!("file missing/mismatch: {}", s.detail)),
+            match probe
+                .file_matches(target, sub_goal.expect_contains.as_deref())
+                .await
+            {
+                Some(s) if s.value => {
+                    Verdict::verified(s.confidence, format!("file ok: {}", s.detail))
+                }
+                Some(s) => {
+                    Verdict::failed(s.confidence, format!("file missing/mismatch: {}", s.detail))
+                }
                 None => Verdict::unverified("no filesystem signal"),
             }
         }
@@ -172,14 +208,22 @@ pub async fn verify_sub_goal(sub_goal: &SubGoal, probe: &dyn VerificationProbe) 
             None => Verdict::unverified("no output signal"),
         },
         SubGoalKind::Click => match probe.element_observable(target).await {
-            Some(s) if s.value => Verdict::verified(s.confidence, format!("element/pane observable: {}", s.detail)),
-            Some(s) => Verdict::failed(s.confidence, format!("expected change not observable: {}", s.detail)),
+            Some(s) if s.value => Verdict::verified(
+                s.confidence,
+                format!("element/pane observable: {}", s.detail),
+            ),
+            Some(s) => Verdict::failed(
+                s.confidence,
+                format!("expected change not observable: {}", s.detail),
+            ),
             None => Verdict::unverified("no element/screen signal"),
         },
         SubGoalKind::Type => {
             let needle = sub_goal.expect_contains.as_deref().unwrap_or(target);
             match probe.screen_contains(needle).await {
-                Some(s) if s.value => Verdict::verified(s.confidence, format!("text '{needle}' present")),
+                Some(s) if s.value => {
+                    Verdict::verified(s.confidence, format!("text '{needle}' present"))
+                }
                 Some(s) => Verdict::failed(s.confidence, format!("text '{needle}' absent")),
                 None => Verdict::unverified("no screen-text signal"),
             }
@@ -187,10 +231,19 @@ pub async fn verify_sub_goal(sub_goal: &SubGoal, probe: &dyn VerificationProbe) 
         // Verify/Other have no intrinsic action; a Verify checkpoint with a target
         // is treated like a screen-contains assertion, else Unverified.
         SubGoalKind::Verify | SubGoalKind::Other => {
-            if let Some(needle) = sub_goal.expect_contains.as_deref().or(Some(target)).filter(|n| !n.is_empty()) {
+            if let Some(needle) = sub_goal
+                .expect_contains
+                .as_deref()
+                .or(Some(target))
+                .filter(|n| !n.is_empty())
+            {
                 match probe.screen_contains(needle).await {
-                    Some(s) if s.value => Verdict::verified(s.confidence, format!("checkpoint '{needle}' satisfied")),
-                    Some(s) => Verdict::failed(s.confidence, format!("checkpoint '{needle}' failed")),
+                    Some(s) if s.value => {
+                        Verdict::verified(s.confidence, format!("checkpoint '{needle}' satisfied"))
+                    }
+                    Some(s) => {
+                        Verdict::failed(s.confidence, format!("checkpoint '{needle}' failed"))
+                    }
                     None => Verdict::unverified("no checkpoint signal"),
                 }
             } else {
@@ -290,7 +343,11 @@ mod tests {
         let probe = FakeProbe::default();
         *probe.window.lock().unwrap() = Some(Signal::new(true, 0.4, "blurry"));
         let v = verify_sub_goal(&sg(SubGoalKind::OpenApp, "x"), &probe).await;
-        assert_eq!(v.outcome, VerifyOutcome::Unverified, "confidence below floor must not pass");
+        assert_eq!(
+            v.outcome,
+            VerifyOutcome::Unverified,
+            "confidence below floor must not pass"
+        );
     }
 
     #[tokio::test]
@@ -310,7 +367,10 @@ mod tests {
         *probe.output.lock().unwrap() = Some(Signal::new("file1\nfile2\n".into(), 0.9, "ls"));
         let mut g = sg(SubGoalKind::RunCommand, "ls");
         g.expect_contains = Some("file1".into());
-        assert_eq!(verify_sub_goal(&g, &probe).await.outcome, VerifyOutcome::Verified);
+        assert_eq!(
+            verify_sub_goal(&g, &probe).await.outcome,
+            VerifyOutcome::Verified
+        );
     }
 
     #[tokio::test]
@@ -327,18 +387,31 @@ mod tests {
     #[tokio::test]
     async fn type_verified_by_screen_text() {
         let probe = FakeProbe::default();
-        probe.screen.lock().unwrap().insert("3328".into(), Signal::new(true, 0.85, "ocr"));
+        probe
+            .screen
+            .lock()
+            .unwrap()
+            .insert("3328".into(), Signal::new(true, 0.85, "ocr"));
         let mut g = sg(SubGoalKind::Type, "");
         g.expect_contains = Some("3328".into());
-        assert_eq!(verify_sub_goal(&g, &probe).await.outcome, VerifyOutcome::Verified);
+        assert_eq!(
+            verify_sub_goal(&g, &probe).await.outcome,
+            VerifyOutcome::Verified
+        );
     }
 
     #[tokio::test]
     async fn click_verified_by_observable_element() {
         let probe = FakeProbe::default();
-        probe.elements.lock().unwrap().insert("Wi-Fi".into(), Signal::new(true, 0.8, "pane"));
+        probe
+            .elements
+            .lock()
+            .unwrap()
+            .insert("Wi-Fi".into(), Signal::new(true, 0.8, "pane"));
         assert_eq!(
-            verify_sub_goal(&sg(SubGoalKind::Click, "Wi-Fi"), &probe).await.outcome,
+            verify_sub_goal(&sg(SubGoalKind::Click, "Wi-Fi"), &probe)
+                .await
+                .outcome,
             VerifyOutcome::Verified
         );
     }
@@ -347,7 +420,9 @@ mod tests {
     async fn standard_verifier_delegates() {
         let probe = FakeProbe::default();
         *probe.window.lock().unwrap() = Some(Signal::new(true, 0.9, "ok"));
-        let v = StandardVerifier.verify(&sg(SubGoalKind::OpenApp, "x"), &probe).await;
+        let v = StandardVerifier
+            .verify(&sg(SubGoalKind::OpenApp, "x"), &probe)
+            .await;
         assert!(v.is_verified());
     }
 }

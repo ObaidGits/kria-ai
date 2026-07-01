@@ -9,6 +9,7 @@ import ProviderSettings from "./ProviderSettings";
 import N8nSettings from "./N8nSettings";
 import BriefingBuilder from "./BriefingBuilder";
 import MobileRemotePanel from "./MobileRemotePanel";
+import ResourceDashboard from "./ResourceDashboard";
 
 type Tab = "llm" | "voice" | "safety" | "ui" | "assistant" | "labs" | "search" | "services" | "telegram" | "mobile" | "n8n" | "automation" | "gui_automation" | "hardware" | "knowledge" | "google" | "colab" | "ironclad" | "marketplace" | "developer" | "briefing";
 type SettingsLayer = "basic" | "workflow" | "integrations" | "advanced" | "developer";
@@ -2347,6 +2348,10 @@ const SettingsModal: Component = () => {
           {/* Hardware Tab */}
           <Show when={activeTab() === "hardware"}>
             <section class="settings-section">
+              <h3>Resource Authority</h3>
+              <ResourceDashboard />
+            </section>
+            <section class="settings-section">
               <h3>Detected Hardware</h3>
               <Show when={hardwareInfo()} fallback={<p>Loading hardware information...</p>}>
                 {(hw) => (
@@ -2416,6 +2421,57 @@ const SettingsModal: Component = () => {
                         <option value="performance">Performance</option>
                         <option value="high">High</option>
                       </select>
+                    </div>
+
+                    <h3>GPU Policy</h3>
+                    <p class="field-hint">
+                      Controls how KRIA sizes the local LLM on your GPU and whether it may
+                      re-optimize while idle. Defaults are safe for most machines.
+                    </p>
+                    <div class="settings-field">
+                      <label class="settings-checkbox">
+                        <input
+                          type="checkbox"
+                          checked={draft()?.orchestrator?.gpu_autoscale ?? false}
+                          onChange={(e) => updateField("orchestrator", "gpu_autoscale", e.currentTarget.checked)}
+                        />
+                        Allow background GPU auto-upgrade (off = most stable)
+                      </label>
+                      <span class="field-hint">
+                        When off, the model keeps its startup size and never spontaneously
+                        restarts — no surprise "Optimizing GPU layers". Turn on only if you have a
+                        large GPU and want KRIA to upgrade layers while idle.
+                      </span>
+                    </div>
+                    <div class="settings-field">
+                      <label>GPU memory reserve (MB)</label>
+                      <input
+                        type="number"
+                        min="256"
+                        step="128"
+                        value={draft()?.orchestrator?.cuda_reserve_mb ?? 1024}
+                        onInput={(e) => updateField("orchestrator", "cuda_reserve_mb", parseInt(e.currentTarget.value) || 1024)}
+                      />
+                      <span class="field-hint">
+                        Memory left free for GPU driver/kernels so the model isn't over-committed.
+                        Raise (e.g. 1536) if the model falls back to CPU or fails to load; lower
+                        (e.g. 768) to give the model more GPU.
+                      </span>
+                    </div>
+                    <div class="settings-field">
+                      <label>Desktop volatility reserve cap (MB)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="128"
+                        value={draft()?.orchestrator?.vram_volatility_cap_mb ?? 1536}
+                        onInput={(e) => updateField("orchestrator", "vram_volatility_cap_mb", parseInt(e.currentTarget.value) || 1536)}
+                      />
+                      <span class="field-hint">
+                        Extra GPU headroom kept so other apps (browser, games) reclaiming memory
+                        don't crash the model. Lower (e.g. 512) if KRIA is the only GPU app; raise
+                        if you run heavy GPU apps alongside and the model crashes.
+                      </span>
                     </div>
                   </>
                 )}

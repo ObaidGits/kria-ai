@@ -339,11 +339,10 @@ fn strip_code_fences(content: &str) -> String {
             Some(nl) => &rest[nl + 1..],
             None => rest,
         };
-        if let Some(body) = after_lang.strip_suffix("```").or_else(|| {
-            after_lang
-                .trim_end()
-                .strip_suffix("```")
-        }) {
+        if let Some(body) = after_lang
+            .strip_suffix("```")
+            .or_else(|| after_lang.trim_end().strip_suffix("```"))
+        {
             return body.to_string();
         }
         return after_lang.to_string();

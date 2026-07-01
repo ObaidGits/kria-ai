@@ -2253,7 +2253,10 @@ mod tests {
         // may be tuned over time (more roles improve resolution coverage); the
         // BOUND is what this test guards — a capped, focused scan — not a brittle
         // exact list. It must always include the core interactive roles.
-        assert!(!request.roles.is_empty(), "role allow-list must be non-empty");
+        assert!(
+            !request.roles.is_empty(),
+            "role allow-list must be non-empty"
+        );
         assert!(
             request.roles.len() <= 16,
             "role allow-list must stay bounded (was {})",
@@ -2448,17 +2451,27 @@ mod tests {
             return;
         }
         let engine = AtSpiEngine::new();
-        let snap = engine.capture_snapshot(AtSpiSnapshotRequest::default()).await;
-        let with_bounds = snap.elements.iter().filter(|e| {
-            e.bounds.map(|b| b[2] > 0 && b[3] > 0).unwrap_or(false)
-        }).count();
+        let snap = engine
+            .capture_snapshot(AtSpiSnapshotRequest::default())
+            .await;
+        let with_bounds = snap
+            .elements
+            .iter()
+            .filter(|e| e.bounds.map(|b| b[2] > 0 && b[3] > 0).unwrap_or(false))
+            .count();
         eprintln!(
             "ATSPI_PROBE: status={} focused_window={:?} elements={} with_bounds={} node_count={}",
-            snap.status, snap.focused_window, snap.elements.len(), with_bounds, snap.node_count
+            snap.status,
+            snap.focused_window,
+            snap.elements.len(),
+            with_bounds,
+            snap.node_count
         );
         for e in snap.elements.iter().take(8) {
-            eprintln!("  - role={} name={:?} bounds={:?} visible={} enabled={}",
-                e.role, e.name, e.bounds, e.visible, e.enabled);
+            eprintln!(
+                "  - role={} name={:?} bounds={:?} visible={} enabled={}",
+                e.role, e.name, e.bounds, e.visible, e.enabled
+            );
         }
     }
 }

@@ -325,11 +325,31 @@ impl TaskStore {
         let today = Utc::now().date_naive().to_string(); // YYYY-MM-DD prefix
         let mut s = ProductivityStats::default();
         s.total = count(&conn, "SELECT COUNT(*) FROM tasks", params![])?;
-        s.open = count(&conn, "SELECT COUNT(*) FROM tasks WHERE status='open'", params![])?;
-        s.in_progress = count(&conn, "SELECT COUNT(*) FROM tasks WHERE status='in_progress'", params![])?;
-        s.blocked = count(&conn, "SELECT COUNT(*) FROM tasks WHERE status='blocked'", params![])?;
-        s.waiting = count(&conn, "SELECT COUNT(*) FROM tasks WHERE status='waiting'", params![])?;
-        s.done = count(&conn, "SELECT COUNT(*) FROM tasks WHERE status='done'", params![])?;
+        s.open = count(
+            &conn,
+            "SELECT COUNT(*) FROM tasks WHERE status='open'",
+            params![],
+        )?;
+        s.in_progress = count(
+            &conn,
+            "SELECT COUNT(*) FROM tasks WHERE status='in_progress'",
+            params![],
+        )?;
+        s.blocked = count(
+            &conn,
+            "SELECT COUNT(*) FROM tasks WHERE status='blocked'",
+            params![],
+        )?;
+        s.waiting = count(
+            &conn,
+            "SELECT COUNT(*) FROM tasks WHERE status='waiting'",
+            params![],
+        )?;
+        s.done = count(
+            &conn,
+            "SELECT COUNT(*) FROM tasks WHERE status='done'",
+            params![],
+        )?;
         s.overdue = count(
             &conn,
             "SELECT COUNT(*) FROM tasks WHERE status NOT IN ('done','cancelled') AND due_at IS NOT NULL AND due_at < ?1",
@@ -607,7 +627,12 @@ mod tests {
     fn recurring_reminder_reschedules() {
         let s = store();
         let r = s
-            .add_reminder("standup", Utc::now() - Duration::minutes(1), None, Some("daily"))
+            .add_reminder(
+                "standup",
+                Utc::now() - Duration::minutes(1),
+                None,
+                Some("daily"),
+            )
             .unwrap();
         let next = s.reschedule_recurring(&r).unwrap().unwrap();
         assert_eq!(next.message, "standup");

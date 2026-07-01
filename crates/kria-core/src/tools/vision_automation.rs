@@ -114,7 +114,7 @@ pub struct OmniParserOutput {
     /// Full-screen visual hash for integrity
     pub visual_hash: String,
     /// Task 8 (Issue #1): the model that produced these detections (e.g.
-    /// `qwen2.5-vl-7b`, or `dummy-omniparser-v0.1` for the stub). `#[serde(default)]`
+    /// `qwen3-vl-4b`, or `dummy-omniparser-v0.1` for the stub). `#[serde(default)]`
     /// so pre-Task-8 sidecar responses deserialize unchanged.
     #[serde(default)]
     pub model: String,
@@ -519,57 +519,13 @@ impl GatedSensing {
 }
 
 // ============================================================================
-// Section 3: GPU Lease Management (Scaffolding)
+// Section 3: GPU Lease Management
 // ============================================================================
-
-/// GPU lease handle for resource management.
-pub struct GpuLease {
-    /// Lease ID
-    _id: String,
-    /// When lease was acquired
-    _acquired_at: Instant,
-}
-
-impl GpuLease {
-    /// Release the lease (drop implementation handles actual release).
-    pub fn release(self) {
-        // Explicit release - the drop will handle cleanup
-        drop(self);
-    }
-}
-
-impl Drop for GpuLease {
-    fn drop(&mut self) {
-        // In production, this would signal the GPU lease manager
-        tracing::debug!(target: "gpu_lease", "GPU lease {} released", self._id);
-    }
-}
-
-/// GPU lease manager interface (scaffolding for Phase 2).
-pub struct GpuLeaseManager;
-
-impl GpuLeaseManager {
-    /// Request a GPU lease for vision operations.
-    /// Per RFC 007: "OmniParser execution requires GPU lease management"
-    pub async fn request_lease() -> Option<GpuLease> {
-        // Scaffolding: In production, this would:
-        // 1. Check GPU availability
-        // 2. Queue if necessary
-        // 3. Return lease handle with timeout
-
-        // For now, always succeed (actual GPU management in Phase 2.5)
-        Some(GpuLease {
-            _id: format!("vision-{}", uuid::Uuid::new_v4()),
-            _acquired_at: Instant::now(),
-        })
-    }
-
-    /// Check if GPU is available without acquiring lease.
-    pub fn is_available() -> bool {
-        // Scaffolding: always true for now
-        true
-    }
-}
+//
+// REMOVED (HRA Task 15): the scaffolding `GpuLease` / `GpuLeaseManager` no-op stub that always
+// granted and provided zero protection. GPU leasing for the vision/OmniParser path is now owned by
+// the Hardware & Resource Authority (`crate::resource::authority` + `crate::resource::gpu_lease`)
+// via the Vision consumer (`GpuOwner::Vision`), eliminating the duplicate, name-colliding stub.
 
 // ============================================================================
 // Section 4: OmniParser Client Interface
@@ -1074,13 +1030,9 @@ impl ToolHandler for GetScreenElements {
         // Cache miss - need to parse screen
         tracing::info!(target: "get_screen_elements", "Cache miss, parsing screen");
 
-        // Step 1: Request GPU lease
-        let _gpu_lease = match GpuLeaseManager::request_lease().await {
-            Some(lease) => lease,
-            None => {
-                return ToolResult::err("GPU lease unavailable - vision parsing blocked");
-            }
-        };
+        // GPU leasing for vision parsing is owned by the Hardware & Resource Authority at the
+        // consumer-registration layer (HRA Vision consumer, GpuOwner::Vision) — not by a local
+        // no-op stub. The previous scaffolding `GpuLeaseManager` (always-grant) was removed.
 
         // Step 2: Capture screenshot
         let screenshot_data = match ScreenshotCapture::capture_full().await {
@@ -1149,10 +1101,7 @@ impl ToolHandler for GetScreenElements {
             }
         }
 
-        // Step 4: Release GPU lease (implicit drop of _gpu_lease)
-        // Per RFC 007: "Release lease immediately after JSON generation"
-        drop(_gpu_lease);
-
+        // Step 4: cache the results (GPU lease release is handled by the HRA Vision consumer).
         // Step 5: Cache the results (now with real pixel-calculated hashes)
         OMNI_CACHE
             .set(cache_key.clone(), parsed.clone(), screenshot_data)

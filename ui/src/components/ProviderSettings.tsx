@@ -918,7 +918,7 @@ const ProviderSettings: Component = () => {
                   type="text"
                   value={newProviderModel()}
                   onInput={(e) => setNewProviderModel(e.currentTarget.value)}
-                  placeholder={newProviderType() === "openai_compatible" ? "model served by endpoint" : "gpt-4o, claude-sonnet-4, qwen2.5:7b"}
+                  placeholder={newProviderType() === "openai_compatible" ? "model served by endpoint" : "gpt-4o, claude-sonnet-4, qwen3-vl-4b"}
                 />
               </div>
             </div>

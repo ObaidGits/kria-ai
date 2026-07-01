@@ -55,14 +55,30 @@ impl OutcomeAttribution {
     /// One-line layman explanation.
     pub fn human(&self) -> String {
         match self {
-            OutcomeAttribution::DegradedSight => "Sight couldn't see the screen (perception degraded).".into(),
-            OutcomeAttribution::Terminal => "The model chose to finish or ask a question (no action).".into(),
-            OutcomeAttribution::DirectAction => "The model chose a keyboard/scroll action (no on-screen target needed).".into(),
-            OutcomeAttribution::TargetMissingFromSight => "Sight never showed the requested control, so it couldn't be acted on.".into(),
-            OutcomeAttribution::BrainPickedAbsentElement => "The model referenced a control that isn't on screen (model mistake).".into(),
-            OutcomeAttribution::BrainPickedExpected { label } => format!("The model correctly chose '{label}'."),
-            OutcomeAttribution::BrainPickedWrongElement { label } => format!("The control was visible, but the model chose '{label}' instead (model mistake)."),
-            OutcomeAttribution::BrainPickedPresent { label } => format!("The model chose the on-screen control '{label}'."),
+            OutcomeAttribution::DegradedSight => {
+                "Sight couldn't see the screen (perception degraded).".into()
+            }
+            OutcomeAttribution::Terminal => {
+                "The model chose to finish or ask a question (no action).".into()
+            }
+            OutcomeAttribution::DirectAction => {
+                "The model chose a keyboard/scroll action (no on-screen target needed).".into()
+            }
+            OutcomeAttribution::TargetMissingFromSight => {
+                "Sight never showed the requested control, so it couldn't be acted on.".into()
+            }
+            OutcomeAttribution::BrainPickedAbsentElement => {
+                "The model referenced a control that isn't on screen (model mistake).".into()
+            }
+            OutcomeAttribution::BrainPickedExpected { label } => {
+                format!("The model correctly chose '{label}'.")
+            }
+            OutcomeAttribution::BrainPickedWrongElement { label } => format!(
+                "The control was visible, but the model chose '{label}' instead (model mistake)."
+            ),
+            OutcomeAttribution::BrainPickedPresent { label } => {
+                format!("The model chose the on-screen control '{label}'.")
+            }
         }
     }
 }
@@ -192,7 +208,12 @@ mod tests {
                 .into_iter()
                 .map(|(id, label)| UiElement {
                     id,
-                    bbox: Bbox { x: 0, y: 0, width: 10, height: 10 },
+                    bbox: Bbox {
+                        x: 0,
+                        y: 0,
+                        width: 10,
+                        height: 10,
+                    },
                     monitor_index: 0,
                     kind: "button".into(),
                     label: label.into(),
@@ -206,14 +227,23 @@ mod tests {
     }
 
     fn click(id: u32) -> Decision {
-        Decision { action: Action::Click { element_id: id }, reason: String::new(), risk_hint: None }
+        Decision {
+            action: Action::Click { element_id: id },
+            reason: String::new(),
+            risk_hint: None,
+        }
     }
 
     #[test]
     fn brain_correct_pick_is_attributed_to_brain_expected() {
         let obs = obs_with(vec![(1, "New Tab"), (2, "Close")]);
         let a = attribute(&obs, &click(1), Some("new tab"));
-        assert_eq!(a, OutcomeAttribution::BrainPickedExpected { label: "New Tab".into() });
+        assert_eq!(
+            a,
+            OutcomeAttribution::BrainPickedExpected {
+                label: "New Tab".into()
+            }
+        );
         assert_eq!(a.blame_layer(), "none");
     }
 
@@ -231,7 +261,12 @@ mod tests {
         // "New Tab" IS present (id 1) but the Brain clicked "Close" (id 2).
         let obs = obs_with(vec![(1, "New Tab"), (2, "Close")]);
         let a = attribute(&obs, &click(2), Some("new tab"));
-        assert_eq!(a, OutcomeAttribution::BrainPickedWrongElement { label: "Close".into() });
+        assert_eq!(
+            a,
+            OutcomeAttribution::BrainPickedWrongElement {
+                label: "Close".into()
+            }
+        );
         assert_eq!(a.blame_layer(), "brain");
     }
 
@@ -256,11 +291,31 @@ mod tests {
     fn direct_and_terminal_actions_blame_no_layer() {
         let obs = obs_with(vec![(1, "x")]);
         assert_eq!(
-            attribute(&obs, &Decision { action: Action::Key { combo: "ctrl+t".into() }, reason: String::new(), risk_hint: None }, None),
+            attribute(
+                &obs,
+                &Decision {
+                    action: Action::Key {
+                        combo: "ctrl+t".into()
+                    },
+                    reason: String::new(),
+                    risk_hint: None
+                },
+                None
+            ),
             OutcomeAttribution::DirectAction
         );
         assert_eq!(
-            attribute(&obs, &Decision { action: Action::Done { summary: "ok".into() }, reason: String::new(), risk_hint: None }, None),
+            attribute(
+                &obs,
+                &Decision {
+                    action: Action::Done {
+                        summary: "ok".into()
+                    },
+                    reason: String::new(),
+                    risk_hint: None
+                },
+                None
+            ),
             OutcomeAttribution::Terminal
         );
     }
@@ -274,7 +329,12 @@ mod tests {
             .unwrap();
         assert_eq!(diag.element_count, 1);
         assert_eq!(diag.matched_label.as_deref(), Some("New Tab"));
-        assert_eq!(diag.attribution, OutcomeAttribution::BrainPickedExpected { label: "New Tab".into() });
+        assert_eq!(
+            diag.attribution,
+            OutcomeAttribution::BrainPickedExpected {
+                label: "New Tab".into()
+            }
+        );
         assert!(!diag.degraded);
     }
 }

@@ -1,0 +1,20 @@
+# KRIA TTS Sidecar dependencies (Voice System v3, Wave 5)
+#
+# IMPORTANT: install into a DEDICATED venv on Python 3.10–3.12 (NOT the repo
+# .venv which is 3.14 — kokoro→misaki→spacy has no 3.14 wheels). The Rust
+# launcher auto-prefers `sidecars/kria-tts/venv/bin/python`.
+#
+#   python3.12 -m venv sidecars/kria-tts/venv
+#   sidecars/kria-tts/venv/bin/python -m pip install -U pip wheel
+#   sidecars/kria-tts/venv/bin/python -m pip install -r sidecars/kria-tts/requirements.txt
+#
+# The Kokoro model weights + the en_core_web_sm spaCy model download
+# automatically on first KPipeline construction. `espeakng-loader` bundles
+# espeak-ng, so no system `apt install espeak-ng` is required (install it
+# system-wide only if you want the OS espeak for additional languages).
+
+kokoro>=0.9.0
+soundfile>=0.12.0
+numpy>=1.24.0
+
+# Pulled in transitively by kokoro: torch, misaki, spacy, transformers, etc.

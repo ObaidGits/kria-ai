@@ -10,6 +10,13 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
 
     let mut config = KriaConfig::load(None)?;
     let paths = config.resolve_paths()?;
+    // Apply GPU policy tunables (redesign G1/G2) from config at startup so Settings-UI values are
+    // live from boot. Env vars override at read time.
+    kria_core::llm::orchestrator::gpu_policy::apply_settings(
+        config.orchestrator.gpu_autoscale,
+        config.orchestrator.cuda_reserve_mb,
+        config.orchestrator.vram_volatility_cap_mb,
+    );
     if let Some(path) = config
         .n8n
         .migrate_literal_api_key_to_file()
@@ -620,18 +627,47 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     kria_core::tools::precognitive::register(&tool_registry_inner, sidecar.clone());
     kria_core::tools::news::register(&tool_registry_inner, sidecar.clone());
     // Re-register vision tools with sidecar (overrides the None-sidecar registration from build_registry)
+    // ── Single shared GPU lease arbiter (HRA Tasks 13/14/15) ───────────────────
+    // ONE process-wide lease manager shared by every GPU consumer (image, vision, and — via
+    // `global_gpu_lease()` — voice/speech). This is the single-authority fix (Gap G1): consumers
+    // contend on the SAME arbiter and can no longer collide on the GPU unknowingly.
+    let shared_gpu_lease = kria_core::resource::gpu_lease::global_gpu_lease();
+
+    // ── Single telemetry hub (HRA Phase A1 — telemetry unification) ────────────
+    // ONE process-wide VRAM/RAM sampler owning the single device (NVML/ROCm) context. Every reader
+    // — the shared lease's recovery telemetry, the HRA snapshot/admission path, and the dashboard —
+    // borrows this hub's profiler / reads its published snapshot instead of opening its own context.
+    // Created BEFORE the lease telemetry so `SharedResourceTelemetry::new()` binds to the hub. RAM
+    // total is detected by the hub itself on its first sample (via sysinfo in kria-core); 0 is just
+    // the pre-first-sample fallback.
+    let telemetry_hub = kria_core::resource::TelemetryHub::new(0);
+    kria_core::resource::set_global_telemetry_hub(telemetry_hub.clone());
+    {
+        // Background sampler: the single periodic VRAM poll for the whole process.
+        let hub_run = telemetry_hub.clone();
+        tokio::spawn(async move {
+            hub_run.run(std::time::Duration::from_secs(5)).await;
+        });
+    }
+
+    // Wire REAL resource telemetry into the shared lease so recovery/reconciliation verifies the
+    // GPU actually freed after a release (instead of assuming). Prevents the lease from ever
+    // self-degrading and blocking image/voice/vision (HRA production item 2). Sources the single
+    // hub profiler (no second device context).
+    shared_gpu_lease.set_resource_telemetry(std::sync::Arc::new(
+        kria_core::resource::shared_telemetry::SharedResourceTelemetry::new(),
+    ));
+
     kria_core::tools::vision::register(
         &tool_registry_inner,
         Some(sidecar.clone()),
-        Some(GpuLeaseManager::shared(
-            std::time::Duration::from_secs(120),
-            std::time::Duration::from_secs(15),
-        )),
+        Some(shared_gpu_lease.clone()),
     );
 
     // ── Image generation orchestrator ─────────────────────────────────────────
     let image_cfg = config.image_generation.clone();
-    let image_orchestrator = ImageOrchestrator::new(image_cfg, &paths.data_dir);
+    let image_orchestrator =
+        ImageOrchestrator::new_with_lease(image_cfg, &paths.data_dir, shared_gpu_lease.clone());
     {
         // Build an EventEmitter that forwards image/voice events to the Tauri frontend.
         let handle_img = handle.clone();
@@ -1068,15 +1104,32 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     )
     .await;
 
-    // Phase 3: Build tool-level semantic index
+    // Phase 3: Build tool-level semantic index.
+    // C6 (startup optimization): create the index EMPTY (instant) and populate it on a background
+    // task, so the ~seconds-long embedding build no longer blocks startup / the LLM spawn. While it
+    // builds, semantic tool matching returns None and routing falls back to the lexical/ONNX path —
+    // self-healing once the background rebuild completes.
     let tool_defs_for_index: Vec<kria_core::tools::registry::ToolDef> =
         tool_registry.list_defs().to_vec();
-    let tool_index = kria_core::routing::tool_index::SharedToolIndex::new(
-        tool_defs_for_index,
-        routing_config.clone(),
-    )
-    .await;
-    tracing::info!("Tool semantic index initialized");
+    let tool_index = kria_core::routing::tool_index::SharedToolIndex::empty();
+    {
+        let ti_bg = tool_index.clone();
+        let cfg_bg = routing_config.clone();
+        tokio::spawn(async move {
+            let started = std::time::Instant::now();
+            match ti_bg.rebuild(tool_defs_for_index, cfg_bg).await {
+                Ok(()) => tracing::info!(
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    "Tool semantic index built in background — semantic routing now active (C6)"
+                ),
+                Err(e) => tracing::warn!(
+                    error = %e,
+                    "Tool semantic index background build failed — routing uses lexical fallback"
+                ),
+            }
+        });
+    }
+    tracing::info!("Tool semantic index: building in background (non-blocking startup, C6)");
 
     // Phase 5: Build feedback collector
     let feedback_collector = Arc::new(tokio::sync::Mutex::new(
@@ -1789,6 +1842,7 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         let voice_active_bg = voice_active.clone();
         let handle_bg = handle.clone();
         let fleet_runtime_bg = fleet_runtime.clone();
+        let hra_data_dir_bg = paths.data_dir.clone();
 
         tokio::spawn(async move {
             tracing::info!("orchestrator: starting in background");
@@ -1831,33 +1885,177 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
                         }),
                     );
 
-                    // Start idle-release monitor if enabled.
-                    //
-                    // ─── TEMPORARY: idle auto-sleep DISABLED (user request) ──────────
-                    // The idle/stale auto-release below unloads the local
-                    // llama-server + model after `idle_release_after_secs` of no
-                    // activity (default 300s). That behaviour belongs to an
-                    // UNFINISHED feature and was causing issues, so it is turned OFF
-                    // for now. While disabled, the local llama-server + model stay
-                    // RESIDENT for the whole app session and only stop when the app
-                    // is closed — they will NOT sleep/stop on idle, session end, or
-                    // stop. This flag overrides config/hardware-tier so it holds on
-                    // every tier.
-                    //
-                    // TO RE-ENABLE (once the feature is finished): set
-                    // `IDLE_RELEASE_TEMPORARILY_DISABLED = false` (or delete it and
-                    // its use below so the original
-                    // `if orch.config.idle_release_enabled` guard applies again).
-                    // ─────────────────────────────────────────────────────────────────
-                    let idle_release_temporarily_disabled = true; // IDLE_RELEASE_TEMPORARILY_DISABLED
-                    if idle_release_temporarily_disabled {
-                        tracing::info!(
-                            "orchestrator: idle release monitor TEMPORARILY DISABLED — \
-                             local llama-server + model stay resident for the whole \
-                             session (only stop on app close)"
+                    // Staged readiness (redesign G8): the LLM is the ONLY critical-path
+                    // subsystem. Emit `core_llm_ready` independently so the UI can become
+                    // interactive immediately, without waiting on the background-loaded
+                    // tool index (C6), voice warmup, or MCP providers. Those subsystems
+                    // emit their own readiness events when they finish loading.
+                    let _ = handle_bg.emit(
+                        "runtime:core_llm_ready",
+                        serde_json::json!({
+                            "stage": "core_llm",
+                            "backend": format!("{:?}", orch.backend),
+                            "critical_path": true,
+                        }),
+                    );
+
+                    // ── HRA (Hardware & Resource Authority) — SHADOW MODE ─────────────
+                    // Additive: construct the Resource Authority service and run it in
+                    // shadow (records decisions + compares to the legacy path, emits
+                    // status for the UI) WITHOUT gating real admission. The legacy
+                    // orchestrator/lease paths remain authoritative. This is the safe
+                    // first cutover step (HRA Tasks 3/10/12-shadow/37). Flipping a
+                    // consumer to honor the RA is done later via the per-consumer bypass
+                    // switch once the shadow comparator gate is clean.
+                    {
+                        use kria_core::resource::authority::{
+                            ConsumerId, HraService, PolicyProfile,
+                        };
+
+                        let hw = tokio::task::spawn_blocking(
+                            kria_core::infra::hardware_profiler::profile_hardware,
+                        )
+                        .await
+                        .ok();
+                        let (gpu_total_vram, ram_total) = hw
+                            .as_ref()
+                            .map(|h| (h.info.vram_mb.unwrap_or(0), h.info.total_ram_mb))
+                            .unwrap_or((0, 0));
+
+                        let gpus: Vec<(u32, u64)> = if gpu_total_vram > 0 {
+                            vec![(0, gpu_total_vram)]
+                        } else {
+                            vec![]
+                        };
+                        let hra = HraService::new_persisted(
+                            &gpus,
+                            512,
+                            ram_total,
+                            &[],
+                            PolicyProfile::Balanced,
+                            hra_data_dir_bg.join("hra_journal.bin"),
                         );
+
+                        // On boot, surface any leases recovered from the persisted journal (HRA
+                        // Phase D1). These represent residency that a prior (crashed) instance held;
+                        // the Reconciler/legacy path reclaims the real GPU processes. Logged for
+                        // diagnostics — reclaim is gated by the safety policy (Phase D2).
+                        let recovered = hra.authority().recovered_open_leases();
+                        if !recovered.is_empty() {
+                            tracing::warn!(
+                                target: "hra",
+                                count = recovered.len(),
+                                "HRA journal recovery: prior-instance open leases detected (crash recovery)"
+                            );
+                        }
+
+                        // Register the L1 LLM as an RA-drivable model (additive; no behavior change).
+                        let llm_model = std::sync::Arc::new(
+                            kria_core::llm::orchestrator::ra_adapter::OrchestratorModel::new(
+                                orch.clone(),
+                                "l1-llm",
+                                gpu_total_vram.min(4096),
+                                2048,
+                            ),
+                        );
+                        hra.residency().register(llm_model).await;
+
+                        // Register the process-wide HRA handle so the legacy GPU watchdog can
+                        // consult the authority before scale-ups (real cutover hook).
+                        kria_core::resource::authority::set_global_hra(hra.clone());
+
+                        // Enforcement flip (HRA Tasks 12–16 / Session 15 cutover).
+                        // DEFAULT = ENFORCE: the Hardware & Resource Authority owns GPU admission
+                        // (Co-Residency manager) for every consumer. This is the "run on the new
+                        // architecture" cutover the user opted into.
+                        // ROLLBACK PARACHUTE: set `KRIA_HRA_ENFORCE=0` (or false/off/no) to fall back
+                        // to the legacy shadow path instantly — no code change, no data migration.
+                        // Legacy `GpuLeaseManager` is intentionally still present as that fallback;
+                        // it is only deleted after this enforce path is proven in real use.
+                        let enforce = std::env::var("KRIA_HRA_ENFORCE")
+                            .ok()
+                            .and_then(|v| match v.trim().to_ascii_lowercase().as_str() {
+                                "0" | "false" | "off" | "no" => Some(false),
+                                "1" | "true" | "on" | "yes" => Some(true),
+                                _ => None,
+                            })
+                            .unwrap_or(true); // default ON (enforce)
+                        hra.set_shadow_only(!enforce);
+                        // When enforcing, consumers honor the RA (not bypassed). In shadow, the
+                        // bypass flag is irrelevant because request() does not gate.
+                        hra.set_bypass(ConsumerId::Llm, false);
+                        tracing::info!(
+                            enforce,
+                            "HRA: enforcement {} (default ENFORCE; set KRIA_HRA_ENFORCE=0 to roll back to legacy shadow)",
+                            if enforce { "ON" } else { "SHADOW" }
+                        );
+
+                        let _ = handle_bg.emit("resource:hra_status", hra.status_json());
+                        tracing::info!(
+                            gpu_total_vram_mb = gpu_total_vram,
+                            ram_total_mb = ram_total,
+                            enforce,
+                            "HRA: resource authority constructed ({} mode)",
+                            if enforce { "ENFORCE" } else { "SHADOW" }
+                        );
+
+                        // Co-residency recovery sweep (HRA Phase B): periodically reclaim leases
+                        // whose holder vanished (TTL), freeing reservations + cooling the model.
+                        // Bounded, best-effort; runs for the process lifetime.
+                        let hra_sweep = hra.clone();
+                        tokio::spawn(async move {
+                            let mut tick = tokio::time::interval(std::time::Duration::from_secs(30));
+                            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                            loop {
+                                tick.tick().await;
+                                let reclaimed = hra_sweep.co_residency().reclaim_expired().await;
+                                if reclaimed > 0 {
+                                    tracing::info!(
+                                        target: "hra",
+                                        reclaimed,
+                                        "co-residency sweep reclaimed expired leases"
+                                    );
+                                }
+                            }
+                        });
+
+                        // Periodic shadow telemetry → DeviceTable + UI status, sourced from the
+                        // single telemetry hub (HRA Phase A1 — no second device context here).
+                        let handle_hra = handle_bg.clone();
+                        tokio::spawn(async move {
+                            let mut rx = match kria_core::resource::global_telemetry_hub() {
+                                Some(hub) => hub.subscribe(),
+                                None => return, // hub always set at startup; nothing to do otherwise
+                            };
+                            loop {
+                                // Wait for the hub to publish a fresh snapshot (single sampler).
+                                if rx.changed().await.is_err() {
+                                    break;
+                                }
+                                let snap = rx.borrow().clone();
+                                hra.apply_snapshot(&snap);
+                                let _ = handle_hra.emit("resource:hra_status", hra.status_json());
+                                let _ = handle_hra
+                                    .emit("resource:hra_diagnostics", hra.diagnostics_json_async().await);
+                            }
+                        });
                     }
-                    if orch.config.idle_release_enabled && !idle_release_temporarily_disabled {
+
+                    // Start idle-release monitor if enabled (HRA Phase A3 — re-enabled).
+                    //
+                    // The idle monitor unloads the local llama-server + model after
+                    // `idle_release_after_secs` of no activity, freeing VRAM for other
+                    // consumers (image/voice/vision) and reducing swap pressure. It is
+                    // FOREGROUND-SAFE: the loop below skips a release while voice is
+                    // active, while any chat turn is in flight (`active_turns > 0`),
+                    // while a swap is running, or when no model is resident — so it can
+                    // never unload mid-answer. Driven purely by `orch.config`:
+                    //   - `idle_release_enabled` (master switch)
+                    //   - `idle_release_after_secs` (dwell, min 30s)
+                    //   - `idle_release_check_interval_secs` (poll, min 1s)
+                    // Set `idle_release_enabled = false` in config to keep the model
+                    // resident for the whole session.
+                    if orch.config.idle_release_enabled {
                         let idle_after_secs = orch.config.idle_release_after_secs.max(30);
                         let check_interval_secs =
                             orch.config.idle_release_check_interval_secs.max(1);
@@ -1938,12 +2136,24 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
                                         to_ngl,
                                         emergency,
                                     }) => {
+                                        // G10: name the EXACT action instead of a generic
+                                        // "Optimizing GPU layers". Emergency downsizes are a
+                                        // safety action; a non-emergency change is a placement
+                                        // adjustment (rare — only on an explicit break condition).
+                                        let banner = if emergency {
+                                            "Reducing GPU use to stay stable…"
+                                        } else if to_ngl < from_ngl {
+                                            "Freeing GPU memory…"
+                                        } else {
+                                            "Optimizing GPU placement…"
+                                        };
                                         let _ = handle_orch.emit(
                                             "orchestrator:swap_started",
                                             serde_json::json!({
                                                 "from_ngl": from_ngl,
                                                 "to_ngl": to_ngl,
                                                 "emergency": emergency,
+                                                "banner": banner,
                                             }),
                                         );
                                     }
@@ -1965,6 +2175,15 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
                                         let _ = handle_orch.emit(
                                             "orchestrator:degradation_changed",
                                             serde_json::json!({ "level": level }),
+                                        );
+                                    }
+                                    Ok(KriaEvent::LlmSwapFailed { reason }) => {
+                                        // C3: forward swap failure so the UI can clear the
+                                        // "Optimizing GPU layers" overlay (it was previously
+                                        // swallowed by `Ok(_) => {}`, stranding the overlay forever).
+                                        let _ = handle_orch.emit(
+                                            "orchestrator:swap_failed",
+                                            serde_json::json!({ "reason": reason }),
                                         );
                                     }
                                     Ok(KriaEvent::LlmStreamInterrupted) => {

@@ -219,7 +219,11 @@ fn layer_count_for(name: &str) -> Option<u32> {
     let n = name.to_ascii_lowercase();
     if n.contains("qwen2.5-vl-7b") || n.contains("qwen2.5-7b") || n.contains("qwen3-7b") {
         Some(28)
-    } else if n.contains("qwen2.5-3b") || n.contains("qwen3-3b") || n.contains("qwen3-8b") {
+    } else if n.contains("qwen2.5-3b")
+        || n.contains("qwen3-3b")
+        || n.contains("qwen3-8b")
+        || n.contains("qwen3-vl-4b")
+    {
         Some(36)
     } else if n.contains("qwen3-0.6b") {
         Some(28)
@@ -262,7 +266,7 @@ mod tests {
         let models = vec![
             mk_model("qwen3-0.6b", "q06.gguf", 0.6, false, 4096),
             mk_model("phi-4-mini", "phi.gguf", 2.5, false, 4096),
-            mk_model("qwen2.5-vl-7b", "qwen.gguf", 6.0, true, 8192),
+            mk_model("qwen3-vl-4b", "qwen.gguf", 3.5, true, 8192),
         ];
         let choice = select_model_for_tier(
             HardwareTier::High,
@@ -273,7 +277,7 @@ mod tests {
             |_| true,
         )
         .unwrap();
-        assert_eq!(choice.model.name, "qwen2.5-vl-7b");
+        assert_eq!(choice.model.name, "qwen3-vl-4b");
         assert!(!choice.vision_disabled);
     }
 
@@ -281,7 +285,7 @@ mod tests {
     fn lite_tier_avoids_vision_model() {
         let models = vec![
             mk_model("qwen3-0.6b", "q06.gguf", 0.6, false, 4096),
-            mk_model("qwen2.5-vl-7b", "qwen.gguf", 6.0, true, 8192),
+            mk_model("qwen3-vl-4b", "qwen.gguf", 3.5, true, 8192),
         ];
         let choice =
             select_model_for_tier(HardwareTier::Lite, 4 * 1024, None, "", &models, |_| true)
@@ -293,7 +297,7 @@ mod tests {
     fn user_override_honoured_when_file_exists() {
         let models = vec![
             mk_model("qwen3-0.6b", "q06.gguf", 0.6, false, 4096),
-            mk_model("qwen2.5-vl-7b", "qwen.gguf", 6.0, true, 8192),
+            mk_model("qwen3-vl-4b", "qwen.gguf", 3.5, true, 8192),
         ];
         let choice = select_model_for_tier(
             HardwareTier::Performance,
@@ -329,7 +333,7 @@ mod tests {
     #[test]
     fn no_fitting_model_falls_back_to_smallest_existing() {
         let models = vec![
-            mk_model("qwen2.5-vl-7b", "qwen.gguf", 6.0, true, 8192),
+            mk_model("qwen3-vl-4b", "qwen.gguf", 3.5, true, 8192),
             mk_model("qwen3-0.6b", "q06.gguf", 2.0, false, 4096),
         ];
         // Lite tier with 2 GB RAM → 60% budget = 1228 MB. Both 6 GB and 2 GB
@@ -349,7 +353,7 @@ mod tests {
 
     #[test]
     fn derive_profile_matches_vision_capability() {
-        let m = mk_model("qwen2.5-vl-7b", "q.gguf", 6.0, true, 8192);
+        let m = mk_model("qwen3-vl-4b", "q.gguf", 3.5, true, 8192);
         let base = ModelProfile::default();
         let p = derive_model_profile(&m, &base);
         assert!(p.has_vision_projector);

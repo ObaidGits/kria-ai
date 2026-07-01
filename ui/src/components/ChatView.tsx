@@ -48,12 +48,17 @@ const ChatView: Component = () => {
     toggleVoice,
     voiceActive,
     voiceState,
+    voiceMode,
+    voicePttPress,
+    voicePttRelease,
+    voicePttActive,
     toolChoiceRequest,
     submitToolChoice,
     dismissToolChoice,
     currentSession,
     sessions,
     isSwapping,
+    swapBanner,
     degradationLevel,
     manualToolModes,
     manualToolMode,
@@ -317,7 +322,7 @@ const ChatView: Component = () => {
       <Show when={isSwapping()}>
         <div class="gpu-swap-alert" role="status" aria-live="polite">
           <span class="dot" /><span class="dot" /><span class="dot" />
-          <span class="swap-label">Optimizing GPU layers...</span>
+          <span class="swap-label">{(swapBanner() ?? "Adjusting GPU memory…") + " — you can keep typing"}</span>
         </div>
       </Show>
 
@@ -520,6 +525,45 @@ const ChatView: Component = () => {
             {voiceState() === "speaking" ? "🔊" : "🎤"}
           </button>
 
+          {/* Wave 3.2: hold-to-talk — ONLY shown in push_to_talk mode (in
+              continuous/wake modes the mic toggle above governs listening, so a
+              hold button there is confusing). Press and hold to capture; release
+              to transcribe. */}
+          <Show when={voiceMode() === "push_to_talk"}>
+            <button
+              type="button"
+              class={`voice-ptt-btn ${voicePttActive() ? "active" : ""}`}
+              title="Hold to talk: press and hold, speak, then release"
+              aria-label="Hold to talk"
+              aria-pressed={voicePttActive()}
+              onPointerDown={(e) => {
+                e.preventDefault();
+                void voicePttPress();
+              }}
+              onPointerUp={() => void voicePttRelease()}
+              onPointerLeave={() => {
+                if (voicePttActive()) void voicePttRelease();
+              }}
+              onPointerCancel={() => {
+                if (voicePttActive()) void voicePttRelease();
+              }}
+              onKeyDown={(e) => {
+                if ((e.key === " " || e.key === "Enter") && !e.repeat) {
+                  e.preventDefault();
+                  void voicePttPress();
+                }
+              }}
+              onKeyUp={(e) => {
+                if (e.key === " " || e.key === "Enter") {
+                  e.preventDefault();
+                  void voicePttRelease();
+                }
+              }}
+            >
+              {voicePttActive() ? "🔴 Release to send" : "🎙 Hold to talk"}
+            </button>
+          </Show>
+
           <label class="attach-btn" title="Attach file or image" role="button" tabIndex={0}>
             📎
             <input
@@ -539,9 +583,7 @@ const ChatView: Component = () => {
             ref={textareaRef}
             class="chat-input"
             placeholder={
-              isSwapping()
-                ? "Model is swapping GPU layers…"
-                : pendingFiles().length > 0
+              pendingFiles().length > 0
                 ? "Add a message about your files, or press Send…"
                 : pendingImage()
                 ? "Describe what you want to know about this image…"
@@ -555,7 +597,6 @@ const ChatView: Component = () => {
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
             rows={1}
-            disabled={isSwapping()}
           />
 
           <Show when={isThinking()}>
@@ -576,7 +617,7 @@ const ChatView: Component = () => {
             <button
               type="submit"
               class="send-btn"
-              disabled={isSwapping() || (!inputText().trim() && !pendingImage() && pendingFiles().length === 0)}
+              disabled={!inputText().trim() && !pendingImage() && pendingFiles().length === 0}
             >
               Send
             </button>

@@ -29,11 +29,8 @@ pub fn plan_day(
     default_minutes: i64,
 ) -> (Vec<PlannedBlock>, Vec<i64>) {
     // Mutable remaining cursors per slot.
-    let mut cursors: Vec<(DateTime<Utc>, DateTime<Utc>)> = slots
-        .iter()
-        .filter(|(s, e)| e > s)
-        .cloned()
-        .collect();
+    let mut cursors: Vec<(DateTime<Utc>, DateTime<Utc>)> =
+        slots.iter().filter(|(s, e)| e > s).cloned().collect();
 
     let mut blocks = Vec::new();
     let mut unscheduled = Vec::new();
@@ -87,7 +84,10 @@ fn parse_estimate(text: &str) -> Option<i64> {
     if let Some(h) = rest.strip_suffix('h') {
         return h.parse::<i64>().ok().map(|n| n * 60);
     }
-    rest.trim_end_matches('m').parse::<i64>().ok().filter(|n| *n > 0)
+    rest.trim_end_matches('m')
+        .parse::<i64>()
+        .ok()
+        .filter(|n| *n > 0)
 }
 
 #[cfg(test)]
@@ -96,7 +96,9 @@ mod tests {
     use chrono::TimeZone;
 
     fn dt(h: i64, m: i64) -> DateTime<Utc> {
-        Utc.with_ymd_and_hms(2026, 6, 18, 0, 0, 0).unwrap() + Duration::hours(h) + Duration::minutes(m)
+        Utc.with_ymd_and_hms(2026, 6, 18, 0, 0, 0).unwrap()
+            + Duration::hours(h)
+            + Duration::minutes(m)
     }
 
     fn task(id: i64, title: &str, notes: Option<&str>) -> Task {

@@ -259,12 +259,11 @@ const FILE_EXTS: &[&str] = &[
 /// Extract an explicit `name.ext` filename mentioned in the task (first match).
 pub(crate) fn extract_filename(task: &str) -> Option<String> {
     for raw in task.split_whitespace() {
-        let tok = raw.trim_matches(|c: char| !c.is_alphanumeric() && c != '.' && c != '_' && c != '-');
+        let tok =
+            raw.trim_matches(|c: char| !c.is_alphanumeric() && c != '.' && c != '_' && c != '-');
         if let Some(dot) = tok.rfind('.') {
             let ext = &tok[dot + 1..];
-            if !ext.is_empty()
-                && FILE_EXTS.contains(&ext.to_ascii_lowercase().as_str())
-                && dot > 0
+            if !ext.is_empty() && FILE_EXTS.contains(&ext.to_ascii_lowercase().as_str()) && dot > 0
             {
                 return Some(tok.to_string());
             }
@@ -278,12 +277,20 @@ pub(crate) fn extract_filename(task: &str) -> Option<String> {
 /// right body). Returns the trailing phrase, trimmed of a closing "and show…".
 fn extract_inline_content(task: &str) -> Option<String> {
     let lower = task.to_ascii_lowercase();
-    for marker in ["with the text ", "with the content ", "containing ", "that says ", "with text "] {
+    for marker in [
+        "with the text ",
+        "with the content ",
+        "containing ",
+        "that says ",
+        "with text ",
+    ] {
         if let Some(idx) = lower.find(marker) {
             let rest = &task[idx + marker.len()..];
             let mut out: Vec<&str> = Vec::new();
             for word in rest.split_whitespace() {
-                let wl = word.trim_matches(|c: char| !c.is_alphanumeric()).to_ascii_lowercase();
+                let wl = word
+                    .trim_matches(|c: char| !c.is_alphanumeric())
+                    .to_ascii_lowercase();
                 if matches!(wl.as_str(), "then" | "and" | "after" | "before") {
                     break;
                 }
@@ -337,8 +344,10 @@ pub(crate) fn normalize_plan(task: &str, mut plan: Plan) -> Plan {
     // nano not installed) must not derail the task. Non-editor opens (e.g. a
     // terminal to run the script) and run/read sub-goals are kept.
     plan.sub_goals.retain(|s| {
-        !matches!(s.kind, SubGoalKind::Type | SubGoalKind::Click | SubGoalKind::WriteFile)
-            && !(s.kind == SubGoalKind::OpenApp && target_is_text_editor(s.target_hint.as_deref()))
+        !matches!(
+            s.kind,
+            SubGoalKind::Type | SubGoalKind::Click | SubGoalKind::WriteFile
+        ) && !(s.kind == SubGoalKind::OpenApp && target_is_text_editor(s.target_hint.as_deref()))
     });
     // Write the file FIRST (via the bridge) so it exists for any later run/show
     // step regardless of whether some optional app opens.
@@ -355,9 +364,22 @@ fn target_is_text_editor(target: Option<&str>) -> bool {
         None => return false,
     };
     [
-        "nano", "vim", "vi ", "emacs", "gedit", "kate", "sublime", "text editor",
-        "texteditor", "gnome-text-editor", "code", "vscode", "visual studio code",
-        "notepad", "mousepad", "leafpad",
+        "nano",
+        "vim",
+        "vi ",
+        "emacs",
+        "gedit",
+        "kate",
+        "sublime",
+        "text editor",
+        "texteditor",
+        "gnome-text-editor",
+        "code",
+        "vscode",
+        "visual studio code",
+        "notepad",
+        "mousepad",
+        "leafpad",
     ]
     .iter()
     .any(|e| t == *e || t.contains(e))
@@ -412,9 +434,8 @@ pub fn fallback_plan(task: &str) -> Plan {
 
     // 3) A shell command to run.
     if let Some(cmd) = task_command_target(task) {
-        sub_goals.push(
-            SubGoal::new(format!("run {cmd}"), SubGoalKind::RunCommand).with_target(cmd),
-        );
+        sub_goals
+            .push(SubGoal::new(format!("run {cmd}"), SubGoalKind::RunCommand).with_target(cmd));
     }
 
     // 4) A calculator expression (type-and-submit "A op B=").
@@ -429,9 +450,8 @@ pub fn fallback_plan(task: &str) -> Plan {
 
     // 5) A standard keyboard follow-up (new tab / close tab / reload / ...).
     if let Some(combo) = task_followup_action(task) {
-        sub_goals.push(
-            SubGoal::new(format!("perform {combo}"), SubGoalKind::Click).with_target(combo),
-        );
+        sub_goals
+            .push(SubGoal::new(format!("perform {combo}"), SubGoalKind::Click).with_target(combo));
     }
 
     // Nothing matched → a single best-effort "other" sub-goal carrying the task,
@@ -484,7 +504,11 @@ mod tests {
         let s = plan_schema();
         assert_eq!(s["type"], "object");
         let enum_vals = &s["properties"]["sub_goals"]["items"]["properties"]["kind"]["enum"];
-        assert!(enum_vals.as_array().unwrap().iter().any(|v| v == "open_app"));
+        assert!(enum_vals
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v == "open_app"));
     }
 
     #[test]
@@ -495,7 +519,10 @@ mod tests {
         ]}"#;
         let plan = parse_plan_json(json).unwrap();
         assert_eq!(plan.len(), 2);
-        assert_eq!(plan.kinds(), vec![SubGoalKind::OpenApp, SubGoalKind::Navigate]);
+        assert_eq!(
+            plan.kinds(),
+            vec![SubGoalKind::OpenApp, SubGoalKind::Navigate]
+        );
         assert_eq!(plan.sub_goals[0].target_hint.as_deref(), Some("chrome"));
     }
 
@@ -541,8 +568,16 @@ mod tests {
         assert_eq!(plan.kinds()[0], SubGoalKind::OpenApp);
         assert!(plan.kinds().contains(&SubGoalKind::Navigate));
         // OpenApp precedes Navigate.
-        let oi = plan.kinds().iter().position(|k| *k == SubGoalKind::OpenApp).unwrap();
-        let ni = plan.kinds().iter().position(|k| *k == SubGoalKind::Navigate).unwrap();
+        let oi = plan
+            .kinds()
+            .iter()
+            .position(|k| *k == SubGoalKind::OpenApp)
+            .unwrap();
+        let ni = plan
+            .kinds()
+            .iter()
+            .position(|k| *k == SubGoalKind::Navigate)
+            .unwrap();
         assert!(oi < ni);
     }
 
@@ -552,7 +587,11 @@ mod tests {
         assert!(p1.kinds().contains(&SubGoalKind::RunCommand));
         let p2 = fallback_plan("open the calculator and compute 256 times 13");
         // The calc sub-goal carries the expected result for the verifier.
-        let calc = p2.sub_goals.iter().find(|s| s.kind == SubGoalKind::Type).unwrap();
+        let calc = p2
+            .sub_goals
+            .iter()
+            .find(|s| s.kind == SubGoalKind::Type)
+            .unwrap();
         assert_eq!(calc.expect_contains.as_deref(), Some("3328"));
         assert_eq!(calc.target_hint.as_deref(), Some("256*13="));
     }
@@ -574,8 +613,14 @@ mod tests {
 
     #[test]
     fn extract_filename_finds_explicit_names() {
-        assert_eq!(extract_filename("create a file hello.txt with text").as_deref(), Some("hello.txt"));
-        assert_eq!(extract_filename("run fib.py please").as_deref(), Some("fib.py"));
+        assert_eq!(
+            extract_filename("create a file hello.txt with text").as_deref(),
+            Some("hello.txt")
+        );
+        assert_eq!(
+            extract_filename("run fib.py please").as_deref(),
+            Some("fib.py")
+        );
         assert_eq!(extract_filename("open the calculator").as_deref(), None);
     }
 
@@ -591,17 +636,26 @@ mod tests {
         let kinds = norm.kinds();
         assert!(kinds.contains(&SubGoalKind::WriteFile));
         assert!(!kinds.contains(&SubGoalKind::Type), "editor-typing dropped");
-        let wf = norm.sub_goals.iter().find(|s| s.kind == SubGoalKind::WriteFile).unwrap();
+        let wf = norm
+            .sub_goals
+            .iter()
+            .find(|s| s.kind == SubGoalKind::WriteFile)
+            .unwrap();
         assert_eq!(wf.target_hint.as_deref(), Some("hello.txt"));
         assert_eq!(wf.expect_contains.as_deref(), Some("Hello KRIA"));
     }
 
     #[test]
     fn normalize_infers_filename_for_scripts() {
-        let p = normalize_plan("write a python script that prints fibonacci", Plan::new(vec![
-            SubGoal::new("type code", SubGoalKind::Type),
-        ]));
-        let wf = p.sub_goals.iter().find(|s| s.kind == SubGoalKind::WriteFile).unwrap();
+        let p = normalize_plan(
+            "write a python script that prints fibonacci",
+            Plan::new(vec![SubGoal::new("type code", SubGoalKind::Type)]),
+        );
+        let wf = p
+            .sub_goals
+            .iter()
+            .find(|s| s.kind == SubGoalKind::WriteFile)
+            .unwrap();
         assert!(wf.target_hint.as_deref().unwrap().ends_with(".py"));
     }
 

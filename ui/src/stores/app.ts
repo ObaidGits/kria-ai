@@ -111,7 +111,21 @@ const [promptLabHitlRequest, setPromptLabHitlRequest] = createSignal<HitlRequest
 const [assistantToolChoiceRequest, setAssistantToolChoiceRequest] = createSignal<ToolChoiceRequest | null>(null);
 const [promptLabToolChoiceRequest, setPromptLabToolChoiceRequest] = createSignal<ToolChoiceRequest | null>(null);
 const [voiceActive, setVoiceActive] = createSignal(false);
-const [voiceState, setVoiceState] = createSignal<"idle" | "listening" | "processing" | "speaking" | "busy">("idle");
+// Wave 8: full FSM state surface. New granular states (transcribing, thinking,
+// interrupt, wake_listening) are emitted by the backend; "processing"/"busy"
+// are kept as backward-compatible aliases.
+export type VoiceUiState =
+  | "idle"
+  | "wake_listening"
+  | "listening"
+  | "transcribing"
+  | "thinking"
+  | "processing"
+  | "speaking"
+  | "interrupt"
+  | "busy"
+  | "error";
+const [voiceState, setVoiceState] = createSignal<VoiceUiState>("idle");
 const [voiceLiveTranscript, setVoiceLiveTranscript] = createSignal("");
 const [voiceLiveConfidence, setVoiceLiveConfidence] = createSignal<number | null>(null);
 const [voiceLiveLanguage, setVoiceLiveLanguage] = createSignal("auto");
@@ -120,6 +134,76 @@ const [voiceInterruptionReason, setVoiceInterruptionReason] = createSignal<strin
 const [voicePlaybackHealth, setVoicePlaybackHealth] = createSignal<"ok" | "recovering" | "failed">("ok");
 const [voiceIoMode, setVoiceIoMode] = createSignal<"half_duplex" | "headphone">("half_duplex");
 const [voiceTtfaMs, setVoiceTtfaMs] = createSignal<number | null>(null);
+// Wave 8: advisory partial transcript (non-authoritative) shown distinctly.
+const [voicePartialTranscript, setVoicePartialTranscript] = createSignal("");
+// Wave 8: last wake event (score) for a brief "Heard: Hey Ria" flash.
+const [voiceWakeFlash, setVoiceWakeFlash] = createSignal(false);
+// Wave 8: sidecar health surfaced from voice_v2_status.
+const [voiceSttSidecarHealthy, setVoiceSttSidecarHealthy] = createSignal<boolean | null>(null);
+const [voiceTtsSidecarHealthy, setVoiceTtsSidecarHealthy] = createSignal<boolean | null>(null);
+const [voiceSttEngine, setVoiceSttEngine] = createSignal<string>("");
+const [voiceTtsEngine, setVoiceTtsEngine] = createSignal<string>("");
+// Wave 3.2: push-to-talk active flag (key held).
+const [voicePttActive, setVoicePttActive] = createSignal(false);
+// Resolved voice mode (from voice_v2_status): push_to_talk | continuous | wake_word.
+const [voiceMode, setVoiceMode] = createSignal<string>("continuous");
+// Wave 8.4: live mic input level (0..1) for the input meter.
+const [voiceMicLevel, setVoiceMicLevel] = createSignal(0);
+// Wave 8.4: voice onboarding wizard visibility.
+const [showVoiceOnboarding, setShowVoiceOnboarding] = createSignal(false);
+function openVoiceOnboarding() {
+  void refreshVoiceStatus();
+  setShowVoiceOnboarding(true);
+}
+function closeVoiceOnboarding() {
+  setShowVoiceOnboarding(false);
+  try {
+    window.localStorage.setItem("kria_voice_onboarded", "1");
+  } catch {
+    /* ignore */
+  }
+}
+function voiceOnboardingCompleted(): boolean {
+  try {
+    return window.localStorage.getItem("kria_voice_onboarded") === "1";
+  } catch {
+    return true;
+  }
+}
+// Wave 7: structured per-turn diagnostics + aggregate voice health.
+export interface VoiceTurnRecord {
+  seq: number;
+  ended_unix_ms: number;
+  outcome: string;
+  reason: string | null;
+  failure_class: string | null;
+  stt_engine: string | null;
+  tts_engine: string | null;
+  transcript_len: number | null;
+  stt_latency_ms: number | null;
+  partial_latency_ms: number | null;
+  llm_ttft_ms: number | null;
+  tts_gen_ms: number | null;
+  playback_start_ms: number | null;
+  end_to_end_ms: number | null;
+  ttfa_budget_ms: number | null;
+  ttfa_overrun: boolean;
+}
+export interface VoiceHealthAggregate {
+  turns: number;
+  completed: number;
+  empty: number;
+  errors: number;
+  barge_ins: number;
+  timeouts: number;
+  e2e_p50_ms: number | null;
+  e2e_p95_ms: number | null;
+  ttfa_overruns: number;
+  top_failure: string | null;
+}
+const [voiceTurns, setVoiceTurns] = createSignal<VoiceTurnRecord[]>([]);
+const [voiceHealth, setVoiceHealth] = createSignal<VoiceHealthAggregate | null>(null);
+const [voiceConfigWarnings, setVoiceConfigWarnings] = createSignal<string[]>([]);
 let suppressVoiceErrorUntil = 0;
 let liveVoiceDraftMessageId: string | null = null;
 const [inputText, setInputText] = createSignal("");
@@ -210,7 +294,17 @@ function persistTelegramBotInfo(info: TelegramBotInfo | null) {
 
 // Orchestrator swap state
 const [isSwapping, setIsSwapping] = createSignal(false);
+// G10: the exact, action-specific banner text for the current swap (e.g. "Freeing GPU
+// memory…"). Replaces the generic "Optimizing GPU layers" string. null when not swapping.
+const [swapBanner, setSwapBanner] = createSignal<string | null>(null);
 const [degradationLevel, setDegradationLevel] = createSignal<string | null>(null);
+// HRA (Hardware & Resource Authority) status — shadow-mode telemetry from the backend
+// (`resource:hra_status`). Null until the authority reports. Used by the Resource Dashboard /
+// Diagnostics views. Advisory only while HRA runs in shadow.
+const [hraStatus, setHraStatus] = createSignal<Record<string, unknown> | null>(null);
+// HRA full diagnostics bundle (`resource:hra_diagnostics` + `get_hra_diagnostics`). Devices,
+// telemetry freshness, recovered crash leases, SLA. Null until first publish.
+const [hraDiagnostics, setHraDiagnostics] = createSignal<Record<string, unknown> | null>(null);
 // Image generation progress (null = no active generation)
 const [imageGenProgress, setImageGenProgress] = createSignal<number | null>(null);
 const [imageGenStage, setImageGenStage] = createSignal<string | null>(null);
@@ -1956,6 +2050,72 @@ async function replayInteractionDecisions() {
   return invoke<{ events: unknown[]; metrics: DecisionMetrics }>("replay_interaction_decisions");
 }
 
+async function refreshVoiceStatus() {
+  // Wave 8: pull resolved engines + sidecar health from the backend so the
+  // overlay reflects runtime truth (Req 8.4 / 9.3).
+  try {
+    const status = await invoke<any>("voice_v2_status");
+    setVoiceSttEngine(String(status?.stt_engine ?? ""));
+    setVoiceTtsEngine(String(status?.tts_engine ?? ""));
+    if (typeof status?.mode === "string") setVoiceMode(status.mode);
+    setVoiceSttSidecarHealthy(
+      typeof status?.stt_sidecar?.healthy === "boolean" ? status.stt_sidecar.healthy : null
+    );
+    setVoiceTtsSidecarHealthy(
+      typeof status?.tts_sidecar?.healthy === "boolean" ? status.tts_sidecar.healthy : null
+    );
+    setVoiceConfigWarnings(Array.isArray(status?.config_warnings) ? status.config_warnings : []);
+  } catch (e) {
+    // Non-fatal; leave health as unknown.
+    console.debug("voice_v2_status unavailable:", e);
+  }
+}
+
+async function refreshVoiceTurnDiagnostics() {
+  try {
+    const res = await invoke<{ turns: VoiceTurnRecord[]; aggregate: VoiceHealthAggregate }>(
+      "voice_turn_diagnostics",
+      { limit: 20 }
+    );
+    setVoiceTurns(res?.turns ?? []);
+    setVoiceHealth(res?.aggregate ?? null);
+  } catch (e) {
+    console.debug("voice_turn_diagnostics unavailable:", e);
+  }
+}
+
+// Wave 3.2: true hold-to-talk. The frontend binds keydown/keyup of the
+// configured PTT key (see VoiceOverlay/ChatView) and calls these. Press starts
+// a voice session (one PTT turn); release signals the backend to finalize the
+// current capture immediately rather than waiting for VAD silence.
+async function voicePttPress() {
+  if (voicePttActive()) return;
+  setVoicePttActive(true);
+  try {
+    if (!voiceActive()) {
+      await invoke("start_voice");
+      setVoiceActive(true);
+      setVoiceState("listening");
+      void refreshVoiceStatus();
+    }
+  } catch (e) {
+    console.error("PTT press failed:", e);
+    setVoicePttActive(false);
+  }
+}
+
+async function voicePttRelease() {
+  if (!voicePttActive()) return;
+  setVoicePttActive(false);
+  try {
+    // Ask the backend to end the current utterance now (finalize → transcribe).
+    await invoke("voice_ptt_release");
+  } catch (e) {
+    // Backend may not expose the command in older builds; fall back to stop.
+    console.debug("voice_ptt_release unavailable, ignoring:", e);
+  }
+}
+
 async function toggleVoice() {
   if (voiceActive()) {
     suppressVoiceErrorUntil = Date.now() + 2500;
@@ -1971,6 +2131,8 @@ async function toggleVoice() {
       await invoke("start_voice");
       setVoiceActive(true);
       setVoiceState("listening");
+      // Wave 8: refresh sidecar health/engine info for the overlay.
+      void refreshVoiceStatus();
     } catch (e: any) {
       console.error("Failed to start voice:", e);
       const errText = typeof e === "string" ? e : e?.message ?? "Unknown error starting voice";
@@ -4195,17 +4357,44 @@ function initListeners() {
   });
 
   // Voice pipeline events
-  listen<{ state: "idle" | "listening" | "processing" | "speaking" | "busy" }>("voice:state", (event) => {
-    setVoiceState(event.payload.state);
-    setVoiceActive(event.payload.state !== "idle");
-    if (event.payload.state === "idle") {
+  listen<{ state: VoiceUiState }>("voice:state", (event) => {
+    const st = event.payload.state;
+    setVoiceState(st);
+    setVoiceActive(st !== "idle");
+    if (st === "idle") {
       setVoiceLiveTranscript("");
+      setVoicePartialTranscript("");
       setVoiceLiveConfidence(null);
       setVoiceLiveStability(null);
+      setVoiceMicLevel(0);
       liveVoiceDraftMessageId = null;
-    } else if (event.payload.state === "listening") {
+    } else if (st === "listening" || st === "wake_listening") {
       lastPartialSeq = 0;
+      // New listen window: clear any stale advisory partial.
+      setVoicePartialTranscript("");
     }
+  });
+
+  // Wave 8: dedicated wake event — brief "Heard: Hey Ria" flash.
+  listen<{ score?: number; source?: string }>("voice:wake", () => {
+    setVoiceWakeFlash(true);
+    setTimeout(() => setVoiceWakeFlash(false), 1200);
+  });
+
+  // Wave 9 warm path: optional wake daemon delivered an external wake →
+  // start a voice session if not already active.
+  listen<{ score?: number; source?: string }>("voice:external_wake", () => {
+    setVoiceWakeFlash(true);
+    setTimeout(() => setVoiceWakeFlash(false), 1200);
+    if (!voiceActive()) {
+      void toggleVoice();
+    }
+  });
+
+  // Wave 8.4: live mic input level meter.
+  listen<{ level?: number }>("voice:mic_level", (event) => {
+    const lvl = typeof event.payload.level === "number" ? event.payload.level : 0;
+    setVoiceMicLevel(Math.max(0, Math.min(1, lvl)));
   });
 
   listen<{ message?: string; entrypoint?: string; state?: string }>("voice:busy", (event) => {
@@ -4232,58 +4421,50 @@ function initListeners() {
     if (now - lastPartialAt < 40) return;
     if (seq > 0) lastPartialSeq = seq;
     lastPartialAt = now;
+    // Wave 8: partials are ADVISORY (non-authoritative). Keep them in a
+    // separate signal so the UI can render them distinctly (dimmed/italic)
+    // and never confuse them with the committed transcript.
+    setVoicePartialTranscript(event.payload.text);
     setVoiceLiveTranscript(event.payload.text);
     setVoiceLiveConfidence(event.payload.confidence ?? null);
     setVoiceLiveLanguage(event.payload.language ?? "auto");
     setVoiceLiveStability(event.payload.stability ?? null);
-
-    // Temporary debug UX: mirror live STT partials into chat immediately.
-    // This makes it obvious whether STT is working when LLM/TTS is slow.
-    const partialText = (event.payload.text ?? "").trim();
-    if (partialText.length > 0) {
-      const content = `🎤 (live) ${partialText}`;
-      if (!liveVoiceDraftMessageId) {
-        const draftMsg: Message = {
-          id: crypto.randomUUID(),
-          role: "user",
-          content,
-          timestamp: Date.now(),
-        };
-        liveVoiceDraftMessageId = draftMsg.id;
-        appendScopedMessage("assistant", draftMsg);
-      } else {
-        updateScopedMessages("assistant", (prev) =>
-          prev.map((m) =>
-            m.id === liveVoiceDraftMessageId ? { ...m, content, timestamp: Date.now() } : m
-          )
-        );
-      }
-    }
+    // Partials are shown ONLY in the voice overlay (advisory), never mirrored
+    // into the chat transcript — keeps the conversation clean (Issue 3).
   });
 
   listen<{ text: string; confidence?: number; language?: string; stability?: number }>("voice:transcript", (event) => {
     lastPartialSeq = 0;
     setVoiceLiveTranscript("");
+    setVoicePartialTranscript("");
     setVoiceLiveConfidence(event.payload.confidence ?? null);
     setVoiceLiveLanguage(event.payload.language ?? "auto");
     setVoiceLiveStability(event.payload.stability ?? null);
-    const finalContent = `🎤 ${event.payload.text}`;
-    if (liveVoiceDraftMessageId) {
-      updateScopedMessages("assistant", (prev) =>
-        prev.map((m) =>
-          m.id === liveVoiceDraftMessageId ? { ...m, content: finalContent, timestamp: Date.now() } : m
-        )
-      );
-      liveVoiceDraftMessageId = null;
-    } else {
+    liveVoiceDraftMessageId = null;
+    // The committed user utterance is appended as a normal user chat message.
+    const text = (event.payload.text ?? "").trim();
+    if (text.length > 0) {
       const userMsg: Message = {
         id: crypto.randomUUID(),
         role: "user",
-        content: finalContent,
+        content: text,
         timestamp: Date.now(),
       };
       appendScopedMessage("assistant", userMsg);
     }
+  });
+
+  // Voice assistant reply (spoken via TTS) shown as a normal chat message.
+  listen<{ text?: string; turn?: number }>("voice:assistant_text", (event) => {
+    const text = (event.payload.text ?? "").trim();
+    if (text.length === 0) return;
+    const reply: Message = {
+      id: crypto.randomUUID(),
+      role: "assistant",
+      content: text,
+      timestamp: Date.now(),
+    };
+    appendScopedMessage("assistant", reply);
   });
 
   listen<{ error: string }>("voice:error", (event) => {
@@ -4295,6 +4476,12 @@ function initListeners() {
       return;
     }
     console.error("Voice error:", event.payload.error);
+    // Wave 8: surface a transient Error state so the overlay shows recovery.
+    setVoiceState("error");
+    setVoicePartialTranscript("");
+    setTimeout(() => {
+      if (voiceState() === "error" && voiceActive()) setVoiceState("listening");
+    }, 1500);
     const errMsg: Message = {
       id: crypto.randomUUID(),
       role: "system",
@@ -4306,8 +4493,13 @@ function initListeners() {
 
   listen<{ reason?: string }>("voice:interruption", (event) => {
     setVoiceInterruptionReason(event.payload.reason ?? "interrupted");
-    setVoiceState("listening");
-    setTimeout(() => setVoiceInterruptionReason(null), 1200);
+    // Wave 8: distinct Interrupt state, then back to listening.
+    setVoiceState("interrupt");
+    setVoicePartialTranscript("");
+    setTimeout(() => {
+      setVoiceInterruptionReason(null);
+      if (voiceState() === "interrupt" && voiceActive()) setVoiceState("listening");
+    }, 1200);
   });
 
   listen<{ error: string }>("voice:playback_failure", (event) => {
@@ -4346,66 +4538,80 @@ function initListeners() {
       if (typeof maybe === "number") {
         setVoiceTtfaMs(maybe);
       }
+      // Wave 7: a turn just finalised — refresh structured diagnostics.
+      void refreshVoiceTurnDiagnostics();
     }
     // Metrics / Wake / FirstAudioOut — silently consumed for now.
   });
 
-  // Extra backend breadcrumbs for diagnosing STT->LLM->TTS stalls.
+  // Backend breadcrumbs for diagnosing STT->LLM->TTS stalls. These go to the
+  // console ONLY — never into the chat transcript (Issue 3: keep chat clean).
   listen<{ stage?: string; turn?: number; [key: string]: unknown }>("voice:debug", (event) => {
     const stage = String(event.payload.stage ?? "unknown");
-    if (stage === "stt_final") {
-      const chars = Number(event.payload.text_len ?? 0);
-      const preview = String(event.payload.text_preview ?? "").trim();
-      const dbg: Message = {
-        id: crypto.randomUUID(),
-        role: "system",
-        content:
-          preview.length > 0
-            ? `🧪 Voice Debug: STT final received (${Number.isFinite(chars) ? chars : 0} chars): "${preview}"`
-            : `🧪 Voice Debug: STT final received (${Number.isFinite(chars) ? chars : 0} chars)`,
-        timestamp: Date.now(),
-      };
-      appendScopedMessage("assistant", dbg);
-      return;
-    }
-    if (
-      stage === "llm_route_start" ||
-      stage === "llm_route_ok" ||
-      stage === "llm_stream_request" ||
-      stage === "llm_first_token" ||
-      stage === "llm_stream_done" ||
-      stage === "llm_route_timeout" ||
-      stage === "llm_stream_start_timeout" ||
-      stage === "llm_stream_token_timeout" ||
-      stage === "llm_stream_error"
-    ) {
-      const dbg: Message = {
-        id: crypto.randomUUID(),
-        role: "system",
-        content: `🧪 Voice Debug: ${stage} (turn ${String(event.payload.turn ?? "?")})`,
-        timestamp: Date.now(),
-      };
-      appendScopedMessage("assistant", dbg);
-    }
+    console.debug("[voice:debug]", stage, event.payload);
   });
 
-  // Orchestrator events — track GPU swap state
-  listen<{ from_ngl: number; to_ngl: number; emergency: boolean }>(
+  // Orchestrator events — track GPU swap state (C3: full state machine —
+  // started → {completed | failed | timeout} → idle; the overlay must never get stuck).
+  let swapTimeoutId: ReturnType<typeof setTimeout> | undefined;
+  const clearSwap = () => {
+    if (swapTimeoutId !== undefined) {
+      clearTimeout(swapTimeoutId);
+      swapTimeoutId = undefined;
+    }
+    setIsSwapping(false);
+    setSwapBanner(null);
+  };
+  listen<{ from_ngl: number; to_ngl: number; emergency: boolean; banner?: string }>(
     "orchestrator:swap_started",
-    () => {
+    (event) => {
       setIsSwapping(true);
+      // G10: show the exact action the backend reported, never a generic "Optimizing GPU layers".
+      setSwapBanner(event.payload?.banner ?? "Adjusting GPU memory…");
+      // Safety timeout: if no terminal event arrives (lost/missing event), auto-clear so the
+      // overlay can never strand the UI. Generous to not clip a long swap.
+      if (swapTimeoutId !== undefined) clearTimeout(swapTimeoutId);
+      swapTimeoutId = setTimeout(() => {
+        setIsSwapping(false);
+        setSwapBanner(null);
+      }, 120_000);
     }
   );
 
   listen<{ new_ngl: number; new_context: number; duration_ms: number }>(
     "orchestrator:swap_completed",
     () => {
-      setIsSwapping(false);
+      clearSwap();
     }
   );
 
+  // C3: a failed GPU swap must clear the overlay (backend recovers to CPU).
+  listen<{ reason: string }>("orchestrator:swap_failed", () => {
+    clearSwap();
+  });
+
+  // C3: orchestrator-level error also clears any in-flight swap overlay.
+  listen<{ error: string }>("orchestrator:error", () => {
+    clearSwap();
+  });
+
   listen<{ level: string }>("orchestrator:degradation_changed", (event) => {
     setDegradationLevel(event.payload.level);
+  });
+
+  // HRA shadow-mode status stream (backend Resource Authority). Additive; advisory only.
+  listen<Record<string, unknown>>("resource:hra_status", (event) => {
+    if (event.payload && typeof event.payload === "object") {
+      setHraStatus(event.payload);
+    }
+  });
+
+  // HRA full diagnostics bundle (devices, telemetry freshness, recovered crash leases, SLA).
+  // Feeds the Resource Dashboard's Recovery/Diagnostics/Overview detail views with live data.
+  listen<Record<string, unknown>>("resource:hra_diagnostics", (event) => {
+    if (event.payload && typeof event.payload === "object") {
+      setHraDiagnostics(event.payload);
+    }
   });
 
   listen("orchestrator:ready", () => {
@@ -4618,6 +4824,7 @@ loadSettings();
 void loadMemoryEnabled();
 void loadTelegramConfig();
 loadAudioDevices();
+void refreshVoiceStatus();
 void loadColabStatus();
 void loadIroncladStatus();
 void loadIroncladForensics();
@@ -4663,6 +4870,22 @@ export const appStore = {
   voicePlaybackHealth,
   voiceIoMode,
   voiceTtfaMs,
+  voicePartialTranscript,
+  voiceWakeFlash,
+  voiceSttSidecarHealthy,
+  voiceTtsSidecarHealthy,
+  voiceSttEngine,
+  voiceTtsEngine,
+  voicePttActive,
+  voiceMode,
+  voiceMicLevel,
+  showVoiceOnboarding,
+  openVoiceOnboarding,
+  closeVoiceOnboarding,
+  voiceOnboardingCompleted,
+  voiceTurns,
+  voiceHealth,
+  voiceConfigWarnings,
   inputText,
   setInputText,
   currentEnvironment,
@@ -4700,6 +4923,10 @@ export const appStore = {
   cancelInteractionDecision,
   replayInteractionDecisions,
   toggleVoice,
+  voicePttPress,
+  voicePttRelease,
+  refreshVoiceStatus,
+  refreshVoiceTurnDiagnostics,
   loadSessions,
   createSession,
   switchSession,
@@ -4805,7 +5032,10 @@ export const appStore = {
   submitToolChoice,
   dismissToolChoice,
   isSwapping,
+  swapBanner,
   degradationLevel,
+  hraStatus,
+  hraDiagnostics,
   imageGenProgress,
   imageGenStage,
   vramBlackoutInfo,

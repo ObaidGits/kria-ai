@@ -66,8 +66,21 @@ pub fn normalize_for_tts(text: &str) -> String {
     // 8. Replace em-dash / en-dash with a natural pause
     let text = text.replace(['—', '–'], ", ");
 
-    // 9. Strip leftover bare special chars that espeak would vocalise literally
-    let text = Regex::new(r"[*_#~|\\]").map_or_else(
+    // 9. Strip leftover bare special chars that espeak would vocalise literally.
+    //    Includes backticks and bracket/brace/angle scaffolding so unbalanced
+    //    code fences (split across streamed sentences) and tool-call/JSON
+    //    fragments are never spoken (Req 7.1, 7.3).
+    let text = Regex::new(r"[*_#~|\\`{}\[\]<>]").map_or_else(
+        |_| text.clone(),
+        |re| re.replace_all(&text, "").into_owned(),
+    );
+
+    // 9b. Strip emoji / pictographs / symbol ranges that espeak mispronounces
+    //     or vocalises as their unicode name.
+    let text = Regex::new(
+        r"[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE0F}\u{200D}]",
+    )
+    .map_or_else(
         |_| text.clone(),
         |re| re.replace_all(&text, "").into_owned(),
     );
@@ -129,7 +142,7 @@ impl TextToSpeech {
         let clean = normalize_for_tts(text);
         let output_path = std::env::temp_dir().join("kria_tts_output.wav");
 
-        let lease_guard = self.acquire_speech_lease("speech_tts_synthesize")?;
+        let lease_guard = self.acquire_speech_lease("speech_tts_synthesize").await?;
         let result: anyhow::Result<PathBuf> = if let Some(ref binary) = self.binary_path {
             let mut child = tokio::process::Command::new(binary)
                 .args([
@@ -206,6 +219,7 @@ impl TextToSpeech {
         &self.model_path
     }
 
+    #[allow(dead_code)] // retained for diagnostics; HRA bypass now handles lease errors gracefully
     fn map_gpu_lease_error(error: GpuLeaseError) -> anyhow::Error {
         let hint = match &error {
             GpuLeaseError::Busy { owner } => {
@@ -221,19 +235,30 @@ impl TextToSpeech {
         anyhow::anyhow!("speech GPU lease unavailable: {error}. {hint}")
     }
 
-    fn acquire_speech_lease(&self, turn_label: &str) -> anyhow::Result<Option<GpuLeaseGuard>> {
+    async fn acquire_speech_lease(&self, turn_label: &str) -> anyhow::Result<Option<GpuLeaseGuard>> {
         let Some(gpu_lease) = &self.gpu_lease else {
             return Ok(None);
         };
 
-        gpu_lease
-            .acquire_guard(
+        // HRA cutover: route through the authority when enforcing (shadow = legacy, unchanged).
+        // TTS is realtime-voice class. On HRA denial, fall back to no-lease (CPU synth) instead of
+        // hard-failing — speech must stay responsive.
+        match gpu_lease
+            .acquire_guard_gated(
                 GpuOwner::Speech,
                 turn_label,
                 Some(std::time::Duration::from_secs(120)),
+                700,
             )
-            .map(Some)
-            .map_err(Self::map_gpu_lease_error)
+            .await
+        {
+            Ok(guard) => Ok(Some(guard)),
+            Err(GpuLeaseError::Busy { owner }) => {
+                tracing::info!(?owner, "speech TTS: GPU admission denied by HRA; synthesizing without lease");
+                Ok(None)
+            }
+            Err(other) => Err(Self::map_gpu_lease_error(other)),
+        }
     }
 
     fn reconcile_speech_lease_idle(&self) {
@@ -299,6 +324,38 @@ mod tests {
         let out = normalize_for_tts(input);
         assert!(!out.contains("```"), "code fence should be removed");
         assert!(out.contains("Done."), "text after fence should remain");
+    }
+
+    #[test]
+    fn strips_unbalanced_backtick_fragment() {
+        // A streamed sentence may carry a lone opening fence with no closer.
+        let out = normalize_for_tts("Let me run ```bash now");
+        assert!(!out.contains('`'), "stray backticks must be removed: {out}");
+        assert!(out.contains("Let me run"));
+    }
+
+    #[test]
+    fn strips_tool_call_json_scaffolding() {
+        let out = normalize_for_tts("{\"name\": \"get_weather\", \"arguments\": [1, 2]}");
+        assert!(
+            !out.contains('{') && !out.contains('}'),
+            "braces removed: {out}"
+        );
+        assert!(
+            !out.contains('[') && !out.contains(']'),
+            "brackets removed: {out}"
+        );
+    }
+
+    #[test]
+    fn strips_emoji() {
+        let out = normalize_for_tts("All done 🎤 ✅ 🚀 — ready");
+        assert!(
+            !out.chars().any(|c| c as u32 >= 0x1F000),
+            "emoji must be removed: {out}"
+        );
+        assert!(out.contains("All done"));
+        assert!(out.contains("ready"));
     }
 
     #[test]

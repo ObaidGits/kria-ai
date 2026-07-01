@@ -188,7 +188,10 @@ async fn force_fresh_post_action_reobserve_is_distinct_from_cached_pre_action_fr
         provider.cache_consulted.load(Ordering::SeqCst),
         "default path must consult the observation cache"
     );
-    assert!(stale.cache.cache_hit, "default path served the cached frame");
+    assert!(
+        stale.cache.cache_hit,
+        "default path served the cached frame"
+    );
     assert_eq!(
         stale.active_window_label, "PreActionWindow",
         "default path returned the STALE pre-action window"
@@ -218,7 +221,10 @@ async fn force_fresh_post_action_reobserve_is_distinct_from_cached_pre_action_fr
         !provider.force_fresh_now.load(Ordering::SeqCst),
         "force-fresh signal must be reset after the observation"
     );
-    assert!(!post.cache.cache_hit, "force-fresh observe must be a fresh capture");
+    assert!(
+        !post.cache.cache_hit,
+        "force-fresh observe must be a fresh capture"
+    );
     assert_eq!(
         post.active_window_label, "PostActionWindow",
         "force-fresh observe reflects the TRUE post-action screen"

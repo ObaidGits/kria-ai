@@ -4826,10 +4826,22 @@ impl AgentLoop {
             };
         }
 
-        let free_vram_mb = crate::platform::vram::build_profiler()
-            .snapshot()
-            .await
-            .free_mb;
+        // HRA Phase A1: read free VRAM from the single telemetry hub's last published snapshot when
+        // available (no extra device context); fall back to a one-off profiler read otherwise.
+        let free_vram_mb = match crate::resource::global_telemetry_hub() {
+            Some(hub) => hub
+                .latest()
+                .gpus
+                .first()
+                .map(|g| g.free_vram_mb)
+                .unwrap_or(0),
+            None => {
+                crate::platform::vram::build_profiler()
+                    .snapshot()
+                    .await
+                    .free_mb
+            }
+        };
         let safe_cap = calculate_safe_visual_tokens(
             free_vram_mb,
             safety_margin_mb,

@@ -212,7 +212,8 @@ impl TurnBudget {
     /// The re-observe cap invariant ceiling for the configured `max_steps`
     /// (Requirement 19.4: default ≤ max_steps + 4).
     pub fn reobserve_ceiling(&self) -> u32 {
-        self.max_steps.saturating_add(REOBSERVE_SLACK_OVER_MAX_STEPS)
+        self.max_steps
+            .saturating_add(REOBSERVE_SLACK_OVER_MAX_STEPS)
     }
 
     /// Effective re-observe cap, never exceeding the 19.4 ceiling even if a
@@ -232,9 +233,15 @@ impl TurnBudget {
             ("turn_watchdog_ms", self.turn_watchdog_ms),
             ("step_resolve_ms", self.step_resolve_ms),
             ("step_verify_ms", self.step_verify_ms),
-            ("single_primitive_budget_ms", self.single_primitive_budget_ms),
+            (
+                "single_primitive_budget_ms",
+                self.single_primitive_budget_ms,
+            ),
             ("max_reobserve", self.max_reobserve as u64),
-            ("max_verification_failures", self.max_verification_failures as u64),
+            (
+                "max_verification_failures",
+                self.max_verification_failures as u64,
+            ),
             ("flapping_threshold", self.flapping_threshold as u64),
         ];
         for (field, value) in checks {
@@ -753,12 +760,16 @@ mod tests {
     #[test]
     fn effective_max_reobserve_is_capped_at_ceiling() {
         // Configured above the 19.4 ceiling → clamped to max_steps + 4.
-        let budget = TurnBudget::default().with_max_steps(8).with_max_reobserve(100);
+        let budget = TurnBudget::default()
+            .with_max_steps(8)
+            .with_max_reobserve(100);
         assert_eq!(budget.reobserve_ceiling(), 12);
         assert_eq!(budget.effective_max_reobserve(), 12);
 
         // Configured below the ceiling → preserved.
-        let budget = TurnBudget::default().with_max_steps(8).with_max_reobserve(5);
+        let budget = TurnBudget::default()
+            .with_max_steps(8)
+            .with_max_reobserve(5);
         assert_eq!(budget.effective_max_reobserve(), 5);
     }
 
@@ -902,10 +913,8 @@ mod tests {
 
     #[test]
     fn runtime_guard_default_on_threads_budget_overrides() {
-        let guards = GuiRuntimeGuardConfig::from_env_lookup_default_on(lookup_from(&[(
-            ENV_MAX_STEPS,
-            "3",
-        )]));
+        let guards =
+            GuiRuntimeGuardConfig::from_env_lookup_default_on(lookup_from(&[(ENV_MAX_STEPS, "3")]));
         assert!(guards.is_enforced());
         assert_eq!(guards.budget.max_steps, 3);
     }
@@ -990,8 +999,11 @@ mod tests {
     #[test]
     fn tracker_aborts_on_max_reobserve() {
         // effective cap = min(max_reobserve, max_steps + 4) = 2.
-        let mut tracker =
-            tracker_on(TurnBudget::default().with_max_steps(8).with_max_reobserve(2));
+        let mut tracker = tracker_on(
+            TurnBudget::default()
+                .with_max_steps(8)
+                .with_max_reobserve(2),
+        );
         tracker.note_reobserve();
         assert_eq!(tracker.evaluate_at(0), None);
         tracker.note_reobserve();
@@ -1025,7 +1037,11 @@ mod tests {
         let mut tracker = tracker_on(TurnBudget::default().with_flapping_threshold(3));
         tracker.note_screen_hash(Some("screen-A"));
         tracker.note_screen_hash(Some("screen-A"));
-        assert_eq!(tracker.evaluate_at(0), None, "two repeats is not yet flapping");
+        assert_eq!(
+            tracker.evaluate_at(0),
+            None,
+            "two repeats is not yet flapping"
+        );
         tracker.note_screen_hash(Some("screen-A"));
         let abort = tracker.evaluate_at(0).expect("flapping abort");
         assert_eq!(abort.cause, abort_cause::FLAPPING);
@@ -1078,7 +1094,8 @@ mod tests {
         assert!(!GuiReobserveConfig::from_env_lookup(lookup_from(&[])).is_enabled());
         // Non-truthy values stay OFF.
         for raw in ["0", "false", "no", "off", "", "maybe"] {
-            let cfg = GuiReobserveConfig::from_env_lookup(lookup_from(&[(REOBSERVE_ENV_FLAG, raw)]));
+            let cfg =
+                GuiReobserveConfig::from_env_lookup(lookup_from(&[(REOBSERVE_ENV_FLAG, raw)]));
             assert!(!cfg.is_enabled(), "flag {raw:?} must keep re-observe OFF");
         }
     }
@@ -1086,7 +1103,8 @@ mod tests {
     #[test]
     fn reobserve_flag_on_when_truthy_env() {
         for raw in ["1", "true", "YES", "On", " on "] {
-            let cfg = GuiReobserveConfig::from_env_lookup(lookup_from(&[(REOBSERVE_ENV_FLAG, raw)]));
+            let cfg =
+                GuiReobserveConfig::from_env_lookup(lookup_from(&[(REOBSERVE_ENV_FLAG, raw)]));
             assert!(cfg.is_enabled(), "flag {raw:?} must enable re-observe");
         }
     }
@@ -1125,8 +1143,11 @@ mod tests {
     fn tracker_exposes_reobserve_count_and_cap() {
         // Re-observe accounting is surfaced so the Task 3.1 hook can report the
         // cap binding; the effective cap honors the 19.4 ceiling.
-        let mut tracker =
-            tracker_on(TurnBudget::default().with_max_steps(8).with_max_reobserve(100));
+        let mut tracker = tracker_on(
+            TurnBudget::default()
+                .with_max_steps(8)
+                .with_max_reobserve(100),
+        );
         assert_eq!(tracker.reobserve_count(), 0);
         assert_eq!(tracker.effective_max_reobserve(), 12); // min(100, 8 + 4)
         tracker.note_reobserve();

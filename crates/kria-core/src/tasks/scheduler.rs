@@ -81,7 +81,11 @@ mod tests {
         );
 
         tokio::time::sleep(Duration::from_millis(150)).await;
-        assert_eq!(count.load(Ordering::SeqCst), 1, "overdue reminder fires once");
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            1,
+            "overdue reminder fires once"
+        );
         assert!(store.due_reminders(Utc::now()).unwrap().is_empty());
     }
 }

@@ -385,6 +385,16 @@ impl SharedToolIndex {
         })
     }
 
+    /// Create an EMPTY shared index immediately, with no embedding build (C6 — startup
+    /// optimization). Pair with [`rebuild`](Self::rebuild) on a background task to populate it
+    /// without blocking startup for ~seconds. While empty, `match_*` return `None`, so tool routing
+    /// degrades gracefully to the lexical/ONNX path until the build completes.
+    pub fn empty() -> Arc<Self> {
+        Arc::new(Self {
+            index: RwLock::new(ToolEmbeddingIndex::empty()),
+        })
+    }
+
     /// Match a query embedding against tools.
     pub async fn match_tool(
         &self,

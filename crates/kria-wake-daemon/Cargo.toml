@@ -1,0 +1,21 @@
+[package]
+name = "kria-wake-daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "KRIA optional wake daemon — unprivileged always-on VAD + wake-word detection (Voice System v3, Wave 9). Runs NO STT/TTS/LLM; on wake it signals the main app via IPC."
+
+[[bin]]
+name = "kria-wake-daemon"
+path = "src/main.rs"
+
+[dependencies]
+kria-core = { path = "../kria-core" }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+libc = { workspace = true }

@@ -172,10 +172,8 @@ mod tests {
     #[test]
     fn falsey_flag_yields_real_session() {
         for raw in ["0", "false", "no", "off", ""] {
-            let env = GuiExecutionEnvironment::from_env_lookup(lookup_from(&[(
-                SUBSTRATE_ENV_FLAG,
-                raw,
-            )]));
+            let env =
+                GuiExecutionEnvironment::from_env_lookup(lookup_from(&[(SUBSTRATE_ENV_FLAG, raw)]));
             assert_eq!(
                 env,
                 GuiExecutionEnvironment::RealSession,
@@ -187,11 +185,12 @@ mod tests {
     #[test]
     fn truthy_flag_yields_substrate_that_allows_auto_approval() {
         for raw in ["1", "true", "YES", "On"] {
-            let env = GuiExecutionEnvironment::from_env_lookup(lookup_from(&[(
-                SUBSTRATE_ENV_FLAG,
-                raw,
-            )]));
-            assert!(env.is_test_substrate(), "flag {raw:?} must enable substrate");
+            let env =
+                GuiExecutionEnvironment::from_env_lookup(lookup_from(&[(SUBSTRATE_ENV_FLAG, raw)]));
+            assert!(
+                env.is_test_substrate(),
+                "flag {raw:?} must enable substrate"
+            );
             assert!(env.allows_auto_approval());
             assert_eq!(env.label(), "test_substrate");
         }
@@ -212,7 +211,10 @@ mod tests {
                     scratch_dir,
                     Some(PathBuf::from("/tmp/kria-substrate/scratch"))
                 );
-                assert!(restore_clipboard, "clipboard restore defaults on in substrate");
+                assert!(
+                    restore_clipboard,
+                    "clipboard restore defaults on in substrate"
+                );
             }
             other => panic!("expected substrate, got {other:?}"),
         }

@@ -146,24 +146,30 @@ impl ToolHandler for ReminderSet {
         // Accept: `when` (natural "tomorrow 5pm" / ISO), or `fire_at` (ISO),
         // or `fire_in_minutes`.
         let now = Utc::now();
-        let fire_at = if let Some(s) = params["when"].as_str().or_else(|| params["fire_at"].as_str())
+        let fire_at = if let Some(s) = params["when"]
+            .as_str()
+            .or_else(|| params["fire_at"].as_str())
         {
             match crate::tasks::nl_time::parse(s, now) {
                 Some(dt) => dt,
-                None => {
-                    return ToolResult::err(format!(
-                        "couldn't understand time '{s}'. Try ISO 8601, or English like 'tomorrow 5pm'."
-                    ))
-                }
+                None => return ToolResult::err(format!(
+                    "couldn't understand time '{s}'. Try ISO 8601, or English like 'tomorrow 5pm'."
+                )),
             }
         } else {
             let minutes = params["fire_in_minutes"].as_f64().unwrap_or(5.0).max(0.0);
             now + chrono::Duration::milliseconds((minutes * 60_000.0) as i64)
         };
         let task_id = params["task_id"].as_i64();
-        let recurrence = params["recurrence"].as_str().filter(|s| !s.trim().is_empty());
+        let recurrence = params["recurrence"]
+            .as_str()
+            .filter(|s| !s.trim().is_empty());
 
-        match self.0 .0.add_reminder(&message, fire_at, task_id, recurrence) {
+        match self
+            .0
+             .0
+            .add_reminder(&message, fire_at, task_id, recurrence)
+        {
             Ok(reminder) => ToolResult::ok(serde_json::json!({
                 "scheduled": true,
                 "durable": true,
@@ -265,10 +271,14 @@ impl ToolHandler for PlanMyDay {
         let day = now.date_naive();
         let parse_hm = |hm: &str, fallback_h: u32| {
             let mut it = hm.split(':');
-            let h = it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(fallback_h);
+            let h = it
+                .next()
+                .and_then(|s| s.parse::<u32>().ok())
+                .unwrap_or(fallback_h);
             let m = it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
-            day.and_hms_opt(h.min(23), m.min(59), 0)
-                .map(|nd| chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(nd, chrono::Utc))
+            day.and_hms_opt(h.min(23), m.min(59), 0).map(|nd| {
+                chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(nd, chrono::Utc)
+            })
         };
         let win_start = match parse_hm(work_start, 9) {
             Some(d) => d.max(now),
@@ -287,7 +297,11 @@ impl ToolHandler for PlanMyDay {
                     b["start"].as_str().and_then(parse_rfc3339),
                     b["end"].as_str().and_then(parse_rfc3339),
                 ) {
-                    busy.push(BusyInterval { start: s, end: e, title: None });
+                    busy.push(BusyInterval {
+                        start: s,
+                        end: e,
+                        title: None,
+                    });
                 }
             }
         }

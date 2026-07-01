@@ -136,10 +136,7 @@ impl ToolHandler for OpenApplication {
                     } else {
                         format!(" Did you mean: {}?", suggestions.join(", "))
                     };
-                    return ToolResult::err(format!(
-                        "'{}' is not installed.{}",
-                        name, hint
-                    ));
+                    return ToolResult::err(format!("'{}' is not installed.{}", name, hint));
                 }
             },
         };

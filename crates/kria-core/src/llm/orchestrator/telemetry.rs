@@ -413,20 +413,6 @@ impl GpuTelemetry for RamTelemetry {
     }
 }
 
-/// Create the best available CUDA telemetry source using legacy trait path.
-/// **Deprecated**: prefer `create_telemetry_actor` for production use.
-pub fn create_cuda_telemetry() -> Arc<dyn GpuTelemetry> {
-    #[cfg(feature = "nvidia")]
-    {
-        // NvmlTelemetry is no longer exposed; WatchTelemetry via actor is
-        // the correct production path. This legacy factory uses CliTelemetry.
-    }
+// (HRA Task 17) Removed deprecated `create_cuda_telemetry` legacy factory — the production path is
+// `create_telemetry_actor` (WatchTelemetry via the TelemetryActor). It had no call sites.
 
-    if CliTelemetry::try_new().is_some() {
-        tracing::info!("telemetry: (legacy) using nvidia-smi CLI");
-        return Arc::new(CliTelemetry);
-    }
-
-    tracing::warn!("telemetry: (legacy) no GPU telemetry available, falling back to RAM");
-    Arc::new(RamTelemetry::new())
-}

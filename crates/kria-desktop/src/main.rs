@@ -54,6 +54,10 @@ fn main() {
             // Initialize tray icon
             tray::create_tray(app.handle())?;
 
+            // Wave 9 warm path: bind the wake-daemon IPC socket so an optional
+            // running kria-wake-daemon can start a session without relaunch.
+            commands::wake_listener::spawn(app.handle().clone());
+
             // Initialize kria-core runtime in background
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -109,6 +113,7 @@ fn main() {
             commands::voice::get_voice_status,
             commands::voice::voice_v2_speak,
             commands::voice::voice_v2_abort,
+            commands::voice::voice_ptt_release,
             commands::image_chat::send_image_message,
             commands::document_chat::send_document_message,
             commands::mcp::list_mcp_servers,
@@ -260,6 +265,7 @@ fn main() {
             commands::google_workspace::connect_google_workspace,
             commands::google_workspace::disconnect_google_workspace,
             commands::runtime_status::get_orchestrator_status,
+            commands::runtime_status::get_hra_diagnostics,
             commands::runtime_status::register_new_target,
             commands::runtime_status::delete_target,
             commands::runtime_status::update_target,
@@ -288,6 +294,7 @@ fn main() {
             commands::provisioning::get_provisioning_diagnostics,
             commands::provisioning::get_hardware_profile,
             commands::voice_diagnostics::voice_v2_status,
+            commands::voice_diagnostics::voice_turn_diagnostics,
             commands::voice_diagnostics::voice_transcribe_audio_file,
             commands::voice_diagnostics::voice_transcribe_uploaded_audio,
             commands::openclaw::clawhub_list_skills,

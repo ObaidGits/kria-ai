@@ -470,12 +470,9 @@ impl LlmBackend for CloudBackend {
         if let Some(mode) = self.cached_structured_mode() {
             return mode;
         }
-        let probe = tokio::time::timeout(
-            Self::PROBE_BUDGET,
-            self.probe_structured_output_mode(),
-        )
-        .await
-        .unwrap_or(StructuredOutputMode::None);
+        let probe = tokio::time::timeout(Self::PROBE_BUDGET, self.probe_structured_output_mode())
+            .await
+            .unwrap_or(StructuredOutputMode::None);
 
         if probe.is_structured() {
             // Cache ONLY a positive detection.
@@ -801,14 +798,22 @@ impl CloudBackend {
                     }
                 });
                 let body = self.send_structured_once(&payload).await?;
-                Ok(Self::normalize_structured_response(body, &self.model_id, mode))
+                Ok(Self::normalize_structured_response(
+                    body,
+                    &self.model_id,
+                    mode,
+                ))
             }
             StructuredOutputMode::JsonObject => {
                 let wire = Self::augment_messages_for_json_object(messages, json_schema);
                 let mut payload = self.base_payload(wire, temperature, max_tokens);
                 payload["response_format"] = serde_json::json!({ "type": "json_object" });
                 let body = self.send_structured_once(&payload).await?;
-                Ok(Self::normalize_structured_response(body, &self.model_id, mode))
+                Ok(Self::normalize_structured_response(
+                    body,
+                    &self.model_id,
+                    mode,
+                ))
             }
             StructuredOutputMode::ToolCalling => {
                 let wire = Self::structured_wire_messages(messages);
@@ -826,7 +831,11 @@ impl CloudBackend {
                     "function": { "name": schema_name }
                 });
                 let body = self.send_structured_once(&payload).await?;
-                Ok(Self::normalize_structured_response(body, &self.model_id, mode))
+                Ok(Self::normalize_structured_response(
+                    body,
+                    &self.model_id,
+                    mode,
+                ))
             }
             StructuredOutputMode::None => {
                 // No honored structured method: inject schema + example into the
@@ -835,7 +844,11 @@ impl CloudBackend {
                 let wire = Self::augment_messages_for_json_object(messages, json_schema);
                 let payload = self.base_payload(wire, temperature, max_tokens);
                 let body = self.send_structured_once(&payload).await?;
-                Ok(Self::normalize_structured_response(body, &self.model_id, mode))
+                Ok(Self::normalize_structured_response(
+                    body,
+                    &self.model_id,
+                    mode,
+                ))
             }
         }
     }
@@ -1173,7 +1186,10 @@ mod structured_tests {
             backend.detect_structured_output_mode().await,
             StructuredOutputMode::JsonObject
         );
-        assert_eq!(backend.structured_output_mode(), StructuredOutputMode::JsonObject);
+        assert_eq!(
+            backend.structured_output_mode(),
+            StructuredOutputMode::JsonObject
+        );
     }
 
     #[tokio::test]

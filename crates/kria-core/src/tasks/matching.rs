@@ -89,6 +89,9 @@ mod tests {
             task(2, "deploy production server now"),
         ];
         // "finished deploy production" overlaps task 2 more
-        assert_eq!(best_match("finished deploy production", &tasks, 0.3), Some(2));
+        assert_eq!(
+            best_match("finished deploy production", &tasks, 0.3),
+            Some(2)
+        );
     }
 }

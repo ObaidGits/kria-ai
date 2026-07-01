@@ -8,7 +8,7 @@
 //!
 //! ```text
 //! voice::v2::
-//!     stt          — `trait Stt` + WhisperRsStt + SidecarStt fallback
+//!     stt          — `trait Stt` + SidecarFasterWhisperStt (default) + CLI + whisper-rs rollback
 //!     tts          — `trait Tts` + PiperRsTts + PiperCliTts fallback
 //!     sentence     — sentence splitter for streaming LLM tokens
 //!     playback     — PlaybackSink with hard-abort barge-in support
@@ -40,7 +40,9 @@ pub mod playback;
 pub mod post_edit;
 pub mod sentence;
 pub mod stt;
+pub mod stt_sidecar;
 pub mod tts;
+pub mod tts_sidecar;
 pub mod wake;
 
 pub use aec::{AecProcessor, AecSettings};
@@ -70,77 +72,120 @@ pub fn build_v2_with_cli_engines(
 ) -> (
     std::sync::Arc<VoicePipelineV2>,
     tokio::sync::watch::Receiver<VoiceSessionState>,
-    tokio::sync::mpsc::UnboundedReceiver<VoiceTelemetry>,
+    tokio::sync::broadcast::Receiver<VoiceTelemetry>,
 ) {
     use std::sync::Arc;
     let profile = crate::voice::tier::VoiceTierProfile::build(voice_cfg, hw_tier);
 
     let stt_v2: Arc<dyn Stt> = {
-        #[cfg(feature = "voice-whisper-rs")]
-        {
-            let requested = profile.stt_engine.trim().to_ascii_lowercase();
-            let wants_whisper_rs = matches!(
-                requested.as_str(),
-                "" | "auto" | "whisper-rs" | "whisper-rs-cuda" | "whisper-cuda"
+        let requested = profile.stt_engine.trim().to_ascii_lowercase();
+        // V3 Wave A: faster-whisper sidecar is the DEFAULT STT engine. It is
+        // selected for "auto" and the new explicit names. whisper-rs (and the
+        // CLI) remain selectable as an explicit rollback path until Wave 6.
+        let wants_sidecar = matches!(
+            requested.as_str(),
+            "" | "auto" | "faster-whisper" | "faster_whisper" | "fasterwhisper" | "fw" | "sidecar"
+        );
+        // whisper-rs is now opt-in (explicit), e.g. `stt_engine = "whisper-rs"`.
+        let wants_whisper_rs = matches!(
+            requested.as_str(),
+            "whisper-rs" | "whisper-rs-cuda" | "whisper-cuda" | "whisper-rs-vulkan"
+        );
+
+        if wants_sidecar {
+            // Req 3.2/3.4/6.4: partials default from config, forced off on the
+            // low (C) tier where the budget can't sustain them.
+            let enable_partials = voice_cfg.enable_partial_transcripts
+                && !matches!(profile.tier, crate::voice::tier::VoiceTier::C);
+            tracing::info!(
+                base_url = %stt_sidecar::base_url(),
+                enable_partials,
+                "voice v2 selecting faster-whisper sidecar as primary STT backend (Wave A)"
             );
-            let model_path = stt.model_path().clone();
-            if wants_whisper_rs && model_path.exists() {
-                let n_threads = std::thread::available_parallelism()
-                    .map(|n| n.get())
-                    .unwrap_or(4)
-                    .clamp(1, 8);
-                tracing::info!(
-                    model = %model_path.display(),
-                    threads = n_threads,
-                    "voice v2 selecting whisper-rs as primary STT backend"
-                );
-                Arc::new(stt::WhisperRsStt::new(
-                    model_path,
-                    n_threads,
-                    voice_cfg.language.clone(),
-                    Some(stt.clone()),
-                ))
-            } else {
-                if wants_whisper_rs {
-                    tracing::warn!(
+            Arc::new(stt::SidecarFasterWhisperStt::new(
+                voice_cfg.language.clone(),
+                Some(stt.clone()),
+                enable_partials,
+            ))
+        } else {
+            #[cfg(feature = "voice-whisper-rs")]
+            {
+                let model_path = stt.model_path().clone();
+                if wants_whisper_rs && model_path.exists() {
+                    let n_threads = std::thread::available_parallelism()
+                        .map(|n| n.get())
+                        .unwrap_or(4)
+                        .clamp(1, 8);
+                    tracing::info!(
                         model = %model_path.display(),
-                        "voice v2 whisper-rs requested but model path is missing; falling back to whisper-cli"
+                        threads = n_threads,
+                        "voice v2 selecting whisper-rs STT backend (explicit rollback)"
                     );
+                    // Req 3.2/3.4: partials default from config, forced off on the
+                    // low (C) tier where the CPU budget can't sustain them.
+                    let enable_partials = voice_cfg.enable_partial_transcripts
+                        && !matches!(profile.tier, crate::voice::tier::VoiceTier::C);
+                    Arc::new(stt::WhisperRsStt::new(
+                        model_path,
+                        n_threads,
+                        voice_cfg.language.clone(),
+                        Some(stt.clone()),
+                        enable_partials,
+                    ))
+                } else {
+                    if wants_whisper_rs {
+                        tracing::warn!(
+                            model = %model_path.display(),
+                            "voice v2 whisper-rs requested but model path is missing; falling back to whisper-cli"
+                        );
+                    }
+                    Arc::new(stt::CliWhisperStt::new(stt))
                 }
+            }
+            #[cfg(not(feature = "voice-whisper-rs"))]
+            {
+                let _ = wants_whisper_rs;
                 Arc::new(stt::CliWhisperStt::new(stt))
             }
-        }
-        #[cfg(not(feature = "voice-whisper-rs"))]
-        {
-            Arc::new(stt::CliWhisperStt::new(stt))
         }
     };
 
     let tts_v2: Arc<dyn Tts> = {
-        #[cfg(feature = "voice-piper-rs")]
-        {
-            let requested = profile.tts_engine.trim().to_ascii_lowercase();
-            let wants_piper_rs = matches!(requested.as_str(), "" | "auto" | "piper-rs");
-            let model_path = tts.model_path().clone();
-            if wants_piper_rs && model_path.exists() {
-                tracing::info!(
-                    model = %model_path.display(),
-                    "voice v2 selecting piper-rs as primary TTS backend"
-                );
-                Arc::new(tts::PiperRsTts::new(model_path))
-            } else {
-                if wants_piper_rs {
-                    tracing::warn!(
+        let requested_tts = profile.tts_engine.trim().to_ascii_lowercase();
+        // Build the Piper engine first — it is the guaranteed fallback (Req 7.4).
+        let piper_tts: Arc<dyn Tts> = {
+            #[cfg(feature = "voice-piper-rs")]
+            {
+                let wants_piper_rs =
+                    matches!(requested_tts.as_str(), "" | "auto" | "piper-rs" | "kokoro");
+                let model_path = tts.model_path().clone();
+                if wants_piper_rs && model_path.exists() {
+                    tracing::info!(
                         model = %model_path.display(),
-                        "voice v2 piper-rs requested but model path is missing; falling back to piper-cli"
+                        "voice v2 selecting piper-rs as TTS backend / fallback"
                     );
+                    Arc::new(tts::PiperRsTts::new(model_path))
+                } else {
+                    Arc::new(tts::CliPiperTts::new(tts, 22_050))
                 }
+            }
+            #[cfg(not(feature = "voice-piper-rs"))]
+            {
                 Arc::new(tts::CliPiperTts::new(tts, 22_050))
             }
-        }
-        #[cfg(not(feature = "voice-piper-rs"))]
-        {
-            Arc::new(tts::CliPiperTts::new(tts, 22_050))
+        };
+
+        // Wave 5: Kokoro is opt-in via `tts_engine = "kokoro"`. It uses the
+        // Kokoro sidecar and falls back to Piper when the sidecar/model is
+        // unavailable, so selecting it never breaks audio output.
+        if requested_tts == "kokoro" {
+            tracing::info!(
+                base_url = %tts_sidecar::base_url(),
+                "voice v2 selecting Kokoro TTS (sidecar) with Piper fallback"
+            );
+            Arc::new(tts::KokoroTts::new(piper_tts))
+        } else {
+            piper_tts
         }
     };
     let playback = PlaybackSink::new(22_050);

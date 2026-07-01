@@ -1,0 +1,15 @@
+# KRIA STT Sidecar dependencies (Voice System v3, Wave A)
+# Python 3.10+ required.
+#
+# The sidecar uses the Python standard library http.server, so no web framework
+# is needed — only the STT engine + numpy.
+
+# STT engine — faster-whisper (CTranslate2 backend). GPU INT8 small default,
+# CPU INT8 fallback. CUDA support comes from the system ctranslate2 build.
+faster-whisper>=1.0.0
+numpy>=1.24.0
+
+# Optional: torch is used ONLY to probe free VRAM for device coordination
+# (Wave A3). The sidecar runs CPU-only without it. Install the CUDA build to
+# enable GPU selection.
+# torch>=2.0.0

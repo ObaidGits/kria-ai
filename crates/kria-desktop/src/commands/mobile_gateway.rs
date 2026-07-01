@@ -304,7 +304,13 @@ pub async fn mobile_begin_pairing(
         let slot = server_slot().lock().await;
         slot.as_ref()
             .map(|h| h.bound_addr.clone())
-            .unwrap_or_else(|| format!("{}:{}", advertised_host(&bind_host(&config)), config.mobile.port))
+            .unwrap_or_else(|| {
+                format!(
+                    "{}:{}",
+                    advertised_host(&bind_host(&config)),
+                    config.mobile.port
+                )
+            })
     };
     let challenge = mgrs.device_registry.begin_pairing(&host);
     Ok(serde_json::json!({

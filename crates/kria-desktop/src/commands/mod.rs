@@ -37,6 +37,7 @@ pub(crate) mod tool_result_helpers;
 pub(crate) mod voice;
 pub(crate) mod voice_diagnostics;
 pub(crate) mod voice_runtime_helpers;
+pub(crate) mod wake_listener;
 pub(crate) mod workflow;
 
 use colab::collect_colab_tier_status;
@@ -172,6 +173,7 @@ pub use runtime::{init_runtime, shutdown_runtime};
 #[allow(unused_imports)]
 pub use runtime_status::{
     delete_target, get_ironclad_config, get_ironclad_forensics, get_ironclad_status,
+    get_hra_diagnostics,
     get_orchestrator_status, register_new_target, request_ironclad_hard_reset,
     request_ironclad_soft_reset, update_ironclad_config, update_target,
 };
@@ -193,10 +195,13 @@ pub use test_runner::{
     list_test_history, list_test_targets, read_test_report, start_test_run, stop_test_run,
 };
 #[allow(unused_imports)]
-pub use voice::{get_voice_status, start_voice, stop_voice, voice_v2_abort, voice_v2_speak};
+pub use voice::{
+    get_voice_status, start_voice, stop_voice, voice_ptt_release, voice_v2_abort, voice_v2_speak,
+};
 #[allow(unused_imports)]
 pub use voice_diagnostics::{
-    voice_transcribe_audio_file, voice_transcribe_uploaded_audio, voice_v2_status,
+    voice_transcribe_audio_file, voice_transcribe_uploaded_audio, voice_turn_diagnostics,
+    voice_v2_status,
 };
 
 use async_stream::stream;
@@ -251,7 +256,6 @@ use kria_core::memory::{
 use kria_core::platform::detect::{
     detect_hardware, get_available_package_managers, HardwareInfo, HardwareTier,
 };
-use kria_core::resource::GpuLeaseManager;
 use kria_core::safety::hitl::{ApprovalResponse, HitlGateway};
 use kria_core::safety::{AuditLogger, PolicyEngine, RiskLevel, RollbackManager};
 use kria_core::sidecar::SidecarBridge;

@@ -105,10 +105,10 @@ case "$KRIA_TIER" in
         KRIA_ACTIVE_MODEL_KEY="phi-4-mini"
         ;;
     performance)
-        KRIA_LLM_MODEL="Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf"
-        KRIA_LLM_REPO="unsloth/Qwen2.5-VL-7B-Instruct-GGUF"
-        KRIA_LLM_DISPLAY="Qwen2.5-VL-7B-Instruct"
-        KRIA_MMPROJ_FILE="mmproj-F16.gguf"
+        KRIA_LLM_MODEL="Qwen3VL-4B-Instruct-Q4_K_M.gguf"
+        KRIA_LLM_REPO="Qwen/Qwen3-VL-4B-Instruct-GGUF"
+        KRIA_LLM_DISPLAY="Qwen3-VL-4B-Instruct"
+        KRIA_MMPROJ_FILE="mmproj-Qwen3VL-4B-Instruct-F16.gguf"
         KRIA_STT_MODEL="ggml-large-v3-turbo-q5_0.bin"
         KRIA_CTX_SIZE=4096
         KRIA_MAX_TOKENS=2048
@@ -120,13 +120,13 @@ case "$KRIA_TIER" in
         KRIA_LLAMA_THREADS=$(( KRIA_CPU_THREADS < 8 ? KRIA_CPU_THREADS : 8 ))
         KRIA_WHISPER_THREADS=$(( KRIA_CPU_THREADS < 8 ? KRIA_CPU_THREADS : 8 ))
         KRIA_VISION_ENABLED=true
-        KRIA_ACTIVE_MODEL_KEY="qwen2.5-vl-7b"
+        KRIA_ACTIVE_MODEL_KEY="qwen3-vl-4b"
         ;;
     high)
-        KRIA_LLM_MODEL="Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf"
-        KRIA_LLM_REPO="unsloth/Qwen2.5-VL-7B-Instruct-GGUF"
-        KRIA_LLM_DISPLAY="Qwen2.5-VL-7B-Instruct"
-        KRIA_MMPROJ_FILE="mmproj-F16.gguf"
+        KRIA_LLM_MODEL="Qwen3VL-4B-Instruct-Q4_K_M.gguf"
+        KRIA_LLM_REPO="Qwen/Qwen3-VL-4B-Instruct-GGUF"
+        KRIA_LLM_DISPLAY="Qwen3-VL-4B-Instruct"
+        KRIA_MMPROJ_FILE="mmproj-Qwen3VL-4B-Instruct-F16.gguf"
         KRIA_STT_MODEL="ggml-large-v3-turbo-q5_0.bin"
         KRIA_CTX_SIZE=8192
         KRIA_MAX_TOKENS=4096
@@ -138,7 +138,7 @@ case "$KRIA_TIER" in
         KRIA_LLAMA_THREADS=$(( KRIA_CPU_THREADS < 12 ? KRIA_CPU_THREADS : 12 ))
         KRIA_WHISPER_THREADS=$(( KRIA_CPU_THREADS < 8 ? KRIA_CPU_THREADS : 8 ))
         KRIA_VISION_ENABLED=true
-        KRIA_ACTIVE_MODEL_KEY="qwen2.5-vl-7b"
+        KRIA_ACTIVE_MODEL_KEY="qwen3-vl-4b"
         ;;
     *)
         echo "[detect_hardware] ERROR: Unknown tier '${KRIA_TIER}'. Valid: lite, standard, performance, high" >&2

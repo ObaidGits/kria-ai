@@ -5,7 +5,9 @@
 //!   - `set_gui_automation_enabled(enabled: bool)` → master kill switch
 
 use super::AppStateCell;
-use kria_core::agent::gui_cognition::backend_status::{select_gui_action_backend, GuiBackendProbeInput};
+use kria_core::agent::gui_cognition::backend_status::{
+    select_gui_action_backend, GuiBackendProbeInput,
+};
 use kria_core::orchestrator::ServiceStatus;
 use tauri::{AppHandle, Manager};
 

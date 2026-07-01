@@ -85,11 +85,10 @@ pub struct AppState {
     /// `voice_pipeline` directly; v2-aware code reads `active_voice`.
     pub active_voice: Arc<RwLock<kria_core::voice::v2::ActivePipeline>>,
     /// Telemetry receiver for the v2 pipeline (when active). `None` while
-    /// running v1. Wrapped in a Mutex so the background driver task can
-    /// take it without dropping the AppState lock.
+    /// running v1. Broadcast so each session can subscribe fresh (Issue 3).
     pub voice_v2_telemetry: Arc<
         tokio::sync::Mutex<
-            Option<tokio::sync::mpsc::UnboundedReceiver<kria_core::voice::v2::VoiceTelemetry>>,
+            Option<tokio::sync::broadcast::Receiver<kria_core::voice::v2::VoiceTelemetry>>,
         >,
     >,
     pub health: Arc<HealthRegistry>,

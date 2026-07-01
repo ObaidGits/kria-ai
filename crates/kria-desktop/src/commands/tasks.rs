@@ -53,7 +53,9 @@ pub async fn task_add(
 
 #[tauri::command]
 pub async fn task_update_status(id: i64, status: String) -> Result<Option<Task>, String> {
-    open()?.update_status(id, &status).map_err(|e| e.to_string())
+    open()?
+        .update_status(id, &status)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -148,7 +150,10 @@ pub async fn plan_my_day(
 
     let parse_hm = |hm: &str, fb_h: u32| -> DateTime<Utc> {
         let mut it = hm.split(':');
-        let h = it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(fb_h);
+        let h = it
+            .next()
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(fb_h);
         let m = it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
         day.and_hms_opt(h.min(23), m.min(59), 0)
             .map(|nd| DateTime::<Utc>::from_naive_utc_and_offset(nd, Utc))

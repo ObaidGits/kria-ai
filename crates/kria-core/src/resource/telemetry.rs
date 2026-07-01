@@ -94,6 +94,15 @@ pub enum ReconciliationResult {
 
 impl ResourceSnapshot {
     pub fn reconcile(&self, expected_owner: &Option<GpuOwner>) -> ReconciliationResult {
+        // C2: `total_mb == 0` means telemetry is UNKNOWN (no GPU reading available — e.g. a
+        // telemetry-less host or a transient probe failure), NOT "GPU is full". Treating Unknown as
+        // 0-free was the root cause of the image lease degrading to
+        // `GuardReleasedAwaitingTelemetry` and blocking image/voice/vision. Unknown ⇒ assume the
+        // device reconciled (the consumer finished its work); never enter CriticalOomRisk on Unknown.
+        if self.vram.total_mb == 0 {
+            return ReconciliationResult::Healthy;
+        }
+
         let reconciliation = self.reconciliation_snapshot(expected_owner);
 
         if reconciliation.available_vram_mb < 200 || reconciliation.is_near_full() {

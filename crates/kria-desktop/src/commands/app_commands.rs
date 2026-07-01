@@ -184,10 +184,10 @@ pub async fn deny_action(
         if gui_store.lookup_by_request_id(&request_id).is_some() {
             let mut decision = gui_store.record_decision(&request_id, false, now_ms);
             if let Some(reason) = reason {
-                decision.decision_reason =
-                    Some(kria_core::agent::gui_cognition::perception::sanitize_gui_text(
-                        &reason, 160,
-                    ).text);
+                decision.decision_reason = Some(
+                    kria_core::agent::gui_cognition::perception::sanitize_gui_text(&reason, 160)
+                        .text,
+                );
             }
             return Ok(serde_json::json!({
                 "status": "ok",
@@ -775,6 +775,13 @@ pub async fn update_settings(
     apply_google_runtime_env_from_config(&new_config);
     // Persist to disk first
     new_config.save().map_err(|e| e.to_string())?;
+    // Apply GPU policy tunables live (redesign G1/G2) so the Settings UI takes effect without a
+    // restart. Env vars still override these at read time.
+    kria_core::llm::orchestrator::gpu_policy::apply_settings(
+        new_config.orchestrator.gpu_autoscale,
+        new_config.orchestrator.cuda_reserve_mb,
+        new_config.orchestrator.vram_volatility_cap_mb,
+    );
     // Then update in-memory config
     let mut config = state.config.write().await;
     *config = new_config;

@@ -80,7 +80,7 @@ impl SpeechToText {
         cancel: &CancellationToken,
     ) -> anyhow::Result<TranscriptionResult> {
         let start = Instant::now();
-        let lease_guard = self.acquire_speech_lease("speech_stt_transcribe")?;
+        let lease_guard = self.acquire_speech_lease("speech_stt_transcribe").await?;
 
         let result: anyhow::Result<TranscriptionResult> = if let Some(ref binary) = self.binary_path
         {
@@ -153,6 +153,7 @@ impl SpeechToText {
         &self.model_path
     }
 
+    #[allow(dead_code)] // retained for diagnostics; HRA bypass now handles lease errors gracefully
     fn map_gpu_lease_error(error: GpuLeaseError) -> anyhow::Error {
         let hint = match &error {
             GpuLeaseError::Busy { owner } => {
@@ -168,12 +169,16 @@ impl SpeechToText {
         anyhow::anyhow!("speech GPU lease unavailable: {error}. {hint}")
     }
 
-    fn acquire_speech_lease(&self, turn_label: &str) -> anyhow::Result<Option<GpuLeaseGuard>> {
+    async fn acquire_speech_lease(&self, turn_label: &str) -> anyhow::Result<Option<GpuLeaseGuard>> {
         let Some(gpu_lease) = &self.gpu_lease else {
             return Ok(None);
         };
 
-        match gpu_lease.acquire_guard(GpuOwner::Speech, turn_label, Some(Duration::from_secs(120)))
+        // HRA cutover: route through the authority when enforcing (shadow = legacy, unchanged).
+        // STT is realtime-voice class. ~900 MB hint for a whisper GPU footprint.
+        match gpu_lease
+            .acquire_guard_gated(GpuOwner::Speech, turn_label, Some(Duration::from_secs(120)), 900)
+            .await
         {
             Ok(guard) => Ok(Some(guard)),
             Err(GpuLeaseError::Degraded { reason }) => {
@@ -194,7 +199,15 @@ impl SpeechToText {
                 });
                 Ok(None)
             }
-            Err(other) => Err(Self::map_gpu_lease_error(other)),
+            // HRA admission denial (enforce) → run whisper without a GPU lease (CPU subprocess),
+            // exactly like the legacy degraded/recovering bypass. Never hard-fail STT on contention.
+            Err(GpuLeaseError::Busy { owner }) => {
+                tracing::info!(
+                    ?owner,
+                    "speech STT: GPU admission denied by HRA; running whisper-cli without lease (CPU)"
+                );
+                Ok(None)
+            }
         }
     }
 
@@ -363,9 +376,13 @@ fn clamp01(v: f32) -> f32 {
 }
 
 fn default_whisper_threads() -> usize {
+    // C7 (CPU optimization): cap whisper-cli at half the cores, max 4. Previously this clamped to 8,
+    // so on a many-core laptop a single STT call fanned out to 8 busy threads → the ~700–800% CPU
+    // spike. 4 threads keeps STT responsive without saturating the machine. Override via config
+    // (`hardware.threads`) / `set_threads`.
     std::thread::available_parallelism()
-        .map(|n| n.get().clamp(1, 8))
-        .unwrap_or(4)
+        .map(|n| (n.get() / 2).clamp(1, 4))
+        .unwrap_or(2)
 }
 
 /// Write PCM f32 samples to a WAV file.

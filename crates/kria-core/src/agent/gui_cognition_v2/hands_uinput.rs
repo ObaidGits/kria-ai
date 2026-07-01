@@ -106,7 +106,10 @@ impl<S: InputSink> GuiHands for UinputHands<S> {
         match &decision.action {
             Action::OpenApp { app } => {
                 if app.trim().is_empty() {
-                    return Ok(ActionResult::failed(backend, "open_app with empty app name"));
+                    return Ok(ActionResult::failed(
+                        backend,
+                        "open_app with empty app name",
+                    ));
                 }
                 match self.sink.open_app(app).await {
                     Ok(()) => Ok(ActionResult::ok(backend)),
@@ -136,7 +139,10 @@ impl<S: InputSink> GuiHands for UinputHands<S> {
             },
             Action::TypeAndSubmit { text } => {
                 if text.is_empty() {
-                    return Ok(ActionResult::failed(backend, "type_and_submit with empty text"));
+                    return Ok(ActionResult::failed(
+                        backend,
+                        "type_and_submit with empty text",
+                    ));
                 }
                 if let Err(e) = self.sink.type_text(text).await {
                     return Ok(ActionResult::failed(backend, e.to_string()));
@@ -215,7 +221,10 @@ mod tests {
             Ok(())
         }
         async fn scroll(&self, direction: &str, amount: i32) -> anyhow::Result<()> {
-            self.events.lock().unwrap().push(format!("scroll {direction} {amount}"));
+            self.events
+                .lock()
+                .unwrap()
+                .push(format!("scroll {direction} {amount}"));
             Ok(())
         }
         async fn open_app(&self, app: &str) -> anyhow::Result<()> {
@@ -236,7 +245,12 @@ mod tests {
             active_window: None,
             elements: vec![UiElement {
                 id: 7,
-                bbox: Bbox { x: 100, y: 200, width: 80, height: 40 },
+                bbox: Bbox {
+                    x: 100,
+                    y: 200,
+                    width: 80,
+                    height: 40,
+                },
                 monitor_index: 0,
                 kind: "button".into(),
                 label: "New Tab".into(),
@@ -249,7 +263,11 @@ mod tests {
     }
 
     fn decide(action: Action) -> Decision {
-        Decision { action, reason: String::new(), risk_hint: None }
+        Decision {
+            action,
+            reason: String::new(),
+            risk_hint: None,
+        }
     }
 
     #[tokio::test]
@@ -257,11 +275,19 @@ mod tests {
         let sink = RecordingSink::default();
         let hands = UinputHands::new(sink);
         let r = hands
-            .execute(&decide(Action::TypeAndSubmit { text: "ls -la".into() }), &obs())
+            .execute(
+                &decide(Action::TypeAndSubmit {
+                    text: "ls -la".into(),
+                }),
+                &obs(),
+            )
             .await
             .unwrap();
         assert!(r.ok);
-        assert_eq!(hands.sink.events.lock().unwrap().as_slice(), ["type ls -la", "key enter"]);
+        assert_eq!(
+            hands.sink.events.lock().unwrap().as_slice(),
+            ["type ls -la", "key enter"]
+        );
     }
 
     #[tokio::test]
@@ -269,7 +295,12 @@ mod tests {
         let sink = RecordingSink::default();
         let hands = UinputHands::new(sink);
         let r = hands
-            .execute(&decide(Action::Navigate { url: "youtube.com".into() }), &obs())
+            .execute(
+                &decide(Action::Navigate {
+                    url: "youtube.com".into(),
+                }),
+                &obs(),
+            )
             .await
             .unwrap();
         assert!(r.ok);
@@ -302,11 +333,19 @@ mod tests {
         let sink = RecordingSink::default();
         let hands = UinputHands::new(sink);
         let r = hands
-            .execute(&decide(Action::OpenApp { app: "chrome".into() }), &obs())
+            .execute(
+                &decide(Action::OpenApp {
+                    app: "chrome".into(),
+                }),
+                &obs(),
+            )
             .await
             .unwrap();
         assert!(r.ok);
-        assert_eq!(hands.sink.events.lock().unwrap().as_slice(), ["open_app chrome"]);
+        assert_eq!(
+            hands.sink.events.lock().unwrap().as_slice(),
+            ["open_app chrome"]
+        );
     }
 
     #[tokio::test]
@@ -319,7 +358,10 @@ mod tests {
             .unwrap();
         assert!(r.ok);
         assert_eq!(r.backend_used, "fake_uinput");
-        assert_eq!(hands.sink.events.lock().unwrap().as_slice(), ["click 140,220"]);
+        assert_eq!(
+            hands.sink.events.lock().unwrap().as_slice(),
+            ["click 140,220"]
+        );
     }
 
     #[tokio::test]
@@ -332,7 +374,10 @@ mod tests {
             .unwrap();
         assert!(!r.ok);
         assert!(r.error.unwrap().contains("not present"));
-        assert!(hands.sink.events.lock().unwrap().is_empty(), "no fallback click");
+        assert!(
+            hands.sink.events.lock().unwrap().is_empty(),
+            "no fallback click"
+        );
     }
 
     #[tokio::test]
@@ -340,7 +385,12 @@ mod tests {
         let sink = RecordingSink::default();
         let hands = UinputHands::new(sink);
         let r = hands
-            .execute(&decide(Action::Key { combo: "new_tab".into() }), &obs())
+            .execute(
+                &decide(Action::Key {
+                    combo: "new_tab".into(),
+                }),
+                &obs(),
+            )
             .await
             .unwrap();
         assert!(r.ok);
@@ -351,10 +401,22 @@ mod tests {
     async fn click_point_and_type_and_scroll_dispatch() {
         let sink = RecordingSink::default();
         let hands = UinputHands::new(sink);
-        hands.execute(&decide(Action::ClickPoint { x: 5, y: 6 }), &obs()).await.unwrap();
-        hands.execute(&decide(Action::Type { text: "hi".into() }), &obs()).await.unwrap();
         hands
-            .execute(&decide(Action::Scroll { direction: "down".into(), amount: Some(2) }), &obs())
+            .execute(&decide(Action::ClickPoint { x: 5, y: 6 }), &obs())
+            .await
+            .unwrap();
+        hands
+            .execute(&decide(Action::Type { text: "hi".into() }), &obs())
+            .await
+            .unwrap();
+        hands
+            .execute(
+                &decide(Action::Scroll {
+                    direction: "down".into(),
+                    amount: Some(2),
+                }),
+                &obs(),
+            )
             .await
             .unwrap();
         assert_eq!(

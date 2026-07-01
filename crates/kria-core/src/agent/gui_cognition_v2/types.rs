@@ -283,7 +283,10 @@ impl SubGoalKind {
     /// Whether this sub-goal executes via the cross-substrate bridge (shell/file)
     /// rather than as a GUI action.
     pub fn is_bridged(&self) -> bool {
-        matches!(self, SubGoalKind::RunCommand | SubGoalKind::WriteFile | SubGoalKind::ReadOutput)
+        matches!(
+            self,
+            SubGoalKind::RunCommand | SubGoalKind::WriteFile | SubGoalKind::ReadOutput
+        )
     }
 }
 
@@ -342,7 +345,12 @@ mod tests {
             active_window: Some("Chrome".into()),
             elements: vec![UiElement {
                 id: 3,
-                bbox: Bbox { x: 100, y: 200, width: 80, height: 40 },
+                bbox: Bbox {
+                    x: 100,
+                    y: 200,
+                    width: 80,
+                    height: 40,
+                },
                 monitor_index: 0,
                 kind: "button".into(),
                 label: "New Tab".into(),
@@ -356,7 +364,12 @@ mod tests {
 
     #[test]
     fn bbox_center_is_midpoint() {
-        let b = Bbox { x: 100, y: 200, width: 80, height: 40 };
+        let b = Bbox {
+            x: 100,
+            y: 200,
+            width: 80,
+            height: 40,
+        };
         assert_eq!(b.center(), (140, 220));
     }
 
@@ -378,9 +391,18 @@ mod tests {
     #[test]
     fn action_executable_and_kind() {
         assert!(Action::Click { element_id: 1 }.is_executable());
-        assert!(Action::Key { combo: "ctrl+t".into() }.is_executable());
-        assert!(!Action::Done { summary: "ok".into() }.is_executable());
-        assert!(!Action::Ask { question: "which?".into() }.is_executable());
+        assert!(Action::Key {
+            combo: "ctrl+t".into()
+        }
+        .is_executable());
+        assert!(!Action::Done {
+            summary: "ok".into()
+        }
+        .is_executable());
+        assert!(!Action::Ask {
+            question: "which?".into()
+        }
+        .is_executable());
         assert_eq!(Action::ClickPoint { x: 1, y: 2 }.kind(), "click_point");
     }
 

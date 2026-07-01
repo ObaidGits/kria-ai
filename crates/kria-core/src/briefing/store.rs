@@ -46,11 +46,9 @@ impl BriefingStore {
     pub fn get(&self) -> BriefingConfig {
         let conn = self.conn.lock().unwrap();
         let raw: Option<String> = conn
-            .query_row(
-                "SELECT json FROM briefing_config WHERE id = 1",
-                [],
-                |r| r.get(0),
-            )
+            .query_row("SELECT json FROM briefing_config WHERE id = 1", [], |r| {
+                r.get(0)
+            })
             .ok();
         match raw.and_then(|j| serde_json::from_str::<BriefingConfig>(&j).ok()) {
             Some(cfg) => cfg,

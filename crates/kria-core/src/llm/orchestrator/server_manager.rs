@@ -13,11 +13,20 @@ use crate::llm::orchestrator::vision_strategy::VisionMode;
 use crate::platform::os;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{ChildStderr, ChildStdout};
+
+/// Process-relative monotonic milliseconds (C4 cooldown clock). Uses a lazily-initialized base
+/// `Instant` so it is monotonic and never goes backwards (unlike SystemTime).
+fn proc_monotonic_ms() -> u64 {
+    use std::sync::OnceLock;
+    use std::time::Instant;
+    static BASE: OnceLock<Instant> = OnceLock::new();
+    BASE.get_or_init(Instant::now).elapsed().as_millis() as u64
+}
 use tokio::sync::{Mutex, Notify};
 use tokio_util::sync::CancellationToken;
 
@@ -131,6 +140,23 @@ pub struct LlamaServerManager {
     current_ctx: AtomicU32,
     /// Whether the current runtime was spawned with vision/mmproj enabled.
     current_vision: AtomicBool,
+    /// Lowest GPU layer count (`ngl`) that has FAILED to start this process lifetime (OOM /
+    /// "exited before reporting listening port"). `u32::MAX` = none failed yet. Subsequent spawns
+    /// clamp below this so the orchestrator backs off to a fitting config instead of looping on the
+    /// same too-big target (fixes the GPU restart ping-pong).
+    failed_ngl: AtomicU32,
+    /// C4: monotonic-clock millis (process-relative) of the last GPU spawn failure, or 0 if none.
+    /// The watchdog suppresses GPU scale-up for a cooldown window after a failure to stop the
+    /// failed-swap thrash (kill CPU → fail GPU → recover CPU → retry → …).
+    last_gpu_failure_ms: AtomicU64,
+    /// Count of in-flight foreground inference calls/streams. The watchdog defers non-emergency
+    /// swaps while this is > 0 (HRA Task 12 / A4: never interrupt an active foreground turn).
+    active_streams: AtomicUsize,
+    /// Per-spawn override (seconds) for the port-discovery + health wait. 0 = use config defaults.
+    /// The startup backoff ladder sets a short value so a hanging GPU spawn (e.g. a llama.cpp Vulkan
+    /// laptop quirk that stalls at high ngl) is detected fast and retried at a lower ngl instead of
+    /// blocking the whole startup for the full 60s discovery timeout.
+    spawn_timeout_override_secs: AtomicU64,
     /// Last GPU layer count before an API-level unload. Used to restore
     /// `current_ngl` on API load success.
     pre_api_unload_ngl: AtomicU32,
@@ -172,6 +198,10 @@ impl LlamaServerManager {
             current_ngl: AtomicU32::new(0),
             current_ctx: AtomicU32::new(0),
             current_vision: AtomicBool::new(false),
+            failed_ngl: AtomicU32::new(u32::MAX),
+            last_gpu_failure_ms: AtomicU64::new(0),
+            active_streams: AtomicUsize::new(0),
+            spawn_timeout_override_secs: AtomicU64::new(0),
             pre_api_unload_ngl: AtomicU32::new(0),
             pre_api_unload_vision: AtomicBool::new(false),
             router_mode_capability: AtomicU8::new(ROUTER_MODE_UNKNOWN),
@@ -231,6 +261,102 @@ impl LlamaServerManager {
     /// Whether the current runtime can accept image input.
     pub fn current_vision_enabled(&self) -> bool {
         self.current_vision.load(Ordering::Acquire)
+    }
+
+    /// Clamp a requested `(ngl, context)` below any known GPU-failure ceiling so we never re-attempt
+    /// an offload size that already OOM'd this process lifetime. Each failure lowers the ceiling, so
+    /// repeated calls converge on a config that actually fits (fixes the OOM restart loop).
+    fn clamp_against_failures(&self, ngl: u32, context: u32) -> (u32, u32) {
+        let failed = self.failed_ngl.load(Ordering::Acquire);
+        if failed == u32::MAX || ngl < failed {
+            return (ngl, context);
+        }
+        let step = self.config.min_ngl_delta.max(2);
+        let safe_ngl = failed.saturating_sub(step);
+        let safe_ctx = context.min(self.config.model_profile.min_context.max(2048));
+        tracing::warn!(
+            requested_ngl = ngl,
+            requested_ctx = context,
+            failed_ngl = failed,
+            safe_ngl,
+            safe_ctx,
+            "server_manager: clamping spawn below known VRAM-failure ceiling (OOM backoff)"
+        );
+        (safe_ngl, safe_ctx)
+    }
+
+    /// Record a GPU spawn failure at `ngl` (lowers the failure ceiling). No-op for CPU (`ngl == 0`).
+    fn record_spawn_failure(&self, ngl: u32) {
+        if ngl == 0 {
+            return;
+        }
+        // C4: stamp the failure time so the watchdog can apply a GPU scale-up cooldown.
+        self.last_gpu_failure_ms
+            .store(proc_monotonic_ms(), Ordering::Release);
+        let prev = self.failed_ngl.load(Ordering::Acquire);
+        if ngl < prev {
+            self.failed_ngl.store(ngl, Ordering::Release);
+            tracing::warn!(
+                failed_ngl = ngl,
+                "server_manager: recorded GPU spawn-failure ceiling (will back off below this)"
+            );
+        }
+    }
+
+    /// C4: true if a GPU spawn failed within the cooldown window. The watchdog consults this before
+    /// a GPU scale-up so a failed swap doesn't immediately retry (kill CPU → fail GPU → recover CPU →
+    /// retry …). Window overridable via `KRIA_GPU_COOLDOWN_SECS` (default 120s).
+    pub fn gpu_in_cooldown(&self) -> bool {
+        let last = self.last_gpu_failure_ms.load(Ordering::Acquire);
+        if last == 0 {
+            return false;
+        }
+        let cooldown_ms = std::env::var("KRIA_GPU_COOLDOWN_SECS")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .unwrap_or(120)
+            * 1000;
+        proc_monotonic_ms().saturating_sub(last) < cooldown_ms
+    }
+
+    /// Mark the start of a foreground inference call/stream (HRA Task 12 / A4).
+    pub fn begin_stream(&self) {
+        self.active_streams.fetch_add(1, Ordering::AcqRel);
+    }
+
+    /// Mark the end of a foreground inference call/stream. Saturating (never underflows).
+    pub fn end_stream(&self) {
+        let _ = self
+            .active_streams
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |v| {
+                Some(v.saturating_sub(1))
+            });
+    }
+
+    /// Whether any foreground inference call/stream is currently in flight.
+    pub fn has_active_streams(&self) -> bool {
+        self.active_streams.load(Ordering::Acquire) > 0
+    }
+
+    /// Set a short per-spawn timeout (seconds) for the next spawn's port-discovery + health wait.
+    /// 0 clears the override (use config defaults). Used by the startup backoff ladder so a hung
+    /// GPU spawn is detected quickly and retried at a lower ngl. Applies to subsequent spawns until
+    /// changed.
+    pub fn set_spawn_timeout_override(&self, secs: u64) {
+        self.spawn_timeout_override_secs
+            .store(secs, Ordering::Release);
+    }
+
+    /// Effective port-discovery / health timeout (seconds): the override when set (>0), else the
+    /// configured value. The override can only SHORTEN relative to its own value (it does not extend
+    /// past config for the CPU fallback, which clears it to 0).
+    fn effective_spawn_timeout_secs(&self, config_secs: u64) -> u64 {
+        let ov = self.spawn_timeout_override_secs.load(Ordering::Acquire);
+        if ov > 0 {
+            ov
+        } else {
+            config_secs
+        }
     }
 
     /// Whether vision is configured well enough to request a vision spawn.
@@ -381,6 +507,9 @@ impl LlamaServerManager {
             );
         }
 
+        // OOM backoff: never re-attempt an offload size that already failed this process lifetime.
+        let (ngl, context) = self.clamp_against_failures(ngl, context);
+
         self.state.store(STATE_STARTING, Ordering::Release);
         self.current_vision.store(false, Ordering::Release);
 
@@ -525,6 +654,8 @@ impl LlamaServerManager {
             Err(e) => {
                 // Kill the child before returning the error so we don't leak it.
                 guard.force_kill().await;
+                // "exited before reporting listening port" is the classic VRAM-OOM-at-load signal.
+                self.record_spawn_failure(ngl);
                 return Err(e);
             }
         };
@@ -552,6 +683,7 @@ impl LlamaServerManager {
                 g.force_kill().await;
             }
             self.state.store(STATE_ERROR, Ordering::Release);
+            self.record_spawn_failure(ngl);
             return Err(e);
         }
 
@@ -609,7 +741,9 @@ impl LlamaServerManager {
             return Err(anyhow::anyhow!("no stdout/stderr from llama-server"));
         }
 
-        let port_timeout_secs = self.config.port_discovery_timeout_secs.max(1);
+        let port_timeout_secs = self
+            .effective_spawn_timeout_secs(self.config.port_discovery_timeout_secs)
+            .max(1);
         let deadline = tokio::time::Instant::now() + Duration::from_secs(port_timeout_secs);
 
         let discovered = loop {
@@ -701,7 +835,9 @@ impl LlamaServerManager {
             .build()?;
 
         let health_url = api_url.replace("/v1", "/health");
-        let health_timeout_secs = self.config.health_check_timeout_secs.max(1);
+        let health_timeout_secs = self
+            .effective_spawn_timeout_secs(self.config.health_check_timeout_secs)
+            .max(1);
         let deadline = tokio::time::Instant::now() + Duration::from_secs(health_timeout_secs);
         let mut backoff_ms: u64 = 50;
 
@@ -1226,6 +1362,25 @@ fn mlock_is_safe(model_path: &str) -> bool {
     safe
 }
 
+/// RAII guard that marks a foreground inference call/stream active on the `LlamaServerManager` for
+/// its lifetime, so the watchdog defers non-emergency swaps until it drops (HRA Task 12 / A4).
+pub struct StreamActivityGuard {
+    mgr: Arc<LlamaServerManager>,
+}
+
+impl StreamActivityGuard {
+    pub fn new(mgr: Arc<LlamaServerManager>) -> Self {
+        mgr.begin_stream();
+        Self { mgr }
+    }
+}
+
+impl Drop for StreamActivityGuard {
+    fn drop(&mut self) {
+        self.mgr.end_stream();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1267,6 +1422,80 @@ mod tests {
     fn no_port_from_unrelated_line() {
         let line = "model loaded successfully in 2.3s";
         assert_eq!(LlamaServerManager::extract_port_from_line(line), None);
+    }
+
+    #[test]
+    fn oom_backoff_clamps_below_failure_ceiling() {
+        let mgr = LlamaServerManager::new(
+            OrchestratorConfig::default(),
+            "/tmp/model.gguf".into(),
+            None,
+        );
+        // No failures yet → request passes through unchanged.
+        assert_eq!(mgr.clamp_against_failures(36, 8192), (36, 8192));
+
+        // Record a failure at ngl=36 → future requests at/above 36 are clamped below it.
+        mgr.record_spawn_failure(36);
+        let (ngl, ctx) = mgr.clamp_against_failures(36, 8192);
+        assert!(ngl < 36, "ngl should drop below the failure ceiling, got {ngl}");
+        assert!(ctx <= 8192);
+
+        // A lower request than the ceiling is left alone.
+        assert_eq!(mgr.clamp_against_failures(20, 4096).0, 20);
+    }
+
+    #[test]
+    fn oom_backoff_converges_downward_on_repeated_failures() {
+        let mgr = LlamaServerManager::new(
+            OrchestratorConfig::default(),
+            "/tmp/model.gguf".into(),
+            None,
+        );
+        let mut target = 36u32;
+        let mut last = u32::MAX;
+        // Simulate repeated OOM at the clamped target → ceiling must keep falling, never rise.
+        for _ in 0..10 {
+            let (ngl, _) = mgr.clamp_against_failures(target, 4096);
+            mgr.record_spawn_failure(ngl.max(target).min(target)); // record at the attempted size
+            assert!(ngl <= last || last == u32::MAX);
+            last = ngl;
+            target = ngl;
+            if target == 0 {
+                break;
+            }
+        }
+        assert!(last < 36, "backoff must converge below the original target");
+    }
+
+    #[test]
+    fn cpu_spawn_failure_is_not_recorded_as_ceiling() {
+        let mgr = LlamaServerManager::new(
+            OrchestratorConfig::default(),
+            "/tmp/model.gguf".into(),
+            None,
+        );
+        mgr.record_spawn_failure(0); // CPU fallback failure must not poison the GPU ceiling
+        assert_eq!(mgr.clamp_against_failures(36, 8192), (36, 8192));
+    }
+
+    #[test]
+    fn active_stream_counter_tracks_foreground_turns() {
+        let mgr = LlamaServerManager::new(
+            OrchestratorConfig::default(),
+            "/tmp/model.gguf".into(),
+            None,
+        );
+        assert!(!mgr.has_active_streams());
+        mgr.begin_stream();
+        assert!(mgr.has_active_streams());
+        mgr.begin_stream();
+        mgr.end_stream();
+        assert!(mgr.has_active_streams(), "still one stream in flight");
+        mgr.end_stream();
+        assert!(!mgr.has_active_streams());
+        // saturating: extra end never underflows into "active".
+        mgr.end_stream();
+        assert!(!mgr.has_active_streams());
     }
 
     #[test]
@@ -1322,10 +1551,7 @@ mod tests {
         // Falsy / unrecognized values => keep clip on CPU.
         for falsy in ["0", "false", "no", "off", ""] {
             std::env::set_var(key, falsy);
-            assert!(
-                mmproj_cpu_only(),
-                "{falsy:?} must keep clip CPU-resident"
-            );
+            assert!(mmproj_cpu_only(), "{falsy:?} must keep clip CPU-resident");
         }
 
         // Restore prior environment.

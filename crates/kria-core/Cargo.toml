@@ -119,8 +119,10 @@ voice-piper-rs = ["dep:piper-rs"]
 voice-aec = ["dep:webrtc-audio-processing"]
 voice-wake-oww = []
 
-# Default features: enable in-process whisper for realtime partials.
-default = ["voice-whisper-rs"]
+# Default features: enable in-process whisper for realtime partials, and the
+# openWakeWord backend so `mode = "wake_word"` can function (pure-Rust via the
+# existing `ort` runtime; only loads models when wake is enabled in config).
+default = ["voice-whisper-rs", "voice-wake-oww"]
 
 # Aggregate convenience flag: enable every native backend at once.
 # Pulls in clang + cmake at build time. Use only when you want the full

@@ -127,14 +127,14 @@ TIER_MODELS: dict[str, list[dict]] = {
     ],
     "performance": [
         {
-            "url": f"{HF_BASE}/unsloth/Qwen2.5-VL-7B-Instruct-GGUF/resolve/main/Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf",
-            "dest": MODELS_DIR / "llm" / "Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf",
-            "desc": "Qwen2.5-VL-7B-Instruct Q4_K_M (~4.68 GB)",
+            "url": f"{HF_BASE}/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/main/Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+            "dest": MODELS_DIR / "llm" / "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+            "desc": "Qwen3VL-4B-Instruct Q4_K_M (~2.5 GB)",
         },
         {
-            "url": f"{HF_BASE}/unsloth/Qwen2.5-VL-7B-Instruct-GGUF/resolve/main/mmproj-F16.gguf",
-            "dest": MODELS_DIR / "llm" / "mmproj-F16.gguf",
-            "desc": "Qwen2.5-VL Vision Encoder mmproj-F16 (~1.35 GB)",
+            "url": f"{HF_BASE}/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/main/mmproj-Qwen3VL-4B-Instruct-F16.gguf",
+            "dest": MODELS_DIR / "llm" / "mmproj-Qwen3VL-4B-Instruct-F16.gguf",
+            "desc": "Qwen3VL Vision Encoder mmproj-F16 (~0.84 GB)",
         },
         {
             # Voice-pipeline v2 post-edit (Hinglish fix-pass) — Phase 5.

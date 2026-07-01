@@ -68,37 +68,9 @@ pub enum SwapError {
 /// RAII guard that pauses the VAD/STT audio pipeline while held.
 ///
 /// Wake-word detection uses a split tap and is NOT paused — the user can
-/// still say "Hey Ria" during image generation.
-pub struct AudioFreezeGuard {
-    handle: Arc<AudioCaptureHandle>,
-    #[allow(dead_code)]
-    vad_reset_fn: Box<dyn FnOnce() + Send + Sync>,
-}
-
-impl AudioFreezeGuard {
-    pub fn new(
-        handle: Arc<AudioCaptureHandle>,
-        vad_reset: impl FnOnce() + Send + Sync + 'static,
-    ) -> Self {
-        handle.pause();
-        info!("AudioFreezeGuard: VAD/STT path paused");
-        Self {
-            handle,
-            vad_reset_fn: Box::new(vad_reset),
-        }
-    }
-}
-
-impl Drop for AudioFreezeGuard {
-    fn drop(&mut self) {
-        self.handle.resume();
-        info!("AudioFreezeGuard: VAD/STT path resumed");
-        // vad_reset_fn is consumed here — we need a workaround for FnOnce in Drop.
-        // Use Option wrapper to take ownership.
-    }
-}
-
-// A cleaner version using Option<Box<dyn FnOnce>> so Drop can call it once.
+/// still say "Hey Ria" during image generation. Uses `Option<Box<dyn FnOnce>>`
+/// so `Drop` can run the VAD-reset callback exactly once (HRA Task 17: the older
+/// v1 guard whose `FnOnce` reset never fired in `Drop` was removed).
 pub struct AudioFreezeGuardV2 {
     handle: Arc<AudioCaptureHandle>,
     vad_reset_fn: Option<Box<dyn FnOnce() + Send + Sync>>,

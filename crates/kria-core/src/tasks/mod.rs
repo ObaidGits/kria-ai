@@ -4,10 +4,10 @@
 //! reminders that survive restart, and productivity analytics — all backed by
 //! the shared `kria.db` SQLite database.
 
-pub mod priority;
 pub mod matching;
 pub mod nl_time;
 pub mod planner;
+pub mod priority;
 pub mod recurrence;
 pub mod scheduler;
 pub mod store;

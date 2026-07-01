@@ -30,7 +30,7 @@ use crate::image::ws_bridge::{spawn_ws_listener, EventEmitter, WsBridgeError};
 use crate::platform::vram::{build_profiler, ImageTier, VramProfiler};
 use crate::resource::{
     GpuLeaseError, GpuLeaseGuard, GpuLeaseManager, GpuLeaseState, GpuOwner, ImageLeaseBackendId,
-    ImageRuntimeSnapshot, L1ResidencySnapshot, L1RuntimeSnapshot, RamSnapshot, RecoveryReason,
+    ImageRuntimeSnapshot, L1ResidencySnapshot, L1RuntimeSnapshot, RamSnapshot,
     ResourceSnapshot, VramSnapshot,
 };
 
@@ -360,6 +360,11 @@ pub struct ImageOrchestrator {
     hang_count: AtomicU32,
     /// When true, all Tier B requests are rerouted to cloud for the rest of the session.
     session_degraded: AtomicBool,
+    /// True while a generation is actively running. A second `generate()` while this is set is
+    /// rejected with a clear "already generating" message instead of starting a competing Tier-B
+    /// eviction — prevents the LLM evict/restore thrash + wasted work when a user re-submits an
+    /// image prompt before the (slow) first one finishes.
+    generating: AtomicBool,
     /// Optional callback to pause the audio/STT pipeline during GPU swaps.
     audio_pause_fn: OnceLock<Arc<dyn Fn() + Send + Sync>>,
     /// Optional callback to resume the audio/STT pipeline after GPU swaps.
@@ -397,10 +402,24 @@ fn log_missing_style_lora_once(style: ImageStyle, lora_file: &str, lora_path: &P
 }
 
 impl ImageOrchestrator {
-    /// Build an orchestrator from config.
+    /// Build an orchestrator from config with its own (unshared) GPU lease manager.
     ///
-    /// `kria_data_dir` is the resolved `~/.kria/` directory.
+    /// `kria_data_dir` is the resolved `~/.kria/` directory. Prefer
+    /// [`new_with_lease`](Self::new_with_lease) so all GPU consumers share ONE lease manager (the
+    /// single-arbiter goal — HRA Tasks 13/15). This variant remains for tests/back-compat.
     pub fn new(cfg: ImageGenerationConfig, kria_data_dir: &Path) -> Arc<Self> {
+        let gpu_lease = GpuLeaseManager::shared(Duration::from_secs(180), Duration::from_secs(20));
+        Self::new_with_lease(cfg, kria_data_dir, gpu_lease)
+    }
+
+    /// Build an orchestrator that shares an externally-owned GPU lease manager, so image generation
+    /// contends for the GPU on the SAME arbiter as the LLM/voice/vision consumers instead of a
+    /// private one (HRA single-authority goal, fixes fragmentation Gap G1).
+    pub fn new_with_lease(
+        cfg: ImageGenerationConfig,
+        kria_data_dir: &Path,
+        gpu_lease: Arc<GpuLeaseManager>,
+    ) -> Arc<Self> {
         let resolve = |s: &str, default: &str| -> PathBuf {
             if s.is_empty() {
                 kria_data_dir.join(default)
@@ -427,9 +446,13 @@ impl ImageOrchestrator {
 
         let sidecar = ComfySidecar::new(comfy_cfg);
         let cloud = CloudFallback::new(&cfg.pollinations_base_url, cfg.cloud_fallback != "off");
-        let gpu_lease = GpuLeaseManager::shared(Duration::from_secs(180), Duration::from_secs(20));
         let swap_coord = SwapCoordinator::new(cfg.defrag_every_n_swaps);
-        let profiler = build_profiler();
+        // HRA Phase A1: borrow the single shared profiler from the global telemetry hub when set
+        // (one device context for the whole process); fall back to building one if the hub is not
+        // registered (e.g. headless tests or image-only embedding).
+        let profiler = crate::resource::global_telemetry_hub()
+            .map(|h| h.profiler())
+            .unwrap_or_else(build_profiler);
         let job_sem = Arc::new(Semaphore::new(cfg.max_concurrent_jobs.max(1)));
         let lora_strength = cfg.default_lora_strength;
 
@@ -448,6 +471,7 @@ impl ImageOrchestrator {
             lora_strength,
             hang_count: AtomicU32::new(0),
             session_degraded: AtomicBool::new(false),
+            generating: AtomicBool::new(false),
             audio_pause_fn: OnceLock::new(),
             audio_resume_fn: OnceLock::new(),
             cache_dir,
@@ -512,14 +536,53 @@ impl ImageOrchestrator {
         }))
     }
 
-    fn acquire_local_lease(&self, turn_label: &str) -> Result<GpuLeaseGuard, ImageError> {
+    async fn acquire_local_lease(&self, turn_label: &str) -> Result<GpuLeaseGuard, ImageError> {
+        // HRA cutover: route through the authority when enforcing (shadow = legacy, unchanged).
+        // Image is interactive-background (yields to chat/voice). On HRA denial the existing tier
+        // logic falls back to cloud (Busy maps to an ImageError like the legacy lease errors).
         self.gpu_lease
-            .acquire_guard(
+            .acquire_guard_gated(
                 GpuOwner::ImageBackend(ImageLeaseBackendId::ComfyUi),
                 turn_label,
                 Some(Duration::from_secs(180)),
+                4000,
             )
+            .await
             .map_err(|e| self.map_gpu_lease_error(e))
+    }
+
+    /// Tier-B admission. Like [`acquire_local_lease`] but an HRA `Busy` (co-residency is full
+    /// because the higher-priority LLM is GPU-resident) is NOT a failure — it means "proceed to the
+    /// Tier-B drop-swap, which explicitly evicts the LLM to free the GPU". Returns `Ok(None)` in that
+    /// case; the caller runs `generate_with_swap` WITHOUT a co-residency lease (the VramBarrier + the
+    /// explicit LLM eviction are the coordination for this path). This is the fix for the
+    /// "GPU lease unavailable: held by ImageBackend(ComfyUi)" failure: image generation is an
+    /// explicit user workflow that legitimately evicts the resident LLM (governing law (b)), which
+    /// image (InteractiveBg) cannot express as an HRA preemption of the LLM (InteractiveFg).
+    async fn acquire_local_lease_swap(
+        &self,
+        turn_label: &str,
+    ) -> Result<Option<GpuLeaseGuard>, ImageError> {
+        match self
+            .gpu_lease
+            .acquire_guard_gated(
+                GpuOwner::ImageBackend(ImageLeaseBackendId::ComfyUi),
+                turn_label,
+                Some(Duration::from_secs(180)),
+                4000,
+            )
+            .await
+        {
+            Ok(g) => Ok(Some(g)),
+            Err(GpuLeaseError::Busy { .. }) => {
+                info!(
+                    target: "hra",
+                    "image Tier-B: GPU busy (LLM resident) — proceeding to drop-swap eviction (explicit user workflow)"
+                );
+                Ok(None)
+            }
+            Err(e) => Err(self.map_gpu_lease_error(e)),
+        }
     }
 
     async fn reconcile_gpu_lease(&self, l1_gpu_resident: bool) {
@@ -572,6 +635,32 @@ impl ImageOrchestrator {
         if !self.cfg.enabled {
             return Err(ImageError::Disabled);
         }
+
+        // In-flight guard: reject a second generation while one is running, instead of starting a
+        // competing Tier-B eviction (which restarts llama-server and thrashes the GPU). A RAII
+        // `InFlightGuard` clears the flag on any exit path (success, error, or future-drop).
+        if self
+            .generating
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return Err(ImageError::Reported(Box::new(FailureReport {
+                stage: FailureStage::TierAdmission,
+                provider: "image_orchestrator".into(),
+                http_status: None,
+                attempt: 0,
+                message: "An image is already being generated.".into(),
+                hint: "Please wait for the current image to finish before requesting another."
+                    .into(),
+            })));
+        }
+        struct InFlightGuard<'a>(&'a AtomicBool);
+        impl<'a> Drop for InFlightGuard<'a> {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::Release);
+            }
+        }
+        let _in_flight = InFlightGuard(&self.generating);
 
         let start = Instant::now();
 
@@ -737,7 +826,7 @@ impl ImageOrchestrator {
         let result: Result<ImageResult, ImageError> = match resolved_mode {
             ResolvedMode::LocalOnly => match tier {
                 ImageTier::SHighRes | ImageTier::AStandard => {
-                    match self.acquire_local_lease("image_local_only") {
+                    match self.acquire_local_lease("image_local_only").await {
                         Ok(lease) => {
                             let local = self.generate_local(&job, emitter).await;
                             drop(lease);
@@ -747,7 +836,7 @@ impl ImageOrchestrator {
                         Err(e) => Err(e),
                     }
                 }
-                ImageTier::BDropSwap => match self.acquire_local_lease("image_local_only_swap") {
+                ImageTier::BDropSwap => match self.acquire_local_lease_swap("image_local_only_swap").await {
                     Ok(lease) => {
                         let local = self
                             .generate_with_swap(&job, emitter, llm_evictor.clone())
@@ -777,7 +866,7 @@ impl ImageOrchestrator {
             ResolvedMode::LocalThenCloud => {
                 let local_result = match tier {
                     ImageTier::SHighRes | ImageTier::AStandard => {
-                        match self.acquire_local_lease("image_local_then_cloud") {
+                        match self.acquire_local_lease("image_local_then_cloud").await {
                             Ok(lease) => {
                                 let local = self.generate_local(&job, emitter).await;
                                 drop(lease);
@@ -788,7 +877,7 @@ impl ImageOrchestrator {
                         }
                     }
                     ImageTier::BDropSwap => {
-                        match self.acquire_local_lease("image_local_then_cloud_swap") {
+                        match self.acquire_local_lease_swap("image_local_then_cloud_swap").await {
                             Ok(lease) => {
                                 let local = self
                                     .generate_with_swap(&job, emitter, llm_evictor.clone())
@@ -829,7 +918,7 @@ impl ImageOrchestrator {
                     warn!(error = %e, "CloudThenLocal: cloud failed, trying local fallback");
                     match tier {
                         ImageTier::SHighRes | ImageTier::AStandard => {
-                            match self.acquire_local_lease("image_cloud_then_local") {
+                            match self.acquire_local_lease("image_cloud_then_local").await {
                                 Ok(lease) => {
                                     let local = self.generate_local(&job, emitter).await;
                                     drop(lease);
@@ -840,7 +929,7 @@ impl ImageOrchestrator {
                             }
                         }
                         ImageTier::BDropSwap => {
-                            match self.acquire_local_lease("image_cloud_then_local_swap") {
+                            match self.acquire_local_lease_swap("image_cloud_then_local_swap").await {
                                 Ok(lease) => {
                                     let local = self
                                         .generate_with_swap(&job, emitter, llm_evictor.clone())
@@ -1037,6 +1126,75 @@ impl ImageOrchestrator {
             required_mb,
             "tier-b swap barrier target resolved"
         );
+
+        // ── G9 admission gate: decide HOW to serve this image before attempting a Tier-B restart.
+        // On a tight GPU, blindly evicting the LLM and respawning ComfyUI can fail to free enough
+        // VRAM and thrash (the OOM class this redesign targets). The pure Policy Engine simulates
+        // the eviction and, if it cannot SAFELY free `required_mb`, routes straight to cloud (or
+        // rejects) instead of a doomed local restart. Image generation is a user-initiated workflow
+        // (governing law (b)), so eviction itself is permitted when it is safe.
+        {
+            use crate::resource::authority::budget::{BandPolicy, Budget};
+            use crate::resource::authority::simulator::SimDeviceState;
+            use crate::resource::authority::{decide_image_admission, ActivityState, ImageAdmission};
+
+            let free_ram_mb = {
+                let mut sys = sysinfo::System::new();
+                sys.refresh_memory();
+                sys.available_memory() / (1024 * 1024)
+            };
+            // Pre-image, used VRAM is dominated by the resident LLM — a safe estimate of what
+            // eviction can reclaim.
+            let llm_vram_mb = snap.total_mb.saturating_sub(snap.free_mb);
+            let dev = SimDeviceState {
+                free_vram_mb: snap.free_mb,
+                total_vram_mb: snap.total_mb,
+                free_ram_mb,
+                budget: Budget::derive(snap.total_mb, 512, BandPolicy::default()),
+            };
+            let cloud_ok = self.cfg.cloud_fallback != "off";
+            // Image generation is explicit + user-initiated; treat as the idle promotion window so
+            // the simulator (not an activity veto) governs the local-vs-cloud choice.
+            let admission = decide_image_admission(
+                required_mb,
+                llm_vram_mb,
+                &dev,
+                ActivityState::DeepIdle,
+                cloud_ok,
+            );
+            match admission {
+                ImageAdmission::TierBEvict | ImageAdmission::CoResident => {
+                    info!(?admission, "image admission: proceeding with local Tier-B");
+                }
+                ImageAdmission::CloudFallback => {
+                    warn!(
+                        required_mb,
+                        free_vram_mb = snap.free_mb,
+                        "image admission: local eviction predicted unsafe/insufficient — routing to cloud"
+                    );
+                    return Err(ImageError::Reported(Box::new(FailureReport {
+                        stage: FailureStage::TierAdmission,
+                        provider: "tier".into(),
+                        http_status: None,
+                        attempt: 0,
+                        message: "local GPU cannot safely free enough VRAM for image generation"
+                            .into(),
+                        hint: "Falling back to cloud.".into(),
+                    })));
+                }
+                ImageAdmission::Reject => {
+                    return Err(ImageError::Reported(Box::new(FailureReport {
+                        stage: FailureStage::TierAdmission,
+                        provider: "tier".into(),
+                        http_status: None,
+                        attempt: 0,
+                        message: "no safe local plan for image generation and cloud is disabled"
+                            .into(),
+                        hint: "Enable cloud fallback or free GPU memory.".into(),
+                    })));
+                }
+            }
+        }
 
         // Local emit helper — borrows a clone so `emitter` is still available later.
         let emit_event = {
@@ -1724,10 +1882,7 @@ impl ImageOrchestrator {
 
     /// Idle cleanup: unload Flux from VRAM.
     pub async fn on_idle(&self) {
-        self.gpu_lease.mark_recovering(
-            Some(GpuOwner::ImageBackend(ImageLeaseBackendId::ComfyUi)),
-            RecoveryReason::OwnerReleaseRequested,
-        );
+        // HRA owns residency release (admission guard drop); no explicit lease signal needed.
         if let Err(e) = self.sidecar.unload_models().await {
             warn!(error = %e, "ImageOrchestrator: idle unload failed");
         }
@@ -1736,10 +1891,7 @@ impl ImageOrchestrator {
 
     /// Shut down sidecar cleanly.
     pub async fn shutdown(&self) {
-        self.gpu_lease.mark_recovering(
-            Some(GpuOwner::ImageBackend(ImageLeaseBackendId::ComfyUi)),
-            RecoveryReason::ShutdownRequested,
-        );
+        // HRA owns residency release (admission guard drop); no explicit lease signal needed.
         self.sidecar.stop().await;
         self.reconcile_gpu_lease(false).await;
     }

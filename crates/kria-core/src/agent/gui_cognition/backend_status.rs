@@ -140,7 +140,8 @@ impl GuiBackendStatus {
         }
         if !activate_available {
             capability_notices.push(
-                "window activation unavailable (no extension, portal, or input backend)".to_string(),
+                "window activation unavailable (no extension, portal, or input backend)"
+                    .to_string(),
             );
         }
         if preferred_focus_backend.is_none() {

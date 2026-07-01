@@ -1,0 +1,97 @@
+# ──────────────────────────────────────────────────────────────────────
+# Voice System v3 CI — fast, hardware-free baseline lane.
+#
+# Runs the deterministic voice unit/contract tests, the wake-daemon tests,
+# config validation, sidecar Python syntax checks, and the frontend
+# typecheck/build. Live A/V tests (mic/speaker/wake firing, Kokoro audio) are
+# intentionally NOT run here — they are gated behind KRIA_STT_LIVE / human QA.
+# ──────────────────────────────────────────────────────────────────────
+
+name: Voice CI
+
+on:
+  push:
+    paths:
+      - "crates/kria-core/src/voice/**"
+      - "crates/kria-core/src/config.rs"
+      - "crates/kria-desktop/src/commands/voice*.rs"
+      - "crates/kria-desktop/src/commands/wake_listener.rs"
+      - "crates/kria-wake-daemon/**"
+      - "sidecars/kria-stt/**"
+      - "sidecars/kria-tts/**"
+      - "ui/src/components/VoiceOverlay.tsx"
+      - "ui/src/components/VoiceOnboarding.tsx"
+      - "ui/src/stores/app.ts"
+      - ".github/workflows/voice-ci.yml"
+  pull_request:
+    paths:
+      - "crates/kria-core/src/voice/**"
+      - "crates/kria-wake-daemon/**"
+      - "sidecars/kria-stt/**"
+      - "sidecars/kria-tts/**"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  voice-rust:
+    name: "Voice — Rust unit/contract tests"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev pkg-config libssl-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: kria-core voice unit tests
+        run: cargo test -p kria-core --lib voice:: -- --nocapture
+
+      - name: config voice validation + precedence tests
+        run: cargo test -p kria-core --lib config::voice_validate_tests -- --test-threads=1
+
+      - name: wake daemon tests
+        run: cargo test -p kria-wake-daemon
+
+      - name: desktop voice contract + wake-listener tests
+        run: cargo test -p kria-desktop contract_tests wake_listener
+
+  voice-sidecars:
+    name: "Voice — sidecar syntax check"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile STT + TTS sidecars (syntax)
+        run: |
+          python -m py_compile sidecars/kria-stt/main.py
+          python -m py_compile sidecars/kria-tts/main.py
+
+  voice-frontend:
+    name: "Voice — frontend typecheck/build"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install UI deps
+        working-directory: ui
+        run: npm ci || npm install
+      - name: Typecheck
+        working-directory: ui
+        run: npx tsc --noEmit -p tsconfig.json
+      - name: Build
+        working-directory: ui
+        run: npx vite build

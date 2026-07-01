@@ -6,8 +6,8 @@ use super::config::ProviderConfig;
 use crate::infra::circuit_breaker::CircuitBreaker;
 use crate::llm::{
     extract_first_json_object, extract_openai_content_text, extract_openai_message_text,
-    extract_openai_tool_calls, ChatMessage, LlmBackend, LlmResponse,
-    StructuredOutputMode, TokenUsage, ToolSchema,
+    extract_openai_tool_calls, ChatMessage, LlmBackend, LlmResponse, StructuredOutputMode,
+    TokenUsage, ToolSchema,
 };
 use async_trait::async_trait;
 use futures::Stream;
@@ -1107,10 +1107,12 @@ mod structured_tests {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(body_string_contains("json_object"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(reasoning_preamble_body(
-                "Let me think about which app to open. The user wants the calculator.\n",
-                "{\"intent\":\"open_app\"}",
-            )))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(reasoning_preamble_body(
+                    "Let me think about which app to open. The user wants the calculator.\n",
+                    "{\"intent\":\"open_app\"}",
+                )),
+            )
             .mount(&server)
             .await;
         let backend =

@@ -232,7 +232,12 @@ impl GuiHitlProposalStore {
             .filter_map(|request_id| self.by_request_id.remove(&request_id))
             .map(|pending| {
                 self.active_by_session.remove(&pending.proposal.session_id);
-                decision_for(&pending.proposal, "expired", now_ms, Some("proposal expired"))
+                decision_for(
+                    &pending.proposal,
+                    "expired",
+                    now_ms,
+                    Some("proposal expired"),
+                )
             })
             .collect()
     }
@@ -260,7 +265,13 @@ pub fn decision_for(
 ) -> GuiHitlDecision {
     let can_authorize_step7 = decision == "approved" && decided_at_ms <= proposal.expires_at_ms;
     GuiHitlDecision {
-        decision_id: format!("decision-{}", stable_hash(&format!("{}|{}|{}", proposal.proposal_id, decision, decided_at_ms))),
+        decision_id: format!(
+            "decision-{}",
+            stable_hash(&format!(
+                "{}|{}|{}",
+                proposal.proposal_id, decision, decided_at_ms
+            ))
+        ),
         request_id: proposal.request_id.clone(),
         proposal_id: proposal.proposal_id.clone(),
         proposal_hash: proposal.proposal_hash.clone(),

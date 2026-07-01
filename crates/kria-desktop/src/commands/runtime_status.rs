@@ -311,6 +311,25 @@ pub async fn get_orchestrator_status(
     }
 }
 
+/// Return the HRA (Hardware & Resource Authority) full diagnostics bundle: live device table,
+/// telemetry freshness, admission metrics, foreground-safety invariant, recovered crash leases,
+/// and SLA config. Reads the process-wide HRA handle (set at orchestrator start). Returns
+/// `{ "available": false }` when the authority has not been constructed yet (e.g. orchestrator
+/// disabled). HRA Phase E2/E4.
+#[tauri::command]
+pub async fn get_hra_diagnostics() -> Result<serde_json::Value, String> {
+    match kria_core::resource::authority::global_hra() {
+        Some(hra) => {
+            let mut bundle = hra.diagnostics_json_async().await;
+            if let Some(obj) = bundle.as_object_mut() {
+                obj.insert("available".to_string(), serde_json::Value::Bool(true));
+            }
+            Ok(bundle)
+        }
+        None => Ok(serde_json::json!({ "available": false })),
+    }
+}
+
 #[tauri::command]
 pub async fn register_new_target(
     request: NewTargetRequest,

@@ -201,7 +201,7 @@ class Vl7bOmniParser:
     """
 
     def __init__(self):
-        self.model_name = "qwen2.5-vl-7b"
+        self.model_name = "qwen3-vl-4b"
         self.endpoint = os.environ.get(
             "KRIA_VL_ENDPOINT", "http://127.0.0.1:8090/v1/chat/completions"
         )

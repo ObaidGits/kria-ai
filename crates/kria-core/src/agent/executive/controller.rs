@@ -528,12 +528,12 @@ impl ExecutiveController {
     ) -> TaskResult {
         let start = std::time::Instant::now();
 
-        // Acquire GPU lease if needed
+        // Acquire GPU lease if needed. Routes through HRA admission (single runtime authority);
+        // priority is derived from the owner class (L1Worker → InteractiveFg).
         let _gpu_guard = if task.requires_gpu && task.priority.can_acquire_gpu() {
-            let is_foreground = task.priority.is_foreground();
             let turn_id = task.id.to_string();
             match gpu_lease
-                .acquire_lease(GpuOwner::L1Worker, turn_id, is_foreground)
+                .acquire_guard_gated(GpuOwner::L1Worker, turn_id, None, 0)
                 .await
             {
                 Ok(guard) => Some(guard),

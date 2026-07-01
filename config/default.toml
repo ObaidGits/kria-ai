@@ -17,14 +17,14 @@ cloud_model_id = ""
 cloud_endpoint = ""
 
 [[llm.models]]
-name = "qwen2.5-vl-7b"
-file = "Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf"
-display_name = "Qwen 2.5 VL 7B (Q4_K_M)"
+name = "qwen3-vl-4b"
+file = "Qwen3VL-4B-Instruct-Q4_K_M.gguf"
+display_name = "Qwen 3 VL 4B (Q4_K_M)"
 context_window = 8192
 max_tokens = 4096
-vram_estimate_gb = 5.0
+vram_estimate_gb = 3.5
 capabilities = ["chat", "vision"]
-mmproj_file = "mmproj-F16.gguf"
+mmproj_file = "mmproj-Qwen3VL-4B-Instruct-F16.gguf"
 
 [[llm.models]]
 name = "phi-4-mini"
@@ -227,14 +227,14 @@ macos_emergency_ram_mb = 1024
 macos_recover_ram_mb = 4096
 
 [orchestrator.model_profile]
-total_layers = 28                            # Qwen2.5-VL-7B (qwen2vl.block_count = 28)
-per_layer_vram_mb = 165                      # ~4609 MiB / 28 layers
+total_layers = 36                            # Qwen3-VL-4B
+per_layer_vram_mb = 100                      # ~2500 MiB / 36 layers
 base_vram_overhead_mb = 200
-kv_per_1k_ctx_mb = 100
+kv_per_1k_ctx_mb = 80
 min_context = 4096                           # Hard floor — never go below this (2048 is too small for any useful inference)
 max_context = 8192
 has_vision_projector = true
-mmproj_vram_mb = 1300                        # mmproj-F16.gguf ~1291 MiB
+mmproj_vram_mb = 840                         # mmproj-Qwen3VL-4B-Instruct-F16.gguf
 
 # ── Colab Cloud Tier ────────────────────────────────────────────────
 [colab]
@@ -382,9 +382,9 @@ fallback_provider = "opencode"   # Auto-fallback to cloud when local is unavaila
 [[providers.providers]]
 id = "llama_cpp"
 provider_type = "llama_cpp"
-display_name = "llama.cpp (Local — Qwen2.5-VL-7B)"
+display_name = "llama.cpp (Local — Qwen3-VL-4B)"
 enabled = true
-active_model = "qwen2.5-vl-7b"
+active_model = "qwen3-vl-4b"
 default_temperature = 0.7
 default_max_tokens = 4096
 prefer_streaming = true

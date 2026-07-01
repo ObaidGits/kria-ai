@@ -87,6 +87,18 @@ pub fn profile_hardware() -> HardwareProfile {
 
     let gpu_supported = matches!(gpu_vendor, GpuVendor::Nvidia | GpuVendor::AppleSilicon);
 
+    tracing::info!(
+        target: "hardware",
+        tier = info.tier.as_str(),
+        vendor = ?gpu_vendor,
+        cuda_available,
+        gpu_supported,
+        vram_mb = ?info.vram_mb,
+        total_ram_mb = info.total_ram_mb,
+        arch = %std::env::consts::ARCH,
+        "hardware: profile_hardware — vendor + acceleration resolved"
+    );
+
     HardwareProfile {
         info,
         gpu_vendor,
@@ -162,19 +174,10 @@ fn detect_vram_nvml() -> Option<(u64, String)> {
     Some((mem.total / (1024 * 1024), name))
 }
 
-/// Classify tier from RAM + VRAM (matches detect_hardware.sh logic).
+/// Classify tier from RAM + VRAM — delegates to the canonical classifier in
+/// `platform::detect` (HRA Task 1: single source of truth, AND logic).
 fn classify_tier(ram_mb: u64, vram_mb: Option<u64>) -> HardwareTier {
-    let vram = vram_mb.unwrap_or(0);
-    // Match detect_hardware.sh: GPU >= 8GB AND RAM >= 16GB → High
-    if vram >= 8192 && ram_mb >= 16384 {
-        HardwareTier::High
-    } else if vram >= 4096 && ram_mb >= 12288 {
-        HardwareTier::Performance
-    } else if ram_mb >= 8192 {
-        HardwareTier::Standard
-    } else {
-        HardwareTier::Lite
-    }
+    detect::classify_tier(ram_mb, vram_mb)
 }
 
 /// Path to the persisted hardware profile.

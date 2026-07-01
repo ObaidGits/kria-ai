@@ -741,7 +741,8 @@ async fn gui_cognition_perception_control_descriptor_observable_matches_by_role_
 }
 
 #[tokio::test]
-async fn gui_cognition_perception_control_descriptor_observable_rejects_absent_hidden_and_wrong_role() {
+async fn gui_cognition_perception_control_descriptor_observable_rejects_absent_hidden_and_wrong_role(
+) {
     let observation = collect_observation(
         &RichFakeProvider::healthy(),
         "obs-rich".into(),

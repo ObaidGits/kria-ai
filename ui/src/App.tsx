@@ -12,6 +12,7 @@ import SettingsModal from "./components/SettingsModal";
 import HitlModal from "./components/HitlModal";
 import DecisionActionCenter from "./components/DecisionActionCenter";
 import VoiceOverlay from "./components/VoiceOverlay";
+import VoiceOnboarding from "./components/VoiceOnboarding";
 import SetupWizard from "./components/SetupWizard";
 import { DeviceTargetView, useDeviceStatus } from "./hooks/useDeviceStatus";
 const DeviceMatrix = lazy(() => import("./components/DeviceMatrix"));
@@ -62,6 +63,7 @@ const App: Component = () => {
     showSettings,
     showHitl,
     voiceActive,
+    showVoiceOnboarding,
     setShowSettings,
     currentEnvironment,
     colabDispatchWarning,
@@ -954,6 +956,10 @@ const App: Component = () => {
 
       <Show when={voiceActive()}>
         <VoiceOverlay />
+      </Show>
+
+      <Show when={showVoiceOnboarding()}>
+        <VoiceOnboarding />
       </Show>
 
       {/* Keyboard shortcuts overlay */}

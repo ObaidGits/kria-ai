@@ -1,5 +1,21 @@
 use kria_core::config::KriaConfig;
 
+/// Wave 7 observability: structured per-turn voice diagnostics + aggregate
+/// health. Answers "why did a turn fail / time out / return empty?" using the
+/// in-memory ring buffer populated by the telemetry pump. Only measured values
+/// are present; missing milestones are `null`.
+#[tauri::command]
+pub async fn voice_turn_diagnostics(limit: Option<usize>) -> Result<serde_json::Value, String> {
+    use kria_core::voice::turn_diagnostics::{aggregate, snapshot};
+    let lim = limit.unwrap_or(20).clamp(1, 64);
+    let turns = snapshot(lim);
+    let agg = aggregate();
+    Ok(serde_json::json!({
+        "turns": turns,
+        "aggregate": agg,
+    }))
+}
+
 /// Inspect the v2 voice stack: which engines are compiled in (cargo features)
 /// and what the resolved [`VoiceTierProfile`] would look like for the current
 /// config + detected hardware. Used during the v2 rollout to verify that
@@ -39,6 +55,15 @@ pub async fn voice_v2_status() -> Result<serde_json::Value, String> {
     };
     let wake_models = WakeWordModels::from_keyword_path(wake_keyword_path.clone());
 
+    // Probe the faster-whisper STT sidecar + Kokoro TTS sidecar health so the
+    // UI reflects runtime truth (Req 8.4 / 9.3 health indicator). Short
+    // timeouts; a missing sidecar simply reports healthy=false.
+    let probe_client = reqwest::Client::new();
+    let stt_base = kria_core::voice::v2::stt_sidecar::base_url();
+    let tts_base = kria_core::voice::v2::tts_sidecar::base_url();
+    let stt_healthy = kria_core::voice::v2::stt_sidecar::is_healthy(&probe_client, &stt_base).await;
+    let tts_healthy = kria_core::voice::v2::tts_sidecar::is_healthy(&probe_client, &tts_base).await;
+
     // Try to load the detector; falls back to disabled when the feature is
     // off or model files are missing. Either outcome surfaces in the JSON.
     let wake_detector = if wake_cfg.enabled {
@@ -54,12 +79,25 @@ pub async fn voice_v2_status() -> Result<serde_json::Value, String> {
 
     Ok(serde_json::json!({
         "engine_setting": config.voice.engine,
+        "mode": config.voice.mode,
         "tier": profile.tier.as_str(),
         "ttfa_budget_ms": profile.ttfa_budget_ms,
         "post_edit_timeout_ms": profile.post_edit_timeout_ms,
         "stt_engine": profile.stt_engine,
         "stt_model": profile.stt_model,
         "tts_engine": profile.tts_engine,
+        "config_warnings": config.voice.validate(),
+        "stt_sidecar": {
+            "url": stt_base,
+            "healthy": stt_healthy,
+            "kind": "faster-whisper",
+        },
+        "tts_sidecar": {
+            "url": tts_base,
+            "healthy": tts_healthy,
+            "kind": "kokoro",
+            "selected": profile.tts_engine.eq_ignore_ascii_case("kokoro"),
+        },
         "aec_aggressiveness": profile.aec_aggressiveness,
         "post_edit_always": profile.post_edit_always,
         "hardware_tier": hw.tier.as_str(),
@@ -77,7 +115,7 @@ pub async fn voice_v2_status() -> Result<serde_json::Value, String> {
             "melspectrogram_path": wake_models.melspectrogram.display().to_string(),
             "all_models_present": wake_models.all_present(),
         },
-        "note": "v2 runtime loop pending; engine='v2' currently falls back to v1.",
+        "note": "Voice v2 runtime active. Default STT = faster-whisper sidecar (GPU INT8 small, CPU fallback); default TTS = Piper (Kokoro opt-in via tts_engine='kokoro'). whisper-rs retained as explicit rollback.",
     }))
 }
 

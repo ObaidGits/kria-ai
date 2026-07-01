@@ -15,35 +15,40 @@
 //! Sight/Brain/Hands loop. [`v2_enabled`] remains as a vestigial capability flag
 //! (default ON); there is no longer a V1 path to fall back to.
 
-pub mod fakes;
 pub mod bridge;
-pub mod hands_uinput;
 pub mod decide_only;
-pub mod loop_engine;
+pub mod fakes;
+pub mod hands_uinput;
 pub mod llm_brain;
+pub mod loop_engine;
 pub mod planner;
 pub mod safety;
 pub mod sight_omniparser;
 pub mod traits;
 pub mod types;
-pub mod vision_brain;
 pub mod verifier;
+pub mod vision_brain;
 
-pub use hands_uinput::{InputSink, UinputHands};
-pub use decide_only::{attribute, decide_only, DecisionDiagnostic, OutcomeAttribution};
-pub use loop_engine::{run_turn_v2, decision_needs_grounding, LoopConfig, LoopEvent, LoopGuards, LoopObserver, TurnOutcomeV2, TurnStatus};
-pub use llm_brain::LlmPlannerBrain;
-pub use planner::{fallback_plan, LlmPlanner, Plan, PLANNER_SYSTEM_PROMPT};
 pub use bridge::{BridgeOutcome, GuiBridge, WorkingContext};
+pub use decide_only::{attribute, decide_only, DecisionDiagnostic, OutcomeAttribution};
+pub use hands_uinput::{InputSink, UinputHands};
+pub use llm_brain::LlmPlannerBrain;
+pub use loop_engine::{
+    decision_needs_grounding, run_turn_v2, LoopConfig, LoopEvent, LoopGuards, LoopObserver,
+    TurnOutcomeV2, TurnStatus,
+};
+pub use planner::{fallback_plan, LlmPlanner, Plan, PLANNER_SYSTEM_PROMPT};
 pub use safety::assess_action_risk;
 pub use sight_omniparser::{OmniParserSight, ScreenCapturer};
 pub use traits::{GateDecision, GuiBrain, GuiHands, GuiPlanner, SafetyGate, Sight};
-pub use types::{Action, ActionResult, Bbox, Decision, Observation, SubGoal, SubGoalKind, TurnStep, UiElement};
-pub use vision_brain::{VisionBrain, VISION_LABEL};
+pub use types::{
+    Action, ActionResult, Bbox, Decision, Observation, SubGoal, SubGoalKind, TurnStep, UiElement,
+};
 pub use verifier::{
     verify_sub_goal, Signal, StandardVerifier, SubGoalVerifier, Verdict, VerificationProbe,
     VerifyOutcome, CONFIDENCE_FLOOR,
 };
+pub use vision_brain::{VisionBrain, VISION_LABEL};
 
 /// Environment flag that routes GUI turns through the V2 Sight/Brain/Hands loop.
 ///
@@ -137,11 +142,27 @@ mod brain_choice_tests {
     #[test]
     fn brain_choice_defaults_text_and_selects_vision() {
         assert_eq!(brain_choice_lookup(|_| None), BrainChoice::Text);
-        assert_eq!(brain_choice_lookup(|_| Some("text".into())), BrainChoice::Text);
-        assert_eq!(brain_choice_lookup(|_| Some("something".into())), BrainChoice::Text);
+        assert_eq!(
+            brain_choice_lookup(|_| Some("text".into())),
+            BrainChoice::Text
+        );
+        assert_eq!(
+            brain_choice_lookup(|_| Some("something".into())),
+            BrainChoice::Text
+        );
         // Legacy alias still maps to Text (no behavior break).
-        assert_eq!(brain_choice_lookup(|_| Some("qwen".into())), BrainChoice::Text);
-        for raw in ["vision", "VISION", "ui_tars", "UI_TARS", " ui-tars ", "uitars"] {
+        assert_eq!(
+            brain_choice_lookup(|_| Some("qwen".into())),
+            BrainChoice::Text
+        );
+        for raw in [
+            "vision",
+            "VISION",
+            "ui_tars",
+            "UI_TARS",
+            " ui-tars ",
+            "uitars",
+        ] {
             assert_eq!(
                 brain_choice_lookup(|_| Some(raw.to_string())),
                 BrainChoice::Vision,
@@ -163,11 +184,17 @@ mod flag_tests {
         assert!(v2_enabled_lookup(|_| None));
         // Truthy => ON.
         for raw in ["1", "true", "TRUE", "yes", "on", " On ", "maybe"] {
-            assert!(v2_enabled_lookup(|_| Some(raw.to_string())), "{raw:?} should be V2");
+            assert!(
+                v2_enabled_lookup(|_| Some(raw.to_string())),
+                "{raw:?} should be V2"
+            );
         }
         // Explicit falsy => documented V1 rollback.
         for raw in ["0", "false", "no", "off", "", "  Off "] {
-            assert!(!v2_enabled_lookup(|_| Some(raw.to_string())), "{raw:?} should roll back to V1");
+            assert!(
+                !v2_enabled_lookup(|_| Some(raw.to_string())),
+                "{raw:?} should roll back to V1"
+            );
         }
     }
 }

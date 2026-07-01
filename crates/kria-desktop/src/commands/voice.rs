@@ -684,19 +684,22 @@ pub async fn voice_v2_speak(
     };
     v2.set_audio_player(player).await;
 
-    // Drain telemetry into UI events for the duration of this turn.
-    let telemetry_rx = state.voice_v2_telemetry.lock().await.take();
-    if let Some(mut rx) = telemetry_rx {
+    // Drain telemetry into UI events for the duration of this turn. Subscribe
+    // fresh (broadcast) so it works regardless of prior sessions (Issue 3).
+    {
+        let mut rx = v2.subscribe_telemetry();
         let app_handle = app.clone();
-        let slot = state.voice_v2_telemetry.clone();
         tokio::spawn(async move {
-            while let Some(ev) = rx.recv().await {
-                let payload = serde_json::to_value(&ev).unwrap_or_default();
-                let _ = app_handle.emit("voice:v2_telemetry", payload);
+            loop {
+                match rx.recv().await {
+                    Ok(ev) => {
+                        let payload = serde_json::to_value(&ev).unwrap_or_default();
+                        let _ = app_handle.emit("voice:v2_telemetry", payload);
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
             }
-            // Receiver closed — put None back (channel can't be revived
-            // without rebuilding the pipeline).
-            *slot.lock().await = None;
         });
     }
 
@@ -755,6 +758,20 @@ pub async fn voice_v2_abort(state: State<'_, AppStateCell>) -> Result<(), String
         .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
     if let Some(v2) = state.active_voice.read().await.streaming() {
         v2.force_abort().await;
+    }
+    Ok(())
+}
+
+/// Wave 3.2: push-to-talk key released → finalize the current capture now.
+/// The v2 capture loop ends the utterance immediately (instead of waiting for
+/// VAD silence) and proceeds to transcription. No-op when v2 isn't active.
+#[tauri::command]
+pub async fn voice_ptt_release(state: State<'_, AppStateCell>) -> Result<(), String> {
+    let state = state
+        .get()
+        .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
+    if let Some(v2) = state.active_voice.read().await.streaming() {
+        v2.signal_ptt_finalize();
     }
     Ok(())
 }

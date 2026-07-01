@@ -283,7 +283,11 @@ fn delete_session_preferences_removes_only_managed_keys() {
         format!("session_archived:{sid}"),
         format!("session_temporary:{sid}"),
     ] {
-        assert_eq!(store.get_preference(&k).unwrap(), None, "{k} should be gone");
+        assert_eq!(
+            store.get_preference(&k).unwrap(),
+            None,
+            "{k} should be gone"
+        );
     }
 
     // Unrelated keys preserved.
@@ -292,7 +296,9 @@ fn delete_session_preferences_removes_only_managed_keys() {
         Some("keep-me".to_string())
     );
     assert_eq!(
-        store.get_preference(&format!("session_title:other-{sid}")).unwrap(),
+        store
+            .get_preference(&format!("session_title:other-{sid}"))
+            .unwrap(),
         Some("other".to_string()),
         "another session's prefs must not be touched"
     );

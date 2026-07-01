@@ -123,7 +123,11 @@ fn next_monthly(from: DateTime<Utc>, day: u32) -> DateTime<Utc> {
 }
 
 fn days_in_month(year: i32, month: u32) -> u32 {
-    let (ny, nm) = if month == 12 { (year + 1, 1) } else { (year, month + 1) };
+    let (ny, nm) = if month == 12 {
+        (year + 1, 1)
+    } else {
+        (year, month + 1)
+    };
     let first_next = chrono::NaiveDate::from_ymd_opt(ny, nm, 1).unwrap();
     let first_this = chrono::NaiveDate::from_ymd_opt(year, month, 1).unwrap();
     (first_next - first_this).num_days() as u32
@@ -166,12 +170,27 @@ mod tests {
     #[test]
     fn parse_and_roundtrip() {
         assert_eq!(Recurrence::parse(Some("daily")), Recurrence::Daily);
-        assert_eq!(Recurrence::parse(Some("every:30m")), Recurrence::EveryMinutes(30));
-        assert_eq!(Recurrence::parse(Some("every:2h")), Recurrence::EveryMinutes(120));
-        assert_eq!(Recurrence::parse(Some("weekly:fri")), Recurrence::Weekly(Weekday::Fri));
-        assert_eq!(Recurrence::parse(Some("monthly:15")), Recurrence::Monthly(15));
+        assert_eq!(
+            Recurrence::parse(Some("every:30m")),
+            Recurrence::EveryMinutes(30)
+        );
+        assert_eq!(
+            Recurrence::parse(Some("every:2h")),
+            Recurrence::EveryMinutes(120)
+        );
+        assert_eq!(
+            Recurrence::parse(Some("weekly:fri")),
+            Recurrence::Weekly(Weekday::Fri)
+        );
+        assert_eq!(
+            Recurrence::parse(Some("monthly:15")),
+            Recurrence::Monthly(15)
+        );
         assert_eq!(Recurrence::parse(None), Recurrence::None);
-        assert_eq!(Recurrence::Weekly(Weekday::Fri).to_storage().as_deref(), Some("weekly:fri"));
+        assert_eq!(
+            Recurrence::Weekly(Weekday::Fri).to_storage().as_deref(),
+            Some("weekly:fri")
+        );
     }
 
     #[test]
@@ -182,14 +201,18 @@ mod tests {
 
     #[test]
     fn every_minutes_next() {
-        let n = Recurrence::EveryMinutes(30).next_after(dt(2026, 6, 18, 9)).unwrap();
+        let n = Recurrence::EveryMinutes(30)
+            .next_after(dt(2026, 6, 18, 9))
+            .unwrap();
         assert_eq!(n, dt(2026, 6, 18, 9) + Duration::minutes(30));
     }
 
     #[test]
     fn weekly_next_lands_on_weekday() {
         // 2026-06-18 is a Thursday; next Friday = 06-19.
-        let n = Recurrence::Weekly(Weekday::Fri).next_after(dt(2026, 6, 18, 9)).unwrap();
+        let n = Recurrence::Weekly(Weekday::Fri)
+            .next_after(dt(2026, 6, 18, 9))
+            .unwrap();
         assert_eq!(n.weekday(), Weekday::Fri);
         assert_eq!(n, dt(2026, 6, 19, 9));
     }
@@ -197,7 +220,9 @@ mod tests {
     #[test]
     fn monthly_next_clamps() {
         // Jan 31 → Feb (clamped to 28/29).
-        let n = Recurrence::Monthly(31).next_after(dt(2026, 1, 31, 9)).unwrap();
+        let n = Recurrence::Monthly(31)
+            .next_after(dt(2026, 1, 31, 9))
+            .unwrap();
         assert_eq!(n.month(), 2);
         assert!(n.day() <= 29);
     }

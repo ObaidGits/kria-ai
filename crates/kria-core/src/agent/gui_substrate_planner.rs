@@ -1888,8 +1888,12 @@ pub fn app_alias_to_binary_pub(app: &str) -> String {
 fn app_alias_to_binary(app: &str) -> String {
     match app.to_ascii_lowercase().as_str() {
         "gedit" => "gedit".to_string(),
-        "text editor" | "plain text editor" | "gnome text editor" | "org.gnome.texteditor"
-        | "editor" | "document editor" => "gnome-text-editor".to_string(),
+        "text editor"
+        | "plain text editor"
+        | "gnome text editor"
+        | "org.gnome.texteditor"
+        | "editor"
+        | "document editor" => "gnome-text-editor".to_string(),
         "code" | "vscode" | "visual studio code" | "vs code" => "code".to_string(),
         "code-oss" => "code-oss".to_string(),
         "vscodium" => "codium".to_string(),

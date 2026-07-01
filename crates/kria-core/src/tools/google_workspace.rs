@@ -1438,7 +1438,6 @@ fn gmail_preview_markdown(to: &str, subject: &str, body: &str, cc: Option<&str>)
     format!("**To:** {to}\n{cc_line}**Subject:** {subject}\n\n{body}")
 }
 
-
 struct GwGmailDraftCreate(GwBridge);
 #[async_trait]
 impl ToolHandler for GwGmailDraftCreate {
@@ -1553,7 +1552,9 @@ impl ToolHandler for GwGmailSendBulk {
                         sent_count += 1;
                         results.push(serde_json::json!({ "to": to, "sent": true }));
                     } else {
-                        results.push(serde_json::json!({ "to": to, "sent": false, "error": sent.error }));
+                        results.push(
+                            serde_json::json!({ "to": to, "sent": false, "error": sent.error }),
+                        );
                     }
                 }
                 None => results.push(serde_json::json!({
@@ -2071,7 +2072,9 @@ async fn github_briefing_section(
         Ok(Err(error)) => {
             serde_json::json!({ "connected": true, "tool": tool, "error": error.to_string() })
         }
-        Err(_) => serde_json::json!({ "connected": true, "tool": tool, "error": "github mcp timeout" }),
+        Err(_) => {
+            serde_json::json!({ "connected": true, "tool": tool, "error": "github mcp timeout" })
+        }
     }
 }
 
@@ -2135,10 +2138,7 @@ fn briefing_tasks_section(filter: &str) -> serde_json::Value {
     let selected: Vec<_> = if filter == "urgent_and_overdue" {
         tasks
             .into_iter()
-            .filter(|t| {
-                t.priority_bucket == "urgent"
-                    || t.due_at.map(|d| d < now).unwrap_or(false)
-            })
+            .filter(|t| t.priority_bucket == "urgent" || t.due_at.map(|d| d < now).unwrap_or(false))
             .collect()
     } else {
         tasks
@@ -2185,9 +2185,9 @@ impl ToolHandler for GwMorningBriefing {
                     .await
                 }
                 "github" => github_briefing_section(&self.github, section.tool.as_deref()).await,
-                "tasks" => {
-                    briefing_tasks_section(section.filter.as_deref().unwrap_or("urgent_and_overdue"))
-                }
+                "tasks" => briefing_tasks_section(
+                    section.filter.as_deref().unwrap_or("urgent_and_overdue"),
+                ),
                 other => serde_json::json!({ "error": format!("unknown source: {other}") }),
             };
             sections_out.push(serde_json::json!({
@@ -2784,7 +2784,12 @@ impl ToolHandler for GwFormsCreate {
 /// Always registers all curated Google Workspace tools regardless of whether the MCP server is up.
 /// Pass the `GwClientRef` returned by `new_client_ref()`; call `set_client()`
 /// after the MCP server connects so handlers start forwarding requests.
-pub fn register(reg: &ToolRegistry, mcp_ref: GwClientRef, github_ref: GhClientRef, sidecar: Arc<SidecarBridge>) {
+pub fn register(
+    reg: &ToolRegistry,
+    mcp_ref: GwClientRef,
+    github_ref: GhClientRef,
+    sidecar: Arc<SidecarBridge>,
+) {
     tracing::info!(
         "[GW] registering Google Workspace tools (account source=KRIA_GW_ACCOUNT, lazy MCP ref)"
     );

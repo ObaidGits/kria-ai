@@ -1832,11 +1832,7 @@ mod tests {
             async fn type_text(&self, _t: &str, _i: Option<u64>) -> Result<(), GuiError> {
                 Ok(())
             }
-            async fn press_shortcut(
-                &self,
-                _k: &[Key],
-                _h: Option<u64>,
-            ) -> Result<(), GuiError> {
+            async fn press_shortcut(&self, _k: &[Key], _h: Option<u64>) -> Result<(), GuiError> {
                 Ok(())
             }
             async fn release_all_modifiers(&self) -> Result<(), GuiError> {

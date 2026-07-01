@@ -2,9 +2,9 @@ use super::*;
 use kria_core::agent::gui_cognition::backend_status::{
     select_gui_action_backend, GuiActionBackendStatus, GuiBackendProbeInput, GuiBackendStatus,
 };
-use tauri::{AppHandle, Emitter};
 use std::sync::Arc as StdArc;
 use std::time::Duration;
+use tauri::{AppHandle, Emitter};
 
 fn unix_now_ms() -> i64 {
     Utc::now().timestamp_millis()
@@ -386,7 +386,9 @@ mod kria_ext {
     ///   `None`        when no window matched / the extension was unavailable.
     pub(super) async fn ext_activate_target(token: &str, target_name: &str) -> Option<bool> {
         let listing = ext_call("ListWindows", &[token], 1500).await?;
-        let windows = listing.get("windows").and_then(serde_json::Value::as_array)?;
+        let windows = listing
+            .get("windows")
+            .and_then(serde_json::Value::as_array)?;
         let id = pick_window_match(windows, target_name)?;
         let result = ext_call("ActivateWindow", &[token, id.as_str()], 1500).await?;
         let ok = result
@@ -442,7 +444,8 @@ mod kria_ext {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        let path = std::env::temp_dir().join(format!("kria_ext_cap_{}_{nanos}.png", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("kria_ext_cap_{}_{nanos}.png", std::process::id()));
         let path_str = path.to_str()?.to_string();
         let result = ext_call("CaptureScreen", &[token.as_str(), path_str.as_str()], 4000).await;
         let ok = result
@@ -948,7 +951,12 @@ fn v2_is_wayland() -> bool {
 
 fn v2_env_truthy(key: &str) -> bool {
     std::env::var(key)
-        .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .map(|v| {
+            matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
         .unwrap_or(false)
 }
 
@@ -1194,15 +1202,21 @@ impl kria_core::agent::gui_cognition_v2::VerificationProbe for V2DesktopVerifica
             Some(needle) if !needle.trim().is_empty() => {
                 let body = tokio::fs::read_to_string(p).await.ok()?;
                 let hit = body.contains(needle);
-                Some(Signal::new(hit, 0.95, if hit { "file contains expected" } else { "file lacks expected" }))
+                Some(Signal::new(
+                    hit,
+                    0.95,
+                    if hit {
+                        "file contains expected"
+                    } else {
+                        "file lacks expected"
+                    },
+                ))
             }
             _ => Some(Signal::new(true, 0.95, "file exists")),
         }
     }
 
-    async fn command_output(
-        &self,
-    ) -> Option<kria_core::agent::gui_cognition_v2::Signal<String>> {
+    async fn command_output(&self) -> Option<kria_core::agent::gui_cognition_v2::Signal<String>> {
         // Captured command/file output from the Task-10 cross-substrate bridge's
         // working context. `None` until a bridged op has produced output.
         use kria_core::agent::gui_cognition_v2::Signal;
@@ -1263,8 +1277,18 @@ Output only the file body.",
             self.task, path, intent
         );
         let messages = vec![
-            ChatMessage { role: "system".into(), content: sys.into(), name: None, images: None },
-            ChatMessage { role: "user".into(), content: user, name: None, images: None },
+            ChatMessage {
+                role: "system".into(),
+                content: sys.into(),
+                name: None,
+                images: None,
+            },
+            ChatMessage {
+                role: "user".into(),
+                content: user,
+                name: None,
+                images: None,
+            },
         ];
         let resp = tokio::time::timeout(
             Duration::from_secs(60),
@@ -1404,7 +1428,10 @@ impl kria_core::agent::gui_cognition_v2::GuiBridge for V2DesktopBridge {
                     if p.is_absolute() {
                         target.clone()
                     } else if let Some(home) = std::env::var_os("HOME") {
-                        std::path::Path::new(&home).join(p).to_string_lossy().to_string()
+                        std::path::Path::new(&home)
+                            .join(p)
+                            .to_string_lossy()
+                            .to_string()
                     } else {
                         target.clone()
                     }
@@ -1573,7 +1600,10 @@ impl kria_core::agent::gui_cognition_v2::InputSink for V2DesktopInputSink {
         if !result.success {
             anyhow::bail!(
                 "open_application failed: {}",
-                result.error.clone().unwrap_or_else(|| "unknown error".into())
+                result
+                    .error
+                    .clone()
+                    .unwrap_or_else(|| "unknown error".into())
             );
         }
         // Best-effort: on Wayland, ACTIVATE the just-opened/existing window via the
@@ -1641,13 +1671,19 @@ impl kria_core::agent::gui_cognition_v2::SafetyGate for V2DesktopSafetyGate {
 }
 
 /// Build a minimal error capture (used when a prerequisite layer is unavailable).
-fn v2_error_capture(event_scope_prefix: &str, reply: &str) -> super::chat::DesktopChatCommandCapture {
+fn v2_error_capture(
+    event_scope_prefix: &str,
+    reply: &str,
+) -> super::chat::DesktopChatCommandCapture {
     let events = vec![
         super::chat::desktop_chat_event(
             format!("{event_scope_prefix}:token"),
             serde_json::json!({ "text": reply }),
         ),
-        super::chat::desktop_chat_event(format!("{event_scope_prefix}:done"), serde_json::json!({})),
+        super::chat::desktop_chat_event(
+            format!("{event_scope_prefix}:done"),
+            serde_json::json!({}),
+        ),
     ];
     super::chat::DesktopChatCommandCapture {
         status_code: 200,
@@ -1677,7 +1713,12 @@ fn v2_loop_event_to_wire(
             "summary": format!("{} step plan", goals.len()),
             "steps": goals,
         }),
-        LoopEvent::SubGoalUpdated { index, total, goal, status } => serde_json::json!({
+        LoopEvent::SubGoalUpdated {
+            index,
+            total,
+            goal,
+            status,
+        } => serde_json::json!({
             "type": "SubGoalUpdated",
             "index": index,
             "total": total,
@@ -1696,14 +1737,24 @@ fn v2_loop_event_to_wire(
             "type": "ObservationStarted",
             "detail": "looking closer at the screen",
         }),
-        LoopEvent::ObserveCompleted { active_window, element_count, degraded, .. } => serde_json::json!({
+        LoopEvent::ObserveCompleted {
+            active_window,
+            element_count,
+            degraded,
+            ..
+        } => serde_json::json!({
             "type": "ObservationCompleted",
             "active_window": active_window,
             "visible_control_count": element_count,
             "source": if *degraded { "degraded" } else { "perception" },
         }),
         // The Brain's choice + sanitized rationale ("thinking") surfaced as the plan summary.
-        LoopEvent::Decided { action_kind, detail, reason, .. } => serde_json::json!({
+        LoopEvent::Decided {
+            action_kind,
+            detail,
+            reason,
+            ..
+        } => serde_json::json!({
             "type": "PlanCreated",
             "summary": if reason.trim().is_empty() { format!("{action_kind}: {detail}") } else { reason.clone() },
             "steps": [format!("{action_kind}: {detail}")],
@@ -1711,7 +1762,9 @@ fn v2_loop_event_to_wire(
             "plan_status": "planned",
             "goal_action_type": action_kind,
         }),
-        LoopEvent::Gated { allowed, reason, .. } => {
+        LoopEvent::Gated {
+            allowed, reason, ..
+        } => {
             if *allowed {
                 serde_json::json!({ "type": "SafetyGateCompleted", "status": "approved", "safety_status": "approved" })
             } else {
@@ -1722,12 +1775,18 @@ fn v2_loop_event_to_wire(
                 })
             }
         }
-        LoopEvent::ExecuteStarted { action_kind, detail, .. } => serde_json::json!({
+        LoopEvent::ExecuteStarted {
+            action_kind,
+            detail,
+            ..
+        } => serde_json::json!({
             "type": "ActionStarted",
             "action_kind": action_kind,
             "target": detail,
         }),
-        LoopEvent::ExecuteCompleted { ok, error, backend, .. } => {
+        LoopEvent::ExecuteCompleted {
+            ok, error, backend, ..
+        } => {
             if *ok {
                 serde_json::json!({
                     "type": "ActionCompleted",
@@ -1795,11 +1854,11 @@ pub(crate) const GUI_COGNITION_EVENT_TYPES: &[&str] = &[
     "TurnCompleted",
     "TurnFailed",
     // --- Frozen-now, emitted by later tasks (additive) ---
-    "SubGoalUpdated",      // Task 9: per-sub-goal status as the plan advances
-    "AppChoiceRequested",  // Task 7/13: ambiguous app → single inline confirm
-    "GroundingStatus",     // Task 6/12: which Sight backend is live / degraded
-    "RecoveryAttempted",   // Task 11: a no-progress recovery rung was tried
-    "RetryAttempted",      // Task 4: a brain transport/timeout retry occurred
+    "SubGoalUpdated",     // Task 9: per-sub-goal status as the plan advances
+    "AppChoiceRequested", // Task 7/13: ambiguous app → single inline confirm
+    "GroundingStatus",    // Task 6/12: which Sight backend is live / degraded
+    "RecoveryAttempted",  // Task 11: a no-progress recovery rung was tried
+    "RetryAttempted",     // Task 4: a brain transport/timeout retry occurred
 ];
 
 /// Canonical EXAMPLE payload for each frozen `event.type`, serving as living
@@ -1941,11 +2000,12 @@ pub(super) async fn run_gui_cognition_v2(
                             "vision model unavailable; falling back to the text brain + grounded Sight"
                         );
                         effective_choice = v2::BrainChoice::Text;
-                        let brain_timeout_secs = std::env::var("KRIA_GUI_COG_V2_BRAIN_TIMEOUT_SECS")
-                            .ok()
-                            .and_then(|v| v.parse::<u64>().ok())
-                            .filter(|s| *s > 0)
-                            .unwrap_or(60);
+                        let brain_timeout_secs =
+                            std::env::var("KRIA_GUI_COG_V2_BRAIN_TIMEOUT_SECS")
+                                .ok()
+                                .and_then(|v| v.parse::<u64>().ok())
+                                .filter(|s| *s > 0)
+                                .unwrap_or(60);
                         Box::new(
                             v2::LlmPlannerBrain::new(backend)
                                 .with_som(want_som)
@@ -1991,8 +2051,9 @@ pub(super) async fn run_gui_cognition_v2(
 
     // --- Hands (existing uinput daemon backend) ---
     let socket_path = kria_core::agent::gui_services::default_uinput_socket_path();
-    let gui_backend: StdArc<dyn kria_core::tools::gui_automation::GuiBackend> =
-        StdArc::new(kria_core::tools::gui_automation::YdotoolBackend::new(socket_path));
+    let gui_backend: StdArc<dyn kria_core::tools::gui_automation::GuiBackend> = StdArc::new(
+        kria_core::tools::gui_automation::YdotoolBackend::new(socket_path),
+    );
     let sink = V2DesktopInputSink {
         backend: gui_backend,
         dims: dims.clone(),
@@ -2077,9 +2138,7 @@ pub(super) async fn run_gui_cognition_v2(
     );
     let mut config = config;
     if planner_enabled && brain_choice == v2::BrainChoice::Text {
-        if let Some(planner_backend) =
-            app_state.model_router.route("gui_cognition_planner").await
-        {
+        if let Some(planner_backend) = app_state.model_router.route("gui_cognition_planner").await {
             let planner_timeout = std::env::var("KRIA_GUI_COG_PLANNER_TIMEOUT_SECS")
                 .ok()
                 .and_then(|v| v.parse::<u64>().ok())
@@ -2196,7 +2255,10 @@ pub(super) async fn run_gui_cognition_v2(
                     "backend_used": step.result.backend_used,
                 }),
             );
-            events.push(super::chat::desktop_chat_event("gui_cognition:event", payload));
+            events.push(super::chat::desktop_chat_event(
+                "gui_cognition:event",
+                payload,
+            ));
         }
     }
 
@@ -2301,7 +2363,10 @@ mod gui_cognition_v2_glue_tests {
             v2_parse_combo("ctrl+shift+z"),
             vec![Key::Control, Key::Shift, Key::Char('z')]
         );
-        assert_eq!(v2_parse_combo("ctrl+plus"), vec![Key::Control, Key::Char('+')]);
+        assert_eq!(
+            v2_parse_combo("ctrl+plus"),
+            vec![Key::Control, Key::Char('+')]
+        );
         assert_eq!(v2_parse_combo("ctrl+l"), vec![Key::Control, Key::Char('l')]);
         assert_eq!(v2_parse_combo("enter"), vec![Key::Enter]);
     }
@@ -2319,28 +2384,120 @@ mod gui_cognition_v2_glue_tests {
             v2_loop_event_to_wire(ev).map(|v| v["type"].as_str().unwrap().to_string())
         };
         assert_eq!(ty(&LoopEvent::TurnStarted).as_deref(), Some("TurnStarted"));
-        assert_eq!(ty(&LoopEvent::ObserveStarted { step_index: 0 }).as_deref(), Some("ObservationStarted"));
         assert_eq!(
-            ty(&LoopEvent::ObserveCompleted { step_index: 0, active_window: Some("Chrome".into()), element_count: 3, degraded: false }).as_deref(),
+            ty(&LoopEvent::ObserveStarted { step_index: 0 }).as_deref(),
+            Some("ObservationStarted")
+        );
+        assert_eq!(
+            ty(&LoopEvent::ObserveCompleted {
+                step_index: 0,
+                active_window: Some("Chrome".into()),
+                element_count: 3,
+                degraded: false
+            })
+            .as_deref(),
             Some("ObservationCompleted")
         );
         assert_eq!(
-            ty(&LoopEvent::Decided { step_index: 0, action_kind: "key", detail: "new_tab".into(), reason: "open a tab".into() }).as_deref(),
+            ty(&LoopEvent::Decided {
+                step_index: 0,
+                action_kind: "key",
+                detail: "new_tab".into(),
+                reason: "open a tab".into()
+            })
+            .as_deref(),
             Some("PlanCreated")
         );
-        assert_eq!(ty(&LoopEvent::Gated { step_index: 0, allowed: true, reason: None }).as_deref(), Some("SafetyGateCompleted"));
-        assert_eq!(ty(&LoopEvent::Gated { step_index: 0, allowed: false, reason: Some("risky".into()) }).as_deref(), Some("ExecutionBlocked"));
-        assert_eq!(ty(&LoopEvent::ExecuteStarted { step_index: 0, action_kind: "key", detail: "new_tab".into() }).as_deref(), Some("ActionStarted"));
-        assert_eq!(ty(&LoopEvent::ExecuteCompleted { step_index: 0, ok: true, error: None, backend: "uinput".into() }).as_deref(), Some("ActionCompleted"));
-        assert_eq!(ty(&LoopEvent::ExecuteCompleted { step_index: 0, ok: false, error: Some("boom".into()), backend: "uinput".into() }).as_deref(), Some("ActionFailed"));
+        assert_eq!(
+            ty(&LoopEvent::Gated {
+                step_index: 0,
+                allowed: true,
+                reason: None
+            })
+            .as_deref(),
+            Some("SafetyGateCompleted")
+        );
+        assert_eq!(
+            ty(&LoopEvent::Gated {
+                step_index: 0,
+                allowed: false,
+                reason: Some("risky".into())
+            })
+            .as_deref(),
+            Some("ExecutionBlocked")
+        );
+        assert_eq!(
+            ty(&LoopEvent::ExecuteStarted {
+                step_index: 0,
+                action_kind: "key",
+                detail: "new_tab".into()
+            })
+            .as_deref(),
+            Some("ActionStarted")
+        );
+        assert_eq!(
+            ty(&LoopEvent::ExecuteCompleted {
+                step_index: 0,
+                ok: true,
+                error: None,
+                backend: "uinput".into()
+            })
+            .as_deref(),
+            Some("ActionCompleted")
+        );
+        assert_eq!(
+            ty(&LoopEvent::ExecuteCompleted {
+                step_index: 0,
+                ok: false,
+                error: Some("boom".into()),
+                backend: "uinput".into()
+            })
+            .as_deref(),
+            Some("ActionFailed")
+        );
         // A positive verification surfaces; a no-change one is suppressed (no false-fail).
-        assert_eq!(ty(&LoopEvent::Verified { step_index: 0, changed: Some(true) }).as_deref(), Some("VerificationCompleted"));
-        assert!(v2_loop_event_to_wire(&LoopEvent::Verified { step_index: 0, changed: Some(false) }).is_none());
+        assert_eq!(
+            ty(&LoopEvent::Verified {
+                step_index: 0,
+                changed: Some(true)
+            })
+            .as_deref(),
+            Some("VerificationCompleted")
+        );
+        assert!(v2_loop_event_to_wire(&LoopEvent::Verified {
+            step_index: 0,
+            changed: Some(false)
+        })
+        .is_none());
         // Terminal mapping.
-        assert_eq!(ty(&LoopEvent::TurnEnded { status: TurnStatus::Completed }).as_deref(), Some("TurnCompleted"));
-        assert_eq!(ty(&LoopEvent::TurnEnded { status: TurnStatus::NeedsClarification }).as_deref(), Some("TurnCompleted"));
-        assert_eq!(ty(&LoopEvent::TurnEnded { status: TurnStatus::StoppedError }).as_deref(), Some("TurnFailed"));
-        assert_eq!(ty(&LoopEvent::TurnEnded { status: TurnStatus::StoppedSafety }).as_deref(), Some("TurnFailed"));
+        assert_eq!(
+            ty(&LoopEvent::TurnEnded {
+                status: TurnStatus::Completed
+            })
+            .as_deref(),
+            Some("TurnCompleted")
+        );
+        assert_eq!(
+            ty(&LoopEvent::TurnEnded {
+                status: TurnStatus::NeedsClarification
+            })
+            .as_deref(),
+            Some("TurnCompleted")
+        );
+        assert_eq!(
+            ty(&LoopEvent::TurnEnded {
+                status: TurnStatus::StoppedError
+            })
+            .as_deref(),
+            Some("TurnFailed")
+        );
+        assert_eq!(
+            ty(&LoopEvent::TurnEnded {
+                status: TurnStatus::StoppedSafety
+            })
+            .as_deref(),
+            Some("TurnFailed")
+        );
     }
 
     // ---- Task 2: frozen event-contract tests ----
@@ -2352,16 +2509,55 @@ mod gui_cognition_v2_glue_tests {
             LoopEvent::TurnStarted,
             LoopEvent::ObserveStarted { step_index: 0 },
             LoopEvent::GroundingEscalated { step_index: 0 },
-            LoopEvent::ObserveCompleted { step_index: 0, active_window: None, element_count: 0, degraded: true },
-            LoopEvent::Decided { step_index: 0, action_kind: "key", detail: "x".into(), reason: "r".into() },
-            LoopEvent::Gated { step_index: 0, allowed: true, reason: None },
-            LoopEvent::Gated { step_index: 0, allowed: false, reason: Some("x".into()) },
-            LoopEvent::ExecuteStarted { step_index: 0, action_kind: "key", detail: "x".into() },
-            LoopEvent::ExecuteCompleted { step_index: 0, ok: true, error: None, backend: "uinput".into() },
-            LoopEvent::ExecuteCompleted { step_index: 0, ok: false, error: Some("e".into()), backend: "uinput".into() },
-            LoopEvent::Verified { step_index: 0, changed: Some(true) },
-            LoopEvent::TurnEnded { status: TurnStatus::Completed },
-            LoopEvent::TurnEnded { status: TurnStatus::StoppedError },
+            LoopEvent::ObserveCompleted {
+                step_index: 0,
+                active_window: None,
+                element_count: 0,
+                degraded: true,
+            },
+            LoopEvent::Decided {
+                step_index: 0,
+                action_kind: "key",
+                detail: "x".into(),
+                reason: "r".into(),
+            },
+            LoopEvent::Gated {
+                step_index: 0,
+                allowed: true,
+                reason: None,
+            },
+            LoopEvent::Gated {
+                step_index: 0,
+                allowed: false,
+                reason: Some("x".into()),
+            },
+            LoopEvent::ExecuteStarted {
+                step_index: 0,
+                action_kind: "key",
+                detail: "x".into(),
+            },
+            LoopEvent::ExecuteCompleted {
+                step_index: 0,
+                ok: true,
+                error: None,
+                backend: "uinput".into(),
+            },
+            LoopEvent::ExecuteCompleted {
+                step_index: 0,
+                ok: false,
+                error: Some("e".into()),
+                backend: "uinput".into(),
+            },
+            LoopEvent::Verified {
+                step_index: 0,
+                changed: Some(true),
+            },
+            LoopEvent::TurnEnded {
+                status: TurnStatus::Completed,
+            },
+            LoopEvent::TurnEnded {
+                status: TurnStatus::StoppedError,
+            },
         ];
         for ev in &samples {
             if let Some(v) = v2_loop_event_to_wire(ev) {
@@ -2379,10 +2575,22 @@ mod gui_cognition_v2_glue_tests {
         // Locks the contract: additions must be APPENDED (and this list updated);
         // renames/removals of existing names break this snapshot intentionally.
         let expected = [
-            "TurnStarted", "ObservationStarted", "ObservationCompleted", "PlanCreated",
-            "SafetyGateCompleted", "ExecutionBlocked", "ActionStarted", "ActionCompleted",
-            "ActionFailed", "VerificationCompleted", "TurnCompleted", "TurnFailed",
-            "SubGoalUpdated", "AppChoiceRequested", "GroundingStatus", "RecoveryAttempted",
+            "TurnStarted",
+            "ObservationStarted",
+            "ObservationCompleted",
+            "PlanCreated",
+            "SafetyGateCompleted",
+            "ExecutionBlocked",
+            "ActionStarted",
+            "ActionCompleted",
+            "ActionFailed",
+            "VerificationCompleted",
+            "TurnCompleted",
+            "TurnFailed",
+            "SubGoalUpdated",
+            "AppChoiceRequested",
+            "GroundingStatus",
+            "RecoveryAttempted",
             "RetryAttempted",
         ];
         assert_eq!(GUI_COGNITION_EVENT_TYPES, &expected);
@@ -2395,7 +2603,11 @@ mod gui_cognition_v2_glue_tests {
         // to conform to). This is the contract oracle for later-task emitters.
         for &t in GUI_COGNITION_EVENT_TYPES {
             let ex = gui_cognition_event_example(t);
-            assert_eq!(ex["type"].as_str(), Some(t), "example type mismatch for {t}");
+            assert_eq!(
+                ex["type"].as_str(),
+                Some(t),
+                "example type mismatch for {t}"
+            );
             assert!(ex.is_object(), "example for {t} must be a JSON object");
         }
     }
@@ -2409,7 +2621,10 @@ mod gui_cognition_v2_glue_tests {
             assert!(sg.get(k).is_some(), "SubGoalUpdated missing {k}");
         }
         let ac = gui_cognition_event_example("AppChoiceRequested");
-        assert!(ac["candidates"].is_array(), "AppChoiceRequested.candidates must be an array");
+        assert!(
+            ac["candidates"].is_array(),
+            "AppChoiceRequested.candidates must be an array"
+        );
         assert!(ac.get("query").is_some());
         let gs = gui_cognition_event_example("GroundingStatus");
         for k in ["backend", "live", "degraded_reason"] {
