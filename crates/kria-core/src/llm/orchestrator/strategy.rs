@@ -171,7 +171,8 @@ pub fn calculate_target_params_measured(
     };
     let reserve = volatility_reserve_mb(free_samples);
     let budget_free = floor.saturating_sub(reserve);
-    let margin = safety_margin_mb.saturating_add(calibrated_cuda_reserve_mb(learned_cuda_overhead_mb));
+    let margin =
+        safety_margin_mb.saturating_add(calibrated_cuda_reserve_mb(learned_cuda_overhead_mb));
     calculate_target_params(profile, budget_free, margin, backend)
 }
 
@@ -443,7 +444,9 @@ mod tests {
 
     #[test]
     fn volatility_reserve_grows_with_spread_and_is_capped() {
-        let _g = super::super::gpu_policy::tests::SETTINGS_TEST_LOCK.lock().unwrap();
+        let _g = super::super::gpu_policy::tests::SETTINGS_TEST_LOCK
+            .lock()
+            .unwrap();
         // spread 2000 → half = 1000, under cap.
         assert_eq!(volatility_reserve_mb(&[6000, 4000]), 1000);
         // Huge spread is clamped to the live cap (settable global; derive to stay stable).
@@ -453,7 +456,9 @@ mod tests {
 
     #[test]
     fn calibration_correction_is_bounded_to_50pct() {
-        let _g = super::super::gpu_policy::tests::SETTINGS_TEST_LOCK.lock().unwrap();
+        let _g = super::super::gpu_policy::tests::SETTINGS_TEST_LOCK
+            .lock()
+            .unwrap();
         // Bound is relative to the live default reserve (now a settable global), so derive it
         // rather than hardcoding — keeps the test stable regardless of process settings.
         let d = cuda_runtime_reserve_mb();
@@ -470,34 +475,40 @@ mod tests {
 
     #[test]
     fn measured_sizing_uses_floor_minus_reserve_not_peak() {
-        let _g = super::super::gpu_policy::tests::SETTINGS_TEST_LOCK.lock().unwrap();
+        let _g = super::super::gpu_policy::tests::SETTINGS_TEST_LOCK
+            .lock()
+            .unwrap();
         let p = test_profile();
         // Live reading is a transient peak of 6000, but the floor is 4000 with a 2000 spread →
         // 1000 reserve → budget_free = 3000. Sizing must reflect the FLOOR, not the 6000 peak.
-        let peak = calculate_target_params_measured(
-            &p, 6000, &[6000, 4000], 256, None, GpuBackend::Cuda,
-        );
+        let peak =
+            calculate_target_params_measured(&p, 6000, &[6000, 4000], 256, None, GpuBackend::Cuda);
         // Compare to sizing directly at the floor-minus-reserve budget with default cuda reserve.
-        let expected = calculate_target_params(&p, 3000, 256 + cuda_runtime_reserve_mb(), GpuBackend::Cuda);
+        let expected =
+            calculate_target_params(&p, 3000, 256 + cuda_runtime_reserve_mb(), GpuBackend::Cuda);
         assert_eq!(peak.ngl, expected.ngl);
-        assert!(peak.ngl < p.total_layers, "must not size for the transient peak");
+        assert!(
+            peak.ngl < p.total_layers,
+            "must not size for the transient peak"
+        );
     }
 
     #[test]
     fn measured_sizing_falls_back_to_live_when_no_history() {
-        let _g = super::super::gpu_policy::tests::SETTINGS_TEST_LOCK.lock().unwrap();
+        let _g = super::super::gpu_policy::tests::SETTINGS_TEST_LOCK
+            .lock()
+            .unwrap();
         let p = test_profile();
         let r = calculate_target_params_measured(&p, 6144, &[], 256, None, GpuBackend::Cuda);
-        let expected = calculate_target_params(&p, 6144, 256 + cuda_runtime_reserve_mb(), GpuBackend::Cuda);
+        let expected =
+            calculate_target_params(&p, 6144, 256 + cuda_runtime_reserve_mb(), GpuBackend::Cuda);
         assert_eq!(r.ngl, expected.ngl);
     }
 
     #[test]
     fn measured_sizing_cpu_backend_ignores_vram_floor() {
         let p = test_profile();
-        let r = calculate_target_params_measured(
-            &p, 0, &[0, 0], 256, None, GpuBackend::CpuOnly,
-        );
+        let r = calculate_target_params_measured(&p, 0, &[0, 0], 256, None, GpuBackend::CpuOnly);
         assert_eq!(r.ngl, 0);
         assert_eq!(r.degradation, DegradationLevel::CpuOnly);
     }

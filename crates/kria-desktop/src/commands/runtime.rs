@@ -143,47 +143,93 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         } else {
             let fallback = paths.data_dir.join("skills.db");
             let _ = std::fs::create_dir_all(&paths.data_dir);
-            Arc::new(
-                kria_core::openclaw::registry::SkillRegistry::open(&fallback)
-                    .expect("fallback registry must open"),
-            )
+            match kria_core::openclaw::registry::SkillRegistry::open(&fallback) {
+                Ok(r) => Arc::new(r),
+                Err(e) => {
+                    // Never crash the whole app because the OpenClaw registry DB can't
+                    // open (e.g. unwritable data dir). Degrade to an in-memory registry
+                    // so KRIA still boots; skills just won't persist this session.
+                    tracing::error!(
+                        error = %e,
+                        "[OpenClaw] persistent skill registry unavailable — using in-memory \
+                         registry (skills will not persist until the data dir is writable)"
+                    );
+                    Arc::new(
+                        kria_core::openclaw::registry::SkillRegistry::open(std::path::Path::new(
+                            ":memory:",
+                        ))
+                        .unwrap_or_else(|e2| {
+                            panic!("in-memory skill registry must open (SQLite broken): {e2}")
+                        }),
+                    )
+                }
+            }
         };
 
     // Boot the ContainerPool only when explicitly enabled in user config.
     // Docker and the substrate image are optional; missing prerequisites should
     // disable OpenClaw cleanly instead of creating repeated background warnings.
     let openclaw_config = config.openclaw.clone();
+    // TrustConfig enforcement fix (product gap 6/8): seed the live,
+    // process-wide trust-config snapshot from the loaded config at boot, so
+    // execute_semantic reads the correct persisted value even before the
+    // user ever opens Settings (openclaw_update_settings keeps it hot after).
+    kria_core::openclaw::trust_runtime::set_live_trust_config(openclaw_config.trust.clone());
     let openclaw_pool: Option<Arc<kria_core::openclaw::ContainerPool>> = if !openclaw_config.enabled
     {
         tracing::info!("[OpenClaw] container pool disabled by configuration");
         None
     } else {
-        match kria_core::openclaw::ContainerPool::new(openclaw_config.clone()).await {
-            Ok(pool) => {
-                let pool = Arc::new(pool);
-                if let Err(e) = pool.verify_image_available().await {
-                    tracing::warn!(
-                        image = %openclaw_config.image,
-                        "[OpenClaw] container pool disabled: {e}"
+        // Bounded boot retry: the Docker daemon is frequently still coming up when
+        // KRIA launches (login/autostart race), which previously left the pool
+        // permanently `None` for the whole session ("sometimes it starts, sometimes
+        // it doesn't"). Retry a few times with short backoff so a transient
+        // daemon-not-ready window self-heals without materially delaying boot. Uses
+        // the (previously dead) `max_restart_attempts` config knob.
+        let max_attempts = openclaw_config.max_restart_attempts.max(1);
+        let mut booted: Option<Arc<kria_core::openclaw::ContainerPool>> = None;
+        for attempt in 1..=max_attempts {
+            match kria_core::openclaw::ContainerPool::new(openclaw_config.clone()).await {
+                Ok(pool) => {
+                    let pool = Arc::new(pool);
+                    if let Err(e) = pool.verify_image_available().await {
+                        tracing::warn!(
+                            image = %openclaw_config.image,
+                            attempt,
+                            "[OpenClaw] container pool image unavailable: {e}"
+                        );
+                        // A missing image will not appear on retry — stop early.
+                        break;
+                    } else if let Err(e) = pool.initialize().await {
+                        tracing::warn!(attempt, "[OpenClaw] container pool pre-warm failed: {e}");
+                        // Pre-warm failure is often a transient daemon hiccup — retry.
+                    } else {
+                        kria_core::openclaw::ContainerPool::spawn_prewarm_loop(pool.clone());
+                        tracing::info!(attempt, "[OpenClaw] container pool ready");
+                        booted = Some(pool);
+                        break;
+                    }
+                }
+                Err(e) => {
+                    tracing::info!(
+                        attempt,
+                        "[OpenClaw] container pool not ready yet (Docker starting?): {e}"
                     );
-                    None
-                } else if let Err(e) = pool.initialize().await {
-                    tracing::warn!(
-                        "[OpenClaw] container pool disabled after pre-warm failure: {e}"
-                    );
-                    None
-                } else {
-                    // Spawn background loop that maintains warm Light containers.
-                    kria_core::openclaw::ContainerPool::spawn_prewarm_loop(pool.clone());
-                    tracing::info!("[OpenClaw] container pool ready");
-                    Some(pool)
                 }
             }
-            Err(e) => {
-                tracing::info!("[OpenClaw] container pool unavailable (Docker not running?): {e}");
-                None
+            if attempt < max_attempts {
+                // Short backoff (0.75s, 1.5s, …) — bounded so boot is never blocked long.
+                tokio::time::sleep(std::time::Duration::from_millis(750 * attempt as u64)).await;
             }
         }
+        if booted.is_none() {
+            tracing::warn!(
+                attempts = max_attempts,
+                "[OpenClaw] container pool unavailable after {max_attempts} attempt(s); \
+                 use Settings → OpenClaw → Restart Substrate once Docker is up"
+            );
+        }
+        booted
     };
 
     // Initialize model router from config
@@ -196,6 +242,24 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     let health = Arc::new(HealthRegistry::new());
     health.register("sidecar");
     health.update("sidecar", ServiceStatus::Starting, None);
+    // Unified health for the OpenClaw substrate — only surfaced when the user has
+    // enabled it, so it never adds noise for users who don't use OpenClaw.
+    if openclaw_config.enabled {
+        health.register("openclaw");
+        if openclaw_pool.is_some() {
+            health.update(
+                "openclaw",
+                ServiceStatus::Healthy,
+                Some("Substrate running".into()),
+            );
+        } else {
+            health.update(
+                "openclaw",
+                ServiceStatus::Degraded,
+                Some("Substrate unavailable — check Docker, then restart the substrate".into()),
+            );
+        }
+    }
     health.register("ocr_dependency");
     health.register("gui_uinput_daemon");
     health.register("gui_atspi_bus");
@@ -940,9 +1004,47 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     // Wrap registry in Arc immediately — thread-safe for background MCP registration
     let tool_registry = Arc::new(tool_registry_inner);
 
-    // Register active OpenClaw skills as oc_* tools (requires pool to be ready).
+    // Register the semantic OpenClaw handler. Pass the model router so RC1
+    // schema-driven argument generation can translate natural-language requests
+    // into each skill's typed `inputSchema` arguments.
     if let (Some(ref subsystem), Some(ref pool)) = (&openclaw_subsystem, &openclaw_pool) {
-        subsystem.register_into_tool_registry(&tool_registry, pool.clone());
+        // RC-1: register WITH the Capability Intelligence Layer wired in. The
+        // CIL embedder reuses the SAME shared frozen embedding model (no second
+        // backend); the CIL config + `openclaw_icp_enabled` master flag come
+        // from the `[openclaw.cil]` section. With the flag OFF no facade is
+        // built and behavior is byte-for-byte the frozen direct-router path.
+        let cil_embedder: std::sync::Arc<dyn kria_core::openclaw::cil::Embedder> =
+            std::sync::Arc::new(kria_core::openclaw::cil::MemoryEmbedder::new(
+                embeddings.clone(),
+            ));
+        subsystem
+            .register_into_tool_registry_with_cil(
+                &tool_registry,
+                pool.clone(),
+                Some(model_router.clone()),
+                cil_embedder,
+                openclaw_config.cil.clone(),
+                paths.data_dir.join("skills.db"),
+                openclaw_config.registry.index_url.clone(),
+                openclaw_config.registry.allowed_hosts.clone(),
+            )
+            .await;
+
+        // RC2: synchronize the registry from the container's authoritative
+        // `tools/list` so EVERY baked/installed skill is routable with its real
+        // schema. Background + non-fatal: needs Docker and adds container
+        // latency, so it must never block or fail boot — OpenClaw keeps
+        // whatever the registry already had if the container is unreachable.
+        let sync_registry = openclaw_registry.clone();
+        let sync_pool = pool.clone();
+        tokio::spawn(async move {
+            match kria_core::openclaw::init::sync_registry_from_container(&sync_registry, sync_pool)
+                .await
+            {
+                Ok(n) => tracing::info!(changed = n, "[OpenClaw] registry↔container sync complete"),
+                Err(e) => tracing::warn!("[OpenClaw] registry↔container sync skipped: {e}"),
+            }
+        });
     }
 
     tracing::info!(
@@ -1661,7 +1763,7 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         orchestrator_active_turns: orchestrator_active_turns.clone(),
         orchestrator_last_activity_at: orchestrator_last_activity_at.clone(),
         image_orchestrator,
-        skill_registry: openclaw_registry,
+        skill_registry: openclaw_registry.clone(),
         container_pool: openclaw_pool,
         n8n_catalog: n8n_catalog.clone(),
         n8n_state_store: n8n_state_store.clone(),
@@ -1681,6 +1783,18 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     }
 
     tracing::info!("[INIT] AppState set — frontend is now unblocked");
+
+    // Task 13.4 (R10.2): push-sync event bridge for the frozen `RegistryEvent`
+    // stream. Wired here (not in `main.rs::setup`) because `RegistryEvent` is
+    // emitted per-registry-instance (unlike the process-global bundle/execution
+    // buses), so it needs the live `ProductionSkillRegistry` handle that only
+    // exists after runtime init. Subscribes to the SAME frozen registry
+    // broadcast the registry already emits to — no second event system. The UI
+    // reconciles any missed event by polling the authoritative list commands.
+    crate::commands::openclaw::spawn_openclaw_registry_forwarding(
+        handle.clone(),
+        openclaw_registry.clone(),
+    );
 
     {
         let handle_status = handle.clone();
@@ -2004,7 +2118,8 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
                         // Bounded, best-effort; runs for the process lifetime.
                         let hra_sweep = hra.clone();
                         tokio::spawn(async move {
-                            let mut tick = tokio::time::interval(std::time::Duration::from_secs(30));
+                            let mut tick =
+                                tokio::time::interval(std::time::Duration::from_secs(30));
                             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                             loop {
                                 tick.tick().await;
@@ -2035,8 +2150,10 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
                                 let snap = rx.borrow().clone();
                                 hra.apply_snapshot(&snap);
                                 let _ = handle_hra.emit("resource:hra_status", hra.status_json());
-                                let _ = handle_hra
-                                    .emit("resource:hra_diagnostics", hra.diagnostics_json_async().await);
+                                let _ = handle_hra.emit(
+                                    "resource:hra_diagnostics",
+                                    hra.diagnostics_json_async().await,
+                                );
                             }
                         });
                     }

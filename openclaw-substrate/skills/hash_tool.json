@@ -1,0 +1,13 @@
+{
+  "name": "oc_hash_tool",
+  "description": "Computes a cryptographic hash (sha256, sha1, md5, or sha512) of text.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "text": { "type": "string", "description": "The text to hash." },
+      "algorithm": { "type": "string", "description": "One of 'sha256' (default), 'sha1', 'md5', 'sha512'." }
+    },
+    "required": ["text"]
+  },
+  "handler": "hash_tool.js"
+}

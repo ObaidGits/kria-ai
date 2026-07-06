@@ -58,6 +58,17 @@ fn main() {
             // running kria-wake-daemon can start a session without relaunch.
             commands::wake_listener::spawn(app.handle().clone());
 
+            // UI event-forwarding fix (R16, product gap 5/8): bridge the real
+            // OpenClaw bundle-lifecycle + execution event streams to the
+            // frontend. Safe to start immediately (subscribes to broadcast
+            // buses that exist regardless of whether OpenClaw is enabled yet).
+            commands::openclaw::spawn_openclaw_event_forwarding(app.handle().clone());
+
+            // Task 13.2: buffer the same OpenClaw execution + bundle-lifecycle
+            // event streams into an in-memory ring the `openclaw_execution_logs`
+            // command reads. Additive subscription (own broadcast receivers).
+            commands::openclaw::spawn_openclaw_log_buffer();
+
             // Initialize kria-core runtime in background
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -305,6 +316,31 @@ fn main() {
             commands::openclaw::clawhub_toggle_skill,
             commands::openclaw::openclaw_substrate_status,
             commands::openclaw::openclaw_substrate_restart,
+            commands::openclaw::openclaw_get_settings,
+            commands::openclaw::openclaw_update_settings,
+            commands::openclaw::install_skill_bundle,
+            commands::openclaw::uninstall_skill_bundle,
+            commands::openclaw::openclaw_generate_skill,
+            commands::openclaw::openclaw_recommend_skills,
+            commands::openclaw::openclaw_capability_manager,
+            commands::openclaw::openclaw_execution_logs,
+            commands::openclaw::openclaw_capability_graph,
+            commands::openclaw::openclaw_list_grants,
+            commands::openclaw::openclaw_revoke_grant,
+            commands::openclaw::openclaw_get_developer_mode,
+            commands::openclaw::openclaw_set_developer_mode,
+            commands::capability::cpp_status,
+            commands::capability::cpp_list_providers,
+            commands::capability::cpp_discover,
+            commands::capability::cpp_catalog,
+            commands::capability::cpp_recommend,
+            commands::capability::cpp_descriptor,
+            commands::capability::cpp_list_grants,
+            commands::capability::cpp_revoke_grant,
+            commands::capability::cpp_authorize,
+            commands::capability::cpp_approve,
+            commands::capability::cpp_execute,
+            commands::capability::cpp_timeline,
             commands::gui_automation_control::get_gui_automation_status,
             commands::gui_automation_control::set_gui_automation_enabled,
             commands::gui_automation_control::get_gui_cognition_readiness_bypass,

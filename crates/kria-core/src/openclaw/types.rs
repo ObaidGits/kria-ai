@@ -354,8 +354,13 @@ pub struct SkillDescriptor {
     pub network_policy: OpenClawNetworkPolicy,
     /// Resource profile (memory, CPU, timeout).
     pub resource_profile: ResourceProfile,
-    /// Capability requirements.
+    /// Capability requirements (legacy flag view — DERIVED/display only, never used for
+    /// enforcement; the authoritative enforcement set is `granted`).
     pub capabilities: SkillCapabilities,
+    /// Authoritative granted capabilities (A3). The one enforcement source of truth — the
+    /// runtime materializes the container solely from these. Empty for GREEN/no-grant skills.
+    #[serde(default)]
+    pub granted: Vec<crate::openclaw::capability::CapabilityGrant>,
     /// Trust tier.
     pub trust_tier: TrustTier,
     /// Source (ClawHub, local, bundled).

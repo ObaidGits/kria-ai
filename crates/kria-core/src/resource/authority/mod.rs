@@ -68,10 +68,15 @@ pub mod sla;
 pub mod thermal;
 pub mod types;
 
-pub use anomaly::{Anomaly, AnomalyKind};
 pub use activity::{ActivityModel, ActivitySignals, ActivityState, ActivityThresholds};
-pub use benefit::{evaluate as evaluate_benefit, Benefit, BenefitEval, BenefitInputs, BenefitReason, BenefitThresholds};
-pub use benchmark::{detect_regressions, gate_passes, BenchResult, Regression, RegressionTolerance};
+pub use anomaly::{Anomaly, AnomalyKind};
+pub use benchmark::{
+    detect_regressions, gate_passes, BenchResult, Regression, RegressionTolerance,
+};
+pub use benefit::{
+    evaluate as evaluate_benefit, Benefit, BenefitEval, BenefitInputs, BenefitReason,
+    BenefitThresholds,
+};
 pub use budget::{BandPolicy, Budget};
 pub use capability::CapabilityVector;
 pub use capability_registry::{
@@ -93,8 +98,8 @@ pub use metrics::{Counters, LatencyHistogram};
 pub use planner::{plan, PolicyProfile, PolicyWeights};
 pub use policy::{
     decide as policy_decide, decide_image_admission, derive_mode, Action, Confidence,
-    Decision as PolicyDecision, HealthPosture, ImageAdmission, LockPosture, PolicyInputs, PolicyLog,
-    PolicyReason, RuntimeMode,
+    Decision as PolicyDecision, HealthPosture, ImageAdmission, LockPosture, PolicyInputs,
+    PolicyLog, PolicyReason, RuntimeMode,
 };
 pub use predict::{
     prewarm_allowed, prewarm_hint, AutonomousOptimizer, Forecast, Forecaster, PrewarmHint,
@@ -103,7 +108,9 @@ pub use predict::{
 pub use pressure::{PressureEngine, PressureLevel, Remedy};
 pub use ra::{LocalAuthority, RaOutcome, ResourceAuthority};
 pub use reconciler::{reconcile, ObservedProcess, ReconcilePlan};
-pub use residency_manager::{BreakCondition, LockState, ResidencyError, ResidencyManager, ResidentLock};
+pub use residency_manager::{
+    BreakCondition, LockState, ResidencyError, ResidencyManager, ResidentLock,
+};
 pub use scheduler::{AdmitError, Lease, LeaseToken, QueueCaps, Scheduler};
 pub use security::{egress_allowed, CapabilityToken, KillAuthorizer};
 pub use service::{global_hra, set_global_hra, AdmissionGuard, GpuAdmissionAdvice, HraService};

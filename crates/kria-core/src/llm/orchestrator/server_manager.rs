@@ -1437,7 +1437,10 @@ mod tests {
         // Record a failure at ngl=36 → future requests at/above 36 are clamped below it.
         mgr.record_spawn_failure(36);
         let (ngl, ctx) = mgr.clamp_against_failures(36, 8192);
-        assert!(ngl < 36, "ngl should drop below the failure ceiling, got {ngl}");
+        assert!(
+            ngl < 36,
+            "ngl should drop below the failure ceiling, got {ngl}"
+        );
         assert!(ctx <= 8192);
 
         // A lower request than the ceiling is left alone.

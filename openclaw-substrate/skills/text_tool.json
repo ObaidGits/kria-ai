@@ -1,0 +1,13 @@
+{
+  "name": "oc_text_tool",
+  "description": "Text utilities: word/char/line count (stats), upper/lower case, trim, reverse.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "text": { "type": "string", "description": "The input text." },
+      "op": { "type": "string", "description": "One of 'stats' (default), 'upper', 'lower', 'trim', 'reverse'." }
+    },
+    "required": ["text"]
+  },
+  "handler": "text_tool.js"
+}

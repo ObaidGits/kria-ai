@@ -503,22 +503,36 @@ fn try_deterministic_dispatch_with_context(
         }
     }
 
+    // BUG #1 FIX (n8n misrouting root cause #2, category D: Dispatcher issue):
+    // `parse_n8n_workflow_run_reference` matches the bare "run "/"execute "/"retry "
+    // prefix on ANY prompt with no content check at all — unlike the second n8n
+    // dispatch block below, this earlier branch was never gated by
+    // `prompt_looks_like_non_n8n_tool_intent`. "Run the skill oc_fake_skill..."
+    // starts with "run " and was routed straight into n8n workflow resolution,
+    // producing a confusing "not_found"/"blocked" n8n response instead of a
+    // clean "no such skill" answer from the OpenClaw path. Apply the same
+    // intent exclusion here that already guards the fallback n8n block.
     if let Some(reference) = crate::n8n::parse_n8n_workflow_run_reference(user_text) {
-        let workflows = load_n8n_workflows_for_dispatch();
-        let route = crate::n8n::WorkflowRankingEngine::new(workflows).route_chat(
-            crate::n8n::N8nChatRouteRequest {
-                prompt: user_text.to_string(),
-                previous_user_prompt: previous_user_text.map(str::to_string),
-                manual_n8n_mode: false,
-                safe_auto_run_enabled: false,
-                workflows: Vec::new(),
-            },
-        );
-        if matches!(route.status, crate::n8n::N8nChatRouteStatus::UseOtherTool) {
-            return None;
+        if crate::n8n::prompt_looks_like_non_n8n_tool_intent(user_text) {
+            // Not an n8n workflow reference — fall through to normal routing
+            // (e.g. OpenClaw skill invocation) instead of resolving against n8n.
+        } else {
+            let workflows = load_n8n_workflows_for_dispatch();
+            let route = crate::n8n::WorkflowRankingEngine::new(workflows).route_chat(
+                crate::n8n::N8nChatRouteRequest {
+                    prompt: user_text.to_string(),
+                    previous_user_prompt: previous_user_text.map(str::to_string),
+                    manual_n8n_mode: false,
+                    safe_auto_run_enabled: false,
+                    workflows: Vec::new(),
+                },
+            );
+            if matches!(route.status, crate::n8n::N8nChatRouteStatus::UseOtherTool) {
+                return None;
+            }
+            let _ = reference;
+            return deterministic_notice_tool(n8n_route_notice(&route));
         }
-        let _ = reference;
-        return deterministic_notice_tool(n8n_route_notice(&route));
     }
 
     if !crate::n8n::prompt_looks_like_non_n8n_tool_intent(user_text) {
@@ -776,6 +790,24 @@ fn try_deterministic_extract(_tool_hint: &str, user_text: &str) -> Option<serde_
 /// - Never expose internal tool names (n8n_invoke_workflow, execute_bash, etc.)
 /// - Extract actionable information from the raw error
 /// - For n8n: suggest available workflows when unknown workflow requested
+/// PRODUCTION HARDENING FIX (Phase 10: error system audit). Compute the
+/// `result` payload for a `StreamEvent::ToolEnd` from a completed
+/// `ToolResult`. On success, forwards `data` unchanged (preserves the
+/// existing, correct contract for successful tool calls). On failure, folds
+/// the real `error` message into the payload as `{"error": "..."}` instead of
+/// forwarding `data` (which `ToolResult::err` always sets to `Value::Null`) —
+/// otherwise the frontend's raw result display has nothing to show and falls
+/// back to a generic "unknown error", hiding the actual failure reason from
+/// the user regardless of what really happened.
+fn tool_end_result_payload(tool_result: &crate::infra::isolation::ToolResult) -> serde_json::Value {
+    if !tool_result.success {
+        if let Some(err) = tool_result.error.as_ref() {
+            return serde_json::json!({ "error": err });
+        }
+    }
+    tool_result.data.clone()
+}
+
 fn format_tool_error_for_user(tool_name: &str, raw_error: &str) -> String {
     let lower = raw_error.to_lowercase();
 
@@ -4172,7 +4204,16 @@ fn tool_matches_lab_app_lock(tool_name: &str, app_lock: &str) -> bool {
         "forms" => tool_name_lower.starts_with("gw_forms_"),
         "google" | "gworkspace" | "google_workspace" => tool_name_lower.starts_with("gw_"),
         "n8n" => tool_name_lower == "n8n_invoke_workflow",
-        "openclaw" | "claw" => tool_name_lower.starts_with("oc_"),
+        // A6: OpenClaw is a single semantic tool `"openclaw"` (+ introspection
+        // `"list_installed_skills"`), NOT per-skill `oc_*` tools anymore. The old
+        // `starts_with("oc_")`-only rule blocked the only tools that can satisfy an
+        // OpenClaw request when the user locks Tool Mode to "OpenClaw". Keep `oc_*`
+        // for backward compat with any legacy per-skill registration.
+        "openclaw" | "claw" => {
+            tool_name_lower == "openclaw"
+                || tool_name_lower == "list_installed_skills"
+                || tool_name_lower.starts_with("oc_")
+        }
         "gui" | "gui_cognition" | "gui-cognition" | "desktop_gui" => {
             matches!(
                 tool_name_lower.as_str(),
@@ -4231,6 +4272,11 @@ fn tool_matches_lab_app_lock(tool_name: &str, app_lock: &str) -> bool {
         ),
         "docker" => {
             tool_name_lower.contains("docker")
+                // A6: OpenClaw skills run in Docker containers, so "docker" mode must
+                // reach the semantic OpenClaw tool + introspection (same fix as the
+                // "openclaw" arm), not just the legacy `oc_*` per-skill names.
+                || tool_name_lower == "openclaw"
+                || tool_name_lower == "list_installed_skills"
                 || tool_name_lower.starts_with("oc_")
                 || tool_name_lower == "n8n_invoke_workflow"
         }
@@ -9736,9 +9782,25 @@ impl AgentLoop {
                     })),
                 );
 
+                // PRODUCTION HARDENING FIX (Phase 10: error system audit): on a
+                // failed tool call, `tool_result.data` is always `Value::Null`
+                // (see `ToolResult::err`'s constructor) — the REAL error string
+                // lives in the separate `tool_result.error` field, which this
+                // event never forwarded. The frontend's raw "Result:" display
+                // reads `result.error`, so every failed tool call showed the
+                // generic "unknown error" fallback regardless of what actually
+                // went wrong (root-caused via a real OpenClaw registry-empty
+                // failure that displayed as "unknown error" instead of the true
+                // "No suitable skill found: No enabled skills found in registry").
+                // `human_readable`/`conversational_summary` already carried the
+                // real message correctly (via `ResultSynthesizer::synthesize_failure`
+                // reading `tool_result.error` directly) — this fix makes the raw
+                // `result` payload consistent with those, instead of silently
+                // dropping the one field that actually explains the failure.
+                let tool_end_result = tool_end_result_payload(&tool_result);
                 let _ = event_tx.send(StreamEvent::ToolEnd {
                     name: call.name.clone(),
-                    result: tool_result.data.clone(),
+                    result: tool_end_result,
                     success: tool_result.success,
                     human_readable: Some(synthesized.human_readable.clone()),
                     conversational_summary: Some(synthesized.conversational_summary.clone()),
@@ -10068,7 +10130,25 @@ impl AgentLoop {
                 })),
             );
 
+            // BUG #7 FIX (category L: State Management issue). Root cause: this
+            // bare `if !is_turn_active() { return; }` returned with ZERO events
+            // emitted, unlike the established `return_if_stale()` pattern used
+            // everywhere else in this function (which always emits
+            // `StreamEvent::Done("Turn cancelled.")` before returning). A turn
+            // that reached here with a stale admission state — e.g. because an
+            // unusual/ambiguous prompt like "Decompress this concept..." routed
+            // through a slower path and got superseded mid-flight — produced
+            // NO response and NO error: a silent, undiagnosable dropped turn.
+            // Emit the same terminal event the rest of the function already
+            // uses so a stale turn is always visibly resolved, never silent.
             if !is_turn_active() {
+                log_pipeline_step(
+                    session_id,
+                    "stale_turn_dropped_at_satisfaction",
+                    "Turn became stale before satisfaction summary could be emitted",
+                    Some(serde_json::json!({ "turn_id": turn_id_for_checks })),
+                );
+                let _ = event_tx.send(StreamEvent::Done("Turn cancelled.".into()));
                 return;
             }
 
@@ -10087,7 +10167,15 @@ impl AgentLoop {
             })),
         );
 
+        // BUG #7 FIX: same silent-drop gap as above, at the max-rounds exit path.
         if !is_turn_active() {
+            log_pipeline_step(
+                session_id,
+                "stale_turn_dropped_at_max_rounds",
+                "Turn became stale before max-rounds error could be emitted",
+                Some(serde_json::json!({ "turn_id": turn_id_for_checks })),
+            );
+            let _ = event_tx.send(StreamEvent::Done("Turn cancelled.".into()));
             return;
         }
 

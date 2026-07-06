@@ -12,8 +12,8 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use super::collector::HostSnapshot;
 use super::co_residency::{CoResidencyManager, CoResidencyMetrics};
+use super::collector::HostSnapshot;
 use super::metrics::Counters;
 use super::planner::PolicyProfile;
 use super::predict::{Forecast, Forecaster, ResourceKind};
@@ -211,7 +211,9 @@ impl HraService {
                 "time_to_exhaustion_s": fc.time_to_threshold_s,
                 "confidence": fc.confidence,
             }),
-            None => serde_json::json!({ "resource": "vram", "time_to_exhaustion_s": null, "confidence": 0.0 }),
+            None => {
+                serde_json::json!({ "resource": "vram", "time_to_exhaustion_s": null, "confidence": 0.0 })
+            }
         }
     }
 
@@ -282,7 +284,11 @@ impl HraService {
                     ),
                 }
             } else {
-                let best_free = gpus.iter().map(|d| d.effective_free_vram_mb()).max().unwrap_or(0);
+                let best_free = gpus
+                    .iter()
+                    .map(|d| d.effective_free_vram_mb())
+                    .max()
+                    .unwrap_or(0);
                 GpuAdmissionAdvice {
                     allow_gpu: false,
                     shadow,
@@ -327,7 +333,10 @@ impl HraService {
             })
             .collect();
         if let Some(obj) = base.as_object_mut() {
-            obj.insert("residents".to_string(), serde_json::Value::Array(residents_json));
+            obj.insert(
+                "residents".to_string(),
+                serde_json::Value::Array(residents_json),
+            );
         }
         base
     }
@@ -478,7 +487,13 @@ mod tests {
     use super::*;
 
     fn svc() -> Arc<HraService> {
-        HraService::new(&[(0, 12288)], 512, 32768, &["openai"], PolicyProfile::Balanced)
+        HraService::new(
+            &[(0, 12288)],
+            512,
+            32768,
+            &["openai"],
+            PolicyProfile::Balanced,
+        )
     }
 
     fn req(vram: u64) -> ResourceRequest {
@@ -532,7 +547,10 @@ mod tests {
     #[tokio::test]
     async fn admit_gpu_is_inert_passthrough_in_shadow() {
         let s = svc(); // shadow by default
-        let g = s.admit_gpu(&req(4000), super::super::co_residency::ResidencyTarget::Hot).await.unwrap();
+        let g = s
+            .admit_gpu(&req(4000), super::super::co_residency::ResidencyTarget::Hot)
+            .await
+            .unwrap();
         assert!(!g.is_enforced(), "shadow admission must be inert");
         assert!(g.is_valid());
         // No co-resident state was created in shadow.
@@ -543,8 +561,14 @@ mod tests {
     async fn admit_gpu_grants_through_co_residency_when_enforcing() {
         let s = svc();
         s.set_shadow_only(false);
-        let g = s.admit_gpu(&req(4000), super::super::co_residency::ResidencyTarget::Hot).await.unwrap();
-        assert!(g.is_enforced(), "enforcing admission routes through co-residency");
+        let g = s
+            .admit_gpu(&req(4000), super::super::co_residency::ResidencyTarget::Hot)
+            .await
+            .unwrap();
+        assert!(
+            g.is_enforced(),
+            "enforcing admission routes through co-residency"
+        );
         assert!(g.is_valid());
         assert_eq!(s.co_residency().resident_count().await, 1);
     }

@@ -372,6 +372,45 @@ mod tests {
         assert!(admission.is_active(&session_id, &second_turn_id));
     }
 
+    /// BUG #7 regression (category L: State Management issue). Documents the
+    /// exact `is_active` state transition that `loop_engine::run_agent_turn`'s
+    /// terminal code paths (satisfaction summary, max-rounds error) depend on
+    /// to decide whether to emit a response. Before the fix, TWO of those
+    /// paths did `if !is_active(..) { return; }` with no event emitted at
+    /// all — a genuinely silent, response-less dropped turn whenever a turn
+    /// was superseded between starting work and reaching its terminal branch
+    /// (e.g. an ambiguous/slow-to-route prompt racing a new user message).
+    /// The contract this test locks in: once a turn is superseded,
+    /// `is_active` for the OLD turn_id must become false immediately and
+    /// permanently — every caller-side terminal branch MUST check this and
+    /// emit an explicit "Turn cancelled." (or equivalent) event rather than
+    /// silently returning, matching the `return_if_stale()` pattern already
+    /// used everywhere else in `run_agent_turn`.
+    #[test]
+    fn regr_bug7_superseded_turn_is_never_active_again_for_old_turn_id() {
+        let admission = TurnAdmission::new();
+        let session_id = "session-bug7".to_string();
+        let stale_turn_id = "turn-stale".to_string();
+        let superseding_turn_id = "turn-superseding".to_string();
+
+        admission.admit_turn(session_id.clone(), stale_turn_id.clone());
+        assert!(admission.is_active(&session_id, &stale_turn_id));
+
+        // Simulate a new message racing in and superseding the in-flight turn
+        // — exactly the race that produced the real silent-drop bug.
+        admission.admit_turn(session_id.clone(), superseding_turn_id.clone());
+
+        // The stale turn must NEVER report active again, at any point a
+        // terminal code path in the caller might check it.
+        assert!(!admission.is_active(&session_id, &stale_turn_id));
+        assert!(admission.is_active(&session_id, &superseding_turn_id));
+
+        // Even after the superseding turn completes, the OLD turn_id must
+        // still never become active again.
+        admission.complete_turn(&session_id, &superseding_turn_id);
+        assert!(!admission.is_active(&session_id, &stale_turn_id));
+    }
+
     #[test]
     fn complete_turn_is_race_safe_against_supersession() {
         let admission = TurnAdmission::new();

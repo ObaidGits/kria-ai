@@ -84,13 +84,22 @@ mod tests {
     use super::*;
 
     fn cool() -> ThermalState {
-        ThermalState { temp_c: Some(60.0), throttle_c: 90.0 }
+        ThermalState {
+            temp_c: Some(60.0),
+            throttle_c: 90.0,
+        }
     }
     fn hot() -> ThermalState {
-        ThermalState { temp_c: Some(87.0), throttle_c: 90.0 }
+        ThermalState {
+            temp_c: Some(87.0),
+            throttle_c: 90.0,
+        }
     }
     fn nosensors() -> ThermalState {
-        ThermalState { temp_c: None, throttle_c: 90.0 }
+        ThermalState {
+            temp_c: None,
+            throttle_c: 90.0,
+        }
     }
 
     #[test]

@@ -27,9 +27,11 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_MANIFEST_BYTES: usize = 64 * 1024; // 64 KiB
 
-/// Default registry index URL — points to the official KRIA skills repo.
+/// Default registry index URL — points to the official, production KRIA skills
+/// repo (decision locked: `ObaidGits/kria-skills` is authoritative; see
+/// `.kiro/specs/openclaw-production-validation/tasks.md` task 25).
 pub const DEFAULT_REGISTRY_URL: &str =
-    "https://raw.githubusercontent.com/kria-ai/kria-skills/main/index.json";
+    "https://raw.githubusercontent.com/ObaidGits/kria-skills/refs/heads/main/index.json";
 
 /// Domains permitted for manifest downloads.
 const ALLOWED_DOWNLOAD_HOSTS: &[&str] = &[

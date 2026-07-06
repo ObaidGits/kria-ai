@@ -1,0 +1,16 @@
+{
+  "name": "oc_regex_tool",
+  "description": "Matches, tests, or replaces text using a regular expression.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "text": { "type": "string", "description": "The input text." },
+      "pattern": { "type": "string", "description": "The regular expression pattern." },
+      "flags": { "type": "string", "description": "Regex flags, e.g. 'gi'. Defaults to 'g'." },
+      "mode": { "type": "string", "description": "One of 'match' (default), 'replace', or 'test'." },
+      "replacement": { "type": "string", "description": "Replacement text (required for mode=replace)." }
+    },
+    "required": ["text", "pattern"]
+  },
+  "handler": "regex_tool.js"
+}

@@ -39,13 +39,38 @@ impl PolicyProfile {
     pub fn weights(&self) -> PolicyWeights {
         match self {
             // Latency matters most; cloud/cpu penalised vs local GPU.
-            Self::Performance => PolicyWeights { w_latency: 4, w_cost: 1, w_power: 0, w_disrupt: 2 },
-            Self::Balanced => PolicyWeights { w_latency: 2, w_cost: 2, w_power: 1, w_disrupt: 2 },
+            Self::Performance => PolicyWeights {
+                w_latency: 4,
+                w_cost: 1,
+                w_power: 0,
+                w_disrupt: 2,
+            },
+            Self::Balanced => PolicyWeights {
+                w_latency: 2,
+                w_cost: 2,
+                w_power: 1,
+                w_disrupt: 2,
+            },
             // Battery: power dominates → prefer cloud/CPU over hot GPU.
-            Self::BatterySaver => PolicyWeights { w_latency: 1, w_cost: 2, w_power: 4, w_disrupt: 1 },
-            Self::PrivacyStrict => PolicyWeights { w_latency: 2, w_cost: 1, w_power: 1, w_disrupt: 2 },
+            Self::BatterySaver => PolicyWeights {
+                w_latency: 1,
+                w_cost: 2,
+                w_power: 4,
+                w_disrupt: 1,
+            },
+            Self::PrivacyStrict => PolicyWeights {
+                w_latency: 2,
+                w_cost: 1,
+                w_power: 1,
+                w_disrupt: 2,
+            },
             // Thermal capped: avoid sustained GPU → mild power/latency tradeoff.
-            Self::ThermalCapped => PolicyWeights { w_latency: 2, w_cost: 1, w_power: 3, w_disrupt: 2 },
+            Self::ThermalCapped => PolicyWeights {
+                w_latency: 2,
+                w_cost: 1,
+                w_power: 3,
+                w_disrupt: 2,
+            },
         }
     }
 }
@@ -81,7 +106,12 @@ pub fn plan(req: &ResourceRequest, table: &DeviceTable, profile: PolicyProfile) 
     let mut candidates: Vec<Candidate> = Vec::new();
 
     // Extra GPU power penalty when the request explicitly asks for low power (battery).
-    let gpu_power = POWER_GPU + if req.constraints.power == super::types::PowerReq::LowPower { 40 } else { 0 };
+    let gpu_power = POWER_GPU
+        + if req.constraints.power == super::types::PowerReq::LowPower {
+            40
+        } else {
+            0
+        };
 
     // GPU candidates.
     for d in table.usable_gpus() {
@@ -116,8 +146,7 @@ pub fn plan(req: &ResourceRequest, table: &DeviceTable, profile: PolicyProfile) 
     // Cloud candidates (never for privacy-strict).
     if allow_cloud {
         for d in table.usable_cloud() {
-            let cost =
-                w.w_latency * LAT_CLOUD + w.w_cost * COST_CLOUD + w.w_power * POWER_CLOUD;
+            let cost = w.w_latency * LAT_CLOUD + w.w_cost * COST_CLOUD + w.w_power * POWER_CLOUD;
             candidates.push(Candidate {
                 plan: Plan {
                     device: d.id.clone(),
@@ -220,13 +249,20 @@ mod tests {
     fn deterministic_same_inputs_same_plan() {
         let t = table();
         let r = req(4000, PrivacyReq::Standard, true);
-        assert_eq!(plan(&r, &t, PolicyProfile::Balanced), plan(&r, &t, PolicyProfile::Balanced));
+        assert_eq!(
+            plan(&r, &t, PolicyProfile::Balanced),
+            plan(&r, &t, PolicyProfile::Balanced)
+        );
     }
 
     #[test]
     fn balanced_prefers_local_gpu_when_it_fits() {
         let t = table();
-        let p = plan(&req(4000, PrivacyReq::Standard, true), &t, PolicyProfile::Balanced);
+        let p = plan(
+            &req(4000, PrivacyReq::Standard, true),
+            &t,
+            PolicyProfile::Balanced,
+        );
         assert_eq!(p.device, DeviceId::Gpu(0));
         assert_eq!(p.residency, Residency::VramHot);
         assert_eq!(p.rationale, RationaleCode::FitsLocal);
@@ -237,7 +273,11 @@ mod tests {
     #[test]
     fn privacy_strict_never_plans_cloud() {
         let t = table();
-        let p = plan(&req(4000, PrivacyReq::Strict, true), &t, PolicyProfile::Balanced);
+        let p = plan(
+            &req(4000, PrivacyReq::Strict, true),
+            &t,
+            PolicyProfile::Balanced,
+        );
         assert!(p.device != DeviceId::CloudPool("openai".into()));
         for fb in &p.fallback_chain {
             assert!(matches!(fb.device, DeviceId::Gpu(_) | DeviceId::Cpu));
@@ -251,7 +291,11 @@ mod tests {
         t.upsert(DeviceRecord::gpu(0, 2048, 512));
         t.upsert(DeviceRecord::cpu(16384));
         t.upsert(DeviceRecord::cloud("openai"));
-        let p = plan(&req(8000, PrivacyReq::Standard, true), &t, PolicyProfile::Balanced);
+        let p = plan(
+            &req(8000, PrivacyReq::Standard, true),
+            &t,
+            PolicyProfile::Balanced,
+        );
         assert!(matches!(p.device, DeviceId::CloudPool(_) | DeviceId::Cpu));
     }
 
@@ -270,7 +314,11 @@ mod tests {
         // Without an explicit low-power request, local GPU remains cheapest (correct: local is
         // free + low-latency; TPPE handles duty-cycling separately).
         let t = table();
-        let p = plan(&req(4000, PrivacyReq::Standard, true), &t, PolicyProfile::BatterySaver);
+        let p = plan(
+            &req(4000, PrivacyReq::Standard, true),
+            &t,
+            PolicyProfile::BatterySaver,
+        );
         assert_eq!(p.device, DeviceId::Gpu(0));
     }
 
@@ -280,7 +328,11 @@ mod tests {
         t.upsert(DeviceRecord::gpu(0, 2048, 512)); // too small
         t.upsert(DeviceRecord::cpu(16384));
         t.upsert(DeviceRecord::cloud("openai"));
-        let p = plan(&req(8000, PrivacyReq::Strict, true), &t, PolicyProfile::Balanced);
+        let p = plan(
+            &req(8000, PrivacyReq::Strict, true),
+            &t,
+            PolicyProfile::Balanced,
+        );
         assert_eq!(p.device, DeviceId::Cpu);
         assert_eq!(p.rationale, RationaleCode::PrivacyLocalOnly);
     }

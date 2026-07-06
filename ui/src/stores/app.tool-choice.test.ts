@@ -117,6 +117,46 @@ describe("appStore low-confidence tool choice flow", () => {
     __resetGuiCognitionSessionForTests();
   });
 
+  /**
+   * PHASE 2 regression (real bug found via GUI E2E stress test).
+   * Root cause: `ChatView.tsx::handleSubmit` had its OWN
+   * `if (isThinking()) return;` guard that ran BEFORE ever calling
+   * `sendMessage`, completely bypassing `sendMessage`'s own, already-correct
+   * queueing logic (`enqueueScopedPrompt`) — a message typed while the
+   * assistant was still responding was silently discarded with zero
+   * feedback, and zero record in `messages()`. This test exercises the store
+   * layer directly (bypassing the fixed `ChatView.tsx` guard entirely) to
+   * lock in the CORRECT behavior that must never regress: calling
+   * `sendMessage` while `isThinking()` is true must queue the prompt (visible
+   * as a "Queued — N" system message) rather than silently drop it.
+   */
+  it("regr_phase2_queues_rather_than_drops_a_message_sent_while_thinking", async () => {
+    emit("agent:thinking", { status: "planning" });
+    expect(appStore.isThinking()).toBe(true);
+
+    const messagesBefore = appStore.messages().length;
+    appStore.sendMessage("second message sent while still thinking");
+    await flushAsync();
+
+    // The prompt must never be silently dropped: a new message (the queue
+    // notice) must appear, and the real user text must be captured in it.
+    const messagesAfter = appStore.messages();
+    expect(messagesAfter.length).toBeGreaterThan(messagesBefore);
+    const queueNotice = messagesAfter.find(
+      (m: any) => m.role === "system" && typeof m.content === "string" && m.content.startsWith("Queued")
+    );
+    expect(queueNotice).toBeDefined();
+
+    // Critically: `send_message` must NOT have been invoked a second time yet
+    // (the queued prompt is dispatched later, when the current turn
+    // completes) — proving it was queued, not sent immediately, and not lost.
+    const sendCallsWithQueuedText = invokeMock.mock.calls.filter(
+      ([command, args]: [string, any]) =>
+        command === "send_message" && args?.message === "second message sent while still thinking"
+    );
+    expect(sendCallsWithQueuedText.length).toBe(0);
+  });
+
   it("captures tool-choice event and clears thinking state", () => {
     emit("agent:thinking", { status: "planning" });
     expect(appStore.isThinking()).toBe(true);
@@ -401,20 +441,36 @@ describe("appStore manual tool selection mode", () => {
     emit("agent:done", {});
   });
 
-  it("new chat cancels an active turn and becomes visible immediately", async () => {
+  it("new chat does NOT cancel a background turn and becomes visible immediately", async () => {
     emit("agent:thinking", { status: "processing" });
+    await flushAsync(2);
 
     await appStore.createSession();
     await flushAsync(8);
 
-    expect(invokeMock).toHaveBeenCalledWith("cancel_turn", {
-      sessionId: expect.any(String),
-    });
+    // Issue-2 fix: opening a new chat must NEVER cancel a turn generating in
+    // another session — it keeps running in the background and stays reachable.
+    expect(invokeMock).not.toHaveBeenCalledWith("cancel_turn", expect.anything());
+    // The freshly-created chat is the active, empty, idle conversation.
     expect(appStore.isThinking()).toBe(false);
     expect(appStore.currentSession()).toBe("mock-created-session");
     expect(
       appStore.sessions().some((session) => session.id === "mock-created-session"),
     ).toBe(true);
+  });
+
+  it("switching chats does NOT cancel the outgoing turn (background generation continues)", async () => {
+    // A turn is generating in the current session.
+    emit("agent:thinking", { status: "processing" });
+    await flushAsync(2);
+    invokeMock.mockClear();
+
+    // Switch to another conversation.
+    await appStore.switchSession("some-other-session");
+    await flushAsync(4);
+
+    // Issue-2 fix: switching must NEVER cancel the turn we navigated away from.
+    expect(invokeMock).not.toHaveBeenCalledWith("cancel_turn", expect.anything());
   });
 
   it("clears all chat sessions and switches to the replacement session", async () => {

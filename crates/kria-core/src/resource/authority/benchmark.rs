@@ -73,18 +73,57 @@ pub fn detect_regressions(
         }
     };
 
-    check("p50_ms", baseline.p50_ms as f64, candidate.p50_ms as f64, tol.latency);
-    check("p99_ms", baseline.p99_ms as f64, candidate.p99_ms as f64, tol.latency);
-    check("vram_peak_mb", baseline.vram_peak_mb as f64, candidate.vram_peak_mb as f64, tol.memory);
-    check("ram_peak_mb", baseline.ram_peak_mb as f64, candidate.ram_peak_mb as f64, tol.memory);
-    check("queue_delay_ms", baseline.queue_delay_ms as f64, candidate.queue_delay_ms as f64, tol.latency);
-    check("swaps", baseline.swaps as f64, candidate.swaps as f64, tol.swaps);
-    check("recovery_ms", baseline.recovery_ms as f64, candidate.recovery_ms as f64, tol.latency);
+    check(
+        "p50_ms",
+        baseline.p50_ms as f64,
+        candidate.p50_ms as f64,
+        tol.latency,
+    );
+    check(
+        "p99_ms",
+        baseline.p99_ms as f64,
+        candidate.p99_ms as f64,
+        tol.latency,
+    );
+    check(
+        "vram_peak_mb",
+        baseline.vram_peak_mb as f64,
+        candidate.vram_peak_mb as f64,
+        tol.memory,
+    );
+    check(
+        "ram_peak_mb",
+        baseline.ram_peak_mb as f64,
+        candidate.ram_peak_mb as f64,
+        tol.memory,
+    );
+    check(
+        "queue_delay_ms",
+        baseline.queue_delay_ms as f64,
+        candidate.queue_delay_ms as f64,
+        tol.latency,
+    );
+    check(
+        "swaps",
+        baseline.swaps as f64,
+        candidate.swaps as f64,
+        tol.swaps,
+    );
+    check(
+        "recovery_ms",
+        baseline.recovery_ms as f64,
+        candidate.recovery_ms as f64,
+        tol.latency,
+    );
     out
 }
 
 /// Release gate: true when the candidate has no regressions vs baseline.
-pub fn gate_passes(baseline: &BenchResult, candidate: &BenchResult, tol: RegressionTolerance) -> bool {
+pub fn gate_passes(
+    baseline: &BenchResult,
+    candidate: &BenchResult,
+    tol: RegressionTolerance,
+) -> bool {
     detect_regressions(baseline, candidate, tol).is_empty()
 }
 

@@ -31,6 +31,10 @@ pub struct KriaConfig {
     pub browser_agent: BrowserAgentConfig,
     // ─── OpenClaw Skill Substrate ───
     pub openclaw: crate::openclaw::OpenClawConfig,
+    // ─── Capability Provider Platform (CPP) — provider-neutral boundary ───
+    // Additive `[capability]` section. Master flag defaults OFF, preserving the
+    // current CIL/OpenClaw behavior byte-for-byte until CPP is wired on.
+    pub capability: crate::capability::CapabilityPlatformConfig,
     // ─── n8n workflow substrate ───
     pub n8n: crate::n8n::N8nConfig,
     // ─── Universal Model Provider System ───
@@ -1621,18 +1625,75 @@ fn merge_config(base: &mut KriaConfig, user: &KriaConfig) {
         base.colab = user.colab.clone();
     }
     merge_n8n_config(&mut base.n8n, &user.n8n);
-    // Merge openclaw registry config — allows ~/.kria/config.toml to override
-    // the default registry index_url and allowed_hosts.
+    // Merge openclaw config — ~/.kria/config.toml is the authoritative user override.
+    // The user config fully controls every openclaw field when it is present:
+    // - `enabled` is always taken from the user file (both true AND false).
+    //   The previous code only promoted `enabled = true` and silently ignored
+    //   `enabled = false`, making the Settings toggle ineffective.
+    // - All runtime-tunable fields (pool sizing, timeouts, trust policy) are
+    //   taken from the user file when they differ from the compiled default.
+    // - The workspace kria_config.toml sets the *dev baseline*; ~/.kria/config.toml
+    //   is what the user actually configures through Settings.
     {
+        let default_cfg = crate::openclaw::OpenClawConfig::default();
         let default_url = crate::openclaw::clawhub::DEFAULT_REGISTRY_URL;
+
+        // `enabled`: user override always wins in both directions.
+        // We detect a "the user file has this section" by checking whether ANY field
+        // differs from the default — if the user saved an openclaw section at all,
+        // respect their enabled value.
+        let user_has_openclaw_section = user.openclaw.enabled != default_cfg.enabled
+            || user.openclaw.image != default_cfg.image
+            || user.openclaw.warm_per_class != default_cfg.warm_per_class
+            || user.openclaw.max_concurrent_invocations != default_cfg.max_concurrent_invocations
+            || user.openclaw.max_restart_attempts != default_cfg.max_restart_attempts
+            || user.openclaw.registry.index_url != default_url
+            || !user.openclaw.registry.allowed_hosts.is_empty();
+
+        if user_has_openclaw_section {
+            // Full openclaw section was present in ~/.kria/config.toml → take it entirely.
+            base.openclaw.enabled = user.openclaw.enabled;
+        }
+
+        // Individual field overrides (these are non-boolean so "differs from default" is safe).
+        if user.openclaw.image != default_cfg.image {
+            base.openclaw.image = user.openclaw.image.clone();
+        }
+        if user.openclaw.warm_per_class != default_cfg.warm_per_class {
+            base.openclaw.warm_per_class = user.openclaw.warm_per_class;
+        }
+        if user.openclaw.max_concurrent_invocations != default_cfg.max_concurrent_invocations {
+            base.openclaw.max_concurrent_invocations = user.openclaw.max_concurrent_invocations;
+        }
+        if user.openclaw.default_timeout_secs != default_cfg.default_timeout_secs {
+            base.openclaw.default_timeout_secs = user.openclaw.default_timeout_secs;
+        }
+        if user.openclaw.max_warm_age_secs != default_cfg.max_warm_age_secs {
+            base.openclaw.max_warm_age_secs = user.openclaw.max_warm_age_secs;
+        }
+        if user.openclaw.max_restart_attempts != default_cfg.max_restart_attempts {
+            base.openclaw.max_restart_attempts = user.openclaw.max_restart_attempts;
+        }
+        if user.openclaw.rewrite_descriptions != default_cfg.rewrite_descriptions {
+            base.openclaw.rewrite_descriptions = user.openclaw.rewrite_descriptions;
+        }
         if user.openclaw.registry.index_url != default_url {
             base.openclaw.registry.index_url = user.openclaw.registry.index_url.clone();
         }
         if !user.openclaw.registry.allowed_hosts.is_empty() {
             base.openclaw.registry.allowed_hosts = user.openclaw.registry.allowed_hosts.clone();
         }
-        if user.openclaw.enabled {
-            base.openclaw.enabled = true;
+        if user.openclaw.trust.community_allows_network
+            != default_cfg.trust.community_allows_network
+        {
+            base.openclaw.trust.community_allows_network =
+                user.openclaw.trust.community_allows_network;
+        }
+        if user.openclaw.trust.verified_skips_hitl != default_cfg.trust.verified_skips_hitl {
+            base.openclaw.trust.verified_skips_hitl = user.openclaw.trust.verified_skips_hitl;
+        }
+        if user.openclaw.lifecycle.check_updates != default_cfg.lifecycle.check_updates {
+            base.openclaw.lifecycle.check_updates = user.openclaw.lifecycle.check_updates;
         }
     }
 }

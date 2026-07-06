@@ -13,13 +13,14 @@
 //!
 //! # Thread Safety
 //!
-//! Each `McpBridge` instance owns a single container's stdio streams.
-//! It is `Send` but not `Clone` — one bridge per container.
+//! Each `McpBridge` instance owns a single instance's stdio streams (a container `exec`, a WASM
+//! host channel, a remote worker socket, …). It is `Send` but not `Clone` — one bridge per
+//! instance. The bridge is generic over any async writer/reader so every `SkillRuntime` backend
+//! (execution-contract) speaks the same MCP transport without coupling to `docker attach`.
 
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, ChildStdout};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 
 /// Errors from MCP bridge communication.
 #[derive(Debug, thiserror::Error)]
@@ -70,33 +71,31 @@ struct JsonRpcError {
     data: Option<serde_json::Value>,
 }
 
-/// MCP bridge client for communicating with a container's MCP bridge.
-pub struct McpBridge {
-    stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
+/// MCP bridge client for communicating with an instance's MCP process over stdio.
+///
+/// Generic over the write half (`W`) and read half (`R`) so it works with a container `exec`
+/// stream (bollard), a subprocess, a WASM host channel, or a remote socket identically.
+pub struct McpBridge<W, R> {
+    stdin: W,
+    stdout: BufReader<R>,
     next_id: u64,
     /// Pending responses keyed by request ID.
     initialized: bool,
 }
 
-impl McpBridge {
-    /// Create a new MCP bridge from a container's child process.
-    pub fn new(child: &mut Child) -> Result<Self, BridgeError> {
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| BridgeError::Protocol("child process has no stdin".into()))?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| BridgeError::Protocol("child process has no stdout".into()))?;
-
-        Ok(Self {
+impl<W, R> McpBridge<W, R>
+where
+    W: AsyncWrite + Unpin + Send,
+    R: AsyncRead + Unpin + Send,
+{
+    /// Create a new MCP bridge from an instance's write/read stdio halves.
+    pub fn from_parts(stdin: W, stdout: R) -> Self {
+        Self {
             stdin,
             stdout: BufReader::new(stdout),
             next_id: 1,
             initialized: false,
-        })
+        }
     }
 
     /// Initialize the MCP bridge (perform the `initialize` handshake).
@@ -292,7 +291,12 @@ pub struct McpToolDef {
     pub name: String,
     #[serde(default)]
     pub description: Option<String>,
-    #[serde(default)]
+    /// The substrate MCP bridge (`mcp-bridge.js::handleToolsList`) emits this
+    /// field as camelCase `inputSchema` (standard MCP). Without the alias,
+    /// serde looked only for `input_schema` and silently dropped EVERY skill's
+    /// schema to `None` — which is exactly the schema that schema-driven
+    /// argument generation (task 36) needs. Accept both spellings.
+    #[serde(default, alias = "inputSchema")]
     pub input_schema: Option<serde_json::Value>,
 }
 
@@ -318,5 +322,47 @@ impl ToolCallResult {
             .filter_map(|b| b.text.as_deref())
             .collect::<Vec<_>>()
             .join("\n")
+    }
+}
+
+#[cfg(test)]
+mod mcp_tool_def_tests {
+    use super::McpToolDef;
+
+    /// Regression: the substrate bridge emits camelCase `inputSchema`. Without
+    /// the serde alias, `input_schema` deserialized to `None` and the skill's
+    /// real parameter schema was silently lost — blocking schema-driven
+    /// argument generation (task 36).
+    #[test]
+    fn parses_camelcase_input_schema_from_bridge() {
+        let json = serde_json::json!({
+            "name": "oc_calculator",
+            "description": "Evaluates an arithmetic expression.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "expression": { "type": "string" } },
+                "required": ["expression"]
+            }
+        });
+        let def: McpToolDef = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(def.name, "oc_calculator");
+        let schema = def
+            .input_schema
+            .expect("inputSchema must be captured via alias");
+        assert_eq!(
+            schema["required"][0], "expression",
+            "the real skill schema must survive deserialization"
+        );
+    }
+
+    /// snake_case still works (belt-and-suspenders for any non-substrate source).
+    #[test]
+    fn parses_snake_case_input_schema() {
+        let json = serde_json::json!({
+            "name": "x",
+            "input_schema": { "type": "object" }
+        });
+        let def: McpToolDef = serde_json::from_value(json).expect("deserialize");
+        assert!(def.input_schema.is_some());
     }
 }

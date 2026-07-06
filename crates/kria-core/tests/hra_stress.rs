@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use kria_core::resource::authority::{
-    CoResidencyManager, CoResidencyPolicy, ConsumerId, Constraints, DeviceId, LocalAuthority,
+    CoResidencyManager, CoResidencyPolicy, Constraints, ConsumerId, DeviceId, LocalAuthority,
     ModelDescriptor, ModelHealth, ModelLifecycle, PolicyProfile, PriorityClass, Residency,
     ResidencyManager, ResidencyTarget, ResourceNeed, ResourceRequest, TurnId,
 };
@@ -73,7 +73,13 @@ impl ModelLifecycle for MockModel {
 }
 
 fn authority(gpus: &[(u32, u64)]) -> Arc<LocalAuthority> {
-    Arc::new(LocalAuthority::bootstrap(gpus, 512, 65536, &[], PolicyProfile::Balanced))
+    Arc::new(LocalAuthority::bootstrap(
+        gpus,
+        512,
+        65536,
+        &[],
+        PolicyProfile::Balanced,
+    ))
 }
 
 fn req(consumer: ConsumerId, class: PriorityClass, vram: u64, model: &str) -> ResourceRequest {
@@ -97,7 +103,11 @@ fn reserved(auth: &LocalAuthority, gpu: u32) -> u64 {
     auth.with_table_for_compare(|t| t.get(&DeviceId::Gpu(gpu)).unwrap().reserved_vram_mb)
 }
 
-async fn build(gpus: &[(u32, u64)], models: usize, policy: CoResidencyPolicy) -> (Arc<LocalAuthority>, Arc<CoResidencyManager>) {
+async fn build(
+    gpus: &[(u32, u64)],
+    models: usize,
+    policy: CoResidencyPolicy,
+) -> (Arc<LocalAuthority>, Arc<CoResidencyManager>) {
     let auth = authority(gpus);
     let res = Arc::new(ResidencyManager::new());
     for i in 0..models {
@@ -118,7 +128,15 @@ async fn build(gpus: &[(u32, u64)], models: usize, policy: CoResidencyPolicy) ->
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn stress_10k_concurrent_acquire_release_single_gpu() {
     let total = 16384u64;
-    let (auth, cor) = build(&[(0, total)], 10, CoResidencyPolicy { pin_dwell: Duration::from_millis(1), ..Default::default() }).await;
+    let (auth, cor) = build(
+        &[(0, total)],
+        10,
+        CoResidencyPolicy {
+            pin_dwell: Duration::from_millis(1),
+            ..Default::default()
+        },
+    )
+    .await;
 
     let workers = 16;
     let per_worker = 700; // 16 * 700 = 11_200 ops
@@ -144,7 +162,13 @@ async fn stress_10k_concurrent_acquire_release_single_gpu() {
                 let model = format!("m{}", rng % 10);
                 if rng % 2 == 0 && !held.is_empty() {
                     held.swap_remove((rng as usize) % held.len());
-                } else if let Ok(l) = cor.acquire(&req(ConsumerId::Image, class, vram, &model), ResidencyTarget::Hot).await {
+                } else if let Ok(l) = cor
+                    .acquire(
+                        &req(ConsumerId::Image, class, vram, &model),
+                        ResidencyTarget::Hot,
+                    )
+                    .await
+                {
                     held.push(l);
                 }
                 assert!(reserved(&auth, 0) <= total, "OVER-COMMIT detected");
@@ -163,7 +187,11 @@ async fn stress_10k_concurrent_acquire_release_single_gpu() {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     let _ = cor.reclaim_expired().await;
-    assert_eq!(reserved(&auth, 0), 0, "RESOURCE LEAK: reservations did not drain");
+    assert_eq!(
+        reserved(&auth, 0),
+        0,
+        "RESOURCE LEAK: reservations did not drain"
+    );
 }
 
 /// Preemption churn: foreground vs background hammering a small GPU. FG must keep getting in; the
@@ -171,7 +199,15 @@ async fn stress_10k_concurrent_acquire_release_single_gpu() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn stress_preemption_churn_foreground_vs_background() {
     let total = 8192u64;
-    let (auth, cor) = build(&[(0, total)], 6, CoResidencyPolicy { pin_dwell: Duration::from_millis(1), ..Default::default() }).await;
+    let (auth, cor) = build(
+        &[(0, total)],
+        6,
+        CoResidencyPolicy {
+            pin_dwell: Duration::from_millis(1),
+            ..Default::default()
+        },
+    )
+    .await;
 
     let mut handles = Vec::new();
     // Foreground workers (big, high priority).
@@ -183,7 +219,10 @@ async fn stress_preemption_churn_foreground_vs_background() {
             for i in 0..1000 {
                 let model = format!("m{}", (w + i) % 3);
                 if let Ok(l) = cor
-                    .acquire(&req(ConsumerId::Llm, PriorityClass::InteractiveFg, 6000, &model), ResidencyTarget::Hot)
+                    .acquire(
+                        &req(ConsumerId::Llm, PriorityClass::InteractiveFg, 6000, &model),
+                        ResidencyTarget::Hot,
+                    )
                     .await
                 {
                     fg_grants += 1;
@@ -203,7 +242,10 @@ async fn stress_preemption_churn_foreground_vs_background() {
             for i in 0..1000 {
                 let model = format!("m{}", 3 + (w + i) % 3);
                 if let Ok(l) = cor
-                    .acquire(&req(ConsumerId::Image, PriorityClass::Batch, 5000, &model), ResidencyTarget::Hot)
+                    .acquire(
+                        &req(ConsumerId::Image, PriorityClass::Batch, 5000, &model),
+                        ResidencyTarget::Hot,
+                    )
                     .await
                 {
                     assert!(reserved(&auth, 0) <= total);
@@ -218,9 +260,14 @@ async fn stress_preemption_churn_foreground_vs_background() {
     for h in handles {
         fg_total += h.await.expect("no panic");
     }
-    assert!(fg_total > 0, "foreground must make progress (no starvation of FG)");
+    assert!(
+        fg_total > 0,
+        "foreground must make progress (no starvation of FG)"
+    );
     for _ in 0..20 {
-        if reserved(&auth, 0) == 0 { break; }
+        if reserved(&auth, 0) == 0 {
+            break;
+        }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     let _ = cor.reclaim_expired().await;
@@ -250,7 +297,10 @@ async fn stress_dedup_same_model_single_load() {
         handles.push(tokio::spawn(async move {
             for _ in 0..200 {
                 if let Ok(l) = cor
-                    .acquire(&req(ConsumerId::Llm, PriorityClass::InteractiveFg, 4000, "hot"), ResidencyTarget::Hot)
+                    .acquire(
+                        &req(ConsumerId::Llm, PriorityClass::InteractiveFg, 4000, "hot"),
+                        ResidencyTarget::Hot,
+                    )
                     .await
                 {
                     tokio::task::yield_now().await;
@@ -264,12 +314,21 @@ async fn stress_dedup_same_model_single_load() {
     }
     // The residency manager serializes per-model transitions, so concurrent loads of the same model
     // never exceed 1 (no duplicate loading).
-    assert!(max_concurrent.load(Ordering::SeqCst) <= 1, "duplicate concurrent load of one model");
+    assert!(
+        max_concurrent.load(Ordering::SeqCst) <= 1,
+        "duplicate concurrent load of one model"
+    );
     for _ in 0..20 {
-        if reserved(&auth, 0) == 0 { break; }
+        if reserved(&auth, 0) == 0 {
+            break;
+        }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    assert_eq!(reserved(&auth, 0), 0, "refcount leak — model never fully released");
+    assert_eq!(
+        reserved(&auth, 0),
+        0,
+        "refcount leak — model never fully released"
+    );
 }
 
 /// Rollback storm: half of all loads fail. Every failed admission must release its reservation —
@@ -302,7 +361,10 @@ async fn stress_rollback_storm_no_leak() {
                 fail.store((w + i) % 2 == 0, Ordering::Release);
                 let model = format!("m{}", (w + i) % 4);
                 if let Ok(l) = cor
-                    .acquire(&req(ConsumerId::Image, PriorityClass::Batch, 3000, &model), ResidencyTarget::Hot)
+                    .acquire(
+                        &req(ConsumerId::Image, PriorityClass::Batch, 3000, &model),
+                        ResidencyTarget::Hot,
+                    )
                     .await
                 {
                     l.release().await;
@@ -316,7 +378,9 @@ async fn stress_rollback_storm_no_leak() {
     }
     fail.store(false, Ordering::Release);
     for _ in 0..20 {
-        if reserved(&auth, 0) == 0 { break; }
+        if reserved(&auth, 0) == 0 {
+            break;
+        }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     let _ = cor.reclaim_expired().await;
@@ -328,21 +392,41 @@ async fn stress_rollback_storm_no_leak() {
 /// suppression) must be reclaimed by the sweep so reservations drain.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn stress_ttl_reclaim_drains_orphans() {
-    let (auth, cor) = build(&[(0, 12288)], 4, CoResidencyPolicy { lease_ttl: Duration::from_millis(5), pin_dwell: Duration::from_millis(1), ..Default::default() }).await;
+    let (auth, cor) = build(
+        &[(0, 12288)],
+        4,
+        CoResidencyPolicy {
+            lease_ttl: Duration::from_millis(5),
+            pin_dwell: Duration::from_millis(1),
+            ..Default::default()
+        },
+    )
+    .await;
 
     // Acquire and intentionally leak the guards (simulate a crashed holder that never releases).
     for i in 0..4 {
         let model = format!("m{i}");
-        if let Ok(l) = cor.acquire(&req(ConsumerId::Image, PriorityClass::Batch, 2000, &model), ResidencyTarget::Hot).await {
+        if let Ok(l) = cor
+            .acquire(
+                &req(ConsumerId::Image, PriorityClass::Batch, 2000, &model),
+                ResidencyTarget::Hot,
+            )
+            .await
+        {
             std::mem::forget(l); // holder vanished without releasing
         }
     }
-    assert!(reserved(&auth, 0) > 0, "orphans should hold reservations before sweep");
+    assert!(
+        reserved(&auth, 0) > 0,
+        "orphans should hold reservations before sweep"
+    );
     tokio::time::sleep(Duration::from_millis(20)).await;
     let mut reclaimed_total = 0;
     for _ in 0..10 {
         reclaimed_total += cor.reclaim_expired().await;
-        if reserved(&auth, 0) == 0 { break; }
+        if reserved(&auth, 0) == 0 {
+            break;
+        }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     assert!(reclaimed_total >= 1, "sweep must reclaim orphaned leases");
@@ -352,7 +436,15 @@ async fn stress_ttl_reclaim_drains_orphans() {
 /// Multi-GPU: concurrent consumers spread across two GPUs; neither device is ever over-committed.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn stress_multi_gpu_no_overcommit() {
-    let (auth, cor) = build(&[(0, 12288), (1, 12288)], 8, CoResidencyPolicy { pin_dwell: Duration::from_millis(1), ..Default::default() }).await;
+    let (auth, cor) = build(
+        &[(0, 12288), (1, 12288)],
+        8,
+        CoResidencyPolicy {
+            pin_dwell: Duration::from_millis(1),
+            ..Default::default()
+        },
+    )
+    .await;
 
     let mut handles = Vec::new();
     for w in 0..12u64 {
@@ -362,12 +454,20 @@ async fn stress_multi_gpu_no_overcommit() {
             let mut rng = w.wrapping_mul(0x100000001B3) | 1;
             let mut held = Vec::new();
             for _ in 0..500 {
-                rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
+                rng ^= rng << 13;
+                rng ^= rng >> 7;
+                rng ^= rng << 17;
                 let vram = 2000 + (rng % 4) * 1500;
                 let model = format!("m{}", rng % 8);
                 if rng % 2 == 0 && !held.is_empty() {
                     held.pop();
-                } else if let Ok(l) = cor.acquire(&req(ConsumerId::Image, PriorityClass::Batch, vram, &model), ResidencyTarget::Hot).await {
+                } else if let Ok(l) = cor
+                    .acquire(
+                        &req(ConsumerId::Image, PriorityClass::Batch, vram, &model),
+                        ResidencyTarget::Hot,
+                    )
+                    .await
+                {
                     held.push(l);
                 }
                 assert!(reserved(&auth, 0) <= 12288, "GPU0 over-commit");
@@ -380,7 +480,9 @@ async fn stress_multi_gpu_no_overcommit() {
         h.await.expect("no panic multi-gpu");
     }
     for _ in 0..20 {
-        if reserved(&auth, 0) == 0 && reserved(&auth, 1) == 0 { break; }
+        if reserved(&auth, 0) == 0 && reserved(&auth, 1) == 0 {
+            break;
+        }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     let _ = cor.reclaim_expired().await;

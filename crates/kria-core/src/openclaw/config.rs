@@ -45,6 +45,12 @@ pub struct OpenClawConfig {
     pub lifecycle: LifecycleConfig,
     /// Remote registry configuration.
     pub registry: RegistryConfig,
+    /// Capability Intelligence Layer (ICP) configuration.
+    ///
+    /// Additive `[openclaw.cil]` section (data-only). Gated behind
+    /// `cil.openclaw_icp_enabled` (default `false`), which preserves current
+    /// behavior byte-for-byte. See [`crate::openclaw::cil::CilConfig`].
+    pub cil: crate::openclaw::cil::CilConfig,
 }
 
 impl Default for OpenClawConfig {
@@ -68,6 +74,7 @@ impl Default for OpenClawConfig {
             trust: TrustConfig::default(),
             lifecycle: LifecycleConfig::default(),
             registry: RegistryConfig::default(),
+            cil: crate::openclaw::cil::CilConfig::default(),
         }
     }
 }

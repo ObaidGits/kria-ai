@@ -14,7 +14,7 @@ use super::journal::{DecisionKind, Journal};
 use super::journal_store::JournalStore;
 use super::planner::{self, PolicyProfile};
 use super::scheduler::{AdmitError, Lease, LeaseToken, Scheduler};
-use super::types::{ConsumerId, DeviceId, Epoch, Plan, ResourceRequest, Residency, Capacity};
+use super::types::{Capacity, ConsumerId, DeviceId, Epoch, Plan, Residency, ResourceRequest};
 
 /// Result of a resource request.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -110,10 +110,15 @@ impl LocalAuthority {
     /// store / clean boot. Used to detect orphan GPU residency after a crash (Phase D1/D2).
     pub fn recovered_open_leases(&self) -> Vec<(u64, DeviceId, u64)> {
         let j = self.journal.lock().unwrap();
-        let mut open: std::collections::HashMap<u64, (DeviceId, u64)> = std::collections::HashMap::new();
+        let mut open: std::collections::HashMap<u64, (DeviceId, u64)> =
+            std::collections::HashMap::new();
         for rec in j.records() {
             match &rec.payload.kind {
-                DecisionKind::LeaseGranted { token, device, vram_mb } => {
+                DecisionKind::LeaseGranted {
+                    token,
+                    device,
+                    vram_mb,
+                } => {
                     open.insert(*token, (device.clone(), *vram_mb));
                 }
                 DecisionKind::LeaseReleased { token } => {
@@ -192,7 +197,11 @@ impl LocalAuthority {
     ) -> Self {
         let mut table = DeviceTable::new();
         for (idx, vram) in gpus {
-            table.upsert(super::device_table::DeviceRecord::gpu(*idx, *vram, gpu_safety_mb));
+            table.upsert(super::device_table::DeviceRecord::gpu(
+                *idx,
+                *vram,
+                gpu_safety_mb,
+            ));
         }
         table.upsert(super::device_table::DeviceRecord::cpu(cpu_ram_mb));
         for pool in cloud_pools {
@@ -213,7 +222,11 @@ impl LocalAuthority {
     ) -> Self {
         let mut table = DeviceTable::new();
         for (idx, vram) in gpus {
-            table.upsert(super::device_table::DeviceRecord::gpu(*idx, *vram, gpu_safety_mb));
+            table.upsert(super::device_table::DeviceRecord::gpu(
+                *idx,
+                *vram,
+                gpu_safety_mb,
+            ));
         }
         table.upsert(super::device_table::DeviceRecord::cpu(cpu_ram_mb));
         for pool in cloud_pools {
@@ -241,14 +254,19 @@ impl LocalAuthority {
                     DecisionKind::EpochBump { to } => (
                         "epoch_bump",
                         format!("epoch → {to}"),
-                        "Authority (re)started — prior leases fenced for split-brain safety.".to_string(),
+                        "Authority (re)started — prior leases fenced for split-brain safety."
+                            .to_string(),
                     ),
                     DecisionKind::Planned { device, rationale } => (
                         "planned",
                         format!("{device:?}"),
                         rationale.human().to_string(),
                     ),
-                    DecisionKind::LeaseGranted { token, device, vram_mb } => (
+                    DecisionKind::LeaseGranted {
+                        token,
+                        device,
+                        vram_mb,
+                    } => (
                         "granted",
                         format!("#{token} {device:?} {vram_mb} MB"),
                         "Admitted — fit within the device VRAM budget.".to_string(),
@@ -258,7 +276,10 @@ impl LocalAuthority {
                         format!("#{token}"),
                         "Lease released — reservation returned to the device.".to_string(),
                     ),
-                    DecisionKind::Preempted { victim_token, reason } => (
+                    DecisionKind::Preempted {
+                        victim_token,
+                        reason,
+                    } => (
                         "preempted",
                         format!("#{victim_token}"),
                         format!("Evicted a lower-priority resident to make room: {reason}"),
@@ -313,7 +334,11 @@ impl LocalAuthority {
         // Candidate GPUs, most effective-free first (best fit / least disruptive).
         let gpus: Vec<DeviceId> = {
             let table = self.table.lock().unwrap();
-            table.usable_gpus().into_iter().map(|d| d.id.clone()).collect()
+            table
+                .usable_gpus()
+                .into_iter()
+                .map(|d| d.id.clone())
+                .collect()
         };
         if gpus.is_empty() {
             return RaOutcome::Busy; // no GPU — caller falls back to CPU/cloud
@@ -432,9 +457,7 @@ impl ResourceAuthority for LocalAuthority {
 #[cfg(test)]
 mod tests {
     use super::super::device_table::{DeviceRecord, DeviceTable};
-    use super::super::types::{
-        Constraints, ConsumerId, PriorityClass, ResourceNeed, TurnId,
-    };
+    use super::super::types::{Constraints, ConsumerId, PriorityClass, ResourceNeed, TurnId};
     use super::*;
 
     fn table() -> DeviceTable {
@@ -536,7 +559,11 @@ mod tests {
             let open = ra.recovered_open_leases();
             assert_eq!(open.len(), 1, "expected one recovered open lease");
             assert_eq!(open[0].1, DeviceId::Gpu(0));
-            assert_eq!(ra.current_epoch(), Epoch(2), "epoch must advance on restart (fencing)");
+            assert_eq!(
+                ra.current_epoch(),
+                Epoch(2),
+                "epoch must advance on restart (fencing)"
+            );
         }
         let _ = std::fs::remove_file(&path);
     }
@@ -545,7 +572,10 @@ mod tests {
     fn released_lease_is_not_recovered_as_open() {
         use super::super::journal_store::JournalStore;
         let mut path = std::env::temp_dir();
-        path.push(format!("kria_ra_persist_rel_{}.journal", std::process::id()));
+        path.push(format!(
+            "kria_ra_persist_rel_{}.journal",
+            std::process::id()
+        ));
         let _ = std::fs::remove_file(&path);
         {
             let store = JournalStore::new(&path);

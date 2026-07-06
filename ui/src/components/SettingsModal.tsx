@@ -5,6 +5,7 @@ import { appStore } from "../stores/app";
 import { SUPPORTED_LANGUAGES, setLocale } from "../stores/i18n";
 import SkillMarketplace from "./SkillMarketplace";
 import SubstrateStatus from "./SubstrateStatus";
+import OpenClawSettings from "./OpenClawSettings";
 import ProviderSettings from "./ProviderSettings";
 import N8nSettings from "./N8nSettings";
 import BriefingBuilder from "./BriefingBuilder";
@@ -3287,8 +3288,9 @@ const SettingsModal: Component = () => {
             <section>
               <h3>Marketplace</h3>
               <p class="settings-hint">Browse and manage skills.</p>
-              <SkillMarketplace />
+              <OpenClawSettings />
               <SubstrateStatus />
+              <SkillMarketplace />
             </section>
           </Show>
 

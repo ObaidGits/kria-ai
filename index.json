@@ -1,0 +1,452 @@
+[
+  {
+    "slug": "oc_code_sandbox",
+    "name": "Code Sandbox",
+    "description": "Executes Python 3 code in an isolated container and returns stdout and stderr.",
+    "category": "developer",
+    "trust_tier": "community",
+    "version": "1.0.0",
+    "manifest_url": "https://raw.githubusercontent.com/ObaidGits/kria-skills/main/skills/oc_code_sandbox/SKILL.md",
+    "capabilities": {
+      "network": false,
+      "filesystem_read": false,
+      "filesystem_write": false,
+      "subprocess": true
+    }
+  },
+  {
+    "slug": "oc_word_counter",
+    "name": "Word Counter",
+    "description": "Calculates the word, character, sentence, and line counts of a text.",
+    "category": "utility",
+    "trust_tier": "community",
+    "version": "1.0.0",
+    "manifest_url": "https://raw.githubusercontent.com/ObaidGits/kria-skills/main/skills/oc_word_counter/SKILL.md",
+    "capabilities": {
+      "network": false,
+      "filesystem_read": false,
+      "filesystem_write": false,
+      "subprocess": false
+    }
+  },
+  {
+    "slug": "oc_case_converter",
+    "name": "Case Converter",
+    "description": "Converts text between upper, lower, title, snake, kebab, and camel case.",
+    "category": "utility",
+    "trust_tier": "community",
+    "version": "1.0.0",
+    "manifest_url": "https://raw.githubusercontent.com/ObaidGits/kria-skills/main/skills/oc_case_converter/SKILL.md",
+    "capabilities": {
+      "network": false,
+      "filesystem_read": false,
+      "filesystem_write": false,
+      "subprocess": false
+    }
+  },
+  {
+    "slug": "oc_base64_tool",
+    "name": "Base64 Tool",
+    "description": "Encodes or decodes text and data using Base64.",
+    "category": "utility",
+    "trust_tier": "community",
+    "version": "1.0.0",
+    "manifest_url": "https://raw.githubusercontent.com/ObaidGits/kria-skills/main/skills/oc_base64_tool/SKILL.md",
+    "capabilities": {
+      "network": false,
+      "filesystem_read": false,
+      "filesystem_write": false,
+      "subprocess": false
+    }
+  },
+  {
+    "slug": "oc_url_codec",
+    "name": "Url Codec",
+    "description": "Encodes or decodes URL percent-encoding for a string.",
+    "category": "utility",
+    "trust_tier": "community",
+    "version": "1.0.0",
+    "manifest_url": "https://raw.githubusercontent.com/ObaidGits/kria-skills/main/skills/oc_url_codec/SKILL.md",
+    "capabilities": {
+      "network": false,
+      "filesystem_read": false,
+      "filesystem_write": false,
+      "subprocess": false
+    }
+  },
+  {
+    "slug": "oc_json_formatter",
+    "name": "Json Formatter",
+    "description": "Formats, minifies, and validates a JSON document.",
+    "category": "utility",
+    "trust_tier": "community",
+    "version": "1.0.0",
+    "manifest_url": "https://raw.githubusercontent.com/ObaidGits/kria-skills/main/skills/oc_json_formatter/SKILL.md",
+    "capabilities": {
+      "network": false,
+      "filesystem_read": false,
+      "filesystem_write": false,
+      "subprocess": false
+    }
+  },
+  {
+    "slug": "oc_yaml_to_json",
+    "name": "Yaml To Json",
+    "description": "Converts a YAML document into equivalent JSON.",
+    "category": "data",
+    "trust_tier": "community",
+    "version": "1.0.0",
+    "manifest_url": "https://raw.githubusercontent.com/ObaidGits/kria-skills/main/skills/oc_yaml_to_json/SKILL.md",
+    "capabilities": {
+      "network": false,
+      "filesystem_read": false,
+      "filesystem_write": false,
+      "subprocess": false
+    }
+  },
+  {
+    "slug": "oc_csv_to_json",
+    "name": "Csv To Json",
+    "description": "Parses CSV text and converts it to a JSON array of row objects.",
+    "category": "data",
+    "trust_tier": "community",
+    "version": "1.0.0",
+    "manifest_url": "https://raw.githubusercontent.com/ObaidGits/kria-skills/main/skills/oc_csv_to_json/SKILL.md",
+    "capabilities": {
+      "network": false,
+      "filesystem_read": false,
+      "filesystem_write": false,
+      "subprocess": false
+    }
+  },
+  {
+    "slug": "oc_uuid_generator",
+    "name": "Uuid Generator",
+    "description": "Generates random UUID (v4) or time-ordered (v7) identifiers.",
+    "category": "utility",
+    "trust_tier": "community",
+    "version": "1.0.0",
+    "manifest_url": "https://raw.githubusercontent.com/ObaidGits/kria-skills/main/skills/oc_uuid_generator/SKILL.md",
+    "capabilities": {
+      "network": false,
+      "filesystem_read": false,
+      "filesystem_write": false,
+      "subprocess": false
+    }
+  },
+  {
+    "slug": "oc_hash_generator",
+    "name": "Hash Generator",
+    "description": "Calculates md5, sha1, sha256, or sha512 digests of an input string.",
+    "category": "utility",
+    "trust_tier": "community",
+    "version": "1.0.0",
+    "manifest_url": "https://raw.githubusercontent.com/ObaidGits/kria-skills/main/skills/oc_hash_generator/SKILL.md",
+    "capabilities": {
+      "network": false,
+      "filesystem_read": false,
+      "filesystem_write": false,
+      "subprocess": false
+    }
+  },
+  {
+    "slug": "oc_regex_extractor",
+    "name": "Regex Extractor",
+    "description": "Extracts all matches of a regular expression from a text.",
+    "category": "utility",
+    "trust_tier": "community",
+    "version": "1.0.0",
+    "manifest_url": "https://raw.githubusercontent.com/ObaidGits/kria-skills/main/skills/oc_regex_extractor/SKILL.md",
+    "capabilities": {
+      "network": false,
+      "filesystem_read": false,
+      "filesystem_write": false,
+      "subprocess": false
+    }
+  },
+  {
+    "slug": "oc_text_diff",
+    "name": "Text Diff",
+    "description": "Generates a unified diff between two text inputs.",
+    "category": "developer",
+    "trust_tier": "community",
+    "version": "1.0.0",
+    "manifest_url": "https://raw.githubusercontent.com/ObaidGits/kria-skills/main/skills/oc_text_diff/SKILL.md",
+    "capabilities": {
+      "network": false,
+      "filesystem_read": false,
+      "filesystem_write": false,
+      "subprocess": false
+    }
+  },
+  {
+    "slug": "oc_markdown_to_html",
+    "name": "Markdown To Html",
+    "description": "Converts a Markdown document into HTML.",
+    "category": "utility",
+    "trust_tier": "community",
+    "version": "1.0.0",
+    "manifest_url": "https://raw.githubusercontent.com/ObaidGits/kria-skills/main/skills/oc_markdown_to_html/SKILL.md",
+    "capabilities": {
+      "network": false,
+      "filesystem_read": false,
+      "filesystem_write": false,
+      "subprocess": false
+    }
+  },
+  {
+    "slug": "oc_slug_generator",
+    "name": "Slug Generator",
+    "description": "Generates a URL-safe slug from an arbitrary title string.",
+    "category": "utility",
+    "trust_tier": "community",
+    "version": "1.0.0",
+    "manifest_url": "https://raw.githubusercontent.com/ObaidGits/kria-skills/main/skills/oc_slug_generator/SKILL.md",
+    "capabilities": {
+      "network": false,
+      "filesystem_read": false,
+      "filesystem_write": false,
+      "subprocess": false
+    }
+  },
+  {
+    "slug": "oc_lorem_ipsum",
+    "name": "Lorem Ipsum",
+    "description": "Generates placeholder lorem ipsum words, sentences, or paragraphs.",
+    "category": "utility",
+    "trust_tier": "community",
+    "version": "1.0.0",
+    "manifest_url": "https://raw.githubusercontent.com/ObaidGits/kria-skills/main/skills/oc_lorem_ipsum/SKILL.md",
+    "capabilities": {
+      "network": false,
+      "filesystem_read": false,
+      "filesystem_write": false,
+      "subprocess": false
+    }
+  },
+  {
+    "slug": "oc_password_generator",
+    "name": "Password Generator",
+    "description": "Generates a cryptographically random password of a given length.",
+    "category": "utility",
+    "trust_tier": "community",
+    "version": "1.0.0",
+    "manifest_url": "https://raw.githubusercontent.com/ObaidGits/kria-skills/main/skills/oc_password_generator/SKILL.md",
+    "capabilities": {
+      "network": false,
+      "filesystem_read": false,
+      "filesystem_write": false,
+      "subprocess": false
+    }
+  },
+  {
+    "slug": "oc_number_base_converter",
+    "name": "Number Base Converter",
+    "description": "Converts an integer between binary, octal, decimal, and hexadecimal.",
+    "category": "utility",
+    "trust_tier": "community",
+    "version": "1.0.0",
+    "manifest_url": "https://raw.githubusercontent.com/ObaidGits/kria-skills/main/skills/oc_number_base_converter/SKILL.md",
+    "capabilities": {
+      "network": false,
+      "filesystem_read": false,
+      "filesystem_write": false,
+      "subprocess": false
+    }
+  },
+  {
+    "slug": "oc_timestamp_converter",
+    "name": "Timestamp Converter",
+    "description": "Converts between Unix epoch seconds and ISO-8601 date-time strings.",
+    "category": "utility",
+    "trust_tier": "community",
+    "version": "1.0.0",
+    "manifest_url": "https://raw.githubusercontent.com/ObaidGits/kria-skills/main/skills/oc_timestamp_converter/SKILL.md",
+    "capabilities": {
+      "network": false,
+      "filesystem_read": false,
+      "filesystem_write": false,
+      "subprocess": false
+    }
+  },
+  {
+    "slug": "oc_color_converter",
+    "name": "Color Converter",
+    "description": "Converts colors between HEX, RGB, and HSL representations.",
+    "category": "utility",
+    "trust_tier": "community",
+    "version": "1.0.0",
+    "manifest_url": "https://raw.githubusercontent.com/ObaidGits/kria-skills/main/skills/oc_color_converter/SKILL.md",
+    "capabilities": {
+      "network": false,
+      "filesystem_read": false,
+      "filesystem_write": false,
+      "subprocess": false
+    }
+  },
+  {
+    "slug": "oc_jwt_decoder",
+    "name": "Jwt Decoder",
+    "description": "Decodes the header and payload of a JWT without verifying its signature.",
+    "category": "developer",
+    "trust_tier": "community",
+    "version": "1.0.0",
+    "manifest_url": "https://raw.githubusercontent.com/ObaidGits/kria-skills/main/skills/oc_jwt_decoder/SKILL.md",
+    "capabilities": {
+      "network": false,
+      "filesystem_read": false,
+      "filesystem_write": false,
+      "subprocess": false
+    }
+  },
+  {
+    "slug": "oc_string_template",
+    "name": "String Template",
+    "description": "Formats a template string by substituting named placeholder variables.",
+    "category": "utility",
+    "trust_tier": "community",
+    "version": "1.0.0",
+    "manifest_url": "https://raw.githubusercontent.com/ObaidGits/kria-skills/main/skills/oc_string_template/SKILL.md",
+    "capabilities": {
+      "network": false,
+      "filesystem_read": false,
+      "filesystem_write": false,
+      "subprocess": false
+    }
+  },
+  {
+    "slug": "oc_math_evaluator",
+    "name": "Math Evaluator",
+    "description": "Calculates the result of a numeric arithmetic expression.",
+    "category": "productivity",
+    "trust_tier": "community",
+    "version": "1.0.0",
+    "manifest_url": "https://raw.githubusercontent.com/ObaidGits/kria-skills/main/skills/oc_math_evaluator/SKILL.md",
+    "capabilities": {
+      "network": false,
+      "filesystem_read": false,
+      "filesystem_write": false,
+      "subprocess": false
+    }
+  },
+  {
+    "slug": "oc_unit_converter",
+    "name": "Unit Converter",
+    "description": "Converts a value between units of length, weight, or temperature.",
+    "category": "productivity",
+    "trust_tier": "community",
+    "version": "1.0.0",
+    "manifest_url": "https://raw.githubusercontent.com/ObaidGits/kria-skills/main/skills/oc_unit_converter/SKILL.md",
+    "capabilities": {
+      "network": false,
+      "filesystem_read": false,
+      "filesystem_write": false,
+      "subprocess": false
+    }
+  },
+  {
+    "slug": "oc_html_to_text",
+    "name": "Html To Text",
+    "description": "Extracts readable plain text from an HTML document.",
+    "category": "utility",
+    "trust_tier": "community",
+    "version": "1.0.0",
+    "manifest_url": "https://raw.githubusercontent.com/ObaidGits/kria-skills/main/skills/oc_html_to_text/SKILL.md",
+    "capabilities": {
+      "network": false,
+      "filesystem_read": false,
+      "filesystem_write": false,
+      "subprocess": false
+    }
+  },
+  {
+    "slug": "oc_sql_formatter",
+    "name": "Sql Formatter",
+    "description": "Formats a SQL statement with consistent indentation and keyword casing.",
+    "category": "developer",
+    "trust_tier": "community",
+    "version": "1.0.0",
+    "manifest_url": "https://raw.githubusercontent.com/ObaidGits/kria-skills/main/skills/oc_sql_formatter/SKILL.md",
+    "capabilities": {
+      "network": false,
+      "filesystem_read": false,
+      "filesystem_write": false,
+      "subprocess": false
+    }
+  },
+  {
+    "slug": "oc_cron_describer",
+    "name": "Cron Describer",
+    "description": "Converts a cron expression into a human-readable schedule description.",
+    "category": "developer",
+    "trust_tier": "community",
+    "version": "1.0.0",
+    "manifest_url": "https://raw.githubusercontent.com/ObaidGits/kria-skills/main/skills/oc_cron_describer/SKILL.md",
+    "capabilities": {
+      "network": false,
+      "filesystem_read": false,
+      "filesystem_write": false,
+      "subprocess": false
+    }
+  },
+  {
+    "slug": "oc_sentiment_basic",
+    "name": "Sentiment Basic",
+    "description": "Analyzes text and returns a basic positive, negative, or neutral score.",
+    "category": "data",
+    "trust_tier": "community",
+    "version": "1.0.0",
+    "manifest_url": "https://raw.githubusercontent.com/ObaidGits/kria-skills/main/skills/oc_sentiment_basic/SKILL.md",
+    "capabilities": {
+      "network": false,
+      "filesystem_read": false,
+      "filesystem_write": false,
+      "subprocess": false
+    }
+  },
+  {
+    "slug": "oc_http_get",
+    "name": "Http Get",
+    "description": "Fetches the response body of an HTTP GET request for a URL.",
+    "category": "web",
+    "trust_tier": "community",
+    "version": "1.0.0",
+    "manifest_url": "https://raw.githubusercontent.com/ObaidGits/kria-skills/main/skills/oc_http_get/SKILL.md",
+    "capabilities": {
+      "network": true,
+      "filesystem_read": false,
+      "filesystem_write": false,
+      "subprocess": false
+    }
+  },
+  {
+    "slug": "oc_ip_info",
+    "name": "Ip Info",
+    "description": "Fetches geolocation and network metadata for an IP address.",
+    "category": "web",
+    "trust_tier": "community",
+    "version": "1.0.0",
+    "manifest_url": "https://raw.githubusercontent.com/ObaidGits/kria-skills/main/skills/oc_ip_info/SKILL.md",
+    "capabilities": {
+      "network": true,
+      "filesystem_read": false,
+      "filesystem_write": false,
+      "subprocess": false
+    }
+  },
+  {
+    "slug": "oc_dns_lookup",
+    "name": "Dns Lookup",
+    "description": "Resolves DNS records (A, AAAA, MX, TXT) for a hostname.",
+    "category": "web",
+    "trust_tier": "community",
+    "version": "1.0.0",
+    "manifest_url": "https://raw.githubusercontent.com/ObaidGits/kria-skills/main/skills/oc_dns_lookup/SKILL.md",
+    "capabilities": {
+      "network": true,
+      "filesystem_read": false,
+      "filesystem_write": false,
+      "subprocess": false
+    }
+  }
+]

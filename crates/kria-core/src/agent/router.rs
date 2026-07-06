@@ -257,6 +257,26 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             "list_installed_skills",
         ),
         (
+            r"(?i)\b(list|show)\b.{0,20}\b(installed|available)\b.{0,20}\bskills?\b",
+            "list_installed_skills",
+        ),
+        // BUG #8/#9 FIX (category B: Capability Discovery issue): "which skills
+        // are enabled/disabled" had NO lexical pattern at all, so it fell
+        // through to the full LLM+semantic-router path with nothing to anchor
+        // on — the reported false-positive `search_news` call and downstream
+        // timeout/cancellation both trace back to this missing deterministic
+        // hint. Route directly to the same real `list_installed_skills` tool
+        // (added for Bug #3) with an explicit filter. Covers both word orders
+        // ("skills ... enabled" and "enabled ... skills").
+        (
+            r"(?i)\b(list|show|what|which)\b.{0,30}\bskills?\b.{0,20}\b(enabled|disabled|active|inactive)\b",
+            "list_installed_skills",
+        ),
+        (
+            r"(?i)\b(list|show)\b.{0,20}\b(enabled|disabled|active|inactive)\b.{0,20}\bskills?\b",
+            "list_installed_skills",
+        ),
+        (
             r"(?i)\b(browse|fetch|list)\b.{0,20}\b(available|remote)\b.{0,20}\bskills?\b",
             "clawhub_fetch_remote_skills",
         ),
@@ -1626,6 +1646,41 @@ mod tests {
         let result = IntentRouter::classify("check status of the server");
         assert!(matches!(result.intent, Intent::DirectTool(_)));
         assert_eq!(result.tool_hint.as_deref(), Some("check_device_health"));
+    }
+
+    /// BUG #3 regression: "is there a word-count/reverse-string skill
+    /// installed?"-style phrasing must route to the real introspection tool
+    /// rather than falling through to an LLM answer from static training data.
+    #[test]
+    fn regr_bug3_routes_which_skills_installed_to_list_installed_skills() {
+        let result = IntentRouter::classify("What OpenClaw skills are installed?");
+        assert!(matches!(result.intent, Intent::DirectTool(_)));
+        assert_eq!(result.tool_hint.as_deref(), Some("list_installed_skills"));
+
+        let result = IntentRouter::classify("List installed OpenClaw skills.");
+        assert!(matches!(result.intent, Intent::DirectTool(_)));
+        assert_eq!(result.tool_hint.as_deref(), Some("list_installed_skills"));
+    }
+
+    /// BUG #8/#9 regression: "which skills are enabled/disabled" had no
+    /// lexical pattern at all before this fix, forcing every such prompt
+    /// through the slow ambiguous LLM+semantic-router path.
+    #[test]
+    fn regr_bug8_routes_which_skills_enabled_to_list_installed_skills() {
+        let result = IntentRouter::classify("Show me which skills are currently enabled");
+        assert!(matches!(result.intent, Intent::DirectTool(_)));
+        assert_eq!(result.tool_hint.as_deref(), Some("list_installed_skills"));
+    }
+
+    #[test]
+    fn regr_bug9_routes_which_skills_disabled_to_list_installed_skills() {
+        let result = IntentRouter::classify("Show me which skills are currently disabled");
+        assert!(matches!(result.intent, Intent::DirectTool(_)));
+        assert_eq!(result.tool_hint.as_deref(), Some("list_installed_skills"));
+
+        let result = IntentRouter::classify("List disabled skills.");
+        assert!(matches!(result.intent, Intent::DirectTool(_)));
+        assert_eq!(result.tool_hint.as_deref(), Some("list_installed_skills"));
     }
 
     #[test]

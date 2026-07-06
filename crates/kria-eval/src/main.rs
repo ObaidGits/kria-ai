@@ -68,6 +68,8 @@ enum EvalMode {
     GuiLive,
     /// Run the bounded full GUI cognition eval sequence, excluding general text-prompt evals.
     GuiFull,
+    /// Generate the OpenClaw release checklist + feature matrix markdown artifacts.
+    OpenclawArtifacts,
     /// Run both suites.
     All,
 }
@@ -88,6 +90,7 @@ fn parse_mode() -> EvalMode {
             "--gui-expanded-evals" => return EvalMode::GuiExpanded,
             "--gui-live" => return EvalMode::GuiLive,
             "--gui-full" => return EvalMode::GuiFull,
+            "--openclaw-artifacts" => return EvalMode::OpenclawArtifacts,
             "--all" => return EvalMode::All,
             "--general" => return EvalMode::General,
             _ => {}
@@ -110,6 +113,7 @@ fn parse_mode() -> EvalMode {
         "gui-expanded-evals" | "gui_expanded_evals" => EvalMode::GuiExpanded,
         "gui-live" | "gui_live" => EvalMode::GuiLive,
         "gui-full" | "gui_full" => EvalMode::GuiFull,
+        "openclaw-artifacts" | "openclaw_artifacts" => EvalMode::OpenclawArtifacts,
         "all" => EvalMode::All,
         _ => EvalMode::General,
     }
@@ -223,10 +227,43 @@ async fn main() {
         run_gui_live_eval().await;
     }
 
+    // ── OpenClaw release artifacts (tasks 31/32) ──────────────────────────
+    if mode == EvalMode::OpenclawArtifacts {
+        run_openclaw_artifacts();
+    }
+
     // ── General Text-Prompt Eval ──────────────────────────────────────────
     if mode == EvalMode::General || mode == EvalMode::All {
         run_general_eval().await;
     }
+}
+
+fn run_openclaw_artifacts() {
+    use kria_eval::openclaw_eval::release_artifacts::{generate_feature_matrix_markdown, generate_release_checklist};
+    use kria_eval::openclaw_eval::EvidenceStore;
+
+    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    println!("  OpenClaw Release Artifacts (tasks 31/32)");
+    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+    // Real, evidence-backed feature matrix — does not require a live
+    // EvidenceStore run (it is derived from this session's real, already-
+    // reproduced findings, cited per-entry).
+    let matrix_md = generate_feature_matrix_markdown();
+    let matrix_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../OPENCLAW_FEATURE_MATRIX.md");
+    std::fs::write(matrix_path, &matrix_md).expect("Failed to write OPENCLAW_FEATURE_MATRIX.md");
+    println!("Feature matrix written to: {matrix_path}");
+
+    // Release checklist from an EMPTY store here (no live run performed by
+    // this CLI invocation) — honestly reflects "no evidence collected in
+    // THIS run" rather than fabricating a populated store. A real run would
+    // wire in the actual EvidenceStore from a full task 1-23 execution.
+    let store = EvidenceStore::new();
+    let checklist_md = generate_release_checklist(&store);
+    let checklist_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../OPENCLAW_RELEASE_CHECKLIST.md");
+    std::fs::write(checklist_path, &checklist_md).expect("Failed to write OPENCLAW_RELEASE_CHECKLIST.md");
+    println!("Release checklist written to: {checklist_path}");
+    println!();
 }
 
 fn run_hitl_timeline_eval() {

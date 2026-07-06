@@ -1,0 +1,19 @@
+{
+  "name": "oc_json_tool",
+  "description": "Validates, pretty-prints, or minifies a JSON string.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "json": {
+        "type": "string",
+        "description": "The JSON text to process."
+      },
+      "mode": {
+        "type": "string",
+        "description": "One of 'pretty' (default), 'minify', or 'validate'."
+      }
+    },
+    "required": ["json"]
+  },
+  "handler": "json_tool.js"
+}

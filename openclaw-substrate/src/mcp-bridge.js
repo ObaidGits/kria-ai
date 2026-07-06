@@ -19,26 +19,53 @@ const path = require("path");
 
 const SKILLS_DIR = path.join(__dirname, "..", "skills");
 
-function loadSkills() {
-  const skills = [];
-  if (!fs.existsSync(SKILLS_DIR)) return skills;
+// Runtime-mounted skills dir (OpenClaw bundle execution): installed
+// marketplace/generated skills are bind-mounted here (read-only) by the
+// DockerRuntime for a bespoke execution container. This is how a skill whose
+// handler is NOT baked into the image at build time still executes — the
+// bundle's bridge-format descriptor + handler are mounted at run time.
+const EXTRA_SKILLS_DIR = process.env.OPENCLAW_EXTRA_SKILLS_DIR || "";
 
-  const files = fs.readdirSync(SKILLS_DIR).filter((f) => f.endsWith(".json"));
+// Each skill entry tracks the directory it was loaded from so the handler
+// path resolves relative to the correct location (baked-in vs mounted).
+function loadSkillsFrom(dir, skills) {
+  if (!dir || !fs.existsSync(dir)) return;
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith(".json"));
   for (const file of files) {
     try {
-      const raw = fs.readFileSync(path.join(SKILLS_DIR, file), "utf8");
+      const raw = fs.readFileSync(path.join(dir, file), "utf8");
       const skill = JSON.parse(raw);
       if (skill.name && skill.description) {
+        skill.__dir = dir;
         skills.push(skill);
       }
     } catch (e) {
       process.stderr.write(`[mcp-bridge] Failed to load skill ${file}: ${e.message}\n`);
     }
   }
+}
+
+function loadSkills() {
+  const skills = [];
+  loadSkillsFrom(SKILLS_DIR, skills);
+  loadSkillsFrom(EXTRA_SKILLS_DIR, skills);
   return skills;
 }
 
 const skills = loadSkills();
+
+/**
+ * Resolve a loaded handler module to a callable function, supporting the
+ * common Node export conventions so both baked-in skills
+ * (`module.exports = fn`) and LLM-generated skills (`exports.handler = fn`
+ * or `exports.default = fn`) execute.
+ */
+function resolveHandlerFn(mod) {
+  if (typeof mod === "function") return mod;
+  if (mod && typeof mod.handler === "function") return mod.handler;
+  if (mod && typeof mod.default === "function") return mod.default;
+  return null;
+}
 
 // ─── Content-Length Frame Parser ─────────────────────────────────────────────
 
@@ -130,7 +157,7 @@ function handleToolsList(id, _params) {
   jsonRpcResult(id, { tools });
 }
 
-function handleToolsCall(id, params) {
+async function handleToolsCall(id, params) {
   const { name, arguments: args } = params || {};
 
   const skill = skills.find((s) => s.name === name);
@@ -143,11 +170,22 @@ function handleToolsCall(id, params) {
   try {
     let result;
     if (skill.handler && typeof skill.handler === "string") {
-      // Load and execute handler file
-      const handlerPath = path.join(SKILLS_DIR, skill.handler);
+      // Resolve handler relative to the dir the skill was loaded from
+      // (baked-in SKILLS_DIR or the runtime-mounted EXTRA_SKILLS_DIR).
+      const baseDir = skill.__dir || SKILLS_DIR;
+      const handlerPath = path.join(baseDir, skill.handler);
       if (fs.existsSync(handlerPath)) {
-        const handler = require(handlerPath);
-        result = typeof handler === "function" ? handler(args || {}) : handler;
+        const mod = require(handlerPath);
+        const fn = resolveHandlerFn(mod);
+        if (fn) {
+          result = fn(args || {});
+          // Support async handlers (generated skills are frequently async).
+          if (result && typeof result.then === "function") {
+            result = await result;
+          }
+        } else {
+          result = mod;
+        }
       } else {
         result = { output: `Skill '${name}' handler not found at ${skill.handler}` };
       }
@@ -195,7 +233,10 @@ function handleMessage(msg) {
       handleToolsList(id, params);
       break;
     case "tools/call":
-      handleToolsCall(id, params);
+      // Fire-and-forget async; handler sends its own framed response.
+      handleToolsCall(id, params).catch((e) => {
+        jsonRpcError(id, -32603, `Internal error: ${e && e.message ? e.message : e}`);
+      });
       break;
     default:
       jsonRpcError(id, -32601, `Method not found: ${method}`);

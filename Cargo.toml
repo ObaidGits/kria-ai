@@ -82,6 +82,8 @@ image = { version = "0.25", features = ["png"] }
 
 # Crypto
 sha2 = "0.10"
+sha1 = "0.10"
+md-5 = "0.11"
 hmac = "0.12"
 rand = "0.8"
 
@@ -116,8 +118,8 @@ unicode-normalization = "0.1"
 # GPU telemetry (NVIDIA)
 nvml-wrapper = "0.10"
 
-# Async utilities (CancellationToken)
-tokio-util = "0.7"
+# Async utilities (CancellationToken + StreamReader for container exec stdio)
+tokio-util = { version = "0.7", features = ["io", "rt"] }
 
 # WebSocket client (image-gen WS progress bridge)
 tokio-tungstenite = { version = "0.26", features = ["native-tls"] }

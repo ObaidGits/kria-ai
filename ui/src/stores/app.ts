@@ -4,6 +4,11 @@ import { listen } from "@tauri-apps/api/event";
 import hljsDarkThemeUrl from "highlight.js/styles/github-dark.css?url";
 import hljsLightThemeUrl from "highlight.js/styles/github.css?url";
 import {
+  updateBucketMessages,
+  updateBucketThinking,
+  appendAssistantToken,
+} from "../lib/sessionRuntime";
+import {
   handleGuiCognitionEvent,
   activeGuiCognitionSession,
   hasActiveGuiCognitionSession,
@@ -84,8 +89,6 @@ const resolveInitialManualToolMode = (): ManualToolModeId =>
   normalizeManualToolMode(readStorageValue(STORAGE_KEYS.manualToolMode));
 
 // --- Signals ---
-const [assistantMessages, setAssistantMessages] = createSignal<Message[]>([]);
-const [promptLabMessages, setPromptLabMessages] = createSignal<Message[]>([]);
 const [sessions, setSessions] = createSignal<Session[]>([]);
 const [isSessionStartupLoading, setIsSessionStartupLoading] = createSignal(true);
 const [assistantCurrentSession, setAssistantCurrentSession] = createSignal<string | null>(
@@ -94,7 +97,77 @@ const [assistantCurrentSession, setAssistantCurrentSession] = createSignal<strin
 const [promptLabCurrentSession, setPromptLabCurrentSession] = createSignal<string | null>(
   readStorageValue(STORAGE_KEYS.promptLabSession)
 );
-const [assistantIsThinking, setAssistantIsThinking] = createSignal(false);
+
+// ── Per-session runtime state (Issue-2 fix) ──────────────────────────────────
+// Messages + thinking live PER SESSION, not per scope, so switching chats never
+// loses an in-flight generation. Streamed tokens/tool events are routed to the
+// OWNING session's bucket by `session_id`, so a background chat keeps building
+// its response and returning to it restores the live transcript + spinner.
+type SessionRuntimeState = { messages: Message[]; thinking: boolean };
+const EPHEMERAL_SESSION_KEY = "__ephemeral__";
+const [assistantSessionState, setAssistantSessionState] =
+  createSignal<Record<string, SessionRuntimeState>>({});
+const [promptLabSessionState, setPromptLabSessionState] =
+  createSignal<Record<string, SessionRuntimeState>>({});
+
+function scopeSetter(scope: StreamScope) {
+  return scope === "prompt_lab" ? setPromptLabSessionState : setAssistantSessionState;
+}
+function activeKey(scope: StreamScope): string {
+  const sid = scope === "prompt_lab" ? promptLabCurrentSession() : assistantCurrentSession();
+  return sid ?? EPHEMERAL_SESSION_KEY;
+}
+
+function writeSessionMessages(
+  scope: StreamScope,
+  key: string,
+  updater: (prev: Message[]) => Message[]
+) {
+  scopeSetter(scope)((prev) => updateBucketMessages(prev, key, updater));
+}
+function writeSessionThinking(
+  scope: StreamScope,
+  key: string,
+  value: boolean | ((prev: boolean) => boolean)
+) {
+  scopeSetter(scope)((prev) => updateBucketThinking(prev, key, value));
+}
+
+// Session-targeted helpers used by the stream listeners: route by the event's
+// `session_id` (falling back to the active session when absent).
+function updateSessionMessages(
+  scope: StreamScope,
+  sessionId: string | null | undefined,
+  updater: (prev: Message[]) => Message[]
+) {
+  writeSessionMessages(scope, sessionId && sessionId.length > 0 ? sessionId : activeKey(scope), updater);
+}
+function setSessionThinkingById(
+  scope: StreamScope,
+  sessionId: string | null | undefined,
+  value: boolean
+) {
+  writeSessionThinking(scope, sessionId && sessionId.length > 0 ? sessionId : activeKey(scope), value);
+}
+
+// Backwards-compatible accessors: read/write the ACTIVE session's bucket so the
+// existing call surface keeps working unchanged.
+const assistantMessages = (): Message[] =>
+  assistantSessionState()[activeKey("assistant")]?.messages ?? [];
+const setAssistantMessages = (next: Message[] | ((prev: Message[]) => Message[])) =>
+  writeSessionMessages("assistant", activeKey("assistant"), (prev) =>
+    typeof next === "function" ? (next as (p: Message[]) => Message[])(prev) : next
+  );
+const promptLabMessages = (): Message[] =>
+  promptLabSessionState()[activeKey("prompt_lab")]?.messages ?? [];
+const setPromptLabMessages = (next: Message[] | ((prev: Message[]) => Message[])) =>
+  writeSessionMessages("prompt_lab", activeKey("prompt_lab"), (prev) =>
+    typeof next === "function" ? (next as (p: Message[]) => Message[])(prev) : next
+  );
+const assistantIsThinking = (): boolean =>
+  assistantSessionState()[activeKey("assistant")]?.thinking ?? false;
+const setAssistantIsThinking = (next: boolean | ((prev: boolean) => boolean)) =>
+  writeSessionThinking("assistant", activeKey("assistant"), next);
 // Per-scope sequential prompt queue. When a turn is active, additional prompts
 // are QUEUED (not silently dropped) and auto-sent in order when the turn
 // finishes. Each item is tagged with the session it was queued in so a queued
@@ -102,7 +175,10 @@ const [assistantIsThinking, setAssistantIsThinking] = createSignal(false);
 type QueuedPrompt = { text: string; sessionId: string | null };
 const [assistantPromptQueue, setAssistantPromptQueue] = createSignal<QueuedPrompt[]>([]);
 const [promptLabPromptQueue, setPromptLabPromptQueue] = createSignal<QueuedPrompt[]>([]);
-const [promptLabIsThinking, setPromptLabIsThinking] = createSignal(false);
+const promptLabIsThinking = (): boolean =>
+  promptLabSessionState()[activeKey("prompt_lab")]?.thinking ?? false;
+const setPromptLabIsThinking = (next: boolean | ((prev: boolean) => boolean)) =>
+  writeSessionThinking("prompt_lab", activeKey("prompt_lab"), next);
 const [showSettings, setShowSettings] = createSignal(false);
 const [assistantShowHitl, setAssistantShowHitl] = createSignal(false);
 const [promptLabShowHitl, setPromptLabShowHitl] = createSignal(false);
@@ -1460,13 +1536,6 @@ function enqueueScopedPrompt(scope: StreamScope, text: string): void {
   setScopedPromptQueueValue(scope, updated);
   setInputText("");
   showQueueNotice(scope, updated.filter((i) => i.sessionId === sessionId).length);
-}
-
-/** Discard any queued prompts for the scope (used when the session changes). */
-function clearScopedPromptQueue(scope: StreamScope): void {
-  if (getScopedPromptQueue(scope).length === 0) return;
-  setScopedPromptQueueValue(scope, []);
-  removeQueueNotice(scope);
 }
 
 /**
@@ -3380,7 +3449,9 @@ async function createSession() {
       return;
     }
 
-    await cancelScopedTurnIfActive(scope);
+    // Creating a new chat must NOT cancel a turn generating in another session
+    // (Issue-2): that turn keeps running in the background and stays reachable by
+    // switching back to its chat. Only an explicit Stop cancels.
     const result = await invoke<{ session_id: string }>("create_session");
     setScopedCurrentSession(scope, result.session_id);
     backendActiveSessionId = result.session_id;
@@ -3481,7 +3552,8 @@ async function startTemporaryChat(): Promise<void> {
   if (!CHAT_FLAGS.temporary) return;
   try {
     const scope = scopeFromEnvironment();
-    await cancelScopedTurnIfActive(scope);
+    // Starting a temporary chat must NOT cancel a turn generating in another
+    // session (Issue-2): it continues in the background and stays reachable.
     const result = await invoke<{ session_id: string }>("create_session");
     await invoke("set_session_temporary", { sessionId: result.session_id, temporary: true });
     setScopedCurrentSession(scope, result.session_id);
@@ -3696,25 +3768,29 @@ function mergeHistoryWithLocalMessages(history: Message[], localMessages: Messag
 async function switchSession(sessionId: string) {
   try {
     const scope = scopeFromEnvironment();
-    const activeSession = getScopedCurrentSession(scope);
-    const wasAlreadyCurrent = activeSession === sessionId;
-    const localMessages = scope === "prompt_lab" ? promptLabMessages() : assistantMessages();
-    if (activeSession && activeSession !== sessionId) {
-      await cancelScopedTurnIfActive(scope);
-      // Drop any prompts queued for the session we are leaving so they never
-      // dispatch into the newly-opened chat.
-      clearScopedPromptQueue(scope);
-    }
+
+    // Switching chats must NEVER cancel an in-flight turn (Issue-2 fix). The
+    // session being left keeps generating in the background; its tokens continue
+    // to be routed into its own per-session bucket by `session_id`. Queued
+    // prompts are session-tagged and drained per-session, so they are preserved
+    // (not cleared) across a switch.
     await invoke("switch_session", { sessionId });
     backendActiveSessionId = sessionId;
     setScopedCurrentSession(scope, sessionId);
     setTemporaryChatActive(false);
-    let mapped = await loadMappedSessionHistory(sessionId);
-    if (wasAlreadyCurrent) {
-      mapped = mergeHistoryWithLocalMessages(mapped, localMessages);
+
+    // Once the active session flips, the scoped accessors read the TARGET
+    // session's bucket. If it already holds a live/in-progress transcript (or a
+    // turn is still streaming into it), show it untouched so returning to a chat
+    // restores its current response + spinner. Only hydrate from backend history
+    // when the bucket is empty AND idle.
+    const targetHasRuntime =
+      (scope === "prompt_lab" ? promptLabMessages() : assistantMessages()).length > 0 ||
+      isScopedThinking(scope);
+    if (!targetHasRuntime) {
+      const mapped = await loadMappedSessionHistory(sessionId);
+      updateScopedMessages(scope, () => mapped);
     }
-    updateScopedMessages(scope, () => mapped);
-    setScopedThinking(scope, false);
   } catch (e) {
     console.error("Failed to switch session:", e);
   }
@@ -3856,49 +3932,53 @@ async function renameSession(sessionId: string, title: string) {
 // --- Event listeners (set up once) ---
 function initListeners() {
   const registerStreamListeners = (eventPrefix: "agent" | "prompt_lab", scope: StreamScope) => {
-    // Cross-session isolation: a streaming event stamped with a `session_id`
-    // that is NOT the scope's current session belongs to a turn the user has
-    // navigated away from. Such message-appending events (token/tool) are
-    // dropped so they never pollute the current transcript. (We deliberately do
-    // NOT gate `:done`/`:thinking` on this — those control the shared per-scope
-    // thinking flag and must always be free to clear it.)
-    const isForeignSession = (sid: unknown): boolean =>
-      typeof sid === "string" && sid.length > 0 && sid !== getScopedCurrentSession(scope);
-
+    // Per-session routing (Issue-2 fix): every message-appending event is routed
+    // to the bucket of the session that OWNS it (`session_id`), never dropped.
+    // A background chat therefore keeps accumulating its response, and returning
+    // to it restores the live transcript + spinner. Events without a session_id
+    // (legacy/pre-task) fall back to the active session.
     listen<{ text: string; session_id?: string }>(`${eventPrefix}:token`, (event) => {
-      if (isForeignSession(event.payload?.session_id)) return;
-      if (scope === "assistant") pokeAssistantThinkingWatchdog();
-      updateScopedMessages(scope, (prev) => {
-        const last = prev[prev.length - 1];
-        if (last?.role === "assistant") {
-          return [
-            ...prev.slice(0, -1),
-            { ...last, content: last.content + event.payload.text },
-          ];
+      const sid = event.payload?.session_id;
+      if (scope === "assistant" && (!sid || sid === getScopedCurrentSession(scope))) {
+        pokeAssistantThinkingWatchdog();
+      }
+      updateSessionMessages(scope, sid, (prev) =>
+        appendAssistantToken(prev, event.payload.text, (text) => ({
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: text,
+          timestamp: Date.now(),
+        }))
+      );
+    });
+
+    listen<{ status?: string; plan?: string; session_id?: string }>(
+      `${eventPrefix}:thinking`,
+      (event) => {
+        const sid = event.payload?.session_id;
+        if (!sid || sid === getScopedCurrentSession(scope)) {
+          setScopedThinking(scope, true);
+        } else {
+          setSessionThinkingById(scope, sid, true);
         }
-        return [
-          ...prev,
-          {
-            id: crypto.randomUUID(),
-            role: "assistant",
-            content: event.payload.text,
-            timestamp: Date.now(),
-          },
-        ];
-      });
-    });
+      }
+    );
 
-    listen<{ status?: string; plan?: string }>(`${eventPrefix}:thinking`, () => {
-      setScopedThinking(scope, true);
-    });
-
-    listen(`${eventPrefix}:done`, () => {
-      setScopedThinking(scope, false);
+    listen<{ session_id?: string }>(`${eventPrefix}:done`, (event) => {
+      const sid = event.payload?.session_id;
+      const active = getScopedCurrentSession(scope);
+      if (!sid || sid === active) {
+        setScopedThinking(scope, false);
+      } else {
+        setSessionThinkingById(scope, sid, false);
+      }
       loadSessions();
       loadHealth();
-      // Sequential queue: a turn just finished, so dispatch the next queued
-      // prompt for this scope (if any). Drains one-at-a-time as each turn ends.
-      drainScopedPromptQueue(scope);
+      // Drain the sequential queue only for the active session (draining
+      // dispatches into the currently-open chat).
+      if (!sid || sid === active) {
+        drainScopedPromptQueue(scope);
+      }
     });
 
     listen<HitlRequest>(`${eventPrefix}:approval_required`, (event) => {
@@ -3911,11 +3991,11 @@ function initListeners() {
     });
 
     listen<{ name: string; params: Record<string, unknown>; session_id?: string }>(`${eventPrefix}:tool_call`, (event) => {
-      if (isForeignSession(event.payload?.session_id)) return;
+      const sid = event.payload?.session_id;
       const { params } = event.payload;
       // Guarantee a string name (see tool_result handler).
       const name = event.payload?.name ?? "tool";
-      updateScopedMessages(scope, (prev) => {
+      updateSessionMessages(scope, sid, (prev) => {
         const last = prev[prev.length - 1];
         if (last?.role === "assistant") {
           const tc: ToolCall = { name, args: params, status: "running" };
@@ -3952,7 +4032,7 @@ function initListeners() {
       execution_metadata?: ExecutionMetadata;
       session_id?: string;
     }>(`${eventPrefix}:tool_result`, (event) => {
-      if (isForeignSession(event.payload?.session_id)) return;
+      const sid = event.payload?.session_id;
       const { name, result, success, metadata, conversational_summary, human_readable, execution_metadata } = event.payload;
       const completedToolCall: ToolCall = {
         // Guarantee a string name: a tool_result with a missing `name` would
@@ -3975,7 +4055,7 @@ function initListeners() {
         execution_metadata: execution_metadata ?? undefined,
       };
 
-      updateScopedMessages(scope, (prev) => {
+      updateSessionMessages(scope, sid, (prev) => {
         for (let i = prev.length - 1; i >= 0; i--) {
           const msg = prev[i];
           if (msg.role !== "assistant" || !msg.toolCalls?.length) continue;

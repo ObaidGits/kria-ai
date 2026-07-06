@@ -74,7 +74,9 @@ impl SlaTable {
 
     /// Evaluate a measurement; unknown ops are treated as Ok (no SLA defined).
     pub fn evaluate(&self, op: &str, measured_ms: u32) -> SlaState {
-        self.get(op).map(|s| s.evaluate(measured_ms)).unwrap_or(SlaState::Ok)
+        self.get(op)
+            .map(|s| s.evaluate(measured_ms))
+            .unwrap_or(SlaState::Ok)
     }
 
     /// Override or insert an entry (config-driven).

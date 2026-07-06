@@ -25,7 +25,13 @@ pub struct Anomaly {
 }
 
 /// Spike detector: value above `threshold` for `dwell` consecutive samples → spike.
-pub fn detect_spike(kind: AnomalyKind, samples: &[u32], threshold: u32, dwell: usize, suspect: Option<String>) -> Option<Anomaly> {
+pub fn detect_spike(
+    kind: AnomalyKind,
+    samples: &[u32],
+    threshold: u32,
+    dwell: usize,
+    suspect: Option<String>,
+) -> Option<Anomaly> {
     if samples.len() < dwell {
         return None;
     }
@@ -46,7 +52,12 @@ pub fn detect_spike(kind: AnomalyKind, samples: &[u32], threshold: u32, dwell: u
 
 /// Leak detector: a monotonic non-reclaimed increase in used memory across idle windows.
 /// `used_mb` are samples taken during idle; a strictly increasing run ≥ `min_run` flags a leak.
-pub fn detect_leak(kind: AnomalyKind, used_mb: &[u64], min_run: usize, suspect: Option<String>) -> Option<Anomaly> {
+pub fn detect_leak(
+    kind: AnomalyKind,
+    used_mb: &[u64],
+    min_run: usize,
+    suspect: Option<String>,
+) -> Option<Anomaly> {
     if used_mb.len() < min_run {
         return None;
     }
@@ -64,7 +75,12 @@ pub fn detect_leak(kind: AnomalyKind, used_mb: &[u64], min_run: usize, suspect: 
 }
 
 /// Starvation: a request class waited longer than its SLA without admission.
-pub fn detect_starvation(class: &str, waited_ms: u32, sla_ms: u32, blocking_holder: Option<String>) -> Option<Anomaly> {
+pub fn detect_starvation(
+    class: &str,
+    waited_ms: u32,
+    sla_ms: u32,
+    blocking_holder: Option<String>,
+) -> Option<Anomaly> {
     if waited_ms > sla_ms {
         Some(Anomaly {
             kind: AnomalyKind::Starvation,
@@ -78,7 +94,12 @@ pub fn detect_starvation(class: &str, waited_ms: u32, sla_ms: u32, blocking_hold
 
 /// Hung model: a lease is active but telemetry shows no progress for `idle_samples` and health is
 /// stale.
-pub fn detect_hung(model: &str, progress_samples: &[u64], idle_samples: usize, health_stale: bool) -> Option<Anomaly> {
+pub fn detect_hung(
+    model: &str,
+    progress_samples: &[u64],
+    idle_samples: usize,
+    health_stale: bool,
+) -> Option<Anomaly> {
     if progress_samples.len() < idle_samples || !health_stale {
         return None;
     }
@@ -87,7 +108,9 @@ pub fn detect_hung(model: &str, progress_samples: &[u64], idle_samples: usize, h
     if no_progress {
         Some(Anomaly {
             kind: AnomalyKind::HungModel,
-            hypothesis: format!("{model} active but no progress for {idle_samples} samples + stale health"),
+            hypothesis: format!(
+                "{model} active but no progress for {idle_samples} samples + stale health"
+            ),
             suspect: Some(model.to_string()),
         })
     } else {
@@ -114,7 +137,13 @@ mod tests {
 
     #[test]
     fn gpu_spike_detected_after_dwell() {
-        let a = detect_spike(AnomalyKind::GpuSpike, &[10, 95, 96, 97], 90, 3, Some("comfyui".into()));
+        let a = detect_spike(
+            AnomalyKind::GpuSpike,
+            &[10, 95, 96, 97],
+            90,
+            3,
+            Some("comfyui".into()),
+        );
         assert!(a.is_some());
         assert_eq!(a.unwrap().suspect.as_deref(), Some("comfyui"));
     }
@@ -127,7 +156,12 @@ mod tests {
 
     #[test]
     fn vram_leak_detected_on_monotonic_growth() {
-        let a = detect_leak(AnomalyKind::VramLeak, &[1000, 1100, 1250, 1400], 3, Some("llama".into()));
+        let a = detect_leak(
+            AnomalyKind::VramLeak,
+            &[1000, 1100, 1250, 1400],
+            3,
+            Some("llama".into()),
+        );
         assert!(a.is_some());
     }
 

@@ -59,6 +59,31 @@ enabled = true
 enabled = true
 max_cpu_percent = 10
 
+[openclaw]
+enabled = true
+image = "kria/openclaw-substrate:latest"
+
+# ─── OpenClaw Intelligent Capability Platform (ICP / CIL) ───
+# Additive, data-only section. Default OFF preserves current direct-router
+# behavior byte-for-byte. All thresholds/weights are config (no hardcoding).
+[openclaw.cil]
+openclaw_icp_enabled = true
+trust_threshold = 0.5
+compatibility_threshold = 0.5
+planner_max_breadth = 8
+planner_max_depth = 5
+generation_allowed = true
+
+# Multi-signal ranking weights (design §8.4).
+[openclaw.cil.weights]
+semantic = 0.35
+lexical = 0.15
+compatibility = 0.20
+trust = 0.10
+quality = 0.08
+popularity = 0.06
+success = 0.06
+
 # ─── Phase 4.5 — Mobile prompt-control ───
 [mobile]
 enabled = true

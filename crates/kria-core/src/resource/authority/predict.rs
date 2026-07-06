@@ -37,11 +37,20 @@ pub fn prewarm_hint(signal: WorkloadSignal) -> Option<PrewarmHint> {
         WorkloadSignal::MicOpened => (ConsumerId::Stt, 85),
         WorkloadSignal::WorkflowStarted => (ConsumerId::Agent, 70),
     };
-    Some(PrewarmHint { consumer, confidence })
+    Some(PrewarmHint {
+        consumer,
+        confidence,
+    })
 }
 
 /// Gate a prewarm hint: only allow if there is free headroom and no veto. Never evicts (R14.2).
-pub fn prewarm_allowed(hint: &PrewarmHint, free_mb: u64, need_mb: u64, veto: bool, min_conf: u8) -> bool {
+pub fn prewarm_allowed(
+    hint: &PrewarmHint,
+    free_mb: u64,
+    need_mb: u64,
+    veto: bool,
+    min_conf: u8,
+) -> bool {
     !veto && hint.confidence >= min_conf && free_mb >= need_mb
 }
 
@@ -96,7 +105,7 @@ impl Forecaster {
         };
         if let (Some(last), true) = (self.last_value, dt_s > 0.0) {
             let inst_slope = (v - last) / dt_s as f64; // units/sec
-            // consistency: same sign as smoothed slope → grow confidence
+                                                       // consistency: same sign as smoothed slope → grow confidence
             if inst_slope.signum() == self.ewma_slope.signum() || self.ewma_slope == 0.0 {
                 self.consistent = (self.consistent + 1).min(10);
             } else {
@@ -171,7 +180,10 @@ mod tests {
 
     #[test]
     fn prewarm_blocked_without_headroom_or_on_veto() {
-        let h = PrewarmHint { consumer: ConsumerId::Image, confidence: 90 };
+        let h = PrewarmHint {
+            consumer: ConsumerId::Image,
+            confidence: 90,
+        };
         assert!(!prewarm_allowed(&h, 1000, 4000, false, 50)); // no headroom
         assert!(!prewarm_allowed(&h, 8000, 4000, true, 50)); // veto
         assert!(prewarm_allowed(&h, 8000, 4000, false, 50)); // ok
@@ -181,7 +193,11 @@ mod tests {
     fn forecaster_predicts_exhaustion_when_decreasing() {
         let mut f = Forecaster::new(ResourceKind::Vram);
         // free VRAM dropping 500/s from 5000 toward 0.
-        let mut last = Forecast { resource: ResourceKind::Vram, time_to_threshold_s: None, confidence: 0.0 };
+        let mut last = Forecast {
+            resource: ResourceKind::Vram,
+            time_to_threshold_s: None,
+            confidence: 0.0,
+        };
         let mut v = 5000.0;
         for _ in 0..6 {
             v -= 500.0;

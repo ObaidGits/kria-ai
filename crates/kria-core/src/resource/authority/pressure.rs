@@ -87,7 +87,12 @@ impl PressureEngine {
 
     /// Feed a raw free-memory sample. Returns the debounced level + recommended remedy.
     /// Hysteresis: exit Yield requires free above `soft + hysteresis`.
-    pub fn observe(&mut self, raw_free_mb: u64, budget: &Budget, hysteresis_mb: u64) -> (PressureLevel, Remedy) {
+    pub fn observe(
+        &mut self,
+        raw_free_mb: u64,
+        budget: &Budget,
+        hysteresis_mb: u64,
+    ) -> (PressureLevel, Remedy) {
         let free = self.ema.update(raw_free_mb);
 
         // Emergency overlay (debounced).

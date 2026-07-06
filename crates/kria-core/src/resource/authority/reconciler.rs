@@ -99,7 +99,10 @@ mod tests {
     fn ra_spawned_orphan_reclaimed_when_no_valid_lease() {
         // After restart epoch=2, the only lease is stale (epoch 1) → no valid lease.
         let leases = vec![lease(1, 1)];
-        let observed = vec![ObservedProcess { pid: 4242, vram_mb: 5000 }];
+        let observed = vec![ObservedProcess {
+            pid: 4242,
+            vram_mb: 5000,
+        }];
         let mut ra = HashSet::new();
         ra.insert(4242);
         let plan = reconcile(Epoch(2), &leases, &observed, &ra);
@@ -108,7 +111,10 @@ mod tests {
 
     #[test]
     fn foreign_pid_never_reclaimed() {
-        let observed = vec![ObservedProcess { pid: 9999, vram_mb: 5000 }];
+        let observed = vec![ObservedProcess {
+            pid: 9999,
+            vram_mb: 5000,
+        }];
         // 9999 is NOT in the RA-spawned set → must never be killed.
         let plan = reconcile(Epoch(2), &[], &observed, &HashSet::new());
         assert!(plan.reclaim_pids.is_empty());
@@ -117,7 +123,10 @@ mod tests {
     #[test]
     fn valid_lease_protects_its_process() {
         let leases = vec![lease(7, 2)]; // valid on current epoch
-        let observed = vec![ObservedProcess { pid: 4242, vram_mb: 5000 }];
+        let observed = vec![ObservedProcess {
+            pid: 4242,
+            vram_mb: 5000,
+        }];
         let mut ra = HashSet::new();
         ra.insert(4242);
         let plan = reconcile(Epoch(2), &leases, &observed, &ra);

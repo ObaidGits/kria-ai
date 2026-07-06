@@ -33,13 +33,18 @@ pub fn apply_settings(autoscale: bool, cuda_reserve_mb: u64, volatility_cap_mb: 
 }
 
 fn env_bool(key: &str) -> Option<bool> {
-    std::env::var(key)
-        .ok()
-        .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "on" | "yes"))
+    std::env::var(key).ok().map(|v| {
+        matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "on" | "yes"
+        )
+    })
 }
 
 fn env_u64(key: &str) -> Option<u64> {
-    std::env::var(key).ok().and_then(|v| v.trim().parse::<u64>().ok())
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
 }
 
 /// Whether the watchdog may opportunistically scale the LLM UP (a restart). Default OFF. Env
@@ -57,7 +62,8 @@ pub fn cuda_reserve_mb() -> u64 {
 
 /// Volatility-reserve ceiling (MB). Env `KRIA_VRAM_VOLATILITY_CAP_MB` overrides the config value.
 pub fn volatility_cap_mb() -> u64 {
-    env_u64("KRIA_VRAM_VOLATILITY_CAP_MB").unwrap_or_else(|| VOLATILITY_CAP_MB.load(Ordering::Relaxed))
+    env_u64("KRIA_VRAM_VOLATILITY_CAP_MB")
+        .unwrap_or_else(|| VOLATILITY_CAP_MB.load(Ordering::Relaxed))
 }
 
 #[cfg(test)]

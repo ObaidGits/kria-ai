@@ -9,7 +9,10 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DaemonState {
     Running,
-    Restarting { attempt: u32, backoff_ms: u64 },
+    Restarting {
+        attempt: u32,
+        backoff_ms: u64,
+    },
     /// Circuit broken after too many failures in the window — stop auto-restarting.
     CircuitOpen,
     Stopped,
@@ -159,7 +162,10 @@ mod tests {
         s.on_recovered();
         assert_eq!(s.state(), DaemonState::Running);
         // next crash starts backoff from attempt 1 again
-        assert!(matches!(s.on_crash(2000), DaemonState::Restarting { attempt: 1, .. }));
+        assert!(matches!(
+            s.on_crash(2000),
+            DaemonState::Restarting { attempt: 1, .. }
+        ));
     }
 
     #[test]

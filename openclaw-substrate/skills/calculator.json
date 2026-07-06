@@ -1,0 +1,15 @@
+{
+  "name": "oc_calculator",
+  "description": "Evaluates an arithmetic expression and returns the numeric result.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "expression": {
+        "type": "string",
+        "description": "Arithmetic expression, e.g. '2 * (3 + 4)' or '10 / 4'."
+      }
+    },
+    "required": ["expression"]
+  },
+  "handler": "calculator.js"
+}

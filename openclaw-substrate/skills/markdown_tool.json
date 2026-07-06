@@ -1,0 +1,12 @@
+{
+  "name": "oc_markdown_tool",
+  "description": "Converts a common Markdown subset (headings, bold, italic, links, lists) to HTML.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "markdown": { "type": "string", "description": "The Markdown source text." }
+    },
+    "required": ["markdown"]
+  },
+  "handler": "markdown_tool.js"
+}

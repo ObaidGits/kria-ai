@@ -191,7 +191,13 @@ impl CoResidencyManager {
                         let revoked = h.revoked.clone();
                         let device = h.device.clone();
                         self.dedup_hits.fetch_add(1, Ordering::Relaxed);
-                        return Ok(CoResidencyLease::new(tok, model, device, revoked, self.clone()));
+                        return Ok(CoResidencyLease::new(
+                            tok,
+                            model,
+                            device,
+                            revoked,
+                            self.clone(),
+                        ));
                     }
                 }
             }
@@ -228,7 +234,9 @@ impl CoResidencyManager {
                         decision = if preempted > 0 { "granted_after_evict" } else { "granted_coresident" },
                         "co-residency DECISION=accepted — model admitted to GPU residency"
                     );
-                    return Ok(self.record_grant(lease.token.0, model, req.class, lease.device).await);
+                    return Ok(self
+                        .record_grant(lease.token.0, model, req.class, lease.device)
+                        .await);
                 }
                 RaOutcome::PreemptThenRetry { victim } => {
                     match self.preempt_victim(victim, emergency).await {
@@ -286,7 +294,12 @@ impl CoResidencyManager {
         if self.residency.state(model).await.is_none() {
             return true;
         }
-        if self.residency.transition(model, target.residency()).await.is_err() {
+        if self
+            .residency
+            .transition(model, target.residency())
+            .await
+            .is_err()
+        {
             return false; // Busy (another transition in flight) — caller retries
         }
         match self.residency.state(model).await {
@@ -298,7 +311,11 @@ impl CoResidencyManager {
     /// Gracefully evict a victim: refuse if it is pinned (anti-thrash) unless this is an emergency
     /// (foreground) admission. On eviction, mark the lease revoked (cooperative), cool the model to
     /// RAM, and release the authority reservation.
-    async fn preempt_victim(&self, victim: LeaseToken, emergency: bool) -> Result<(), CoResidencyError> {
+    async fn preempt_victim(
+        &self,
+        victim: LeaseToken,
+        emergency: bool,
+    ) -> Result<(), CoResidencyError> {
         let (model, revoked) = {
             let inner = self.inner.lock().await;
             match inner.holders.get(&victim.0) {
@@ -563,9 +580,7 @@ mod tests {
         ModelDescriptor, ModelHealth, ModelLifecycle, ResidencyState,
     };
     use crate::resource::authority::planner::PolicyProfile;
-    use crate::resource::authority::types::{
-        Constraints, ConsumerId, ResourceNeed, TurnId,
-    };
+    use crate::resource::authority::types::{Constraints, ConsumerId, ResourceNeed, TurnId};
     use async_trait::async_trait;
     use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
@@ -579,7 +594,10 @@ mod tests {
     }
 
     impl MockModel {
-        fn new(id: &str, kind: ConsumerId) -> (Arc<Self>, Arc<AtomicU32>, Arc<AtomicU32>, Arc<AtomicBool>) {
+        fn new(
+            id: &str,
+            kind: ConsumerId,
+        ) -> (Arc<Self>, Arc<AtomicU32>, Arc<AtomicU32>, Arc<AtomicBool>) {
             let loads = Arc::new(AtomicU32::new(0));
             let cools = Arc::new(AtomicU32::new(0));
             let fail = Arc::new(AtomicBool::new(false));
@@ -678,13 +696,23 @@ mod tests {
     #[tokio::test]
     async fn two_models_co_reside_on_one_gpu() {
         // 12 GB GPU; LLM 4 GB + Image 4 GB fit together → both hot, no preemption.
-        let mgr = mgr_with_models(12288, &[("llm", ConsumerId::Llm), ("img", ConsumerId::Image)]).await;
+        let mgr = mgr_with_models(
+            12288,
+            &[("llm", ConsumerId::Llm), ("img", ConsumerId::Image)],
+        )
+        .await;
         let l1 = mgr
-            .acquire(&req(ConsumerId::Llm, PriorityClass::InteractiveFg, 4000, "llm"), ResidencyTarget::Hot)
+            .acquire(
+                &req(ConsumerId::Llm, PriorityClass::InteractiveFg, 4000, "llm"),
+                ResidencyTarget::Hot,
+            )
             .await
             .expect("llm grant");
         let l2 = mgr
-            .acquire(&req(ConsumerId::Image, PriorityClass::Batch, 4000, "img"), ResidencyTarget::Hot)
+            .acquire(
+                &req(ConsumerId::Image, PriorityClass::Batch, 4000, "img"),
+                ResidencyTarget::Hot,
+            )
             .await
             .expect("image grant");
         assert!(l1.is_valid() && l2.is_valid());
@@ -701,11 +729,17 @@ mod tests {
         let mgr = CoResidencyManager::new(auth, res);
 
         let a = mgr
-            .acquire(&req(ConsumerId::Llm, PriorityClass::InteractiveFg, 4000, "llm"), ResidencyTarget::Hot)
+            .acquire(
+                &req(ConsumerId::Llm, PriorityClass::InteractiveFg, 4000, "llm"),
+                ResidencyTarget::Hot,
+            )
             .await
             .unwrap();
         let b = mgr
-            .acquire(&req(ConsumerId::Llm, PriorityClass::InteractiveFg, 4000, "llm"), ResidencyTarget::Hot)
+            .acquire(
+                &req(ConsumerId::Llm, PriorityClass::InteractiveFg, 4000, "llm"),
+                ResidencyTarget::Hot,
+            )
             .await
             .unwrap();
         // Same model acquired twice → loaded once, shared (refcount 2).
@@ -724,35 +758,62 @@ mod tests {
     #[tokio::test]
     async fn foreground_preempts_background_to_fit() {
         // 8 GB GPU. Background image 6 GB resident; foreground LLM 6 GB needs room → preempt image.
-        let mgr = mgr_with_models(8192, &[("llm", ConsumerId::Llm), ("img", ConsumerId::Image)]).await;
+        let mgr = mgr_with_models(
+            8192,
+            &[("llm", ConsumerId::Llm), ("img", ConsumerId::Image)],
+        )
+        .await;
         let img = mgr
-            .acquire(&req(ConsumerId::Image, PriorityClass::Batch, 6000, "img"), ResidencyTarget::Hot)
+            .acquire(
+                &req(ConsumerId::Image, PriorityClass::Batch, 6000, "img"),
+                ResidencyTarget::Hot,
+            )
             .await
             .unwrap();
         assert!(img.is_valid());
         // FG LLM must preempt the background image. NOTE: image is pinned for the dwell window, but
         // emergency (InteractiveFg) admission overrides the pin.
         let llm = mgr
-            .acquire(&req(ConsumerId::Llm, PriorityClass::InteractiveFg, 6000, "llm"), ResidencyTarget::Hot)
+            .acquire(
+                &req(ConsumerId::Llm, PriorityClass::InteractiveFg, 6000, "llm"),
+                ResidencyTarget::Hot,
+            )
             .await
             .expect("fg should preempt bg and grant");
         assert!(llm.is_valid());
-        assert!(!img.is_valid(), "preempted background lease must be revoked (cooperative)");
+        assert!(
+            !img.is_valid(),
+            "preempted background lease must be revoked (cooperative)"
+        );
         assert!(mgr.metrics().preemptions >= 1);
     }
 
     #[tokio::test]
     async fn background_never_preempts_foreground() {
         // 8 GB GPU. Foreground LLM 6 GB resident; background image 6 GB cannot preempt it → Busy.
-        let mgr = mgr_with_models(8192, &[("llm", ConsumerId::Llm), ("img", ConsumerId::Image)]).await;
+        let mgr = mgr_with_models(
+            8192,
+            &[("llm", ConsumerId::Llm), ("img", ConsumerId::Image)],
+        )
+        .await;
         let llm = mgr
-            .acquire(&req(ConsumerId::Llm, PriorityClass::InteractiveFg, 6000, "llm"), ResidencyTarget::Hot)
+            .acquire(
+                &req(ConsumerId::Llm, PriorityClass::InteractiveFg, 6000, "llm"),
+                ResidencyTarget::Hot,
+            )
             .await
             .unwrap();
         let outcome = mgr
-            .acquire(&req(ConsumerId::Image, PriorityClass::Batch, 6000, "img"), ResidencyTarget::Hot)
+            .acquire(
+                &req(ConsumerId::Image, PriorityClass::Batch, 6000, "img"),
+                ResidencyTarget::Hot,
+            )
             .await;
-        assert_eq!(outcome.err(), Some(CoResidencyError::Busy), "bg must not preempt fg");
+        assert_eq!(
+            outcome.err(),
+            Some(CoResidencyError::Busy),
+            "bg must not preempt fg"
+        );
         assert!(llm.is_valid(), "foreground residency untouched");
     }
 
@@ -760,13 +821,23 @@ mod tests {
     async fn equal_class_does_not_preempt() {
         let mgr = mgr_with_models(8192, &[("a", ConsumerId::Llm), ("b", ConsumerId::Image)]).await;
         let _a = mgr
-            .acquire(&req(ConsumerId::Llm, PriorityClass::Batch, 6000, "a"), ResidencyTarget::Hot)
+            .acquire(
+                &req(ConsumerId::Llm, PriorityClass::Batch, 6000, "a"),
+                ResidencyTarget::Hot,
+            )
             .await
             .unwrap();
         let b = mgr
-            .acquire(&req(ConsumerId::Image, PriorityClass::Batch, 6000, "b"), ResidencyTarget::Hot)
+            .acquire(
+                &req(ConsumerId::Image, PriorityClass::Batch, 6000, "b"),
+                ResidencyTarget::Hot,
+            )
             .await;
-        assert_eq!(b.err(), Some(CoResidencyError::Busy), "equal class cannot preempt");
+        assert_eq!(
+            b.err(),
+            Some(CoResidencyError::Busy),
+            "equal class cannot preempt"
+        );
     }
 
     // ── Anti-thrash pinning ─────────────────────────────────────────────────
@@ -774,15 +845,22 @@ mod tests {
     #[tokio::test]
     async fn pinned_background_not_evicted_by_non_emergency() {
         // Interactive-bg (not emergency) request must not evict a freshly pinned background resident.
-        let mgr = mgr_with_models(8192, &[("a", ConsumerId::Image), ("b", ConsumerId::Vision)]).await;
+        let mgr =
+            mgr_with_models(8192, &[("a", ConsumerId::Image), ("b", ConsumerId::Vision)]).await;
         let _a = mgr
-            .acquire(&req(ConsumerId::Image, PriorityClass::Batch, 6000, "a"), ResidencyTarget::Hot)
+            .acquire(
+                &req(ConsumerId::Image, PriorityClass::Batch, 6000, "a"),
+                ResidencyTarget::Hot,
+            )
             .await
             .unwrap();
         // InteractiveBg outranks Batch so the scheduler would preempt, but the victim is pinned and
         // the requester is not foreground-emergency → Pinned (caller falls back).
         let b = mgr
-            .acquire(&req(ConsumerId::Vision, PriorityClass::InteractiveBg, 6000, "b"), ResidencyTarget::Hot)
+            .acquire(
+                &req(ConsumerId::Vision, PriorityClass::InteractiveBg, 6000, "b"),
+                ResidencyTarget::Hot,
+            )
             .await;
         assert_eq!(b.err(), Some(CoResidencyError::Pinned));
     }
@@ -799,17 +877,26 @@ mod tests {
         let mgr = CoResidencyManager::new(auth.clone(), res);
 
         let outcome = mgr
-            .acquire(&req(ConsumerId::Llm, PriorityClass::InteractiveFg, 6000, "llm"), ResidencyTarget::Hot)
+            .acquire(
+                &req(ConsumerId::Llm, PriorityClass::InteractiveFg, 6000, "llm"),
+                ResidencyTarget::Hot,
+            )
             .await;
         assert_eq!(outcome.err(), Some(CoResidencyError::ResidencyFailed));
         assert_eq!(mgr.metrics().rollbacks, 1);
-        assert_eq!(mgr.resident_count().await, 0, "no holder recorded on failure");
+        assert_eq!(
+            mgr.resident_count().await,
+            0,
+            "no holder recorded on failure"
+        );
         // Reservation released → a fresh request can now fit the full GPU.
-        assert!(auth.with_table_for_compare(|t| t
-            .get(&crate::resource::authority::types::DeviceId::Gpu(0))
-            .unwrap()
-            .reserved_vram_mb)
-            == 0);
+        assert!(
+            auth.with_table_for_compare(|t| t
+                .get(&crate::resource::authority::types::DeviceId::Gpu(0))
+                .unwrap()
+                .reserved_vram_mb)
+                == 0
+        );
     }
 
     // ── Recovery sweep ──────────────────────────────────────────────────────
@@ -823,10 +910,16 @@ mod tests {
         let mgr = CoResidencyManager::with_policy(
             auth,
             res,
-            CoResidencyPolicy { lease_ttl: Duration::from_millis(1), ..Default::default() },
+            CoResidencyPolicy {
+                lease_ttl: Duration::from_millis(1),
+                ..Default::default()
+            },
         );
         let lease = mgr
-            .acquire(&req(ConsumerId::Llm, PriorityClass::InteractiveFg, 4000, "llm"), ResidencyTarget::Hot)
+            .acquire(
+                &req(ConsumerId::Llm, PriorityClass::InteractiveFg, 4000, "llm"),
+                ResidencyTarget::Hot,
+            )
             .await
             .unwrap();
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -862,7 +955,10 @@ mod tests {
                         PriorityClass::Batch
                     };
                     if let Ok(l) = mgr
-                        .acquire(&req(ConsumerId::Image, class, 3000, &model), ResidencyTarget::Hot)
+                        .acquire(
+                            &req(ConsumerId::Image, class, 3000, &model),
+                            ResidencyTarget::Hot,
+                        )
                         .await
                     {
                         tokio::task::yield_now().await;
@@ -897,7 +993,10 @@ mod tests {
         let mgr = CoResidencyManager::with_policy(
             auth.clone(),
             res,
-            CoResidencyPolicy { pin_dwell: Duration::from_millis(2), ..Default::default() },
+            CoResidencyPolicy {
+                pin_dwell: Duration::from_millis(2),
+                ..Default::default()
+            },
         );
 
         let device = crate::resource::authority::types::DeviceId::Gpu(0);
@@ -912,7 +1011,9 @@ mod tests {
                 let mut rng = t.wrapping_mul(2654435761) ^ 0x9E37;
                 let mut held: Vec<CoResidencyLease> = Vec::new();
                 for _ in 0..120 {
-                    rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                    rng = rng
+                        .wrapping_mul(6364136223846793005)
+                        .wrapping_add(1442695040888963407);
                     let r = (rng >> 33) as u32;
                     let vram = 1000 + (r % 5) as u64 * 1000;
                     let class = match r % 4 {
@@ -925,7 +1026,10 @@ mod tests {
                     if r % 3 == 0 && !held.is_empty() {
                         held.pop(); // drop a lease (Drop releases)
                     } else if let Ok(l) = mgr
-                        .acquire(&req(ConsumerId::Image, class, vram, &model), ResidencyTarget::Hot)
+                        .acquire(
+                            &req(ConsumerId::Image, class, vram, &model),
+                            ResidencyTarget::Hot,
+                        )
                         .await
                     {
                         held.push(l);
@@ -958,7 +1062,10 @@ mod tests {
         let res = Arc::new(ResidencyManager::new());
         let mgr = CoResidencyManager::new(auth, res);
         let l = mgr
-            .acquire(&req(ConsumerId::Ext, PriorityClass::Batch, 2000, "ext-thing"), ResidencyTarget::Hot)
+            .acquire(
+                &req(ConsumerId::Ext, PriorityClass::Batch, 2000, "ext-thing"),
+                ResidencyTarget::Hot,
+            )
             .await
             .expect("admission-only grant");
         assert!(l.is_valid());

@@ -235,7 +235,10 @@ impl TextToSpeech {
         anyhow::anyhow!("speech GPU lease unavailable: {error}. {hint}")
     }
 
-    async fn acquire_speech_lease(&self, turn_label: &str) -> anyhow::Result<Option<GpuLeaseGuard>> {
+    async fn acquire_speech_lease(
+        &self,
+        turn_label: &str,
+    ) -> anyhow::Result<Option<GpuLeaseGuard>> {
         let Some(gpu_lease) = &self.gpu_lease else {
             return Ok(None);
         };
@@ -254,7 +257,10 @@ impl TextToSpeech {
         {
             Ok(guard) => Ok(Some(guard)),
             Err(GpuLeaseError::Busy { owner }) => {
-                tracing::info!(?owner, "speech TTS: GPU admission denied by HRA; synthesizing without lease");
+                tracing::info!(
+                    ?owner,
+                    "speech TTS: GPU admission denied by HRA; synthesizing without lease"
+                );
                 Ok(None)
             }
             Err(other) => Err(Self::map_gpu_lease_error(other)),

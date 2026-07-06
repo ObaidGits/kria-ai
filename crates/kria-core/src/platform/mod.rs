@@ -14,6 +14,5 @@ pub use paths::*;
 pub use sandbox::install_seccomp_filter;
 pub use vram::{
     build_profiler, CliVramProfiler, GpuVendor, ImageTier, NullProfiler, RocmProfiler, VramBarrier,
-    VramProfiler,
-    VramSnapshot,
+    VramProfiler, VramSnapshot,
 };

@@ -50,8 +50,13 @@ impl TelemetryHub {
         let initial = HostSnapshot {
             seq: 0,
             gpus: Vec::new(),
-            cpu: CpuLive { per_core_pct: Vec::new() },
-            ram: RamLive { total_mb: ram_total_mb, free_mb: ram_total_mb },
+            cpu: CpuLive {
+                per_core_pct: Vec::new(),
+            },
+            ram: RamLive {
+                total_mb: ram_total_mb,
+                free_mb: ram_total_mb,
+            },
             sampled_at_ms: 0,
         };
         let (tx, rx) = watch::channel(initial);
@@ -90,30 +95,29 @@ impl TelemetryHub {
     pub async fn sample_now(&self) -> HostSnapshot {
         let v = self.profiler.snapshot().await;
         let ram_total_fallback = self.ram_total_mb;
-        let (ram_total_mb, ram_free_mb, per_core_pct) =
-            tokio::task::spawn_blocking(move || {
-                let mut sys = sysinfo::System::new();
-                sys.refresh_memory();
-                let total = sys.total_memory() / (1024 * 1024);
-                let free = sys.available_memory() / (1024 * 1024);
-                // CPU usage needs two samples separated by a short interval.
-                sys.refresh_cpu_usage();
-                std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL);
-                sys.refresh_cpu_usage();
-                let cores: Vec<u8> = sys
-                    .cpus()
-                    .iter()
-                    .map(|c| c.cpu_usage().round().clamp(0.0, 100.0) as u8)
-                    .collect();
-                let (total, free) = if total == 0 {
-                    (ram_total_fallback, ram_total_fallback)
-                } else {
-                    (total, free)
-                };
-                (total, free, cores)
-            })
-            .await
-            .unwrap_or((ram_total_fallback, ram_total_fallback, Vec::new()));
+        let (ram_total_mb, ram_free_mb, per_core_pct) = tokio::task::spawn_blocking(move || {
+            let mut sys = sysinfo::System::new();
+            sys.refresh_memory();
+            let total = sys.total_memory() / (1024 * 1024);
+            let free = sys.available_memory() / (1024 * 1024);
+            // CPU usage needs two samples separated by a short interval.
+            sys.refresh_cpu_usage();
+            std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL);
+            sys.refresh_cpu_usage();
+            let cores: Vec<u8> = sys
+                .cpus()
+                .iter()
+                .map(|c| c.cpu_usage().round().clamp(0.0, 100.0) as u8)
+                .collect();
+            let (total, free) = if total == 0 {
+                (ram_total_fallback, ram_total_fallback)
+            } else {
+                (total, free)
+            };
+            (total, free, cores)
+        })
+        .await
+        .unwrap_or((ram_total_fallback, ram_total_fallback, Vec::new()));
 
         let seq = self.seq.fetch_add(1, Ordering::Relaxed) + 1;
         let gpus = if v.total_mb > 0 {
@@ -132,7 +136,10 @@ impl TelemetryHub {
             seq,
             gpus,
             cpu: CpuLive { per_core_pct },
-            ram: RamLive { total_mb: ram_total_mb, free_mb: ram_free_mb },
+            ram: RamLive {
+                total_mb: ram_total_mb,
+                free_mb: ram_free_mb,
+            },
             sampled_at_ms: self.now_ms(),
         };
         // Publish (ignore error: only fails if all receivers dropped, which cannot happen — the hub

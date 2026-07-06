@@ -30,8 +30,39 @@ static RAW_JSON_TOOL_RE: Lazy<Regex> = Lazy::new(|| {
 static PYTHON_CALL_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r#"(?m)^[ \t]*([A-Za-z0-9_-]+)\(([^)]*)\)[ \t]*$"#).unwrap());
 
+/// BUG #4 FIX (category K: Prompt Engineering issue, surfaced through a
+/// category D: Dispatcher parsing gap). Root cause: the system prompt's tool-
+/// call format instruction shows a literal SCHEMA EXAMPLE —
+/// `{"name": "tool_name", "arguments": {"param": "value"}}` — as the format
+/// to fill in. When the model has no good real tool for a request (e.g. "CSV
+/// to HTML conversion", for which no tool exists), it can echo that template
+/// verbatim instead of either declining or naming a real tool. The parser
+/// previously accepted ANY string in the `"name"` field with zero validation,
+/// so the literal placeholder string reached the dispatcher and produced the
+/// confusing "tool 'tool_name' is not available..." error instead of a clear
+/// "no matching tool" message. This constant is the literal placeholder from
+/// the schema example in `agent/prompts.rs` — never a real, dispatchable tool.
+pub const TOOL_CALL_PLACEHOLDER_NAME: &str = "tool_name";
+
+/// True if `name` is the literal schema-template placeholder rather than a
+/// real tool name the model intended to call.
+fn is_placeholder_tool_name(name: &str) -> bool {
+    name.trim().eq_ignore_ascii_case(TOOL_CALL_PLACEHOLDER_NAME)
+}
+
 /// Parse all tool calls from LLM output text.
 pub fn parse_tool_calls(text: &str) -> Vec<ParsedToolCall> {
+    let calls = parse_tool_calls_inner(text);
+    // BUG #4 FIX: drop any call whose name is the literal schema placeholder —
+    // it is never a real, dispatchable tool and its presence means the model
+    // echoed the format example rather than making an intentional tool call.
+    calls
+        .into_iter()
+        .filter(|c| !is_placeholder_tool_name(&c.name))
+        .collect()
+}
+
+fn parse_tool_calls_inner(text: &str) -> Vec<ParsedToolCall> {
     let mut calls = Vec::new();
 
     // Try Pattern 1: <tool_call>JSON</tool_call>
@@ -106,6 +137,14 @@ pub fn parse_tool_calls_with_known(
     for cap in PYTHON_CALL_RE.captures_iter(text) {
         let name = cap.get(1).map(|m| m.as_str()).unwrap_or("");
         let args_raw = cap.get(2).map(|m| m.as_str().trim()).unwrap_or("");
+
+        // BUG #4 FIX: the Python-style fallback pattern is a last resort and
+        // is gated by `known_tools` already, but guard explicitly here too so
+        // the placeholder can never slip through even if a caller mistakenly
+        // includes it in `known_tools`.
+        if is_placeholder_tool_name(name) {
+            continue;
+        }
 
         // Only fire if name is a registered single-required-param tool
         let Some((_tool_name, param_name)) = known_tools.iter().find(|(n, _)| *n == name) else {
@@ -203,5 +242,60 @@ mod tests {
         let calls = parse_tool_calls(text);
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].name, "mcp_colab-mcp_execute_cell");
+    }
+
+    /// BUG #4 regression (category K: Prompt Engineering issue). Reproduces
+    /// the exact real production failure: the LLM echoed the system prompt's
+    /// literal schema example verbatim (`"name": "tool_name"`) instead of
+    /// naming a real tool, e.g. for "Convert this JSON array to CSV" (no
+    /// CSV-conversion tool exists). The parser must drop this call entirely
+    /// rather than surfacing it to the dispatcher, where it previously
+    /// produced the confusing "tool 'tool_name' is not available..." error.
+    #[test]
+    fn regr_bug4_placeholder_tool_name_is_never_returned_xml_style() {
+        let text = r#"<tool_call>
+{"name": "tool_name", "arguments": {"param": "value"}}
+</tool_call>"#;
+        let calls = parse_tool_calls(text);
+        assert!(
+            calls.is_empty(),
+            "literal schema placeholder must be filtered out, got: {calls:?}"
+        );
+    }
+
+    #[test]
+    fn regr_bug4_placeholder_tool_name_is_never_returned_raw_json_style() {
+        let text = r#"{"name": "tool_name", "arguments": {"param": "value"}}"#;
+        let calls = parse_tool_calls(text);
+        assert!(calls.is_empty());
+    }
+
+    #[test]
+    fn regr_bug4_placeholder_tool_name_is_never_returned_python_style_fallback() {
+        let text = "tool_name(\"value\")";
+        let known = [("tool_name", "value"), ("real_tool", "value")];
+        let calls = parse_tool_calls_with_known(text, &known);
+        assert!(
+            calls.is_empty(),
+            "placeholder must be rejected even if present in known_tools, got: {calls:?}"
+        );
+    }
+
+    #[test]
+    fn regr_bug4_placeholder_check_is_case_insensitive() {
+        assert!(is_placeholder_tool_name("Tool_Name"));
+        assert!(is_placeholder_tool_name("TOOL_NAME"));
+        assert!(is_placeholder_tool_name("  tool_name  "));
+        assert!(!is_placeholder_tool_name("real_tool_name"));
+        assert!(!is_placeholder_tool_name("hash_text"));
+    }
+
+    #[test]
+    fn regr_bug4_real_tool_calls_still_parse_normally_alongside_fix() {
+        // Non-regression: a genuine call to a real tool must still work.
+        let text = r#"{"name": "hash_text", "arguments": {"text": "hi"}}"#;
+        let calls = parse_tool_calls(text);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "hash_text");
     }
 }

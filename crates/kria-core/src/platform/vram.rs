@@ -346,7 +346,9 @@ impl CliVramProfiler {
             .map(|o| o.status.success())
             .unwrap_or(false);
         if ok {
-            tracing::info!("nvidia-smi found — using CliVramProfiler (CLI VRAM telemetry, no NVML feature)");
+            tracing::info!(
+                "nvidia-smi found — using CliVramProfiler (CLI VRAM telemetry, no NVML feature)"
+            );
             Some(Arc::new(Self))
         } else {
             None
@@ -400,8 +402,14 @@ fn parse_nvidia_smi_mem(bytes: &[u8]) -> (u64, u64) {
     let text = std::str::from_utf8(bytes).unwrap_or("");
     let line = text.lines().next().unwrap_or("");
     let mut parts = line.split(',').map(|s| s.trim());
-    let free = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
-    let total = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+    let free = parts
+        .next()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
+    let total = parts
+        .next()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
     (free, total)
 }
 

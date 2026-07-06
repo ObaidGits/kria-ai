@@ -183,14 +183,20 @@ impl RationaleCode {
     pub fn human(&self) -> &'static str {
         match self {
             Self::FitsLocal => "Ran locally — the model fit in available GPU memory.",
-            Self::CoResident => "Ran locally alongside other models — capacity allowed co-residency.",
+            Self::CoResident => {
+                "Ran locally alongside other models — capacity allowed co-residency."
+            }
             Self::EvictedBackground => "Freed a background model to make room.",
             Self::ShrunkContext => "Reduced context size to fit available memory.",
             Self::Downshifted => "Moved some layers to CPU to fit available memory.",
             Self::FailoverCloud => "Used cloud — local capacity was insufficient.",
             Self::FailOpenCpu => "Used CPU — no safe GPU plan was available in time.",
-            Self::HardLimitBreach => "Avoided an action that would have exceeded the safe memory limit.",
-            Self::PrivacyLocalOnly => "Kept local — data is marked privacy-strict and must not leave the device.",
+            Self::HardLimitBreach => {
+                "Avoided an action that would have exceeded the safe memory limit."
+            }
+            Self::PrivacyLocalOnly => {
+                "Kept local — data is marked privacy-strict and must not leave the device."
+            }
         }
     }
 }

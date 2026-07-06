@@ -94,6 +94,46 @@ fn write_cached_safe_ngl(model_path: &str, ngl: u32) {
     }
 }
 
+/// Build the descending `n-gpu-layers` backoff ladder used for the startup spawn probe.
+///
+/// `full` is the freshly VRAM-computed target ngl; `cached` is the last known-good ngl persisted
+/// from a previous successful boot (if any).
+///
+/// Root-cause fix: a previous version seeded the ladder with `cached` FIRST and then only
+/// generated the `full`+fraction rungs inside an `if !ladder.contains(&full)` guard. Whenever the
+/// cache held a value equal to `full` (the common case right after a successful boot at full
+/// offload), that guard was already false, so the fraction rungs (3/4, 1/2, 1/4 of `full`) were
+/// never generated — the ladder silently collapsed to `[full, 0]`. If `full` then failed to load
+/// on a later boot (e.g. the RTX 4050 quirk where ngl≥30 can hang even though ngl≤28 loads,
+/// or transient VRAM contention from another process), the orchestrator had no mid-range rung
+/// to fall back to and jumped straight to CPU-only — the exact 15+ minute stuck-on-CPU symptom
+/// observed in GUI validation.
+///
+/// This version always builds the complete `full → 3/4 → 1/2 → 1/4 → 0` ladder first, then moves
+/// the cached value to the front (as a fast-path hint) without removing any rung. A stale or
+/// optimistic cache entry can no longer shrink the fallback ladder.
+fn build_ngl_backoff_ladder(full: u32, cached: Option<u32>) -> Vec<u32> {
+    let mut ladder: Vec<u32> = Vec::new();
+    if full > 0 {
+        ladder.push(full);
+        for frac in [3u32, 2, 1] {
+            let n = full * frac / 4;
+            if n > 0 && !ladder.contains(&n) {
+                ladder.push(n);
+            }
+        }
+    }
+    ladder.push(0); // CPU fallback — always fits.
+
+    // Move the cached known-good value to the front as a fast-path hint, without dropping any
+    // rung already in the ladder.
+    if let Some(c) = cached.filter(|&n| n > 0 && (full == 0 || n <= full)) {
+        ladder.retain(|&n| n != c);
+        ladder.insert(0, c);
+    }
+    ladder
+}
+
 /// Which GPU backend is available on this platform.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GpuBackend {
@@ -751,25 +791,9 @@ impl Orchestrator {
         // SHORT per-attempt timeout (a healthy load is ~2 s, a hang is forever, so a short probe is
         // safe), backing off until the server reports a listening port. The final rung is CPU
         // (ngl=0) which always loads — so the LLM is ALWAYS available, just slower in the worst case.
-        let mut ladder: Vec<u32> = Vec::new();
         let full = initial_params.ngl;
-        // Seed from the persisted known-good ngl so we start fast at a value that loaded before,
-        // instead of re-probing a too-high ngl that hangs.
-        let cached = read_cached_safe_ngl(&model_path_for_cache)
-            .filter(|&n| n > 0 && (full == 0 || n <= full));
-        if let Some(c) = cached {
-            ladder.push(c);
-        }
-        if full > 0 && !ladder.contains(&full) {
-            ladder.push(full);
-            for frac in [3u32, 2, 1] {
-                let n = full * frac / 4;
-                if n > 0 && !ladder.contains(&n) {
-                    ladder.push(n);
-                }
-            }
-        }
-        ladder.push(0); // CPU fallback — always fits.
+        let cached = read_cached_safe_ngl(&model_path_for_cache);
+        let ladder = build_ngl_backoff_ladder(full, cached);
 
         // Short probe for GPU attempts so a hang costs ~20 s, not the full discovery timeout.
         const GPU_PROBE_SECS: u64 = 20;
@@ -778,7 +802,11 @@ impl Orchestrator {
         for (idx, &cand_ngl) in ladder.iter().enumerate() {
             // GPU attempts get the short probe; the CPU fallback gets the full configured timeout
             // (clear override) because a cold CPU load can legitimately take longer.
-            server_manager.set_spawn_timeout_override(if cand_ngl == 0 { 0 } else { GPU_PROBE_SECS });
+            server_manager.set_spawn_timeout_override(if cand_ngl == 0 {
+                0
+            } else {
+                GPU_PROBE_SECS
+            });
             // On retries, cap context to a conservative 4096 to reduce load time/footprint.
             let cand_ctx = if idx == 0 {
                 initial_params.context
@@ -2179,6 +2207,64 @@ mod tests {
         fn source_name(&self) -> &'static str {
             "test"
         }
+    }
+
+    // ── Regression: startup ngl backoff ladder must never collapse ─────────────
+    // (root-cause: cached==full previously skipped generating the fraction rungs)
+
+    #[test]
+    fn ladder_includes_fraction_rungs_when_cached_equals_full() {
+        // This is the exact scenario that caused the bug: a prior successful boot
+        // persisted the full ngl (36) as the "safe" cached value. A naive
+        // implementation that seeds `cached` first and only builds `full`'s
+        // fraction rungs when `!ladder.contains(&full)` would collapse to [36, 0].
+        let ladder = build_ngl_backoff_ladder(36, Some(36));
+        assert!(
+            ladder.contains(&27) && ladder.contains(&18) && ladder.contains(&9),
+            "ladder must retain all fraction rungs even when cached == full, got {:?}",
+            ladder
+        );
+        assert_eq!(ladder.last(), Some(&0), "CPU fallback must always be last");
+        assert_eq!(ladder[0], 36, "cached value should be tried first");
+    }
+
+    #[test]
+    fn ladder_without_cache_has_full_backoff_sequence() {
+        let ladder = build_ngl_backoff_ladder(36, None);
+        assert_eq!(ladder, vec![36, 27, 18, 9, 0]);
+    }
+
+    #[test]
+    fn ladder_with_lower_cache_puts_cache_first_but_keeps_full() {
+        let ladder = build_ngl_backoff_ladder(36, Some(18));
+        assert_eq!(ladder[0], 18);
+        assert!(ladder.contains(&36));
+        assert_eq!(ladder.last(), Some(&0));
+    }
+
+    #[test]
+    fn ladder_ignores_cache_higher_than_full() {
+        // A stale cache above the freshly computed full target must not be trusted.
+        let ladder = build_ngl_backoff_ladder(18, Some(36));
+        assert_eq!(ladder, vec![18, 13, 9, 4, 0]);
+    }
+
+    #[test]
+    fn ladder_with_full_zero_is_just_cpu() {
+        let ladder = build_ngl_backoff_ladder(0, None);
+        assert_eq!(ladder, vec![0]);
+    }
+
+    #[test]
+    fn ladder_has_no_duplicate_rungs() {
+        let ladder = build_ngl_backoff_ladder(36, Some(36));
+        let unique: std::collections::HashSet<u32> = ladder.iter().copied().collect();
+        assert_eq!(
+            unique.len(),
+            ladder.len(),
+            "ladder must not contain duplicates: {:?}",
+            ladder
+        );
     }
 
     fn build_test_orchestrator(config: OrchestratorConfig) -> Orchestrator {

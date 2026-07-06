@@ -169,7 +169,10 @@ impl SpeechToText {
         anyhow::anyhow!("speech GPU lease unavailable: {error}. {hint}")
     }
 
-    async fn acquire_speech_lease(&self, turn_label: &str) -> anyhow::Result<Option<GpuLeaseGuard>> {
+    async fn acquire_speech_lease(
+        &self,
+        turn_label: &str,
+    ) -> anyhow::Result<Option<GpuLeaseGuard>> {
         let Some(gpu_lease) = &self.gpu_lease else {
             return Ok(None);
         };
@@ -177,7 +180,12 @@ impl SpeechToText {
         // HRA cutover: route through the authority when enforcing (shadow = legacy, unchanged).
         // STT is realtime-voice class. ~900 MB hint for a whisper GPU footprint.
         match gpu_lease
-            .acquire_guard_gated(GpuOwner::Speech, turn_label, Some(Duration::from_secs(120)), 900)
+            .acquire_guard_gated(
+                GpuOwner::Speech,
+                turn_label,
+                Some(Duration::from_secs(120)),
+                900,
+            )
             .await
         {
             Ok(guard) => Ok(Some(guard)),

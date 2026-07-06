@@ -22,11 +22,17 @@ fn home() -> String {
 }
 
 fn model_path() -> String {
-    format!("{}/.kria/models/llm/Qwen3VL-4B-Instruct-Q4_K_M.gguf", home())
+    format!(
+        "{}/.kria/models/llm/Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+        home()
+    )
 }
 
 fn mmproj_path() -> Option<String> {
-    let p = format!("{}/.kria/models/llm/mmproj-Qwen3VL-4B-Instruct-F16.gguf", home());
+    let p = format!(
+        "{}/.kria/models/llm/mmproj-Qwen3VL-4B-Instruct-F16.gguf",
+        home()
+    );
     Path::new(&p).exists().then_some(p)
 }
 
@@ -58,14 +64,7 @@ async fn orchestrator_start_backs_off_and_serves() {
     let health = Arc::new(HealthRegistry::new());
 
     let t0 = std::time::Instant::now();
-    let result = Orchestrator::start(
-        config,
-        model_path(),
-        mmproj_path(),
-        event_bus,
-        health,
-    )
-    .await;
+    let result = Orchestrator::start(config, model_path(), mmproj_path(), event_bus, health).await;
     let elapsed = t0.elapsed();
 
     match result {
@@ -75,7 +74,10 @@ async fn orchestrator_start_backs_off_and_serves() {
                 "orchestrator started in {:?}: backend={:?} ngl={} ctx={} healthy={}",
                 elapsed, snap.backend, snap.current_ngl, snap.current_context, snap.server_healthy
             );
-            assert!(snap.server_healthy, "server must report healthy after start");
+            assert!(
+                snap.server_healthy,
+                "server must report healthy after start"
+            );
             // The backoff must have landed on a loadable config. On the RTX 4050 Vulkan build that
             // is a GPU ngl in the safe zone (≤ ~28) OR, worst case, CPU (ngl=0) — both are "served".
             println!(

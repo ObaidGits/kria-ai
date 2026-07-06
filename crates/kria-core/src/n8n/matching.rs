@@ -244,6 +244,28 @@ struct CandidateScore {
     reason: String,
 }
 
+/// Whole-word containment check: true if `needle` appears in `haystack` as a
+/// complete word (or word sequence) at a word boundary, not as an arbitrary
+/// substring inside a longer unrelated word. Both inputs are expected to
+/// already be normalized (lowercase, single-spaced) via `normalize_reference`.
+///
+/// This is the root-cause fix for BUG #1 (n8n misrouting): plain `str::contains`
+/// let a short tag like "test" match inside "...hash of 'test'" purely because
+/// the substring existed, regardless of word boundaries.
+fn contains_whole_word(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return false;
+    }
+    let hay_words: Vec<&str> = haystack.split_whitespace().collect();
+    let needle_words: Vec<&str> = needle.split_whitespace().collect();
+    if needle_words.is_empty() || needle_words.len() > hay_words.len() {
+        return false;
+    }
+    hay_words
+        .windows(needle_words.len())
+        .any(|window| window == needle_words.as_slice())
+}
+
 fn normalize_reference(value: &str) -> String {
     value
         .trim()
@@ -421,13 +443,25 @@ pub fn is_n8n_workflow_inventory_query(user_text: &str) -> bool {
 
 pub fn prompt_has_explicit_n8n_intent(user_text: &str) -> bool {
     let lower = user_text.to_ascii_lowercase();
+    // BUG #1 FIX (root cause #3, category D: Dispatcher issue): a bare
+    // "run "/"retry "/"rerun " prefix was treated as EXPLICIT n8n intent
+    // unconditionally, which short-circuited `prompt_looks_like_non_n8n_tool_intent`
+    // to `false` before its exclusion list (hash/skill vocabulary) ever ran.
+    // "Run the skill oc_fake_skill_that_does_not_exist" starts with "run " but
+    // is clearly an OpenClaw skill invocation, not an n8n workflow reference.
+    // Keep the prefix heuristic (needed for legitimate "run <workflow_id>"
+    // prompts) but do not let it override an explicit skill/OpenClaw mention.
+    let mentions_skill_or_openclaw =
+        lower.contains("skill") || lower.contains("openclaw") || lower.contains("oc_");
+    let starts_with_run_prefix = !mentions_skill_or_openclaw
+        && (lower.starts_with("run ")
+            || lower.starts_with("retry ")
+            || lower.starts_with("rerun ")
+            || lower.starts_with("re-run "));
     lower.contains("n8n")
         || lower.contains("workflow")
         || lower.contains("workflows")
-        || lower.starts_with("run ")
-        || lower.starts_with("retry ")
-        || lower.starts_with("rerun ")
-        || lower.starts_with("re-run ")
+        || starts_with_run_prefix
         || WorkflowConfirmationFlow::parse_confirmation_reference(user_text).is_some()
 }
 
@@ -441,6 +475,7 @@ pub fn prompt_looks_like_non_n8n_tool_intent(user_text: &str) -> bool {
         "search the web",
         "search web",
         "web search",
+        "search wen", // common typo for "web" observed in production usage
         "browser",
         "google",
         "youtube",
@@ -450,6 +485,7 @@ pub fn prompt_looks_like_non_n8n_tool_intent(user_text: &str) -> bool {
         "open http",
         "fetch article",
         "latest news",
+        "breaking news",
         "weather",
     ]
     .iter()
@@ -481,8 +517,21 @@ pub fn prompt_looks_like_non_n8n_tool_intent(user_text: &str) -> bool {
     ]
     .iter()
     .any(|phrase| lower.contains(phrase));
+    // BUG #1 FIX (n8n misrouting root cause, category D: Dispatcher issue):
+    // prompts about hashing/cryptography or invoking a named skill were never
+    // excluded here, so they fell through to WorkflowRankingEngine::suggest_for_reference
+    // where a single generic word (e.g. "test") could token-match an approved
+    // workflow's tag list and get incorrectly routed/blocked as an n8n workflow.
+    let hash_or_crypto = [
+        "hash", "sha1", "sha256", "sha512", "md5", "blake3", "checksum", "digest",
+    ]
+    .iter()
+    .any(|phrase| lower.contains(phrase));
+    let skill_invocation = ["skill", "openclaw", "oc_"]
+        .iter()
+        .any(|phrase| lower.contains(phrase));
 
-    search_or_browser || file_or_code || mcp_or_external_tool
+    search_or_browser || file_or_code || mcp_or_external_tool || hash_or_crypto || skill_invocation
 }
 
 pub fn extract_n8n_authoring_workflow_name(prompt: &str) -> Option<N8nAuthoringWorkflowName> {
@@ -1913,9 +1962,18 @@ impl WorkflowRankingEngine {
                     continue;
                 }
 
+                // BUG #1 FIX (n8n misrouting, category A: Semantic Router issue):
+                // raw substring containment let a short, generic single-word tag
+                // (e.g. "test") match ANY prompt that happened to contain that
+                // sequence of characters, including inside unrelated words/phrases
+                // (e.g. "sha512 hash of 'test'" contains the substring "test").
+                // Require the shorter side to appear as a whole word (word-boundary
+                // match) rather than an arbitrary substring, so single common words
+                // can no longer masquerade as a strong metadata match.
                 if key.len() >= 4
                     && normalized_reference.len() >= 4
-                    && (key.contains(&normalized_reference) || normalized_reference.contains(&key))
+                    && (contains_whole_word(&key, &normalized_reference)
+                        || contains_whole_word(&normalized_reference, &key))
                 {
                     let score = field.contains_score();
                     if score > best_score {
@@ -2213,6 +2271,113 @@ mod tests {
         search.lifecycle_status = "current".into();
 
         vec![fetch, slack, inbox, search]
+    }
+
+    /// BUG #1 regression fixture: a "Mail Schedule Test" workflow tagged with
+    /// the generic word "test" among its tags — reproduces the exact real
+    /// production workflow (`workflow_id: mail_schedule_test`) that caused the
+    /// misrouting. `monitor_only` mirrors the real config: it cannot be
+    /// auto-run from chat even if matched.
+    fn mail_schedule_test_fixture() -> N8nWorkflowConfig {
+        let mut wf = workflow("mail_schedule_test", "Mail Schedule Test");
+        wf.category = "email".into();
+        wf.description = "Runs the Mail Schedule Test n8n workflow.".into();
+        wf.tags = vec![
+            "email".into(),
+            "mail_schedule_test".into(),
+            "scheduledmonitor".into(),
+            "monitoronly".into(),
+            "mail".into(),
+            "schedule".into(),
+            "test".into(),
+        ];
+        wf.aliases = vec!["mail_schedule_test".into(), "mail schedule test".into()];
+        wf.trigger_strategy = "scheduled_monitor".into();
+        wf.result_mode = "monitor_only".into();
+        wf.risk_tier = RiskLevel::Yellow;
+        wf
+    }
+
+    /// BUG #1 regression (category A: Semantic Router + category D: Dispatcher).
+    /// Root cause: (1) `prompt_looks_like_non_n8n_tool_intent` had no exclusion
+    /// for hashing/crypto or skill-invocation vocabulary, and (2) the fuzzy
+    /// tag-overlap scorer used plain substring containment, so the word "test"
+    /// inside "sha512 hash of 'test'" matched the workflow's "test" tag by pure
+    /// character-sequence coincidence, with zero relation to the tag's actual
+    /// meaning. Fixed by (a) extending the exclusion list and (b) requiring
+    /// whole-word matches in the phrase-overlap scorer.
+    #[test]
+    fn regr_bug1_hash_requests_never_match_mail_schedule_test_workflow() {
+        let workflows = vec![mail_schedule_test_fixture()];
+        let prompts = [
+            "Give me sha512 hash of test",
+            "Hash test using sha256",
+            "What's the sha1 hash of 'production'?",
+            "Give me the sha512 hash of 'test'",
+        ];
+        for prompt in prompts {
+            assert!(
+                prompt_looks_like_non_n8n_tool_intent(prompt),
+                "prompt should be excluded from n8n routing: {prompt}"
+            );
+            let route =
+                WorkflowRankingEngine::new(workflows.clone()).route_chat(N8nChatRouteRequest {
+                    prompt: prompt.to_string(),
+                    previous_user_prompt: None,
+                    manual_n8n_mode: false,
+                    safe_auto_run_enabled: false,
+                    workflows: Vec::new(),
+                });
+            assert_ne!(
+                route.status,
+                N8nChatRouteStatus::Blocked,
+                "hash prompt must not be blocked as an n8n workflow: {prompt}"
+            );
+        }
+    }
+
+    /// BUG #1 regression (category D: Dispatcher issue).
+    /// Root cause: "Run oc_fake_skill_that_does_not_exist" starts with the bare
+    /// "run " prefix that `parse_n8n_workflow_run_reference` matches
+    /// unconditionally, with no exclusion check on that code path at all
+    /// (unlike the sibling n8n dispatch block later in the same function).
+    #[test]
+    fn regr_bug1_run_skill_prompt_is_excluded_from_n8n_reference_parsing() {
+        let prompt = "Run the skill oc_fake_skill_that_does_not_exist with no arguments";
+        assert!(
+            prompt_looks_like_non_n8n_tool_intent(prompt),
+            "skill-invocation prompt must be excluded from n8n routing: {prompt}"
+        );
+        // Confirm the reference parser itself still recognizes the "run "
+        // prefix (that part of the parser is not being changed) — the fix is
+        // that the CALLER must consult the exclusion check before acting on it.
+        assert!(parse_n8n_workflow_run_reference(prompt).is_some());
+    }
+
+    /// BUG #1 regression: the search-web typo variant seen in production
+    /// ("wen" instead of "web") must also be excluded.
+    #[test]
+    fn regr_bug1_search_web_typo_excluded_from_n8n_routing() {
+        assert!(prompt_looks_like_non_n8n_tool_intent(
+            "Using openclaw search wen for todays latest breaking news in India"
+        ));
+        assert!(prompt_looks_like_non_n8n_tool_intent(
+            "Using openclaw search web for todays latest breaking news in India"
+        ));
+    }
+
+    /// BUG #1 regression (category A: Semantic Router issue) — direct unit test
+    /// of the whole-word containment fix, independent of the exclusion list,
+    /// so this stays protected even if the exclusion list is ever refactored.
+    #[test]
+    fn regr_bug1_whole_word_match_rejects_substring_inside_unrelated_word() {
+        // "test" is NOT a whole word inside "production-testing-suite" or "latest"
+        assert!(!contains_whole_word("production testing suite", "test"));
+        assert!(!contains_whole_word("latest", "test"));
+        // "test" IS a whole word inside "mail schedule test"
+        assert!(contains_whole_word("mail schedule test", "test"));
+        // exact equality still matches
+        assert!(contains_whole_word("test", "test"));
     }
 
     #[test]

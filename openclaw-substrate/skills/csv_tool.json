@@ -1,0 +1,14 @@
+{
+  "name": "oc_csv_tool",
+  "description": "Parses CSV text into rows, converts CSV to JSON objects (header row), or converts JSON rows back to CSV.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "csv": { "type": "string", "description": "CSV text input (for mode=parse or mode=to_json)." },
+      "rows": { "type": "array", "description": "Array of arrays (for mode=from_json)." },
+      "mode": { "type": "string", "description": "One of 'parse' (default, raw rows), 'to_json' (header + objects), or 'from_json'." }
+    },
+    "required": []
+  },
+  "handler": "csv_tool.js"
+}

@@ -54,8 +54,14 @@ async fn real_gpu_sizing_lands_on_gpu_not_cpu() {
     // 1. The BUG path: a cold-start zero reading sizes the model onto the CPU (ngl == 0). This is
     //    exactly what the stale runtime did before the fix → endless watchdog scale-up restarts.
     let cold = calculate_target_params_prod(&profile, 0, 512, backend);
-    println!("cold-start (free=0) sizing → ngl={} ({})", cold.ngl, cold.degradation);
-    assert_eq!(cold.ngl, 0, "zero VRAM must size to CPU — this is the flap trigger the fix removes");
+    println!(
+        "cold-start (free=0) sizing → ngl={} ({})",
+        cold.ngl, cold.degradation
+    );
+    assert_eq!(
+        cold.ngl, 0,
+        "zero VRAM must size to CPU — this is the flap trigger the fix removes"
+    );
 
     // 2. The FIX path: sizing on the REAL measured free VRAM must land on the GPU (ngl > 0).
     let live = calculate_target_params_prod(&profile, snap.free_mb, 512, backend);
@@ -78,7 +84,10 @@ async fn real_gpu_sizing_lands_on_gpu_not_cpu() {
         "measured-first (stable window) sizing → ngl={} ctx={} ({})",
         measured.ngl, measured.context, measured.degradation
     );
-    assert!(measured.ngl > 0, "measured-first must also land on GPU on a stable window");
+    assert!(
+        measured.ngl > 0,
+        "measured-first must also land on GPU on a stable window"
+    );
     assert!(
         measured.ngl <= live.ngl,
         "measured-first reserves headroom → never MORE layers than the raw prod sizer"

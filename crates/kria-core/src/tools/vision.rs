@@ -245,7 +245,10 @@ impl VisionSidecar {
         anyhow::anyhow!("vision GPU lease unavailable: {error}. {hint}")
     }
 
-    async fn acquire_vision_lease(&self, turn_label: &str) -> anyhow::Result<Option<GpuLeaseGuard>> {
+    async fn acquire_vision_lease(
+        &self,
+        turn_label: &str,
+    ) -> anyhow::Result<Option<GpuLeaseGuard>> {
         if self.sidecar.is_none() {
             return Ok(None);
         }
@@ -258,12 +261,20 @@ impl VisionSidecar {
         // Vision is interactive-background (yields to chat/voice). On HRA denial, run via the
         // sidecar without a GPU lease rather than hard-failing.
         match gpu_lease
-            .acquire_guard_gated(GpuOwner::Vision, turn_label, Some(Duration::from_secs(120)), 1500)
+            .acquire_guard_gated(
+                GpuOwner::Vision,
+                turn_label,
+                Some(Duration::from_secs(120)),
+                1500,
+            )
             .await
         {
             Ok(guard) => Ok(Some(guard)),
             Err(GpuLeaseError::Busy { owner }) => {
-                tracing::info!(?owner, "vision: GPU admission denied by HRA; running sidecar without lease");
+                tracing::info!(
+                    ?owner,
+                    "vision: GPU admission denied by HRA; running sidecar without lease"
+                );
                 Ok(None)
             }
             Err(other) => Err(Self::map_gpu_lease_error(other)),

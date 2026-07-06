@@ -531,6 +531,7 @@ mod tests {
             network_policy: OpenClawNetworkPolicy::None,
             resource_profile: ResourceProfile::for_category(cat),
             capabilities: SkillCapabilities::default(),
+            granted: Vec::new(),
             trust_tier: TrustTier::Community,
             source: SkillSource::Bundled,
             installed_at: chrono::Utc::now(),

@@ -262,7 +262,12 @@ mod tests {
         let mut t = table();
         let mut s = Scheduler::new(Epoch(1));
         let lease = s
-            .admit(&mut t, PriorityClass::InteractiveFg, TurnId("a".into()), &gpu_plan(4000))
+            .admit(
+                &mut t,
+                PriorityClass::InteractiveFg,
+                TurnId("a".into()),
+                &gpu_plan(4000),
+            )
             .unwrap();
         assert_eq!(lease.device, DeviceId::Gpu(0));
         assert_eq!(lease.epoch, Epoch(1));
@@ -277,20 +282,30 @@ mod tests {
         let mut s = Scheduler::new(Epoch(1));
         // Fill the GPU with a background lease so a second GPU reservation fails.
         let bg = s
-            .admit(&mut t, PriorityClass::Batch, TurnId("bg".into()), &gpu_plan(11000))
+            .admit(
+                &mut t,
+                PriorityClass::Batch,
+                TurnId("bg".into()),
+                &gpu_plan(11000),
+            )
             .unwrap();
         // Foreground wants GPU; reservation fails → preemption required against the batch victim.
         let err = s
-            .admit(&mut t, PriorityClass::InteractiveFg, TurnId("fg".into()), &{
-                // plan with no CPU fallback so we observe the GPU contention error directly
-                Plan {
-                    device: DeviceId::Gpu(0),
-                    residency: Residency::VramHot,
-                    budget: Capacity::vram(4000),
-                    fallback_chain: vec![],
-                    rationale: RationaleCode::FitsLocal,
-                }
-            })
+            .admit(
+                &mut t,
+                PriorityClass::InteractiveFg,
+                TurnId("fg".into()),
+                &{
+                    // plan with no CPU fallback so we observe the GPU contention error directly
+                    Plan {
+                        device: DeviceId::Gpu(0),
+                        residency: Residency::VramHot,
+                        budget: Capacity::vram(4000),
+                        fallback_chain: vec![],
+                        rationale: RationaleCode::FitsLocal,
+                    }
+                },
+            )
             .unwrap_err();
         assert_eq!(err, AdmitError::PreemptionRequired { victim: bg.token });
     }
@@ -300,18 +315,33 @@ mod tests {
         let mut t = table();
         let mut s = Scheduler::new(Epoch(1));
         let _fg = s
-            .admit(&mut t, PriorityClass::InteractiveFg, TurnId("fg".into()), &gpu_plan(11000))
+            .admit(
+                &mut t,
+                PriorityClass::InteractiveFg,
+                TurnId("fg".into()),
+                &gpu_plan(11000),
+            )
             .unwrap();
         let err = s
-            .admit(&mut t, PriorityClass::Batch, TurnId("bg".into()), &Plan {
-                device: DeviceId::Gpu(0),
-                residency: Residency::VramHot,
-                budget: Capacity::vram(4000),
-                fallback_chain: vec![],
-                rationale: RationaleCode::FitsLocal,
-            })
+            .admit(
+                &mut t,
+                PriorityClass::Batch,
+                TurnId("bg".into()),
+                &Plan {
+                    device: DeviceId::Gpu(0),
+                    residency: Residency::VramHot,
+                    budget: Capacity::vram(4000),
+                    fallback_chain: vec![],
+                    rationale: RationaleCode::FitsLocal,
+                },
+            )
             .unwrap_err();
-        assert_eq!(err, AdmitError::Busy { holder: PriorityClass::InteractiveFg });
+        assert_eq!(
+            err,
+            AdmitError::Busy {
+                holder: PriorityClass::InteractiveFg
+            }
+        );
     }
 
     #[test]
@@ -319,11 +349,21 @@ mod tests {
         let mut t = table();
         let mut s = Scheduler::new(Epoch(1));
         let _hog = s
-            .admit(&mut t, PriorityClass::InteractiveFg, TurnId("h".into()), &gpu_plan(11000))
+            .admit(
+                &mut t,
+                PriorityClass::InteractiveFg,
+                TurnId("h".into()),
+                &gpu_plan(11000),
+            )
             .unwrap();
         // Equal-class request with a CPU fallback → lands on CPU instead of erroring.
         let lease = s
-            .admit(&mut t, PriorityClass::InteractiveFg, TurnId("x".into()), &gpu_plan(4000))
+            .admit(
+                &mut t,
+                PriorityClass::InteractiveFg,
+                TurnId("x".into()),
+                &gpu_plan(4000),
+            )
             .unwrap();
         assert_eq!(lease.device, DeviceId::Cpu);
     }
@@ -346,7 +386,12 @@ mod tests {
         let mut t = table();
         let mut s = Scheduler::new(Epoch(1));
         let lease = s
-            .admit(&mut t, PriorityClass::InteractiveFg, TurnId("a".into()), &gpu_plan(2000))
+            .admit(
+                &mut t,
+                PriorityClass::InteractiveFg,
+                TurnId("a".into()),
+                &gpu_plan(2000),
+            )
             .unwrap();
         assert!(s.lease_epoch_valid(&lease));
         s.set_epoch(Epoch(2)); // simulate RA restart

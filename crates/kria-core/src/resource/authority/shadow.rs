@@ -53,8 +53,7 @@ pub fn compare(req: &ResourceRequest, table: &DeviceTable, profile: PolicyProfil
     }
 
     // Privacy invariant.
-    if req.constraints.privacy == PrivacyReq::Strict
-        && matches!(ra_device, DeviceId::CloudPool(_))
+    if req.constraints.privacy == PrivacyReq::Strict && matches!(ra_device, DeviceId::CloudPool(_))
     {
         violations.push("RA planned cloud for a privacy-strict request".into());
     }
@@ -114,7 +113,10 @@ mod tests {
                 model_id: None,
                 est_ms: 1000,
             },
-            constraints: Constraints { privacy, ..Default::default() },
+            constraints: Constraints {
+                privacy,
+                ..Default::default()
+            },
             turn_id: TurnId("t".into()),
         }
     }
@@ -129,7 +131,11 @@ mod tests {
 
     #[test]
     fn no_violations_on_normal_request() {
-        let d = compare(&req(4000, PrivacyReq::Standard), &table(), PolicyProfile::Balanced);
+        let d = compare(
+            &req(4000, PrivacyReq::Standard),
+            &table(),
+            PolicyProfile::Balanced,
+        );
         assert!(d.violations.is_empty());
     }
 
@@ -150,7 +156,11 @@ mod tests {
         let t = table();
         let mut r = ShadowReport::default();
         for _ in 0..20 {
-            r.record(compare(&req(4000, PrivacyReq::Standard), &t, PolicyProfile::Balanced));
+            r.record(compare(
+                &req(4000, PrivacyReq::Standard),
+                &t,
+                PolicyProfile::Balanced,
+            ));
         }
         assert!(r.gate_passes());
         assert_eq!(r.samples, 20);

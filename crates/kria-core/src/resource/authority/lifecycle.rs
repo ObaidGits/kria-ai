@@ -44,8 +44,7 @@ impl ResidencyState {
     /// True when this state is resident at least at the requested tier (used to confirm a
     /// transition actually arrived, since the executor reports load failure as Unloaded).
     pub fn is_resident_at_least(self, target: Residency) -> bool {
-        self.tier_rank() >= Self::from_residency(target).tier_rank()
-            && self.tier_rank() > 0
+        self.tier_rank() >= Self::from_residency(target).tier_rank() && self.tier_rank() > 0
     }
 }
 

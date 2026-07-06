@@ -90,6 +90,17 @@ pub fn transpile_skill(
     // 12. Generate skill_id
     let skill_id = format!("oc_{}", sanitize_name(name));
 
+    // 13. Capability-grant wiring fix: derive real grants from the declared
+    // legacy flags (this transpiler's only capability signal), mirroring
+    // `bundle::to_descriptor`'s `grant_all(.., GrantSource::Manifest, true)`
+    // pattern — a skill's manifest-declared capabilities are granted at
+    // install time, materialized by the runtime at execution time. See
+    // `capability::from_legacy` for the documented lossy-projection caveat.
+    let granted = {
+        let real_caps = super::capability::from_legacy(&capabilities);
+        super::capability::grant_all(&real_caps, super::capability::GrantSource::Manifest, true)
+    };
+
     Ok(SkillDescriptor {
         skill_id,
         name: name.to_string(),
@@ -100,6 +111,7 @@ pub fn transpile_skill(
         network_policy,
         resource_profile,
         capabilities,
+        granted,
         trust_tier,
         source,
         installed_at: chrono::Utc::now(),

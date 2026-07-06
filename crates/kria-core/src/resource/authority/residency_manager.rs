@@ -297,10 +297,7 @@ impl ResidencyManager {
         // Phase 1: claim the in-flight slot + clone the lifecycle handle.
         let (lifecycle, from) = {
             let mut inner = self.inner.lock().await;
-            let entry = inner
-                .models
-                .get_mut(model)
-                .ok_or(ResidencyError::Busy)?; // unknown model treated as unavailable
+            let entry = inner.models.get_mut(model).ok_or(ResidencyError::Busy)?; // unknown model treated as unavailable
             if entry.in_flight {
                 return Err(ResidencyError::Busy);
             }
@@ -493,7 +490,9 @@ mod tests {
     #[test]
     fn cloud_fallback_is_promotion_eligible() {
         // Force a cloud-fallback posture and check eligibility.
-        let lock = ResidentLock { state: LockState::CloudFallback };
+        let lock = ResidentLock {
+            state: LockState::CloudFallback,
+        };
         assert!(lock.perf_optimization_eligible());
     }
 
@@ -510,7 +509,9 @@ mod tests {
 
     #[test]
     fn image_generation_break_targets_image_override() {
-        let mut lock = ResidentLock { state: LockState::ResidentLocked };
+        let mut lock = ResidentLock {
+            state: LockState::ResidentLocked,
+        };
         let new = lock.apply_break(BreakCondition::ImageGeneration).unwrap();
         assert_eq!(new, LockState::ImageOverride);
         // after image gen completes, relock
@@ -520,7 +521,9 @@ mod tests {
 
     #[test]
     fn pinned_model_resists_soft_breaks_but_yields_to_emergency() {
-        let mut lock = ResidentLock { state: LockState::ResidentLocked };
+        let mut lock = ResidentLock {
+            state: LockState::ResidentLocked,
+        };
         lock.pin();
         assert_eq!(lock.state(), LockState::PinnedResident);
         // soft break (image / settings) refused
@@ -543,7 +546,9 @@ mod tests {
             BreakCondition::Maintenance,
             BreakCondition::GpuOom,
         ] {
-            let mut lock = ResidentLock { state: LockState::ResidentLocked };
+            let mut lock = ResidentLock {
+                state: LockState::ResidentLocked,
+            };
             lock.apply_break(cond);
             assert!(!lock.is_locked());
             lock.relock();

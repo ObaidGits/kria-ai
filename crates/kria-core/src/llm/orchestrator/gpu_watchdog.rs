@@ -265,7 +265,11 @@ impl GpuWatchdog {
             free_vram_mb: free_mb,
             total_vram_mb: total_mb,
             free_ram_mb: 0, // RAM not relevant to a GPU upsize feasibility check
-            budget: Budget::derive(total_mb, self.config.safety_margin_mb, BandPolicy::default()),
+            budget: Budget::derive(
+                total_mb,
+                self.config.safety_margin_mb,
+                BandPolicy::default(),
+            ),
         };
         let sim = simulate(
             &SimAction::Swap {
@@ -694,7 +698,9 @@ impl GpuWatchdog {
         // isn't an emergency, defer — the swap will be retried after the turn ends. Emergency swaps
         // (true OOM risk) still proceed (with checkpoint via the existing slot save below).
         {
-            use crate::resource::authority::{ActionImpact, ForegroundGuard, GuardContext, GuardDecision};
+            use crate::resource::authority::{
+                ActionImpact, ForegroundGuard, GuardContext, GuardDecision,
+            };
             let fg_active = self.server.has_active_streams();
             let decision = ForegroundGuard::authorize(
                 ActionImpact::Disruptive,
@@ -704,12 +710,42 @@ impl GpuWatchdog {
                     emergency,
                 },
             );
-            if matches!(decision, GuardDecision::DeferToTurnBoundary) {
-                tracing::info!(
-                    new_ngl = target.ngl,
-                    new_ctx = target.context,
-                    "watchdog: deferring non-emergency swap — foreground turn active (A4)"
-                );
+            // Single authoritative gate: a swap proceeds ONLY on `Allow`. Both
+            // `DeferToTurnBoundary` and `AllowEmergencyCheckpoint` mean "do not tear
+            // down the live foreground stream now" (see `swap_should_proceed`).
+            if !swap_should_proceed(decision) {
+                if matches!(decision, GuardDecision::AllowEmergencyCheckpoint) {
+                    // ROOT-CAUSE FIX ("LLM server not reachable" during generation):
+                    //
+                    // An emergency VRAM action fired DURING a live foreground stream. The
+                    // guard's `AllowEmergencyCheckpoint` contract means "interrupt only via
+                    // checkpoint + resume" — but llama.cpp cannot resume an in-flight
+                    // completion across a model reload, and its KV cache is pre-allocated at
+                    // load time (an in-flight turn does not itself grow VRAM). The old code
+                    // ignored this decision and fell through to `cancel_streams()` + `kill()`,
+                    // which DESTROYED the user's answer mid-token and made `/health`
+                    // transport-fail → "LLM server not reachable", without relieving the real
+                    // pressure (which is almost always transient/other-process noise).
+                    //
+                    // Honor Property-4 ("no surprise interruption"): defer to the turn
+                    // boundary. The wait is bounded by KRIA's turn-level timeout, and the swap
+                    // re-fires the instant the stream ends (has_active_streams()==false → the
+                    // guard then returns `Allow`). A genuine OOM surfaces as a normal
+                    // generation error, never a silent server teardown.
+                    tracing::warn!(
+                        new_ngl = target.ngl,
+                        new_ctx = target.context,
+                        "watchdog: deferring EMERGENCY swap — foreground stream active; \
+                         will swap at the turn boundary (no mid-stream teardown)"
+                    );
+                } else {
+                    tracing::info!(
+                        new_ngl = target.ngl,
+                        new_ctx = target.context,
+                        emergency,
+                        "watchdog: deferring non-emergency swap — foreground turn active (A4)"
+                    );
+                }
                 return;
             }
         }
@@ -953,7 +989,10 @@ impl GpuWatchdog {
                 let _ = self.server.restore_active_slot().await;
             }
             Err(e) => {
-                tracing::error!(?e, "watchdog: swap spawn failed — attempting CPU recovery to keep LLM available");
+                tracing::error!(
+                    ?e,
+                    "watchdog: swap spawn failed — attempting CPU recovery to keep LLM available"
+                );
                 self.event_bus.publish(KriaEvent::LlmSwapFailed {
                     reason: e.to_string(),
                 });
@@ -1017,5 +1056,58 @@ impl GpuWatchdog {
             }
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
+    }
+}
+
+/// Whether the swap executor may PROCEED given a Foreground Guard decision.
+///
+/// This is the single authoritative mapping from the guard's 3-way decision to the
+/// executor's 2-way action, and the site of the "LLM server not reachable during
+/// generation" root-cause fix: a swap proceeds ONLY on `Allow`. Both
+/// `DeferToTurnBoundary` and `AllowEmergencyCheckpoint` must NOT tear down a live
+/// foreground stream — the previous code proceeded on `AllowEmergencyCheckpoint`,
+/// hard-cancelling + killing llama-server mid-generation.
+fn swap_should_proceed(decision: crate::resource::authority::GuardDecision) -> bool {
+    matches!(decision, crate::resource::authority::GuardDecision::Allow)
+}
+
+#[cfg(test)]
+mod swap_gate_tests {
+    use super::swap_should_proceed;
+    use crate::resource::authority::{ActionImpact, ForegroundGuard, GuardContext, GuardDecision};
+
+    fn guard(fg_active: bool, emergency: bool) -> GuardDecision {
+        ForegroundGuard::authorize(
+            ActionImpact::Disruptive,
+            GuardContext {
+                foreground_active: fg_active,
+                at_turn_boundary: !fg_active,
+                emergency,
+            },
+        )
+    }
+
+    #[test]
+    fn non_emergency_swap_during_active_stream_is_deferred() {
+        assert!(!swap_should_proceed(guard(true, false)));
+    }
+
+    #[test]
+    fn emergency_swap_during_active_stream_is_deferred_not_a_teardown() {
+        // REGRESSION: the bug was proceeding here (cancel_streams + kill mid-token),
+        // which produced "LLM server not reachable". The emergency must defer.
+        let decision = guard(true, true);
+        assert_eq!(decision, GuardDecision::AllowEmergencyCheckpoint);
+        assert!(
+            !swap_should_proceed(decision),
+            "emergency during a live foreground stream must NOT tear down the server"
+        );
+    }
+
+    #[test]
+    fn swap_proceeds_at_turn_boundary() {
+        // No active stream → both normal and emergency swaps may proceed.
+        assert!(swap_should_proceed(guard(false, false)));
+        assert!(swap_should_proceed(guard(false, true)));
     }
 }

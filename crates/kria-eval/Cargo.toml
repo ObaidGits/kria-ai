@@ -16,3 +16,8 @@ tokio-util = { workspace = true }
 glob = "0.3"
 async-trait = { workspace = true }
 kria-core = { path = "../kria-core" }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+semver = "1.0.28"
+toml = { workspace = true }

@@ -17,14 +17,34 @@ pub const JOURNAL_VERSION: u16 = 1;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DecisionKind {
-    EpochBump { to: u64 },
-    LeaseGranted { token: u64, device: DeviceId, vram_mb: u64 },
-    LeaseReleased { token: u64 },
-    Planned { device: DeviceId, rationale: RationaleCode },
-    Preempted { victim_token: u64, reason: String },
-    Evicted { model: String },
-    Failover { pool: String },
-    SimulateReject { rationale: RationaleCode },
+    EpochBump {
+        to: u64,
+    },
+    LeaseGranted {
+        token: u64,
+        device: DeviceId,
+        vram_mb: u64,
+    },
+    LeaseReleased {
+        token: u64,
+    },
+    Planned {
+        device: DeviceId,
+        rationale: RationaleCode,
+    },
+    Preempted {
+        victim_token: u64,
+        reason: String,
+    },
+    Evicted {
+        model: String,
+    },
+    Failover {
+        pool: String,
+    },
+    SimulateReject {
+        rationale: RationaleCode,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

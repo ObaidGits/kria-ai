@@ -305,6 +305,26 @@ impl ToolRegistry {
         names.len()
     }
 
+    /// Remove a single tool by name (returns true if it existed). Used for hot uninstall of
+    /// OpenClaw skills (bundle installer deactivation).
+    pub fn unregister(&self, name: &str) -> bool {
+        let removed_def = self
+            .defs
+            .write()
+            .expect("tool registry defs lock poisoned")
+            .remove(name)
+            .is_some();
+        self.handlers
+            .write()
+            .expect("tool registry handlers lock poisoned")
+            .remove(name);
+        self.resume_capabilities
+            .write()
+            .expect("tool registry resume capability lock poisoned")
+            .remove(name);
+        removed_def
+    }
+
     /// Get all category names.
     pub fn categories(&self) -> Vec<String> {
         let defs = self.defs.read().expect("tool registry defs lock poisoned");

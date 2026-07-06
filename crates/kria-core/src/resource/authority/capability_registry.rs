@@ -148,8 +148,20 @@ mod tests {
 
     fn registry() -> CapabilityRegistry {
         CapabilityRegistry::new(vec![
-            llm("local-high", QualityTier::High, LatencyClass::Interactive, 6000, true),
-            llm("local-draft", QualityTier::Draft, LatencyClass::Realtime, 2000, true),
+            llm(
+                "local-high",
+                QualityTier::High,
+                LatencyClass::Interactive,
+                6000,
+                true,
+            ),
+            llm(
+                "local-draft",
+                QualityTier::Draft,
+                LatencyClass::Realtime,
+                2000,
+                true,
+            ),
             llm("cloud-max", QualityTier::Max, LatencyClass::Batch, 0, false),
         ])
     }
@@ -204,9 +216,15 @@ mod tests {
     fn register_is_idempotent_by_id() {
         let mut r = registry();
         let n = r.all().len();
-        r.register(llm("local-high", QualityTier::Max, LatencyClass::Interactive, 6000, true));
+        r.register(llm(
+            "local-high",
+            QualityTier::Max,
+            LatencyClass::Interactive,
+            6000,
+            true,
+        ));
         assert_eq!(r.all().len(), n); // replaced, not appended
-        // capability updated
+                                      // capability updated
         let q = SelectQuery {
             kind: ConsumerId::Llm,
             required_capabilities: vec!["text".into()],

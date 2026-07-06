@@ -4,6 +4,7 @@ import { appStore } from "./stores/app";
 import { provisioningStore } from "./stores/provisioning";
 import ChatView from "./components/ChatView";
 import TasksView from "./components/TasksView";
+import CapabilitiesView from "./views/CapabilitiesView";
 import AddTargetModal from "./components/AddTargetModal";
 import EditTargetModal from "./components/EditTargetModal";
 import PromptLabView from "./components/PromptLabView";
@@ -39,7 +40,7 @@ export function addToast(message: string, type: Toast["type"] = "info") {
 const [toasts, setToasts] = createSignal<Toast[]>([]);
 const CONTROL_PANEL_EXPANDED_STORAGE_KEY = "kria_control_panel_expanded";
 const FLEET_MATRIX_VISIBLE_STORAGE_KEY = "kria_fleet_matrix_visible";
-type AppRoute = "home" | "dashboard" | "vm-management" | "settings" | "tasks";
+type AppRoute = "home" | "dashboard" | "vm-management" | "settings" | "tasks" | "capabilities";
 
 function routeFromHash(hash: string): AppRoute {
   const clean = hash.replace(/^#/, "").trim();
@@ -47,6 +48,7 @@ function routeFromHash(hash: string): AppRoute {
   if (clean === "/vm-management") return "vm-management";
   if (clean === "/settings") return "settings";
   if (clean === "/tasks") return "tasks";
+  if (clean === "/capabilities") return "capabilities";
   return "home";
 }
 
@@ -55,6 +57,7 @@ function hashForRoute(route: AppRoute): string {
   if (route === "vm-management") return "#/vm-management";
   if (route === "settings") return "#/settings";
   if (route === "tasks") return "#/tasks";
+  if (route === "capabilities") return "#/capabilities";
   return "#/";
 }
 
@@ -601,6 +604,7 @@ const App: Component = () => {
             <button type="button" class={`modern-nav-btn ${route() === "dashboard" ? "active" : ""}`} onClick={() => navigate("dashboard")}>Dashboard</button>
             <button type="button" class={`modern-nav-btn ${route() === "vm-management" ? "active" : ""}`} onClick={() => navigate("vm-management")}>VM Management</button>
             <button type="button" class={`modern-nav-btn ${route() === "tasks" ? "active" : ""}`} onClick={() => navigate("tasks")}>Tasks</button>
+            <button type="button" class={`modern-nav-btn ${route() === "capabilities" ? "active" : ""}`} onClick={() => navigate("capabilities")}>Capabilities</button>
             <button type="button" class={`modern-nav-btn ${route() === "settings" ? "active" : ""}`} onClick={() => { navigate("settings"); setShowSettings(true); }}>Settings</button>
           </div>
 
@@ -637,6 +641,10 @@ const App: Component = () => {
           >
           <Show when={route() === "tasks"}>
             <TasksView />
+          </Show>
+
+          <Show when={route() === "capabilities"}>
+            <CapabilitiesView />
           </Show>
 
           <Show when={route() === "dashboard"}>

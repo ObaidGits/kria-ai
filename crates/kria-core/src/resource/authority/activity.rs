@@ -176,7 +176,7 @@ mod tests {
         let m = ActivityModel::default();
         let mut s = quiescent(0);
         s.foreground_focus = true; // focused → never DeepIdle
-        // 5 min since input, but focused
+                                   // 5 min since input, but focused
         assert_eq!(m.evaluate(&s, 300_000), ActivityState::Idle);
     }
 

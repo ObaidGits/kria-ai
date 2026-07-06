@@ -200,7 +200,17 @@ const ChatView: Component = () => {
 
   const handleSubmit = (e: Event) => {
     e.preventDefault();
-    if (isThinking()) return;
+    // PHASE 2 FIX (real bug found via GUI stress test): this early return used
+    // to unconditionally drop the submission whenever the assistant was still
+    // thinking — even though `sendMessage`/`sendDocumentMessage`/
+    // `sendImageMessage` all correctly route to the real prompt queue
+    // (`enqueueScopedPrompt`) one layer down. That queue was completely
+    // unreachable from the chat UI: a user (or, in the real GUI stress test,
+    // three rapid-fire prompts sent 400ms apart) typing while the assistant is
+    // still responding had their message silently discarded with zero
+    // feedback. Slash-command handling still short-circuits below (those are
+    // local UI actions, not messages to send) but a real chat/document/image
+    // submission must now always reach the send/queue path.
     if (showSlash() && filteredSlash().length > 0) {
       executeSlash(filteredSlash()[slashIndex()]);
       return;

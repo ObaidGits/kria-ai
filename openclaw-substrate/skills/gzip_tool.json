@@ -1,0 +1,14 @@
+{
+  "name": "oc_gzip_tool",
+  "description": "Compresses text to gzip (base64) or decompresses a base64 gzip payload back to text.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "mode": { "type": "string", "description": "'compress' (default) or 'decompress'." },
+      "text": { "type": "string", "description": "Text to compress (for mode=compress)." },
+      "base64": { "type": "string", "description": "Base64 gzip payload (for mode=decompress)." }
+    },
+    "required": []
+  },
+  "handler": "gzip_tool.js"
+}

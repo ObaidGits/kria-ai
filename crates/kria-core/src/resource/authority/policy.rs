@@ -144,7 +144,9 @@ impl PolicyReason {
             Self::NotEligibleMode => "Holding — not in a maintenance (deep-idle) window.",
             Self::NotEligibleConfidence => "Holding — GPU memory readings are not trustworthy yet.",
             Self::NotEligibleLock => "Holding — model is already locked at a good size.",
-            Self::NotEligibleCooldown => "Holding — waiting out the cooldown after a recent change.",
+            Self::NotEligibleCooldown => {
+                "Holding — waiting out the cooldown after a recent change."
+            }
             Self::NotEligibleForecast => "Holding — free memory is not reliably sufficient.",
             Self::NotEligibleSimulator => "Holding — a resize is predicted to be unsafe.",
             Self::NotEligibleBenefit => "Holding — a resize would not be worth the interruption.",
@@ -227,7 +229,10 @@ impl PolicyLog {
     /// Emit as a structured tracing event (G11). Restart-class decisions log at info; holds at debug
     /// so the normal "Stay" steady state is quiet.
     pub fn emit(&self) {
-        if matches!(self.action, Action::Optimize | Action::Migrate | Action::Reject | Action::Recover) {
+        if matches!(
+            self.action,
+            Action::Optimize | Action::Migrate | Action::Reject | Action::Recover
+        ) {
             tracing::info!(
                 correlation_id = %self.correlation_id,
                 who = ?self.who,
@@ -251,7 +256,11 @@ impl PolicyLog {
 }
 
 /// Derive the runtime mode (G7) from activity + health. Health (correctness) dominates activity.
-pub fn derive_mode(activity: ActivityState, health: HealthPosture, foreground_focus: bool) -> RuntimeMode {
+pub fn derive_mode(
+    activity: ActivityState,
+    health: HealthPosture,
+    foreground_focus: bool,
+) -> RuntimeMode {
     match health {
         HealthPosture::Faulted => RuntimeMode::Emergency,
         HealthPosture::Recovering => RuntimeMode::Recovery,
@@ -410,7 +419,12 @@ pub fn decide_image_admission(
     }
 
     // 3. User is idle: simulate evicting the LLM to RAM and check the image then fits safely.
-    let est = simulate(&SimAction::EvictToRam { model_vram_mb: llm_vram_mb }, state);
+    let est = simulate(
+        &SimAction::EvictToRam {
+            model_vram_mb: llm_vram_mb,
+        },
+        state,
+    );
     let freed = (state.free_vram_mb as i64 + est.d_vram_mb).max(0) as u64;
     let evict_is_safe = est.risk != RiskLevel::High && !est.breaches_hard_limit;
     if freed >= required_vram_mb && evict_is_safe {
@@ -485,7 +499,10 @@ mod tests {
     fn locked_model_never_optimizes() {
         let mut inp = eligible_inputs();
         inp.lock = LockPosture::Locked;
-        assert_eq!(decide(&inp, RuntimeMode::Maintenance).reason, PolicyReason::NotEligibleLock);
+        assert_eq!(
+            decide(&inp, RuntimeMode::Maintenance).reason,
+            PolicyReason::NotEligibleLock
+        );
     }
 
     #[test]
@@ -597,7 +614,7 @@ mod tests {
         assert_eq!(log.correlation_id, "turn-42");
         assert!(log.expected_speedup > 1.0);
         log.emit(); // must not panic
-        // serde round-trip (journal persistence)
+                    // serde round-trip (journal persistence)
         let json = serde_json::to_string(&log).unwrap();
         let back: PolicyLog = serde_json::from_str(&json).unwrap();
         assert_eq!(log, back);
@@ -605,7 +622,11 @@ mod tests {
 
     // ── G9: image admission tests ────────────────────────────────────────────
 
-    fn img_state(free_vram: u64, total: u64, free_ram: u64) -> super::super::simulator::SimDeviceState {
+    fn img_state(
+        free_vram: u64,
+        total: u64,
+        free_ram: u64,
+    ) -> super::super::simulator::SimDeviceState {
         use super::super::budget::{BandPolicy, Budget};
         super::super::simulator::SimDeviceState {
             free_vram_mb: free_vram,

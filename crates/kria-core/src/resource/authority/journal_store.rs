@@ -82,7 +82,11 @@ mod tests {
         let store = JournalStore::new(&path);
         let mut j = Journal::new();
         j.bump_epoch(TurnId("boot".into()), 0);
-        j.append(TurnId("t".into()), DecisionKind::LeaseReleased { token: 7 }, 1);
+        j.append(
+            TurnId("t".into()),
+            DecisionKind::LeaseReleased { token: 7 },
+            1,
+        );
         store.save(&j).unwrap();
 
         let (loaded, truncated) = store.load();
@@ -107,12 +111,24 @@ mod tests {
         let store = JournalStore::new(&path);
 
         let mut j1 = Journal::new();
-        j1.append(TurnId("a".into()), DecisionKind::Evicted { model: "a".into() }, 1);
+        j1.append(
+            TurnId("a".into()),
+            DecisionKind::Evicted { model: "a".into() },
+            1,
+        );
         store.save(&j1).unwrap();
 
         let mut j2 = Journal::new();
-        j2.append(TurnId("b".into()), DecisionKind::Evicted { model: "b".into() }, 1);
-        j2.append(TurnId("c".into()), DecisionKind::Evicted { model: "c".into() }, 2);
+        j2.append(
+            TurnId("b".into()),
+            DecisionKind::Evicted { model: "b".into() },
+            1,
+        );
+        j2.append(
+            TurnId("c".into()),
+            DecisionKind::Evicted { model: "c".into() },
+            2,
+        );
         store.save(&j2).unwrap();
 
         let (loaded, _) = store.load();
@@ -125,7 +141,11 @@ mod tests {
         let path = tmp_path("corrupt_tail");
         // Write a valid prefix followed by garbage bytes (simulating a torn append).
         let mut j = Journal::new();
-        j.append(TurnId("a".into()), DecisionKind::Evicted { model: "a".into() }, 1);
+        j.append(
+            TurnId("a".into()),
+            DecisionKind::Evicted { model: "a".into() },
+            1,
+        );
         let mut bytes = j.to_bytes();
         bytes.extend_from_slice(b"\x00\xffgarbage");
         fs::write(&path, &bytes).unwrap();

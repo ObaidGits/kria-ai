@@ -105,17 +105,15 @@ pub fn simulate(action: &SimAction, state: &SimDeviceState) -> Estimate {
             };
             (0, 0, LAT_IMAGE_BARRIER, disruption)
         }
-        SimAction::CloudFailover { rtt_ms } => {
-            (0, 0, (*rtt_ms).max(50), Disruption::None)
-        }
+        SimAction::CloudFailover { rtt_ms } => (0, 0, (*rtt_ms).max(50), Disruption::None),
     };
 
     let projected_free_vram = (state.free_vram_mb as i64 + d_vram).max(0) as u64;
     let breaches_hard_limit = match action {
         // Failover/unload free memory; they cannot breach the hard limit by themselves.
-        SimAction::CloudFailover { .. } | SimAction::Unload { .. } | SimAction::EvictToRam { .. } => {
-            false
-        }
+        SimAction::CloudFailover { .. }
+        | SimAction::Unload { .. }
+        | SimAction::EvictToRam { .. } => false,
         SimAction::Swap { .. } => projected_free_vram < state.budget.hard_mb,
         SimAction::ImageTransition { required_vram_mb } => *required_vram_mb > state.free_vram_mb,
     };
@@ -179,7 +177,12 @@ mod tests {
     #[test]
     fn unload_frees_vram_low_risk() {
         let s = state(1000, 12288, 16000);
-        let e = simulate(&SimAction::Unload { model_vram_mb: 3000 }, &s);
+        let e = simulate(
+            &SimAction::Unload {
+                model_vram_mb: 3000,
+            },
+            &s,
+        );
         assert_eq!(e.d_vram_mb, 3000);
         assert_eq!(e.projected_free_vram_mb, 4000);
         assert!(!e.breaches_hard_limit);
@@ -205,7 +208,12 @@ mod tests {
     #[test]
     fn evict_with_low_ram_is_high_risk() {
         let s = state(500, 12288, 1200); // only 1.2 GB RAM free
-        let e = simulate(&SimAction::EvictToRam { model_vram_mb: 3000 }, &s);
+        let e = simulate(
+            &SimAction::EvictToRam {
+                model_vram_mb: 3000,
+            },
+            &s,
+        );
         assert!(e.d_vram_mb > 0 && e.d_ram_mb < 0);
         assert_eq!(e.risk, RiskLevel::High);
     }
@@ -213,7 +221,12 @@ mod tests {
     #[test]
     fn image_transition_insufficient_vram_breaches() {
         let s = state(2000, 12288, 16000);
-        let e = simulate(&SimAction::ImageTransition { required_vram_mb: 4500 }, &s);
+        let e = simulate(
+            &SimAction::ImageTransition {
+                required_vram_mb: 4500,
+            },
+            &s,
+        );
         assert!(e.breaches_hard_limit);
         assert_eq!(e.disruption, Disruption::Interactive);
     }

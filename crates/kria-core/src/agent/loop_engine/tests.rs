@@ -1671,6 +1671,48 @@ fn manual_tool_app_locks_cover_requested_tool_families() {
     assert!(!tool_matches_lab_app_lock("gw_calendar_today", "gmail"));
 }
 
+/// Regression (OpenClaw production hardening — SESSION_HANDOFF TOP PRIORITY bug):
+/// Under A6, OpenClaw is a single semantic tool `"openclaw"` plus the introspection
+/// tool `"list_installed_skills"` — per-skill `oc_*` tools no longer exist. The old
+/// gate matched ONLY `starts_with("oc_")`, so locking Tool Mode to "OpenClaw" in the
+/// UI blocked the only two tools that can satisfy an OpenClaw request, making manual
+/// OpenClaw mode completely non-functional. This asserts the real A6 tool names pass
+/// the gate, `oc_*` stays allowed for backward compat, and the arm is not
+/// over-broadened (unrelated tools stay blocked; other modes don't leak into it).
+#[test]
+fn openclaw_app_lock_allows_real_a6_semantic_tools() {
+    // Real A6 tool names must pass (this is the bug fix).
+    assert!(tool_matches_lab_app_lock("openclaw", "openclaw"));
+    assert!(tool_matches_lab_app_lock(
+        "list_installed_skills",
+        "openclaw"
+    ));
+    assert!(tool_matches_lab_app_lock("openclaw", "claw"));
+    assert!(tool_matches_lab_app_lock("list_installed_skills", "claw"));
+    // Backward compat: legacy per-skill oc_* tools still allowed.
+    assert!(tool_matches_lab_app_lock("oc_calculator", "openclaw"));
+    assert!(tool_matches_lab_app_lock("oc_web_search", "openclaw"));
+    // No over-broadening: unrelated tools stay blocked under OpenClaw mode.
+    assert!(!tool_matches_lab_app_lock("read_file", "openclaw"));
+    assert!(!tool_matches_lab_app_lock("generate_image", "openclaw"));
+    assert!(!tool_matches_lab_app_lock(
+        "n8n_invoke_workflow",
+        "openclaw"
+    ));
+    // The OpenClaw semantic tools must NOT leak into unrelated modes.
+    assert!(!tool_matches_lab_app_lock("openclaw", "gmail"));
+    assert!(!tool_matches_lab_app_lock(
+        "list_installed_skills",
+        "filesystem"
+    ));
+    // "docker" mode runs OpenClaw skills in containers, so it must reach the same
+    // semantic tools (same class of bug as the "openclaw" arm).
+    assert!(tool_matches_lab_app_lock("openclaw", "docker"));
+    assert!(tool_matches_lab_app_lock("list_installed_skills", "docker"));
+    assert!(tool_matches_lab_app_lock("oc_calculator", "docker"));
+    assert!(!tool_matches_lab_app_lock("read_file", "docker"));
+}
+
 #[test]
 fn tool_choice_candidates_include_primary_and_web_alternatives() {
     let allowed: HashSet<String> = ["search_news", "web_search", "searxng_search"]
@@ -1943,4 +1985,201 @@ fn deterministic_dispatch_does_not_match_chitchat() {
     assert!(try_deterministic_dispatch("hello").is_none());
     assert!(try_deterministic_dispatch("how are you").is_none());
     assert!(try_deterministic_dispatch("tell me a joke").is_none());
+}
+
+/// OpenClaw Production Hardening Phase 1 — stress test.
+/// 50+ mixed prompts spanning every bug category fixed in this pass (n8n
+/// misrouting, hash/crypto, skill discovery, clipboard vs literal text, CSV
+/// inline vs file, plus the original clean-pass math/JSON/regex/text prompts
+/// from the real production transcript that must remain unaffected). Runs the
+/// SAME deterministic dispatch entry point real chat traffic goes through.
+/// Assertion is narrow and honest: for each prompt, dispatch must either
+/// return `None` (falls through to normal LLM/tool routing — acceptable) or a
+/// `Some((tool, _))` that is NEVER `"n8n_invoke_workflow"` /
+/// `"__kria_deterministic_notice"` mentioning a blocked n8n workflow for any
+/// prompt that is not actually about n8n/workflows. This proves the Bug #1
+/// fix holds across a wide, randomly-ordered mix, not just the exact original
+/// failing prompts.
+#[test]
+fn stress_50_plus_mixed_prompts_no_regressions_across_all_fixed_bugs() {
+    let prompts: Vec<&str> = vec![
+        // ── clean-pass prompts that must remain unaffected (non-regression) ──
+        "What is 50 divided by 2 divided by 5?",
+        "Compute 2 * 3 * 4 * 5",
+        "What's 7 minus 20?",
+        "Calculate the sum of 10, 20, and 30",
+        "Is this valid JSON: {\"a\": [1,2,3]}?",
+        "Pretty print {\"nested\":{\"x\":1,\"y\":[1,2]}}",
+        "Does the pattern ^[a-z]+$ match 'hello'?",
+        "Replace all digits with # in 'a1b2c3'",
+        "How many lines are in 'line one\\nline two\\nline three'?",
+        "Reverse 'kria' and then tell me if the result is a real word",
+        "Convert '*italic* and **bold**' to HTML",
+        "hello",
+        "how are you",
+        // ── Bug #1 regression coverage: hash/crypto must never hit n8n ──
+        "Give me sha512 hash of test",
+        "Hash test using sha256",
+        "What's the sha1 hash of 'production'?",
+        "Give me the sha512 hash of 'test'",
+        "What's the md5 hash of hello?",
+        "compute the blake3 checksum of 'kria'",
+        // ── Bug #1 regression coverage: search/news must never hit n8n ──
+        "Using openclaw search wen for todays latest breaking news in India",
+        "Using openclaw search web for todays latest breaking news in India",
+        "Search latest breaking news",
+        "Search web for latest news on some topic",
+        // ── Bug #1 regression coverage: skill invocation must never hit n8n ──
+        "Run oc_fake_skill",
+        "Run the skill oc_fake_skill_that_does_not_exist with no arguments",
+        "Run the openclaw calculator skill",
+        // ── Bug #3/#8/#9 regression coverage: skill discovery questions ──
+        "Do I have a word count skill?",
+        "What OpenClaw skills are installed?",
+        "Can you reverse strings?",
+        "What text skills exist?",
+        "List installed OpenClaw skills.",
+        "List enabled skills.",
+        "List disabled skills.",
+        "Show me which skills are currently enabled",
+        "Show me which skills are currently disabled",
+        // ── Bug #6 regression coverage: literal text transforms ──
+        "uppercase abc",
+        "lowercase XYZ",
+        "reverse hello",
+        "capitalize test",
+        "What's the uppercase version of 'kria openclaw'?",
+        // ── Bug #5 regression coverage: CSV parsing ──
+        "Parse this CSV",
+        "Parse uploaded CSV",
+        "CSV to JSON",
+        "JSON to CSV",
+        "Convert this JSON array of rows to CSV: [[\"a\",\"b\"],[\"1\",\"2\"]]",
+        "Parse 'a,b,c\\n1,2,3\\n4,5,6' as raw CSV rows",
+        // ── mixed native / marketplace / generated-skill style prompts ──
+        "What's the trust tier of the code sandbox skill?",
+        "Refresh the marketplace skill list",
+        "Show me marketplace skills in the developer category",
+        "I want to count words, can you help?",
+        "Something to compress text would be useful right now",
+        "I need json formatting help",
+        "Is there a word-count skill installed?",
+        "Is there a skill installed that can reverse strings?",
+        "Decompress this concept: if I gzip 'abc' what happens to the size?",
+        "Quickly: what is 5+5?",
+    ];
+
+    assert!(
+        prompts.len() >= 50,
+        "stress suite must cover at least 50 prompts, got {}",
+        prompts.len()
+    );
+
+    let workflows = n8n_dispatch_fixture_workflows();
+    let mail_schedule_test_style_id = "mail_schedule_test";
+
+    for prompt in &prompts {
+        // 1. Must never panic — this is the primary stress-test invariant.
+        let result = std::panic::catch_unwind(|| try_deterministic_dispatch(prompt));
+        assert!(result.is_ok(), "dispatch panicked on prompt: {prompt}");
+        let dispatch = result.unwrap();
+
+        // 2. Bug #1 regression: hash/crypto and skill-invocation prompts must
+        // never resolve to an n8n workflow tool call.
+        let is_hash_or_skill_prompt = {
+            let lower = prompt.to_ascii_lowercase();
+            lower.contains("hash")
+                || lower.contains("sha1")
+                || lower.contains("sha256")
+                || lower.contains("sha512")
+                || lower.contains("md5")
+                || lower.contains("blake3")
+                || lower.contains("checksum")
+                || (lower.contains("skill") && !lower.contains("skills are"))
+        };
+        if is_hash_or_skill_prompt {
+            if let Some((tool, params)) = &dispatch {
+                assert_ne!(
+                    tool, "n8n_invoke_workflow",
+                    "hash/skill prompt must never invoke n8n directly: {prompt}"
+                );
+                if tool == KRIA_DETERMINISTIC_NOTICE_TOOL {
+                    let msg = deterministic_notice_message(params);
+                    assert!(
+                        !msg.to_ascii_lowercase().contains("mail schedule test")
+                            && !msg.contains(mail_schedule_test_style_id),
+                        "hash/skill prompt must not surface an n8n workflow notice: {prompt} -> {msg}"
+                    );
+                }
+            }
+        }
+
+        // 3. Cross-check against the real WorkflowRankingEngine using the
+        // fixture workflow set: a hash/skill prompt must never be classified
+        // as `Blocked` against ANY approved workflow (the exact original
+        // production symptom).
+        if is_hash_or_skill_prompt {
+            let route = crate::n8n::WorkflowRankingEngine::new(workflows.clone()).route_chat(
+                crate::n8n::N8nChatRouteRequest {
+                    prompt: prompt.to_string(),
+                    previous_user_prompt: None,
+                    manual_n8n_mode: false,
+                    safe_auto_run_enabled: false,
+                    workflows: Vec::new(),
+                },
+            );
+            assert_ne!(
+                route.status,
+                crate::n8n::N8nChatRouteStatus::Blocked,
+                "hash/skill prompt must never be Blocked as an n8n workflow: {prompt}"
+            );
+        }
+    }
+}
+
+/// PRODUCTION HARDENING regression (Phase 10: error system audit). Reproduces
+/// the exact real production failure: a failed OpenClaw call
+/// (`ToolResult::err("No suitable skill found: No enabled skills found in registry")`)
+/// must surface its REAL error message in the `StreamEvent::ToolEnd` payload
+/// sent to the frontend, not the generic "unknown error" fallback the
+/// frontend displays when `result.error` is absent.
+#[test]
+fn regr_phase10_tool_end_payload_forwards_real_error_message() {
+    let real_error = "No suitable skill found: No enabled skills found in registry";
+    let failed = crate::infra::isolation::ToolResult::err(real_error);
+    let payload = tool_end_result_payload(&failed);
+    assert_eq!(
+        payload.get("error").and_then(|v| v.as_str()),
+        Some(real_error),
+        "the real error message must be forwarded, not swallowed into 'unknown error'"
+    );
+}
+
+/// Non-regression: a successful tool call's `data` payload must still be
+/// forwarded unchanged (this fix must not alter the success path).
+#[test]
+fn regr_phase10_tool_end_payload_success_path_unchanged() {
+    let ok = crate::infra::isolation::ToolResult::ok(serde_json::json!({
+        "algorithm": "sha256",
+        "hash": "abc123",
+    }));
+    let payload = tool_end_result_payload(&ok);
+    assert_eq!(payload["algorithm"], "sha256");
+    assert_eq!(payload["hash"], "abc123");
+    assert!(payload.get("error").is_none());
+}
+
+/// Edge case: a failed `ToolResult` with no `error` set at all (should not
+/// happen via the real `ToolResult::err` constructor, but defensively handled
+/// here) must fall back to the raw `data` (Null) rather than panicking or
+/// fabricating a message.
+#[test]
+fn regr_phase10_tool_end_payload_handles_missing_error_gracefully() {
+    let failed_no_error = crate::infra::isolation::ToolResult {
+        success: false,
+        data: serde_json::Value::Null,
+        error: None,
+    };
+    let payload = tool_end_result_payload(&failed_no_error);
+    assert!(payload.is_null());
 }

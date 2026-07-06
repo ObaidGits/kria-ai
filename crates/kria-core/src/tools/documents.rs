@@ -179,11 +179,60 @@ struct ParseCsv {
     sidecar: DocSidecar,
 }
 
+/// Parse CSV rows from raw text content (shared by the `path` and `csv_text`
+/// code paths so both produce identical output shape).
+fn parse_csv_rows(content: &str, max_rows: usize) -> serde_json::Value {
+    let lines: Vec<&str> = content.lines().collect();
+    let header = lines.first().copied().unwrap_or("");
+    let columns: Vec<&str> = header.split(',').collect();
+    let row_count = lines.len().saturating_sub(1);
+    let sample_rows: Vec<Vec<&str>> = lines
+        .iter()
+        .skip(1)
+        .take(max_rows)
+        .map(|l| l.split(',').collect())
+        .collect();
+
+    serde_json::json!({
+        "columns": columns,
+        "column_count": columns.len(),
+        "row_count": row_count,
+        "sample_rows": sample_rows,
+        "truncated": row_count > max_rows,
+    })
+}
+
 #[async_trait]
 impl ToolHandler for ParseCsv {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let path = params["path"].as_str().unwrap_or("");
         let max_rows = params["max_rows"].as_u64().unwrap_or(100) as usize;
+
+        // BUG #5 FIX (category C: Tool Implementation issue). Root cause: this
+        // tool only accepted a `path` parameter and ALWAYS called
+        // `tokio::fs::read_to_string(path)` on whatever string it received —
+        // there was no way to pass raw/inline CSV text. When the LLM (or a
+        // caller) passed literal CSV content like "a,b,c\n1,2,3\n4,5,6" as
+        // `path`, the OS reported "No such file or directory", surfaced
+        // upstream as "unknown error". Add an explicit `csv_text` parameter
+        // for inline content, alongside the existing `path` parameter for
+        // file input, so BOTH are supported without breaking the file path
+        // behavior any existing caller relies on.
+        if let Some(csv_text) = params["csv_text"].as_str() {
+            let result = parse_csv_rows(csv_text, max_rows);
+            let mut result = result;
+            result["format"] = serde_json::json!("csv");
+            result["backend"] = serde_json::json!("inline");
+            result["source"] = serde_json::json!("csv_text");
+            return ToolResult::ok(result);
+        }
+
+        let path = params["path"].as_str().unwrap_or("");
+        if path.is_empty() {
+            return ToolResult::err(
+                "missing required parameter: provide either 'path' (file) or 'csv_text' (inline CSV content)"
+                    .to_string(),
+            );
+        }
 
         // Try sidecar for pandas analysis (schema detection, statistics)
         if let Some(result) = self.sidecar.try_extract(path, &["text", "tables"]).await {
@@ -196,25 +245,11 @@ impl ToolHandler for ParseCsv {
         // Fallback: native CSV parsing with basic analysis
         match tokio::fs::read_to_string(path).await {
             Ok(content) => {
-                let lines: Vec<&str> = content.lines().collect();
-                let header = lines.first().copied().unwrap_or("");
-                let columns: Vec<&str> = header.split(',').collect();
-                let row_count = lines.len().saturating_sub(1);
-                let sample_rows: Vec<Vec<&str>> = lines
-                    .iter()
-                    .skip(1)
-                    .take(max_rows)
-                    .map(|l| l.split(',').collect())
-                    .collect();
-
-                ToolResult::ok(serde_json::json!({
-                    "path": path, "format": "csv", "backend": "native",
-                    "columns": columns,
-                    "column_count": columns.len(),
-                    "row_count": row_count,
-                    "sample_rows": sample_rows,
-                    "truncated": row_count > max_rows,
-                }))
+                let mut result = parse_csv_rows(&content, max_rows);
+                result["path"] = serde_json::json!(path);
+                result["format"] = serde_json::json!("csv");
+                result["backend"] = serde_json::json!("native");
+                ToolResult::ok(result)
             }
             Err(e) => ToolResult::err(format!("CSV read failed: {e}")),
         }
@@ -274,6 +309,83 @@ impl ToolHandler for SummarizeDocument {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tool() -> ParseCsv {
+        ParseCsv {
+            sidecar: DocSidecar(None),
+        }
+    }
+
+    /// BUG #5 regression (category C: Tool Implementation issue). Reproduces
+    /// the exact real production failure: passing raw CSV text as if it were
+    /// a value the tool could parse directly, instead of a filesystem path.
+    #[tokio::test]
+    async fn regr_bug5_parses_inline_csv_text_via_csv_text_param() {
+        let result = tool()
+            .execute(serde_json::json!({ "csv_text": "a,b,c\n1,2,3\n4,5,6" }))
+            .await;
+        assert!(result.success, "expected success, got: {:?}", result.error);
+        assert_eq!(result.data["columns"], serde_json::json!(["a", "b", "c"]));
+        assert_eq!(result.data["row_count"], 2);
+        assert_eq!(result.data["backend"], "inline");
+        assert_eq!(
+            result.data["sample_rows"],
+            serde_json::json!([["1", "2", "3"], ["4", "5", "6"]])
+        );
+    }
+
+    /// Non-regression: the original file-path behavior must still work.
+    #[tokio::test]
+    async fn regr_bug5_still_parses_real_file_via_path_param() {
+        let dir = std::env::temp_dir();
+        let file_path = dir.join(format!("kria_parse_csv_test_{}.csv", uuid::Uuid::new_v4()));
+        tokio::fs::write(&file_path, "x,y\n7,8\n9,10")
+            .await
+            .expect("write temp csv");
+
+        let result = tool()
+            .execute(serde_json::json!({ "path": file_path.to_string_lossy() }))
+            .await;
+
+        tokio::fs::remove_file(&file_path).await.ok();
+
+        assert!(result.success, "expected success, got: {:?}", result.error);
+        assert_eq!(result.data["backend"], "native");
+        assert_eq!(result.data["columns"], serde_json::json!(["x", "y"]));
+        assert_eq!(result.data["row_count"], 2);
+    }
+
+    /// BUG #5 regression: neither `path` nor `csv_text` supplied must produce
+    /// a clear, actionable error instead of a confusing OS-level failure.
+    #[tokio::test]
+    async fn regr_bug5_missing_both_params_gives_clear_error() {
+        let result = tool().execute(serde_json::json!({})).await;
+        assert!(!result.success);
+        let err = result.error.unwrap_or_default();
+        assert!(
+            err.contains("path") && err.contains("csv_text"),
+            "error should mention both options: {err}"
+        );
+    }
+
+    /// BUG #5 regression: passing literal CSV text via the OLD `path` field
+    /// (the exact original bug's mistaken-usage pattern) must still fail
+    /// clearly rather than silently succeeding with garbage data — the real
+    /// fix is that a caller/LLM should now use `csv_text` instead, not that
+    /// `path` should quietly start accepting non-path content.
+    #[tokio::test]
+    async fn regr_bug5_literal_csv_text_via_path_still_fails_clearly() {
+        let result = tool()
+            .execute(serde_json::json!({ "path": "a,b,c\n1,2,3\n4,5,6" }))
+            .await;
+        assert!(!result.success);
+        assert!(result.error.unwrap_or_default().contains("CSV read failed"));
+    }
+}
+
 pub fn register(reg: &ToolRegistry) {
     register_with_sidecar(reg, None);
 }
@@ -303,12 +415,18 @@ pub fn register_with_sidecar(reg: &ToolRegistry, sidecar: Option<Arc<SidecarBrid
         (
             ToolDef {
                 name: "parse_csv".into(),
-                description: "Parse CSV file with column detection and sample rows".into(),
+                description: "Parse CSV with column detection and sample rows. Provide EITHER 'path' (a CSV file on disk) OR 'csv_text' (raw/inline CSV content pasted in the request) — not both required.".into(),
                 category: "documents".into(),
                 default_tier: RiskLevel::Green,
                 min_tier: "lite",
                 parameters: vec![
-                    param("path", "string", "CSV file path", true),
+                    param("path", "string", "CSV file path (use this OR csv_text)", false),
+                    param(
+                        "csv_text",
+                        "string",
+                        "Raw/inline CSV text content, e.g. \"a,b\\n1,2\" (use this OR path)",
+                        false,
+                    ),
                     param(
                         "max_rows",
                         "integer",

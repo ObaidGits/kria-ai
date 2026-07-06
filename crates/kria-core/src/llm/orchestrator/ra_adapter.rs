@@ -82,7 +82,9 @@ impl ModelLifecycle for OrchestratorModel {
 
     async fn unload(&self) -> anyhow::Result<()> {
         // Best-effort release when idle; not an error if a process was still live.
-        self.orchestrator.release_if_idle("ra_residency_unload").await?;
+        self.orchestrator
+            .release_if_idle("ra_residency_unload")
+            .await?;
         Ok(())
     }
 
@@ -91,7 +93,9 @@ impl ModelLifecycle for OrchestratorModel {
             Residency::VramHot | Residency::Cloud => self.orchestrator.reload_to_vram().await,
             Residency::RamWarm | Residency::DiskCold => self.orchestrator.evict_to_ram().await,
             Residency::Unloaded => {
-                self.orchestrator.release_if_idle("ra_residency_swap_unload").await?;
+                self.orchestrator
+                    .release_if_idle("ra_residency_swap_unload")
+                    .await?;
                 Ok(())
             }
         }

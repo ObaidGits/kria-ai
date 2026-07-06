@@ -152,9 +152,11 @@ impl ToolHandler for ReminderSet {
         {
             match crate::tasks::nl_time::parse(s, now) {
                 Some(dt) => dt,
-                None => return ToolResult::err(format!(
+                None => {
+                    return ToolResult::err(format!(
                     "couldn't understand time '{s}'. Try ISO 8601, or English like 'tomorrow 5pm'."
-                )),
+                ))
+                }
             }
         } else {
             let minutes = params["fire_in_minutes"].as_f64().unwrap_or(5.0).max(0.0);

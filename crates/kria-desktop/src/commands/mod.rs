@@ -5,6 +5,7 @@ pub(crate) mod app_commands;
 pub(crate) mod app_state;
 pub(crate) mod automation;
 pub(crate) mod briefing;
+pub(crate) mod capability;
 pub(crate) mod chat;
 pub(crate) mod colab;
 pub(crate) mod colab_dispatch;
@@ -153,8 +154,12 @@ pub use n8n::{
 #[allow(unused_imports)]
 pub use openclaw::{
     clawhub_fetch_remote_skills, clawhub_install_skill, clawhub_list_skills, clawhub_search_skills,
-    clawhub_toggle_skill, clawhub_uninstall_skill, openclaw_substrate_restart,
-    openclaw_substrate_status,
+    clawhub_toggle_skill, clawhub_uninstall_skill, install_skill_bundle, openclaw_capability_graph,
+    openclaw_capability_manager, openclaw_execution_logs, openclaw_generate_skill,
+    openclaw_get_developer_mode, openclaw_get_settings, openclaw_list_grants,
+    openclaw_recommend_skills, openclaw_revoke_grant, openclaw_set_developer_mode,
+    openclaw_substrate_restart, openclaw_substrate_status, openclaw_update_settings,
+    uninstall_skill_bundle,
 };
 #[allow(unused_imports)]
 pub use providers::{
@@ -172,9 +177,8 @@ pub use provisioning::{
 pub use runtime::{init_runtime, shutdown_runtime};
 #[allow(unused_imports)]
 pub use runtime_status::{
-    delete_target, get_ironclad_config, get_ironclad_forensics, get_ironclad_status,
-    get_hra_diagnostics,
-    get_orchestrator_status, register_new_target, request_ironclad_hard_reset,
+    delete_target, get_hra_diagnostics, get_ironclad_config, get_ironclad_forensics,
+    get_ironclad_status, get_orchestrator_status, register_new_target, request_ironclad_hard_reset,
     request_ironclad_soft_reset, update_ironclad_config, update_target,
 };
 #[allow(unused_imports)]

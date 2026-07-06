@@ -99,8 +99,13 @@ mod tests {
                     processes: vec![],
                 },
             ],
-            cpu: CpuLive { per_core_pct: vec![20, 30, 10, 5] },
-            ram: RamLive { total_mb: 32768, free_mb: 20000 },
+            cpu: CpuLive {
+                per_core_pct: vec![20, 30, 10, 5],
+            },
+            ram: RamLive {
+                total_mb: 32768,
+                free_mb: 20000,
+            },
             sampled_at_ms: 1000,
         }
     }
@@ -146,8 +151,13 @@ mod tests {
         let unknown = HostSnapshot {
             seq: 2,
             gpus: vec![],
-            cpu: CpuLive { per_core_pct: vec![] },
-            ram: RamLive { total_mb: 32768, free_mb: 19000 },
+            cpu: CpuLive {
+                per_core_pct: vec![],
+            },
+            ram: RamLive {
+                total_mb: 32768,
+                free_mb: 19000,
+            },
             sampled_at_ms: 2000,
         };
         unknown.apply_to(&mut t, 512);

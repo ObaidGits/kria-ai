@@ -46,17 +46,83 @@ fn contains_temporal_signal(query: &str) -> bool {
 /// "tell me about yourself", "are you live", "what are your features").
 /// These must NEVER trigger live-fact retrieval — KRIA's capabilities are
 /// internal knowledge, not external facts.
+// PRODUCTION HARDENING FIX (OpenClaw pipeline audit, Phase 3: semantic router
+// gap). Root cause, confirmed via real log evidence: "List installed OpenClaw
+// skills." scored gate1_temporal=false, gate2_semantic=true — the SEMANTIC
+// anchor gate (not this lexical pre-filter) misfired, treating the phrase as
+// live-fact-like. This pre-filter was ALREADY the documented, intended
+// mechanism to prevent exactly this class of self-referential-capability
+// query from reaching the live-fact gates at all — but it only recognized
+// "you"/"your"/"yourself"/"kria" as self-referential subjects, never
+// "openclaw"/"skill(s)"/"tool(s)", so a query entirely about KRIA's own
+// OpenClaw skill registry (which IS self-referential capability knowledge,
+// not an external live fact) fell through to Gate 2 and got hijacked into a
+// forced `#tool:searxng_search` directive — the exact mechanism behind the
+// "List the skills available in the OpenClaw marketplace" →
+// `mcp_fs_list_directory`/`web_search` misrouting confirmed in real GUI usage.
 static SELF_REF_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)\b(?:you|your|yourself|kria)\b").expect("Invalid self-ref regex")
+    Regex::new(r"(?i)\b(?:you|your|yourself|kria|marketplace)\b").expect("Invalid self-ref regex")
 });
 
 static CAPABILITY_VERB_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)\b(?:can|could|able|capable|capabilit(?:y|ies)|abilit(?:y|ies)|feature|features|do|help|assist|support|name|identity|model|live|alive|online|ready|awake|version|who|what)\b")
+    Regex::new(r"(?i)\b(?:can|could|able|capable|capabilit(?:y|ies)|abilit(?:y|ies)|feature|features|do|help|assist|support|name|identity|model|live|alive|online|ready|awake|version|who|what|skill|skills|list|installed|enabled|disabled|marketplace|generated)\b")
         .expect("Invalid capability verb regex")
 });
 
+/// Subject terms that are UNCONDITIONALLY self-referential to KRIA's own
+/// system regardless of the rest of the sentence — "openclaw"/"clawhub" name
+/// KRIA's own skill subsystem specifically (unlike "you"/"kria" which are
+/// broad enough that requiring a capability-verb co-occurrence avoids
+/// over-matching ordinary sentences that happen to say "kria" or "you").
+///
+/// PRODUCTION HARDENING FIX (OpenClaw pipeline audit, Phase 3). Real
+/// production failure, confirmed via live backend logs: "Use OpenClaw to
+/// evaluate the expression 8 * 8" matched `SELF_REF_RE` (contains "openclaw")
+/// but NOT `CAPABILITY_VERB_RE` (no can/do/help/skill/etc. word), so the
+/// original `&&`-gated check failed and the query still got hijacked into a
+/// forced `#tool:searxng_search` directive. Any mention of OpenClaw/ClawHub is
+/// unconditionally about KRIA's own subsystem — it can never be an external
+/// live fact — so it must not additionally require a capability verb.
+static UNCONDITIONAL_SELF_REF_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)\b(?:openclaw|clawhub)\b").expect("Invalid unconditional self-ref regex")
+});
+
 fn is_self_referential_capability_query(query: &str) -> bool {
-    SELF_REF_RE.is_match(query) && CAPABILITY_VERB_RE.is_match(query)
+    UNCONDITIONAL_SELF_REF_RE.is_match(query)
+        || (SELF_REF_RE.is_match(query) && CAPABILITY_VERB_RE.is_match(query))
+}
+
+/// Bare OpenClaw skill-management phrasing that never mentions
+/// "you"/"kria"/"openclaw" explicitly (e.g. "which skills are enabled") but
+/// is still unambiguously about KRIA's own skill registry, not an external
+/// live fact. Requires a skill-management action word AND "skill"/"skills"
+/// so generic unrelated sentences containing "skill" alone don't match.
+static SKILL_MANAGEMENT_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)\b(?:list|show|which|what)\b.{0,30}\bskills?\b.{0,30}\b(?:installed|enabled|disabled|available|active|inactive)\b|\b(?:installed|enabled|disabled|available)\b.{0,30}\bskills?\b")
+        .expect("Invalid skill management regex")
+});
+
+fn is_skill_management_query(query: &str) -> bool {
+    SKILL_MANAGEMENT_RE.is_match(query)
+}
+
+/// Skill-invocation phrasing ("use/run/execute the skill called X", "run
+/// skill X") — real production failure, confirmed via live backend logs:
+/// "Use the skill called oc_this_skill_does_not_exist_99999 to do something"
+/// matched none of the other pre-filters (no "openclaw"/"kria" mention, no
+/// installed/enabled/disabled keyword) and got hijacked into
+/// `#tool:searxng_search`. Any phrase invoking "the skill (called/named) X"
+/// is unambiguously an OpenClaw skill-invocation request, never an external
+/// live fact.
+static SKILL_INVOCATION_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"(?i)\b(?:use|run|execute|invoke)\b.{0,15}\bthe\s+skill\b|\bskill\s+(?:called|named)\b",
+    )
+    .expect("Invalid skill invocation regex")
+});
+
+fn is_skill_invocation_query(query: &str) -> bool {
+    SKILL_INVOCATION_RE.is_match(query)
 }
 
 // ─── Gate 2: Semantic Anchor Embeddings ───────────────────────────────────────
@@ -216,6 +282,32 @@ pub fn is_live_fact_query(query: &str) -> bool {
         tracing::info!(
             query = %query,
             "LiveFactClassifier: GUI/app-launch query — not a live fact"
+        );
+        return false;
+    }
+
+    // ── Pre-filter: OpenClaw skill-management queries ──────────────────────
+    // PRODUCTION HARDENING FIX (OpenClaw pipeline audit, Phase 3). Real
+    // production failure, confirmed via live backend logs: "Show me which
+    // skills are currently enabled" scored gate2_semantic=true and got
+    // hijacked into a forced #tool:searxng_search directive. Bare skill-
+    // management phrasing ("list/show/which skills ... installed/enabled/
+    // disabled/available") never mentions "you"/"kria"/"openclaw" explicitly,
+    // so it can't be caught by the self-referential-subject regex above —
+    // but it is unambiguously a query about KRIA's own OpenClaw registry, not
+    // an external live fact, regardless of phrasing.
+    if is_skill_management_query(query) {
+        tracing::info!(
+            query = %query,
+            "LiveFactClassifier: OpenClaw skill-management query — not a live fact"
+        );
+        return false;
+    }
+
+    if is_skill_invocation_query(query) {
+        tracing::info!(
+            query = %query,
+            "LiveFactClassifier: OpenClaw skill-invocation query — not a live fact"
         );
         return false;
     }
@@ -495,6 +587,75 @@ mod tests {
         assert!(is_live_fact_query("what is the current bitcoin price"));
         assert!(is_live_fact_query("latest news about elections"));
         assert!(is_live_fact_query("how old is the president"));
+    }
+
+    /// PRODUCTION HARDENING regression (OpenClaw pipeline audit, Phase 3).
+    /// Real production failure, confirmed via live backend logs: "List
+    /// installed OpenClaw skills." scored `gate1_temporal=false,
+    /// gate2_semantic=true` and got hijacked into a forced
+    /// `#tool:searxng_search` directive BEFORE ever reaching the real
+    /// OpenClaw semantic router — a self-referential query about KRIA's own
+    /// skill registry must never be treated as an external live fact.
+    #[test]
+    fn regr_openclaw_skill_discovery_queries_never_treated_as_live_fact() {
+        assert!(!is_live_fact_query("List installed OpenClaw skills."));
+        assert!(!is_live_fact_query("What OpenClaw skills are installed?"));
+        assert!(!is_live_fact_query(
+            "List the skills available in the OpenClaw marketplace"
+        ));
+        assert!(!is_live_fact_query(
+            "Show me which skills are currently enabled"
+        ));
+        assert!(!is_live_fact_query(
+            "Search the marketplace for a code sandbox skill"
+        ));
+        assert!(!is_live_fact_query(
+            "What generated skills are currently installed?"
+        ));
+        assert!(!is_live_fact_query(
+            "Is there a word-count skill installed?"
+        ));
+    }
+
+    /// PRODUCTION HARDENING regression (OpenClaw pipeline audit, Phase 3).
+    /// Real production failure #2, confirmed via live backend logs after the
+    /// first fix landed: "Use OpenClaw to evaluate the expression 8 * 8"
+    /// contains "openclaw" but has no capability-verb word (no can/do/help/
+    /// skill/etc.), so the original `&&`-gated self-referential check missed
+    /// it and it still got hijacked into a forced `#tool:searxng_search`
+    /// directive. ANY mention of OpenClaw/ClawHub must be unconditionally
+    /// self-referential — it can never be an external live fact regardless
+    /// of what else the sentence says.
+    #[test]
+    fn regr_openclaw_mentions_are_unconditionally_self_referential() {
+        assert!(!is_live_fact_query(
+            "Use OpenClaw to evaluate the expression 8 * 8"
+        ));
+        assert!(!is_live_fact_query(
+            "Use the openclaw calculator skill on 3+3"
+        ));
+        assert!(!is_live_fact_query(
+            "Route this to OpenClaw: reverse the word kria"
+        ));
+        assert!(!is_live_fact_query("openclaw 8 * 8"));
+        assert!(!is_live_fact_query("Ask ClawHub for a code sandbox"));
+    }
+
+    /// PRODUCTION HARDENING regression (OpenClaw pipeline audit, Phase 3).
+    /// Real production failure #3: bare "use/run the skill called X" phrasing
+    /// with no "openclaw"/"kria" mention and no installed/enabled/disabled
+    /// keyword was not caught by any pre-filter and got hijacked into a
+    /// forced `#tool:searxng_search` directive.
+    #[test]
+    fn regr_skill_invocation_phrasing_never_treated_as_live_fact() {
+        assert!(!is_live_fact_query(
+            "Use the skill called oc_this_skill_does_not_exist_99999 to do something"
+        ));
+        assert!(!is_live_fact_query("Run the skill named calculator"));
+        assert!(!is_live_fact_query("Execute the skill called web_search"));
+        assert!(!is_live_fact_query(
+            "Uninstall a skill called oc_nonexistent_test_skill_xyz"
+        ));
     }
 
     // ── GUI / app-launch queries: NEVER live-fact ──

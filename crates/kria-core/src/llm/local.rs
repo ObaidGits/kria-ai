@@ -1,5 +1,7 @@
 use crate::infra::circuit_breaker::{CircuitBreaker, CircuitBreakerError, CircuitState};
-use crate::llm::orchestrator::server_manager::{LlamaServerManager, StreamActivityGuard, STATE_READY};
+use crate::llm::orchestrator::server_manager::{
+    LlamaServerManager, StreamActivityGuard, STATE_READY,
+};
 use crate::llm::{
     extract_openai_content_text, extract_openai_message_text, extract_openai_tool_calls,
     trim_messages_for_context, ChatMessage, ContextTooLargeError, LlmBackend, LlmResponse,
@@ -8,10 +10,27 @@ use crate::llm::{
 use async_trait::async_trait;
 use futures::Stream;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
+
+/// Consecutive transport-level `/health` failures required before the local backend
+/// is reported "not reachable". Debounces transient blips during generation.
+const HEALTH_FAILURE_THRESHOLD: u32 = 3;
+
+/// Outcome of a single `/health` probe against the local llama-server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LocalHealthProbe {
+    /// HTTP 200 — serving and ready.
+    Ready,
+    /// Reachable, non-2xx, not loading (e.g. all slots busy). Server is ALIVE.
+    Busy,
+    /// Reachable, non-2xx, model loading. Server is ALIVE.
+    Loading,
+    /// Transport error or timeout — no HTTP response at all.
+    Unreachable,
+}
 
 /// Pre-flight memory check — estimates whether the requested context will fit in
 /// available RAM. Returns `Some(warning_message)` if risky, `None` otherwise.
@@ -62,6 +81,14 @@ pub struct LocalBackend {
     /// Dynamic context window (updated by orchestrator swaps).
     context_window: Arc<AtomicUsize>,
     client: reqwest::Client,
+    /// Dedicated short-timeout client for `/health` probes. Kept separate from the
+    /// 120s inference `client` so a saturated inference path can neither delay nor
+    /// mask a reachability probe (Issue-1 root cause: shared client + long timeout).
+    health_client: reqwest::Client,
+    /// Consecutive transport-level health failures. Debounces the user-facing
+    /// "not reachable" signal so a single transient blip (or a busy/loading `/health`
+    /// response during an in-flight generation) never flips the banner.
+    consecutive_health_failures: AtomicU32,
     circuit: Arc<CircuitBreaker>,
     /// Optional server manager for orchestrator-managed mode.
     /// Replaceable so Settings-driven local model swaps can attach the new
@@ -81,12 +108,22 @@ impl LocalBackend {
             .build()
             .unwrap_or_default();
 
+        // Short, dedicated probe client: fast connect + overall deadline so the
+        // reachability signal is never coupled to long-running inference requests.
+        let health_client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .connect_timeout(Duration::from_secs(2))
+            .build()
+            .unwrap_or_default();
+
         Self {
             api_url,
             model_label,
             capabilities,
             context_window: Arc::new(AtomicUsize::new(context_window)),
             client,
+            health_client,
+            consecutive_health_failures: AtomicU32::new(0),
             circuit: Arc::new(CircuitBreaker::with_defaults("local-llm")),
             server_manager: RwLock::new(None),
         }
@@ -131,7 +168,6 @@ impl LocalBackend {
     }
 
     /// Check if the server is in a swapping state.
-    #[allow(dead_code)]
     fn is_swapping(&self) -> bool {
         self.server_manager
             .read()
@@ -288,14 +324,40 @@ impl LocalBackend {
         true
     }
 
-    async fn health_check_once(&self) -> bool {
+    /// Result of a single `/health` probe. Distinguishes "alive but not idle/ready"
+    /// from "truly unreachable" — the crux of the Issue-1 fix.
+    async fn probe_health(&self) -> LocalHealthProbe {
         let health_url = self.resolve_api_url().replace("/v1", "/health");
-        self.client
-            .get(&health_url)
-            .send()
-            .await
-            .map(|r| r.status().is_success())
-            .unwrap_or(false)
+        let fut = self.health_client.get(&health_url).send();
+        match tokio::time::timeout(Duration::from_secs(5), fut).await {
+            Ok(Ok(resp)) => {
+                if resp.status().is_success() {
+                    LocalHealthProbe::Ready
+                } else {
+                    // Reachable but not ready. llama.cpp returns 503 while a model is
+                    // loading or (older builds) when all slots are busy. The server is
+                    // ALIVE — never report this as "unreachable".
+                    let loading = resp
+                        .text()
+                        .await
+                        .map(|b| b.to_lowercase().contains("loading"))
+                        .unwrap_or(false);
+                    if loading {
+                        LocalHealthProbe::Loading
+                    } else {
+                        LocalHealthProbe::Busy
+                    }
+                }
+            }
+            // Transport error or timed out → genuinely unreachable for this probe.
+            Ok(Err(_)) | Err(_) => LocalHealthProbe::Unreachable,
+        }
+    }
+
+    /// Strict readiness check (HTTP 200). Used by internal readiness loops and
+    /// circuit recovery where we specifically require the server to be serving.
+    async fn health_check_once(&self) -> bool {
+        matches!(self.probe_health().await, LocalHealthProbe::Ready)
     }
 
     async fn wait_for_backend_ready(&self, timeout_secs: u64) -> bool {
@@ -723,11 +785,18 @@ impl LlmBackend for LocalBackend {
         {
             Ok(Ok(resp)) => resp,
             Ok(Err(e)) => {
-                self.circuit.on_failure().await;
+                // Do not open the circuit for failures caused by a controlled swap:
+                // the server is mid-reload, not broken. Counting these would leave the
+                // breaker OPEN after a swap ("sometimes it doesn't recover").
+                if !self.is_swapping() {
+                    self.circuit.on_failure().await;
+                }
                 return Err(e.into());
             }
             Err(_) => {
-                self.circuit.on_failure().await;
+                if !self.is_swapping() {
+                    self.circuit.on_failure().await;
+                }
                 anyhow::bail!("local LLM stream request timed out");
             }
         };
@@ -739,7 +808,9 @@ impl LlmBackend for LocalBackend {
                 return Err(ContextTooLargeError.into());
             }
 
-            self.circuit.on_failure().await;
+            if !self.is_swapping() {
+                self.circuit.on_failure().await;
+            }
             tracing::error!(
                 status = %status,
                 response_body = %body_text,
@@ -914,7 +985,32 @@ impl LlmBackend for LocalBackend {
     }
 
     async fn health_check(&self) -> bool {
-        self.health_check_once().await
+        // A controlled orchestrator swap (model reload at a turn boundary) briefly
+        // takes `/health` offline while the SAME process is alive and about to serve
+        // again. Never report that as "not reachable" — it is a warming state, not an
+        // outage. This removes the residual banner flicker around legitimate swaps.
+        if self.is_swapping() {
+            self.consecutive_health_failures.store(0, Ordering::Relaxed);
+            return true;
+        }
+        // Reachability semantics (Issue-1 fix): a server that is alive but busy or
+        // loading is NOT "unreachable". Only sustained transport failures count as
+        // down, and even then we require several consecutive misses so a single
+        // blip during an in-flight generation never flips the user-facing banner.
+        match self.probe_health().await {
+            LocalHealthProbe::Ready | LocalHealthProbe::Busy | LocalHealthProbe::Loading => {
+                self.consecutive_health_failures.store(0, Ordering::Relaxed);
+                true
+            }
+            LocalHealthProbe::Unreachable => {
+                let failures = self
+                    .consecutive_health_failures
+                    .fetch_add(1, Ordering::Relaxed)
+                    + 1;
+                // Report reachable until the failure streak crosses the threshold.
+                failures < HEALTH_FAILURE_THRESHOLD
+            }
+        }
     }
 }
 

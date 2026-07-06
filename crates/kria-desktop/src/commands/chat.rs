@@ -774,6 +774,7 @@ async fn send_message_with_profile(
                         &ev_token,
                         serde_json::json!({
                             "text": AGENT_TIMEOUT_MESSAGE,
+                            "session_id": session_id_clone,
                         }),
                     );
                     break;
@@ -864,6 +865,7 @@ async fn send_message_with_profile(
                         serde_json::json!({
                             "name": name,
                             "params": params,
+                            "session_id": session_id_clone,
                         }),
                     );
                 }
@@ -928,6 +930,14 @@ async fn send_message_with_profile(
                         .get("metadata")
                         .cloned()
                         .unwrap_or(serde_json::Value::Null);
+                    // Stamp the owning session so the frontend routes this tool result
+                    // to the correct conversation buffer (per-session isolation).
+                    if let Some(obj) = payload.as_object_mut() {
+                        obj.insert(
+                            "session_id".to_string(),
+                            serde_json::Value::String(session_id_clone.clone()),
+                        );
+                    }
                     let _ = app_handle.emit(&ev_tool_result, payload);
 
                     let persisted_payload = serde_json::json!({
@@ -1337,6 +1347,7 @@ async fn send_message_with_profile(
                                 &ev_token,
                                 serde_json::json!({
                                     "text": fallback_text,
+                                    "session_id": session_id_clone,
                                 }),
                             );
                             continue;
@@ -1371,6 +1382,7 @@ async fn send_message_with_profile(
                         &ev_token,
                         serde_json::json!({
                             "text": user_visible_error,
+                            "session_id": session_id_clone,
                         }),
                     );
                 }
@@ -1383,6 +1395,7 @@ async fn send_message_with_profile(
                             &ev_token,
                             serde_json::json!({
                                 "text": final_text,
+                                "session_id": session_id_clone,
                             }),
                         );
                     }

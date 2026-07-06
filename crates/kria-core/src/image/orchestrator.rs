@@ -30,8 +30,8 @@ use crate::image::ws_bridge::{spawn_ws_listener, EventEmitter, WsBridgeError};
 use crate::platform::vram::{build_profiler, ImageTier, VramProfiler};
 use crate::resource::{
     GpuLeaseError, GpuLeaseGuard, GpuLeaseManager, GpuLeaseState, GpuOwner, ImageLeaseBackendId,
-    ImageRuntimeSnapshot, L1ResidencySnapshot, L1RuntimeSnapshot, RamSnapshot,
-    ResourceSnapshot, VramSnapshot,
+    ImageRuntimeSnapshot, L1ResidencySnapshot, L1RuntimeSnapshot, RamSnapshot, ResourceSnapshot,
+    VramSnapshot,
 };
 
 // ─── Public request / response types ─────────────────────────────────────────
@@ -836,17 +836,19 @@ impl ImageOrchestrator {
                         Err(e) => Err(e),
                     }
                 }
-                ImageTier::BDropSwap => match self.acquire_local_lease_swap("image_local_only_swap").await {
-                    Ok(lease) => {
-                        let local = self
-                            .generate_with_swap(&job, emitter, llm_evictor.clone())
-                            .await;
-                        drop(lease);
-                        self.reconcile_gpu_lease(false).await;
-                        local
+                ImageTier::BDropSwap => {
+                    match self.acquire_local_lease_swap("image_local_only_swap").await {
+                        Ok(lease) => {
+                            let local = self
+                                .generate_with_swap(&job, emitter, llm_evictor.clone())
+                                .await;
+                            drop(lease);
+                            self.reconcile_gpu_lease(false).await;
+                            local
+                        }
+                        Err(e) => Err(e),
                     }
-                    Err(e) => Err(e),
-                },
+                }
                 ImageTier::CRejectOrCloud => {
                     // resolve_image_mode already rejected this combination;
                     // this arm is unreachable in practice.
@@ -877,7 +879,10 @@ impl ImageOrchestrator {
                         }
                     }
                     ImageTier::BDropSwap => {
-                        match self.acquire_local_lease_swap("image_local_then_cloud_swap").await {
+                        match self
+                            .acquire_local_lease_swap("image_local_then_cloud_swap")
+                            .await
+                        {
                             Ok(lease) => {
                                 let local = self
                                     .generate_with_swap(&job, emitter, llm_evictor.clone())
@@ -929,7 +934,10 @@ impl ImageOrchestrator {
                             }
                         }
                         ImageTier::BDropSwap => {
-                            match self.acquire_local_lease_swap("image_cloud_then_local_swap").await {
+                            match self
+                                .acquire_local_lease_swap("image_cloud_then_local_swap")
+                                .await
+                            {
                                 Ok(lease) => {
                                     let local = self
                                         .generate_with_swap(&job, emitter, llm_evictor.clone())
@@ -1136,7 +1144,9 @@ impl ImageOrchestrator {
         {
             use crate::resource::authority::budget::{BandPolicy, Budget};
             use crate::resource::authority::simulator::SimDeviceState;
-            use crate::resource::authority::{decide_image_admission, ActivityState, ImageAdmission};
+            use crate::resource::authority::{
+                decide_image_admission, ActivityState, ImageAdmission,
+            };
 
             let free_ram_mb = {
                 let mut sys = sysinfo::System::new();
