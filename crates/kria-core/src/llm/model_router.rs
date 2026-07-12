@@ -463,19 +463,9 @@ impl ModelRouter {
     }
 }
 
+/// Delegates to the single shared provider-type → backend mapping in
+/// `llm::provider::registry` (also used by `ProviderRegistry`), so the two
+/// no longer drift out of sync.
 fn create_provider_backend(config: &ProviderConfig) -> Option<Arc<dyn LlmBackend>> {
-    use crate::llm::provider::{anthropic, gemini, ollama, openai, openrouter};
-
-    let backend: Arc<dyn LlmBackend> = match config.provider_type {
-        ProviderType::Ollama => Arc::new(ollama::OllamaBackend::from_config(config)),
-        ProviderType::LlamaCpp | ProviderType::OpenAICompatible => {
-            Arc::new(openai::OpenAIBackend::from_config(config))
-        }
-        ProviderType::OpenAI => Arc::new(openai::OpenAIBackend::from_config(config)),
-        ProviderType::Gemini => Arc::new(gemini::GeminiBackend::from_config(config)),
-        ProviderType::Anthropic => Arc::new(anthropic::AnthropicBackend::from_config(config)),
-        ProviderType::OpenRouter => Arc::new(openrouter::OpenRouterBackend::from_config(config)),
-    };
-
-    Some(backend)
+    Some(crate::llm::provider::create_backend_for_provider(config))
 }

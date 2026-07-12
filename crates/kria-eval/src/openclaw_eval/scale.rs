@@ -20,7 +20,9 @@
 //! measured — the "degradation analysis" dimension design.md asks for that
 //! no existing test captures.
 
-use kria_core::openclaw::registry::{DiscoverySource, ProductionSkillRegistry, SkillMetadata, SkillQuery, SkillState};
+use kria_core::openclaw::registry::{
+    DiscoverySource, ProductionSkillRegistry, SkillMetadata, SkillQuery, SkillState,
+};
 use kria_core::openclaw::types::{ResourceClass, SkillCapabilities, TrustTier};
 use kria_core::safety::RiskLevel;
 use std::time::Instant;
@@ -33,7 +35,9 @@ fn fixture_metadata(i: usize) -> SkillMetadata {
         publisher: format!("pub{}", i % 100),
         version: "1.0.0".into(),
         category: "test".into(),
-        discovery_source: DiscoverySource::Bundled { path: "test".into() },
+        discovery_source: DiscoverySource::Bundled {
+            path: "test".into(),
+        },
         discovered_at: chrono::Utc::now(),
         capabilities: SkillCapabilities::default(),
         runtime_requirements: "docker".into(),
@@ -100,11 +104,16 @@ pub fn validate_1000_skill_install_and_search() -> Result<ScaleReport, String> {
     let results = registry.search_skills(&query).map_err(|e| e.to_string())?;
     let search_latency_ms = search_start.elapsed().as_secs_f64() * 1000.0;
     if results.is_empty() {
-        return Err("search over 1000 real installed skills returned no results for a known substring".into());
+        return Err(
+            "search over 1000 real installed skills returned no results for a known substring"
+                .into(),
+        );
     }
 
     let lookup_start = Instant::now();
-    registry.get("oc_scale_500").map_err(|e| format!("lookup of a known skill failed: {e}"))?;
+    registry
+        .get("oc_scale_500")
+        .map_err(|e| format!("lookup of a known skill failed: {e}"))?;
     let lookup_latency_ms = lookup_start.elapsed().as_secs_f64() * 1000.0;
 
     Ok(ScaleReport {
@@ -127,13 +136,18 @@ mod tests {
     #[test]
     #[ignore = "slow (1000 real SQLite installs) — run explicitly with --ignored"]
     fn scale_1000_skills_no_severe_degradation() {
-        let report = validate_1000_skill_install_and_search().expect("1000-skill install+search must succeed");
+        let report = validate_1000_skill_install_and_search()
+            .expect("1000-skill install+search must succeed");
         eprintln!(
             "[SCALE] total={} first_100_avg={:.3}ms last_100_avg={:.3}ms search={:.3}ms lookup={:.3}ms",
             report.total_installs, report.first_100_avg_ms, report.last_100_avg_ms, report.search_latency_ms, report.lookup_latency_ms
         );
 
-        assert!(report.search_latency_ms < 1000.0, "search over 1000 skills must complete in under 1s, got {:.3}ms", report.search_latency_ms);
+        assert!(
+            report.search_latency_ms < 1000.0,
+            "search over 1000 skills must complete in under 1s, got {:.3}ms",
+            report.search_latency_ms
+        );
         assert!(report.lookup_latency_ms < 100.0, "a single-skill lookup must complete in under 100ms even at 1000-skill scale, got {:.3}ms", report.lookup_latency_ms);
 
         let degradation_factor = report.last_100_avg_ms / report.first_100_avg_ms.max(0.001);

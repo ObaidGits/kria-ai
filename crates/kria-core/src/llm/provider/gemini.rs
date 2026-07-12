@@ -18,6 +18,7 @@ pub struct GeminiBackend {
     display_name: String,
     capabilities: Vec<String>,
     client: reqwest::Client,
+    max_retries: u32,
 }
 
 impl GeminiBackend {
@@ -47,10 +48,24 @@ impl GeminiBackend {
                 "vision".into(),
             ],
             client,
+            max_retries: config.endpoint.max_retries.max(1),
         }
     }
 
     /// Convert KRIA messages to Gemini format.
+    ///
+    /// `role: "tool"` messages are converted to labeled `role: "user"` text
+    /// turns rather than Gemini's native `functionResponse` part. Gemini's
+    /// `functionResponse` must reference a `functionCall` (and, for Gemini 3,
+    /// its `id`) that the model itself emitted in the previous turn — but
+    /// KRIA's default tool-calling is text-pattern based (`<tool_call>{...}
+    /// </tool_call>` as plain assistant text), so no real `functionCall` part
+    /// exists to reference. Emitting an unpaired `functionResponse` risks a
+    /// 400. A labeled `user` turn is honest, safe, and consistent with the
+    /// same fix applied to the OpenAI-compatible, Ollama, and Anthropic
+    /// backends. This also avoids two consecutive `tool` results (multiple
+    /// tool calls in one round) becoming untagged back-to-back `user` turns
+    /// that some Gemini model configs reject.
     fn build_contents(&self, messages: &[ChatMessage]) -> Vec<serde_json::Value> {
         let mut contents = Vec::new();
         let mut system_instruction = String::new();
@@ -59,6 +74,17 @@ impl GeminiBackend {
             if msg.role == "system" {
                 system_instruction.push_str(&msg.content);
                 system_instruction.push('\n');
+                continue;
+            }
+
+            if msg.role.eq_ignore_ascii_case("tool") {
+                let tool_name = msg.name.as_deref().unwrap_or("tool");
+                contents.push(serde_json::json!({
+                    "role": "user",
+                    "parts": [{
+                        "text": format!("[Tool result from '{}']\n{}", tool_name, msg.content),
+                    }],
+                }));
                 continue;
             }
 
@@ -174,55 +200,70 @@ impl LlmBackend for GeminiBackend {
             payload["tools"] = tools_val;
         }
 
-        let resp = self.client.post(&url).json(&payload).send().await?;
-        let status = resp.status();
-        if !status.is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("Gemini API error ({}): {}", status, body);
-        }
+        for attempt in 0..self.max_retries {
+            let resp = self.client.post(&url).json(&payload).send().await?;
+            let status = resp.status();
 
-        let body: serde_json::Value = resp.json().await?;
+            if status.as_u16() == 429 {
+                let wait = 2u64.pow(attempt);
+                tracing::warn!(attempt, wait_secs = wait, "Gemini rate limited, retrying");
+                tokio::time::sleep(Duration::from_secs(wait)).await;
+                continue;
+            }
 
-        // Extract content from Gemini response
-        let candidate = &body["candidates"][0];
-        let parts = &candidate["content"]["parts"];
+            if !status.is_success() {
+                let body = resp.text().await.unwrap_or_default();
+                anyhow::bail!("Gemini API error ({}): {}", status, body);
+            }
 
-        let mut content = String::new();
-        let mut tool_calls: Option<Vec<serde_json::Value>> = None;
+            let body: serde_json::Value = resp.json().await?;
 
-        if let Some(parts_arr) = parts.as_array() {
-            for part in parts_arr {
-                if let Some(text) = part["text"].as_str() {
-                    content.push_str(text);
-                }
-                if let Some(fc) = part.get("functionCall") {
-                    let name = fc["name"].as_str().unwrap_or("");
-                    let args = &fc["args"];
-                    let call = serde_json::json!({
-                        "type": "function",
-                        "function": {
-                            "name": name,
-                            "arguments": args.to_string(),
-                        }
-                    });
-                    tool_calls.get_or_insert_with(Vec::new).push(call);
+            // Extract content from Gemini response
+            let candidate = &body["candidates"][0];
+            let parts = &candidate["content"]["parts"];
+
+            let mut content = String::new();
+            let mut tool_calls: Option<Vec<serde_json::Value>> = None;
+
+            if let Some(parts_arr) = parts.as_array() {
+                for part in parts_arr {
+                    if let Some(text) = part["text"].as_str() {
+                        content.push_str(text);
+                    }
+                    if let Some(fc) = part.get("functionCall") {
+                        let name = fc["name"].as_str().unwrap_or("");
+                        let args = &fc["args"];
+                        let call = serde_json::json!({
+                            "type": "function",
+                            "function": {
+                                "name": name,
+                                "arguments": args.to_string(),
+                            }
+                        });
+                        tool_calls.get_or_insert_with(Vec::new).push(call);
+                    }
                 }
             }
+
+            // Extract usage
+            let usage = body["usageMetadata"].as_object().map(|u| TokenUsage {
+                prompt_tokens: u["promptTokenCount"].as_u64().unwrap_or(0) as u32,
+                completion_tokens: u["candidatesTokenCount"].as_u64().unwrap_or(0) as u32,
+                total_tokens: u["totalTokenCount"].as_u64().unwrap_or(0) as u32,
+            });
+
+            return Ok(LlmResponse {
+                content,
+                model: self.model_id.clone(),
+                usage,
+                tool_calls,
+            });
         }
 
-        // Extract usage
-        let usage = body["usageMetadata"].as_object().map(|u| TokenUsage {
-            prompt_tokens: u["promptTokenCount"].as_u64().unwrap_or(0) as u32,
-            completion_tokens: u["candidatesTokenCount"].as_u64().unwrap_or(0) as u32,
-            total_tokens: u["totalTokenCount"].as_u64().unwrap_or(0) as u32,
-        });
-
-        Ok(LlmResponse {
-            content,
-            model: self.model_id.clone(),
-            usage,
-            tool_calls,
-        })
+        anyhow::bail!(
+            "Gemini failed after {} retries (rate limited)",
+            self.max_retries
+        )
     }
 
     async fn chat_stream(
@@ -263,13 +304,34 @@ impl LlmBackend for GeminiBackend {
             payload["tools"] = tools_val;
         }
 
-        let resp = self
-            .client
-            .post(&url)
-            .json(&payload)
-            .send()
-            .await?
-            .error_for_status()?;
+        // Retry on 429 before opening the stream (mirrors the non-streaming
+        // `chat` path). Once the stream is opened successfully, in-flight SSE
+        // reads are not retried.
+        let resp = {
+            let mut opened = None;
+            for attempt in 0..self.max_retries {
+                let r = self.client.post(&url).json(&payload).send().await?;
+                if r.status().as_u16() == 429 {
+                    let wait = 2u64.pow(attempt);
+                    tracing::warn!(
+                        attempt,
+                        wait_secs = wait,
+                        "Gemini stream rate limited, retrying"
+                    );
+                    tokio::time::sleep(Duration::from_secs(wait)).await;
+                    continue;
+                }
+                opened = Some(r.error_for_status()?);
+                break;
+            }
+            match opened {
+                Some(r) => r,
+                None => anyhow::bail!(
+                    "Gemini stream failed after {} retries (rate limited)",
+                    self.max_retries
+                ),
+            }
+        };
 
         let stream = futures::stream::unfold(resp, |mut resp| async move {
             match resp.chunk().await {
@@ -311,5 +373,71 @@ impl LlmBackend for GeminiBackend {
             .await
             .map(|r| r.status().is_success())
             .unwrap_or(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn backend() -> GeminiBackend {
+        GeminiBackend {
+            base_url: "https://generativelanguage.googleapis.com/v1beta".into(),
+            api_key: "test-key".into(),
+            model_id: "gemini-2.0-flash".into(),
+            display_name: "Gemini".into(),
+            capabilities: vec!["text".into()],
+            client: reqwest::Client::new(),
+            max_retries: 1,
+        }
+    }
+
+    /// Regression test: a bare `role: "tool"` message (KRIA's text-pattern tool
+    /// calling has no `functionCall` id to pair with) must NOT be sent as a
+    /// native `functionResponse` part, and must not silently collapse into an
+    /// untagged `user` turn either — it is wrapped with a clear "[Tool result
+    /// from ...]" prefix, avoiding both an unpaired-functionResponse rejection
+    /// and ambiguous back-to-back untagged `user` turns.
+    #[test]
+    fn build_contents_wraps_bare_tool_role_as_labeled_user_turn() {
+        let b = backend();
+        let messages = vec![
+            ChatMessage {
+                role: "user".into(),
+                content: "list skills".into(),
+                name: None,
+                images: None,
+            },
+            ChatMessage {
+                role: "tool".into(),
+                content: "{\"skills\":[]}".into(),
+                name: Some("list_installed_skills".into()),
+                images: None,
+            },
+        ];
+
+        let contents = b.build_contents(&messages);
+
+        assert_eq!(contents[0]["role"], "user");
+        assert_eq!(contents[1]["role"], "user");
+        let text = contents[1]["parts"][0]["text"].as_str().unwrap();
+        assert!(text.contains("list_installed_skills"));
+        assert!(text.contains("skills"));
+        // Must NOT be a native functionResponse part.
+        assert!(contents[1]["parts"][0].get("functionResponse").is_none());
+    }
+
+    #[test]
+    fn build_contents_maps_assistant_role_to_model() {
+        let b = backend();
+        let messages = vec![ChatMessage {
+            role: "assistant".into(),
+            content: "hi".into(),
+            name: None,
+            images: None,
+        }];
+
+        let contents = b.build_contents(&messages);
+        assert_eq!(contents[0]["role"], "model");
     }
 }

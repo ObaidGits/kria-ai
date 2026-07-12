@@ -40,7 +40,9 @@ use kria_core::execution::{ExecutionContext, ExecutionEngine, ExecutorRegistry};
 /// harness without depending on kria-core's `#[cfg(test)]`-only module).
 mod probe_executor {
     use async_trait::async_trait;
-    use kria_core::execution::{ExecutionContext, ExecutionRequest, Executor, ExecutorError, ExecutorHealth};
+    use kria_core::execution::{
+        ExecutionContext, ExecutionRequest, Executor, ExecutorError, ExecutorHealth,
+    };
     use kria_core::infra::isolation::ToolResult;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -52,7 +54,11 @@ mod probe_executor {
 
     impl ProbeExecutor {
         pub fn new(provider_id: impl Into<String>, label: &'static str) -> Self {
-            Self { provider_id: provider_id.into(), label, calls: AtomicU64::new(0) }
+            Self {
+                provider_id: provider_id.into(),
+                label,
+                calls: AtomicU64::new(0),
+            }
         }
     }
 
@@ -72,7 +78,10 @@ mod probe_executor {
         }
 
         async fn health(&self) -> ExecutorHealth {
-            ExecutorHealth { available: true, detail: self.label.to_string() }
+            ExecutorHealth {
+                available: true,
+                detail: self.label.to_string(),
+            }
         }
     }
 
@@ -95,7 +104,10 @@ pub async fn validate_registry_replace() -> Result<(), String> {
     registry.register(second.clone());
 
     if registry.len() != 1 {
-        return Err(format!("expected exactly 1 registered kind after replace, got {}", registry.len()));
+        return Err(format!(
+            "expected exactly 1 registered kind after replace, got {}",
+            registry.len()
+        ));
     }
 
     let resolved = registry
@@ -103,7 +115,10 @@ pub async fn validate_registry_replace() -> Result<(), String> {
         .ok_or("Native executor must be resolvable after replace")?;
     let health = resolved.health().await;
     if health.detail != "second" {
-        return Err(format!("expected the SECOND registration to win, got detail='{}'", health.detail));
+        return Err(format!(
+            "expected the SECOND registration to win, got detail='{}'",
+            health.detail
+        ));
     }
     Ok(())
 }
@@ -123,14 +138,22 @@ pub fn validate_dependency_detection_multi_executor() -> Result<(), String> {
     cyclic.add_node(
         GraphNode::new(
             "a",
-            NodeKind::Skill { provider_id: "native".to_string(), action_id: "noop".into(), params: serde_json::json!({}) },
+            NodeKind::Skill {
+                provider_id: "native".to_string(),
+                action_id: "noop".into(),
+                params: serde_json::json!({}),
+            },
         )
         .depends_on("b"),
     );
     cyclic.add_node(
         GraphNode::new(
             "b",
-            NodeKind::Skill { provider_id: "openclaw".to_string(), action_id: "noop".into(), params: serde_json::json!({}) },
+            NodeKind::Skill {
+                provider_id: "openclaw".to_string(),
+                action_id: "noop".into(),
+                params: serde_json::json!({}),
+            },
         )
         .depends_on("a"),
     );
@@ -144,7 +167,11 @@ pub fn validate_dependency_detection_multi_executor() -> Result<(), String> {
     missing.add_node(
         GraphNode::new(
             "a",
-            NodeKind::Skill { provider_id: "native".to_string(), action_id: "noop".into(), params: serde_json::json!({}) },
+            NodeKind::Skill {
+                provider_id: "native".to_string(),
+                action_id: "noop".into(),
+                params: serde_json::json!({}),
+            },
         )
         .depends_on("does_not_exist"),
     );
@@ -169,15 +196,31 @@ pub async fn validate_structural_node_kinds() -> Result<(), String> {
     let mut graph = ExecutionGraph::new("g-structural", "goal-structural");
     graph.add_node(GraphNode::new(
         "skill_a",
-        NodeKind::Skill { provider_id: "native".to_string(), action_id: "noop".into(), params: serde_json::json!({}) },
+        NodeKind::Skill {
+            provider_id: "native".to_string(),
+            action_id: "noop".into(),
+            params: serde_json::json!({}),
+        },
     ));
     graph.add_node(GraphNode::new("barrier", NodeKind::Barrier).depends_on("skill_a"));
-    graph.add_node(GraphNode::new("checkpoint", NodeKind::Checkpoint { label: "cp1".into() }).depends_on("barrier"));
+    graph.add_node(
+        GraphNode::new(
+            "checkpoint",
+            NodeKind::Checkpoint {
+                label: "cp1".into(),
+            },
+        )
+        .depends_on("barrier"),
+    );
     graph.add_node(GraphNode::new("wait", NodeKind::Wait { millis: 10 }).depends_on("checkpoint"));
     graph.add_node(
         GraphNode::new(
             "skill_b",
-            NodeKind::Skill { provider_id: "native".to_string(), action_id: "noop".into(), params: serde_json::json!({}) },
+            NodeKind::Skill {
+                provider_id: "native".to_string(),
+                action_id: "noop".into(),
+                params: serde_json::json!({}),
+            },
         )
         .depends_on("wait"),
     );
@@ -188,7 +231,9 @@ pub async fn validate_structural_node_kinds() -> Result<(), String> {
 
     use kria_core::execution::ScheduleStatus;
     if result.status != ScheduleStatus::Completed {
-        return Err(format!("mixed structural-node graph must succeed, got: {result:?}"));
+        return Err(format!(
+            "mixed structural-node graph must succeed, got: {result:?}"
+        ));
     }
     Ok(())
 }
@@ -206,8 +251,9 @@ mod tests {
 
     #[test]
     fn dependency_detection_across_real_multi_executor_registry() {
-        validate_dependency_detection_multi_executor()
-            .expect("A7.6: cycle + missing-dep detection must hold with multiple real registered executors");
+        validate_dependency_detection_multi_executor().expect(
+            "A7.6: cycle + missing-dep detection must hold with multiple real registered executors",
+        );
     }
 
     #[tokio::test]
@@ -238,15 +284,17 @@ mod tests {
     #[tokio::test]
     async fn openclaw_executor_real_docker_end_to_end() {
         use crate::openclaw_eval::rig::{verify_docker_reachable, TestRig};
-        use kria_core::execution::{ExecutionGraph, GraphNode, NodeKind, ScheduleStatus};
         use kria_core::execution::executors::openclaw_executor_from_pool;
+        use kria_core::execution::{ExecutionGraph, GraphNode, NodeKind, ScheduleStatus};
 
         if verify_docker_reachable().await.is_err() {
             eprintln!("SKIPPED (Outcome::Skipped, not Pass): docker not reachable");
             return;
         }
 
-        let rig = TestRig::up().await.expect("rig must come up against real Docker");
+        let rig = TestRig::up()
+            .await
+            .expect("rig must come up against real Docker");
 
         let mut engine = ExecutionEngine::new();
         engine.register_executor(Arc::new(openclaw_executor_from_pool(rig.pool.clone())));
@@ -270,6 +318,8 @@ mod tests {
             "real OpenClawExecutor run through the real engine against real Docker must succeed: {result:?}"
         );
 
-        rig.down().await.expect("rig teardown must leave 0 leaked containers");
+        rig.down()
+            .await
+            .expect("rig teardown must leave 0 leaked containers");
     }
 }

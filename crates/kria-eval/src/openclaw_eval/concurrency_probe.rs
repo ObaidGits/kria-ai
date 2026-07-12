@@ -29,7 +29,10 @@ pub async fn validate_parallel_distinct_installs(count: usize) -> Result<(), Str
     let installer = Arc::new(
         BundleInstaller::new(registry.clone(), audit, store)
             .with_kria_version(Version::new(1, 0, 0))
-            .with_trust_policy(TrustPolicy { trusted_keys: Vec::new(), require_signature: true }),
+            .with_trust_policy(TrustPolicy {
+                trusted_keys: Vec::new(),
+                require_signature: true,
+            }),
     );
 
     // Author all bundles up front (filesystem authoring is not the thing
@@ -59,7 +62,10 @@ pub async fn validate_parallel_distinct_installs(count: usize) -> Result<(), Str
     }
 
     if installed_slugs.len() != count {
-        return Err(format!("expected {count} successful installs, got {}", installed_slugs.len()));
+        return Err(format!(
+            "expected {count} successful installs, got {}",
+            installed_slugs.len()
+        ));
     }
 
     // Every installed skill must be independently retrievable — no lost
@@ -94,17 +100,26 @@ pub async fn validate_concurrent_enable_disable_same_skill() -> Result<(), Strin
     let installer = Arc::new(
         BundleInstaller::new(registry.clone(), audit, store)
             .with_kria_version(Version::new(1, 0, 0))
-            .with_trust_policy(TrustPolicy { trusted_keys: Vec::new(), require_signature: true }),
+            .with_trust_policy(TrustPolicy {
+                trusted_keys: Vec::new(),
+                require_signature: true,
+            }),
     );
-    installer.install(&bundle_root).map_err(|e| format!("install failed: {e}"))?;
+    installer
+        .install(&bundle_root)
+        .map_err(|e| format!("install failed: {e}"))?;
 
     let mut handles = Vec::new();
     for i in 0..20 {
         let installer = installer.clone();
         if i % 2 == 0 {
-            handles.push(tokio::spawn(async move { installer.enable("oc_race_target") }));
+            handles.push(tokio::spawn(
+                async move { installer.enable("oc_race_target") },
+            ));
         } else {
-            handles.push(tokio::spawn(async move { installer.disable("oc_race_target") }));
+            handles.push(tokio::spawn(
+                async move { installer.disable("oc_race_target") },
+            ));
         }
     }
 
@@ -120,15 +135,24 @@ pub async fn validate_concurrent_enable_disable_same_skill() -> Result<(), Strin
     .await;
 
     match deadline {
-        Err(_) => return Err("DEADLOCK/LIVELOCK: concurrent enable/disable did not complete within 20s".into()),
+        Err(_) => {
+            return Err(
+                "DEADLOCK/LIVELOCK: concurrent enable/disable did not complete within 20s".into(),
+            )
+        }
         Ok(Err(e)) => return Err(format!("a concurrent enable/disable call failed: {e}")),
         Ok(Ok(())) => {}
     }
 
     // Final state must be deterministically ONE valid state, not corrupted.
-    let final_skill = registry.get_skill("oc_race_target").map_err(|e| e.to_string())?;
+    let final_skill = registry
+        .get_skill("oc_race_target")
+        .map_err(|e| e.to_string())?;
     use kria_core::openclaw::registry::SkillState;
-    if !matches!(final_skill.state, SkillState::Enabled | SkillState::Disabled) {
+    if !matches!(
+        final_skill.state,
+        SkillState::Enabled | SkillState::Disabled
+    ) {
         return Err(format!(
             "concurrent enable/disable left the skill in an invalid state: {:?}",
             final_skill.state
@@ -155,13 +179,17 @@ pub async fn validate_parallel_container_checkout(count: usize) -> Result<(), St
     use kria_core::openclaw::ResourceClass;
 
     let rig = TestRig::up().await.map_err(|e| e.to_string())?;
-    let baseline = leak_detector::baseline(&rig.pool).await.map_err(|e| e.to_string())?;
+    let baseline = leak_detector::baseline(&rig.pool)
+        .await
+        .map_err(|e| e.to_string())?;
 
     let mut handles = Vec::with_capacity(count);
     for i in 0..count {
         let pool = rig.pool.clone();
         handles.push(tokio::spawn(async move {
-            let handle = pool.checkout(ResourceClass::Light, &format!("concurrency-test-{i}")).await?;
+            let handle = pool
+                .checkout(ResourceClass::Light, &format!("concurrency-test-{i}"))
+                .await?;
             pool.checkin(handle).await
         }));
     }
@@ -182,7 +210,9 @@ pub async fn validate_parallel_container_checkout(count: usize) -> Result<(), St
     // bug class caught and fixed in validate_checkout_beyond_limit_rejects_cleanly
     // above — fixed here identically).
     let deadline_result: Result<(), String> = match deadline {
-        Err(_) => Err("DEADLOCK/LIVELOCK: parallel container checkout did not complete within 60s".into()),
+        Err(_) => {
+            Err("DEADLOCK/LIVELOCK: parallel container checkout did not complete within 60s".into())
+        }
         Ok(Err(e)) => Err(format!("a parallel checkout/checkin failed: {e}")),
         Ok(Ok(())) => Ok(()),
     };
@@ -240,7 +270,8 @@ pub async fn validate_checkout_beyond_limit_rejects_cleanly() -> Result<(), Stri
 
     let overflow = tokio::time::timeout(
         Duration::from_secs(5),
-        rig.pool.checkout(ResourceClass::Light, "limit-test-overflow"),
+        rig.pool
+            .checkout(ResourceClass::Light, "limit-test-overflow"),
     )
     .await;
 
@@ -259,8 +290,13 @@ pub async fn validate_checkout_beyond_limit_rejects_cleanly() -> Result<(), Stri
     }
 
     let overflow_result = match overflow {
-        Err(_) => Err("overflow checkout hung instead of being rejected cleanly (should fail fast)".to_string()),
-        Ok(Ok(_)) => Err(format!("expected overflow checkout beyond the limit of {limit} to be rejected")),
+        Err(_) => Err(
+            "overflow checkout hung instead of being rejected cleanly (should fail fast)"
+                .to_string(),
+        ),
+        Ok(Ok(_)) => Err(format!(
+            "expected overflow checkout beyond the limit of {limit} to be rejected"
+        )),
         Ok(Err(e)) => {
             eprintln!("[concurrency] overflow correctly rejected: {e}");
             Ok(())
@@ -270,7 +306,9 @@ pub async fn validate_checkout_beyond_limit_rejects_cleanly() -> Result<(), Stri
     rig.down().await.map_err(|e| e.to_string())?;
 
     if !checkin_errors.is_empty() {
-        return Err(format!("checkin failures during cleanup: {checkin_errors:?}"));
+        return Err(format!(
+            "checkin failures during cleanup: {checkin_errors:?}"
+        ));
     }
     overflow_result
 }
@@ -290,12 +328,17 @@ mod tests {
     async fn concurrent_enable_disable_same_skill_no_deadlock() {
         validate_concurrent_enable_disable_same_skill()
             .await
-            .expect("concurrent enable/disable on the same skill must not deadlock or corrupt state");
+            .expect(
+                "concurrent enable/disable on the same skill must not deadlock or corrupt state",
+            );
     }
 
     #[tokio::test]
     async fn parallel_container_checkout_real_docker() {
-        if crate::openclaw_eval::rig::verify_docker_reachable().await.is_err() {
+        if crate::openclaw_eval::rig::verify_docker_reachable()
+            .await
+            .is_err()
+        {
             eprintln!("SKIPPED (Outcome::Skipped, not Pass): docker not reachable");
             return;
         }
@@ -309,12 +352,17 @@ mod tests {
 
     #[tokio::test]
     async fn checkout_beyond_limit_rejects_cleanly_real_docker() {
-        if crate::openclaw_eval::rig::verify_docker_reachable().await.is_err() {
+        if crate::openclaw_eval::rig::verify_docker_reachable()
+            .await
+            .is_err()
+        {
             eprintln!("SKIPPED (Outcome::Skipped, not Pass): docker not reachable");
             return;
         }
         validate_checkout_beyond_limit_rejects_cleanly()
             .await
-            .expect("checkout beyond max_concurrent_invocations must be rejected cleanly, never hang");
+            .expect(
+                "checkout beyond max_concurrent_invocations must be rejected cleanly, never hang",
+            );
     }
 }

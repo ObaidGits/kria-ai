@@ -54,12 +54,20 @@ pub async fn run_benchmark(
 async fn run_prompt_workload(store: &mut EvidenceStore, count: usize) -> Result<(), String> {
     use crate::openclaw_eval::rig::TestRig;
     use kria_core::execution::executors::openclaw_executor_from_pool;
-    use kria_core::execution::{ExecutionContext, ExecutionEngine, ExecutionGraph, GraphNode, NodeKind, ScheduleStatus};
+    use kria_core::execution::{
+        ExecutionContext, ExecutionEngine, ExecutionGraph, GraphNode, NodeKind, ScheduleStatus,
+    };
 
-    if crate::openclaw_eval::rig::verify_docker_reachable().await.is_err() {
-        store.record(
-            EvidenceRecord::new("20.1", Layer::Benchmark, "prompt_workload", Outcome::Skipped("docker not reachable".into())),
-        );
+    if crate::openclaw_eval::rig::verify_docker_reachable()
+        .await
+        .is_err()
+    {
+        store.record(EvidenceRecord::new(
+            "20.1",
+            Layer::Benchmark,
+            "prompt_workload",
+            Outcome::Skipped("docker not reachable".into()),
+        ));
         return Ok(());
     }
 
@@ -73,7 +81,11 @@ async fn run_prompt_workload(store: &mut EvidenceStore, count: usize) -> Result<
         let mut graph = ExecutionGraph::new(format!("g-bench-{i}"), format!("goal-bench-{i}"));
         graph.add_node(GraphNode::new(
             "calc",
-            NodeKind::Skill { provider_id: "openclaw".to_string(), action_id: "oc_calculator".into(), params: serde_json::json!({ "expression": expr }) },
+            NodeKind::Skill {
+                provider_id: "openclaw".to_string(),
+                action_id: "oc_calculator".into(),
+                params: serde_json::json!({ "expression": expr }),
+            },
         ));
         let ctx = ExecutionContext::new(format!("goal-bench-{i}"), format!("corr-bench-{i}"));
         let start = Instant::now();
@@ -83,15 +95,29 @@ async fn run_prompt_workload(store: &mut EvidenceStore, count: usize) -> Result<
             successes += 1;
         }
         store.record(
-            EvidenceRecord::new("20.1", Layer::Benchmark, format!("prompt_{i}"), if ok { Outcome::Pass } else { Outcome::Fail })
-                .with_metric("latency_ms", start.elapsed().as_millis() as f64),
+            EvidenceRecord::new(
+                "20.1",
+                Layer::Benchmark,
+                format!("prompt_{i}"),
+                if ok { Outcome::Pass } else { Outcome::Fail },
+            )
+            .with_metric("latency_ms", start.elapsed().as_millis() as f64),
         );
     }
 
     store.record(
-        EvidenceRecord::new("4.1", Layer::Benchmark, "prompt_workload_aggregate", if successes == count { Outcome::Pass } else { Outcome::Fail })
-            .with_metric("successes", successes as f64)
-            .with_metric("total", count as f64),
+        EvidenceRecord::new(
+            "4.1",
+            Layer::Benchmark,
+            "prompt_workload_aggregate",
+            if successes == count {
+                Outcome::Pass
+            } else {
+                Outcome::Fail
+            },
+        )
+        .with_metric("successes", successes as f64)
+        .with_metric("total", count as f64),
     );
 
     rig.down().await.map_err(|e| e.to_string())?;
@@ -108,7 +134,8 @@ fn run_install_update_removal_workload(
     let db_path = dir.path().join("benchmark.db");
     let registry = Arc::new(ProductionSkillRegistry::new(&db_path).map_err(|e| e.to_string())?);
     let audit = Arc::new(
-        kria_core::openclaw::audit::AuditLedger::open(&db_path, b"benchmark-key".to_vec()).map_err(|e| e.to_string())?,
+        kria_core::openclaw::audit::AuditLedger::open(&db_path, b"benchmark-key".to_vec())
+            .map_err(|e| e.to_string())?,
     );
     let store_dir = dir.path().join("store");
     std::fs::create_dir_all(&store_dir).map_err(|e| e.to_string())?;
@@ -117,14 +144,30 @@ fn run_install_update_removal_workload(
 
     let installer = BundleInstaller::new(registry.clone(), audit, store_dir)
         .with_kria_version(Version::new(1, 0, 0))
-        .with_trust_policy(TrustPolicy { trusted_keys: Vec::new(), require_signature: true });
+        .with_trust_policy(TrustPolicy {
+            trusted_keys: Vec::new(),
+            require_signature: true,
+        });
 
     let mut installed_slugs = Vec::new();
     for i in 0..install_count {
         let slug = format!("oc_bench_install_{i}");
-        let root = crate::openclaw_eval::installer_matrix::author_signed_bundle(&author_dir, &slug, [(i % 255) as u8; 32])?;
+        let root = crate::openclaw_eval::installer_matrix::author_signed_bundle(
+            &author_dir,
+            &slug,
+            [(i % 255) as u8; 32],
+        )?;
         let outcome = installer.install(&root);
-        store.record(EvidenceRecord::new("3.2", Layer::Benchmark, format!("install_{i}"), if outcome.is_ok() { Outcome::Pass } else { Outcome::Fail }));
+        store.record(EvidenceRecord::new(
+            "3.2",
+            Layer::Benchmark,
+            format!("install_{i}"),
+            if outcome.is_ok() {
+                Outcome::Pass
+            } else {
+                Outcome::Fail
+            },
+        ));
         if outcome.is_ok() {
             installed_slugs.push(slug);
         }
@@ -137,7 +180,11 @@ fn run_install_update_removal_workload(
         let root = author_dir.join(format!("{slug}-2.0.0"));
         let orig_root = author_dir.join(format!("{slug}-1.0.0"));
         if orig_root.exists() {
-            let _ = crate::openclaw_eval::installer_matrix::author_signed_bundle(&author_dir, slug, [((i + 200) % 255) as u8; 32]);
+            let _ = crate::openclaw_eval::installer_matrix::author_signed_bundle(
+                &author_dir,
+                slug,
+                [((i + 200) % 255) as u8; 32],
+            );
         }
         let _ = root; // version bump path kept simple: reuse the same signed bundle (relation=Same, still exercises the real path)
         let reinstall_root = author_dir.join(format!("{slug}-1.0.0"));
@@ -146,7 +193,12 @@ fn run_install_update_removal_workload(
         if ok {
             update_successes += 1;
         }
-        store.record(EvidenceRecord::new("6.3", Layer::Benchmark, format!("update_{i}"), if ok { Outcome::Pass } else { Outcome::Fail }));
+        store.record(EvidenceRecord::new(
+            "6.3",
+            Layer::Benchmark,
+            format!("update_{i}"),
+            if ok { Outcome::Pass } else { Outcome::Fail },
+        ));
     }
     let _ = update_successes;
 
@@ -158,7 +210,12 @@ fn run_install_update_removal_workload(
         if ok {
             removal_successes += 1;
         }
-        store.record(EvidenceRecord::new("6.2", Layer::Benchmark, format!("removal_{i}"), if ok { Outcome::Pass } else { Outcome::Fail }));
+        store.record(EvidenceRecord::new(
+            "6.2",
+            Layer::Benchmark,
+            format!("removal_{i}"),
+            if ok { Outcome::Pass } else { Outcome::Fail },
+        ));
     }
     let _ = removal_successes;
 
@@ -185,8 +242,13 @@ async fn record_generated_skills_blocker(store: &mut EvidenceStore, requested: u
         }
         Outcome::Skipped(reason) => {
             store.record(
-                EvidenceRecord::new("5.1", Layer::Benchmark, "generated_skills_workload", Outcome::Skipped(reason))
-                    .with_llm_mode(LlmMode::Fixture),
+                EvidenceRecord::new(
+                    "5.1",
+                    Layer::Benchmark,
+                    "generated_skills_workload",
+                    Outcome::Skipped(reason),
+                )
+                .with_llm_mode(LlmMode::Fixture),
             );
         }
         Outcome::Fail => unreachable!("validate_real_llm_backend_reachable never returns Fail"),
@@ -194,16 +256,47 @@ async fn record_generated_skills_blocker(store: &mut EvidenceStore, requested: u
 }
 
 async fn run_fault_scenarios(store: &mut EvidenceStore) -> Result<(), String> {
-    if crate::openclaw_eval::rig::verify_docker_reachable().await.is_err() {
-        store.record(EvidenceRecord::new("20.2", Layer::Benchmark, "fault_scenarios", Outcome::Skipped("docker not reachable".into())));
+    if crate::openclaw_eval::rig::verify_docker_reachable()
+        .await
+        .is_err()
+    {
+        store.record(EvidenceRecord::new(
+            "20.2",
+            Layer::Benchmark,
+            "fault_scenarios",
+            Outcome::Skipped("docker not reachable".into()),
+        ));
         return Ok(());
     }
 
-    let docker_outage_ok = crate::openclaw_eval::failure_injection::validate_docker_outage_mid_session().await.is_ok();
-    store.record(EvidenceRecord::new("7.1", Layer::Benchmark, "docker_outage_mid_session", if docker_outage_ok { Outcome::Pass } else { Outcome::Fail }));
+    let docker_outage_ok =
+        crate::openclaw_eval::failure_injection::validate_docker_outage_mid_session()
+            .await
+            .is_ok();
+    store.record(EvidenceRecord::new(
+        "7.1",
+        Layer::Benchmark,
+        "docker_outage_mid_session",
+        if docker_outage_ok {
+            Outcome::Pass
+        } else {
+            Outcome::Fail
+        },
+    ));
 
-    let crash_ok = crate::openclaw_eval::failure_injection::validate_container_crash_mid_run().await.is_ok();
-    store.record(EvidenceRecord::new("7.2", Layer::Benchmark, "container_crash_mid_run", if crash_ok { Outcome::Pass } else { Outcome::Fail }));
+    let crash_ok = crate::openclaw_eval::failure_injection::validate_container_crash_mid_run()
+        .await
+        .is_ok();
+    store.record(EvidenceRecord::new(
+        "7.2",
+        Layer::Benchmark,
+        "container_crash_mid_run",
+        if crash_ok {
+            Outcome::Pass
+        } else {
+            Outcome::Fail
+        },
+    ));
 
     Ok(())
 }
@@ -211,7 +304,9 @@ async fn run_fault_scenarios(store: &mut EvidenceStore) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::openclaw_eval::freeze_report::{compute_verdict, generate_freeze_report, render_report, FreezeVerdict};
+    use crate::openclaw_eval::freeze_report::{
+        compute_verdict, generate_freeze_report, render_report, FreezeVerdict,
+    };
 
     /// Real, bounded R20 benchmark run: real Docker prompt executions, real
     /// installer install/update/remove cycles, honest generated-skills
@@ -220,7 +315,9 @@ mod tests {
     #[tokio::test]
     #[ignore = "slow, real-Docker production benchmark — run explicitly with --ignored"]
     async fn r20_bounded_production_benchmark() {
-        let store = run_benchmark(10, 10, 5, 5).await.expect("benchmark must complete (records failures, never panics on a scenario failure)");
+        let store = run_benchmark(10, 10, 5, 5).await.expect(
+            "benchmark must complete (records failures, never panics on a scenario failure)",
+        );
 
         let report = generate_freeze_report(&store);
         eprintln!("{}", render_report(&report));

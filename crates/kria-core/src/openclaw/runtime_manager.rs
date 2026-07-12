@@ -23,7 +23,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, Mutex, OwnedSemaphorePermit, RwLock, Semaphore};
 use tokio::time::sleep;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// Container lifecycle state - authoritative for all runtimes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -2259,9 +2259,25 @@ impl RuntimeManager {
         let shutdown = self.shutdown.subscribe();
         let manager = self.clone_for_spawn();
 
+        // Proactive background warm-create is deliberately disabled for leak-safety
+        // (see `RuntimeManagerSpawn::create_container`): pool owners that drop
+        // without awaiting `shutdown()` cannot reap background-created containers.
+        // This is NOT a functional gap — `checkout_container` creates a container
+        // on demand via the real `RuntimeManager::create_container` when no warm
+        // one is available (verified). State it once at INFO so the previous
+        // per-tick WARN spam ("Prewarming failed for container") no longer
+        // masquerades as a production error.
+        info!(
+            "prewarming: proactive background warm-create is on-demand-only (containers are \
+             created at checkout by the real runtime); background prewarm is idle until the \
+             leak-safe background-create lifecycle lands"
+        );
+
         let handle = tokio::spawn(async move {
             let mut shutdown = shutdown;
             let mut interval = tokio::time::interval(warm_config.prewarming_interval);
+            // Log the deliberate-disabled outcome at most once (not every tick).
+            let mut disabled_logged = false;
 
             loop {
                 tokio::select! {
@@ -2292,12 +2308,26 @@ impl RuntimeManager {
                                     break 'tick;
                                 }
                                 if let Err(e) = manager.create_container(class).await {
-                                    warn!(
-                                        resource_class = ?class,
-                                        error = %e,
-                                        "Prewarming failed for container"
-                                    );
-                                    break; // Don't spam on failure
+                                    // The deliberate leak-safety no-op (background
+                                    // create disabled) is expected — log it once at
+                                    // debug, never per-tick WARN. A genuinely
+                                    // unexpected Docker error still WARNs.
+                                    if e.to_string().contains("is not implemented against real Docker") {
+                                        if !disabled_logged {
+                                            debug!(
+                                                resource_class = ?class,
+                                                "prewarming: background create disabled (on-demand at checkout); suppressing further notices"
+                                            );
+                                            disabled_logged = true;
+                                        }
+                                    } else {
+                                        warn!(
+                                            resource_class = ?class,
+                                            error = %e,
+                                            "Prewarming failed for container"
+                                        );
+                                    }
+                                    break 'tick; // Don't spam on failure; stop this whole tick.
                                 } else {
                                     info!(
                                         resource_class = ?class,

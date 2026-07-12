@@ -65,6 +65,25 @@ impl AnthropicBackend {
                 continue;
             }
 
+            if msg.role.eq_ignore_ascii_case("tool") {
+                // Anthropic's Messages API requires every `tool_result` content
+                // block to carry a `tool_use_id` that matches a `tool_use` block
+                // the assistant emitted in the immediately preceding turn, or it
+                // returns a 400. KRIA's default tool-calling is text-pattern
+                // based (`<tool_call>{...}</tool_call>` as plain assistant text),
+                // so no real `tool_use` block exists in history to reference.
+                // Emitting a native `tool_result` here would be rejected. Instead,
+                // wrap the tool result as a plain user turn (same fix already
+                // applied to the OpenAI-compatible backend) — the model still
+                // sees the result, just as text rather than a structured block.
+                let tool_name = msg.name.as_deref().unwrap_or("tool");
+                anthropic_messages.push(serde_json::json!({
+                    "role": "user",
+                    "content": format!("[Tool result from '{}']\n{}", tool_name, msg.content),
+                }));
+                continue;
+            }
+
             let role = match msg.role.as_str() {
                 "assistant" => "assistant",
                 _ => "user",
@@ -334,5 +353,81 @@ impl LlmBackend for AnthropicBackend {
 
     async fn health_check(&self) -> bool {
         self.is_configured()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn backend() -> AnthropicBackend {
+        AnthropicBackend {
+            base_url: "https://api.anthropic.com/v1".into(),
+            api_key: "test-key".into(),
+            model_id: "claude-sonnet-4-20250514".into(),
+            display_name: "Anthropic".into(),
+            capabilities: vec!["text".into()],
+            client: reqwest::Client::new(),
+            max_retries: 1,
+        }
+    }
+
+    /// Regression test: a bare `role: "tool"` message (KRIA's text-pattern tool
+    /// calling has no `tool_use_id`) must NOT be emitted as a native
+    /// `tool_result` block, and must not silently collapse into an unlabeled
+    /// user text block either — it is wrapped with a clear "[Tool result
+    /// from ...]" prefix as a `user` turn, avoiding the strict `tool_use_id`
+    /// pairing requirement of the Anthropic Messages API (which 400s otherwise).
+    #[test]
+    fn build_messages_wraps_bare_tool_role_as_labeled_user_turn() {
+        let b = backend();
+        let messages = vec![
+            ChatMessage {
+                role: "user".into(),
+                content: "list skills".into(),
+                name: None,
+                images: None,
+            },
+            ChatMessage {
+                role: "tool".into(),
+                content: "{\"skills\":[]}".into(),
+                name: Some("list_installed_skills".into()),
+                images: None,
+            },
+        ];
+
+        let (_system, wire) = b.build_messages(&messages);
+
+        assert_eq!(wire[0]["role"], "user");
+        assert_eq!(wire[1]["role"], "user");
+        let content = wire[1]["content"].as_str().expect("plain text content");
+        assert!(content.contains("list_installed_skills"));
+        assert!(content.contains("skills"));
+        // Must NOT be a native tool_result content block.
+        assert!(wire[1]["content"].get("type").is_none());
+    }
+
+    #[test]
+    fn build_messages_extracts_system_prompt_separately() {
+        let b = backend();
+        let messages = vec![
+            ChatMessage {
+                role: "system".into(),
+                content: "be concise".into(),
+                name: None,
+                images: None,
+            },
+            ChatMessage {
+                role: "user".into(),
+                content: "hi".into(),
+                name: None,
+                images: None,
+            },
+        ];
+
+        let (system, wire) = b.build_messages(&messages);
+        assert_eq!(system, Some("be concise".to_string()));
+        assert_eq!(wire.len(), 1);
+        assert_eq!(wire[0]["role"], "user");
     }
 }

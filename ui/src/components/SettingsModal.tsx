@@ -77,7 +77,45 @@ function normalizeFontScaleValue(value: unknown): string {
 }
 
 const SettingsModal: Component = () => {
-  const { setShowSettings, settings, loadSettings, saveSettings, models, loadModels, audioDevices, loadAudioDevices, theme, applyTheme, mcpServers, loadMcpServers, addMcpServer, removeMcpServer, toggleMcpServer, healthInfo, loadHealth, scheduledTasks, loadScheduledTasks, addScheduledTask, removeScheduledTask, macros, loadMacros, deleteMacro, workflows, loadWorkflows, deleteWorkflow, hardwareInfo, loadHardwareInfo, knowledgeBase, loadKnowledgeBase, sessions, clearAllChatSessions, telegramConfig, telegramBotInfo, loadTelegramConfig, saveTelegramConfig, testTelegramConnection, startTelegramMcp, stopTelegramMcp, googleStatus, loadGoogleStatus, setGoogleAccount, connectGoogle, disconnectGoogle, colabStatus, loadColabStatus, connectColab, disconnectColab, setColabNotebook, reconcileMcpRuntime, restartMcpServerRuntime, ironcladStatus, loadIroncladStatus, getIroncladConfig, updateIroncladConfig, requestIroncladSoftReset, requestIroncladHardReset, loadIroncladForensics, ironcladForensicsTotal, developerMode, setDeveloperMode, memoryEnabled, setMemoryEnabled } = appStore;
+  const { setShowSettings, settings, loadSettings, saveSettings, models, loadModels, audioDevices, loadAudioDevices, theme, applyTheme, mcpServers, loadMcpServers, addMcpServer, removeMcpServer, toggleMcpServer, healthInfo, loadHealth, scheduledTasks, loadScheduledTasks, addScheduledTask, removeScheduledTask, macros, loadMacros, deleteMacro, workflows, loadWorkflows, deleteWorkflow, hardwareInfo, loadHardwareInfo, knowledgeBase, loadKnowledgeBase, sessions, clearAllChatSessions, telegramConfig, telegramBotInfo, loadTelegramConfig, saveTelegramConfig, testTelegramConnection, startTelegramMcp, stopTelegramMcp, googleStatus, loadGoogleStatus, setGoogleAccount, connectGoogle, disconnectGoogle, colabStatus, loadColabStatus, connectColab, disconnectColab, setColabNotebook, reconcileMcpRuntime, restartMcpServerRuntime, ironcladStatus, loadIroncladStatus, getIroncladConfig, updateIroncladConfig, requestIroncladSoftReset, requestIroncladHardReset, loadIroncladForensics, ironcladForensicsTotal, developerMode, setDeveloperMode, memoryEnabled, setMemoryEnabled, loadConfigSchema, envLockedFields, configFieldMeta, configPrompt, configHistory, loadConfigHistory } = appStore;
+
+  // settings-config-revamp: natural-language settings command box + change-history viewer.
+  const [cmdText, setCmdText] = createSignal("");
+  const [cmdBusy, setCmdBusy] = createSignal(false);
+  const [cmdResult, setCmdResult] = createSignal<Record<string, any> | null>(null);
+  const [showHistory, setShowHistory] = createSignal(false);
+
+  async function runConfigCommand() {
+    const text = cmdText().trim();
+    if (!text) return;
+    setCmdBusy(true);
+    setCmdResult(null);
+    try {
+      const res = await configPrompt(text);
+      setCmdResult(res);
+      // Reflect any applied change + refresh history.
+      await loadSettings();
+      await loadConfigHistory(50);
+    } catch (e: any) {
+      setCmdResult({ status: "error", message: String(e?.message ?? e) });
+    } finally {
+      setCmdBusy(false);
+    }
+  }
+
+  async function undoLastSettingChange() {
+    setCmdBusy(true);
+    try {
+      const res = await configPrompt("undo my last settings change");
+      setCmdResult(res);
+      await loadSettings();
+      await loadConfigHistory(50);
+    } catch (e: any) {
+      setCmdResult({ status: "error", message: String(e?.message ?? e) });
+    } finally {
+      setCmdBusy(false);
+    }
+  }
 
   const [activeTab, setActiveTab] = createSignal<Tab>("llm");
   const [activeLayer, setActiveLayer] = createSignal<SettingsLayer>("basic");
@@ -272,6 +310,66 @@ const SettingsModal: Component = () => {
 
   const closeSettings = () => setShowSettings(false);
 
+  // settings-config-revamp Task 11: (section, field) pairs edited in the current
+  // draft whose schema marks them restart_required — used to warn that a restart
+  // is needed for the change to take effect (no faked live apply).
+  const pendingRestartFields = (): Array<{ section: string; field: string }> => {
+    const d = draft();
+    const cur = settings();
+    if (!d || !cur) return [];
+    const out: Array<{ section: string; field: string }> = [];
+    for (const section of Object.keys(d)) {
+      const dSect = d[section];
+      if (!dSect || typeof dSect !== "object" || Array.isArray(dSect)) continue;
+      const cSect = cur[section];
+      for (const field of Object.keys(dSect)) {
+        const changed =
+          JSON.stringify(cSect?.[field]) !== JSON.stringify(dSect[field]);
+        if (changed && configFieldMeta(section, field)?.restart_required) {
+          out.push({ section, field });
+        }
+      }
+    }
+    return out;
+  };
+
+  // settings-config-revamp Task 11: inline per-field badges (env-lock / restart /
+  // risk) rendered next to a control, driven by the derived config schema.
+  const FieldBadge: Component<{ section: string; field: string }> = (props) => {
+    const meta = () => configFieldMeta(props.section, props.field);
+    // Only render for fields that are genuinely schema-annotated (prompt-changeable)
+    // or env-locked. Unannotated/fail-closed fields (e.g. llm.temperature) render
+    // nothing, so this is safe to attach to every control without noisy false badges.
+    const relevant = () => {
+      const m = meta();
+      return !!m && (m.prompt_changeable === true || m.env_locked === true);
+    };
+    return (
+      <Show when={relevant()}>
+        <span style="display:inline-flex;gap:0.35rem;margin-left:0.5rem;vertical-align:middle;">
+          <Show when={meta()?.env_locked}>
+            <span
+              title={`Locked by environment variable ${meta()?.env_lock_var ?? ""}`}
+              style="font-size:0.68rem;padding:0.05rem 0.4rem;border-radius:0.5rem;background:#d19a1733;color:#d19a17;border:1px solid #d19a1766;"
+            >🔒 env-locked</span>
+          </Show>
+          <Show when={!meta()?.env_locked && meta()?.restart_required}>
+            <span
+              title="Takes effect after restarting KRIA"
+              style="font-size:0.68rem;padding:0.05rem 0.4rem;border-radius:0.5rem;background:#3b82f633;color:#3b82f6;border:1px solid #3b82f666;"
+            >⟳ restart</span>
+          </Show>
+          <Show when={meta()?.risk === "yellow" || meta()?.risk === "red" || meta()?.risk === "black"}>
+            <span
+              title={`Risk: ${meta()?.risk}. Changing this may need approval.`}
+              style="font-size:0.68rem;padding:0.05rem 0.4rem;border-radius:0.5rem;background:#ef444422;color:#ef4444;border:1px solid #ef444455;"
+            >{meta()?.risk === "yellow" ? "⚠ caution" : "⚠ high-risk"}</span>
+          </Show>
+        </span>
+      </Show>
+    );
+  };
+
   onMount(() => {
     let disposed = false;
     let unlistenConnected: (() => void) | null = null;
@@ -290,6 +388,8 @@ const SettingsModal: Component = () => {
 
     const initialize = async () => {
       await loadSettings();
+      await loadConfigSchema();
+      await loadConfigHistory(50);
       await loadModels();
       await loadAudioDevices();
       await loadMcpServers();
@@ -1081,6 +1181,104 @@ const SettingsModal: Component = () => {
                 <div class="settings-success">{success()}</div>
               </Show>
 
+              {/* settings-config-revamp Task 11: env-lock notice. Fields pinned by
+                  an environment variable cannot be changed from the UI or by prompt
+                  until the variable is unset — surface them so edits aren't silently
+                  ignored (Req 12.4). */}
+              <Show when={envLockedFields().length > 0}>
+                <div class="settings-info" role="note" style="border-left:3px solid #d19a17;padding:0.6rem 0.8rem;margin-bottom:0.8rem;">
+                  <strong>Locked by environment</strong>
+                  <p style="margin:0.3rem 0 0;font-size:0.85rem;opacity:0.85;">
+                    These settings are pinned by environment variables and can't be changed here until the variable is unset:
+                  </p>
+                  <ul style="margin:0.4rem 0 0;padding-left:1.1rem;font-size:0.82rem;">
+                    <For each={envLockedFields()}>
+                      {(f) => (
+                        <li>
+                          <code>{f.section}.{f.field}</code>
+                          <Show when={f.env_lock_var}> — <code>{f.env_lock_var}</code></Show>
+                        </li>
+                      )}
+                    </For>
+                  </ul>
+                </div>
+              </Show>
+
+              {/* settings-config-revamp Task 11: restart-required notice for edited
+                  fields that cannot hot-reload — set honestly from the schema. */}
+              <Show when={pendingRestartFields().length > 0}>
+                <div class="settings-info" role="note" style="border-left:3px solid #3b82f6;padding:0.6rem 0.8rem;margin-bottom:0.8rem;">
+                  <strong>Restart required</strong>
+                  <p style="margin:0.3rem 0 0;font-size:0.85rem;opacity:0.85;">
+                    These changes will take effect after restarting KRIA:
+                  </p>
+                  <ul style="margin:0.4rem 0 0;padding-left:1.1rem;font-size:0.82rem;">
+                    <For each={pendingRestartFields()}>
+                      {(f) => (<li><code>{f.section}.{f.field}</code></li>)}
+                    </For>
+                  </ul>
+                </div>
+              </Show>
+
+              {/* settings-config-revamp: natural-language settings command box +
+                  durable change-history viewer (surfaces config_prompt + get_config_history). */}
+              <section class="settings-section" style="margin-bottom:0.9rem;">
+                <div class="settings-field">
+                  <label>Settings command <span style="opacity:0.6;font-size:0.8rem;">(e.g. "switch to dark mode", "undo my last settings change")</span></label>
+                  <div style="display:flex;gap:0.5rem;align-items:center;">
+                    <input
+                      type="text"
+                      style="flex:1;"
+                      placeholder="Tell KRIA what to change…"
+                      value={cmdText()}
+                      onInput={(e) => setCmdText(e.currentTarget.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") runConfigCommand(); }}
+                      disabled={cmdBusy()}
+                    />
+                    <button type="button" class="btn" onClick={runConfigCommand} disabled={cmdBusy()}>
+                      {cmdBusy() ? "…" : "Apply"}
+                    </button>
+                    <button type="button" class="btn" onClick={undoLastSettingChange} disabled={cmdBusy()} title="Undo the last settings change">
+                      Undo last
+                    </button>
+                  </div>
+                  <Show when={cmdResult()}>
+                    <p style="margin:0.4rem 0 0;font-size:0.82rem;opacity:0.9;">
+                      <strong>{String(cmdResult()?.status ?? "")}</strong>
+                      <Show when={cmdResult()?.question}> — {String(cmdResult()?.question)}</Show>
+                      <Show when={cmdResult()?.message}> — {String(cmdResult()?.message)}</Show>
+                      <Show when={cmdResult()?.reason}> — {String(cmdResult()?.reason)}</Show>
+                      <Show when={cmdResult()?.section}> ({String(cmdResult()?.section)}.{String(cmdResult()?.field)})</Show>
+                    </p>
+                  </Show>
+                </div>
+
+                <div class="settings-field" style="margin-top:0.6rem;">
+                  <button type="button" class="btn" onClick={() => { setShowHistory(!showHistory()); if (showHistory()) void loadConfigHistory(50); }}>
+                    {showHistory() ? "Hide" : "Show"} change history ({configHistory().length})
+                  </button>
+                  <Show when={showHistory()}>
+                    <div style="margin-top:0.5rem;max-height:220px;overflow:auto;border:1px solid var(--border,#3333);border-radius:0.4rem;">
+                      <Show when={configHistory().length === 0}>
+                        <p style="padding:0.6rem;font-size:0.82rem;opacity:0.7;">No recorded config changes yet.</p>
+                      </Show>
+                      <For each={configHistory()}>
+                        {(entry) => {
+                          const ch = entry?.change ?? {};
+                          return (
+                            <div style="padding:0.4rem 0.6rem;border-bottom:1px solid var(--border,#2222);font-size:0.8rem;">
+                              <code>{String(ch?.section ?? "?")}.{String(ch?.field ?? "?")}</code>
+                              {" "}<span style="opacity:0.7;">{JSON.stringify(ch?.prior)} → {JSON.stringify(ch?.new)}</span>
+                              <span style="float:right;opacity:0.5;">{String(entry?.timestamp ?? "").replace("T", " ").slice(0, 19)}</span>
+                            </div>
+                          );
+                        }}
+                      </For>
+                    </div>
+                  </Show>
+                </div>
+              </section>
+
           {/* LLM Tab */}
           <Show when={activeTab() === "llm"}>
             <>
@@ -1137,11 +1335,11 @@ const SettingsModal: Component = () => {
                     checked={draft()?.voice?.enabled ?? false}
                     onChange={(e) => updateField("voice", "enabled", e.currentTarget.checked)}
                   />
-                  Enable Voice
+                  Enable Voice<FieldBadge section="voice" field="enabled" />
                 </label>
               </div>
               <div class="settings-field">
-                <label>Mode</label>
+                <label>Mode<FieldBadge section="voice" field="mode" /></label>
                 <select
                   value={draft()?.voice?.mode ?? "push_to_talk"}
                   onChange={(e) => updateField("voice", "mode", e.currentTarget.value)}
@@ -1198,7 +1396,7 @@ const SettingsModal: Component = () => {
                 </select>
               </div>
               <div class="settings-field">
-                <label>STT Language</label>
+                <label>STT Language<FieldBadge section="voice" field="language" /></label>
                 <select
                   value={draft()?.voice?.language ?? "auto"}
                   onChange={(e) => updateField("voice", "language", e.currentTarget.value)}
@@ -1306,7 +1504,7 @@ const SettingsModal: Component = () => {
                     checked={draft()?.safety?.emergency_mode ?? false}
                     onChange={(e) => updateField("safety", "emergency_mode", e.currentTarget.checked)}
                   />
-                  Emergency Mode (disable all tools)
+                  Emergency Mode (disable all tools)<FieldBadge section="safety" field="emergency_mode" />
                 </label>
               </div>
             </section>
@@ -1316,7 +1514,7 @@ const SettingsModal: Component = () => {
           <Show when={activeTab() === "ui"}>
             <section class="settings-section">
               <div class="settings-field">
-                <label>Theme</label>
+                <label>Theme<FieldBadge section="ui" field="theme" /></label>
                 <div class="theme-toggle">
                   <button
                     class={`theme-btn ${theme() === "dark" ? "active" : ""}`}
@@ -1340,7 +1538,7 @@ const SettingsModal: Component = () => {
               </div>
 
               <div class="settings-field">
-                <label>Language</label>
+                <label>Language<FieldBadge section="ui" field="language" /></label>
                 <select
                   value={draft()?.ui?.language ?? "en"}
                   onChange={(e) => {
@@ -1366,7 +1564,7 @@ const SettingsModal: Component = () => {
                       document.documentElement.setAttribute("data-high-contrast", String(val));
                     }}
                   />
-                  {" "}High Contrast
+                  {" "}High Contrast<FieldBadge section="ui" field="high_contrast" />
                 </label>
                 <span class="field-hint">Increase contrast for better visibility.</span>
               </div>
@@ -1382,13 +1580,13 @@ const SettingsModal: Component = () => {
                       document.documentElement.setAttribute("data-reduce-motion", String(val));
                     }}
                   />
-                  {" "}Reduce Motion
+                  {" "}Reduce Motion<FieldBadge section="ui" field="reduce_motion" />
                 </label>
                 <span class="field-hint">Minimize animations for motion sensitivity.</span>
               </div>
 
               <div class="settings-field">
-                <label>Font Scale</label>
+                <label>Font Scale<FieldBadge section="ui" field="font_scale" /></label>
                 <select
                   value={selectedFontScale()}
                   onChange={(e) => {
@@ -1575,7 +1773,7 @@ const SettingsModal: Component = () => {
           <Show when={activeTab() === "search"}>
             <section class="settings-section">
               <div class="settings-field">
-                <label>Search Engine</label>
+                <label>Search Engine<FieldBadge section="search" field="engine" /></label>
                 <select
                   value={draft()?.search?.engine ?? "duckduckgo"}
                   onChange={(e) => updateField("search", "engine", e.currentTarget.value)}
@@ -1586,7 +1784,7 @@ const SettingsModal: Component = () => {
               </div>
               <Show when={draft()?.search?.engine === "searxng"}>
                 <div class="settings-field">
-                  <label>SearXNG URL</label>
+                  <label>SearXNG URL<FieldBadge section="search" field="searxng_url" /></label>
                   <input
                     type="text"
                     value={draft()?.search?.searxng_url ?? ""}
@@ -2436,7 +2634,7 @@ const SettingsModal: Component = () => {
                           checked={draft()?.orchestrator?.gpu_autoscale ?? false}
                           onChange={(e) => updateField("orchestrator", "gpu_autoscale", e.currentTarget.checked)}
                         />
-                        Allow background GPU auto-upgrade (off = most stable)
+                        Allow background GPU auto-upgrade (off = most stable)<FieldBadge section="orchestrator" field="gpu_autoscale" />
                       </label>
                       <span class="field-hint">
                         When off, the model keeps its startup size and never spontaneously
@@ -2445,7 +2643,7 @@ const SettingsModal: Component = () => {
                       </span>
                     </div>
                     <div class="settings-field">
-                      <label>GPU memory reserve (MB)</label>
+                      <label>GPU memory reserve (MB)<FieldBadge section="orchestrator" field="cuda_reserve_mb" /></label>
                       <input
                         type="number"
                         min="256"
@@ -2460,7 +2658,7 @@ const SettingsModal: Component = () => {
                       </span>
                     </div>
                     <div class="settings-field">
-                      <label>Desktop volatility reserve cap (MB)</label>
+                      <label>Desktop volatility reserve cap (MB)<FieldBadge section="orchestrator" field="vram_volatility_cap_mb" /></label>
                       <input
                         type="number"
                         min="0"

@@ -26,7 +26,9 @@
 //! no `Materialization` variant at all (falls through to `_ =>
 //! Materialization::None` in `capability.rs`).
 
-use kria_core::openclaw::capability::{grant_all, Capability, CapabilityKind, CapabilityMode, CapabilityScope, GrantSource};
+use kria_core::openclaw::capability::{
+    grant_all, Capability, CapabilityKind, CapabilityMode, CapabilityScope, GrantSource,
+};
 
 /// Confirms the real `CapabilityKind` set — exactly 8 variants, NOT the 10
 /// requirements.md names. Any change here is a real, meaningful update to
@@ -67,7 +69,11 @@ fn sample_capability(kind: CapabilityKind) -> Capability {
         CapabilityKind::Environment => CapabilityScope::EnvVars(vec!["FIXTURE_VAR".into()]),
         _ => CapabilityScope::None,
     };
-    Capability { kind, mode: CapabilityMode::ReadWrite, scope }
+    Capability {
+        kind,
+        mode: CapabilityMode::ReadWrite,
+        scope,
+    }
 }
 
 /// R4.4 real grant/revoke-adjacent check: `grant_all` (real, public) produces
@@ -79,7 +85,10 @@ pub fn validate_grant_and_revoke_cycle(kind: CapabilityKind) -> Result<(), Strin
     let cap = sample_capability(kind);
     let granted = grant_all(&[cap.clone()], GrantSource::UserApproval, true);
     if granted.len() != 1 {
-        return Err(format!("expected exactly 1 grant for {kind:?}, got {}", granted.len()));
+        return Err(format!(
+            "expected exactly 1 grant for {kind:?}, got {}",
+            granted.len()
+        ));
     }
     if !granted[0].granted {
         return Err(format!("expected {kind:?} grant to be marked granted=true"));
@@ -89,7 +98,10 @@ pub fn validate_grant_and_revoke_cycle(kind: CapabilityKind) -> Result<(), Strin
     // carry-over — grant_all is stateless per call (real, verified behavior).
     let revoked = grant_all(&[], GrantSource::UserApproval, true);
     if !revoked.is_empty() {
-        return Err("expected zero grants when the capability list is empty (no implicit carry-over)".into());
+        return Err(
+            "expected zero grants when the capability list is empty (no implicit carry-over)"
+                .into(),
+        );
     }
 
     Ok(())
@@ -125,7 +137,8 @@ mod tests {
     #[test]
     fn grant_revoke_cycle_for_every_real_capability_kind() {
         for kind in real_capability_kinds() {
-            validate_grant_and_revoke_cycle(kind).unwrap_or_else(|e| panic!("grant/revoke cycle failed for {kind:?}: {e}"));
+            validate_grant_and_revoke_cycle(kind)
+                .unwrap_or_else(|e| panic!("grant/revoke cycle failed for {kind:?}: {e}"));
         }
     }
 

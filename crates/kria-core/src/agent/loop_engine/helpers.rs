@@ -276,11 +276,125 @@ pub(super) fn detect_package_intent_raw(user_text: &str) -> Option<PackageIntent
     None
 }
 
+/// True when an install/uninstall request is about a KRIA *capability*
+/// (skill/tool/plugin from the Capability Provider Platform marketplace) rather
+/// than an operating-system software package. Such requests must NOT enter the
+/// OS package-manager flow (`search_package`/`install_package`) — they belong to
+/// the marketplace tools (`search_marketplace`/`install_capability`). This is an
+/// intent-class disambiguation over generic capability nouns, not a per-prompt
+/// special case, so it generalizes to unseen requests.
+pub(super) fn refers_to_marketplace_capability(user_text: &str) -> bool {
+    let text = user_text.to_lowercase();
+    [
+        "tool",
+        "skill",
+        "capability",
+        "plugin",
+        "add-on",
+        "addon",
+        "extension",
+        "integration",
+        "marketplace",
+        "openclaw",
+        "clawhub",
+    ]
+    .iter()
+    .any(|noun| text.contains(noun))
+}
+
 pub(super) fn detect_package_intent(user_text: &str) -> Option<PackageIntent> {
     if is_remote_command_context(user_text) {
         return None;
     }
+    // Capability/skill/tool installs are a marketplace concern, not an OS
+    // package-manager concern — don't hijack them into the package flow.
+    if refers_to_marketplace_capability(user_text) {
+        return None;
+    }
     detect_package_intent_raw(user_text)
+}
+
+/// Extract the descriptive capability query from a marketplace request by
+/// stripping the lead-in verb ("install", "search the marketplace for", ...) and
+/// trailing filler ("from the marketplace", "please"). The remainder (e.g. "ip
+/// info tool", "pdf extractor") is what the provider's marketplace matcher ranks
+/// against — general, no per-skill logic.
+pub(super) fn extract_capability_query(user_text: &str) -> Option<String> {
+    let lower = user_text.to_lowercase();
+    // Most-specific markers first so "search the marketplace for X" wins over
+    // the bare "search for" / "for" fragments.
+    let markers: &[&str] = &[
+        "search the marketplace for ",
+        "search marketplace for ",
+        "look in the marketplace for ",
+        "install a new ",
+        "install the ",
+        "install a ",
+        "install an ",
+        "install ",
+        "add a ",
+        "add an ",
+        "add the ",
+        "add ",
+        "get me a ",
+        "get me an ",
+        "get me the ",
+        "get me ",
+        "download the ",
+        "download a ",
+        "download ",
+        "set up a ",
+        "set up ",
+        "setup ",
+        "enable the ",
+        "enable ",
+        "find me a ",
+        "find me an ",
+        "find a ",
+        "find an ",
+        "find ",
+        "search for ",
+        "search ",
+        "look for a ",
+        "look for ",
+        "browse for ",
+        "browse ",
+    ];
+    let mut frag = extract_after_first_marker(&lower, markers)
+        .unwrap_or(lower.as_str())
+        .trim()
+        .to_string();
+    frag = frag
+        .split(|c: char| ".,!?;:\n".contains(c))
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    for prefix in ["the ", "a ", "an ", "new ", "some "] {
+        if frag.starts_with(prefix) {
+            frag = frag[prefix.len()..].trim_start().to_string();
+        }
+    }
+    for suffix in [
+        " from the marketplace",
+        " in the marketplace",
+        " from marketplace",
+        " on the marketplace",
+        " please",
+        " now",
+        " for me",
+        " thanks",
+    ] {
+        if let Some(idx) = frag.find(suffix) {
+            frag.truncate(idx);
+        }
+    }
+    let frag = frag.trim().to_string();
+    if frag.is_empty() {
+        None
+    } else {
+        Some(frag)
+    }
 }
 
 pub(super) fn normalize_package_query(raw: &str) -> String {
@@ -836,5 +950,62 @@ pub(super) fn infer_verifiability_for_tool(
 
         // All other tools: no specific verification
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod marketplace_intent_tests {
+    use super::*;
+
+    #[test]
+    fn os_package_install_still_routes_to_package_flow() {
+        // Real OS software → OS package manager intent.
+        assert_eq!(
+            detect_package_intent("install htop"),
+            Some(PackageIntent::Install)
+        );
+        assert_eq!(
+            detect_package_intent("please install docker for me"),
+            Some(PackageIntent::Install)
+        );
+    }
+
+    #[test]
+    fn capability_installs_are_excluded_from_os_package_flow() {
+        // Skill/tool/capability installs must NOT hit the OS package flow — they
+        // belong to the marketplace (search_marketplace / install_capability).
+        for prompt in [
+            "install a web search tool",
+            "install the IP Info tool from the marketplace",
+            "install a PDF extractor skill",
+            "add a zip compression capability",
+            "install an OCR plugin",
+        ] {
+            assert_eq!(
+                detect_package_intent(prompt),
+                None,
+                "capability request must not enter OS package flow: {prompt}"
+            );
+            assert!(
+                refers_to_marketplace_capability(prompt),
+                "should be recognized as a marketplace capability: {prompt}"
+            );
+        }
+    }
+
+    #[test]
+    fn extract_capability_query_strips_verbs_and_marketplace_filler() {
+        assert_eq!(
+            extract_capability_query("Install the IP Info tool from the marketplace").as_deref(),
+            Some("ip info tool")
+        );
+        assert_eq!(
+            extract_capability_query("search the marketplace for a hash tool").as_deref(),
+            Some("hash tool")
+        );
+        assert_eq!(
+            extract_capability_query("add a base64 tool").as_deref(),
+            Some("base64 tool")
+        );
     }
 }

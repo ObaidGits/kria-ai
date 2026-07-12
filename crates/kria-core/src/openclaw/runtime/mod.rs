@@ -123,3 +123,17 @@ impl RuntimeRegistry {
 }
 
 pub use docker::DockerRuntime;
+
+/// Build the provider-neutral runtime registry (the one execution backend set).
+///
+/// Relocated here from the deleted legacy `openclaw::handler` (M12 Option-A
+/// migration): it is reusable runtime infrastructure — the `DockerRuntime` the
+/// OpenClaw `CapabilityProvider` and the real-Docker eval suites drive — not part
+/// of the retired semantic-handler pipeline.
+pub fn build_runtime_registry(
+    pool: Arc<crate::openclaw::pool::ContainerPool>,
+) -> Arc<RuntimeRegistry> {
+    let mut reg = RuntimeRegistry::new();
+    reg.register(Arc::new(docker::DockerRuntime::new(pool)));
+    Arc::new(reg)
+}

@@ -30,8 +30,15 @@ pub async fn validate_docker_outage_mid_session() -> Result<(), String> {
     drop(outage);
 
     match bounded {
-        Err(_) => return Err("R7.1 VIOLATION: construction hung past 15s during Docker outage".into()),
-        Ok(Ok(_)) => return Err("R7.1 VIOLATION: pool construction unexpectedly succeeded during Docker outage".into()),
+        Err(_) => {
+            return Err("R7.1 VIOLATION: construction hung past 15s during Docker outage".into())
+        }
+        Ok(Ok(_)) => {
+            return Err(
+                "R7.1 VIOLATION: pool construction unexpectedly succeeded during Docker outage"
+                    .into(),
+            )
+        }
         Ok(Err(e)) => eprintln!("[R7.1] Docker outage produced honest error, no hang: {e}"),
     }
 
@@ -43,7 +50,9 @@ pub async fn validate_docker_outage_mid_session() -> Result<(), String> {
 /// leave the runtime able to serve the next run.
 pub async fn validate_container_crash_mid_run() -> Result<(), String> {
     let rig = TestRig::up().await.map_err(|e| e.to_string())?;
-    let baseline = leak_detector::baseline(&rig.pool).await.map_err(|e| e.to_string())?;
+    let baseline = leak_detector::baseline(&rig.pool)
+        .await
+        .map_err(|e| e.to_string())?;
 
     let handle = rig
         .pool
@@ -56,29 +65,45 @@ pub async fn validate_container_crash_mid_run() -> Result<(), String> {
     // param is a caller-asserted safety label (must contain the rig prefix) —
     // it is not a Docker name lookup, so we assert the label truthfully since
     // this IS a rig-owned container (checked out from `rig.pool` above).
-    let asserted_label = format!("{}-r7-crash-test", crate::openclaw_eval::rig::RIG_CONTAINER_PREFIX);
+    let asserted_label = format!(
+        "{}-r7-crash-test",
+        crate::openclaw_eval::rig::RIG_CONTAINER_PREFIX
+    );
     ContainerCrash::inject(&handle.container_id, &asserted_label)
         .await
         .map_err(|e| format!("R7.2: real container-crash injection failed: {e}"))?;
-    eprintln!("[R7.2] injected real container crash via docker kill on {}", handle.container_id);
+    eprintln!(
+        "[R7.2] injected real container crash via docker kill on {}",
+        handle.container_id
+    );
 
     // The crash must not hang checkin, and the pool must remain usable
     // afterward.
-    let checkin_result = tokio::time::timeout(std::time::Duration::from_secs(15), rig.pool.checkin(handle)).await;
+    let checkin_result =
+        tokio::time::timeout(std::time::Duration::from_secs(15), rig.pool.checkin(handle)).await;
     if checkin_result.is_err() {
         return Err("R7.2 VIOLATION: checkin hung past 15s after container crash".into());
     }
 
     // Pool must remain able to serve the NEXT run.
-    let next = rig.pool.checkout(ResourceClass::Light, "oc_calculator").await;
+    let next = rig
+        .pool
+        .checkout(ResourceClass::Light, "oc_calculator")
+        .await;
     match next {
         Ok(h) => {
             rig.pool.checkin(h).await.map_err(|e| e.to_string())?;
         }
-        Err(e) => return Err(format!("R7.2 VIOLATION: pool unusable for next run after crash: {e}")),
+        Err(e) => {
+            return Err(format!(
+                "R7.2 VIOLATION: pool unusable for next run after crash: {e}"
+            ))
+        }
     }
 
-    leak_detector::assert_returned_to(&rig.pool, baseline).await.map_err(|e| e.to_string())?;
+    leak_detector::assert_returned_to(&rig.pool, baseline)
+        .await
+        .map_err(|e| e.to_string())?;
     rig.down().await.map_err(|e| e.to_string())?;
     Ok(())
 }

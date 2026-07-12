@@ -409,13 +409,22 @@ async fn model_router_status_reports_unhealthy_when_server_down() {
     let mut config = KriaConfig::default();
     config.llm.local_api_url = "http://127.0.0.1:1/v1".into();
     let router = ModelRouter::from_config(&config);
-    let status = router.status().await;
 
-    // Endpoint is unreachable in test, so health should report false.
-    let healthy = status["local_healthy"].as_bool().unwrap_or(true);
+    // Reachability is intentionally DEBOUNCED: a single missed `/health` probe
+    // must not flip the banner (a blip during generation is not an outage). Only
+    // a *sustained* transport failure reports `local_healthy = false`. Probe a few
+    // times so the consecutive-failure threshold is crossed, then assert down.
+    let mut healthy = true;
+    for _ in 0..6 {
+        let status = router.status().await;
+        healthy = status["local_healthy"].as_bool().unwrap_or(true);
+        if !healthy {
+            break;
+        }
+    }
     assert!(
         !healthy,
-        "local_healthy should be false when llama server is not running"
+        "local_healthy should be false after a sustained outage (server never running)"
     );
 }
 
@@ -464,4 +473,94 @@ fn partial_transcript_is_separate_from_final() {
     // They should NOT match each other's variant
     assert!(!matches!(partial, VoicePipelineEvent::Transcript(_)));
     assert!(!matches!(final_t, VoicePipelineEvent::PartialTranscript(_)));
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  LLM availability & stability — frontend-path reachability
+//
+//  These exercise the SAME path the desktop `get_health` command uses to
+//  drive the status banner: `ModelRouter::status()` → `local_healthy`. A
+//  minimal raw-HTTP `/health` server stands in for llama-server so the test
+//  observes what a real user would: "reachable" while the server answers, and
+//  a *debounced* flip to "not reachable" only after a sustained outage.
+// ═══════════════════════════════════════════════════════════════
+
+/// Spawn a minimal HTTP/1.1 server that answers every request with `200 OK`.
+/// Returns the bound `127.0.0.1:PORT` address and a shutdown handle. Mirrors
+/// llama.cpp's `/health` well enough for the reachability probe.
+async fn spawn_mock_health_server() -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind mock server");
+    let addr = listener.local_addr().expect("local_addr");
+    let handle = tokio::spawn(async move {
+        loop {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                break;
+            };
+            tokio::spawn(async move {
+                let mut buf = [0u8; 1024];
+                let _ = stream.read(&mut buf).await;
+                let body = "{\"status\":\"ok\"}";
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(resp.as_bytes()).await;
+                let _ = stream.flush().await;
+            });
+        }
+    });
+    (addr, handle)
+}
+
+#[tokio::test]
+async fn local_healthy_true_when_server_answers_then_debounced_false_after_outage() {
+    let (addr, server) = spawn_mock_health_server().await;
+
+    let mut config = KriaConfig::default();
+    config.llm.local_api_url = format!("http://{addr}/v1");
+    let router = ModelRouter::from_config(&config);
+
+    // Server is up → the banner path must report reachable.
+    let status = router.status().await;
+    assert_eq!(
+        status["local_healthy"].as_bool(),
+        Some(true),
+        "local_healthy must be true while the /health server answers 200"
+    );
+
+    // Take the server down (simulate a crash / socket failure).
+    server.abort();
+    // Give the runtime a moment to fully release the listener.
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+    // Debounce: a single missed probe must NOT flip the banner. The reachability
+    // layer requires several consecutive transport failures before reporting down,
+    // so a brief blip during generation never shows "LLM server not reachable".
+    let first = router.status().await;
+    assert_eq!(
+        first["local_healthy"].as_bool(),
+        Some(true),
+        "a single missed probe must be debounced (still reachable)"
+    );
+
+    // Sustained outage: after enough consecutive failures, the banner correctly
+    // flips to "not reachable" — accurate availability, not a permanent lie.
+    let mut went_unreachable = false;
+    for _ in 0..6 {
+        let s = router.status().await;
+        if s["local_healthy"].as_bool() == Some(false) {
+            went_unreachable = true;
+            break;
+        }
+    }
+    assert!(
+        went_unreachable,
+        "a sustained outage must eventually report local_healthy=false"
+    );
 }

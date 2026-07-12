@@ -59,15 +59,15 @@ pub struct ConfirmedSettingsFields {
 /// this is the honest, correct level of validation available here).
 pub fn confirmed_settings_fields() -> ConfirmedSettingsFields {
     ConfirmedSettingsFields {
-        enable_disable: true,             // openclaw_get/update_settings
-        marketplace_source: true,         // registry_index_url field
-        installed_skills_list: true,      // clawhub_list_skills
-        skill_enable_disable: true,       // clawhub_toggle_skill
-        skill_uninstall: true,            // clawhub_uninstall_skill
-        generated_skills_view: false,     // NONE found (matches task 10 finding)
-        developer_mode: false,            // NONE found anywhere in kria-desktop
-        health_status: true,              // openclaw_substrate_status
-        logs: false,                      // no dedicated OpenClaw logs command
+        enable_disable: true,         // openclaw_get/update_settings
+        marketplace_source: true,     // registry_index_url field
+        installed_skills_list: true,  // clawhub_list_skills
+        skill_enable_disable: true,   // clawhub_toggle_skill
+        skill_uninstall: true,        // clawhub_uninstall_skill
+        generated_skills_view: false, // NONE found (matches task 10 finding)
+        developer_mode: false,        // NONE found anywhere in kria-desktop
+        health_status: true,          // openclaw_substrate_status
+        logs: false,                  // no dedicated OpenClaw logs command
     }
 }
 
@@ -81,7 +81,8 @@ pub fn settings_payload_exposes_dead_trust_knobs() -> bool {
         .nth(1)
         .and_then(|s| s.split('}').next())
         .unwrap_or_default();
-    payload_section.contains("community_allows_network") && payload_section.contains("verified_skips_hitl")
+    payload_section.contains("community_allows_network")
+        && payload_section.contains("verified_skips_hitl")
 }
 
 /// R14.2: `OpenClawConfig` (the section `openclaw_update_settings` persists)
@@ -120,9 +121,18 @@ mod tests {
     fn r8_1_confirmed_present_controls() {
         let fields = confirmed_settings_fields();
         assert!(fields.enable_disable, "enable/disable must be present");
-        assert!(fields.marketplace_source, "marketplace source must be present");
-        assert!(fields.installed_skills_list, "installed skills list must be present");
-        assert!(fields.skill_enable_disable, "per-skill enable/disable must be present");
+        assert!(
+            fields.marketplace_source,
+            "marketplace source must be present"
+        );
+        assert!(
+            fields.installed_skills_list,
+            "installed skills list must be present"
+        );
+        assert!(
+            fields.skill_enable_disable,
+            "per-skill enable/disable must be present"
+        );
         assert!(fields.skill_uninstall, "uninstall must be present");
         assert!(fields.health_status, "health/status must be present");
     }
@@ -141,7 +151,8 @@ mod tests {
 
     #[test]
     fn r14_2_config_persistence_format_round_trips() {
-        validate_openclaw_config_round_trips().expect("R14.2: OpenClawConfig must round-trip through TOML without loss");
+        validate_openclaw_config_round_trips()
+            .expect("R14.2: OpenClawConfig must round-trip through TOML without loss");
     }
 
     /// Confirms the two now-LIVE trust knobs remain exposed as Settings

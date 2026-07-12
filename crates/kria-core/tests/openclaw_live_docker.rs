@@ -189,8 +189,9 @@ async fn live_runtime_executes_calculator_end_to_end() {
     require_docker!();
 
     use kria_core::openclaw::event::{self, Stage};
-    use kria_core::openclaw::handler::build_runtime_registry;
-    use kria_core::openclaw::runtime::{LaunchSpec, RuntimeContext, RuntimeKind};
+    use kria_core::openclaw::runtime::{
+        build_runtime_registry, LaunchSpec, RuntimeContext, RuntimeKind,
+    };
     use kria_core::openclaw::{ContainerPool, OpenClawConfig, ResourceClass};
     use std::sync::Arc;
     use std::time::Duration;
@@ -420,8 +421,9 @@ async fn live_runtime_executes_text_tool_end_to_end() {
         return;
     }
 
-    use kria_core::openclaw::handler::build_runtime_registry;
-    use kria_core::openclaw::runtime::{LaunchSpec, RuntimeContext, RuntimeKind};
+    use kria_core::openclaw::runtime::{
+        build_runtime_registry, LaunchSpec, RuntimeContext, RuntimeKind,
+    };
     use kria_core::openclaw::{ContainerPool, OpenClawConfig, ResourceClass};
     use std::sync::Arc;
     use std::time::Duration;
@@ -515,77 +517,7 @@ async fn live_registry_syncs_all_container_skills_with_schemas() {
     println!("[PASS] live_registry_syncs_all_container_skills_with_schemas");
 }
 
-/// GOLD-STANDARD full e2e (RC1+RC2 together): a natural-language `query`
-/// through the REAL semantic handler → RC1 schema-driven argument generation
-/// (real LLM) → real Docker container → correct result. This is the exact
-/// failing case ("missing required parameter: expression") now passing end to
-/// end with NO prompt-specific logic.
-///
-/// Gated on BOTH `KRIA_LIVE_DOCKER_TESTS` and `KRIA_LLAMA_API_URL`.
-#[tokio::test]
-async fn live_e2e_natural_language_to_calculator_result() {
-    require_docker!();
-    let Ok(llm_url) = std::env::var("KRIA_LLAMA_API_URL") else {
-        eprintln!("[SKIP] set KRIA_LLAMA_API_URL to run the full NL→arg-gen→container e2e");
-        return;
-    };
-
-    use kria_core::llm::ModelRouter;
-    use kria_core::openclaw::audit::AuditLedger;
-    use kria_core::openclaw::handler::{build_runtime_registry, SemanticOpenClawHandler};
-    use kria_core::openclaw::init::sync_registry_from_container;
-    use kria_core::openclaw::registry::ProductionSkillRegistry;
-    use kria_core::openclaw::{ContainerPool, OpenClawConfig};
-    use kria_core::tools::registry::ToolHandler;
-    use std::sync::Arc;
-
-    let dir = tempfile::tempdir().unwrap();
-    let db = dir.path().join("e2e.db");
-    let registry = Arc::new(ProductionSkillRegistry::new(&db).expect("registry"));
-    let pool = Arc::new(
-        ContainerPool::new(OpenClawConfig::default())
-            .await
-            .expect("pool"),
-    );
-    pool.initialize().await.expect("pool init");
-
-    // RC2: registry reflects the container's real skill set + schemas.
-    sync_registry_from_container(&registry, pool.clone())
-        .await
-        .expect("sync");
-
-    // Real model router pointed at the running llama-server (RC1 arg-gen).
-    let mut config = kria_core::config::KriaConfig::default();
-    config.llm.local_api_url = if llm_url.ends_with("/v1") {
-        llm_url
-    } else {
-        format!("{}/v1", llm_url.trim_end_matches('/'))
-    };
-    let router = Arc::new(ModelRouter::from_config(&config));
-
-    let runtimes = build_runtime_registry(pool.clone());
-    let audit = Arc::new(AuditLedger::open(&db, b"e2e-key".to_vec()).expect("audit"));
-    let handler = SemanticOpenClawHandler::new(registry, runtimes, audit).with_arg_gen_llm(router);
-
-    // The ORIGINAL failing prompt — freeform NL, no `expression` field supplied.
-    let result = handler
-        .execute(serde_json::json!({ "query": "calculate 3+3" }))
-        .await;
-
-    let payload = serde_json::to_string(&result.data).unwrap_or_default();
-    println!(
-        "e2e result: success={} data={payload} error={:?}",
-        result.success, result.error
-    );
-    assert!(
-        result.success,
-        "execution must succeed, got error: {:?}",
-        result.error
-    );
-    assert!(
-        payload.contains('6'),
-        "calculator must return 6 for 3+3 (got {payload})"
-    );
-
-    println!("[PASS] live_e2e_natural_language_to_calculator_result");
-}
+// NOTE: the legacy `live_e2e_natural_language_to_calculator_result` test drove the
+// deleted `SemanticOpenClawHandler`. The equivalent NL→arg-gen→execute path is now
+// the CPP `CapabilityDispatchHandler` (see `crate::tools::capability_dispatch` unit
+// tests + `tests/capability_prompt_report_docker.rs`), so this legacy test was removed.

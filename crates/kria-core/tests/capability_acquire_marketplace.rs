@@ -77,6 +77,8 @@ async fn openclaw_lifecycle_acquire_and_remove_real_marketplace() {
         .acquire(&AcquireRequest {
             capability_tag: "code.execute.python".to_string(),
             hint: Some("execute python code snippet sandbox".to_string()),
+            capability_id: None,
+            proposed_graph: None,
             context: RequestContext::new(),
         })
         .await

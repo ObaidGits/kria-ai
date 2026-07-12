@@ -10,8 +10,12 @@ pub mod app_lifecycle;
 pub mod atspi_tools;
 pub mod availability;
 pub mod browser_agent;
+/// CPP-backed capability dispatcher (Option-A migration) — the single chat/agent
+/// execution entry point that routes through `CapabilityPlatform`.
+pub mod capability_dispatch;
 pub mod cognition_tools;
 pub mod communication;
+pub mod config_patch;
 pub mod desktop;
 pub mod developer;
 pub mod disk;
@@ -48,11 +52,41 @@ pub mod tasks;
 pub mod vision;
 pub mod vision_automation;
 
+/// Provenance of the content that triggered a tool call.
+///
+/// Used by the settings-config-revamp injection wall: privileged tools (e.g.
+/// `config_patch`) MUST refuse to mutate state unless the trigger is
+/// [`TriggerProvenance::User`]. Defaults to `User` for backward compatibility
+/// with existing tool call sites; the agent/turn boundary sets the accurate
+/// value (e.g. `ExternalContent` when a tool acts on fetched web/file content).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum TriggerProvenance {
+    /// The tool call originates directly from user input.
+    #[default]
+    User,
+    /// The tool call originates from external content (web page, file, doc).
+    ExternalContent,
+    /// The tool call originates from another tool's output.
+    Tool,
+}
+
 #[derive(Clone)]
 pub struct ToolContext {
     pub env: Arc<dyn EnvironmentProvider>,
     pub shell_state: SharedShellState,
     pub cancellation: CancellationToken,
+    /// Provenance of the triggering content (injection wall — see
+    /// [`TriggerProvenance`]). Defaults to `User`.
+    pub provenance: TriggerProvenance,
+    /// Optional handle to the live `ConfigService` (settings-config-revamp).
+    /// `None` for tool calls that don't need config access; the `config_patch`
+    /// tool (Task 13) requires it. Defaults to `None`.
+    pub config: Option<Arc<crate::config::ConfigService>>,
+    /// Optional turn-scoped configuration overlay (settings-config-revamp Task 14).
+    /// When present, `effective_config()` returns the live config with these
+    /// whitelisted temp overrides applied on top. Dropped at turn end (never
+    /// persisted) — so it auto-reverts on success, error, or crash.
+    pub request_override: Option<Arc<crate::config::RequestOverride>>,
 }
 
 impl ToolContext {
@@ -65,6 +99,47 @@ impl ToolContext {
             env,
             shell_state,
             cancellation,
+            provenance: TriggerProvenance::User,
+            config: None,
+            request_override: None,
+        }
+    }
+
+    /// Set the trigger provenance (builder-style). The agent/turn boundary uses
+    /// this to mark tool calls that act on external/tool-derived content.
+    pub fn with_provenance(mut self, provenance: TriggerProvenance) -> Self {
+        self.provenance = provenance;
+        self
+    }
+
+    /// Attach a live `ConfigService` handle (builder-style) for tools that
+    /// read or mutate configuration (e.g. `config_patch`).
+    pub fn with_config(mut self, config: Arc<crate::config::ConfigService>) -> Self {
+        self.config = Some(config);
+        self
+    }
+
+    /// Attach a turn-scoped `RequestOverride` (builder-style, settings-config-revamp
+    /// Task 14). Tools that support per-turn temporary settings read it via
+    /// [`ToolContext::effective_config`].
+    pub fn with_request_override(
+        mut self,
+        request_override: Arc<crate::config::RequestOverride>,
+    ) -> Self {
+        self.request_override = Some(request_override);
+        self
+    }
+
+    /// Resolve the effective config for THIS turn: the live `ConfigService` value
+    /// with any whitelisted turn-scoped [`RequestOverride`] applied on top. Returns
+    /// `None` if no `ConfigService` handle is attached. The override is never
+    /// persisted — it exists only for the lifetime of this context.
+    pub async fn effective_config(&self) -> Option<crate::config::KriaConfig> {
+        let svc = self.config.as_ref()?;
+        let base = svc.get().await;
+        match &self.request_override {
+            Some(ov) if !ov.is_empty() => Some(ov.overlay(&base)),
+            _ => Some(base),
         }
     }
 
@@ -179,4 +254,28 @@ pub async fn vm_dispatch_command_with_sudo(cmd: &str, use_sudo: bool) -> Result<
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod provenance_tests {
+    use super::*;
+
+    #[test]
+    fn provenance_defaults_to_user() {
+        // Backward-compat: a freshly built ToolContext (via any legacy path)
+        // must default to `User` so existing tool call sites are unaffected.
+        assert_eq!(TriggerProvenance::default(), TriggerProvenance::User);
+    }
+
+    #[test]
+    fn with_provenance_threads_value() {
+        let base = TriggerProvenance::default();
+        assert_eq!(base, TriggerProvenance::User);
+        // The builder must carry the accurate provenance for the injection wall.
+        let external = TriggerProvenance::ExternalContent;
+        assert_ne!(external, TriggerProvenance::User);
+        let tool = TriggerProvenance::Tool;
+        assert_ne!(tool, TriggerProvenance::User);
+        assert_ne!(tool, external);
+    }
 }

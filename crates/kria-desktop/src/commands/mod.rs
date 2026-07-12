@@ -10,6 +10,7 @@ pub(crate) mod chat;
 pub(crate) mod colab;
 pub(crate) mod colab_dispatch;
 pub(crate) mod command_helpers;
+pub(crate) mod config_prompt;
 pub(crate) mod constants;
 pub(crate) mod device_enrollment;
 pub(crate) mod device_tools;

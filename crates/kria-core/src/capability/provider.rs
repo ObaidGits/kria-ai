@@ -98,7 +98,36 @@ pub struct AcquireRequest {
     pub capability_tag: String,
     /// Optional free-text hint (e.g. the original goal) to guide selection.
     pub hint: Option<String>,
+    /// The **Brain-selected** specific catalog capability id to install, when the
+    /// Brain has already ranked the provider's catalog and chosen one (spec R8/
+    /// R9.4 — match-selection is the Brain's job, not the provider's). When
+    /// `Some`, the provider MUST install exactly this capability and MUST NOT
+    /// re-resolve a different match. When `None`, the provider may resolve the
+    /// best match itself (backward-compatible / thin-caller path).
+    pub capability_id: Option<String>,
+    /// A **Brain-proposed Capability-Graph IR** (neutral serialized JSON) for a
+    /// synthesizing provider to persist + run (Wave 9, W9-R11). The Brain owns
+    /// *which* IR to synthesize (deterministic or LLM-assisted proposer); the
+    /// provider re-validates it (safety, not cognition) and executes. `None` ⇒
+    /// the provider derives a deterministic spec from the goal itself.
+    pub proposed_graph: Option<serde_json::Value>,
     pub context: RequestContext,
+}
+
+impl AcquireRequest {
+    /// Convenience constructor for a goal-driven acquisition (no pre-selected id,
+    /// no proposed graph). Keeps call sites concise + forward-compatible as new
+    /// optional fields are added.
+    pub fn for_goal(goal: impl Into<String>) -> Self {
+        let goal = goal.into();
+        Self {
+            capability_tag: goal.clone(),
+            hint: Some(goal),
+            capability_id: None,
+            proposed_graph: None,
+            context: RequestContext::new(),
+        }
+    }
 }
 
 /// The anti-corruption boundary. Implemented once per provider, inside an

@@ -6,8 +6,8 @@
 //! when unset so normal `cargo test` runs are unaffected. No mocks: uses the
 //! real `LocalBackend` + the real `arg_gen::generate_arguments` production path.
 
+use kria_core::capability::intelligence::arg_gen::{generate_arguments, validate_against_schema};
 use kria_core::llm::local::LocalBackend;
-use kria_core::openclaw::arg_gen::{generate_arguments, validate_against_schema};
 use serde_json::json;
 
 fn backend() -> Option<LocalBackend> {

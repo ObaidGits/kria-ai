@@ -34,7 +34,7 @@
 //!   calls `register_skill` at all), so the ONLY way into OpenClaw from chat
 //!   is confirmed to be the single `"openclaw"` semantic tool.
 
-use kria_core::openclaw::event::{Stage, SkillEvent};
+use kria_core::openclaw::event::{SkillEvent, Stage};
 use tokio::sync::broadcast::Receiver;
 
 /// Drains the real `openclaw::event` broadcast stream for up to `timeout` and
@@ -56,7 +56,10 @@ pub async fn collect_events_for_correlation(
         match tokio::time::timeout(remaining, receiver.recv()).await {
             Ok(Ok(event)) => {
                 if event.correlation_id == correlation_id {
-                    let is_terminal = matches!(event.stage, Stage::Completed | Stage::Failed | Stage::Cancelled);
+                    let is_terminal = matches!(
+                        event.stage,
+                        Stage::Completed | Stage::Failed | Stage::Cancelled
+                    );
                     collected.push(event);
                     if is_terminal {
                         break;
@@ -77,20 +80,31 @@ pub async fn collect_events_for_correlation(
 /// proving the run went through the real lifecycle, not a shortcut.
 pub fn assert_canonical_stage_sequence(events: &[SkillEvent]) -> Result<(), String> {
     if events.is_empty() {
-        return Err("no SkillEvents observed for this correlation id — OpenClaw execution \
+        return Err(
+            "no SkillEvents observed for this correlation id — OpenClaw execution \
              telemetry is silent, meaning the run either bypassed the runtime or the \
              event bus is broken"
-            .into());
+                .into(),
+        );
     }
 
     let first = &events[0];
     if first.stage != Stage::Started {
-        return Err(format!("first observed stage must be Started, got {:?}", first.stage));
+        return Err(format!(
+            "first observed stage must be Started, got {:?}",
+            first.stage
+        ));
     }
 
     let last = events.last().expect("checked non-empty above");
-    if !matches!(last.stage, Stage::Completed | Stage::Failed | Stage::Cancelled) {
-        return Err(format!("last observed stage must be terminal, got {:?}", last.stage));
+    if !matches!(
+        last.stage,
+        Stage::Completed | Stage::Failed | Stage::Cancelled
+    ) {
+        return Err(format!(
+            "last observed stage must be terminal, got {:?}",
+            last.stage
+        ));
     }
 
     Ok(())
@@ -101,7 +115,9 @@ mod tests {
     use super::*;
     use crate::openclaw_eval::rig::{verify_docker_reachable, TestRig};
     use kria_core::execution::executors::openclaw_executor_from_pool;
-    use kria_core::execution::{ExecutionContext, ExecutionEngine, ExecutionGraph, GraphNode, NodeKind, ScheduleStatus};
+    use kria_core::execution::{
+        ExecutionContext, ExecutionEngine, ExecutionGraph, GraphNode, NodeKind, ScheduleStatus,
+    };
     use std::sync::Arc;
 
     /// Real end-to-end R11 trace: subscribe to the REAL `openclaw::event` bus,
@@ -118,7 +134,9 @@ mod tests {
             return;
         }
 
-        let rig = TestRig::up().await.expect("rig must come up against real Docker");
+        let rig = TestRig::up()
+            .await
+            .expect("rig must come up against real Docker");
 
         let receiver = kria_core::openclaw::event::subscribe();
 
@@ -139,18 +157,31 @@ mod tests {
 
         let ctx = ExecutionContext::new("goal-r11-trace", correlation_id.clone());
         let result = engine.execute_graph(&graph, &ctx).await;
-        assert_eq!(result.status, ScheduleStatus::Completed, "run must succeed: {result:?}");
+        assert_eq!(
+            result.status,
+            ScheduleStatus::Completed,
+            "run must succeed: {result:?}"
+        );
 
-        let events = collect_events_for_correlation(receiver, &correlation_id, std::time::Duration::from_secs(5)).await;
-        assert_canonical_stage_sequence(&events)
-            .expect("R11: real OpenClaw execution must emit a valid canonical SkillEvent stage sequence");
+        let events = collect_events_for_correlation(
+            receiver,
+            &correlation_id,
+            std::time::Duration::from_secs(5),
+        )
+        .await;
+        assert_canonical_stage_sequence(&events).expect(
+            "R11: real OpenClaw execution must emit a valid canonical SkillEvent stage sequence",
+        );
 
-        eprintln!("[R11] observed {} SkillEvents for correlation_id={correlation_id}: {:?}",
+        eprintln!(
+            "[R11] observed {} SkillEvents for correlation_id={correlation_id}: {:?}",
             events.len(),
             events.iter().map(|e| &e.stage).collect::<Vec<_>>()
         );
 
-        rig.down().await.expect("rig teardown must leave 0 leaked containers");
+        rig.down()
+            .await
+            .expect("rig teardown must leave 0 leaked containers");
     }
 
     /// Real, non-hypothetical assertion that the previously-deprecated

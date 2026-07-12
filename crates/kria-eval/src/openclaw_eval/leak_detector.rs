@@ -40,7 +40,10 @@ pub async fn baseline(pool: &Arc<ContainerPool>) -> Result<Baseline, LeakError> 
 /// leases must return to baseline exactly; the rig container count is allowed
 /// to be <= baseline (warm-pool recycling may destroy idle containers, which
 /// is a shrink, never a leak).
-pub async fn assert_returned_to(pool: &Arc<ContainerPool>, expected: Baseline) -> Result<(), LeakError> {
+pub async fn assert_returned_to(
+    pool: &Arc<ContainerPool>,
+    expected: Baseline,
+) -> Result<(), LeakError> {
     let now = baseline(pool).await?;
 
     if now.active_leases != expected.active_leases {

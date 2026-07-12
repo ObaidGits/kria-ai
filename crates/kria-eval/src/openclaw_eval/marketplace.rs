@@ -51,14 +51,25 @@ pub fn validate_https_only_enforced() -> Result<(), String> {
 /// tests ACTUAL network unreachability, not the (separately validated,
 /// `validate_https_only_enforced`) domain-allowlist rejection.
 pub async fn validate_unreachable_repo_fails_gracefully() -> Result<(), String> {
-    let client = ClawHubClient::new("https://127.0.0.1:9/index.json", vec!["127.0.0.1".to_string()]);
+    let client = ClawHubClient::new(
+        "https://127.0.0.1:9/index.json",
+        vec!["127.0.0.1".to_string()],
+    );
     let start = std::time::Instant::now();
-    let result = tokio::time::timeout(std::time::Duration::from_secs(20), client.fetch_remote_index()).await;
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        client.fetch_remote_index(),
+    )
+    .await;
     let elapsed = start.elapsed();
 
     match result {
-        Err(_) => Err(format!("fetch_remote_index hung past the 20s bound (R3.6 violation), elapsed={elapsed:?}")),
-        Ok(Ok(_)) => Err("fetch_remote_index unexpectedly succeeded against an unreachable host".into()),
+        Err(_) => Err(format!(
+            "fetch_remote_index hung past the 20s bound (R3.6 violation), elapsed={elapsed:?}"
+        )),
+        Ok(Ok(_)) => {
+            Err("fetch_remote_index unexpectedly succeeded against an unreachable host".into())
+        }
         Ok(Err(e)) => {
             let is_network_error = e.to_string().to_lowercase().contains("network")
                 || e.to_string().to_lowercase().contains("connect")
@@ -99,8 +110,12 @@ pub fn validate_transpile_and_install_real() -> Result<(), String> {
     // "oc_web_search"`). Fixture names here therefore do NOT include the
     // "oc_" prefix themselves, to avoid a double "oc_oc_..." id.
     let raw = valid_skill_md("fixture_market_valid");
-    let source = SkillSource::ClawHub { slug: "fixture_market_valid".into(), version: "remote".into() };
-    let mut descriptor = transpile_skill(&raw, source, false).map_err(|e| format!("transpile failed: {e}"))?;
+    let source = SkillSource::ClawHub {
+        slug: "fixture_market_valid".into(),
+        version: "remote".into(),
+    };
+    let mut descriptor =
+        transpile_skill(&raw, source, false).map_err(|e| format!("transpile failed: {e}"))?;
 
     // Mirror clawhub_install_skill step 4: remote skills always Community.
     descriptor.trust_tier = TrustTier::Community;
@@ -108,11 +123,18 @@ pub fn validate_transpile_and_install_real() -> Result<(), String> {
         return Err("remote skill must always be Community tier, never Verified".into());
     }
 
-    registry.install(&descriptor).map_err(|e| format!("registry install failed: {e}"))?;
+    registry
+        .install(&descriptor)
+        .map_err(|e| format!("registry install failed: {e}"))?;
 
-    let installed = registry.get("oc_fixture_market_valid").map_err(|e| e.to_string())?;
+    let installed = registry
+        .get("oc_fixture_market_valid")
+        .map_err(|e| e.to_string())?;
     if installed.trust_tier != TrustTier::Community {
-        return Err(format!("installed skill trust_tier drifted, got {:?}", installed.trust_tier));
+        return Err(format!(
+            "installed skill trust_tier drifted, got {:?}",
+            installed.trust_tier
+        ));
     }
 
     Ok(())
@@ -122,8 +144,17 @@ pub fn validate_transpile_and_install_real() -> Result<(), String> {
 /// abort transpilation — nothing gets installed.
 pub fn validate_malformed_manifest_aborts() -> Result<(), String> {
     let raw = "---\nname: oc_fixture_bad\n---\nno description field\n";
-    match transpile_skill(raw, SkillSource::ClawHub { slug: "oc_fixture_bad".into(), version: "remote".into() }, false) {
-        Ok(_) => Err("transpile_skill must reject a manifest missing the required description field".into()),
+    match transpile_skill(
+        raw,
+        SkillSource::ClawHub {
+            slug: "oc_fixture_bad".into(),
+            version: "remote".into(),
+        },
+        false,
+    ) {
+        Ok(_) => Err(
+            "transpile_skill must reject a manifest missing the required description field".into(),
+        ),
         Err(e) => {
             eprintln!("[R3.3] malformed manifest correctly rejected: {e}");
             Ok(())
@@ -149,7 +180,10 @@ pub fn validate_drift_surfaced() -> Result<DriftReport, String> {
         let raw = valid_skill_md(&format!("fixture_drift_db_{i}"));
         let descriptor = transpile_skill(
             &raw,
-            SkillSource::ClawHub { slug: format!("fixture_drift_db_{i}"), version: "remote".into() },
+            SkillSource::ClawHub {
+                slug: format!("fixture_drift_db_{i}"),
+                version: "remote".into(),
+            },
             false,
         )
         .map_err(|e| e.to_string())?;
@@ -159,11 +193,14 @@ pub fn validate_drift_surfaced() -> Result<DriftReport, String> {
     // The fixture index.json lists exactly 1 skill (reproducing the audit's
     // real "index has 1" side) — parse it with the REAL wire-format struct.
     let index_json = drift_index_json("https://example.invalid/manifests");
-    let index_entries: Vec<FixtureIndexEntry> = serde_json::from_str(&index_json).map_err(|e| e.to_string())?;
+    let index_entries: Vec<FixtureIndexEntry> =
+        serde_json::from_str(&index_json).map_err(|e| e.to_string())?;
 
     let db_skills = registry.get_enabled_skills().map_err(|e| e.to_string())?;
-    let db_slugs: std::collections::HashSet<String> = db_skills.iter().map(|s| s.skill_id.clone()).collect();
-    let index_slugs: std::collections::HashSet<String> = index_entries.iter().map(|e| e.slug.clone()).collect();
+    let db_slugs: std::collections::HashSet<String> =
+        db_skills.iter().map(|s| s.skill_id.clone()).collect();
+    let index_slugs: std::collections::HashSet<String> =
+        index_entries.iter().map(|e| e.slug.clone()).collect();
 
     let db_only: Vec<String> = db_slugs.difference(&index_slugs).cloned().collect();
     let index_only: Vec<String> = index_slugs.difference(&db_slugs).cloned().collect();
@@ -175,8 +212,13 @@ pub fn validate_drift_surfaced() -> Result<DriftReport, String> {
         index_only,
     };
 
-    if report.db_count == report.index_count && report.db_only.is_empty() && report.index_only.is_empty() {
-        return Err("expected drift (db=3 vs index=1, per the audit finding) but none was detected".into());
+    if report.db_count == report.index_count
+        && report.db_only.is_empty()
+        && report.index_only.is_empty()
+    {
+        return Err(
+            "expected drift (db=3 vs index=1, per the audit finding) but none was detected".into(),
+        );
     }
 
     eprintln!(
@@ -213,19 +255,32 @@ mod tests {
 
     #[test]
     fn r3_2_transpile_and_install_real() {
-        validate_transpile_and_install_real().expect("R3.2: real transpile+install must succeed and enforce Community tier");
+        validate_transpile_and_install_real()
+            .expect("R3.2: real transpile+install must succeed and enforce Community tier");
     }
 
     #[test]
     fn r3_3_malformed_manifest_aborts() {
-        validate_malformed_manifest_aborts().expect("R3.3: malformed manifest must abort transpilation");
+        validate_malformed_manifest_aborts()
+            .expect("R3.3: malformed manifest must abort transpilation");
     }
 
     #[test]
     fn r3_5_drift_is_surfaced_not_hidden() {
-        let report = validate_drift_surfaced().expect("R3.5: drift (db=3, index=1) must be surfaced");
-        assert_eq!(report.db_count, 3, "expected 3 skills seeded in local DB (audit finding)");
-        assert_eq!(report.index_count, 1, "expected 1 skill in fixture index (audit finding)");
-        assert_eq!(report.db_only.len(), 3, "all 3 DB skills should be DB-only vs the drift fixture index");
+        let report =
+            validate_drift_surfaced().expect("R3.5: drift (db=3, index=1) must be surfaced");
+        assert_eq!(
+            report.db_count, 3,
+            "expected 3 skills seeded in local DB (audit finding)"
+        );
+        assert_eq!(
+            report.index_count, 1,
+            "expected 1 skill in fixture index (audit finding)"
+        );
+        assert_eq!(
+            report.db_only.len(),
+            3,
+            "all 3 DB skills should be DB-only vs the drift fixture index"
+        );
     }
 }

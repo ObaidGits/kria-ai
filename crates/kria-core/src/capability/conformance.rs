@@ -141,6 +141,8 @@ pub async fn run_conformance(provider: &dyn CapabilityProvider) -> ConformanceRe
                 .acquire(&AcquireRequest {
                     capability_tag: "conformance.probe".to_string(),
                     hint: None,
+                    capability_id: None,
+                    proposed_graph: None,
                     context: RequestContext::new(),
                 })
                 .await;

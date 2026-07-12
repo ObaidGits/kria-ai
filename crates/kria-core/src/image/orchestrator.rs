@@ -54,6 +54,12 @@ pub struct ImageRequest {
     /// Force cloud fallback even on capable tiers.
     #[serde(default)]
     pub force_cloud: bool,
+    /// Force local (on-device) generation for this request only. Mirrors
+    /// `KRIA_IMAGE_MODE=local_only` but scoped to a single call. Wins over
+    /// `force_cloud` when both are set (privacy-preserving default). Turn-scoped
+    /// temporary override — nothing is persisted.
+    #[serde(default)]
+    pub force_local: bool,
     /// Quality preset. `None` → use `config.default_quality`.
     pub quality: Option<QualityProfile>,
     /// User-supplied negative prompt (only effective on SDXL High path).
@@ -680,9 +686,12 @@ impl ImageOrchestrator {
             .map(|v| v.trim().to_ascii_lowercase())
             .filter(|v| !v.is_empty());
         let env_forces_local = matches!(env_image_mode.as_deref(), Some("local_only"));
+        // Per-request temp override ("generate X using local AI") OR env var forces local.
+        // force_local wins over force_cloud when both are set (privacy-preserving).
+        let forces_local = env_forces_local || req.force_local;
 
-        let tier = if req.force_cloud && !env_forces_local {
-            // LLM requested cloud — signal Tier C only when env doesn't say local_only.
+        let tier = if req.force_cloud && !forces_local {
+            // LLM requested cloud — signal Tier C only when nothing forces local.
             ImageTier::CRejectOrCloud
         } else if !self.cfg.tier_override.is_empty() {
             self.cfg
@@ -699,8 +708,8 @@ impl ImageOrchestrator {
         //   1. KRIA_IMAGE_MODE env var — explicit user/operator override; always wins
         //   2. req.force_cloud — LLM hint to prefer cloud; ignored when env says local_only
         //   3. config image_mode + tier-based default
-        let mut resolved_mode = if env_forces_local {
-            // Env var says local_only — force_cloud is ignored; tier is correctly resolved above.
+        let mut resolved_mode = if forces_local {
+            // Env var or per-request force_local — force_cloud is ignored; tier resolved above.
             if tier == crate::platform::vram::ImageTier::CRejectOrCloud {
                 return Err(ImageError::Reported(Box::new(FailureReport {
                     stage: FailureStage::TierAdmission,
@@ -1936,7 +1945,12 @@ impl ImageBackend for ImageOrchestrator {
 
     async fn estimate(&self, request: &ImageRequest) -> ImageEstimate {
         let snapshot = self.profiler.snapshot().await;
-        let tier = if request.force_cloud {
+        let env_forces_local = matches!(
+            std::env::var("KRIA_IMAGE_MODE").ok().as_deref(),
+            Some("local_only")
+        );
+        let forces_local = env_forces_local || request.force_local;
+        let tier = if request.force_cloud && !forces_local {
             ImageTier::CRejectOrCloud
         } else {
             ImageTier::from_snapshot(&snapshot)
@@ -1956,7 +1970,9 @@ impl ImageBackend for ImageOrchestrator {
             ImageTier::CRejectOrCloud => None,
         };
 
-        let backend = if matches!(tier, ImageTier::CRejectOrCloud) || request.force_cloud {
+        let backend = if !forces_local
+            && (matches!(tier, ImageTier::CRejectOrCloud) || request.force_cloud)
+        {
             TraitImageBackendId::CloudFallback
         } else {
             TraitImageBackendId::ComfyUi
@@ -1964,13 +1980,15 @@ impl ImageBackend for ImageOrchestrator {
 
         ImageEstimate {
             backend,
-            requires_gpu: !matches!(tier, ImageTier::CRejectOrCloud) && !request.force_cloud,
+            requires_gpu: forces_local
+                || (!matches!(tier, ImageTier::CRejectOrCloud) && !request.force_cloud),
             expected_seconds,
             expected_vram_mb,
             notes: Some(format!(
-                "tier={} force_cloud={}",
+                "tier={} force_cloud={} force_local={}",
                 tier.as_str(),
-                request.force_cloud
+                request.force_cloud,
+                request.force_local
             )),
         }
     }

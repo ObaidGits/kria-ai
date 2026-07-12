@@ -141,40 +141,76 @@ pub fn build_session_evidence_store() -> EvidenceStore {
     // Requirements with real, passing evidence across this session (each
     // requirement number maps to the task(s) that produced real Pass
     // evidence for it, per the per-task validation already run for real).
-    let real_pass_requirements_ci: &[&str] = &["2", "3", "6", "7", "8", "9", "10", "12", "13", "17", "18", "20"];
+    let real_pass_requirements_ci: &[&str] = &[
+        "2", "3", "6", "7", "8", "9", "10", "12", "13", "17", "18", "20",
+    ];
     let real_pass_requirements_live: &[&str] = &["1", "4", "11", "16"];
 
     for req in real_pass_requirements_ci {
-        store.record(EvidenceRecord::new(format!("{req}.1"), Layer::Ci, "session_task_evidence", Outcome::Pass));
+        store.record(EvidenceRecord::new(
+            format!("{req}.1"),
+            Layer::Ci,
+            "session_task_evidence",
+            Outcome::Pass,
+        ));
     }
     for req in real_pass_requirements_live {
-        store.record(EvidenceRecord::new(format!("{req}.1"), Layer::Live, "session_task_evidence_real_docker", Outcome::Pass));
+        store.record(EvidenceRecord::new(
+            format!("{req}.1"),
+            Layer::Live,
+            "session_task_evidence_real_docker",
+            Outcome::Pass,
+        ));
     }
 
     // R5/R13: fixture-LLM evidence only (task 11.1) — NEVER counts for
     // freeze, tagged honestly.
     store.record(
-        EvidenceRecord::new("5.1", Layer::Ci, "generation_pipeline_fixture", Outcome::Pass).with_llm_mode(LlmMode::Fixture),
+        EvidenceRecord::new(
+            "5.1",
+            Layer::Ci,
+            "generation_pipeline_fixture",
+            Outcome::Pass,
+        )
+        .with_llm_mode(LlmMode::Fixture),
     );
-    store.record(
-        EvidenceRecord::new("13.1", Layer::Ci, "generated_bundle_format_convergence", Outcome::Pass),
-    );
+    store.record(EvidenceRecord::new(
+        "13.1",
+        Layer::Ci,
+        "generated_bundle_format_convergence",
+        Outcome::Pass,
+    ));
 
     // R14: Settings persistence format validated, but the real production
     // knobs include confirmed-dead ones — recorded as a real Pass for the
     // format contract, with the dead-knob finding tracked separately in the
     // honesty ledger (not hidden, just not double-counted here).
-    store.record(EvidenceRecord::new("14.1", Layer::Ci, "settings_persistence_format", Outcome::Pass));
+    store.record(EvidenceRecord::new(
+        "14.1",
+        Layer::Ci,
+        "settings_persistence_format",
+        Outcome::Pass,
+    ));
 
     // R15: honesty sweep itself ran and produced a real, non-empty ledger —
     // that IS the R15 validation artifact (a clean ledger would be the
     // "failure" case; a ledger that accurately reflects reality is success).
-    store.record(EvidenceRecord::new("15.1", Layer::Ci, "honesty_ledger_produced", Outcome::Pass));
+    store.record(EvidenceRecord::new(
+        "15.1",
+        Layer::Ci,
+        "honesty_ledger_produced",
+        Outcome::Pass,
+    ));
 
     // R19: the migration gap was PROVEN (a real Fail reproduced on purpose)
     // — this is Outcome::Fail because the underlying capability (migration)
     // does not exist and was directly demonstrated to break.
-    store.record(EvidenceRecord::new("19.1", Layer::Ci, "schema_migration_gap_reproduced", Outcome::Fail));
+    store.record(EvidenceRecord::new(
+        "19.1",
+        Layer::Ci,
+        "schema_migration_gap_reproduced",
+        Outcome::Fail,
+    ));
 
     // Tasks 24-28: genuine environment blockers, recorded honestly.
     for (req, reason) in [
@@ -212,15 +248,28 @@ mod tests {
                  blockers and open product gaps — a Go here would be a fabricated verdict"
             ),
         }
-        assert!(!remaining.is_empty(), "remaining work must be non-empty given the confirmed blockers");
-        let critical_count = remaining.iter().filter(|w| w.severity == Severity::Critical).count();
-        assert!(critical_count > 0, "at least one Critical item must be present (the real-usage-wave blockers)");
+        assert!(
+            !remaining.is_empty(),
+            "remaining work must be non-empty given the confirmed blockers"
+        );
+        let critical_count = remaining
+            .iter()
+            .filter(|w| w.severity == Severity::Critical)
+            .count();
+        assert!(
+            critical_count > 0,
+            "at least one Critical item must be present (the real-usage-wave blockers)"
+        );
     }
 
     #[test]
     fn remaining_work_every_item_has_a_real_blocker_kind() {
         for item in remaining_work() {
-            assert!(!item.blocker_kind.is_empty(), "item '{}' must state its blocker kind", item.description);
+            assert!(
+                !item.blocker_kind.is_empty(),
+                "item '{}' must state its blocker kind",
+                item.description
+            );
         }
     }
 }

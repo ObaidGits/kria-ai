@@ -52,11 +52,15 @@ mod tests {
     use kria_core::openclaw::bundle::verify::keypair_from_seed;
     use kria_core::openclaw::generation::approval::ApprovalLayer;
     use kria_core::openclaw::generation::budget::{BudgetLimits, GenerationBudget};
-    use kria_core::openclaw::generation::decision::{DecisionEngine, GenerationPolicy, SkillCandidate};
+    use kria_core::openclaw::generation::decision::{
+        DecisionEngine, GenerationPolicy, SkillCandidate,
+    };
     use kria_core::openclaw::generation::events::GenerationEventStream;
     use kria_core::openclaw::generation::install_sink::BundleInstallSink;
     use kria_core::openclaw::generation::llm_generator::LlmSkillGenerator;
-    use kria_core::openclaw::generation::pipeline::{GenerationPipeline, PipelineConfig, PipelineOutcome};
+    use kria_core::openclaw::generation::pipeline::{
+        GenerationPipeline, PipelineConfig, PipelineOutcome,
+    };
     use kria_core::openclaw::generation::sandbox::StaticSandbox;
     use kria_core::openclaw::registry::ProductionSkillRegistry;
     use kria_core::openclaw::ToolRegistryActivation;
@@ -72,14 +76,17 @@ mod tests {
             return;
         };
         if !backend.health_check().await {
-            eprintln!("SKIPPED (Outcome::Skipped, not Pass): configured cloud provider not reachable");
+            eprintln!(
+                "SKIPPED (Outcome::Skipped, not Pass): configured cloud provider not reachable"
+            );
             return;
         }
 
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("task26_cloud.db");
         let registry = Arc::new(ProductionSkillRegistry::new(&db_path).expect("registry"));
-        let audit = Arc::new(AuditLedger::open(&db_path, b"task26-cloud-key".to_vec()).expect("audit"));
+        let audit =
+            Arc::new(AuditLedger::open(&db_path, b"task26-cloud-key".to_vec()).expect("audit"));
         let store = dir.path().join("store");
         std::fs::create_dir_all(&store).expect("store dir");
 
@@ -104,7 +111,14 @@ mod tests {
             let decision = DecisionEngine::new(0.85, GenerationPolicy::GenerateIfMissing);
             let approval = ApprovalLayer::new(true); // auto-approve for this real-generation proof
             let events = GenerationEventStream::new();
-            let pipeline = GenerationPipeline::new(generator, sandbox, decision, approval, events, Arc::new(sink));
+            let pipeline = GenerationPipeline::new(
+                generator,
+                sandbox,
+                decision,
+                approval,
+                events,
+                Arc::new(sink),
+            );
 
             let (signing_key, publisher_hex) = keypair_from_seed([90u8 + i as u8; 32]);
             let config = PipelineConfig {
@@ -134,7 +148,13 @@ mod tests {
                 .collect();
 
             let outcome = pipeline
-                .run(&format!("task26-cloud-{i}"), prompt, &existing, &budget, &config)
+                .run(
+                    &format!("task26-cloud-{i}"),
+                    prompt,
+                    &existing,
+                    &budget,
+                    &config,
+                )
                 .await;
 
             eprintln!("[Task26/cloud] prompt {i} ({prompt:?}) -> {outcome:?}");
@@ -150,12 +170,17 @@ mod tests {
                 other => {
                     // Honest: if the real cloud model didn't converge for a
                     // given prompt, report it — do not fabricate success.
-                    eprintln!("[Task26/cloud] prompt {i} did not produce a Generated outcome: {other:?}");
+                    eprintln!(
+                        "[Task26/cloud] prompt {i} did not produce a Generated outcome: {other:?}"
+                    );
                 }
             }
         }
 
-        eprintln!("[Task26/cloud] successfully generated + installed {} skill(s): {installed_slugs:?}", installed_slugs.len());
+        eprintln!(
+            "[Task26/cloud] successfully generated + installed {} skill(s): {installed_slugs:?}",
+            installed_slugs.len()
+        );
         assert!(
             installed_slugs.len() >= 3,
             "Task 26 requires generating + installing at least 3 real skills via the cloud LLM; got {}: {installed_slugs:?}",
@@ -182,7 +207,7 @@ mod tests {
     /// Requires both cloud config AND Docker; skips honestly otherwise.
     #[tokio::test]
     async fn task26_cloud_generated_skill_executes_in_real_container() {
-        use kria_core::openclaw::handler::build_runtime_registry;
+        use kria_core::openclaw::runtime::build_runtime_registry;
         use kria_core::openclaw::runtime::{LaunchSpec, RuntimeContext, RuntimeKind};
         use kria_core::openclaw::types::ResourceClass;
         use std::time::Duration;
@@ -191,7 +216,10 @@ mod tests {
             eprintln!("SKIPPED (Outcome::Skipped, not Pass): cloud provider not configured");
             return;
         };
-        if crate::openclaw_eval::rig::verify_docker_reachable().await.is_err() {
+        if crate::openclaw_eval::rig::verify_docker_reachable()
+            .await
+            .is_err()
+        {
             eprintln!("SKIPPED (Outcome::Skipped, not Pass): docker not reachable");
             return;
         }
@@ -200,15 +228,20 @@ mod tests {
             return;
         }
 
-        let rig = crate::openclaw_eval::rig::TestRig::up().await.expect("rig up");
-        let baseline = crate::openclaw_eval::leak_detector::baseline(&rig.pool).await.expect("baseline");
+        let rig = crate::openclaw_eval::rig::TestRig::up()
+            .await
+            .expect("rig up");
+        let baseline = crate::openclaw_eval::leak_detector::baseline(&rig.pool)
+            .await
+            .expect("baseline");
 
         // Persistent (non-temp) store so the installed bundle's .bridge dir
         // survives for the execution mount.
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("task26_exec.db");
         let registry = Arc::new(ProductionSkillRegistry::new(&db_path).expect("registry"));
-        let audit = Arc::new(AuditLedger::open(&db_path, b"task26-exec-key".to_vec()).expect("audit"));
+        let audit =
+            Arc::new(AuditLedger::open(&db_path, b"task26-exec-key".to_vec()).expect("audit"));
         let store = dir.path().join("store");
         std::fs::create_dir_all(&store).expect("store");
         let work = dir.path().join("work");
@@ -221,7 +254,14 @@ mod tests {
         let decision = DecisionEngine::new(0.85, GenerationPolicy::GenerateIfMissing);
         let approval = ApprovalLayer::new(true);
         let events = GenerationEventStream::new();
-        let pipeline = GenerationPipeline::new(generator, sandbox, decision, approval, events, Arc::new(sink));
+        let pipeline = GenerationPipeline::new(
+            generator,
+            sandbox,
+            decision,
+            approval,
+            events,
+            Arc::new(sink),
+        );
 
         let (signing_key, publisher_hex) = keypair_from_seed([200u8; 32]);
         let config = PipelineConfig {
@@ -238,7 +278,13 @@ mod tests {
         });
 
         let outcome = pipeline
-            .run("task26-exec", "count the number of words in a piece of text", &[], &budget, &config)
+            .run(
+                "task26-exec",
+                "count the number of words in a piece of text",
+                &[],
+                &budget,
+                &config,
+            )
             .await;
         let slug = match outcome {
             PipelineOutcome::Generated { slug, .. } => slug,
@@ -251,9 +297,14 @@ mod tests {
 
         // Resolve the installed skill's .bridge mount dir.
         let meta = registry.get_skill(&slug).expect("installed skill metadata");
-        let bundle_path = meta.bundle_path.expect("generated skill must have a bundle_path");
+        let bundle_path = meta
+            .bundle_path
+            .expect("generated skill must have a bundle_path");
         let bridge_dir = std::path::Path::new(&bundle_path).join(".bridge");
-        assert!(bridge_dir.is_dir(), "installer must have prepared .bridge dir at {bridge_dir:?}");
+        assert!(
+            bridge_dir.is_dir(),
+            "installer must have prepared .bridge dir at {bridge_dir:?}"
+        );
 
         // Execute the generated skill in a REAL container via the mount.
         let runtimes = build_runtime_registry(rig.pool.clone());

@@ -8,8 +8,8 @@
 use super::{LaunchSpec, RuntimeContext, RuntimeKind, SkillRuntime};
 use crate::infra::isolation::ToolResult;
 use crate::openclaw::admission;
-use crate::openclaw::approval::ApprovalCache;
 use crate::openclaw::bridge::McpBridge;
+use crate::openclaw::cap_hash;
 use crate::openclaw::capability::{self, Materialization};
 use crate::openclaw::event::{self, CapabilityAction, FailureInfo, FailureKind, SkillEvent, Stage};
 use crate::openclaw::materialize::{self, NullEnvProvider, ResourceLimits};
@@ -129,13 +129,8 @@ impl SkillRuntime for DockerRuntime {
 
         // ── Capability lifecycle (A3.10) + revocation registration (A3.9) ───────
         let caps = capability::capabilities_of(&spec.grants);
-        let cap_hash = ApprovalCache::compute_hash(
-            &spec.skill_id,
-            "",
-            &caps,
-            spec.resource_class.as_str(),
-            "",
-        );
+        let cap_hash =
+            cap_hash::compute_hash(&spec.skill_id, "", &caps, spec.resource_class.as_str(), "");
         event::emit_capability(
             &spec.correlation_id,
             &execution_id,

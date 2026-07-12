@@ -26,6 +26,26 @@ pub type OrchestratorNotifyFn = Arc<
         + Sync,
 >;
 
+/// Single source of truth for mapping a [`ProviderConfig`] to its concrete
+/// [`LlmBackend`] implementation. Both [`ProviderRegistry`] and
+/// [`crate::llm::model_router::ModelRouter`] (the actually-wired production
+/// routing path) call this, so a provider-type → backend mapping change never
+/// has to be made in two places and risk drifting out of sync.
+pub fn create_backend_for_provider(config: &ProviderConfig) -> Arc<dyn LlmBackend> {
+    use super::{anthropic, gemini, ollama, openai, openrouter};
+
+    match config.provider_type {
+        ProviderType::Ollama => Arc::new(ollama::OllamaBackend::from_config(config)),
+        ProviderType::LlamaCpp | ProviderType::OpenAICompatible => {
+            Arc::new(openai::OpenAIBackend::from_config(config))
+        }
+        ProviderType::OpenAI => Arc::new(openai::OpenAIBackend::from_config(config)),
+        ProviderType::Gemini => Arc::new(gemini::GeminiBackend::from_config(config)),
+        ProviderType::Anthropic => Arc::new(anthropic::AnthropicBackend::from_config(config)),
+        ProviderType::OpenRouter => Arc::new(openrouter::OpenRouterBackend::from_config(config)),
+    }
+}
+
 /// The provider registry manages all configured providers and routes requests.
 pub struct ProviderRegistry {
     /// Provider configurations (persisted).
@@ -74,22 +94,7 @@ impl ProviderRegistry {
 
     /// Create a backend instance from provider config.
     fn create_backend(&self, config: &ProviderConfig) -> Option<Arc<dyn LlmBackend>> {
-        use super::{anthropic, gemini, ollama, openai, openrouter};
-
-        let backend: Arc<dyn LlmBackend> = match config.provider_type {
-            ProviderType::Ollama => Arc::new(ollama::OllamaBackend::from_config(config)),
-            ProviderType::LlamaCpp | ProviderType::OpenAICompatible => {
-                Arc::new(openai::OpenAIBackend::from_config(config))
-            }
-            ProviderType::OpenAI => Arc::new(openai::OpenAIBackend::from_config(config)),
-            ProviderType::Gemini => Arc::new(gemini::GeminiBackend::from_config(config)),
-            ProviderType::Anthropic => Arc::new(anthropic::AnthropicBackend::from_config(config)),
-            ProviderType::OpenRouter => {
-                Arc::new(openrouter::OpenRouterBackend::from_config(config))
-            }
-        };
-
-        Some(backend)
+        Some(create_backend_for_provider(config))
     }
 
     /// Get the currently active provider backend.

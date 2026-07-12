@@ -32,7 +32,7 @@ pub use capabilities::{ModelCapabilities, ProviderCapability};
 pub use config::{ProviderConfig, ProviderEndpointConfig, ProviderType};
 pub use connection_test::{ConnectionTestResult, ConnectionTestStatus};
 pub use error::{ProviderError, ProviderErrorKind};
-pub use registry::ProviderRegistry;
+pub use registry::{create_backend_for_provider, ProviderRegistry};
 pub use streaming::UnifiedStream;
 pub use types::{ModelInfo, ProviderStatus};
 

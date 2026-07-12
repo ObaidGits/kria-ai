@@ -173,3 +173,124 @@ the default-on flip). M11 gated on default-on + soak. The CPP is **SOAK TEST REA
 providers + acquisition + generation + permission/approval + full desktop surfaces). The only remaining work
 is release validation: the multi-hour soak, a 100+ manual prompt campaign, and live UX truthfulness — all
 harnessed and READY FOR EXECUTION.
+
+## M12 — Single-pipeline migration (Option A, LOCKED)
+
+Decision LOCKED: KRIA collapses onto ONE execution architecture = the Capability Provider Platform. The
+legacy chat pipeline (`SemanticOpenClawHandler` → `SemanticSkillRouter` → `ExecutionEngine` →
+`ApprovalCache`/`openclaw::perm`) is being retired, not preserved. No backward-compat.
+
+Investigation findings (evidence): chat executed through `SemanticOpenClawHandler::execute_semantic`
+(registered as the `openclaw` tool in `kria-desktop/commands/runtime.rs`), which carried its OWN permission
+engine (`openclaw::perm`) + grant store + CIL gated by `openclaw.cil.openclaw_icp_enabled` (default OFF) and
+a default IN-MEMORY grant store — so grants never persisted and re-prompted, and CPP (`capability::*`) was a
+parallel path used only by the `cpp_*` desktop commands. That divergence is exactly the "two systems" bug.
+
+- **Stage 1 DONE (build+tests):** `crate::tools::capability_dispatch::CapabilityDispatchHandler` — the single
+  CPP-backed chat/agent dispatcher (discover → one permission engine + one durable grant store → provider
+  execute; NL→typed args via `openclaw::arg_gen`). Lives under `tools/` so it may bridge tools↔capability
+  without breaking the `capability/` boundary gate. 2 unit tests green.
+- **Stage 2 DONE (build):** `runtime.rs` now registers the dispatcher for the `openclaw` tool, overwriting the
+  legacy handler by name (keeps `list_installed_skills`). Reuses the shared embedding model + OpenClaw
+  provider (marketplace lifecycle) + durable `cpp_grants.db`. `cargo build -p kria-desktop` clean. Chat
+  capability execution now flows through `CapabilityPlatform`.
+- **Remaining (Stages 3–6):** marketplace UI → remote provider catalog; inline approval-modal round-trip on
+  the chat path; delete legacy (`SemanticOpenClawHandler` routing, `SemanticSkillRouter`, `ApprovalCache`,
+  `openclaw::perm`, legacy CIL discovery, `openclaw_icp_enabled`) once callers are gone; default-on + real
+  desktop drive + restart persistence. Each stage build-green before the next.
+
+### M12 Stage 5 progress (legacy deletion)
+
+- **Batch A DONE:** legacy handler unwired from production (chat + list on CPP).
+- **Batch B DONE:** `crates/kria-core/src/openclaw/handler.rs` **deleted** in full. `build_runtime_registry`
+  relocated to `openclaw::runtime` (neutral runtime infra, still used by CPP + real-Docker eval suites); all
+  imports updated. The 3 legacy `OpenClawSubsystem::register_into_tool_registry*` methods deleted. Legacy
+  handler tests removed (`execute_e2e::r4_4_fixed_*`, `trust_revocation`'s community-network + source-tripwire
+  tests, `openclaw_live_docker`'s NL→calculator e2e). `build_cil_facade` is now dead (deleted with `cil` in
+  Batch F). Evidence: `cargo test -p kria-core -p kria-eval --no-run` compiles all binaries; `cargo build -p
+  kria-desktop` clean; `tools::capability_dispatch` 2/2 tests green.
+- **Batch D DONE:** `openclaw::perm` (grant_store + engine) **deleted** — the duplicate grant store + permission
+  engine are gone. Desktop `openclaw_list_grants`/`openclaw_revoke_grant` migrated to `capability::grants` +
+  `capability::permission` over the ONE `cpp_grants.db` (shared with the chat dispatcher + Capabilities panel).
+  Evidence: `cargo build -p kria-core -p kria-desktop` clean; `cargo test -p kria-core -p kria-eval --no-run`
+  compiles all binaries. (cil doc-links to `perm::grant_store` remain — they vanish with cil in Batch F.)
+- **Remaining:** Batch F delete `openclaw::cil` + `build_cil_facade` + `openclaw_icp_enabled` + the desktop cil
+  commands (recommendations/capability_manager/capability_graph) — this frees `SemanticSkillRouter` (used only
+  by `cil::learn`); Batch C then deletes `SemanticSkillRouter` (+ eval routing tests); Batch E reduces
+  `ApprovalCache` to the `compute_hash` util `runtime/docker.rs` needs (inline), deletes the rest.
+
+### M12 Stage 5 COMPLETE — legacy execution architecture removed
+
+Batches A–F all done, tree green (kria-core + kria-desktop + kria-eval, lib + tests):
+- **A/B:** `SemanticOpenClawHandler` + `handler.rs` deleted; chat served by `CapabilityDispatchHandler`;
+  `build_runtime_registry` relocated to `openclaw::runtime`.
+- **D:** `openclaw::perm` deleted; ONE grant store + ONE permission engine (`capability::grants`/`permission`);
+  desktop grant commands migrated to `cpp_grants.db`.
+- **F:** `openclaw::cil` (whole module) + `build_cil_facade` + `OpenClawConfig.cil` + `openclaw_icp_enabled`
+  flag + cil re-exports deleted. Desktop cil commands rewritten cil-free (delegate to CPP / registry-only).
+  Eval cil suites removed/trimmed (kept `honesty_ledger`).
+- **C:** `SemanticSkillRouter` + `semantic_router.rs`/tests deleted; eval routing tests migrated to
+  registry-based checks or removed.
+- **E:** `ApprovalCache` deleted; reusable `compute_hash` extracted to `openclaw::cap_hash`; `docker.rs`
+  updated. Only `capability::permission` + `capability::grants` remain.
+
+**Evidence:** grep of `crates/*/src` for `SemanticOpenClawHandler|SemanticSkillRouter|openclaw::perm|
+openclaw::cil|ApprovalCache|openclaw_icp_enabled` → ZERO production references. `cargo test -p kria-core
+-p kria-eval --no-run` compiles all binaries; `cargo build -p kria-desktop` clean; 110 capability lib tests
+pass; `cargo fmt` clean.
+
+**Final architecture:** User → CapabilityDispatchHandler → CapabilityPlatform → ProviderRegistry →
+{OpenClawProvider, McpProvider} → execution. One permission engine, one grant store, one provider registry,
+one discovery index, one dispatcher. No duplicate systems, no legacy execution path, no feature flags
+protecting dead code.
+
+### E2E validation session (post-migration)
+
+Drove the REAL chat entry (`CapabilityDispatchHandler`) with 18 diverse prompts on real Docker
+(`tests/capability_e2e_dispatch_docker.rs`): **PASS 18 / FAIL 0**, 0 container leaks, avg ~52ms.
+Categories: arithmetic, hashing (sha256/md5), JSON (minify/pretty), regex, CSV, markdown, string
+(upper/lower), gzip, + negatives (unknown/malformed/empty) + permission-gate + grant-reuse.
+
+Two real dispatcher bugs found + fixed: (1) no relevance floor → mis-executed the top hit for
+irrelevant queries; (2) mis-routing among similar utility skills under the hash-fallback embedder.
+Both fixed by an overlap-based re-rank + relevance floor in `tools::capability_dispatch` (prefix-token
+matching; irrelevant/unknown → honest no-match). 110 capability lib tests still green; desktop builds;
+fmt clean. Full report: `E2E_VALIDATION_REPORT.md`. Known prerequisite: install the ONNX embedding model
+for full semantic chat routing (hash fallback routes by lexical keyword only).
+
+### Final engineering validation (embedding model + E2E campaign + ClawHub lifecycle)
+
+- **Embedding model installed:** all-MiniLM-L6-v2 ONNX (90MB) + tokenizer.json at
+  `~/.kria/models/embeddings/`. Fixed a real bug: `embeddings.rs` used a placeholder hash tokenizer →
+  wired the real `tokenizers` WordPiece tokenizer; ONNX path requires model+tokenizer. Hash fallback off.
+  Semantic clustering verified (`embedding_semantic_validation.rs`): intra 0.49–0.73 vs cross 0.004.
+- **E2E campaign:** `capability_e2e_dispatch_docker.rs` — 24 diverse prompts through the real
+  `CapabilityDispatchHandler` (OpenClaw + MCP), **24/24 PASS, 0 leaks, avg 56ms**. Fixed a real permission
+  bug: `Unknown` reversibility was over-classified as AlwaysAsk → thin-provider (MCP) tools couldn't remember
+  a grant; refined so only explicit-irreversible/host-subprocess is AlwaysAsk. 110 capability lib tests green.
+- **ClawHub lifecycle:** acquire→describe→remove on real marketplace (`capability_acquire_marketplace.rs`),
+  0 leaks. Install-battery (30 skills) reused from `capability_prompt_report_docker.rs`.
+- Full report: `FINAL_VALIDATION_REPORT.md`. Verdict: **GO** (remaining = soak / manual UX / substrate handlers).
+
+
+## Real-user debugging session (2026-07-07): frontend↔CPP divergences
+
+Verified on the REAL live path (`POST /api/chat` = same pipeline as desktop `send_message`),
+real Docker + orchestrator LLM + real ClawHub marketplace.
+
+Fixed (build-green; unit + live-verified):
+- n8n pre-fallback weak-match hijack → `route_chat` releases low-confidence/non-explicit matches
+  to normal routing (`n8n/matching.rs`).
+- Exposed CPP marketplace to the agent: `search_marketplace` + `install_capability` tools +
+  `CapabilityPlatform::acquire_for_goal` (no hardcoded skill names).
+- OS package-flow no longer hijacks skill/tool/capability installs (`loop_engine/helpers.rs`);
+  narrowed `search_package`/`install_package` descriptions to OS-only (`tools/packages.rs`).
+- Deterministic `CapabilityFlowState` safety net forces the correct marketplace tool when the
+  small model hedges (`loop_engine/mod.rs`).
+
+Live proof: "Install the IP Info tool from the marketplace" installs end-to-end (was the exact
+chat-export failure); no n8n hijack; no max-rounds loop (90s→8s); 0 container leaks.
+
+Known remaining (out of CPP scope): compress/PDF/zip/websearch skills are genuinely absent from
+the marketplace repo (substrate content gap — author skills to close); small-model summary/hedge
+quality.

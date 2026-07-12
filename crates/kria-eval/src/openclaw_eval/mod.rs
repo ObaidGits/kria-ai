@@ -12,17 +12,16 @@ pub mod capability_classes;
 pub mod concurrency_probe;
 pub mod container_lifecycle;
 pub mod engine_probe;
-pub mod fault_injector;
 pub mod execute_e2e;
 pub mod failure_campaign;
 pub mod failure_injection;
+pub mod fault_injector;
 pub mod final_freeze;
 pub mod fixtures;
 pub mod freeze_report;
-pub mod performance_budgets;
 pub mod generated_vs_authored;
-pub mod honesty_sweep;
 pub mod generation_e2e;
+pub mod honesty_sweep;
 pub mod icp_e2e;
 pub mod installer_matrix;
 pub mod leak_detector;
@@ -30,6 +29,7 @@ pub mod leak_freedom;
 pub mod lifecycle;
 pub mod live_marketplace;
 pub mod marketplace;
+pub mod performance_budgets;
 pub mod pipeline_trace;
 pub mod production_stress;
 pub mod regression;
@@ -37,10 +37,9 @@ pub mod release_artifacts;
 pub mod rig;
 pub mod scale;
 pub mod settings_surface;
-pub mod soak;
 pub mod skill_management;
+pub mod soak;
 pub mod stress;
-pub mod telemetry_completeness;
 pub mod trust_revocation;
 pub mod ui_sync_probe;
 pub mod upgrade;
@@ -132,7 +131,12 @@ pub struct EvidenceRecord {
 }
 
 impl EvidenceRecord {
-    pub fn new(requirement: impl Into<String>, layer: Layer, name: impl Into<String>, outcome: Outcome) -> Self {
+    pub fn new(
+        requirement: impl Into<String>,
+        layer: Layer,
+        name: impl Into<String>,
+        outcome: Outcome,
+    ) -> Self {
         Self {
             requirement: requirement.into(),
             layer,
@@ -146,7 +150,11 @@ impl EvidenceRecord {
         }
     }
 
-    pub fn with_metric(mut self, key: impl Into<String>, value: impl Into<serde_json::Value>) -> Self {
+    pub fn with_metric(
+        mut self,
+        key: impl Into<String>,
+        value: impl Into<serde_json::Value>,
+    ) -> Self {
         self.metrics.insert(key.into(), value.into());
         self
     }
@@ -225,7 +233,12 @@ mod tests {
 
     #[test]
     fn skipped_never_counts_for_freeze() {
-        let record = EvidenceRecord::new("1.1", Layer::Live, "enable_ui", Outcome::Skipped("no desktop".into()));
+        let record = EvidenceRecord::new(
+            "1.1",
+            Layer::Live,
+            "enable_ui",
+            Outcome::Skipped("no desktop".into()),
+        );
         assert!(!record.counts_for_freeze());
     }
 
@@ -246,17 +259,32 @@ mod tests {
     #[test]
     fn requirement_satisfied_requires_pass_and_no_fail() {
         let mut store = EvidenceStore::new();
-        store.record(EvidenceRecord::new("2.1", Layer::Rig, "acquire_reuse", Outcome::Pass));
+        store.record(EvidenceRecord::new(
+            "2.1",
+            Layer::Rig,
+            "acquire_reuse",
+            Outcome::Pass,
+        ));
         assert!(store.requirement_satisfied("2"));
 
-        store.record(EvidenceRecord::new("2.2", Layer::Rig, "unhealthy_evict", Outcome::Fail));
+        store.record(EvidenceRecord::new(
+            "2.2",
+            Layer::Rig,
+            "unhealthy_evict",
+            Outcome::Fail,
+        ));
         assert!(!store.requirement_satisfied("2"));
     }
 
     #[test]
     fn requirement_with_only_skipped_is_not_satisfied() {
         let mut store = EvidenceStore::new();
-        store.record(EvidenceRecord::new("1.1", Layer::Live, "enable_ui", Outcome::Skipped("no docker".into())));
+        store.record(EvidenceRecord::new(
+            "1.1",
+            Layer::Live,
+            "enable_ui",
+            Outcome::Skipped("no docker".into()),
+        ));
         assert!(!store.requirement_satisfied("1"));
     }
 }

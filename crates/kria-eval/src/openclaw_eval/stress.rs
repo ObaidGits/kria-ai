@@ -62,17 +62,25 @@ pub async fn parallel_lifecycle_stress(count: usize) -> Result<(), String> {
         match handle.await {
             Ok(Ok(())) => {}
             Ok(Err(e)) => errors.push(e),
-            Err(join_err) => errors.push(format!("parallel iteration {i}: task panicked: {join_err}")),
+            Err(join_err) => {
+                errors.push(format!("parallel iteration {i}: task panicked: {join_err}"))
+            }
         }
     }
 
     if !errors.is_empty() {
-        return Err(format!("{} of {count} parallel iterations failed: {:?}", errors.len(), errors));
+        return Err(format!(
+            "{} of {count} parallel iterations failed: {:?}",
+            errors.len(),
+            errors
+        ));
     }
 
     let after = count_rig_containers().await.map_err(|e| e.to_string())?;
     if after != baseline {
-        return Err(format!("parallel stress left {after} containers, expected baseline {baseline}"));
+        return Err(format!(
+            "parallel stress left {after} containers, expected baseline {baseline}"
+        ));
     }
 
     Ok(())
@@ -100,7 +108,10 @@ mod tests {
         assert_eq!(counts.len(), 100);
         let baseline = counts[0];
         for (i, c) in counts.iter().enumerate() {
-            assert_eq!(*c, baseline, "iteration {i} drifted from baseline {baseline}");
+            assert_eq!(
+                *c, baseline,
+                "iteration {i} drifted from baseline {baseline}"
+            );
         }
         eprintln!("[STRESS] 100/100 sequential lifecycle iterations: 0 leaked containers at every iteration");
     }
@@ -135,6 +146,8 @@ mod tests {
         let counts = sequential_lifecycle_stress(50)
             .await
             .expect("50 rapid enable/disable cycles must all leave 0 drift");
-        eprintln!("[STRESS] 50/50 rapid enable/disable cycles: 0 leaked containers, counts={counts:?}");
+        eprintln!(
+            "[STRESS] 50/50 rapid enable/disable cycles: 0 leaked containers, counts={counts:?}"
+        );
     }
 }

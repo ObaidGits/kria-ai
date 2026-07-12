@@ -51,6 +51,13 @@ pub enum KriaEvent {
     LlmStreamInterrupted,
     /// LLM server swap failed during spawn; `reason` describes the cause.
     LlmSwapFailed { reason: String },
+    /// A configuration section changed (settings-config-revamp).
+    ///
+    /// Carries the changed section name and a monotonically increasing config
+    /// version. The bus is a bounded, lossy broadcast, so subscribers MUST NOT
+    /// assume they observe every delta: on receipt (or after a `Lagged` skip)
+    /// they reconcile by re-reading the current config via `ConfigService`.
+    ConfigChanged { section: String, version: u64 },
 }
 
 /// Central event bus using tokio broadcast channels.

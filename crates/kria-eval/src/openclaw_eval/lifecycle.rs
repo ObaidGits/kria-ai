@@ -42,7 +42,10 @@ mod disabled_gate {
         // The real gate in runtime.rs is `if !openclaw_config.enabled { None }`.
         // We assert the config default matches (enabled=false by default per
         // config.rs), so a fresh install never boots the substrate unasked.
-        assert!(!config.enabled, "OpenClawConfig::enabled must default/stay false when explicitly disabled");
+        assert!(
+            !config.enabled,
+            "OpenClawConfig::enabled must default/stay false when explicitly disabled"
+        );
     }
 
     #[test]
@@ -64,7 +67,9 @@ pub async fn validate_enabled_lifecycle() -> Result<(), String> {
     let rig = match TestRig::up().await {
         Ok(rig) => rig,
         Err(e) if matches!(e, crate::openclaw_eval::rig::RigError::DockerUnavailable(_)) => {
-            return Err(format!("SKIPPED (Outcome::Skipped, not Pass): docker not reachable: {e}"));
+            return Err(format!(
+                "SKIPPED (Outcome::Skipped, not Pass): docker not reachable: {e}"
+            ));
         }
         Err(e) => return Err(e.to_string()),
     };
@@ -102,7 +107,10 @@ pub async fn validate_docker_absent_is_honest() -> Result<(), String> {
 
     let result = ContainerPool::new(config).await;
     match result {
-        Ok(_) => Err("BUG: ContainerPool::new succeeded with Docker unreachable — must fail honestly (R1.3)".into()),
+        Ok(_) => Err(
+            "BUG: ContainerPool::new succeeded with Docker unreachable — must fail honestly (R1.3)"
+                .into(),
+        ),
         Err(e) => {
             // Honest failure, not a panic and not a fabricated success.
             eprintln!("[R1] docker-absent produced honest error (expected): {e}");

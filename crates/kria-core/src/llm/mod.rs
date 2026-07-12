@@ -188,6 +188,57 @@ pub fn extract_openai_message_text(message: &serde_json::Value) -> String {
     extract_openai_content_text(&message["content"])
 }
 
+/// Extract the "reasoning channel" text a thinking/reasoning model may return
+/// INSTEAD of `content`. Different OpenAI-compatible providers/proxies use
+/// different wire keys for this channel:
+///   * `message.reasoning`                    — OpenRouter / opencode(zen) style
+///   * `message.reasoning_details[].text`     — opencode(zen) structured variant
+///   * `message.reasoning_content`            — DeepSeek style
+///
+/// This is provider-neutral (keyed off the wire shape, never a model name or a
+/// user prompt) and is only meant as a fallback when `content` is empty and the
+/// turn carries no tool calls. The value is never logged by callers.
+pub fn extract_openai_reasoning_text(message: &serde_json::Value) -> String {
+    // Plain string reasoning channels first.
+    if let Some(s) = message.get("reasoning").and_then(|v| v.as_str()) {
+        if !s.trim().is_empty() {
+            return s.to_string();
+        }
+    }
+    if let Some(s) = message.get("reasoning_content").and_then(|v| v.as_str()) {
+        if !s.trim().is_empty() {
+            return s.to_string();
+        }
+    }
+    // Structured `reasoning_details: [{ type, text, ... }]` variant.
+    if let Some(parts) = message.get("reasoning_details").and_then(|v| v.as_array()) {
+        let mut chunks: Vec<String> = Vec::new();
+        for part in parts {
+            if let Some(t) = part.get("text").and_then(|v| v.as_str()) {
+                if !t.trim().is_empty() {
+                    chunks.push(t.to_string());
+                }
+            }
+        }
+        if !chunks.is_empty() {
+            return chunks.join("\n");
+        }
+    }
+    String::new()
+}
+
+/// Extract assistant text from `choice.message`, falling back to the reasoning
+/// channel when `content` is empty. Use this on user-facing (non-tool) turns so
+/// that a reasoning model that placed its answer in `reasoning`/`reasoning_content`
+/// (with `content: null`) still yields visible text instead of a blank reply.
+pub fn extract_openai_message_text_with_reasoning(message: &serde_json::Value) -> String {
+    let content = extract_openai_content_text(&message["content"]);
+    if !content.trim().is_empty() {
+        return content;
+    }
+    extract_openai_reasoning_text(message)
+}
+
 /// Extract tool calls from `choice.message` across provider variants.
 /// Supports modern `tool_calls` and legacy `function_call` fields.
 pub fn extract_openai_tool_calls(message: &serde_json::Value) -> Option<Vec<serde_json::Value>> {

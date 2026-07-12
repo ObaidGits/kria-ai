@@ -1,0 +1,62 @@
+{"prompt": "switch to dark mode", "decision": "change", "section": "ui", "field": "theme", "value": "dark"}
+{"prompt": "change theme to light", "decision": "change", "section": "ui", "field": "theme", "value": "light"}
+{"prompt": "turn on dark mode", "decision": "change", "section": "ui", "field": "theme", "value": "dark"}
+{"prompt": "set search engine to duckduckgo", "decision": "change", "section": "search", "field": "engine", "value": "duckduckgo"}
+{"prompt": "use DuckDuckGo for search", "decision": "change", "section": "search", "field": "engine", "value": "duckduckgo"}
+{"prompt": "turn off voice", "decision": "change", "section": "voice", "field": "enabled", "value": "false"}
+{"prompt": "disable voice", "decision": "change", "section": "voice", "field": "enabled", "value": "false"}
+{"prompt": "enable voice", "decision": "change", "section": "voice", "field": "enabled", "value": "true"}
+{"prompt": "set voice mode to continuous", "decision": "change", "section": "voice", "field": "mode", "value": "continuous"}
+{"prompt": "set autonomy to aggressive", "decision": "change", "section": "agent", "field": "autonomy_profile", "value": "aggressive"}
+{"prompt": "turn off autonomous mode", "decision": "clarify", "note": "3-value enum (conservative/balanced/aggressive) — 'off' is ambiguous, ask which"}
+{"prompt": "enable remote desktop", "decision": "change", "section": "remote_desktop", "field": "enabled", "value": "true"}
+{"prompt": "what is my current theme?", "decision": "read_back", "section": "ui", "field": "theme"}
+{"prompt": "what theme am I using", "decision": "read_back", "section": "ui", "field": "theme"}
+{"prompt": "can you remind me which theme I use?", "decision": "read_back", "section": "ui", "field": "theme"}
+{"prompt": "what is my current image mode?", "decision": "read_back", "section": "image_generation", "field": "image_mode"}
+{"prompt": "what search engine am I using?", "decision": "read_back", "section": "search", "field": "engine"}
+{"prompt": "undo my last settings change", "decision": "undo"}
+{"prompt": "revert the last setting", "decision": "undo"}
+{"prompt": "revert previous configuration", "decision": "undo"}
+{"prompt": "change that back", "decision": "undo"}
+{"prompt": "restore previous setting", "decision": "undo"}
+{"prompt": "go back to previous settings", "decision": "undo"}
+{"prompt": "use local only image mode for this one", "decision": "temp", "section": "image_generation", "field": "image_mode", "value": "local_only"}
+{"prompt": "set image mode to cloud only for this image", "decision": "temp", "section": "image_generation", "field": "image_mode", "value": "cloud_only"}
+{"prompt": "generate this image using local AI", "decision": "not_settings", "note": "verb-less content request; field 'image mode' not referenced. Per-request routing without an explicit settings reference is deferred to Wave 2 (image-context evidence) to avoid interfering with content generation."}
+{"prompt": "generate the next image using cloud", "decision": "not_settings", "note": "content request; see above"}
+{"prompt": "set theme to rainbow", "decision": "change", "section": "ui", "field": "theme", "value": "rainbow", "note": "invalid value; handler rejects with allowed list"}
+{"prompt": "I'll change my approach to dark themes in CSS", "decision": "not_settings"}
+{"prompt": "turn on the lights", "decision": "not_settings"}
+{"prompt": "change the API key in my code", "decision": "not_settings"}
+{"prompt": "switch branches", "decision": "not_settings"}
+{"prompt": "enable the feature flag in the code", "decision": "not_settings"}
+{"prompt": "set up a meeting for tomorrow", "decision": "not_settings"}
+{"prompt": "what is the capital of India", "decision": "not_settings"}
+{"prompt": "how are you", "decision": "not_settings"}
+{"prompt": "should I use Gemini for my project?", "decision": "not_settings", "note": "advice about user's project, not KRIA config"}
+{"prompt": "what is dark mode?", "decision": "not_settings", "note": "definitional question, not read-back of KRIA setting"}
+{"prompt": "theme ko dark karo", "decision": "change", "section": "ui", "field": "theme", "value": "dark", "note": "hinglish"}
+{"prompt": "dark mode", "decision": "clarify", "note": "too vague — command or question?"}
+{"prompt": "make it dark", "decision": "change", "section": "ui", "field": "theme", "value": "dark"}
+{"prompt": "switch to dark mode and then summarize this article", "decision": "change", "section": "ui", "field": "theme", "value": "dark", "note": "multi-intent: settings clause + task; settings applied then task continues"}
+{"prompt": "what settings can I configure?", "decision": "info", "note": "catalog"}
+{"prompt": "list voice settings", "decision": "info", "note": "catalog group=voice"}
+{"prompt": "how do I change the theme?", "decision": "info", "note": "help theme"}
+{"prompt": "explain emergency mode", "decision": "info", "note": "help safety.emergency_mode"}
+{"prompt": "what are the valid values for the search engine?", "decision": "info", "note": "help search.engine"}
+{"prompt": "what changed today?", "decision": "info", "note": "recent changes"}
+{"prompt": "show me my recent settings changes", "decision": "info", "note": "recent changes"}
+{"prompt": "set max tool rounds to 8", "decision": "change", "section": "agent", "field": "max_tool_rounds", "value": 8, "note": "numeric coverage"}
+{"prompt": "set temperature to 0.2", "decision": "change", "section": "llm", "field": "temperature", "value": 0.2, "note": "float coverage"}
+{"prompt": "enable image generation", "decision": "change", "section": "image_generation", "field": "enabled", "value": "true", "note": "toggle coverage"}
+{"prompt": "generate an image of a cat", "decision": "not_settings", "note": "content request must not touch settings"}
+{"prompt": "create a dark themed poster", "decision": "not_settings", "note": "value word 'dark' present but theme field not referenced"}
+{"prompt": "write a poem about dark mode", "decision": "not_settings", "note": "content about a topic"}
+{"prompt": "what's the temperature outside", "decision": "not_settings", "note": "weather, not llm.temperature"}
+{"prompt": "draw me something in light colors", "decision": "not_settings", "note": "content request"}
+{"prompt": "which providers are available?", "decision": "info", "note": "provider catalog"}
+{"prompt": "list all providers", "decision": "info", "note": "provider catalog"}
+{"prompt": "what provider am I using?", "decision": "info", "note": "active provider read-back"}
+{"prompt": "which model am I using right now", "decision": "info", "note": "active provider/model"}
+{"prompt": "explain OpenRouter", "decision": "info", "note": "provider explain"}

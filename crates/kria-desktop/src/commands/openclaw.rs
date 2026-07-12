@@ -1361,123 +1361,21 @@ pub async fn openclaw_recommend_skills(
     app_handle: AppHandle,
     state: State<'_, AppStateCell>,
 ) -> Result<RecommendationsPayload, String> {
-    use kria_core::openclaw::cil::market::MarketIndex;
-    use kria_core::openclaw::cil::{
-        ClawHubProvider, DefaultRecommender, Embedder, MarketplaceProvider, MemoryEmbedder,
-        Recommender,
-    };
-    use std::sync::Arc;
-
-    let app = state.get().ok_or("runtime not ready")?;
-
-    // Snapshot config: the CIL flag/weights/thresholds and the marketplace registry.
-    let (cil_cfg, oc_cfg) = {
-        let cfg = app.config.read().await;
-        (cfg.openclaw.cil.clone(), cfg.openclaw.clone())
-    };
-
-    // Recommendation breadth is bounded (never an unbounded query).
-    let k = limit.unwrap_or(10).clamp(1, 50);
-
-    // ── Flag gate (R7.2/R7.3): OFF → honest disabled result, never fabricated.
-    if !cil_cfg.openclaw_icp_enabled {
-        let payload = RecommendationsPayload {
-            enabled: false,
-            degraded: true,
-            status: "OpenClaw ICP is disabled (openclaw_icp_enabled = false); no recommendations."
-                .into(),
-            recommendations: Vec::new(),
-        };
-        let _ = app_handle.emit(event_names::RECOMMENDATIONS, &payload);
-        return Ok(payload);
-    }
-
-    // ── Frozen embedding backend (no new backend introduced): reuse the shared
-    // KRIA embedding model behind the CIL `Embedder` trait boundary. If the goal
-    // cannot be embedded we are degraded — honest empty, never fabricated (R13.1).
-    let embedder: Arc<dyn Embedder> = Arc::new(MemoryEmbedder::new(app.embeddings.clone()));
-    let goal_embedding = match embedder.embed(&goal).await {
-        Ok(v) => v,
-        Err(e) => {
-            let payload = RecommendationsPayload {
-                enabled: true,
-                degraded: true,
-                status: format!(
-                    "degraded: embedder unavailable ({e}); cannot rank recommendations."
-                ),
-                recommendations: Vec::new(),
-            };
-            let _ = app_handle.emit(event_names::RECOMMENDATIONS, &payload);
-            return Ok(payload);
-        }
-    };
-
-    // ── Installed skills are filtered out (no point recommending what's installed).
-    let installed_skill_ids: Vec<String> = app
-        .skill_registry
-        .list_installed()
-        .unwrap_or_default()
-        .into_iter()
-        .map(|s| s.skill_id)
-        .collect();
-
-    // ── MarketIndex over the SAME skills.db the registry uses (migration 4 owns
-    // `market_catalog`). Federated through the frozen ClawHubClient adapter — no
-    // second database, no second fetch path. This is a read handle only: `sync()`
-    // is NOT called here (R9.2 — the offline cache is refreshed by the CIL
-    // background job, not by this per-query read).
-    let db_path = kria_data_dir().join("skills.db");
-    let provider = Arc::new(ClawHubProvider::new(
-        &oc_cfg.registry.index_url,
-        oc_cfg.registry.allowed_hosts.clone(),
-    )) as Arc<dyn MarketplaceProvider>;
-    let market = Arc::new(
-        MarketIndex::open(&db_path, embedder.clone(), vec![provider])
-            .map_err(|e| format!("market index unavailable: {e}"))?,
-    );
-
-    // ── Pure read over the pre-embedded `market_catalog`, ranked by the
-    // configured `CilConfig` signals/thresholds. Installs nothing (R8.2). An
-    // empty result is an honest "nothing above threshold" / empty cache (R8.5).
-    let recommender = DefaultRecommender::new(market);
-    let recs = recommender
-        .recommend(&goal_embedding, &installed_skill_ids, k, &cil_cfg)
-        .map_err(|e| format!("recommendation failed: {e}"))?;
-
-    let status = if recs.is_empty() {
-        "no marketplace candidate above the relevance threshold (or the catalog cache is empty)."
-            .to_string()
-    } else {
-        "ok".to_string()
-    };
-
-    let recommendations: Vec<SkillRecommendationCard> = recs
-        .into_iter()
-        .map(|r| SkillRecommendationCard {
-            provider_id: r.provider_id,
-            slug: r.slug,
-            version: r.version,
-            score: r.score,
-            trust_tier: r.trust.map(|t| t.as_str().to_string()),
-            quality: r.quality,
-            popularity: r.popularity,
-            deprecated: r.deprecated,
-            rationale: r.rationale,
-            alternatives: r.alternatives,
-        })
-        .collect();
-
+    // M12 (Option A): the legacy CIL recommender is removed. Marketplace
+    // recommendations now flow through the ONE Capability Provider Platform —
+    // the `cpp_recommend` command backing Capabilities → Marketplace. This
+    // command is retained only as a compatibility shim for any old caller and
+    // returns an honest, empty result that points at the CPP surface; it
+    // installs/generates/ranks nothing itself.
+    let _ = (goal, limit, state);
     let payload = RecommendationsPayload {
-        enabled: true,
-        degraded: false,
-        status,
-        recommendations,
+        enabled: false,
+        degraded: true,
+        status: "Legacy recommender removed — use Capabilities → Marketplace (cpp_recommend)."
+            .into(),
+        recommendations: Vec::new(),
     };
-
-    // Push the result to the UI, mirroring the existing `openclaw:*` event
-    // convention (additive event name; all existing event names preserved).
     let _ = app_handle.emit(event_names::RECOMMENDATIONS, &payload);
-
     Ok(payload)
 }
 
@@ -1522,6 +1420,13 @@ use std::sync::{Mutex as StdMutex, OnceLock};
 /// no second database. Mirrors the path `openclaw_recommend_skills` already uses.
 fn openclaw_skills_db_path() -> std::path::PathBuf {
     kria_data_dir().join("skills.db")
+}
+
+/// Path to the single CPP grant store (`capability::grants`), shared by the chat
+/// dispatcher, the Capabilities panel, and the desktop grant list/revoke
+/// commands — the ONE grant store (M12 Option-A).
+fn cpp_grants_db_path() -> std::path::PathBuf {
+    kria_data_dir().join("cpp_grants.db")
 }
 
 /// Read every non-removed skill's authoritative metadata from the frozen
@@ -1655,41 +1560,16 @@ pub async fn openclaw_capability_manager(
     app_handle: AppHandle,
     state: State<'_, AppStateCell>,
 ) -> Result<CapabilityManagerPayload, String> {
-    use kria_core::openclaw::cil::extract::ProfileStore;
-
+    // M12 (Option A): the legacy CIL capability-profile view is removed. This
+    // command now returns the frozen registry + provenance only (empty capability
+    // profiles); rich capability metadata lives in the CPP descriptors
+    // (Capabilities → Browser / Descriptor Viewer via `cpp_catalog`/`cpp_descriptor`).
     let app = state.get().ok_or("runtime not ready")?;
-    let icp_enabled = app.config.read().await.openclaw.cil.openclaw_icp_enabled;
-
     let metadata = all_installed_metadata(&app.skill_registry)?;
-
-    // The derived capability_profiles view is only meaningful under the flag.
-    // Opening it is best-effort: a failure degrades honestly rather than erroring.
-    let profile_store = if icp_enabled {
-        ProfileStore::open(&openclaw_skills_db_path()).ok()
-    } else {
-        None
-    };
-    let degraded = !icp_enabled || profile_store.is_none();
 
     let mut skills = Vec::with_capacity(metadata.len());
     for meta in &metadata {
         let (provenance, generated_workflow_id) = provenance_of(&meta.discovery_source);
-
-        let profile = match &profile_store {
-            Some(store) => match store.get_profile(&meta.skill_id) {
-                Ok(Some(row)) => CapabilityProfileView {
-                    provides: row.profile.provides.iter().map(|t| t.id.clone()).collect(),
-                    consumes: row.profile.consumes.iter().map(|t| t.id.clone()).collect(),
-                    inputs: row.profile.inputs.clone(),
-                    outputs: row.profile.outputs.clone(),
-                    has_profile: true,
-                },
-                // No derived row yet (backfill pending) or a read error — honest empty.
-                _ => CapabilityProfileView::default(),
-            },
-            None => CapabilityProfileView::default(),
-        };
-
         skills.push(CapabilitySkillCard {
             skill_id: meta.skill_id.clone(),
             name: meta.name.clone(),
@@ -1701,23 +1581,17 @@ pub async fn openclaw_capability_manager(
             enabled: meta.state.is_usable(),
             provenance,
             generated_workflow_id,
-            profile,
+            profile: CapabilityProfileView::default(),
         });
     }
 
-    let status = if !icp_enabled {
-        "OpenClaw ICP disabled — showing registry + provenance only (capability profiles are indexed under the flag).".to_string()
-    } else if degraded {
-        "degraded: capability profile view unavailable; showing registry + provenance only."
-            .to_string()
-    } else {
-        format!("ok — {} skill(s)", skills.len())
-    };
-
     let payload = CapabilityManagerPayload {
-        enabled: icp_enabled,
-        degraded,
-        status,
+        enabled: false,
+        degraded: true,
+        status: format!(
+            "registry + provenance only — {} skill(s); capability profiles now come from CPP descriptors.",
+            skills.len()
+        ),
         skills,
     };
     let _ = app_handle.emit(event_names::CAPABILITIES, &payload);
@@ -1857,11 +1731,11 @@ pub async fn openclaw_capability_graph(
     app_handle: AppHandle,
     state: State<'_, AppStateCell>,
 ) -> Result<CapabilityGraphPayload, String> {
-    use kria_core::openclaw::cil::graph::{CapabilityGraph, EdgeKind};
-
+    // M12 (Option A): the legacy CIL capability-edge graph is removed. This
+    // command now returns skill nodes from the frozen registry with an empty edge
+    // set; capability relationships/alternatives are surfaced by CPP discovery
+    // (Capabilities → Browser, `cpp_discover`/`cpp_recommend`).
     let app = state.get().ok_or("runtime not ready")?;
-    let icp_enabled = app.config.read().await.openclaw.cil.openclaw_icp_enabled;
-
     let metadata = all_installed_metadata(&app.skill_registry)?;
     let nodes: Vec<CapabilityGraphNodeView> = metadata
         .iter()
@@ -1876,53 +1750,16 @@ pub async fn openclaw_capability_graph(
             }
         })
         .collect();
+    let edges: Vec<CapabilityGraphEdgeView> = Vec::new();
 
-    // Edges live in the derived `capability_edges` view (populated under the flag).
-    let mut edges = Vec::new();
-    let mut degraded = !icp_enabled;
-    if icp_enabled {
-        match CapabilityGraph::open(&openclaw_skills_db_path()) {
-            Ok(graph) => {
-                for kind in [
-                    EdgeKind::Depends,
-                    EdgeKind::ProvidesFor,
-                    EdgeKind::Alternative,
-                    EdgeKind::Supersedes,
-                ] {
-                    match graph.edges_of_kind(kind) {
-                        Ok(kind_edges) => {
-                            for e in kind_edges {
-                                edges.push(CapabilityGraphEdgeView {
-                                    from_skill: e.from_skill,
-                                    to_skill: e.to_skill,
-                                    edge_kind: e.edge_kind.as_str().to_string(),
-                                    weight: e.weight,
-                                });
-                            }
-                        }
-                        Err(_) => {
-                            degraded = true;
-                        }
-                    }
-                }
-            }
-            Err(_) => {
-                degraded = true;
-            }
-        }
-    }
-
-    let status = if !icp_enabled {
-        "OpenClaw ICP disabled — showing skill nodes only (capability edges are derived under the flag).".to_string()
-    } else if degraded {
-        "degraded: capability edge view unavailable; showing nodes only.".to_string()
-    } else {
-        format!("ok — {} node(s), {} edge(s)", nodes.len(), edges.len())
-    };
+    let status = format!(
+        "nodes only — {} node(s); capability relationships now come from CPP discovery.",
+        nodes.len()
+    );
 
     let payload = CapabilityGraphPayload {
-        enabled: icp_enabled,
-        degraded,
+        enabled: false,
+        degraded: true,
         status,
         nodes,
         edges,
@@ -1967,32 +1804,39 @@ pub struct GrantsPayload {
 /// never appears as active. Never mutates state.
 #[tauri::command]
 pub async fn openclaw_list_grants(state: State<'_, AppStateCell>) -> Result<GrantsPayload, String> {
-    use kria_core::openclaw::perm::GrantStore;
+    // M12: unified on the ONE CPP grant store (`capability::grants` over
+    // `cpp_grants.db`) — the same store the chat dispatcher + Capabilities panel
+    // use. No second grant store.
+    use kria_core::capability::grants::GrantStore;
 
-    let app = state.get().ok_or("runtime not ready")?;
-    let store = GrantStore::open(&openclaw_skills_db_path())
+    let _app = state.get().ok_or("runtime not ready")?;
+    let store = GrantStore::open(&cpp_grants_db_path())
         .map_err(|e| format!("grant store unavailable: {e}"))?;
 
-    let metadata = all_installed_metadata(&app.skill_registry)?;
     let now = chrono::Utc::now();
-    let mut grants = Vec::new();
-    for meta in &metadata {
-        let active = store
-            .active_grants_for_skill(&meta.skill_id, now)
-            .map_err(|e| format!("list grants for {}: {e}", meta.skill_id))?;
-        for g in active {
-            grants.push(ScopedGrantView {
-                grant_id: g.grant_id,
-                skill_id: g.skill_id,
-                scope_kind: g.scope_kind.as_str().to_string(),
-                scope_key: g.scope_key,
-                risk: g.risk.as_str().to_string(),
-                decision: g.decision.as_str().to_string(),
-                granted_at: g.granted_at.to_rfc3339(),
-                expires_at: g.expires_at.map(|t| t.to_rfc3339()),
-            });
-        }
-    }
+    let grants = store
+        .active_grants(now)
+        .map_err(|e| format!("list grants: {e}"))?
+        .into_iter()
+        .map(|g| ScopedGrantView {
+            grant_id: g.grant_id,
+            // Provider-neutral: the UI's `skill_id` field carries the fully
+            // qualified capability id.
+            skill_id: format!("{}/{}", g.provider_id, g.capability_id),
+            scope_kind: g.scope_kind.as_str().to_string(),
+            scope_key: g.scope_key,
+            // Effects → coarse risk label (elevated ⇒ YELLOW, else GREEN).
+            risk: if g.effects.is_empty() {
+                "GREEN"
+            } else {
+                "YELLOW"
+            }
+            .to_string(),
+            decision: g.decision.as_str().to_string(),
+            granted_at: g.granted_at.to_rfc3339(),
+            expires_at: g.expires_at.map(|t| t.to_rfc3339()),
+        })
+        .collect::<Vec<_>>();
 
     let status = format!("{} active grant(s)", grants.len());
     Ok(GrantsPayload { grants, status })
@@ -2011,13 +1855,14 @@ pub async fn openclaw_revoke_grant(
     app_handle: AppHandle,
     state: State<'_, AppStateCell>,
 ) -> Result<(), String> {
-    use kria_core::openclaw::perm::{DefaultPermissionEngine, GrantStore, PermissionEngine};
+    use kria_core::capability::grants::GrantStore;
+    use kria_core::capability::permission::{DefaultPermissionEngine, PermissionEngine};
 
     let _app = state.get().ok_or("runtime not ready")?;
-    let store = GrantStore::open(&openclaw_skills_db_path())
+    let store = GrantStore::open(&cpp_grants_db_path())
         .map_err(|e| format!("grant store unavailable: {e}"))?;
 
-    let engine = DefaultPermissionEngine::new();
+    let engine = DefaultPermissionEngine;
     engine
         .revoke(&grant_id, &store)
         .map_err(|e| e.to_string())?;

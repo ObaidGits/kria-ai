@@ -116,7 +116,9 @@ pub async fn validate_bridge_rejects_bad_input_without_hanging() -> Result<(), S
 
     match bounded {
         Ok(_) => {
-            eprintln!("[R2] destroy-of-checked-out-container completed in {elapsed:?} (bounded, no hang)");
+            eprintln!(
+                "[R2] destroy-of-checked-out-container completed in {elapsed:?} (bounded, no hang)"
+            );
         }
         Err(_) => {
             return Err("destroy operation hung past the 10s bound — R2.6 violation".into());
@@ -174,7 +176,8 @@ mod tests {
         let idle_recycle_filter_includes_dead = false; // per runtime_manager.rs:1948 read
         let health_monitor_calls_trigger_recovery_automatically = false; // per comprehensive_health_check read
         assert!(
-            !idle_recycle_filter_includes_dead && !health_monitor_calls_trigger_recovery_automatically,
+            !idle_recycle_filter_includes_dead
+                && !health_monitor_calls_trigger_recovery_automatically,
             "if this assertion ever fails, the gap has been fixed in runtime_manager.rs — \
              update/remove this documentation test accordingly"
         );

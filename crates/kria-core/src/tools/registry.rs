@@ -102,6 +102,15 @@ pub struct ToolRegistry {
     resume_capabilities: RwLock<HashMap<String, ToolResumeCapability>>,
     env_provider: RwLock<Arc<dyn EnvironmentProvider>>,
     shell_state: SharedShellState,
+    /// Optional live ConfigService, injected into every ToolContext so tools
+    /// like `config_patch` can read/mutate configuration (settings-config-revamp).
+    config_service: RwLock<Option<Arc<crate::config::ConfigService>>>,
+    /// Injection-wall taint (settings-config-revamp Task 0/13): set true once the
+    /// Turn-scoped config overlay (settings-config-revamp Task 14). Set by the agent
+    /// loop when a user prompt requests a temporary, whitelisted setting change
+    /// ("... for this one"). Injected into each `ToolContext` and dropped (cleared)
+    /// at the next turn boundary — never persisted.
+    turn_override: RwLock<Option<Arc<crate::config::RequestOverride>>>,
 }
 
 fn default_shell_state() -> ShellState {
@@ -121,7 +130,103 @@ impl ToolRegistry {
             resume_capabilities: RwLock::new(HashMap::new()),
             env_provider: RwLock::new(env_provider),
             shell_state: Arc::new(Mutex::new(default_shell_state())),
+            config_service: RwLock::new(None),
+            turn_override: RwLock::new(None),
         }
+    }
+
+    /// Clear any turn-scoped config override at a user-turn boundary so last turn's
+    /// temporary override does not leak into this one (Task 14). Injection-wall
+    /// provenance is now tracked PER-TURN by the agent loop (settings-nl-control
+    /// Task 3, fixes NEW-5) — it is no longer a global flag on the registry.
+    pub fn clear_turn_override(&self) {
+        *self
+            .turn_override
+            .write()
+            .expect("tool registry turn_override lock poisoned") = None;
+    }
+
+    /// Install a turn-scoped [`crate::config::RequestOverride`] for the current turn
+    /// (settings-config-revamp Task 14). Injected into every `ToolContext` produced
+    /// this turn; cleared at the next turn boundary via `clear_turn_override`.
+    pub fn set_turn_override(&self, ov: Arc<crate::config::RequestOverride>) {
+        *self
+            .turn_override
+            .write()
+            .expect("tool registry turn_override lock poisoned") = Some(ov);
+    }
+
+    /// Whether a tool ingests content from OUTSIDE the trusted user channel
+    /// (web pages, files on disk, MCP servers, marketplace/knowledge stores,
+    /// remote/sidecar output). Once such a tool runs in a turn, later config
+    /// mutations in that turn are treated as untrusted (injection wall, Req 9).
+    ///
+    /// settings-nl-control Task 2 (fixes NEW-3): classification is driven by the
+    /// LIVE registry's `category` metadata (every registered tool declares one) +
+    /// a small structural rule (MCP prefix, file-read discrimination) — NOT an
+    /// outdated hardcoded name list. A new external tool with an existing external
+    /// category is covered automatically.
+    pub fn is_external_content_tool(&self, name: &str) -> bool {
+        // MCP tools are external by construction (remote server output).
+        if name.starts_with("mcp_") {
+            return true;
+        }
+        let category = self
+            .defs
+            .read()
+            .ok()
+            .and_then(|defs| defs.get(name).map(|d| d.category.clone()));
+        match category.as_deref() {
+            // Content pulled from the internet / news / knowledge+marketplace stores
+            // / RAG can carry injected instructions.
+            Some("internet") | Some("web") | Some("news") | Some("knowledge")
+            | Some("marketplace") | Some("rag") => true,
+            // Filesystem: only READS ingest external content; writes do not.
+            Some("file_ops") => Self::is_file_read_op(name),
+            // Unregistered/edge tools: fall back to a structural read-name heuristic.
+            _ => Self::is_file_read_op(name),
+        }
+    }
+
+    /// Filesystem READ operations that pull file contents/listings into context.
+    /// (Writes/renames/deletes are not content ingestion.)
+    fn is_file_read_op(name: &str) -> bool {
+        matches!(
+            name,
+            "read_file"
+                | "read_files"
+                | "search_files"
+                | "search_file_contents"
+                | "list_directory"
+                | "get_file_info"
+                | "get_project_structure"
+                | "find_files_by_pattern"
+                | "calculate_dir_size"
+                | "fetch_article"
+                | "fetch_url"
+                | "download_file"
+                | "parse_document"
+                | "read_document"
+                | "extract_document"
+        )
+    }
+
+    /// The live ConfigService, if injected (used by the settings NL pipeline +
+    /// `config_patch`). `None` before runtime wiring.
+    pub fn config_service(&self) -> Option<Arc<crate::config::ConfigService>> {
+        self.config_service
+            .read()
+            .expect("tool registry config_service lock poisoned")
+            .clone()
+    }
+
+    /// Inject the live ConfigService so tool contexts can carry it (used by
+    /// the `config_patch` tool). Called once at runtime startup.
+    pub fn set_config_service(&self, svc: Arc<crate::config::ConfigService>) {
+        *self
+            .config_service
+            .write()
+            .expect("tool registry config_service lock poisoned") = Some(svc);
     }
 
     pub fn set_environment_provider(&self, provider: Arc<dyn EnvironmentProvider>) {
@@ -143,11 +248,43 @@ impl ToolRegistry {
     }
 
     pub fn make_tool_context(&self, cancellation: CancellationToken) -> ToolContext {
-        ToolContext::new(
+        // Default provenance is User. The injection-wall taint is PER-TURN and owned
+        // by the agent loop (Task 3, NEW-5); config-capable dispatch sites pass the
+        // turn's provenance explicitly via `make_tool_context_with_provenance`.
+        self.make_tool_context_with_provenance(cancellation, crate::tools::TriggerProvenance::User)
+    }
+
+    /// Build a `ToolContext` stamping an explicit trigger provenance. The agent loop
+    /// passes `ExternalContent` when the current turn has already run an
+    /// external-content tool, so `config_patch` refuses injected mutations (Req 9).
+    pub fn make_tool_context_with_provenance(
+        &self,
+        cancellation: CancellationToken,
+        provenance: crate::tools::TriggerProvenance,
+    ) -> ToolContext {
+        let mut ctx = ToolContext::new(
             self.environment_provider(),
             self.shell_state(),
             cancellation,
         )
+        .with_provenance(provenance);
+        if let Some(svc) = self
+            .config_service
+            .read()
+            .expect("tool registry config_service lock poisoned")
+            .clone()
+        {
+            ctx = ctx.with_config(svc);
+        }
+        if let Some(ov) = self
+            .turn_override
+            .read()
+            .expect("tool registry turn_override lock poisoned")
+            .clone()
+        {
+            ctx = ctx.with_request_override(ov);
+        }
+        ctx
     }
 
     /// Register a tool with its definition and handler.
@@ -412,6 +549,14 @@ pub fn build_registry_full_with_psdg_wcr(
 ) -> ToolRegistry {
     let reg = ToolRegistry::new();
 
+    // settings-config-revamp: prompt-driven settings tool. NL settings control is
+    // ON by default (disable with KRIA_NL_SETTINGS=0); no-ops if the disable flag
+    // is set or no ConfigService is injected.
+    reg.register(
+        super::config_patch::ConfigPatchTool::def(),
+        Arc::new(super::config_patch::ConfigPatchTool),
+    );
+
     super::system_info::register(&reg);
     super::file_ops::register(&reg);
     super::app_lifecycle::register(&reg);
@@ -553,4 +698,61 @@ pub fn build_registry_full_with_psdg_wcr(
 
     tracing::info!(count = reg.len(), "tool registry built");
     reg
+}
+
+#[cfg(test)]
+mod provenance_tests {
+    use super::*;
+    use crate::tools::TriggerProvenance;
+    use tokio_util::sync::CancellationToken;
+
+    #[test]
+    fn default_context_is_user_provenance() {
+        let reg = ToolRegistry::new();
+        let ctx = reg.make_tool_context(CancellationToken::new());
+        assert_eq!(ctx.provenance, TriggerProvenance::User);
+    }
+
+    #[test]
+    fn explicit_external_provenance_is_stamped() {
+        let reg = ToolRegistry::new();
+        let ctx = reg.make_tool_context_with_provenance(
+            CancellationToken::new(),
+            TriggerProvenance::ExternalContent,
+        );
+        assert_eq!(ctx.provenance, TriggerProvenance::ExternalContent);
+        // Default path stays User (no global taint bleed — NEW-5).
+        let ctx2 = reg.make_tool_context(CancellationToken::new());
+        assert_eq!(ctx2.provenance, TriggerProvenance::User);
+    }
+
+    #[test]
+    fn external_content_tool_classification_is_category_driven() {
+        let reg = ToolRegistry::new();
+        // Register a tool with an external category → detected via metadata.
+        reg.register(
+            ToolDef {
+                name: "some_web_tool".into(),
+                description: "d".into(),
+                category: "internet".into(),
+                parameters: vec![],
+                default_tier: crate::safety::RiskLevel::Green,
+                min_tier: "lite",
+            },
+            std::sync::Arc::new(NoopHandler),
+        );
+        assert!(reg.is_external_content_tool("some_web_tool")); // category=internet
+        assert!(reg.is_external_content_tool("mcp_fs_read_file")); // mcp_ prefix
+        assert!(reg.is_external_content_tool("read_file")); // file read fallback
+        assert!(!reg.is_external_content_tool("config_patch")); // not external
+        assert!(!reg.is_external_content_tool("write_file")); // file WRITE, not ingestion
+    }
+
+    struct NoopHandler;
+    #[async_trait::async_trait]
+    impl ToolHandler for NoopHandler {
+        async fn execute(&self, _p: serde_json::Value) -> crate::infra::ToolResult {
+            crate::infra::ToolResult::ok(serde_json::json!({}))
+        }
+    }
 }

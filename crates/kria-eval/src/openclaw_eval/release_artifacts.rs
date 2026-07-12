@@ -104,10 +104,17 @@ pub fn feature_matrix() -> Vec<FeatureEntry> {
 pub fn generate_feature_matrix_markdown() -> String {
     let mut out = String::new();
     out.push_str("# OpenClaw Feature Matrix\n\n");
-    out.push_str("_Auto-generated from real, task-by-task validation evidence. Do not hand-edit._\n\n");
+    out.push_str(
+        "_Auto-generated from real, task-by-task validation evidence. Do not hand-edit._\n\n",
+    );
     out.push_str("| Feature | Status | Evidence |\n|---|---|---|\n");
     for entry in feature_matrix() {
-        out.push_str(&format!("| {} | {} | {} |\n", entry.feature, entry.status.as_str(), entry.evidence));
+        out.push_str(&format!(
+            "| {} | {} | {} |\n",
+            entry.feature,
+            entry.status.as_str(),
+            entry.evidence
+        ));
     }
     out
 }
@@ -130,7 +137,11 @@ mod tests {
         let matrix = feature_matrix();
         assert!(!matrix.is_empty());
         for entry in &matrix {
-            assert!(!entry.evidence.is_empty(), "feature '{}' must cite evidence", entry.feature);
+            assert!(
+                !entry.evidence.is_empty(),
+                "feature '{}' must cite evidence",
+                entry.feature
+            );
         }
     }
 
@@ -152,7 +163,10 @@ mod tests {
         let ledger = honesty_ledger();
         let matrix = feature_matrix();
         let gap_count_in_ledger = ledger.iter().filter(|f| f.is_gap).count();
-        let non_implemented_in_matrix = matrix.iter().filter(|e| e.status != FeatureStatus::Implemented).count();
+        let non_implemented_in_matrix = matrix
+            .iter()
+            .filter(|e| e.status != FeatureStatus::Implemented)
+            .count();
         assert!(
             non_implemented_in_matrix >= gap_count_in_ledger,
             "feature matrix must reflect at least as many gaps ({non_implemented_in_matrix}) as the honesty ledger ({gap_count_in_ledger})"

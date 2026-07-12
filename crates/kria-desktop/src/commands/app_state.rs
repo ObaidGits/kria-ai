@@ -56,6 +56,13 @@ impl Default for LlmRuntimeApplySnapshot {
 /// Shared application state managed by Tauri.
 pub struct AppState {
     pub config: Arc<RwLock<KriaConfig>>,
+    /// Single source of truth for config reads/writes (settings-config-revamp).
+    /// Wraps the SAME `config` handle above + the event bus, so routing through
+    /// it is behaviourally identical when `KRIA_CONFIG_SERVICE` is off.
+    pub config_service: Arc<kria_core::config::ConfigService>,
+    /// Hash-chained audit ledger (also the durable config-change history source,
+    /// settings-config-revamp Task 15). Shares the same `kria.db` used elsewhere.
+    pub audit_logger: Arc<kria_core::safety::AuditLogger>,
     /// Held to keep the Arc alive for the app's lifetime.
     #[allow(dead_code)]
     pub model_router: Arc<ModelRouter>,

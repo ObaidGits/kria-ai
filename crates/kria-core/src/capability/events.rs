@@ -23,8 +23,16 @@ pub enum Stage {
     Rank,
     Permission,
     Acquire,
+    /// Capability synthesis / generation (spec R7, Wave 9): spec creation, IR
+    /// generation + validation, golden smoke — distinct from `Acquire` (install)
+    /// so the Generate UI can render a synthesis timeline.
+    Synthesize,
     Plan,
     Execute,
+    /// A bounded retry of a failed attempt (Wave 11, spec R12.1).
+    Retry,
+    /// A durable long-running job state transition (Wave 11, spec R28).
+    Job,
     Recover,
     Learn,
     Failure,
@@ -39,8 +47,11 @@ impl Stage {
             Self::Rank => "rank",
             Self::Permission => "permission",
             Self::Acquire => "acquire",
+            Self::Synthesize => "synthesize",
             Self::Plan => "plan",
             Self::Execute => "execute",
+            Self::Retry => "retry",
+            Self::Job => "job",
             Self::Recover => "recover",
             Self::Learn => "learn",
             Self::Failure => "failure",

@@ -2,13 +2,131 @@ use super::*;
 use crate::commands::colab::migrate_legacy_colab_server_command;
 use std::collections::HashMap;
 
+/// One-time migration (settings-config-revamp Task 5): if the SQLite config
+/// store is empty and a legacy `~/.kria/config.toml` exists, import its
+/// user-layer deviations into field-level rows and back up the file as
+/// `config.toml.bak`. Idempotent: does nothing once the store is populated.
+fn maybe_import_toml_into_store(
+    store: &dyn kria_core::config::ConfigStore,
+    secrets: Option<&kria_core::config::SecretStore>,
+    paths: &kria_core::platform::paths::KriaPaths,
+) {
+    let is_empty = store.all().map(|r| r.is_empty()).unwrap_or(false);
+    if !is_empty {
+        return;
+    }
+    let toml_path = paths.user_config();
+    if !toml_path.exists() {
+        return;
+    }
+    let text = match std::fs::read_to_string(&toml_path) {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::warn!(error = %e, "config import: could not read legacy config.toml");
+            return;
+        }
+    };
+    let user_cfg: kria_core::config::KriaConfig = match toml::from_str(&text) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(error = %e, "config import: could not parse legacy config.toml; skipping");
+            return;
+        }
+    };
+    // Migrate any plaintext secrets from the legacy file into the vault BEFORE
+    // backing up the file (write_user_layer_diff itself redacts secrets from the
+    // DB rows).
+    if let Some(secrets) = secrets {
+        secrets.persist(&user_cfg);
+    }
+    match user_cfg.write_user_layer_diff(store, "import") {
+        Ok(()) => {
+            let bak = toml_path.with_extension("toml.bak");
+            if let Err(e) = std::fs::rename(&toml_path, &bak) {
+                tracing::warn!(error = %e, "config import: rows written but backup rename failed");
+            } else {
+                tracing::info!(
+                    backup = %bak.display(),
+                    "config import: migrated ~/.kria/config.toml into SQLite config store"
+                );
+            }
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "config import: failed to write user-layer rows; leaving config.toml intact");
+        }
+    }
+}
+
 pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     // Initialize logging first so startup diagnostics are filterable.
     let startup_started = std::time::Instant::now();
     let bootstrap_paths = kria_core::platform::paths::KriaPaths::resolve();
     kria_core::infra::logging::setup_logging(&bootstrap_paths.logs_dir);
 
-    let mut config = KriaConfig::load(None)?;
+    // Durable settings-routing diagnostics (Task 11 observability): every settings
+    // intent decision is appended as JSONL, bounded, surviving restart for debugging.
+    kria_core::config::nl::diagnostics::set_persist_path(
+        bootstrap_paths
+            .logs_dir
+            .join("settings_intent_routing.jsonl"),
+    );
+
+    // settings-config-revamp: backend-aware config load. Default `toml` keeps
+    // legacy behaviour byte-for-byte. `sqlite` resolves the layered
+    // (code < default.toml < DB < env) config and, on first run, imports the
+    // existing ~/.kria/config.toml into field-level rows (Task 4/5).
+    let config_backend = kria_core::config::ConfigBackend::from_env();
+    let config_store: Option<std::sync::Arc<dyn kria_core::config::ConfigStore>> =
+        match config_backend {
+            kria_core::config::ConfigBackend::Sqlite => {
+                match kria_core::config::SqliteConfigStore::open(&bootstrap_paths.db_path) {
+                    Ok(store) => {
+                        let store: std::sync::Arc<dyn kria_core::config::ConfigStore> =
+                            std::sync::Arc::new(store);
+                        Some(store)
+                    }
+                    Err(e) => {
+                        // Fail closed: fall back to the TOML loader (Req 1.6).
+                        tracing::error!(error = %e, "config: SQLite backend open failed; falling back to TOML");
+                        None
+                    }
+                }
+            }
+            kria_core::config::ConfigBackend::Toml => None,
+        };
+
+    // Vault-backed secret store (Task 6) — only under the SQLite backend, where
+    // secrets are kept out of the config rows and hydrated into the live config.
+    let secret_store: Option<std::sync::Arc<kria_core::config::SecretStore>> = if config_store
+        .is_some()
+    {
+        match kria_core::config::SecretStore::open_default() {
+            Ok(s) => Some(std::sync::Arc::new(s)),
+            Err(e) => {
+                tracing::warn!(error = %e, "config: secret vault unavailable; secrets will not persist this session");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // One-time import of legacy ~/.kria/config.toml into the SQLite store +
+    // vault (runs after both are open so secrets migrate into the vault).
+    if let Some(store) = &config_store {
+        maybe_import_toml_into_store(store.as_ref(), secret_store.as_deref(), &bootstrap_paths);
+    }
+
+    let mut config = match &config_store {
+        Some(store) => {
+            let mut cfg = kria_core::config::KriaConfig::resolve_from_store(store.as_ref());
+            if let Some(secrets) = &secret_store {
+                secrets.hydrate(&mut cfg);
+            }
+            cfg
+        }
+        None => KriaConfig::load(None)?,
+    };
     let paths = config.resolve_paths()?;
     // Apply GPU policy tunables (redesign G1/G2) from config at startup so Settings-UI values are
     // live from boot. Env vars override at read time.
@@ -1007,28 +1125,273 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     // Register the semantic OpenClaw handler. Pass the model router so RC1
     // schema-driven argument generation can translate natural-language requests
     // into each skill's typed `inputSchema` arguments.
-    if let (Some(ref subsystem), Some(ref pool)) = (&openclaw_subsystem, &openclaw_pool) {
-        // RC-1: register WITH the Capability Intelligence Layer wired in. The
-        // CIL embedder reuses the SAME shared frozen embedding model (no second
-        // backend); the CIL config + `openclaw_icp_enabled` master flag come
-        // from the `[openclaw.cil]` section. With the flag OFF no facade is
-        // built and behavior is byte-for-byte the frozen direct-router path.
-        let cil_embedder: std::sync::Arc<dyn kria_core::openclaw::cil::Embedder> =
-            std::sync::Arc::new(kria_core::openclaw::cil::MemoryEmbedder::new(
-                embeddings.clone(),
-            ));
-        subsystem
-            .register_into_tool_registry_with_cil(
-                &tool_registry,
-                pool.clone(),
-                Some(model_router.clone()),
-                cil_embedder,
-                openclaw_config.cil.clone(),
-                paths.data_dir.join("skills.db"),
-                openclaw_config.registry.index_url.clone(),
-                openclaw_config.registry.allowed_hosts.clone(),
-            )
-            .await;
+    if let (Some(_subsystem), Some(ref pool)) = (&openclaw_subsystem, &openclaw_pool) {
+        // ── M12 (Option A): the ONE execution pipeline. The `openclaw` chat tool
+        //    and `list_installed_skills` are served entirely by the Capability
+        //    Provider Platform — discover → permission (one engine + one durable
+        //    grant store) → provider execution. The legacy SemanticOpenClawHandler
+        //    / SemanticSkillRouter / ApprovalCache path is no longer wired.
+        {
+            use kria_core::capability::acl::openclaw::OpenClawProvider;
+            use kria_core::capability::events::CapabilityEventBus;
+            use kria_core::capability::grants::GrantStore as CapGrantStore;
+            use kria_core::capability::index::{InMemoryFederatedIndex, MemoryEmbedder};
+            use kria_core::capability::platform::CapabilityPlatform;
+            use kria_core::capability::registry::ProviderRegistry as CapProviderRegistry;
+            use kria_core::openclaw::runtime::{DockerRuntime, SkillRuntime};
+            use kria_core::safety::RiskLevel;
+            use kria_core::tools::capability_dispatch::{
+                CapabilityDispatchHandler, CapabilityListHandler, MarketplaceInstallHandler,
+                MarketplaceSearchHandler,
+            };
+            use kria_core::tools::registry::{ParamDef, ToolDef};
+
+            // Reuse the shared embedding model (no second backend).
+            let cap_embedder = Arc::new(MemoryEmbedder::from_model(embeddings.clone(), 384));
+            let cap_index = Arc::new(InMemoryFederatedIndex::new(cap_embedder));
+            let cap_registry = Arc::new(CapProviderRegistry::new(cap_index));
+            let cap_runtime: Arc<dyn SkillRuntime> = Arc::new(DockerRuntime::new(pool.clone()));
+            let mut oc = OpenClawProvider::new(openclaw_registry.clone(), cap_runtime);
+            let store_dir = paths.data_dir.join("openclaw_skills");
+            let _ = std::fs::create_dir_all(&store_dir);
+            if let Ok(audit) = kria_core::openclaw::audit::AuditLedger::open(
+                &paths.data_dir.join("skills.db"),
+                b"kria-openclaw-dev-audit-key-0001".to_vec(),
+            ) {
+                oc = oc.with_lifecycle(
+                    openclaw_config.registry.index_url.clone(),
+                    openclaw_config.registry.allowed_hosts.clone(),
+                    Arc::new(audit),
+                    store_dir,
+                );
+            }
+            cap_registry.register(Arc::new(oc));
+            let cap_bus = Arc::new(CapabilityEventBus::new(512));
+            let mut cap_platform = CapabilityPlatform::new(cap_registry).with_events(cap_bus);
+            // P1: wire the durable Capability Knowledge Base when enabled. Flag OFF
+            // ⇒ platform behaves exactly as before (flag-off parity). When ON, every
+            // execution outcome is recorded for reuse/ranking/grounding (spec R1).
+            let mut jobs_store: Option<
+                Arc<kria_core::capability::intelligence::SqliteCapabilityKnowledge>,
+            > = None;
+            if config.capability.intelligence.ckb {
+                match kria_core::capability::intelligence::SqliteCapabilityKnowledge::open(
+                    &paths.data_dir.join("cpp_knowledge.db"),
+                ) {
+                    Ok(ckb) => {
+                        let ckb = Arc::new(ckb);
+                        cap_platform = cap_platform.with_knowledge(ckb.clone());
+                        jobs_store = Some(ckb.clone());
+                        // P8: expose the same CKB as its EvolutionStore facet when
+                        // evolution is enabled, so health/proposals persist to the
+                        // one learned layer (no parallel store).
+                        if config.capability.intelligence.evolution {
+                            cap_platform = cap_platform.with_evolution_store(ckb.clone());
+                            tracing::info!(
+                                "[CPP] Evolution store wired (health + benchmarks + proposals, spec R6/R18)"
+                            );
+                        }
+                        tracing::info!(
+                            "[CPP] Capability Knowledge Base wired (cpp_knowledge.db) — learning enabled"
+                        );
+                    }
+                    Err(e) => tracing::warn!("[CPP] CKB open failed (continuing without): {e}"),
+                }
+            }
+            // P6: wire Wave 6 marketplace intelligence when enabled. Flag OFF ⇒
+            // legacy index-only recommendation (flag-off parity). When ON, catalog
+            // recommendations fuse neutral trust/quality/cost/adoption signals and
+            // provider catalogs are TTL-cached (spec R8).
+            if config.capability.intelligence.marketplace_v2 {
+                use kria_core::capability::intelligence::{CatalogRanker, CatalogRankingPolicy};
+                cap_platform = cap_platform.with_marketplace_v2(
+                    CatalogRanker::new(CatalogRankingPolicy::default()),
+                    std::time::Duration::from_secs(300),
+                );
+                tracing::info!(
+                    "[CPP] Marketplace intelligence v2 wired — neutral catalog ranking + TTL cache (spec R8)"
+                );
+            }
+            // P9: register the synthesizing provider + enable synthesis
+            // fall-through so a real chat turn with no candidate can GENERATE a
+            // capability (spec R7/Wave 9). Flag-gated + off critical path.
+            if config.capability.intelligence.synthesis {
+                let syn_store = paths.data_dir.join("cpp_synthesis");
+                match kria_core::capability::acl::synthesis::SynthesisProvider::new(
+                    "synthesis",
+                    &syn_store,
+                ) {
+                    Ok(p) => {
+                        cap_platform.registry().register(Arc::new(p));
+                        cap_platform = cap_platform.with_synthesis("synthesis");
+                        // W9-R11: LLM-assisted IR proposer (flag-gated); validator
+                        // + golden gate own correctness; deterministic fallback.
+                        if config.capability.intelligence.synthesis_llm {
+                            let generator = crate::commands::capability::SynthesisLlmGenerator::new(
+                                model_router.clone(),
+                            );
+                            cap_platform = cap_platform.with_ir_proposer(Arc::new(
+                                kria_core::capability::intelligence::LlmIrProposer::new(generator)
+                                    .with_code(config.capability.intelligence.synthesis_code),
+                            ));
+                            tracing::info!("[CPP] LLM-assisted IR proposer wired (synthesis_llm)");
+                        }
+                        if config.capability.intelligence.synthesis_code {
+                            cap_platform = cap_platform.with_code_runner(Arc::new(
+                                kria_core::capability::acl::code_sandbox::CodeSandbox::default(),
+                            ));
+                            tracing::info!("[CPP] Tier-3 code sandbox wired (synthesis_code)");
+                        }
+                        tracing::info!(
+                            "[CPP] Synthesis provider wired — Brain can generate capabilities (spec R7)"
+                        );
+                    }
+                    Err(e) => tracing::warn!("[CPP] synthesis provider unavailable: {e}"),
+                }
+            }
+            let platform = Arc::new(cap_platform);
+            platform.refresh().await;
+
+            // Wave 11: wire the durable job manager at boot + resume active jobs
+            // (restart recovery, spec R28). Idempotent global.
+            if config.capability.intelligence.jobs {
+                if let Some(store) = &jobs_store {
+                    crate::commands::capability::ensure_jobs_spawned(
+                        platform.clone(),
+                        store.clone(),
+                        8,
+                    );
+                }
+            }
+
+            // Wave 10: spawn the continuous discovery/maintenance loop at boot
+            // (background, off-by-default, autonomy-gated). Idempotent global.
+            if config.capability.intelligence.continuous_discovery {
+                let autonomy = kria_core::capability::intelligence::AutonomyLevel::parse(
+                    &config.capability.intelligence.autonomy_level,
+                )
+                .unwrap_or(kria_core::capability::intelligence::AutonomyLevel::ProposeOnly);
+                crate::commands::capability::ensure_discovery_spawned(platform.clone(), autonomy);
+            }
+
+            // `list_installed_skills` — CPP-backed, provider-neutral.
+            let list_def = ToolDef {
+                name: "list_installed_skills".to_string(),
+                description: "List capabilities that are actually installed/available right now \
+                    across all providers (OpenClaw, MCP, ...). Use this to answer ANY question \
+                    about whether a capability is installed — never answer from memory."
+                    .to_string(),
+                category: "openclaw".to_string(),
+                parameters: vec![ParamDef {
+                    name: "filter".to_string(),
+                    param_type: "string".to_string(),
+                    description: "all|enabled|disabled (default all)".to_string(),
+                    required: false,
+                    default: None,
+                }],
+                default_tier: RiskLevel::Green,
+                min_tier: "lite",
+            };
+            tool_registry.register(
+                list_def,
+                Arc::new(CapabilityListHandler::new(platform.clone())),
+            );
+
+            // `search_marketplace` — provider-neutral marketplace search (remote,
+            // installable capabilities). This is what "search the marketplace for
+            // X" / "find a tool that does X" resolves to — NOT the OS package
+            // manager, NOT the installed list.
+            let search_def = ToolDef {
+                name: "search_marketplace".to_string(),
+                description: "Search the capability MARKETPLACE for installable skills/tools that \
+                    are NOT yet installed (e.g. a PDF extractor, a zip compressor, an OCR tool). \
+                    Use this whenever the user wants to find, discover, or look for a new \
+                    tool/skill/capability to add. Returns ranked remote candidates; install one \
+                    with `install_capability`. This is NOT the OS package manager and NOT the \
+                    installed-skills list."
+                    .to_string(),
+                category: "openclaw".to_string(),
+                parameters: vec![ParamDef {
+                    name: "query".to_string(),
+                    param_type: "string".to_string(),
+                    description: "What kind of capability to look for (natural language)"
+                        .to_string(),
+                    required: true,
+                    default: None,
+                }],
+                default_tier: RiskLevel::Green,
+                min_tier: "lite",
+            };
+            tool_registry.register(
+                search_def,
+                Arc::new(MarketplaceSearchHandler::new(platform.clone())),
+            );
+
+            // `install_capability` — install the best marketplace match for a
+            // natural-language goal, then make it immediately usable. No skill
+            // names required from the user.
+            let install_def = ToolDef {
+                name: "install_capability".to_string(),
+                description: "Install a new skill/tool/capability from the MARKETPLACE by \
+                    describing what it should do (e.g. 'install a PDF extractor', 'install a zip \
+                    compressor', 'add an OCR tool'). The best marketplace match is installed and \
+                    becomes immediately available — the user does NOT need to know the exact skill \
+                    name. Use this for any 'install/add/get me a tool that ...' request. This is \
+                    NOT the OS package manager (that is `install_package`)."
+                    .to_string(),
+                category: "openclaw".to_string(),
+                parameters: vec![ParamDef {
+                    name: "query".to_string(),
+                    param_type: "string".to_string(),
+                    description: "Describe the capability to install (natural language)"
+                        .to_string(),
+                    required: true,
+                    default: None,
+                }],
+                default_tier: RiskLevel::Yellow,
+                min_tier: "lite",
+            };
+            tool_registry.register(
+                install_def,
+                Arc::new(MarketplaceInstallHandler::new(platform.clone())),
+            );
+
+            match CapGrantStore::open(&paths.data_dir.join("cpp_grants.db")) {
+                Ok(store) => {
+                    let dispatcher = CapabilityDispatchHandler::new(platform, Arc::new(store))
+                        .with_arg_llm(model_router.clone())
+                        .with_reasoner(config.capability.intelligence.reasoner);
+                    let def = ToolDef {
+                        name: "openclaw".to_string(),
+                        description: "Run a capability to actually DO a task that needs execution \
+                            rather than just an answer (calculation, parsing/converting files, \
+                            fetching/searching the web, processing data, etc.). Automatically \
+                            discovers and runs the best-matching capability across all providers \
+                            through the Capability Provider Platform, gated by one unified \
+                            permission engine, and returns a real verified result or an honest \
+                            'no matching capability'."
+                            .to_string(),
+                        category: "openclaw".to_string(),
+                        parameters: vec![ParamDef {
+                            name: "query".to_string(),
+                            param_type: "string".to_string(),
+                            description: "Describe what you want to accomplish".to_string(),
+                            required: true,
+                            default: None,
+                        }],
+                        default_tier: RiskLevel::Green,
+                        min_tier: "lite",
+                    };
+                    tool_registry.register(def, Arc::new(dispatcher));
+                    tracing::info!(
+                        "[CPP] chat tools (`openclaw`, `list_installed_skills`) served by CapabilityPlatform (Option-A single pipeline)"
+                    );
+                }
+                Err(e) => tracing::warn!(
+                    "[CPP] grant store unavailable ({e}); openclaw tool not registered"
+                ),
+            }
+        }
 
         // RC2: synchronize the registry from the container's authoritative
         // `tools/list` so EVERY baked/installed skill is routable with its real
@@ -1439,6 +1802,29 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         .filter(|workflow| matches!(workflow.status, kria_core::n8n::N8nWorkflowStatus::Approved))
         .count();
     let config = Arc::new(RwLock::new(config));
+    // settings-config-revamp: single config reader/writer over the SAME handle
+    // + event bus. Uses the SQLite store when the backend is `sqlite`, else the
+    // whole-file TOML persist. Behaviourally inert unless KRIA_CONFIG_SERVICE
+    // routes reads/writes through it.
+    let config_service = Arc::new(match config_store.clone() {
+        Some(store) => kria_core::config::ConfigService::with_store_and_secrets(
+            config.clone(),
+            event_bus.clone(),
+            store,
+            secret_store.clone(),
+        ),
+        None => kria_core::config::ConfigService::new(config.clone(), event_bus.clone()),
+    });
+    // settings-config-revamp Task 15: durably record every committed config change
+    // into the hash-chained audit ledger (in addition to the in-memory undo ring).
+    config_service.set_audit_sink(audit_logger.clone());
+
+    // Clone for the Task 8 effect-executor subscription (config_service itself is
+    // moved into AppState below).
+    let config_service_for_effects = config_service.clone();
+    // Wire the ConfigService into the tool registry so the `config_patch` agent
+    // tool can read/apply config from its ToolContext.
+    tool_registry.set_config_service(config_service.clone());
     {
         let mr = model_router.clone();
         let health_mr = health.clone();
@@ -1723,6 +2109,8 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     );
     let state = AppState {
         config,
+        config_service,
+        audit_logger: audit_logger.clone(),
         model_router,
         agent_loop,
         tool_registry: tool_registry.clone(),
@@ -2343,6 +2731,88 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
                         "orchestrator:error",
                         serde_json::json!({ "error": e.to_string() }),
                     );
+                }
+            }
+        });
+    }
+
+    // ── settings-config-revamp Task 3: config-change → frontend forwarder ─────
+    // Always-on (not gated on the orchestrator). Forwards `KriaEvent::ConfigChanged`
+    // to the Tauri `config-changed` event so the UI can reflect live changes. The
+    // bus is a bounded, lossy broadcast: on `Lagged` we emit a wildcard signal so
+    // the UI reconciles by re-fetching current settings (Req 2.4 / N6).
+    {
+        let handle_cfg = handle.clone();
+        let mut rx = event_bus.subscribe();
+        tokio::spawn(async move {
+            use kria_core::infra::event_bus::KriaEvent;
+            loop {
+                match rx.recv().await {
+                    Ok(KriaEvent::ConfigChanged { section, version }) => {
+                        let _ = handle_cfg.emit(
+                            "config-changed",
+                            serde_json::json!({ "section": section, "version": version }),
+                        );
+                    }
+                    Ok(_) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::debug!(
+                            "config-change forwarder lagged by {n}; signalling re-fetch"
+                        );
+                        let _ = handle_cfg.emit(
+                            "config-changed",
+                            serde_json::json!({ "section": "*", "lagged": true }),
+                        );
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+    }
+
+    // ── settings-config-revamp Task 8: infallible config-effect executor ──────
+    // Applies infallible, live-reloadable effects when config changes, via the
+    // ConfigChanged subscription (design C5 / C1.1). Fallible effects
+    // (provider/model swap, MCP reconcile) stay on their dedicated apply paths
+    // (apply_provider_selection / update_settings). Reference pattern:
+    // gpu_policy::apply_settings (lock-free atomics). On lag, re-apply from
+    // current config (idempotent reconciliation, N6).
+    {
+        let cfg_svc = config_service_for_effects;
+        let mut rx = event_bus.subscribe();
+        tokio::spawn(async move {
+            use kria_core::infra::event_bus::KriaEvent;
+            async fn apply_infallible(cfg_svc: &kria_core::config::ConfigService) {
+                let cfg = cfg_svc.get().await;
+                // Orchestrator GPU-policy tunables (redesign G1/G2) — infallible atomics.
+                kria_core::llm::orchestrator::gpu_policy::apply_settings(
+                    cfg.orchestrator.gpu_autoscale,
+                    cfg.orchestrator.cuda_reserve_mb,
+                    cfg.orchestrator.vram_volatility_cap_mb,
+                );
+                // Google Workspace runtime env (account + config dir) — infallible
+                // (just sets process env vars, read by the Google MCP on next spawn).
+                // Google config lives under the `mcp` servers section. MCP SERVER
+                // reconcile itself is fallible and stays on the dedicated apply path
+                // (apply_mcp_runtime_from_config) per design C1.1.
+                super::command_helpers::apply_google_runtime_env_from_config(&cfg);
+            }
+            loop {
+                match rx.recv().await {
+                    Ok(KriaEvent::ConfigChanged { section, .. }) => {
+                        if section == "orchestrator"
+                            || section == "mcp"
+                            || section == "google_workspace"
+                            || section == "*"
+                        {
+                            apply_infallible(&cfg_svc).await;
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        apply_infallible(&cfg_svc).await;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
             }
         });

@@ -23,7 +23,11 @@ const ENTRY_RELATIVE_PATH: &str = "handler/entry.js";
 /// Write a minimal, real, schema-valid `.ocskill` directory for `slug` under
 /// `dir`. This is the "valid" fixture (R3 valid-signed-skill case, once
 /// signed by the caller with `bundle::verify`).
-pub fn write_valid_bundle(dir: &Path, slug: &str, publisher: &str) -> std::io::Result<FixtureBundle> {
+pub fn write_valid_bundle(
+    dir: &Path,
+    slug: &str,
+    publisher: &str,
+) -> std::io::Result<FixtureBundle> {
     let root = dir.join(slug);
     std::fs::create_dir_all(root.join("handler"))?;
 
@@ -72,7 +76,10 @@ publisher = "{publisher}"
 
 /// Write a bundle with an invalid manifest (bad slug prefix — fails
 /// `Manifest::validate`). Used for the R3.3 bad-manifest abort case.
-pub fn write_invalid_manifest_bundle(dir: &Path, slug_no_prefix: &str) -> std::io::Result<FixtureBundle> {
+pub fn write_invalid_manifest_bundle(
+    dir: &Path,
+    slug_no_prefix: &str,
+) -> std::io::Result<FixtureBundle> {
     let root = dir.join(format!("invalid_{slug_no_prefix}"));
     std::fs::create_dir_all(root.join("handler"))?;
 
@@ -168,11 +175,15 @@ mod tests {
     #[test]
     fn valid_fixture_bundle_parses_and_validates_with_real_manifest() {
         let dir = tempfile::tempdir().unwrap();
-        let bundle = write_valid_bundle(dir.path(), "oc_fixture_valid", "fixture-publisher").unwrap();
+        let bundle =
+            write_valid_bundle(dir.path(), "oc_fixture_valid", "fixture-publisher").unwrap();
 
         let toml_str = std::fs::read_to_string(bundle.root.join("manifest.toml")).unwrap();
-        let manifest = Manifest::parse(&toml_str).expect("fixture manifest.toml must parse with the REAL parser");
-        let caps = manifest.validate().expect("fixture manifest must validate with the REAL validator");
+        let manifest = Manifest::parse(&toml_str)
+            .expect("fixture manifest.toml must parse with the REAL parser");
+        let caps = manifest
+            .validate()
+            .expect("fixture manifest must validate with the REAL validator");
         assert_eq!(manifest.skill.slug, "oc_fixture_valid");
         assert!(caps.is_empty());
     }
@@ -194,6 +205,10 @@ mod tests {
     fn drift_fixture_lists_exactly_one_skill() {
         let json = drift_index_json("https://example.invalid/manifests");
         let entries: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap();
-        assert_eq!(entries.len(), 1, "drift fixture index.json must list exactly 1 skill");
+        assert_eq!(
+            entries.len(),
+            1,
+            "drift fixture index.json must list exactly 1 skill"
+        );
     }
 }

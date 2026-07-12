@@ -31,7 +31,9 @@
 //! before this fix, never from the synthesized signature's identity.
 
 use kria_core::openclaw::bundle::synth::synth_marketplace_bundle;
-use kria_core::openclaw::bundle::verify::{keypair_from_seed, sign_bundle, write_hash_tree, TrustPolicy};
+use kria_core::openclaw::bundle::verify::{
+    keypair_from_seed, sign_bundle, write_hash_tree, TrustPolicy,
+};
 use kria_core::openclaw::bundle::BundleInstaller;
 use kria_core::openclaw::registry::ProductionSkillRegistry;
 use kria_core::openclaw::transpiler::transpile_skill;
@@ -59,7 +61,12 @@ pub fn author_signed_bundle(dir: &Path, slug: &str, seed: [u8; 32]) -> Result<Pa
 /// signed bundle for `slug` at `version`, signed by the key derived from
 /// `seed` (same seed → same publisher key, so an upgrade of an installed
 /// slug passes the publisher-consistency check).
-pub fn author_signed_bundle_version(dir: &Path, slug: &str, seed: [u8; 32], version: &str) -> Result<PathBuf, String> {
+pub fn author_signed_bundle_version(
+    dir: &Path,
+    slug: &str,
+    seed: [u8; 32],
+    version: &str,
+) -> Result<PathBuf, String> {
     let (signing_key, publisher_hex) = keypair_from_seed(seed);
     let root = dir.join(format!("{slug}-{version}"));
     std::fs::create_dir_all(root.join("handler")).map_err(|e| e.to_string())?;
@@ -90,8 +97,16 @@ publisher = "{publisher_hex}"
 "#
     );
     std::fs::write(root.join("manifest.toml"), manifest).map_err(|e| e.to_string())?;
-    std::fs::write(root.join("schema.json"), r#"{"type":"object","properties":{}}"#).map_err(|e| e.to_string())?;
-    std::fs::write(root.join("handler/entry.js"), "module.exports=()=>({ok:true})").map_err(|e| e.to_string())?;
+    std::fs::write(
+        root.join("schema.json"),
+        r#"{"type":"object","properties":{}}"#,
+    )
+    .map_err(|e| e.to_string())?;
+    std::fs::write(
+        root.join("handler/entry.js"),
+        "module.exports=()=>({ok:true})",
+    )
+    .map_err(|e| e.to_string())?;
 
     write_hash_tree(&root).map_err(|e| e.to_string())?;
     sign_bundle(&root, &signing_key).map_err(|e| e.to_string())?;
@@ -174,9 +189,14 @@ pub fn validate_local_bundle_path_real() -> Result<(), String> {
 
     let installer = BundleInstaller::new(registry.clone(), audit, store)
         .with_kria_version(Version::new(1, 0, 0))
-        .with_trust_policy(TrustPolicy { trusted_keys: Vec::new(), require_signature: true });
+        .with_trust_policy(TrustPolicy {
+            trusted_keys: Vec::new(),
+            require_signature: true,
+        });
 
-    installer.install(&bundle_root).map_err(|e| format!("local bundle install failed: {e}"))?;
+    installer
+        .install(&bundle_root)
+        .map_err(|e| format!("local bundle install failed: {e}"))?;
 
     let installed = registry.get("oc_matrix_local").map_err(|e| e.to_string())?;
     let provenance = registry
@@ -221,18 +241,29 @@ pub fn validate_marketplace_path_real() -> Result<(), String> {
     let raw = "---\nname: matrix_marketplace\ndescription: Fixture for R12 marketplace-path comparison, matches its own slug for routing.\ncategory: test\ncapabilities:\n  filesystem_read: true\n---\n";
     let mut descriptor = transpile_skill(
         raw,
-        SkillSource::ClawHub { slug: "matrix_marketplace".into(), version: "remote".into() },
+        SkillSource::ClawHub {
+            slug: "matrix_marketplace".into(),
+            version: "remote".into(),
+        },
         false,
     )
     .map_err(|e| e.to_string())?;
     descriptor.trust_tier = kria_core::openclaw::types::TrustTier::Community;
 
-    let caps: Vec<_> = descriptor.granted.iter().map(|g| g.capability.clone()).collect();
+    let caps: Vec<_> = descriptor
+        .granted
+        .iter()
+        .map(|g| g.capability.clone())
+        .collect();
     let synth_dir = dir.path().join("synth").join(&descriptor.skill_id);
-    synth_marketplace_bundle(&descriptor, &caps, &synth_dir).map_err(|e| format!("synth failed: {e}"))?;
+    synth_marketplace_bundle(&descriptor, &caps, &synth_dir)
+        .map_err(|e| format!("synth failed: {e}"))?;
 
-    let installer = BundleInstaller::new(registry.clone(), audit, store)
-        .with_trust_policy(TrustPolicy { trusted_keys: Vec::new(), require_signature: true });
+    let installer =
+        BundleInstaller::new(registry.clone(), audit, store).with_trust_policy(TrustPolicy {
+            trusted_keys: Vec::new(),
+            require_signature: true,
+        });
     installer
         .install(&synth_dir)
         .map_err(|e| format!("marketplace-style (unified) install failed: {e}"))?;
@@ -260,7 +291,8 @@ mod tests {
 
     #[test]
     fn local_bundle_path_real_produces_provenance() {
-        validate_local_bundle_path_real().expect("local bundle install must succeed and produce provenance");
+        validate_local_bundle_path_real()
+            .expect("local bundle install must succeed and produce provenance");
     }
 
     #[test]

@@ -15,9 +15,14 @@ use std::time::Duration;
 /// container/lease counts return to baseline repeatedly over sustained
 /// (not just single) real usage, and that the registry/pool stay healthy
 /// throughout.
-pub async fn run_bounded_soak(iterations: usize, sample_every: usize) -> Result<Vec<(usize, bool)>, String> {
+pub async fn run_bounded_soak(
+    iterations: usize,
+    sample_every: usize,
+) -> Result<Vec<(usize, bool)>, String> {
     let rig = TestRig::up().await.map_err(|e| e.to_string())?;
-    let baseline = leak_detector::baseline(&rig.pool).await.map_err(|e| e.to_string())?;
+    let baseline = leak_detector::baseline(&rig.pool)
+        .await
+        .map_err(|e| e.to_string())?;
 
     let mut samples = Vec::new();
 
@@ -27,13 +32,20 @@ pub async fn run_bounded_soak(iterations: usize, sample_every: usize) -> Result<
             .checkout(ResourceClass::Light, "oc_calculator")
             .await
             .map_err(|e| format!("iteration {i}: checkout failed: {e}"))?;
-        rig.pool.checkin(handle).await.map_err(|e| format!("iteration {i}: checkin failed: {e}"))?;
+        rig.pool
+            .checkin(handle)
+            .await
+            .map_err(|e| format!("iteration {i}: checkin failed: {e}"))?;
 
         if i % sample_every == 0 {
-            let ok = leak_detector::assert_returned_to(&rig.pool, baseline).await.is_ok();
+            let ok = leak_detector::assert_returned_to(&rig.pool, baseline)
+                .await
+                .is_ok();
             samples.push((i, ok));
             if !ok {
-                eprintln!("[R18] iteration {i}: leases/containers NOT at baseline (sampled, continuing)");
+                eprintln!(
+                    "[R18] iteration {i}: leases/containers NOT at baseline (sampled, continuing)"
+                );
             }
         }
 
@@ -61,17 +73,25 @@ mod tests {
     #[tokio::test]
     #[ignore = "real-Docker soak — run explicitly with --ignored"]
     async fn r18_bounded_soak_30_cycles() {
-        if crate::openclaw_eval::rig::verify_docker_reachable().await.is_err() {
+        if crate::openclaw_eval::rig::verify_docker_reachable()
+            .await
+            .is_err()
+        {
             eprintln!("SKIPPED (Outcome::Skipped, not Pass): docker not reachable");
             return;
         }
 
-        let samples = run_bounded_soak(30, 5).await.expect("bounded soak must complete with baseline restored");
+        let samples = run_bounded_soak(30, 5)
+            .await
+            .expect("bounded soak must complete with baseline restored");
         let failures: Vec<_> = samples.iter().filter(|(_, ok)| !ok).collect();
         assert!(
             failures.is_empty(),
             "R18: every sampled point during the soak must be at baseline, failures at: {failures:?}"
         );
-        eprintln!("[R18] 30-cycle bounded soak: {} samples, all at baseline", samples.len());
+        eprintln!(
+            "[R18] 30-cycle bounded soak: {} samples, all at baseline",
+            samples.len()
+        );
     }
 }

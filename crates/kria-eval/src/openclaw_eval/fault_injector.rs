@@ -31,7 +31,9 @@ use tokio::sync::{Mutex, OwnedMutexGuard};
 static DOCKER_ENV_LOCK: OnceLock<std::sync::Arc<Mutex<()>>> = OnceLock::new();
 
 fn docker_env_lock() -> std::sync::Arc<Mutex<()>> {
-    DOCKER_ENV_LOCK.get_or_init(|| std::sync::Arc::new(Mutex::new(()))).clone()
+    DOCKER_ENV_LOCK
+        .get_or_init(|| std::sync::Arc::new(Mutex::new(())))
+        .clone()
 }
 
 /// Acquire the same process-global lock `DockerOutage` uses, WITHOUT mutating
@@ -67,7 +69,10 @@ impl DockerOutage {
         let guard = docker_env_lock().lock_owned().await;
         let previous = std::env::var("DOCKER_HOST").ok();
         // Unix socket path that (almost certainly) has nothing listening on it.
-        std::env::set_var("DOCKER_HOST", "unix:///tmp/kria-openclaw-eval-nonexistent.sock");
+        std::env::set_var(
+            "DOCKER_HOST",
+            "unix:///tmp/kria-openclaw-eval-nonexistent.sock",
+        );
         Self {
             previous,
             _guard: guard,
@@ -131,7 +136,9 @@ pub struct BridgeStall {
 
 impl BridgeStall {
     pub async fn start() -> Result<Self, String> {
-        let listener = TcpListener::bind("127.0.0.1:0").await.map_err(|e| e.to_string())?;
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .map_err(|e| e.to_string())?;
         let port = listener.local_addr().map_err(|e| e.to_string())?.port();
         Ok(Self {
             _listener: listener,
@@ -157,7 +164,9 @@ pub enum FaultyRepoMode {
 
 impl FaultyRepoServer {
     pub async fn start(mode: FaultyRepoMode) -> Result<Self, String> {
-        let listener = TcpListener::bind("127.0.0.1:0").await.map_err(|e| e.to_string())?;
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .map_err(|e| e.to_string())?;
         let port = listener.local_addr().map_err(|e| e.to_string())?.port();
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
@@ -221,14 +230,20 @@ mod tests {
                 "unix:///tmp/kria-openclaw-eval-nonexistent.sock"
             );
         }
-        assert_eq!(std::env::var("DOCKER_HOST").unwrap(), "unix:///var/run/docker.sock");
+        assert_eq!(
+            std::env::var("DOCKER_HOST").unwrap(),
+            "unix:///var/run/docker.sock"
+        );
         std::env::remove_var("DOCKER_HOST");
     }
 
     #[tokio::test]
     async fn container_crash_refuses_non_rig_container() {
         let result = ContainerCrash::inject("abc123", "kria-guacd").await;
-        assert!(result.is_err(), "must refuse to kill a non-rig-prefixed container");
+        assert!(
+            result.is_err(),
+            "must refuse to kill a non-rig-prefixed container"
+        );
     }
 
     #[tokio::test]
@@ -236,8 +251,13 @@ mod tests {
         let server = FaultyRepoServer::start(FaultyRepoMode::Malformed)
             .await
             .expect("server should start");
-        let resp = reqwest::get(server.url()).await.expect("request should succeed");
+        let resp = reqwest::get(server.url())
+            .await
+            .expect("request should succeed");
         let text = resp.text().await.expect("body should be readable");
-        assert!(serde_json::from_str::<serde_json::Value>(&text).is_err(), "body must be malformed json");
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&text).is_err(),
+            "body must be malformed json"
+        );
     }
 }

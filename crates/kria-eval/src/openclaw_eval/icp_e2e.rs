@@ -98,7 +98,10 @@ mod tests {
         let raw = "---\nname: icp_calculator\ndescription: Calculates arithmetic expressions, a calculator-style capability for the ICP live path.\ncategory: math\ncapabilities:\n  filesystem_read: true\n---\n";
         let mut descriptor = transpile_skill(
             raw,
-            SkillSource::ClawHub { slug: "icp_calculator".into(), version: "remote".into() },
+            SkillSource::ClawHub {
+                slug: "icp_calculator".into(),
+                version: "remote".into(),
+            },
             false,
         )
         .map_err(|e| format!("transpile failed: {e}"))?;
@@ -106,14 +109,22 @@ mod tests {
         // exact security posture `clawhub_install_skill` enforces.
         descriptor.trust_tier = TrustTier::Community;
 
-        let caps: Vec<_> = descriptor.granted.iter().map(|g| g.capability.clone()).collect();
+        let caps: Vec<_> = descriptor
+            .granted
+            .iter()
+            .map(|g| g.capability.clone())
+            .collect();
         let synth_dir = dir.path().join("synth").join(&descriptor.skill_id);
-        synth_marketplace_bundle(&descriptor, &caps, &synth_dir).map_err(|e| format!("synth failed: {e}"))?;
+        synth_marketplace_bundle(&descriptor, &caps, &synth_dir)
+            .map_err(|e| format!("synth failed: {e}"))?;
 
         // THE SINGLE FROZEN INSTALLER — same one authored `.ocskill` bundles
         // use. No duplicate install path.
-        let installer = BundleInstaller::new(registry.clone(), audit, store)
-            .with_trust_policy(TrustPolicy { trusted_keys: Vec::new(), require_signature: true });
+        let installer =
+            BundleInstaller::new(registry.clone(), audit, store).with_trust_policy(TrustPolicy {
+                trusted_keys: Vec::new(),
+                require_signature: true,
+            });
         installer
             .install(&synth_dir)
             .map_err(|e| format!("marketplace (unified installer) install failed: {e}"))?;
@@ -173,14 +184,18 @@ mod tests {
 
         // Honesty gate (R1.3/R15): Docker unavailable → Skipped, never Pass.
         if verify_docker_reachable().await.is_err() {
-            eprintln!("SKIPPED (Outcome::Skipped, not Pass): docker not reachable in this environment");
+            eprintln!(
+                "SKIPPED (Outcome::Skipped, not Pass): docker not reachable in this environment"
+            );
             return;
         }
 
         // Substrate — bring up an isolated real OpenClaw rig (temp ~/.kria
         // root + dedicated container-name prefix). Never the user's real
         // substrate.
-        let rig = TestRig::up().await.expect("rig must come up against real Docker");
+        let rig = TestRig::up()
+            .await
+            .expect("rig must come up against real Docker");
 
         // Phase B/C — discover + install-from-test-rig-marketplace through the
         // SINGLE frozen BundleInstaller (Property 8, installer convergence).
@@ -235,6 +250,8 @@ mod tests {
 
         // Teardown itself asserts 0 rig-prefixed containers remain (frozen
         // leak-freedom invariant on the live path).
-        rig.down().await.expect("Property 12: rig teardown must leave 0 leaked containers");
+        rig.down()
+            .await
+            .expect("Property 12: rig teardown must leave 0 leaked containers");
     }
 }

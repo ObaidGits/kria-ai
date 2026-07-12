@@ -239,7 +239,9 @@ async fn main() {
 }
 
 fn run_openclaw_artifacts() {
-    use kria_eval::openclaw_eval::release_artifacts::{generate_feature_matrix_markdown, generate_release_checklist};
+    use kria_eval::openclaw_eval::release_artifacts::{
+        generate_feature_matrix_markdown, generate_release_checklist,
+    };
     use kria_eval::openclaw_eval::EvidenceStore;
 
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
@@ -250,7 +252,10 @@ fn run_openclaw_artifacts() {
     // EvidenceStore run (it is derived from this session's real, already-
     // reproduced findings, cited per-entry).
     let matrix_md = generate_feature_matrix_markdown();
-    let matrix_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../OPENCLAW_FEATURE_MATRIX.md");
+    let matrix_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../OPENCLAW_FEATURE_MATRIX.md"
+    );
     std::fs::write(matrix_path, &matrix_md).expect("Failed to write OPENCLAW_FEATURE_MATRIX.md");
     println!("Feature matrix written to: {matrix_path}");
 
@@ -260,8 +265,12 @@ fn run_openclaw_artifacts() {
     // wire in the actual EvidenceStore from a full task 1-23 execution.
     let store = EvidenceStore::new();
     let checklist_md = generate_release_checklist(&store);
-    let checklist_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../OPENCLAW_RELEASE_CHECKLIST.md");
-    std::fs::write(checklist_path, &checklist_md).expect("Failed to write OPENCLAW_RELEASE_CHECKLIST.md");
+    let checklist_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../OPENCLAW_RELEASE_CHECKLIST.md"
+    );
+    std::fs::write(checklist_path, &checklist_md)
+        .expect("Failed to write OPENCLAW_RELEASE_CHECKLIST.md");
     println!("Release checklist written to: {checklist_path}");
     println!();
 }

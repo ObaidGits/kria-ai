@@ -134,7 +134,9 @@ mod tests {
             Outcome::Skipped(reason) => {
                 eprintln!("[R5] task 11.2 SKIPPED (Outcome::Skipped, NOT Pass) — genuine blocker: {reason}");
             }
-            Outcome::Fail => panic!("validate_real_llm_backend_reachable must never return Fail, only Pass or Skipped"),
+            Outcome::Fail => panic!(
+                "validate_real_llm_backend_reachable must never return Fail, only Pass or Skipped"
+            ),
         }
     }
 
@@ -168,7 +170,9 @@ mod tests {
         use kria_core::openclaw::generation::events::GenerationEventStream;
         use kria_core::openclaw::generation::install_sink::BundleInstallSink;
         use kria_core::openclaw::generation::llm_generator::LlmSkillGenerator;
-        use kria_core::openclaw::generation::pipeline::{GenerationPipeline, PipelineConfig, PipelineOutcome};
+        use kria_core::openclaw::generation::pipeline::{
+            GenerationPipeline, PipelineConfig, PipelineOutcome,
+        };
         use kria_core::openclaw::generation::sandbox::StaticSandbox;
         use kria_core::openclaw::registry::ProductionSkillRegistry;
         use kria_core::openclaw::ToolRegistryActivation;
@@ -193,7 +197,9 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("task11_2_real_llm.db");
         let registry = Arc::new(ProductionSkillRegistry::new(&db_path).expect("registry"));
-        let audit = Arc::new(AuditLedger::open(&db_path, b"task11-2-real-llm-key".to_vec()).expect("audit"));
+        let audit = Arc::new(
+            AuditLedger::open(&db_path, b"task11-2-real-llm-key".to_vec()).expect("audit"),
+        );
         let store = dir.path().join("store");
         std::fs::create_dir_all(&store).expect("store dir");
         let work = dir.path().join("work");
@@ -207,7 +213,14 @@ mod tests {
         let decision = DecisionEngine::new(0.85, GenerationPolicy::GenerateIfMissing);
         let approval = ApprovalLayer::new(true); // auto-approve for this real-LLM proof
         let events = GenerationEventStream::new();
-        let pipeline = GenerationPipeline::new(generator, sandbox, decision, approval, events, Arc::new(sink));
+        let pipeline = GenerationPipeline::new(
+            generator,
+            sandbox,
+            decision,
+            approval,
+            events,
+            Arc::new(sink),
+        );
 
         let (signing_key, publisher_hex) = keypair_from_seed([77u8; 32]);
         let config = PipelineConfig {
@@ -238,7 +251,11 @@ mod tests {
             .await;
 
         match outcome {
-            PipelineOutcome::Generated { slug, version, quality } => {
+            PipelineOutcome::Generated {
+                slug,
+                version,
+                quality,
+            } => {
                 eprintln!("[R5/Layer2/LlmMode::Real] REAL LLM generated + installed: {slug}@{version} (quality={quality:.2})");
                 let installed = registry.get(&slug);
                 assert!(installed.is_ok(), "REGRESSION: real-LLM-generated skill must be findable in the real registry, got {installed:?}");

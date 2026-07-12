@@ -167,13 +167,15 @@ impl LocalBackend {
         self.server_manager().map(|mgr| mgr.cancel_token())
     }
 
-    /// Check if the server is in a swapping state.
-    fn is_swapping(&self) -> bool {
+    /// Whether the orchestrator is in a controlled transition (swap OR intended
+    /// restart) where `/health` is briefly offline while the SAME model comes
+    /// back. Reachability must report this as warming, never "unreachable".
+    fn is_warming(&self) -> bool {
         self.server_manager
             .read()
             .ok()
             .and_then(|guard| guard.clone())
-            .map(|mgr| mgr.is_swapping())
+            .map(|mgr| mgr.is_warming())
             .unwrap_or(false)
     }
 
@@ -785,16 +787,17 @@ impl LlmBackend for LocalBackend {
         {
             Ok(Ok(resp)) => resp,
             Ok(Err(e)) => {
-                // Do not open the circuit for failures caused by a controlled swap:
-                // the server is mid-reload, not broken. Counting these would leave the
-                // breaker OPEN after a swap ("sometimes it doesn't recover").
-                if !self.is_swapping() {
+                // Do not open the circuit for failures caused by a controlled
+                // transition (swap OR intended restart): the server is mid-reload,
+                // not broken. Counting these would leave the breaker OPEN after a
+                // swap/restart ("sometimes it doesn't recover").
+                if !self.is_warming() {
                     self.circuit.on_failure().await;
                 }
                 return Err(e.into());
             }
             Err(_) => {
-                if !self.is_swapping() {
+                if !self.is_warming() {
                     self.circuit.on_failure().await;
                 }
                 anyhow::bail!("local LLM stream request timed out");
@@ -808,7 +811,7 @@ impl LlmBackend for LocalBackend {
                 return Err(ContextTooLargeError.into());
             }
 
-            if !self.is_swapping() {
+            if !self.is_warming() {
                 self.circuit.on_failure().await;
             }
             tracing::error!(
@@ -985,11 +988,12 @@ impl LlmBackend for LocalBackend {
     }
 
     async fn health_check(&self) -> bool {
-        // A controlled orchestrator swap (model reload at a turn boundary) briefly
-        // takes `/health` offline while the SAME process is alive and about to serve
-        // again. Never report that as "not reachable" — it is a warming state, not an
-        // outage. This removes the residual banner flicker around legitimate swaps.
-        if self.is_swapping() {
+        // A controlled orchestrator transition — a swap (model reload at a turn
+        // boundary) OR an intended, bounded restart (crash/idle recovery) — briefly
+        // takes `/health` offline while the SAME model is coming back. Never report
+        // that as "not reachable"; it is a warming state, not an outage. This removes
+        // the residual banner flicker around legitimate swaps and restarts.
+        if self.is_warming() {
             self.consecutive_health_failures.store(0, Ordering::Relaxed);
             return true;
         }

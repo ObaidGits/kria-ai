@@ -2183,3 +2183,143 @@ fn regr_phase10_tool_end_payload_handles_missing_error_gracefully() {
     let payload = tool_end_result_payload(&failed_no_error);
     assert!(payload.is_null());
 }
+
+#[test]
+fn capability_flow_detects_install_and_forces_install_capability() {
+    let flow = CapabilityFlowState::from_user_text("Install the IP Info tool from the marketplace")
+        .expect("should detect a marketplace install intent");
+    assert_eq!(flow.intent, CapabilityFlowIntent::Install);
+    assert_eq!(flow.tool_name(), "install_capability");
+
+    let mut allowed = std::collections::HashSet::new();
+    allowed.insert("install_capability".to_string());
+    let calls = flow.next_required_calls(&allowed);
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].name, "install_capability");
+    assert_eq!(calls[0].arguments["query"], "ip info tool");
+}
+
+#[test]
+fn capability_flow_detects_search_and_forces_search_marketplace() {
+    let flow = CapabilityFlowState::from_user_text("search the marketplace for a hash tool")
+        .expect("should detect a marketplace search intent");
+    assert_eq!(flow.intent, CapabilityFlowIntent::Search);
+    assert_eq!(flow.tool_name(), "search_marketplace");
+}
+
+#[test]
+fn capability_flow_ignores_plain_chat_and_os_package_installs() {
+    // Not a capability request.
+    assert!(CapabilityFlowState::from_user_text("what's the weather today").is_none());
+    // OS software install (no capability noun) → handled by the OS package flow,
+    // not the capability flow.
+    assert!(CapabilityFlowState::from_user_text("install htop").is_none());
+}
+
+#[test]
+fn capability_flow_stops_after_its_tool_runs() {
+    let mut flow = CapabilityFlowState::from_user_text("install a base64 tool").unwrap();
+    let mut allowed = std::collections::HashSet::new();
+    allowed.insert("install_capability".to_string());
+    assert!(!flow.next_required_calls(&allowed).is_empty());
+    let call = ParsedToolCall {
+        name: "install_capability".into(),
+        arguments: serde_json::json!({ "query": "base64 tool" }),
+    };
+    flow.observe_tool_result(&call);
+    assert!(
+        flow.next_required_calls(&allowed).is_empty(),
+        "flow must not loop after its tool has run"
+    );
+}
+
+// NOTE: The `try_config_prompt_dispatch` / `build_turn_override` deterministic
+// deciders were removed (settings-nl-control Task 16 / Wave 5 F15). Their behaviour
+// (theme→change, question→no-mutate, false-positive guards, YELLOW/RED gating, temp
+// override) is now covered by the single decider: the `config::nl` pipeline golden
+// set (`config::nl::pipeline::tests`), the `SettingsHandler` tests
+// (`config::nl::handler::tests`), and the turn-integration tests below.
+
+// ── settings-nl-control Wave 3: turn-integration helpers ────────────────────
+
+#[test]
+fn nl_settings_flag_defaults_on_and_opts_out_with_falsy() {
+    // NL settings control is now ON by default (fully integrated). No other test
+    // touches KRIA_NL_SETTINGS, so no cross-test env race on this var.
+    std::env::remove_var("KRIA_NL_SETTINGS");
+    std::env::remove_var("KRIA_CONFIG_PROMPT_CONTROL");
+    assert!(nl_settings_enabled(), "unset ⇒ default ON");
+
+    std::env::set_var("KRIA_NL_SETTINGS", "0");
+    assert!(!nl_settings_enabled(), "explicit falsy ⇒ off (opt-out)");
+
+    std::env::set_var("KRIA_NL_SETTINGS", "on");
+    assert!(nl_settings_enabled(), "explicit truthy ⇒ on");
+
+    std::env::remove_var("KRIA_NL_SETTINGS");
+}
+
+#[test]
+fn multi_intent_splits_settings_clause_from_task() {
+    let pipeline = crate::config::nl::SettingsIntentPipeline::new(std::sync::Arc::new(
+        crate::config::nl::SchemaEntityIndex::build(),
+    ));
+    let conv = crate::config::nl::ConversationContext::default();
+    // Settings clause + trailing task → remainder is the task.
+    let rem = settings_multi_intent_remainder(
+        "switch to dark mode and then summarize this article",
+        &conv,
+        &pipeline,
+    );
+    assert_eq!(rem.as_deref(), Some("summarize this article"));
+}
+
+#[test]
+fn multi_intent_none_for_two_settings() {
+    let pipeline = crate::config::nl::SettingsIntentPipeline::new(std::sync::Arc::new(
+        crate::config::nl::SchemaEntityIndex::build(),
+    ));
+    let conv = crate::config::nl::ConversationContext::default();
+    // "dark mode" remainder is settings-ish (clarify), NOT a task → no continue.
+    let rem = settings_multi_intent_remainder("turn on voice and dark mode", &conv, &pipeline);
+    assert!(rem.is_none());
+}
+
+#[test]
+fn multi_intent_none_for_pure_settings() {
+    let pipeline = crate::config::nl::SettingsIntentPipeline::new(std::sync::Arc::new(
+        crate::config::nl::SchemaEntityIndex::build(),
+    ));
+    let conv = crate::config::nl::ConversationContext::default();
+    assert!(settings_multi_intent_remainder("switch to dark mode", &conv, &pipeline).is_none());
+}
+
+#[test]
+fn conversation_context_built_from_recent_messages() {
+    let messages = vec![
+        ChatMessage {
+            role: "user".into(),
+            content: "help with my rust code".into(),
+            name: None,
+            images: None,
+        },
+        ChatMessage {
+            role: "assistant".into(),
+            content: "sure".into(),
+            name: None,
+            images: None,
+        },
+        ChatMessage {
+            role: "user".into(),
+            content: "change the theme".into(),
+            name: None,
+            images: None,
+        },
+    ];
+    let conv = build_settings_conversation_context(&messages);
+    // The adapter captured history; subject signal for a KRIA-directed phrase works.
+    assert_eq!(
+        conv.subject_signal("change your theme"),
+        crate::config::nl::SubjectSignal::KriaDirected
+    );
+}

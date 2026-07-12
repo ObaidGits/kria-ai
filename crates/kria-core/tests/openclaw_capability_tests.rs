@@ -5,7 +5,6 @@
 //! capability events. Container *execution* is Docker/hardware; everything here validates that a
 //! declared capability deterministically produces the correct enforced runtime config.
 
-use kria_core::openclaw::approval::{ApprovalCache, ApprovalDecision};
 use kria_core::openclaw::bundle::manifest::Manifest;
 use kria_core::openclaw::capability::{
     self, Capability, CapabilityKind, CapabilityMode, CapabilityScope, GrantSource,
@@ -240,45 +239,10 @@ fn net(scope: Vec<&str>) -> Capability {
     }
 }
 
-#[test]
-fn capability_escalation_rejected() {
-    let cache = ApprovalCache::new();
-    let old = vec![net(vec!["a.com"])];
-    let widened = vec![net(vec!["a.com", "b.com"])];
-    let d = cache.evaluate(
-        "oc_cap",
-        "1.1.0",
-        &widened,
-        Some(&old),
-        "light",
-        "1",
-        RiskLevel::Yellow,
-    );
-    assert!(
-        matches!(d, ApprovalDecision::NeedsHitl(_)),
-        "widening requires re-approval"
-    );
-}
-
-#[test]
-fn capability_reduction_accepted() {
-    let cache = ApprovalCache::new();
-    let old = vec![net(vec!["a.com", "b.com"])];
-    let reduced = vec![net(vec!["a.com"])];
-    let d = cache.evaluate(
-        "oc_cap",
-        "1.1.0",
-        &reduced,
-        Some(&old),
-        "light",
-        "1",
-        RiskLevel::Yellow,
-    );
-    assert!(
-        matches!(d, ApprovalDecision::AutoApproved(_)),
-        "narrowing never needs approval"
-    );
-}
+// NOTE: the legacy `capability_escalation_rejected` / `capability_reduction_accepted`
+// tests exercised the deleted `ApprovalCache` widening oracle. Permission
+// widening/narrowing is now owned by `capability::permission` (Property 7 tests in
+// `kria-core capability::tests`), so these legacy tests were removed with the cache.
 
 // ── Revocation ─────────────────────────────────────────────────────────────
 

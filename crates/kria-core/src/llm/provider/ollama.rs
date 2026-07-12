@@ -24,6 +24,7 @@ pub struct OllamaBackend {
     display_name: String,
     capabilities: Vec<String>,
     client: reqwest::Client,
+    max_retries: u32,
 }
 
 impl OllamaBackend {
@@ -39,6 +40,7 @@ impl OllamaBackend {
             display_name: config.display_name.clone(),
             capabilities: vec!["text".into(), "streaming".into(), "tools".into()],
             client,
+            max_retries: config.endpoint.max_retries.max(1),
         }
     }
 
@@ -68,11 +70,24 @@ impl OllamaBackend {
         Ok(())
     }
 
+    /// Build the wire-format messages array. Converts bare `role: "tool"`
+    /// messages into `role: "user"` turns with the tool result embedded as
+    /// text — text-pattern tool calls (KRIA's default) have no `tool_call_id`,
+    /// and a bare `role: "tool"` message can be rejected by stricter
+    /// OpenAI-compatible endpoints/proxies fronting Ollama with a 400 "tool
+    /// result's tool id() not found" error. This mirrors the same fix applied
+    /// to `OpenAIBackend::structured_wire_messages`.
     fn build_messages(&self, messages: &[ChatMessage]) -> Vec<serde_json::Value> {
         messages
             .iter()
             .map(|msg| {
-                if msg.has_images() {
+                if msg.role.eq_ignore_ascii_case("tool") {
+                    let tool_name = msg.name.as_deref().unwrap_or("tool");
+                    serde_json::json!({
+                        "role": "user",
+                        "content": format!("[Tool result from '{}']\n{}", tool_name, msg.content),
+                    })
+                } else if msg.has_images() {
                     serde_json::json!({
                         "role": msg.role,
                         "content": msg.to_multimodal_content(),
@@ -143,26 +158,42 @@ impl LlmBackend for OllamaBackend {
             }
         }
 
-        let resp = self.client.post(&url).json(&payload).send().await?;
-        let body: serde_json::Value = resp.error_for_status()?.json().await?;
+        for attempt in 0..self.max_retries {
+            let resp = self.client.post(&url).json(&payload).send().await?;
+            let status = resp.status();
 
-        let choice = &body["choices"][0];
-        let message = &choice["message"];
-        let content = extract_openai_message_text(message);
-        let tool_calls = extract_openai_tool_calls(message);
+            if status.as_u16() == 429 {
+                let wait = 2u64.pow(attempt);
+                tracing::warn!(attempt, wait_secs = wait, "Ollama rate limited, retrying");
+                tokio::time::sleep(Duration::from_secs(wait)).await;
+                continue;
+            }
 
-        let usage = body["usage"].as_object().map(|u| TokenUsage {
-            prompt_tokens: u["prompt_tokens"].as_u64().unwrap_or(0) as u32,
-            completion_tokens: u["completion_tokens"].as_u64().unwrap_or(0) as u32,
-            total_tokens: u["total_tokens"].as_u64().unwrap_or(0) as u32,
-        });
+            let body: serde_json::Value = resp.error_for_status()?.json().await?;
 
-        Ok(LlmResponse {
-            content,
-            model: self.model_id.clone(),
-            usage,
-            tool_calls,
-        })
+            let choice = &body["choices"][0];
+            let message = &choice["message"];
+            let content = extract_openai_message_text(message);
+            let tool_calls = extract_openai_tool_calls(message);
+
+            let usage = body["usage"].as_object().map(|u| TokenUsage {
+                prompt_tokens: u["prompt_tokens"].as_u64().unwrap_or(0) as u32,
+                completion_tokens: u["completion_tokens"].as_u64().unwrap_or(0) as u32,
+                total_tokens: u["total_tokens"].as_u64().unwrap_or(0) as u32,
+            });
+
+            return Ok(LlmResponse {
+                content,
+                model: self.model_id.clone(),
+                usage,
+                tool_calls,
+            });
+        }
+
+        anyhow::bail!(
+            "Ollama failed after {} retries (rate limited)",
+            self.max_retries
+        )
     }
 
     async fn chat_stream(
@@ -201,13 +232,34 @@ impl LlmBackend for OllamaBackend {
             }
         }
 
-        let resp = self
-            .client
-            .post(&url)
-            .json(&payload)
-            .send()
-            .await?
-            .error_for_status()?;
+        // Retry on 429 before opening the stream (mirrors the non-streaming
+        // `chat` path). Once the stream is opened successfully, in-flight SSE
+        // reads are not retried.
+        let resp = {
+            let mut opened = None;
+            for attempt in 0..self.max_retries {
+                let r = self.client.post(&url).json(&payload).send().await?;
+                if r.status().as_u16() == 429 {
+                    let wait = 2u64.pow(attempt);
+                    tracing::warn!(
+                        attempt,
+                        wait_secs = wait,
+                        "Ollama stream rate limited, retrying"
+                    );
+                    tokio::time::sleep(Duration::from_secs(wait)).await;
+                    continue;
+                }
+                opened = Some(r.error_for_status()?);
+                break;
+            }
+            match opened {
+                Some(r) => r,
+                None => anyhow::bail!(
+                    "Ollama stream failed after {} retries (rate limited)",
+                    self.max_retries
+                ),
+            }
+        };
 
         let stream = futures::stream::unfold(resp, |mut resp| async move {
             match resp.chunk().await {
@@ -293,5 +345,69 @@ impl LlmBackend for OllamaBackend {
             usage,
             tool_calls,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn backend() -> OllamaBackend {
+        OllamaBackend {
+            base_url: "http://localhost:11434".into(),
+            model_id: "llama3".into(),
+            display_name: "Ollama".into(),
+            capabilities: vec!["text".into()],
+            client: reqwest::Client::new(),
+            max_retries: 1,
+        }
+    }
+
+    /// Regression test: a bare `role: "tool"` message (KRIA's text-pattern tool
+    /// calling has no `tool_call_id`) must be converted to a `role: "user"`
+    /// turn, not sent as-is — stricter OpenAI-compatible endpoints/proxies
+    /// fronting Ollama reject an untethered `role: "tool"` message with a 400.
+    #[test]
+    fn build_messages_converts_bare_tool_role_to_user() {
+        let b = backend();
+        let messages = vec![
+            ChatMessage {
+                role: "user".into(),
+                content: "list skills".into(),
+                name: None,
+                images: None,
+            },
+            ChatMessage {
+                role: "tool".into(),
+                content: "{\"skills\":[]}".into(),
+                name: Some("list_installed_skills".into()),
+                images: None,
+            },
+        ];
+
+        let wire = b.build_messages(&messages);
+
+        assert_eq!(wire[0]["role"], "user");
+        assert_eq!(wire[1]["role"], "user");
+        assert!(wire[1]["content"]
+            .as_str()
+            .unwrap()
+            .contains("list_installed_skills"));
+        assert!(wire[1]["content"].as_str().unwrap().contains("skills"));
+    }
+
+    #[test]
+    fn build_messages_passes_through_non_tool_roles_unchanged() {
+        let b = backend();
+        let messages = vec![ChatMessage {
+            role: "assistant".into(),
+            content: "hello".into(),
+            name: None,
+            images: None,
+        }];
+
+        let wire = b.build_messages(&messages);
+        assert_eq!(wire[0]["role"], "assistant");
+        assert_eq!(wire[0]["content"], "hello");
     }
 }

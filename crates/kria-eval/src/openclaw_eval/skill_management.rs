@@ -32,44 +32,43 @@
 
 use kria_core::openclaw::bundle::BundleInstaller;
 use kria_core::openclaw::registry::ProductionSkillRegistry;
-use kria_core::openclaw::semantic_router::{ResourcePressure, RoutingContext, RoutingIntent, SemanticSkillRouter};
-use kria_core::openclaw::types::TrustTier;
-use kria_core::safety::RiskLevel;
 use semver::Version;
 use std::sync::Arc;
 
-fn routing_intent(request: &str) -> RoutingIntent {
-    RoutingIntent {
-        request: request.to_string(),
-        required_capabilities: vec![],
-        max_risk: RiskLevel::Yellow,
-        preferred_resource: None,
-        context: RoutingContext {
-            resource_pressure: ResourcePressure::Low,
-            gpu_memory_mb: None,
-            network_available: true,
-            session_trust: TrustTier::Local,
-        },
-    }
+/// True when `skill_id` is currently in the registry's enabled set — the SAME
+/// source capability discovery (CPP federated index / prior router) reads fresh
+/// on every decision, so this is the real "is it discoverable right now" check
+/// without depending on the deleted `SemanticSkillRouter`.
+fn is_enabled(registry: &ProductionSkillRegistry, skill_id: &str) -> Result<bool, String> {
+    Ok(registry
+        .get_enabled_skills()
+        .map_err(|e| e.to_string())?
+        .iter()
+        .any(|s| s.skill_id == skill_id))
 }
 
-/// R6.1/R6.4: real hot enable/disable. Installs a real signed bundle, routes
-/// to it (must match), disables it, routes AGAIN with the SAME registry/
-/// router instances (no restart) and asserts it no longer matches, re-enables
-/// and asserts it matches again — proving genuine hot toggling.
+/// R6.1/R6.4: real hot enable/disable. Installs a real signed bundle, asserts
+/// it is immediately in the enabled set, disables it and asserts it drops out
+/// with the SAME registry instance (no restart), re-enables and asserts it
+/// returns — proving genuine hot toggling of discoverability.
 pub async fn validate_hot_enable_disable() -> Result<(), String> {
     let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
     let db_path = dir.path().join("r6_hotswap.db");
     let registry = Arc::new(ProductionSkillRegistry::new(&db_path).map_err(|e| e.to_string())?);
     let audit = Arc::new(
-        kria_core::openclaw::audit::AuditLedger::open(&db_path, b"r6-test-key".to_vec()).map_err(|e| e.to_string())?,
+        kria_core::openclaw::audit::AuditLedger::open(&db_path, b"r6-test-key".to_vec())
+            .map_err(|e| e.to_string())?,
     );
     let store = dir.path().join("store");
     std::fs::create_dir_all(&store).map_err(|e| e.to_string())?;
     let author_dir = dir.path().join("authored");
     std::fs::create_dir_all(&author_dir).map_err(|e| e.to_string())?;
 
-    let bundle_root = crate::openclaw_eval::installer_matrix::author_signed_bundle(&author_dir, "oc_r6_hotswap", [9u8; 32])?;
+    let bundle_root = crate::openclaw_eval::installer_matrix::author_signed_bundle(
+        &author_dir,
+        "oc_r6_hotswap",
+        [9u8; 32],
+    )?;
 
     let installer = BundleInstaller::new(registry.clone(), audit, store)
         .with_kria_version(Version::new(1, 0, 0))
@@ -77,7 +76,9 @@ pub async fn validate_hot_enable_disable() -> Result<(), String> {
             trusted_keys: Vec::new(),
             require_signature: true,
         });
-    installer.install(&bundle_root).map_err(|e| format!("install failed: {e}"))?;
+    installer
+        .install(&bundle_root)
+        .map_err(|e| format!("install failed: {e}"))?;
 
     // FIX PROOF (product gap 4/8): a fresh bundle install must now land
     // directly in `Enabled` state — NO separate `enable()` call needed.
@@ -92,38 +93,29 @@ pub async fn validate_hot_enable_disable() -> Result<(), String> {
         );
     }
 
-    // The SAME router instance across all remaining checks — no restart, no
+    // The SAME registry instance across all remaining checks — no restart, no
     // new process — proving genuine hot behavior, not "works after reboot".
-    let router = SemanticSkillRouter::new(registry.clone(), None);
-
-    let before = router
-        .route(routing_intent("oc_r6_hotswap fixture skill"))
-        .await
-        .map_err(|e| e.to_string())?;
-    if before.skill.as_ref().map(|s| s.skill_id.as_str()) != Some("oc_r6_hotswap") {
-        return Err(format!(
-            "REGRESSION: fresh install must route WITHOUT a separate enable() call, got {:?} (reasoning: {})",
-            before.skill.map(|s| s.skill_id),
-            before.reasoning
-        ));
+    if !is_enabled(&registry, "oc_r6_hotswap")? {
+        return Err(
+            "REGRESSION: fresh install must be discoverable WITHOUT a separate enable() call"
+                .into(),
+        );
     }
 
-    installer.disable("oc_r6_hotswap").map_err(|e| format!("disable failed: {e}"))?;
-    let during_disabled = router
-        .route(routing_intent("oc_r6_hotswap fixture skill"))
-        .await
-        .map_err(|e| e.to_string())?;
-    if during_disabled.skill.as_ref().map(|s| s.skill_id.as_str()) == Some("oc_r6_hotswap") {
-        return Err("R6.1/R6.4 VIOLATION: disabled skill still routed to, with NO restart between disable and route".into());
+    installer
+        .disable("oc_r6_hotswap")
+        .map_err(|e| format!("disable failed: {e}"))?;
+    if is_enabled(&registry, "oc_r6_hotswap")? {
+        return Err("R6.1/R6.4 VIOLATION: disabled skill still in the enabled set, NO restart between disable and check".into());
     }
 
-    installer.enable("oc_r6_hotswap").map_err(|e| format!("enable failed: {e}"))?;
-    let after_enabled = router
-        .route(routing_intent("oc_r6_hotswap fixture skill"))
-        .await
-        .map_err(|e| e.to_string())?;
-    if after_enabled.skill.as_ref().map(|s| s.skill_id.as_str()) != Some("oc_r6_hotswap") {
-        return Err("R6.1/R6.4: re-enabled skill did not resume routing, with NO restart".into());
+    installer
+        .enable("oc_r6_hotswap")
+        .map_err(|e| format!("enable failed: {e}"))?;
+    if !is_enabled(&registry, "oc_r6_hotswap")? {
+        return Err(
+            "R6.1/R6.4: re-enabled skill did not resume discoverability, with NO restart".into(),
+        );
     }
 
     Ok(())
@@ -137,14 +129,19 @@ pub fn validate_uninstall_leaves_no_orphans() -> Result<(), String> {
     let db_path = dir.path().join("r6_uninstall.db");
     let registry = Arc::new(ProductionSkillRegistry::new(&db_path).map_err(|e| e.to_string())?);
     let audit = Arc::new(
-        kria_core::openclaw::audit::AuditLedger::open(&db_path, b"r6-test-key-2".to_vec()).map_err(|e| e.to_string())?,
+        kria_core::openclaw::audit::AuditLedger::open(&db_path, b"r6-test-key-2".to_vec())
+            .map_err(|e| e.to_string())?,
     );
     let store = dir.path().join("store");
     std::fs::create_dir_all(&store).map_err(|e| e.to_string())?;
     let author_dir = dir.path().join("authored");
     std::fs::create_dir_all(&author_dir).map_err(|e| e.to_string())?;
 
-    let bundle_root = crate::openclaw_eval::installer_matrix::author_signed_bundle(&author_dir, "oc_r6_uninstall", [11u8; 32])?;
+    let bundle_root = crate::openclaw_eval::installer_matrix::author_signed_bundle(
+        &author_dir,
+        "oc_r6_uninstall",
+        [11u8; 32],
+    )?;
 
     let installer = BundleInstaller::new(registry.clone(), audit, store.clone())
         .with_kria_version(Version::new(1, 0, 0))
@@ -152,19 +149,25 @@ pub fn validate_uninstall_leaves_no_orphans() -> Result<(), String> {
             trusted_keys: Vec::new(),
             require_signature: true,
         });
-    installer.install(&bundle_root).map_err(|e| format!("install failed: {e}"))?;
+    installer
+        .install(&bundle_root)
+        .map_err(|e| format!("install failed: {e}"))?;
 
     if !store.join("oc_r6_uninstall").exists() {
         return Err("expected store dir to exist after install".into());
     }
 
-    installer.uninstall("oc_r6_uninstall").map_err(|e| format!("uninstall failed: {e}"))?;
+    installer
+        .uninstall("oc_r6_uninstall")
+        .map_err(|e| format!("uninstall failed: {e}"))?;
 
     if registry.get("oc_r6_uninstall").is_ok() {
         return Err("R6.2/R6.5: registry still returns Ok(..) for an uninstalled skill (orphaned registry entry)".into());
     }
     if store.join("oc_r6_uninstall").exists() {
-        return Err("R6.2/R6.5: store directory still exists after uninstall (orphaned files)".into());
+        return Err(
+            "R6.2/R6.5: store directory still exists after uninstall (orphaned files)".into(),
+        );
     }
 
     Ok(())
@@ -186,7 +189,8 @@ mod tests {
 
     #[test]
     fn r6_2_5_uninstall_leaves_no_orphans() {
-        validate_uninstall_leaves_no_orphans().expect("R6.2/R6.5: uninstall must leave no orphaned registry row or files");
+        validate_uninstall_leaves_no_orphans()
+            .expect("R6.2/R6.5: uninstall must leave no orphaned registry row or files");
     }
 
     /// FIX PROOF: `BundleInstaller::install_inner` must contain the real
@@ -201,7 +205,8 @@ mod tests {
             .nth(1)
             .and_then(|s| s.split("pub fn").next())
             .unwrap_or_default();
-        let auto_enables = install_inner_section.contains("VersionRelation::Fresh => Some(SkillState::Enabled)");
+        let auto_enables =
+            install_inner_section.contains("VersionRelation::Fresh => Some(SkillState::Enabled)");
         assert!(
             auto_enables,
             "REGRESSION: install_inner must auto-enable a Fresh install — if this fails, \

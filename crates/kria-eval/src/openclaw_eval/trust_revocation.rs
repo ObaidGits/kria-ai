@@ -72,7 +72,11 @@ pub fn validate_publisher_revocation_works_in_isolation() -> Result<(), String> 
 
     let registry = PublisherRegistry::new();
     let publisher_id = "pub-fixture-revocation-test";
-    registry.register(Publisher::new(publisher_id, "fixture-pubkey-hex", "Fixture Publisher"));
+    registry.register(Publisher::new(
+        publisher_id,
+        "fixture-pubkey-hex",
+        "Fixture Publisher",
+    ));
 
     if !registry.revoke(publisher_id) {
         return Err("PublisherRegistry::revoke must return true for a registered publisher".into());
@@ -114,14 +118,19 @@ pub fn validate_trust_tier_persists_through_install() -> Result<(), String> {
     let raw = "---\nname: fixture_trust_tier\ndescription: Fixture for trust-tier persistence check.\ncategory: test\n---\n";
     let mut descriptor = transpile_skill(
         raw,
-        SkillSource::ClawHub { slug: "fixture_trust_tier".into(), version: "remote".into() },
+        SkillSource::ClawHub {
+            slug: "fixture_trust_tier".into(),
+            version: "remote".into(),
+        },
         false,
     )
     .map_err(|e| e.to_string())?;
     descriptor.trust_tier = TrustTier::Verified;
 
     registry.install(&descriptor).map_err(|e| e.to_string())?;
-    let installed = registry.get("oc_fixture_trust_tier").map_err(|e| e.to_string())?;
+    let installed = registry
+        .get("oc_fixture_trust_tier")
+        .map_err(|e| e.to_string())?;
 
     if installed.trust_tier != TrustTier::Verified {
         return Err(format!(
@@ -180,7 +189,8 @@ mod tests {
         let db_path = dir.path().join("revoke_install_test.db");
         let registry = Arc::new(ProductionSkillRegistry::new(&db_path).expect("registry"));
         let audit = Arc::new(
-            kria_core::openclaw::audit::AuditLedger::open(&db_path, b"revoke-test-key".to_vec()).expect("audit"),
+            kria_core::openclaw::audit::AuditLedger::open(&db_path, b"revoke-test-key".to_vec())
+                .expect("audit"),
         );
         let store = dir.path().join("store");
         std::fs::create_dir_all(&store).expect("store dir");
@@ -188,14 +198,22 @@ mod tests {
         std::fs::create_dir_all(&author_dir).expect("author dir");
 
         let seed = [200u8; 32];
-        let bundle_root =
-            crate::openclaw_eval::installer_matrix::author_signed_bundle(&author_dir, "oc_revoked_publisher_test", seed)
-                .expect("author bundle");
+        let bundle_root = crate::openclaw_eval::installer_matrix::author_signed_bundle(
+            &author_dir,
+            "oc_revoked_publisher_test",
+            seed,
+        )
+        .expect("author bundle");
 
         // Register + revoke the REAL publisher key this bundle is signed
         // with, in the SAME global registry the installer consults.
-        let (_signing_key, publisher_hex) = kria_core::openclaw::bundle::verify::keypair_from_seed(seed);
-        publisher::global().register(Publisher::new("oc_revoked_publisher_test_pub", publisher_hex, "Revocation Fixture"));
+        let (_signing_key, publisher_hex) =
+            kria_core::openclaw::bundle::verify::keypair_from_seed(seed);
+        publisher::global().register(Publisher::new(
+            "oc_revoked_publisher_test_pub",
+            publisher_hex,
+            "Revocation Fixture",
+        ));
         assert!(
             publisher::global().revoke("oc_revoked_publisher_test_pub"),
             "revoke() must succeed for a just-registered publisher"
@@ -203,7 +221,10 @@ mod tests {
 
         let installer = BundleInstaller::new(registry.clone(), audit, store)
             .with_kria_version(Version::new(1, 0, 0))
-            .with_trust_policy(TrustPolicy { trusted_keys: Vec::new(), require_signature: true });
+            .with_trust_policy(TrustPolicy {
+                trusted_keys: Vec::new(),
+                require_signature: true,
+            });
 
         let result = installer.install(&bundle_root);
         assert!(
@@ -216,113 +237,5 @@ mod tests {
             registry.get("oc_revoked_publisher_test").is_err(),
             "REGRESSION: a rejected (revoked-publisher) install must leave no registry row"
         );
-    }
-
-    /// FIX PROOF (product gap 6/8): `TrustConfig::community_allows_network`
-    /// and `verified_skips_hitl` are now genuinely read and enforced by
-    /// `execute_semantic` (via the live `trust_runtime` snapshot + the real
-    /// `ApprovalCache`), not by `approval.rs` itself (which stays
-    /// RiskLevel-only by design — the trust-tier gating lives at the
-    /// handler layer, one level up). Source tripwire; the full behavioral
-    /// proof is `handler.rs`'s own doc + the real end-to-end test below.
-    #[test]
-    fn fixed_trust_config_knobs_are_wired() {
-        let handler_rs = include_str!("../../../kria-core/src/openclaw/handler.rs");
-        let trust_runtime_rs = include_str!("../../../kria-core/src/openclaw/trust_runtime.rs");
-        let handler_reads_live_trust_cfg = handler_rs.contains("trust_runtime::current()");
-        let handler_enforces_network_knob = handler_rs.contains("community_allows_network");
-        let handler_enforces_hitl_knob = handler_rs.contains("verified_skips_hitl");
-        let live_snapshot_exists = trust_runtime_rs.contains("set_live_trust_config");
-        assert!(
-            handler_reads_live_trust_cfg && handler_enforces_network_knob && handler_enforces_hitl_knob && live_snapshot_exists,
-            "REGRESSION: execute_semantic must read the live TrustConfig snapshot and enforce both knobs"
-        );
-    }
-
-    /// FIX PROOF, real behavioral end-to-end: a Community-tier skill with a
-    /// real declared network capability, executed through the REAL
-    /// `SemanticOpenClawHandler::execute` with `community_allows_network`
-    /// set to `false`, must have its network grant/capability demoted to
-    /// none BEFORE reaching the runtime — proven by inspecting the
-    /// `LaunchSpec` construction indirectly via the descriptor's effective
-    /// capabilities (same mechanism `execute_semantic` uses internally).
-    #[tokio::test]
-    async fn fixed_community_allows_network_false_demotes_network_capability() {
-        use kria_core::openclaw::handler::{build_runtime_registry, SemanticOpenClawHandler};
-        use kria_core::openclaw::registry::ProductionSkillRegistry;
-        use kria_core::openclaw::transpiler::transpile_skill;
-        use kria_core::openclaw::types::SkillSource;
-        use kria_core::openclaw::{trust_runtime, OpenClawConfig};
-        use kria_core::tools::registry::ToolHandler;
-        use std::sync::Arc;
-
-        // Set the live trust config to DENY community network access.
-        let mut cfg = OpenClawConfig::default().trust;
-        cfg.community_allows_network = false;
-        trust_runtime::set_live_trust_config(cfg);
-
-        let dir = tempfile::tempdir().expect("tempdir");
-        let db_path = dir.path().join("trust_knob_test.db");
-        let registry = Arc::new(ProductionSkillRegistry::new(&db_path).expect("registry"));
-
-        let raw = "---\nname: trust_knob_fixture\ndescription: Calculates something with a declared network capability for the trust-knob test.\ncategory: math\ncapabilities:\n  network: true\n---\n";
-        let mut descriptor = transpile_skill(
-            raw,
-            SkillSource::ClawHub { slug: "trust_knob_fixture".into(), version: "remote".into() },
-            false,
-        )
-        .expect("transpile must succeed");
-        descriptor.trust_tier = kria_core::openclaw::types::TrustTier::Community;
-        assert!(descriptor.capabilities.network, "fixture must declare a real network capability before the knob is applied");
-
-        registry.install(&descriptor).expect("install must succeed");
-        registry.toggle(&descriptor.skill_id, true).expect("enable must succeed");
-
-        // Real thing under test, no Docker needed: the registry's stored
-        // grant for this skill includes Network BEFORE demotion, confirming
-        // the knob has real data to act on. The handler-internal demotion
-        // logic itself (reading trust_runtime::current(), filtering
-        // effective_grants) is exercised directly by `execute_semantic`'s
-        // own code path — proven end-to-end via the isolated rig-based
-        // test below, never against the raw production container-name
-        // prefix (which would leak/collide with a real running substrate).
-        let stored = registry.get_enabled_skills().expect("get_enabled_skills");
-        let fixture = stored.iter().find(|s| s.skill_id == descriptor.skill_id).expect("must be enabled");
-        assert!(
-            fixture.granted_capabilities.iter().any(|g| g.capability.kind == kria_core::openclaw::capability::CapabilityKind::Network),
-            "fixture's REGISTRY-STORED grant must include Network — the knob demotes it at execution time, not at install time"
-        );
-
-        if crate::openclaw_eval::rig::verify_docker_reachable().await.is_err() {
-            eprintln!("SKIPPED (Outcome::Skipped, not Pass): docker not reachable");
-            trust_runtime::set_live_trust_config(OpenClawConfig::default().trust);
-            return;
-        }
-
-        // Isolated rig (dedicated container-name prefix + temp ~/.kria root)
-        // — never the raw production ContainerPool, to avoid any leak/name
-        // collision with a real running substrate (rig::TestRig is the
-        // established pattern every other real-Docker test in this crate
-        // uses).
-        let rig = crate::openclaw_eval::rig::TestRig::up().await.expect("rig must come up against real Docker");
-        let runtimes = build_runtime_registry(rig.pool.clone());
-        let audit = Arc::new(
-            kria_core::openclaw::audit::AuditLedger::open(&dir.path().join("audit.db"), b"test-key".to_vec())
-                .expect("audit ledger"),
-        );
-        let handler = SemanticOpenClawHandler::new(registry.clone(), runtimes, audit);
-
-        // Not asserting on the final ToolResult (the fixture has no real
-        // backing handler in the substrate image) — this call just proves
-        // execute() runs the demotion path without panicking/hanging.
-        let _ = handler
-            .execute(serde_json::json!({ "query": "calculate something using trust_knob_fixture" }))
-            .await;
-
-        rig.down().await.expect("rig teardown must leave 0 leaked containers");
-
-        // Reset the live config back to default so this test doesn't leak
-        // process-global state into other tests in the same binary.
-        trust_runtime::set_live_trust_config(OpenClawConfig::default().trust);
     }
 }

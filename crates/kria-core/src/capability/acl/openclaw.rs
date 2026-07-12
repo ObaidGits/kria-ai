@@ -13,9 +13,14 @@
 //! - a frozen [`SkillRuntime`] (the Docker runtime built from the container
 //!   pool) for [`execute`](CapabilityProvider::execute).
 //!
-//! The execute mapping mirrors the frozen `execution::executors::OpenClawExecutor`
-//! (build a [`LaunchSpec`], call the runtime), so behavior is identical to the
-//! proven path — this adapter does not invent a second execution route.
+//! The execute mapping builds a [`LaunchSpec`] and calls the runtime (the same
+//! two-step shape as the frozen `execution::executors::OpenClawExecutor`), so it
+//! does not invent a second execution route. It additionally threads the skill's
+//! declared `resource_class`, its authoritative `granted_capabilities` (filtered
+//! to the per-run permission grant — never exceeding it), and the installed
+//! bundle's `.bridge` handler dir, so installed marketplace/generated skills run
+//! correctly and within their approved grants (baked/GREEN skills degrade to the
+//! proven Light/no-grant/no-mount path).
 //!
 //! # Facets (Milestone 2)
 //!
@@ -137,6 +142,37 @@ impl OpenClawProvider {
         }
     }
 
+    /// Map a single granted [`Capability`] to the neutral effect-class strings it
+    /// materializes, using the SAME open vocabulary as [`Self::effect_classes`]
+    /// (the boundary vocabulary the Brain's permission engine grants against).
+    /// Kept in lock-step with `effect_classes` so a grant is filtered against
+    /// exactly the classes it would surface in the descriptor's `permissions`.
+    fn capability_effect_classes(
+        cap: &crate::openclaw::capability::Capability,
+    ) -> Vec<&'static str> {
+        use crate::openclaw::capability::{CapabilityKind, CapabilityMode};
+        match cap.kind {
+            CapabilityKind::Filesystem => {
+                if matches!(cap.mode, CapabilityMode::ReadWrite) {
+                    // ReadWrite surfaces BOTH read + write (mirrors `to_legacy`),
+                    // so it may run only when both are granted (fail closed).
+                    vec!["read", "write"]
+                } else {
+                    vec!["read"]
+                }
+            }
+            CapabilityKind::Subprocess => vec!["subprocess"],
+            CapabilityKind::Browser => vec!["browser"],
+            CapabilityKind::Network => vec!["network"],
+            CapabilityKind::Gpu => vec!["image_generation"],
+            CapabilityKind::Device => vec!["media"],
+            // Clipboard/Environment are not part of the boundary effect
+            // vocabulary (they never appear in the descriptor `permissions`);
+            // they carry no class to exceed.
+            CapabilityKind::Clipboard | CapabilityKind::Environment => Vec::new(),
+        }
+    }
+
     /// Derive a neutral [`CapabilityDescriptor`] from a skill's metadata, with no
     /// loss of the fields the Brain (CIL/permission/planner) needs.
     fn descriptor_from(&self, m: &SkillMetadata) -> CapabilityDescriptor {
@@ -194,7 +230,16 @@ impl OpenClawProvider {
             stats: None,
             guidance: None,
             expectations: None,
-            extensions: serde_json::Map::new(),
+            extensions: {
+                // The Hands DECLARE their substrate; the neutral Brain reads it
+                // via `infer_kind` (no provider-name branching in the Brain).
+                let mut ext = serde_json::Map::new();
+                ext.insert(
+                    "kind".to_string(),
+                    serde_json::Value::String("installed".to_string()),
+                );
+                ext
+            },
         }
     }
 }
@@ -245,44 +290,142 @@ impl CapabilityProvider for OpenClawProvider {
             .fetch_remote_index()
             .await
             .map_err(|e| CapError::Discovery(format!("marketplace index fetch failed: {e}")))?;
-        Ok(index
+
+        // Map each remote entry through the neutral ClawHub schema (the canonical
+        // Brain-side marketplace model, spec R8.5), then project to installable
+        // descriptors. This is the single ClawHub model — the OpenClaw client is
+        // only transport. Entries keep their slug as `capability_id` so the Brain
+        // can select a specific one (`AcquireRequest.capability_id`).
+        use crate::capability::intelligence::{
+            ClawHubListing, PublishedVersion, Rating, UpdateChannel,
+        };
+        let descriptors = index
             .iter()
-            .map(|e| {
-                let mut d = CapabilityDescriptor::minimal(
-                    self.id.clone(),
-                    e.slug.clone(),
-                    e.name.clone(),
-                    e.description.clone(),
-                    serde_json::json!({}),
+            .filter_map(|e| {
+                let coordinate = crate::capability::intelligence::CapabilityCoordinate::from_ids(
+                    &self.id, &e.slug,
                 );
-                d.version = e.version.clone();
-                d.trust.tier = Some("community".to_string());
-                // Mark as installable-but-not-installed so the UI/planner can
-                // distinguish a recommendation from an installed capability.
-                d.extensions
-                    .insert("installed".to_string(), serde_json::Value::Bool(false));
+                let listing = ClawHubListing {
+                    coordinate,
+                    publisher: e.slug.clone(),
+                    description: e.description.clone(),
+                    versions: vec![PublishedVersion {
+                        version: if e.version.trim().is_empty() {
+                            "0.0.0".to_string()
+                        } else {
+                            e.version.clone()
+                        },
+                        artifact_digest: None, // unknown until download (honest)
+                        signature_hex: None,
+                        public_key_hex: None,
+                        dependencies: Vec::new(),
+                        channel: UpdateChannel::Stable,
+                        breaking: false,
+                        compatibility: Vec::new(),
+                        published_at: String::new(),
+                        yanked: false,
+                    }],
+                    rating: Rating::default(),
+                    reviews: Vec::new(),
+                    // Installed skills are forced to Community; catalog entries
+                    // carry their declared tier for ranking (Brain decides trust).
+                    trust_tier: Some(e.trust_tier.clone()),
+                };
+                // The listing uses `name` as the descriptor id; force the slug so
+                // acquisition can resolve the exact index entry.
+                let mut ds = listing.to_catalog_descriptors(&self.id);
+                let mut d = ds.pop()?;
+                d.capability_id = e.slug.clone();
+                d.name = e.name.clone();
+                // Honest installed-state (Phase 8: don't recommend/duplicate an
+                // already-installed capability). The Brain filters installed
+                // entries out of `recommend`.
+                let already_installed = self.registry.get_skill(&e.slug).is_ok();
+                d.extensions.insert(
+                    "installed".to_string(),
+                    serde_json::Value::Bool(already_installed),
+                );
                 d.extensions.insert(
                     "manifest_url".to_string(),
                     serde_json::Value::String(e.manifest_url.clone()),
                 );
-                d
+                d.extensions.insert(
+                    "kind".to_string(),
+                    serde_json::Value::String("installed".to_string()),
+                );
+                Some(d)
             })
-            .collect())
+            .collect();
+        Ok(descriptors)
     }
 
     async fn execute(&self, req: CapabilityRequest) -> Result<CapabilityOutcome, CapError> {
-        // Mirror the frozen OpenClawExecutor: assemble a LaunchSpec and run it on
-        // the Docker runtime. Grant materialization (from the permission engine)
-        // and installed-bundle mounting are layered on in later milestones; for
-        // baked/GREEN skills this is the exact proven execution path.
+        // Assemble a LaunchSpec and run it on the Docker runtime. Three things
+        // are threaded from the authoritative registry + the per-run permission
+        // decision so installed marketplace/generated skills execute correctly
+        // and within their approved grants (baked/GREEN skills degrade to the
+        // exact proven legacy path: Light, no grants, no mount):
+        //   1. `resource_class` — the skill's declared class (not hardcoded).
+        //   2. `grants` — the skill's authoritative `granted_capabilities`,
+        //      FILTERED to only the effect classes the permission engine granted
+        //      for THIS run (`req.granted_effects`); the provider must never
+        //      exceed the run authorization (fail closed).
+        //   3. `mounted_skill_dir` — the installed bundle's bridge-format handler
+        //      dir (`<bundle_path>/.bridge`), so a handler that is NOT baked into
+        //      the substrate image is bind-mounted and can execute (A3).
+        //
+        // The registry read is best-effort: a skill absent from the registry
+        // (e.g. a baked-only smoke skill) keeps the conservative legacy defaults.
+        let meta = self.registry.get_skill(&req.capability_id).ok();
+
+        let resource_class = meta
+            .as_ref()
+            .map(|m| m.resource_class)
+            .unwrap_or(OcResourceClass::Light);
+
+        // Filter authoritative grants down to what was actually granted this run.
+        // A grant runs only when EVERY effect class it materializes is present in
+        // `granted_effects` (a ReadWrite fs grant needs both read + write).
+        let granted: std::collections::HashSet<&str> =
+            req.granted_effects.iter().map(|e| e.as_str()).collect();
+        let grants: Vec<crate::openclaw::capability::CapabilityGrant> = meta
+            .as_ref()
+            .map(|m| {
+                m.granted_capabilities
+                    .iter()
+                    .filter(|g| g.granted)
+                    .filter(|g| {
+                        Self::capability_effect_classes(&g.capability)
+                            .iter()
+                            .all(|c| granted.contains(c))
+                    })
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // Installed skills carry a `bundle_path`; the runtime handler lives in
+        // its `.bridge/` projection. Baked skills have no `bundle_path` → None
+        // (they run from the warm pool). Only mount when the dir really exists.
+        let mounted_skill_dir = meta.as_ref().and_then(|m| {
+            m.bundle_path.as_ref().and_then(|bp| {
+                let dir = std::path::Path::new(bp).join(".bridge");
+                if dir.is_dir() {
+                    Some(dir)
+                } else {
+                    None
+                }
+            })
+        });
+
         let spec = LaunchSpec {
             skill_id: req.capability_id.clone(),
             params: req.args.clone(),
-            resource_class: OcResourceClass::Light,
+            resource_class,
             timeout: self.default_timeout,
             correlation_id: req.context.correlation_id.clone(),
-            grants: Vec::new(),
-            mounted_skill_dir: None,
+            grants,
+            mounted_skill_dir,
         };
         let runtime_ctx = RuntimeContext::detached();
 
@@ -337,12 +480,31 @@ impl CapabilityProvider for OpenClawProvider {
             let hay = format!("{} {} {}", e.slug, e.name, e.description).to_lowercase();
             needle_tokens.iter().filter(|t| hay.contains(**t)).count()
         };
-        let entry = index
-            .iter()
-            .filter(|e| score(e) > 0)
-            .max_by_key(|e| score(e))
-            .ok_or_else(|| CapError::Acquire(format!("no marketplace skill matches '{needle}'")))?
-            .clone();
+        // Brain-chosen selection (spec R9.4): when the Brain has ranked the
+        // catalog and passed a specific `capability_id` (== slug), install
+        // exactly that — the provider does NOT re-resolve a different match.
+        // Match-selection authority lives in the Brain; the provider only
+        // resolves the best match itself on the thin/no-choice path.
+        let entry = if let Some(chosen) = req.capability_id.as_deref() {
+            index
+                .iter()
+                .find(|e| e.slug == chosen)
+                .cloned()
+                .ok_or_else(|| {
+                    CapError::Acquire(format!(
+                        "Brain-selected capability '{chosen}' not found in marketplace index"
+                    ))
+                })?
+        } else {
+            index
+                .iter()
+                .filter(|e| score(e) > 0)
+                .max_by_key(|e| score(e))
+                .ok_or_else(|| {
+                    CapError::Acquire(format!("no marketplace skill matches '{needle}'"))
+                })?
+                .clone()
+        };
 
         // Already installed? Just return its current descriptor (idempotent).
         if let Ok(meta) = self.registry.get_skill(&entry.slug) {
@@ -358,9 +520,28 @@ impl CapabilityProvider for OpenClawProvider {
             .download_skill_manifest(&entry.manifest_url)
             .await
             .map_err(|e| CapError::Acquire(format!("manifest download failed: {e}")))?;
+
+        // Neutral artifact integrity (spec R8.3): compute a content digest over
+        // the downloaded manifest bytes for tamper-evident provenance, using the
+        // single neutral verifier. The current ClawHub index advertises no
+        // expected hash, so this is provenance (honest — NOT a fabricated
+        // "verified" claim); byte-level signature enforcement remains the
+        // BundleInstaller's `require_signature` below. The provenance digest is
+        // carried on the neutral descriptor so the Brain can persist it (CKB) and
+        // future indices that DO advertise a hash are verified + refused on
+        // mismatch with zero further wiring.
+        use crate::capability::intelligence::{ArtifactVerifier, Digest, DigestAlgorithm};
+        let computed = Digest::compute(DigestAlgorithm::Sha256, raw.as_bytes());
+        let _integrity = ArtifactVerifier.verify(raw.as_bytes(), None, None); // NoExpectedHash
+        tracing::info!(
+            slug = %entry.slug,
+            artifact_sha256 = %computed.hex,
+            "[CPP] acquired-artifact provenance digest recorded"
+        );
+
         let source = SkillSource::ClawHub {
             slug: entry.slug.clone(),
-            version: "remote".into(),
+            version: entry.version.clone(),
         };
         let mut descriptor = transpile_skill(&raw, source, false)
             .map_err(|e| CapError::Acquire(format!("transpile failed: {e}")))?;
@@ -394,12 +575,18 @@ impl CapabilityProvider for OpenClawProvider {
         })?;
         let _ = std::fs::remove_dir_all(&synth_root);
 
-        // 4. Return the freshly-installed capability's descriptor (descriptor refresh).
+        // 4. Return the freshly-installed capability's descriptor (descriptor
+        //    refresh), carrying the provenance digest for the Brain to persist.
         let meta = self
             .registry
             .get_skill(&outcome.skill_id)
             .map_err(|e| CapError::Acquire(format!("post-install registry read failed: {e}")))?;
-        Ok(self.descriptor_from(&meta))
+        let mut installed = self.descriptor_from(&meta);
+        installed.extensions.insert(
+            "artifact_sha256".to_string(),
+            serde_json::Value::String(computed.hex),
+        );
+        Ok(installed)
     }
 
     async fn remove(&self, capability_id: &str) -> Result<(), CapError> {

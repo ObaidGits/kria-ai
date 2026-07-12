@@ -1825,6 +1825,56 @@ impl WorkflowRankingEngine {
                     .iter()
                     .any(|m| m == "workflow_id" || m == "display_name" || m == "alias")
             });
+
+        // Weak-match release: a prompt that only faintly touches a workflow (low
+        // confidence, matched on a broad field like a single tag/category token
+        // rather than the workflow id/name/alias or a curated example prompt) must
+        // NOT be hijacked by n8n. Hijacking here was the root cause of general
+        // requests ("install a web-fetch tool", "compress this folder") being
+        // routed to an unrelated workflow instead of the agent's normal tool
+        // routing (which includes the Capability Provider Platform / marketplace).
+        // Defer to normal routing unless the match is explicit, strong, blocked,
+        // hard (the user clearly asked for an n8n workflow), or ambiguous.
+        let strong_field = selected.as_ref().is_some_and(|candidate| {
+            candidate.matched_on.iter().any(|m| {
+                matches!(
+                    m.as_str(),
+                    "workflow_id" | "display_name" | "alias" | "example_prompt"
+                )
+            })
+        });
+        let weak_match_release = !exact_or_explicit
+            && !strong_field
+            && !hard_prompt
+            && !ambiguous
+            && selected_blockers.is_empty()
+            && selected_confidence < 0.60;
+        if weak_match_release {
+            trace.push("decision=use_other_tool(weak_match_release)".to_string());
+            return N8nChatRouteDecision {
+                schema_version: "kria.n8n.chat_route.v1".into(),
+                prompt,
+                reference: response.reference,
+                status: N8nChatRouteStatus::UseOtherTool,
+                selected_workflow: None,
+                candidates: Vec::new(),
+                inventory: Vec::new(),
+                input_payload_preview: Value::Object(Map::new()),
+                missing_inputs: Vec::new(),
+                blockers: Vec::new(),
+                next_actions: vec!["Use normal chat/tool routing".into()],
+                confidence: selected_confidence,
+                reason: "Only a weak/low-confidence n8n match — defer to normal tool routing"
+                    .into(),
+                message: "This prompt looks better handled by another KRIA tool, not n8n.".into(),
+                can_auto_run: false,
+                requires_confirmation: false,
+                ambiguous: false,
+                hard_prompt: false,
+                trace,
+            };
+        }
+
         let safe_auto_run = selected.as_ref().is_some_and(|candidate| {
             candidate.risk_tier.eq_ignore_ascii_case("green")
                 && candidate.hitl_policy.trim().eq_ignore_ascii_case("none")

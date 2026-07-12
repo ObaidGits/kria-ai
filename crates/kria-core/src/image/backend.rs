@@ -196,6 +196,14 @@ impl ImageBackendRegistry {
         request: &ImageRequest,
         telemetry: &ResourceSnapshot,
     ) -> Result<Arc<dyn ImageBackend>, ImageError> {
+        let env_forces_local = matches!(
+            std::env::var("KRIA_IMAGE_MODE").ok().as_deref(),
+            Some("local_only")
+        );
+        // force_local (per-request or env) wins over force_cloud.
+        if request.force_local || env_forces_local {
+            return self.select_local_or_err("request explicitly forced local backend");
+        }
         if request.force_cloud {
             return self.select_cloud_or_err("request explicitly forced cloud backend");
         }
@@ -254,6 +262,16 @@ impl ImageBackendRegistry {
         )))
     }
 
+    fn select_local_or_err(&self, reason: &str) -> Result<Arc<dyn ImageBackend>, ImageError> {
+        if let Some(comfy_backend) = self.get(&ImageBackendId::ComfyUi) {
+            return Ok(comfy_backend);
+        }
+
+        Err(ImageError::OutputDir(format!(
+            "local (ComfyUi) backend is not registered ({reason})"
+        )))
+    }
+
     fn local_gpu_lease_available_for_comfy(&self) -> bool {
         let lease = self
             .local_gpu_lease
@@ -286,5 +304,124 @@ impl ImageBackendRegistry {
 impl Default for ImageBackendRegistry {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod force_local_tests {
+    use super::*;
+    use crate::image::orchestrator::{ImageRequest, ImageResult};
+    use std::time::Instant;
+
+    struct FakeBackend {
+        id: ImageBackendId,
+    }
+
+    #[async_trait]
+    impl ImageBackend for FakeBackend {
+        fn id(&self) -> ImageBackendId {
+            self.id.clone()
+        }
+        fn capabilities(&self) -> ImageBackendCapabilities {
+            ImageBackendCapabilities::default()
+        }
+        async fn health(&self) -> ImageBackendHealth {
+            ImageBackendHealth::healthy("fake")
+        }
+        async fn estimate(&self, _request: &ImageRequest) -> ImageEstimate {
+            ImageEstimate {
+                backend: self.id.clone(),
+                requires_gpu: false,
+                expected_seconds: Some(1),
+                expected_vram_mb: None,
+                notes: None,
+            }
+        }
+        async fn generate(
+            &self,
+            _request: ImageRequest,
+            _ctx: ImageExecutionContext,
+        ) -> Result<ImageResult, ImageError> {
+            Err(ImageError::OutputDir("fake".into()))
+        }
+        async fn cancel(&self, _job_id: ImageJobId) -> Result<(), ImageError> {
+            Ok(())
+        }
+        async fn release(&self) -> Result<(), ImageError> {
+            Ok(())
+        }
+    }
+
+    fn req(force_cloud: bool, force_local: bool) -> ImageRequest {
+        ImageRequest {
+            prompt: "a cat".into(),
+            style: None,
+            aspect: Default::default(),
+            count: 1,
+            seed: None,
+            force_cloud,
+            force_local,
+            quality: None,
+            negative: None,
+            enhance: None,
+        }
+    }
+
+    fn snapshot() -> ResourceSnapshot {
+        ResourceSnapshot {
+            vram: crate::resource::VramSnapshot::from_totals(8000, 6000),
+            ram: crate::resource::RamSnapshot {
+                total_mb: 16000,
+                free_mb: 8000,
+            },
+            l1: crate::resource::L1RuntimeSnapshot {
+                residency: L1Residency::Stopped,
+                process_id: None,
+            },
+            image: crate::resource::ImageRuntimeSnapshot {
+                backend_id: "none".into(),
+                is_generating: false,
+                process_id: None,
+            },
+            processes: vec![],
+            sampled_at: Instant::now(),
+        }
+    }
+
+    fn registry() -> ImageBackendRegistry {
+        let reg = ImageBackendRegistry::new();
+        reg.register(Arc::new(FakeBackend {
+            id: ImageBackendId::ComfyUi,
+        }));
+        reg.register(Arc::new(FakeBackend {
+            id: ImageBackendId::CloudFallback,
+        }));
+        reg.set_cloud_fallback_backend(ImageBackendId::CloudFallback);
+        reg
+    }
+
+    #[test]
+    fn force_local_selects_local_backend() {
+        std::env::remove_var("KRIA_IMAGE_MODE");
+        let reg = registry();
+        let b = reg.select_best(&req(false, true), &snapshot()).unwrap();
+        assert_eq!(b.id(), ImageBackendId::ComfyUi);
+    }
+
+    #[test]
+    fn force_local_wins_over_force_cloud() {
+        std::env::remove_var("KRIA_IMAGE_MODE");
+        let reg = registry();
+        // Both set → local wins (privacy-preserving).
+        let b = reg.select_best(&req(true, true), &snapshot()).unwrap();
+        assert_eq!(b.id(), ImageBackendId::ComfyUi);
+    }
+
+    #[test]
+    fn force_cloud_alone_selects_cloud() {
+        std::env::remove_var("KRIA_IMAGE_MODE");
+        let reg = registry();
+        let b = reg.select_best(&req(true, false), &snapshot()).unwrap();
+        assert_eq!(b.id(), ImageBackendId::CloudFallback);
     }
 }

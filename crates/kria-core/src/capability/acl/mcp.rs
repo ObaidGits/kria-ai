@@ -69,13 +69,19 @@ impl McpProvider {
     /// MCP server declares no effects, so the descriptor defaults to
     /// "unknown/elevated" (the permission engine will require approval) per R3.3.
     fn descriptor_from(&self, t: &McpToolDef) -> CapabilityDescriptor {
-        CapabilityDescriptor::minimal(
+        let mut d = CapabilityDescriptor::minimal(
             self.id.clone(),
             t.name.clone(),
             t.name.clone(),
             t.description.clone().unwrap_or_default(),
             t.input_schema.clone(),
-        )
+        );
+        // Declare substrate for the neutral Brain (no name branching in core).
+        d.extensions.insert(
+            "kind".to_string(),
+            serde_json::Value::String("mcp".to_string()),
+        );
+        d
     }
 }
 

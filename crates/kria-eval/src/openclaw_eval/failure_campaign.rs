@@ -26,7 +26,8 @@ pub fn validate_missing_dependency_rejected() -> Result<(), String> {
     let db_path = dir.path().join("missing_dep.db");
     let registry = Arc::new(ProductionSkillRegistry::new(&db_path).map_err(|e| e.to_string())?);
     let audit = Arc::new(
-        kria_core::openclaw::audit::AuditLedger::open(&db_path, b"missing-dep-key".to_vec()).map_err(|e| e.to_string())?,
+        kria_core::openclaw::audit::AuditLedger::open(&db_path, b"missing-dep-key".to_vec())
+            .map_err(|e| e.to_string())?,
     );
     let store = dir.path().join("store");
     std::fs::create_dir_all(&store).map_err(|e| e.to_string())?;
@@ -35,7 +36,8 @@ pub fn validate_missing_dependency_rejected() -> Result<(), String> {
 
     // Author a bundle with a [dependencies] section requiring a skill that
     // is never installed.
-    let (signing_key, publisher_hex) = kria_core::openclaw::bundle::verify::keypair_from_seed([55u8; 32]);
+    let (signing_key, publisher_hex) =
+        kria_core::openclaw::bundle::verify::keypair_from_seed([55u8; 32]);
     let root = author_dir.join("oc_needs_missing-1.0.0");
     std::fs::create_dir_all(root.join("handler")).map_err(|e| e.to_string())?;
     let manifest = format!(
@@ -64,20 +66,37 @@ skills = {{ "oc_this_skill_does_not_exist" = "^1.0" }}
 "#
     );
     std::fs::write(root.join("manifest.toml"), manifest).map_err(|e| e.to_string())?;
-    std::fs::write(root.join("schema.json"), r#"{"type":"object","properties":{}}"#).map_err(|e| e.to_string())?;
-    std::fs::write(root.join("handler/entry.js"), "module.exports=()=>({ok:true})").map_err(|e| e.to_string())?;
+    std::fs::write(
+        root.join("schema.json"),
+        r#"{"type":"object","properties":{}}"#,
+    )
+    .map_err(|e| e.to_string())?;
+    std::fs::write(
+        root.join("handler/entry.js"),
+        "module.exports=()=>({ok:true})",
+    )
+    .map_err(|e| e.to_string())?;
     kria_core::openclaw::bundle::verify::write_hash_tree(&root).map_err(|e| e.to_string())?;
-    kria_core::openclaw::bundle::verify::sign_bundle(&root, &signing_key).map_err(|e| e.to_string())?;
+    kria_core::openclaw::bundle::verify::sign_bundle(&root, &signing_key)
+        .map_err(|e| e.to_string())?;
 
     let installer = BundleInstaller::new(registry.clone(), audit, store)
         .with_kria_version(Version::new(1, 0, 0))
-        .with_trust_policy(TrustPolicy { trusted_keys: Vec::new(), require_signature: true });
+        .with_trust_policy(TrustPolicy {
+            trusted_keys: Vec::new(),
+            require_signature: true,
+        });
 
     let result = installer.install(&root);
     if result.is_ok() {
-        return Err("expected install to be rejected for a missing dependency, but it succeeded".into());
+        return Err(
+            "expected install to be rejected for a missing dependency, but it succeeded".into(),
+        );
     }
-    eprintln!("[FAILURE CAMPAIGN] missing dependency correctly rejected: {:?}", result.err());
+    eprintln!(
+        "[FAILURE CAMPAIGN] missing dependency correctly rejected: {:?}",
+        result.err()
+    );
 
     // Registry must have NO row for the rejected skill.
     if registry.get("oc_needs_missing").is_ok() {
@@ -102,17 +121,27 @@ pub fn validate_restart_during_install_leaves_consistent_state() -> Result<(), S
     let author_dir = dir.path().join("authored");
     std::fs::create_dir_all(&author_dir).map_err(|e| e.to_string())?;
 
-    let bundle_root = crate::openclaw_eval::installer_matrix::author_signed_bundle(&author_dir, "oc_restart_fixture", [66u8; 32])?;
+    let bundle_root = crate::openclaw_eval::installer_matrix::author_signed_bundle(
+        &author_dir,
+        "oc_restart_fixture",
+        [66u8; 32],
+    )?;
 
     {
         let registry = Arc::new(ProductionSkillRegistry::new(&db_path).map_err(|e| e.to_string())?);
         let audit = Arc::new(
-            kria_core::openclaw::audit::AuditLedger::open(&db_path, b"restart-key".to_vec()).map_err(|e| e.to_string())?,
+            kria_core::openclaw::audit::AuditLedger::open(&db_path, b"restart-key".to_vec())
+                .map_err(|e| e.to_string())?,
         );
         let installer = BundleInstaller::new(registry.clone(), audit, store.clone())
             .with_kria_version(Version::new(1, 0, 0))
-            .with_trust_policy(TrustPolicy { trusted_keys: Vec::new(), require_signature: true });
-        installer.install(&bundle_root).map_err(|e| format!("install failed: {e}"))?;
+            .with_trust_policy(TrustPolicy {
+                trusted_keys: Vec::new(),
+                require_signature: true,
+            });
+        installer
+            .install(&bundle_root)
+            .map_err(|e| format!("install failed: {e}"))?;
         // `registry`/`installer` dropped here — simulates process exit right
         // after a successful install completes (the realistic "restart
         // happened right after install finished" case; a restart truly
@@ -122,7 +151,9 @@ pub fn validate_restart_during_install_leaves_consistent_state() -> Result<(), S
 
     // Fresh "process": open a NEW registry instance against the SAME db file.
     let fresh_registry = ProductionSkillRegistry::new(&db_path).map_err(|e| e.to_string())?;
-    let skill = fresh_registry.get("oc_restart_fixture").map_err(|e| format!("fresh registry must see the completed install: {e}"))?;
+    let skill = fresh_registry
+        .get("oc_restart_fixture")
+        .map_err(|e| format!("fresh registry must see the completed install: {e}"))?;
     let _ = skill;
 
     Ok(())
@@ -134,7 +165,8 @@ mod tests {
 
     #[test]
     fn missing_dependency_rejected_real() {
-        validate_missing_dependency_rejected().expect("missing dependency must be rejected, not silently installed");
+        validate_missing_dependency_rejected()
+            .expect("missing dependency must be rejected, not silently installed");
     }
 
     #[test]
@@ -149,7 +181,15 @@ mod tests {
     /// posture avoids performing on a real host.
     #[test]
     fn documented_deferred_scenarios_oom_disk_permission() {
-        let deferred = ["real_oom_injection", "real_disk_full_injection", "real_permission_denied_injection"];
-        assert_eq!(deferred.len(), 3, "these three scenarios are explicitly deferred, not fabricated as passing");
+        let deferred = [
+            "real_oom_injection",
+            "real_disk_full_injection",
+            "real_permission_denied_injection",
+        ];
+        assert_eq!(
+            deferred.len(),
+            3,
+            "these three scenarios are explicitly deferred, not fabricated as passing"
+        );
     }
 }

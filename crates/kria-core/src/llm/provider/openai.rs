@@ -6,12 +6,13 @@ use super::config::ProviderConfig;
 use crate::infra::circuit_breaker::CircuitBreaker;
 use crate::llm::{
     extract_first_json_object, extract_openai_content_text, extract_openai_message_text,
-    extract_openai_tool_calls, ChatMessage, LlmBackend, LlmResponse, StructuredOutputMode,
-    TokenUsage, ToolSchema,
+    extract_openai_message_text_with_reasoning, extract_openai_tool_calls, ChatMessage,
+    ContextTooLargeError, LlmBackend, LlmResponse, StructuredOutputMode, TokenUsage, ToolSchema,
 };
 use async_trait::async_trait;
 use futures::Stream;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -36,6 +37,14 @@ pub struct OpenAIBackend {
     /// by this backend instance (one instance per provider+model). `None` until
     /// the first [`detect_structured_output_mode`](LlmBackend::detect_structured_output_mode).
     structured_cache: Mutex<Option<StructuredOutputMode>>,
+    /// Whether this backend is currently believed to support tool/function
+    /// calling. Starts `true`; flipped to `false` for the remainder of this
+    /// backend's lifetime the first time a 400 response is traced back to the
+    /// `tools` payload (ported from `crate::llm::cloud::CloudBackend`, which
+    /// had this safety net but was not wired to the live `opencode`/zen
+    /// provider path). Once disabled, subsequent `chat`/`chat_stream` calls
+    /// skip sending `tools` entirely rather than repeatedly 400ing.
+    supports_tools: AtomicBool,
 }
 
 impl OpenAIBackend {
@@ -72,6 +81,7 @@ impl OpenAIBackend {
             max_retries: config.endpoint.max_retries,
             structured_override: None,
             structured_cache: Mutex::new(None),
+            supports_tools: AtomicBool::new(true),
         }
     }
 
@@ -92,27 +102,52 @@ impl OpenAIBackend {
             .or_else(|| self.structured_cache.lock().ok().and_then(|c| *c))
     }
 
+    /// Heuristic match for a provider error body indicating the target model
+    /// doesn't support image/vision input (mirrors `local::LocalBackend`'s
+    /// detector of the same name). Used to turn an opaque 400 into an
+    /// actionable error when the request included images.
+    fn looks_like_vision_not_supported_response(body: &str) -> bool {
+        let lower = body.to_ascii_lowercase();
+        lower.contains("image input is not supported")
+            || lower.contains("vision input is not supported")
+            || lower.contains("does not support image")
+            || lower.contains("does not support vision")
+            || (lower.contains("mmproj") && lower.contains("image"))
+            || (lower.contains("mmproj") && lower.contains("vision"))
+    }
+
+    /// Heuristic match for a provider error body indicating the request
+    /// exceeded the model's context window (mirrors `local::LocalBackend`'s
+    /// `looks_like_context_overflow_response`). Cloud providers don't expose
+    /// a queryable context-window size in [`super::config::ProviderConfig`],
+    /// so KRIA cannot pre-emptively clamp `max_tokens` the way the local
+    /// backend does — this only classifies the error AFTER the provider
+    /// rejects it, surfacing [`ContextTooLargeError`] so callers (and the
+    /// circuit breaker) can react the same way they do for the local backend,
+    /// rather than treating it as a generic/opaque 400.
+    fn looks_like_context_overflow_response(body: &str) -> bool {
+        let lower = body.to_ascii_lowercase();
+        (lower.contains("context")
+            && (lower.contains("exceed")
+                || lower.contains("too long")
+                || lower.contains("too large")))
+            || (lower.contains("token")
+                && (lower.contains("exceed") || lower.contains("maximum context")))
+            || lower.contains("context_length_exceeded")
+            || lower.contains("context window")
+            || lower.contains("prompt is too long")
+    }
+
+    /// Build the OpenAI wire-format messages array for the main `chat`/
+    /// `chat_stream` path. Delegates to [`Self::structured_wire_messages`],
+    /// which converts bare `role: "tool"` messages into `role: "user"` turns
+    /// (text-pattern tool calls have no `tool_call_id`, and OpenAI-compatible
+    /// cloud proxies like opencode/zen reject a `role: "tool"` message that
+    /// doesn't reference one with a 400 "tool result's tool id() not found"
+    /// error). This keeps the main chat path and the structured-output probe
+    /// path using the exact same, known-safe message shape.
     fn build_messages_payload(&self, messages: &[ChatMessage]) -> Vec<serde_json::Value> {
-        messages
-            .iter()
-            .map(|msg| {
-                if msg.has_images() {
-                    serde_json::json!({
-                        "role": msg.role,
-                        "content": msg.to_multimodal_content(),
-                    })
-                } else {
-                    let mut m = serde_json::json!({
-                        "role": msg.role,
-                        "content": msg.content,
-                    });
-                    if let Some(ref name) = msg.name {
-                        m["name"] = serde_json::json!(name);
-                    }
-                    m
-                }
-            })
-            .collect()
+        self.structured_wire_messages(messages)
     }
 
     fn build_tools_payload(&self, tools: Option<&[ToolSchema]>) -> Option<serde_json::Value> {
@@ -163,20 +198,31 @@ impl LlmBackend for OpenAIBackend {
         temperature: f32,
         max_tokens: u32,
     ) -> anyhow::Result<LlmResponse> {
-        let mut payload = serde_json::json!({
-            "model": self.model_id,
-            "messages": self.build_messages_payload(messages),
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        });
+        // If a previous call on this backend got a 400 that we traced back to
+        // the `tools` payload, skip sending tools for the remainder of this
+        // backend's lifetime rather than repeatedly 400ing (ported from
+        // `CloudBackend`; see `supports_tools` field docs).
+        let include_tools = self.supports_tools.load(Ordering::Relaxed);
 
-        if let Some(tools_val) = self.build_tools_payload(tools) {
-            payload["tools"] = tools_val;
-        }
+        let build_payload = |with_tools: bool| {
+            let mut p = serde_json::json!({
+                "model": self.model_id,
+                "messages": self.build_messages_payload(messages),
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            });
+            if with_tools {
+                if let Some(tools_val) = self.build_tools_payload(tools) {
+                    p["tools"] = tools_val;
+                }
+            }
+            p
+        };
 
         let url = format!("{}/chat/completions", self.endpoint);
 
         for attempt in 0..self.max_retries {
+            let payload = build_payload(include_tools);
             let mut req = self.client.post(&url).json(&payload);
             if !self.api_key.is_empty() {
                 req = req.bearer_auth(&self.api_key);
@@ -197,12 +243,130 @@ impl LlmBackend for OpenAIBackend {
                 continue;
             }
 
+            if status.as_u16() == 400 {
+                let body_text = resp.text().await.unwrap_or_default();
+                // TEMP diagnostic: log the outgoing payload shape (keys + tool
+                // count + message roles) to root-cause opencode "Upstream request
+                // failed" 400s. Does not log message content/secrets.
+                let payload_keys: Vec<String> = payload
+                    .as_object()
+                    .map(|o| o.keys().cloned().collect())
+                    .unwrap_or_default();
+                let tool_count = payload
+                    .get("tools")
+                    .and_then(|t| t.as_array())
+                    .map(|a| a.len());
+                let roles: Vec<String> = payload
+                    .get("messages")
+                    .and_then(|m| m.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .map(|m| {
+                                m.get("role")
+                                    .and_then(|r| r.as_str())
+                                    .unwrap_or("?")
+                                    .to_string()
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let first_tool = payload
+                    .get("tools")
+                    .and_then(|t| t.as_array())
+                    .and_then(|a| a.first())
+                    .map(|t| t.to_string())
+                    .unwrap_or_default();
+                tracing::warn!(
+                    provider = %self.provider_id,
+                    endpoint = %self.endpoint,
+                    model = %self.model_id,
+                    body = %body_text,
+                    payload_keys = ?payload_keys,
+                    tool_count = ?tool_count,
+                    msg_roles = ?roles,
+                    first_tool = %first_tool.chars().take(300).collect::<String>(),
+                    "400 Bad Request [DIAG]"
+                );
+                // Surface a clear, actionable error when the target model/proxy
+                // doesn't support vision input, instead of a raw provider error
+                // blob. We do NOT silently strip images and retry — that would
+                // change the user's request without their knowledge; the caller
+                // decides how to handle a vision-unsupported model.
+                if messages.iter().any(|m| m.has_images())
+                    && Self::looks_like_vision_not_supported_response(&body_text)
+                {
+                    anyhow::bail!(
+                        "{} model '{}' does not support image/vision input: {body_text}",
+                        self.provider_id,
+                        self.model_id
+                    );
+                }
+                // Classify a context-length-exceeded 400 as ContextTooLargeError
+                // so it's treated the same way as the local backend's overflow
+                // (exempted from circuit-breaker failure counts upstream, and
+                // recognized by history/telegram's error-message filters).
+                if Self::looks_like_context_overflow_response(&body_text) {
+                    return Err(ContextTooLargeError.into());
+                }
+                // If tools were included and the error text references
+                // tool/function calling, this endpoint/proxy doesn't support
+                // it — disable tools for this backend going forward and
+                // retry once, immediately, without them.
+                if include_tools
+                    && (body_text.to_ascii_lowercase().contains("tool")
+                        || body_text.to_ascii_lowercase().contains("function"))
+                {
+                    tracing::warn!(
+                        provider = %self.provider_id,
+                        model = %self.model_id,
+                        "model/endpoint does not support tool calling — disabling tools for this backend"
+                    );
+                    self.supports_tools.store(false, Ordering::Relaxed);
+                    let payload_no_tools = build_payload(false);
+                    let mut retry_req = self.client.post(&url).json(&payload_no_tools);
+                    if !self.api_key.is_empty() {
+                        retry_req = retry_req.bearer_auth(&self.api_key);
+                    }
+                    let body: serde_json::Value =
+                        retry_req.send().await?.error_for_status()?.json().await?;
+                    let choice = &body["choices"][0];
+                    let message = &choice["message"];
+                    let tool_calls = extract_openai_tool_calls(message);
+                    // On a non-tool turn, recover text from the reasoning channel
+                    // if `content` is empty (reasoning-model shape). Never do this
+                    // when tool_calls are present — those turns legitimately have
+                    // null content.
+                    let content = if tool_calls.is_none() {
+                        extract_openai_message_text_with_reasoning(message)
+                    } else {
+                        extract_openai_message_text(message)
+                    };
+                    let usage = body["usage"].as_object().map(|u| TokenUsage {
+                        prompt_tokens: u["prompt_tokens"].as_u64().unwrap_or(0) as u32,
+                        completion_tokens: u["completion_tokens"].as_u64().unwrap_or(0) as u32,
+                        total_tokens: u["total_tokens"].as_u64().unwrap_or(0) as u32,
+                    });
+                    return Ok(LlmResponse {
+                        content,
+                        model: self.model_id.clone(),
+                        usage,
+                        tool_calls,
+                    });
+                }
+                anyhow::bail!("Bad request (400) to '{}': {body_text}", self.endpoint);
+            }
+
             let body: serde_json::Value = resp.error_for_status()?.json().await?;
 
             let choice = &body["choices"][0];
             let message = &choice["message"];
-            let content = extract_openai_message_text(message);
             let tool_calls = extract_openai_tool_calls(message);
+            // Reasoning-channel fallback for non-tool turns (see retry branch).
+            let content = if tool_calls.is_none() {
+                extract_openai_message_text_with_reasoning(message)
+            } else {
+                extract_openai_message_text(message)
+            };
 
             let usage = body["usage"].as_object().map(|u| TokenUsage {
                 prompt_tokens: u["prompt_tokens"].as_u64().unwrap_or(0) as u32,
@@ -232,25 +396,71 @@ impl LlmBackend for OpenAIBackend {
         temperature: f32,
         max_tokens: u32,
     ) -> anyhow::Result<Pin<Box<dyn Stream<Item = String> + Send>>> {
-        let mut payload = serde_json::json!({
-            "model": self.model_id,
-            "messages": self.build_messages_payload(messages),
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "stream": true,
-        });
+        let include_tools = self.supports_tools.load(Ordering::Relaxed);
 
-        if let Some(tools_val) = self.build_tools_payload(tools) {
-            payload["tools"] = tools_val;
-        }
+        let build_payload = |with_tools: bool| {
+            let mut p = serde_json::json!({
+                "model": self.model_id,
+                "messages": self.build_messages_payload(messages),
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "stream": true,
+            });
+            if with_tools {
+                if let Some(tools_val) = self.build_tools_payload(tools) {
+                    p["tools"] = tools_val;
+                }
+            }
+            p
+        };
 
         let url = format!("{}/chat/completions", self.endpoint);
+        let payload = build_payload(include_tools);
         let mut req = self.client.post(&url).json(&payload);
         if !self.api_key.is_empty() {
             req = req.bearer_auth(&self.api_key);
         }
 
-        let resp = req.send().await?.error_for_status()?;
+        let resp = req.send().await?;
+        let status = resp.status();
+
+        // Same tool-disable-and-retry recovery as `chat()`, applied before the
+        // stream is opened (a 400 here means the server rejected the request
+        // outright, not a mid-stream error).
+        let resp = if status.as_u16() == 400 {
+            let body_text = resp.text().await.unwrap_or_default();
+            tracing::warn!(
+                provider = %self.provider_id,
+                endpoint = %self.endpoint,
+                model = %self.model_id,
+                body = %body_text,
+                "stream 400 Bad Request"
+            );
+            if Self::looks_like_context_overflow_response(&body_text) {
+                return Err(ContextTooLargeError.into());
+            }
+            if include_tools
+                && (body_text.to_ascii_lowercase().contains("tool")
+                    || body_text.to_ascii_lowercase().contains("function"))
+            {
+                tracing::warn!(
+                    provider = %self.provider_id,
+                    model = %self.model_id,
+                    "model/endpoint does not support tool calling — disabling tools and retrying stream"
+                );
+                self.supports_tools.store(false, Ordering::Relaxed);
+                let payload_no_tools = build_payload(false);
+                let mut retry_req = self.client.post(&url).json(&payload_no_tools);
+                if !self.api_key.is_empty() {
+                    retry_req = retry_req.bearer_auth(&self.api_key);
+                }
+                retry_req.send().await?.error_for_status()?
+            } else {
+                anyhow::bail!("Bad request (400) to '{}': {body_text}", self.endpoint);
+            }
+        } else {
+            resp.error_for_status()?
+        };
 
         let stream = futures::stream::unfold(resp, |mut resp| async move {
             match resp.chunk().await {
@@ -263,10 +473,27 @@ impl LlmBackend for OpenAIBackend {
                                 continue;
                             }
                             if let Ok(v) = serde_json::from_str::<serde_json::Value>(data) {
-                                let delta_content = &v["choices"][0]["delta"]["content"];
-                                let tok = extract_openai_content_text(delta_content);
+                                let delta = &v["choices"][0]["delta"];
+                                let tok = extract_openai_content_text(&delta["content"]);
                                 if !tok.is_empty() {
                                     tokens.push_str(&tok);
+                                } else {
+                                    // Reasoning-model streaming shape: visible text
+                                    // arrives under `delta.reasoning` (string) or
+                                    // `delta.reasoning_content` while `delta.content`
+                                    // stays empty. Emit it so the reply isn't blank.
+                                    // Provider-neutral (keyed off wire shape only).
+                                    let rtok = delta["reasoning"]
+                                        .as_str()
+                                        .filter(|s| !s.is_empty())
+                                        .or_else(|| {
+                                            delta["reasoning_content"]
+                                                .as_str()
+                                                .filter(|s| !s.is_empty())
+                                        });
+                                    if let Some(rtok) = rtok {
+                                        tokens.push_str(rtok);
+                                    }
                                 }
                             }
                         }
@@ -757,6 +984,298 @@ impl OpenAIBackend {
         body["choices"][0]["message"]["reasoning_content"]
             .as_str()
             .map(|s| s.to_string())
+    }
+}
+
+#[cfg(test)]
+mod message_wire_tests {
+    use super::*;
+    use crate::llm::provider::config::{ProviderConfig, ProviderType};
+
+    fn backend() -> OpenAIBackend {
+        let mut cfg = ProviderConfig::new("opencode", ProviderType::OpenAICompatible);
+        cfg.endpoint.base_url = "https://opencode.ai/zen/v1".into();
+        cfg.endpoint.api_key = "test-key".into();
+        cfg.active_model = "deepseek-v4-flash-free".into();
+        OpenAIBackend::from_config(&cfg)
+    }
+
+    /// Regression test for the bug that caused a live 400 against
+    /// opencode.ai/zen/v1 on the second round of a tool-calling conversation:
+    /// `build_messages_payload` (used by the main `chat`/`chat_stream` path)
+    /// must convert bare `role: "tool"` messages into `role: "user"` turns,
+    /// same as `structured_wire_messages` already does for the probe path.
+    #[test]
+    fn build_messages_payload_converts_bare_tool_role_to_user() {
+        let b = backend();
+        let messages = vec![
+            ChatMessage {
+                role: "user".into(),
+                content: "List all the Skills in marketplace".into(),
+                name: None,
+                images: None,
+            },
+            ChatMessage {
+                role: "assistant".into(),
+                content:
+                    "<tool_call> {\"name\":\"list_installed_skills\",\"arguments\":{}} </tool_call>"
+                        .into(),
+                name: None,
+                images: None,
+            },
+            ChatMessage {
+                role: "tool".into(),
+                content: "{\"skills\":[],\"count\":0}".into(),
+                name: Some("list_installed_skills".into()),
+                images: None,
+            },
+        ];
+
+        let wire = b.build_messages_payload(&messages);
+
+        assert_eq!(wire.len(), 3);
+        assert_eq!(
+            wire[2]["role"], "user",
+            "role:\"tool\" must become role:\"user\""
+        );
+        let content = wire[2]["content"].as_str().expect("plain text content");
+        assert!(content.contains("list_installed_skills"));
+        assert!(content.contains("count"));
+    }
+
+    /// A reasoning model (e.g. opencode/zen `mimo-v2.5-free`) returns the final
+    /// answer under `reasoning` / `reasoning_details[].text` with `content: null`.
+    /// On a non-tool turn this must be recovered as visible text rather than an
+    /// empty reply. Provider-neutral: keyed off wire shape, not model name.
+    #[test]
+    fn reasoning_channel_recovered_when_content_null() {
+        // opencode/zen shape: reasoning + reasoning_details, content null.
+        let msg = serde_json::json!({
+            "role": "assistant",
+            "content": serde_json::Value::Null,
+            "reasoning": "Your public IP is 203.0.113.5.",
+            "reasoning_details": [{ "type": "reasoning.text", "text": "Your public IP is 203.0.113.5.", "index": 0 }],
+        });
+        assert_eq!(
+            extract_openai_message_text_with_reasoning(&msg),
+            "Your public IP is 203.0.113.5."
+        );
+
+        // DeepSeek shape: reasoning_content.
+        let msg2 = serde_json::json!({
+            "role": "assistant",
+            "content": "",
+            "reasoning_content": "The answer is 42.",
+        });
+        assert_eq!(
+            extract_openai_message_text_with_reasoning(&msg2),
+            "The answer is 42."
+        );
+
+        // reasoning_details-only shape (no top-level `reasoning` string).
+        let msg3 = serde_json::json!({
+            "role": "assistant",
+            "content": serde_json::Value::Null,
+            "reasoning_details": [{ "type": "reasoning.text", "text": "Only in details." }],
+        });
+        assert_eq!(
+            extract_openai_message_text_with_reasoning(&msg3),
+            "Only in details."
+        );
+    }
+
+    /// When `content` is present it wins — the reasoning channel is a fallback
+    /// only, never allowed to override a real answer.
+    #[test]
+    fn content_wins_over_reasoning_channel() {
+        let msg = serde_json::json!({
+            "role": "assistant",
+            "content": "Real answer.",
+            "reasoning": "internal chain of thought that must not leak",
+        });
+        assert_eq!(
+            extract_openai_message_text_with_reasoning(&msg),
+            "Real answer."
+        );
+    }
+
+    #[test]
+    fn build_messages_payload_passes_through_non_tool_roles_unchanged() {
+        let b = backend();
+        let messages = vec![ChatMessage {
+            role: "user".into(),
+            content: "hi".into(),
+            name: None,
+            images: None,
+        }];
+
+        let wire = b.build_messages_payload(&messages);
+        assert_eq!(wire[0]["role"], "user");
+        assert_eq!(wire[0]["content"], "hi");
+    }
+
+    fn backend_at(endpoint: String) -> OpenAIBackend {
+        let mut cfg = ProviderConfig::new("test-openai", ProviderType::OpenAICompatible);
+        cfg.endpoint.base_url = endpoint;
+        cfg.endpoint.api_key = "test-key".into();
+        cfg.active_model = "test-model".into();
+        cfg.endpoint.max_retries = 2;
+        OpenAIBackend::from_config(&cfg)
+    }
+
+    fn ok_message_body() -> serde_json::Value {
+        serde_json::json!({
+            "choices": [{ "message": { "role": "assistant", "content": "hi there" } }],
+            "usage": { "prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2 }
+        })
+    }
+
+    /// Ported safety net (issue #3/#6): on a 400 whose body mentions
+    /// "tool"/"function", `chat()` must disable tools for this backend and
+    /// transparently retry without them — not just bail with a raw error.
+    #[tokio::test]
+    async fn chat_disables_tools_and_retries_on_400_mentioning_tools() {
+        use wiremock::matchers::{body_string_contains, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+
+        // First call includes "tools" in the body -> reject with a tool-related 400.
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .and(body_string_contains("\"tools\""))
+            .respond_with(
+                ResponseTemplate::new(400)
+                    .set_body_string("this model does not support tool calling"),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        // Retry without "tools" -> succeed.
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(ok_message_body()))
+            .mount(&server)
+            .await;
+
+        let b = backend_at(server.uri());
+        let tools = vec![ToolSchema {
+            name: "list_installed_skills".into(),
+            description: "list skills".into(),
+            parameters: serde_json::json!({"type": "object", "properties": {}}),
+        }];
+        let messages = vec![ChatMessage {
+            role: "user".into(),
+            content: "list skills".into(),
+            name: None,
+            images: None,
+        }];
+
+        let resp = b
+            .chat(&messages, Some(&tools), 0.7, 256)
+            .await
+            .expect("should recover by disabling tools and retrying");
+        assert_eq!(resp.content, "hi there");
+
+        // Subsequent calls must skip tools entirely (no more 400s needed).
+        let resp2 = b
+            .chat(&messages, Some(&tools), 0.7, 256)
+            .await
+            .expect("subsequent call should not resend tools");
+        assert_eq!(resp2.content, "hi there");
+    }
+
+    /// A 400 that mentions neither "tool" nor "function" (and wasn't sent with
+    /// tools at all) must bail with a real error rather than looping forever.
+    #[tokio::test]
+    async fn chat_bails_on_400_unrelated_to_tools() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(400).set_body_string("malformed request"))
+            .mount(&server)
+            .await;
+
+        let b = backend_at(server.uri());
+        let messages = vec![ChatMessage {
+            role: "user".into(),
+            content: "hi".into(),
+            name: None,
+            images: None,
+        }];
+
+        let err = b.chat(&messages, None, 0.7, 256).await.unwrap_err();
+        assert!(err.to_string().contains("Bad request"));
+    }
+
+    /// Issue #8: a 400 whose body indicates the model can't handle image
+    /// input (and the request included images) must surface as a clear,
+    /// actionable error rather than a generic 400/tool-retry path.
+    #[tokio::test]
+    async fn chat_surfaces_actionable_error_for_vision_unsupported_400() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(400)
+                    .set_body_string("Error: image input is not supported by this model"),
+            )
+            .mount(&server)
+            .await;
+
+        let b = backend_at(server.uri());
+        let messages = vec![ChatMessage {
+            role: "user".into(),
+            content: "what is in this image?".into(),
+            name: None,
+            images: Some(vec![crate::llm::ImageAttachment {
+                data: "aGVsbG8=".into(),
+                mime_type: "image/png".into(),
+            }]),
+        }];
+
+        let err = b.chat(&messages, None, 0.7, 256).await.unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("does not support image"), "got: {msg}");
+    }
+
+    /// Issue #11: a 400 indicating the request exceeded the model's context
+    /// window must be classified as `ContextTooLargeError`, matching the
+    /// local backend's behavior, rather than an opaque generic error.
+    #[tokio::test]
+    async fn chat_classifies_context_overflow_400_as_context_too_large_error() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(400).set_body_string(
+                "This model's maximum context length is 8192 tokens, but the request exceeded it",
+            ))
+            .mount(&server)
+            .await;
+
+        let b = backend_at(server.uri());
+        let messages = vec![ChatMessage {
+            role: "user".into(),
+            content: "hi".into(),
+            name: None,
+            images: None,
+        }];
+
+        let err = b.chat(&messages, None, 0.7, 256).await.unwrap_err();
+        assert!(
+            err.downcast_ref::<ContextTooLargeError>().is_some(),
+            "expected ContextTooLargeError, got: {err}"
+        );
     }
 }
 

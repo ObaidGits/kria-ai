@@ -31,9 +31,10 @@ impl Budgets {
 /// a moderately populated (100-skill) real registry — using the SAME real
 /// `SemanticSkillRouter`/`ProductionSkillRegistry` exercised throughout this
 /// session, not a synthetic benchmark harness.
-pub fn measure_routing_and_lookup() -> Result<(f64, f64), String> {
-    use kria_core::openclaw::registry::{DiscoverySource, ProductionSkillRegistry, SkillMetadata, SkillState};
-    use kria_core::openclaw::semantic_router::{ResourcePressure, RoutingContext, RoutingIntent, SemanticSkillRouter};
+pub fn measure_registry_lookup() -> Result<f64, String> {
+    use kria_core::openclaw::registry::{
+        DiscoverySource, ProductionSkillRegistry, SkillMetadata, SkillState,
+    };
     use kria_core::openclaw::types::{ResourceClass, SkillCapabilities, TrustTier};
     use kria_core::safety::RiskLevel;
     use std::sync::Arc;
@@ -51,7 +52,9 @@ pub fn measure_routing_and_lookup() -> Result<(f64, f64), String> {
                 publisher: "perf".into(),
                 version: "1.0.0".into(),
                 category: "test".into(),
-                discovery_source: DiscoverySource::Bundled { path: "test".into() },
+                discovery_source: DiscoverySource::Bundled {
+                    path: "test".into(),
+                },
                 discovered_at: chrono::Utc::now(),
                 capabilities: SkillCapabilities::default(),
                 runtime_requirements: "docker".into(),
@@ -79,32 +82,10 @@ pub fn measure_routing_and_lookup() -> Result<(f64, f64), String> {
     registry.get("oc_perf_50").map_err(|e| e.to_string())?;
     let lookup_ms = lookup_start.elapsed().as_secs_f64() * 1000.0;
 
-    let router = SemanticSkillRouter::new(registry, None);
-    let intent = RoutingIntent {
-        request: "Perf 50".into(),
-        required_capabilities: vec![],
-        max_risk: RiskLevel::Yellow,
-        preferred_resource: None,
-        context: RoutingContext {
-            resource_pressure: ResourcePressure::Low,
-            gpu_memory_mb: None,
-            network_available: true,
-            session_trust: TrustTier::Local,
-        },
-    };
-    let route_start = Instant::now();
-    let handle = tokio::runtime::Handle::try_current();
-    let routing_ms = if let Ok(h) = handle {
-        let start = Instant::now();
-        h.block_on(router.route(intent)).map_err(|e| e.to_string())?;
-        start.elapsed().as_secs_f64() * 1000.0
-    } else {
-        let rt = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
-        rt.block_on(router.route(intent)).map_err(|e| e.to_string())?;
-        route_start.elapsed().as_secs_f64() * 1000.0
-    };
-
-    Ok((routing_ms, lookup_ms))
+    // M12: semantic-routing latency measurement removed with the legacy
+    // `SemanticSkillRouter`. Capability discovery latency is now a CPP concern
+    // (federated index), measured in the capability suite, not here.
+    Ok(lookup_ms)
 }
 
 /// Measures real marketplace search latency against the real
@@ -122,8 +103,13 @@ pub fn measure_marketplace_search_ms() -> f64 {
     // Simulate the real cost shape: JSON parse + linear scan, matching
     // ClawHubClient::search_remote's real filter logic complexity, over a
     // representative 100-entry payload built in-memory (no network).
-    let entries: Vec<(String, String)> = (0..100).map(|i| (format!("oc_market_{i}"), format!("Market skill {i}"))).collect();
-    let _matches: Vec<_> = entries.iter().filter(|(_, desc)| desc.contains("50")).collect();
+    let entries: Vec<(String, String)> = (0..100)
+        .map(|i| (format!("oc_market_{i}"), format!("Market skill {i}")))
+        .collect();
+    let _matches: Vec<_> = entries
+        .iter()
+        .filter(|(_, desc)| desc.contains("50"))
+        .collect();
     start.elapsed().as_secs_f64() * 1000.0
 }
 
@@ -135,22 +121,40 @@ impl PerformanceReport {
     pub fn assert_within_budgets(&self) -> Result<(), String> {
         let mut violations = Vec::new();
         if self.semantic_routing_ms >= Budgets::SEMANTIC_ROUTING_MS {
-            violations.push(format!("semantic routing {:.3}ms >= budget {}ms", self.semantic_routing_ms, Budgets::SEMANTIC_ROUTING_MS));
+            violations.push(format!(
+                "semantic routing {:.3}ms >= budget {}ms",
+                self.semantic_routing_ms,
+                Budgets::SEMANTIC_ROUTING_MS
+            ));
         }
         if self.registry_lookup_ms >= Budgets::REGISTRY_LOOKUP_MS {
-            violations.push(format!("registry lookup {:.3}ms >= budget {}ms", self.registry_lookup_ms, Budgets::REGISTRY_LOOKUP_MS));
+            violations.push(format!(
+                "registry lookup {:.3}ms >= budget {}ms",
+                self.registry_lookup_ms,
+                Budgets::REGISTRY_LOOKUP_MS
+            ));
         }
         if let Some(reuse) = self.container_reuse_ms {
             if reuse >= Budgets::CONTAINER_REUSE_MS {
-                violations.push(format!("container reuse {reuse:.3}ms >= budget {}ms", Budgets::CONTAINER_REUSE_MS));
+                violations.push(format!(
+                    "container reuse {reuse:.3}ms >= budget {}ms",
+                    Budgets::CONTAINER_REUSE_MS
+                ));
             }
         }
         if self.marketplace_search_ms >= Budgets::MARKETPLACE_SEARCH_MS {
-            violations.push(format!("marketplace search {:.3}ms >= budget {}ms", self.marketplace_search_ms, Budgets::MARKETPLACE_SEARCH_MS));
+            violations.push(format!(
+                "marketplace search {:.3}ms >= budget {}ms",
+                self.marketplace_search_ms,
+                Budgets::MARKETPLACE_SEARCH_MS
+            ));
         }
         if let Some(cold_start) = self.container_cold_start_ms {
             if cold_start >= Budgets::CONTAINER_COLD_START_MS {
-                violations.push(format!("container cold start {cold_start:.3}ms >= budget {}ms", Budgets::CONTAINER_COLD_START_MS));
+                violations.push(format!(
+                    "container cold start {cold_start:.3}ms >= budget {}ms",
+                    Budgets::CONTAINER_COLD_START_MS
+                ));
             }
         }
         if violations.is_empty() {
@@ -166,19 +170,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn task29_routing_lookup_within_budget() {
-        let (routing_ms, lookup_ms) = measure_routing_and_lookup().expect("measurement must succeed");
-        eprintln!("[PERF] semantic_routing={routing_ms:.3}ms (budget {}) registry_lookup={lookup_ms:.3}ms (budget {})", Budgets::SEMANTIC_ROUTING_MS, Budgets::REGISTRY_LOOKUP_MS);
-        assert!(lookup_ms < Budgets::REGISTRY_LOOKUP_MS, "registry lookup {lookup_ms:.3}ms exceeds budget {}ms", Budgets::REGISTRY_LOOKUP_MS);
-        // Semantic routing budget is generous at 20ms; report honestly if exceeded rather than weakening the assertion.
-        if routing_ms >= Budgets::SEMANTIC_ROUTING_MS {
-            eprintln!("[PERF] WARNING: semantic routing {routing_ms:.3}ms exceeds the {}ms budget (reported honestly, not weakened)", Budgets::SEMANTIC_ROUTING_MS);
-        }
+    fn task29_registry_lookup_within_budget() {
+        let lookup_ms = measure_registry_lookup().expect("measurement must succeed");
+        eprintln!(
+            "[PERF] registry_lookup={lookup_ms:.3}ms (budget {})",
+            Budgets::REGISTRY_LOOKUP_MS
+        );
+        assert!(
+            lookup_ms < Budgets::REGISTRY_LOOKUP_MS,
+            "registry lookup {lookup_ms:.3}ms exceeds budget {}ms",
+            Budgets::REGISTRY_LOOKUP_MS
+        );
     }
 
     #[tokio::test]
     async fn task29_container_reuse_and_cold_start_real_docker() {
-        if crate::openclaw_eval::rig::verify_docker_reachable().await.is_err() {
+        if crate::openclaw_eval::rig::verify_docker_reachable()
+            .await
+            .is_err()
+        {
             eprintln!("SKIPPED (Outcome::Skipped, not Pass): docker not reachable");
             return;
         }
@@ -207,30 +217,60 @@ mod tests {
 
         // Warm reuse: checkout+checkin an already-warm container.
         let reuse_start = Instant::now();
-        let handle = rig.pool.checkout(ResourceClass::Light, "perf-test").await.expect("checkout must succeed");
+        let handle = rig
+            .pool
+            .checkout(ResourceClass::Light, "perf-test")
+            .await
+            .expect("checkout must succeed");
         let reuse_ms = reuse_start.elapsed().as_secs_f64() * 1000.0;
-        rig.pool.checkin(handle).await.expect("checkin must succeed");
+        rig.pool
+            .checkin(handle)
+            .await
+            .expect("checkin must succeed");
 
-        eprintln!("[PERF] container_reuse(checkout)={reuse_ms:.1}ms (budget {})", Budgets::CONTAINER_REUSE_MS);
-        assert!(reuse_ms < Budgets::CONTAINER_REUSE_MS, "warm container checkout {reuse_ms:.1}ms exceeds budget {}ms", Budgets::CONTAINER_REUSE_MS);
+        eprintln!(
+            "[PERF] container_reuse(checkout)={reuse_ms:.1}ms (budget {})",
+            Budgets::CONTAINER_REUSE_MS
+        );
+        assert!(
+            reuse_ms < Budgets::CONTAINER_REUSE_MS,
+            "warm container checkout {reuse_ms:.1}ms exceeds budget {}ms",
+            Budgets::CONTAINER_REUSE_MS
+        );
 
         // Single cold-container-creation budget: drain ALL warm Light
         // containers, then measure ONE more checkout (forces a real cold
         // create) against the 5000ms budget — the correctly-scoped check.
         let mut drained = Vec::new();
         loop {
-            match tokio::time::timeout(std::time::Duration::from_millis(500), rig.pool.checkout(ResourceClass::Light, "perf-drain")).await {
+            match tokio::time::timeout(
+                std::time::Duration::from_millis(500),
+                rig.pool.checkout(ResourceClass::Light, "perf-drain"),
+            )
+            .await
+            {
                 Ok(Ok(h)) => drained.push(h),
                 _ => break,
             }
         }
         let cold_start_start = Instant::now();
-        let cold_handle = rig.pool.checkout(ResourceClass::Light, "perf-cold").await.expect("cold checkout must succeed");
+        let cold_handle = rig
+            .pool
+            .checkout(ResourceClass::Light, "perf-cold")
+            .await
+            .expect("cold checkout must succeed");
         let cold_start_ms = cold_start_start.elapsed().as_secs_f64() * 1000.0;
         eprintln!("[PERF] container_cold_start(single, warm pool drained)={cold_start_ms:.1}ms (budget {})", Budgets::CONTAINER_COLD_START_MS);
-        assert!(cold_start_ms < Budgets::CONTAINER_COLD_START_MS, "single cold container start {cold_start_ms:.1}ms exceeds budget {}ms", Budgets::CONTAINER_COLD_START_MS);
+        assert!(
+            cold_start_ms < Budgets::CONTAINER_COLD_START_MS,
+            "single cold container start {cold_start_ms:.1}ms exceeds budget {}ms",
+            Budgets::CONTAINER_COLD_START_MS
+        );
 
-        rig.pool.checkin(cold_handle).await.expect("checkin must succeed");
+        rig.pool
+            .checkin(cold_handle)
+            .await
+            .expect("checkin must succeed");
         for h in drained {
             rig.pool.checkin(h).await.expect("checkin must succeed");
         }
@@ -241,8 +281,15 @@ mod tests {
     #[test]
     fn task29_marketplace_search_within_budget() {
         let ms = measure_marketplace_search_ms();
-        eprintln!("[PERF] marketplace_search={ms:.3}ms (budget {})", Budgets::MARKETPLACE_SEARCH_MS);
-        assert!(ms < Budgets::MARKETPLACE_SEARCH_MS, "marketplace search {ms:.3}ms exceeds budget {}ms", Budgets::MARKETPLACE_SEARCH_MS);
+        eprintln!(
+            "[PERF] marketplace_search={ms:.3}ms (budget {})",
+            Budgets::MARKETPLACE_SEARCH_MS
+        );
+        assert!(
+            ms < Budgets::MARKETPLACE_SEARCH_MS,
+            "marketplace search {ms:.3}ms exceeds budget {}ms",
+            Budgets::MARKETPLACE_SEARCH_MS
+        );
     }
 
     /// Honest note: KRIA full-app restart (<10s budget) cannot be measured
@@ -252,7 +299,10 @@ mod tests {
     #[test]
     fn finding_restart_budget_not_measurable_without_desktop_launch() {
         let measured = false;
-        assert!(!measured, "if this fails, a real desktop restart timing has been added — update this test");
+        assert!(
+            !measured,
+            "if this fails, a real desktop restart timing has been added — update this test"
+        );
         let _ = Budgets::RESTART_MS;
     }
 }

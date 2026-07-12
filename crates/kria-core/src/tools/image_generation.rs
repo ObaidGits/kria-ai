@@ -12,6 +12,7 @@ use crate::infra::ToolResult;
 use crate::llm::orchestrator::Orchestrator;
 use crate::safety::RiskLevel;
 use crate::tools::registry::{ParamDef, ToolDef, ToolHandler, ToolRegistry};
+use crate::tools::ToolContext;
 
 type EmitFn = dyn Fn(&str, serde_json::Value) + Send + Sync + 'static;
 
@@ -63,8 +64,41 @@ impl Drop for GenerationCancelGuard {
     }
 }
 
+/// Map a resolved `image_generation.image_mode` onto the per-call routing flags
+/// on a `generate_image` params object (settings-config-revamp Task 14). Only sets
+/// a flag when the caller hasn't already set it. `local_only` → `force_local`,
+/// `cloud_only` → `force_cloud`; `auto`/anything else leaves params untouched.
+fn apply_image_mode_to_params(params: &mut serde_json::Value, image_mode: &str) {
+    let mode = image_mode.trim().to_ascii_lowercase();
+    let Some(obj) = params.as_object_mut() else {
+        return;
+    };
+    if mode == "local_only" && obj.get("force_local").and_then(|v| v.as_bool()) != Some(true) {
+        obj.insert("force_local".to_string(), serde_json::json!(true));
+    } else if mode == "cloud_only" && obj.get("force_cloud").and_then(|v| v.as_bool()) != Some(true)
+    {
+        obj.insert("force_cloud".to_string(), serde_json::json!(true));
+    }
+}
+
 #[async_trait]
 impl ToolHandler for GenerateImageHandler {
+    async fn execute_with_context(
+        &self,
+        mut params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        // settings-config-revamp Task 14: honor a turn-scoped RequestOverride for
+        // image_generation.image_mode ("generate this one using local/cloud AI").
+        // effective_config() = live config + this turn's whitelisted overlay; we map
+        // the resolved image_mode onto the per-call force_local/force_cloud flags
+        // (only when the caller didn't already set them explicitly).
+        if let Some(cfg) = ctx.effective_config().await {
+            apply_image_mode_to_params(&mut params, &cfg.image_generation.image_mode);
+        }
+        self.execute(params).await
+    }
+
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
         let prompt = match params["prompt"].as_str() {
             Some(p) if !p.trim().is_empty() => p.trim().to_string(),
@@ -83,6 +117,7 @@ impl ToolHandler for GenerateImageHandler {
         let count = params["count"].as_u64().unwrap_or(1).clamp(1, 4) as u32;
         let seed = params["seed"].as_u64();
         let force_cloud = params["force_cloud"].as_bool().unwrap_or(false);
+        let force_local = params["force_local"].as_bool().unwrap_or(false);
 
         // New optional params.
         let quality: Option<QualityProfile> =
@@ -100,6 +135,7 @@ impl ToolHandler for GenerateImageHandler {
             count,
             seed,
             force_cloud,
+            force_local,
             quality,
             negative,
             enhance,
@@ -254,8 +290,53 @@ pub fn register(
                     "Apply template-based prompt enhancement (adds style-specific keywords). Default: true when prompt is short.",
                     false,
                 ),
+                param(
+                    "force_local",
+                    "boolean",
+                    "Force on-device (local GPU) generation for this request only, e.g. when the user says \"generate this using local AI\". Turn-scoped; nothing is persisted. Wins over cloud. Default: false.",
+                    false,
+                ),
             ],
         },
         Arc::new(GenerateImageHandler { backend, emit_fn, llm_orch }),
     );
+}
+
+#[cfg(test)]
+mod image_mode_override_tests {
+    use super::apply_image_mode_to_params;
+
+    #[test]
+    fn local_only_sets_force_local() {
+        let mut p = serde_json::json!({ "prompt": "a cat" });
+        apply_image_mode_to_params(&mut p, "local_only");
+        assert_eq!(p["force_local"], true);
+        assert!(p.get("force_cloud").is_none());
+    }
+
+    #[test]
+    fn cloud_only_sets_force_cloud() {
+        let mut p = serde_json::json!({ "prompt": "a cat" });
+        apply_image_mode_to_params(&mut p, "cloud_only");
+        assert_eq!(p["force_cloud"], true);
+    }
+
+    #[test]
+    fn auto_leaves_params_untouched() {
+        let mut p = serde_json::json!({ "prompt": "a cat" });
+        apply_image_mode_to_params(&mut p, "auto");
+        assert!(p.get("force_local").is_none());
+        assert!(p.get("force_cloud").is_none());
+    }
+
+    #[test]
+    fn does_not_override_explicit_caller_flag() {
+        // Caller already asked for cloud — a local_only override must not silently
+        // flip an explicit false to true beyond the documented mapping. We only add
+        // force_local when it isn't already true; explicit force_cloud stays.
+        let mut p = serde_json::json!({ "prompt": "a cat", "force_cloud": true });
+        apply_image_mode_to_params(&mut p, "local_only");
+        assert_eq!(p["force_cloud"], true);
+        assert_eq!(p["force_local"], true);
+    }
 }

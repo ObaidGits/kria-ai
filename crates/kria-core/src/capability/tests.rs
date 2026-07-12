@@ -330,6 +330,8 @@ async fn fake_provider_lifecycle_defaults_to_unsupported() {
         .acquire(&super::provider::AcquireRequest {
             capability_tag: "x".into(),
             hint: None,
+            capability_id: None,
+            proposed_graph: None,
             context: RequestContext::new(),
         })
         .await
@@ -1067,4 +1069,282 @@ fn learning_success_signal_shifts_ranking() {
         after[0].descriptor.capability_id, "alpha",
         "the historically-successful capability must rank first after learning"
     );
+}
+
+// ─── OpenClaw Intelligence Enhancements: CKB learning loop (P1/P2 e2e) ───────
+
+/// End-to-end: executing a capability through the platform records the outcome
+/// to the wired CKB (learning layer), and the confidence selector then reuses
+/// the learned signal. Real code paths (registry → platform.execute → CKB →
+/// selector), no GUI/LLM/Docker needed (spec R1.4 / R3 / Property 10-adjacent).
+#[tokio::test]
+async fn ckb_learning_loop_records_and_reuses() {
+    use super::intelligence::{
+        CapabilityKnowledge, DefaultCapabilitySelector, SqliteCapabilityKnowledge,
+    };
+
+    let index = test_index();
+    let registry = ProviderRegistry::new(index);
+    registry.register(Arc::new(FakeProvider::new(
+        "fake",
+        vec![sample_descriptor("fake", "cap1")],
+    )));
+
+    let ckb: Arc<dyn CapabilityKnowledge> =
+        Arc::new(SqliteCapabilityKnowledge::in_memory().unwrap());
+    // Register the capability as installed so it is grounded + listable.
+    ckb.record_install(&sample_descriptor("fake", "cap1"))
+        .await
+        .unwrap();
+
+    let platform = CapabilityPlatform::new(Arc::new(registry)).with_knowledge(ckb.clone());
+    platform.refresh().await;
+
+    // Before execution: unobserved ⇒ neutral 0.5.
+    assert_eq!(ckb.success_rate("fake", "cap1").await, 0.5);
+
+    // Execute twice (both succeed via FakeProvider echo).
+    for _ in 0..2 {
+        let out = platform
+            .execute(CapabilityRequest {
+                provider_id: "fake".into(),
+                capability_id: "cap1".into(),
+                args: serde_json::json!({}),
+                context: RequestContext::new(),
+                granted_effects: vec![],
+            })
+            .await
+            .unwrap();
+        assert!(matches!(out, CapabilityOutcome::Value(_)));
+    }
+
+    // The CKB learned the successes (spec R1.4).
+    assert_eq!(ckb.success_rate("fake", "cap1").await, 1.0);
+    // And grounding lists exactly the installed capability (no hallucination).
+    assert_eq!(ckb.list_installed().await.unwrap().len(), 1);
+
+    // The selector, consulting the CKB, ranks the proven capability and (given a
+    // strong lexical/semantic score) chooses to reuse it.
+    let selector = DefaultCapabilitySelector::with_default_policy();
+    let hits = platform.discover("cap1", 5).unwrap();
+    if !hits.is_empty() {
+        let selection = selector.select(&hits, platform.knowledge()).await;
+        // The learned candidate is present and carries the learned success.
+        assert!(selection
+            .candidates
+            .iter()
+            .any(|c| c.descriptor.capability_id == "cap1" && c.learned_success == 1.0));
+    }
+}
+
+/// A declined outcome must NOT count as a learned success (honest learning).
+#[tokio::test]
+async fn ckb_does_not_learn_success_on_decline() {
+    use super::intelligence::{CapabilityKnowledge, SqliteCapabilityKnowledge};
+
+    let index = test_index();
+    let registry = ProviderRegistry::new(index);
+    // FakeProvider declines any capability it does not expose.
+    registry.register(Arc::new(FakeProvider::new("fake", vec![])));
+    let ckb: Arc<dyn CapabilityKnowledge> =
+        Arc::new(SqliteCapabilityKnowledge::in_memory().unwrap());
+    let platform = CapabilityPlatform::new(Arc::new(registry)).with_knowledge(ckb.clone());
+    platform.refresh().await;
+
+    let out = platform
+        .execute(CapabilityRequest {
+            provider_id: "fake".into(),
+            capability_id: "missing".into(),
+            args: serde_json::json!({}),
+            context: RequestContext::new(),
+            granted_effects: vec![],
+        })
+        .await
+        .unwrap();
+    assert!(matches!(out, CapabilityOutcome::Declined { .. }));
+    // Declined ⇒ recorded as a non-success (rate 0.0), never a fake success.
+    assert_eq!(ckb.success_rate("fake", "missing").await, 0.0);
+}
+
+// ─── Wave 6: Brain-owned acquisition pipeline (ranking → trust gate → CKB) ────
+
+use super::intelligence::{CatalogRanker, CatalogRankingPolicy, TrustPolicy};
+use std::sync::Mutex as StdMutex;
+
+/// A lifecycle-capable in-memory provider: exposes a catalog, and `acquire`
+/// installs EXACTLY the Brain-selected `capability_id`, returning a descriptor
+/// whose declared trust tier is taken from the catalog entry. Records the last
+/// acquired `capability_id` so tests can prove the Brain (not the provider) chose.
+struct LifecycleFake {
+    id: super::ProviderId,
+    catalog: Vec<CapabilityDescriptor>,
+    installed: StdMutex<Vec<CapabilityDescriptor>>,
+    last_acquired: StdMutex<Option<String>>,
+}
+
+impl LifecycleFake {
+    fn new(id: &str, catalog: Vec<CapabilityDescriptor>) -> Self {
+        Self {
+            id: id.into(),
+            catalog,
+            installed: StdMutex::new(Vec::new()),
+            last_acquired: StdMutex::new(None),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl CapabilityProvider for LifecycleFake {
+    fn provider_id(&self) -> &super::ProviderId {
+        &self.id
+    }
+    async fn negotiate(
+        &self,
+        client: &ClientCapabilities,
+    ) -> Result<super::protocol::ProtocolSession, CapError> {
+        // Advertise lifecycle so the platform will call acquire.
+        Ok(client.negotiate(
+            self.id.clone(),
+            ProtocolVersion::CURRENT,
+            FeatureSet::mandatory().with(Feature::Lifecycle),
+            serde_json::Map::new(),
+        ))
+    }
+    async fn describe(
+        &self,
+        _s: &super::protocol::ProtocolSession,
+    ) -> Result<Vec<CapabilityDescriptor>, CapError> {
+        Ok(self.installed.lock().unwrap().clone())
+    }
+    async fn catalog(&self) -> Result<Vec<CapabilityDescriptor>, CapError> {
+        Ok(self.catalog.clone())
+    }
+    async fn acquire(
+        &self,
+        req: &super::provider::AcquireRequest,
+    ) -> Result<CapabilityDescriptor, CapError> {
+        let chosen = req
+            .capability_id
+            .clone()
+            .ok_or_else(|| CapError::Acquire("Brain did not select a capability".into()))?;
+        *self.last_acquired.lock().unwrap() = Some(chosen.clone());
+        let d = self
+            .catalog
+            .iter()
+            .find(|d| d.capability_id == chosen)
+            .cloned()
+            .ok_or_else(|| CapError::Acquire(format!("no catalog entry '{chosen}'")))?;
+        self.installed.lock().unwrap().push(d.clone());
+        Ok(d)
+    }
+    async fn execute(&self, req: CapabilityRequest) -> Result<CapabilityOutcome, CapError> {
+        Ok(CapabilityOutcome::Value(
+            serde_json::json!({ "ran": req.capability_id }),
+        ))
+    }
+    async fn health(&self) -> ProviderHealth {
+        ProviderHealth::Ready
+    }
+}
+
+fn catalog_desc(provider: &str, cap: &str, desc: &str, tier: &str) -> CapabilityDescriptor {
+    let mut d = desc_with(provider, cap, cap, desc, &[]);
+    d.version = "1.0.0".to_string();
+    d.trust.tier = Some(tier.to_string());
+    d
+}
+
+fn platform_with_marketplace(provider: LifecycleFake) -> Arc<CapabilityPlatform> {
+    let registry = ProviderRegistry::new(test_index());
+    registry.register(Arc::new(provider));
+    Arc::new(
+        CapabilityPlatform::new(Arc::new(registry)).with_marketplace_v2(
+            CatalogRanker::new(CatalogRankingPolicy::default()),
+            std::time::Duration::from_secs(60),
+        ),
+    )
+}
+
+#[tokio::test]
+async fn brain_selects_and_activates_trusted_capability() {
+    let provider = LifecycleFake::new(
+        "market",
+        vec![catalog_desc(
+            "market",
+            "pdf_ocr",
+            "extract text from scanned pdf documents",
+            "community",
+        )],
+    );
+    let platform = platform_with_marketplace(provider);
+    platform.refresh().await;
+
+    let d = platform
+        .acquire_for_goal("extract text from a scanned pdf")
+        .await
+        .expect("trusted capability should install");
+    assert_eq!(d.capability_id, "pdf_ocr");
+    assert!(!platform.is_quarantined("market", "pdf_ocr"));
+}
+
+#[tokio::test]
+async fn brain_quarantines_untrusted_and_blocks_execution() {
+    let provider = LifecycleFake::new(
+        "market",
+        vec![catalog_desc(
+            "market",
+            "sketchy_tool",
+            "do something with files",
+            "untrusted",
+        )],
+    );
+    let platform = platform_with_marketplace(provider);
+    platform.refresh().await;
+
+    let err = platform
+        .acquire_for_goal("do something with files")
+        .await
+        .expect_err("untrusted capability must be quarantined, not activated");
+    assert!(matches!(err, CapError::Permission(_)), "got {err:?}");
+    assert!(platform.is_quarantined("market", "sketchy_tool"));
+
+    // Even a direct execute of the quarantined capability must be refused.
+    let exec = platform
+        .execute(CapabilityRequest {
+            provider_id: "market".into(),
+            capability_id: "sketchy_tool".into(),
+            args: serde_json::json!({}),
+            context: RequestContext::new(),
+            granted_effects: vec![],
+        })
+        .await;
+    assert!(
+        matches!(exec, Err(CapError::Permission(_))),
+        "quarantined capability must not execute: {exec:?}"
+    );
+}
+
+#[tokio::test]
+async fn flag_off_acquisition_uses_legacy_path_no_quarantine() {
+    // Without marketplace_v2, quarantine is inert and legacy acquisition runs.
+    let provider = LifecycleFake::new(
+        "market",
+        vec![catalog_desc(
+            "market",
+            "any_tool",
+            "do a thing",
+            "untrusted",
+        )],
+    );
+    let registry = ProviderRegistry::new(test_index());
+    registry.register(Arc::new(provider));
+    let platform = Arc::new(CapabilityPlatform::new(Arc::new(registry)));
+    platform.refresh().await;
+
+    // Legacy path passes capability_id: None; our LifecycleFake requires a
+    // selection, so legacy acquire declines here — proving the reasoned pipeline
+    // (which DOES select) is gated strictly behind the flag (parity).
+    let res = platform.acquire_for_goal("do a thing").await;
+    assert!(res.is_err(), "legacy path does not Brain-select");
+    assert!(!platform.is_quarantined("market", "any_tool"));
 }

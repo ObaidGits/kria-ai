@@ -39,7 +39,8 @@ pub const RIG_CONTAINER_PREFIX: &str = "kria-openclaw-eval";
 /// only ever constructs one `RuntimeManager` — so A0-A9 is intentionally left
 /// untouched; the fix is scoped to the test harness serializing full rig
 /// lifecycles instead.
-static RIG_LIFECYCLE_LOCK: std::sync::OnceLock<Arc<tokio::sync::Mutex<()>>> = std::sync::OnceLock::new();
+static RIG_LIFECYCLE_LOCK: std::sync::OnceLock<Arc<tokio::sync::Mutex<()>>> =
+    std::sync::OnceLock::new();
 
 fn rig_lifecycle_lock() -> Arc<tokio::sync::Mutex<()>> {
     RIG_LIFECYCLE_LOCK
@@ -135,7 +136,8 @@ impl TestRig {
         };
         override_fn(&mut config);
 
-        let subsystem = OpenClawSubsystem::boot(&data_dir).map_err(|e| RigError::Boot(e.to_string()))?;
+        let subsystem =
+            OpenClawSubsystem::boot(&data_dir).map_err(|e| RigError::Boot(e.to_string()))?;
 
         // Hold the shared docker-env guard (fault_injector::docker_env_test_guard)
         // across BOTH the reachability check and the actual pool construction —
@@ -150,7 +152,9 @@ impl TestRig {
                 .await
                 .map_err(|e| RigError::Pool(e.to_string()))?
         };
-        pool.initialize().await.map_err(|e| RigError::Pool(e.to_string()))?;
+        pool.initialize()
+            .await
+            .map_err(|e| RigError::Pool(e.to_string()))?;
 
         Ok(Self {
             _temp_root: temp_root,
@@ -174,7 +178,9 @@ impl TestRig {
             .await
             .map_err(|e| RigError::Pool(e.to_string()))?;
 
-        let remaining = count_rig_containers().await.map_err(RigError::DockerUnavailable)?;
+        let remaining = count_rig_containers()
+            .await
+            .map_err(RigError::DockerUnavailable)?;
 
         // Only NOW release the lifecycle lock — after shutdown + the leak
         // check have both completed — so the NEXT rig's initialize() cannot
@@ -249,17 +255,27 @@ mod tests {
     #[tokio::test]
     async fn rig_up_and_down_leaves_zero_containers() {
         if verify_docker_reachable().await.is_err() {
-            eprintln!("SKIPPED (Outcome::Skipped, not Pass): docker not reachable in this environment");
+            eprintln!(
+                "SKIPPED (Outcome::Skipped, not Pass): docker not reachable in this environment"
+            );
             return;
         }
 
-        let rig = TestRig::up().await.expect("rig should come up with docker reachable");
-        let mid_count = count_rig_containers().await.expect("docker ps should succeed");
+        let rig = TestRig::up()
+            .await
+            .expect("rig should come up with docker reachable");
+        let mid_count = count_rig_containers()
+            .await
+            .expect("docker ps should succeed");
         // Warm pool may have created containers already; just assert down() cleans them.
         let _ = mid_count;
 
-        rig.down().await.expect("rig teardown must leave zero rig containers");
-        let after = count_rig_containers().await.expect("docker ps should succeed");
+        rig.down()
+            .await
+            .expect("rig teardown must leave zero rig containers");
+        let after = count_rig_containers()
+            .await
+            .expect("docker ps should succeed");
         assert_eq!(after, 0, "rig teardown must leave 0 leaked containers");
     }
 }

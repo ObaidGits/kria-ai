@@ -1618,7 +1618,7 @@ pub fn register(reg: &ToolRegistry) {
         }, Arc::new(ListInstalledPackages)),
         (ToolDef {
             name: "search_package".into(),
-            description: "Search for a package/application across all available package managers (apt, dnf, snap, flatpak, brew, winget, choco). Returns matching package names, descriptions and sources. Always call this before installing.".into(),
+            description: "Search for OPERATING-SYSTEM software packages/applications across the system package managers (apt, dnf, snap, flatpak, brew, winget, choco) — e.g. htop, docker, vlc. This is ONLY for OS software, NOT for KRIA skills/tools/capabilities (for those use `search_marketplace`). Returns matching package names, descriptions and sources. Always call this before installing an OS package.".into(),
             category: "packages".into(),
             default_tier: RiskLevel::Green,
             min_tier: "lite",
@@ -1662,7 +1662,7 @@ pub fn register(reg: &ToolRegistry) {
         // ── RED: action tools (require HITL approval) ──
         (ToolDef {
             name: "install_package".into(),
-            description: "Install a package using the appropriate system package manager. Requires user approval. Call search_package and check_package_installed first.".into(),
+            description: "Install an OPERATING-SYSTEM software package using the system package manager (apt/dnf/brew/winget/...) — e.g. htop, docker, vlc. This is ONLY for OS software, NOT for KRIA skills/tools/capabilities (to add a skill/tool/capability use `install_capability`). Requires user approval. Call search_package and check_package_installed first.".into(),
             category: "packages".into(),
             default_tier: RiskLevel::Red,
             min_tier: "standard",

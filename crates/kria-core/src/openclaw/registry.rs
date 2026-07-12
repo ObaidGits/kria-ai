@@ -1493,10 +1493,20 @@ impl ProductionSkillRegistry {
         ))
     }
 
-    fn is_version_compatible(&self, _current: &str, _target: &str) -> bool {
-        // Basic semantic versioning compatibility
-        // TODO: Implement proper semver parsing and compatibility rules
-        true
+    /// Real semver compatibility for a version change (upgrade/downgrade).
+    /// Both endpoints must be valid semver and must differ (a "change" to the
+    /// same version is a no-op and rejected). Uses the `semver` crate — no more
+    /// always-true stub. Bidirectional by design: `downgrade_skill` reuses this,
+    /// so we do not require target > current here (direction is the caller's
+    /// intent); we only reject unparseable or identical versions.
+    fn is_version_compatible(&self, current: &str, target: &str) -> bool {
+        let (Ok(cur), Ok(tgt)) = (
+            semver::Version::parse(current.trim()),
+            semver::Version::parse(target.trim()),
+        ) else {
+            return false;
+        };
+        cur != tgt
     }
 
     fn validate_dependencies_for_version(
@@ -1833,9 +1843,28 @@ impl ProductionSkillRegistry {
     }
 
     fn version_satisfies(&self, installed: &str, requirement: &str) -> bool {
-        // TODO: Implement proper semver requirement checking
-        // For now, exact match
-        installed == requirement
+        // Single source of truth: the neutral semver helper in the capability
+        // intelligence layer (Wave 6). A bare version string (no operator) is
+        // treated as an exact-match requirement for backward compatibility with
+        // manifests that pin a plain version.
+        use crate::capability::intelligence::version_satisfies;
+        let req = requirement.trim();
+        let normalized = if req
+            .chars()
+            .next()
+            .map(|c| c.is_ascii_digit())
+            .unwrap_or(false)
+        {
+            format!("={req}")
+        } else {
+            req.to_string()
+        };
+        match version_satisfies(installed, &normalized) {
+            Ok(v) => v,
+            // Unparsable input: fall back to exact string match rather than
+            // silently accepting (honest, conservative).
+            Err(_) => installed.trim() == req,
+        }
     }
 
     /// Get reverse dependencies (skills that depend on this one).

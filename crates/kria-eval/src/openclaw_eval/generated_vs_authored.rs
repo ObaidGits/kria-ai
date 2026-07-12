@@ -34,7 +34,9 @@
 //!   — confirmed by successfully installing a real `emit_bundle`-produced,
 //!   real-signed bundle through the real, unmodified `BundleInstaller`.
 
-use kria_core::openclaw::bundle::verify::{keypair_from_seed, sign_bundle, write_hash_tree, TrustPolicy};
+use kria_core::openclaw::bundle::verify::{
+    keypair_from_seed, sign_bundle, write_hash_tree, TrustPolicy,
+};
 use kria_core::openclaw::bundle::BundleInstaller;
 use kria_core::openclaw::generation::codegen::emit_bundle;
 use kria_core::openclaw::generation::designer::SkillDesign;
@@ -48,7 +50,9 @@ fn fixture_design(slug: &str) -> SkillDesign {
     SkillDesign {
         name: format!("Generated Fixture {slug}"),
         slug: slug.to_string(),
-        description: "R13 fixture: proves emit_bundle output installs through the real BundleInstaller.".into(),
+        description:
+            "R13 fixture: proves emit_bundle output installs through the real BundleInstaller."
+                .into(),
         category: "test".into(),
         tags: vec!["fixture".into(), "generated".into()],
         version: "1.0.0".into(),
@@ -102,13 +106,18 @@ pub fn validate_generated_bundle_installs_via_real_installer() -> Result<(), Str
 
     let installer = BundleInstaller::new(registry.clone(), audit, store)
         .with_kria_version(Version::new(1, 0, 0))
-        .with_trust_policy(TrustPolicy { trusted_keys: Vec::new(), require_signature: true });
+        .with_trust_policy(TrustPolicy {
+            trusted_keys: Vec::new(),
+            require_signature: true,
+        });
 
     installer
         .install(&bundle_root)
         .map_err(|e| format!("REAL BundleInstaller rejected the generated bundle: {e}"))?;
 
-    let installed = registry.get("oc_r13_generated_fixture").map_err(|e| e.to_string())?;
+    let installed = registry
+        .get("oc_r13_generated_fixture")
+        .map_err(|e| e.to_string())?;
     let provenance = registry
         .get_provenance("oc_r13_generated_fixture")
         .map_err(|e| e.to_string())?

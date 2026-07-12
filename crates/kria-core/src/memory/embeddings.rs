@@ -3,21 +3,28 @@ use ort::value::Tensor;
 /// Local sentence embeddings.
 ///
 /// Uses ONNX Runtime (`ort`) for real embedding inference with
-/// `all-MiniLM-L6-v2`. Falls back to deterministic hash-based vectors
-/// if the ONNX model is not available.
+/// `all-MiniLM-L6-v2` and the model's real WordPiece tokenizer
+/// (`tokenizer.json`, via the `tokenizers` crate). Falls back to
+/// deterministic hash-based vectors only if the model OR its tokenizer is
+/// unavailable — a real semantic model with a placeholder tokenizer would
+/// produce meaningless embeddings, so BOTH are required for the ONNX path.
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 pub struct EmbeddingModel {
     dim: usize,
     session: Option<Arc<Mutex<Session>>>,
+    /// The model's real tokenizer (loaded from `tokenizer.json` next to the
+    /// `.onnx` file). `Some` iff the ONNX path is active — the placeholder
+    /// hash tokenizer is gone (it produced garbage vocab ids).
+    tokenizer: Option<Arc<tokenizers::Tokenizer>>,
 }
 
 impl EmbeddingModel {
-    /// Load the embedding model from an ONNX file.
-    /// If no model path is found, falls back to hash-based placeholder.
+    /// Load the embedding model from an ONNX file + its `tokenizer.json`.
+    /// If either is missing, falls back to the hash-based placeholder vectors.
     pub fn load(dim: usize) -> anyhow::Result<Self> {
-        // Try to find the ONNX model in standard locations
+        // Try to find the ONNX model in standard locations.
         let model_paths = [
             dirs::home_dir()
                 .unwrap_or_default()
@@ -26,49 +33,95 @@ impl EmbeddingModel {
         ];
 
         for path in &model_paths {
-            if path.exists() {
-                match Session::builder()?.commit_from_file(path) {
-                    Ok(session) => {
-                        tracing::info!(path = %path.display(), "embedding model loaded (ONNX)");
-                        return Ok(Self {
-                            dim,
-                            session: Some(Arc::new(Mutex::new(session))),
-                        });
-                    }
+            if !path.exists() {
+                continue;
+            }
+            // The real tokenizer must sit next to the model. Without it the ONNX
+            // model would receive garbage token ids, so we treat a missing/invalid
+            // tokenizer as "no ONNX" and honestly fall back.
+            let tok_path = path
+                .parent()
+                .map(|p| p.join("tokenizer.json"))
+                .filter(|p| p.exists());
+            let tokenizer = match tok_path {
+                Some(tp) => match tokenizers::Tokenizer::from_file(&tp) {
+                    Ok(t) => Some(t),
                     Err(e) => {
-                        tracing::warn!(path = %path.display(), error = %e, "failed to load ONNX model, using fallback");
+                        tracing::warn!(path = %tp.display(), error = %e, "tokenizer.json load failed; hash fallback");
+                        None
                     }
+                },
+                None => {
+                    tracing::warn!(path = %path.display(), "ONNX model found but tokenizer.json missing; hash fallback");
+                    None
+                }
+            };
+            let Some(tokenizer) = tokenizer else {
+                continue;
+            };
+
+            match Session::builder()?.commit_from_file(path) {
+                Ok(session) => {
+                    tracing::info!(path = %path.display(), "embedding model loaded (ONNX + real tokenizer)");
+                    return Ok(Self {
+                        dim,
+                        session: Some(Arc::new(Mutex::new(session))),
+                        tokenizer: Some(Arc::new(tokenizer)),
+                    });
+                }
+                Err(e) => {
+                    tracing::warn!(path = %path.display(), error = %e, "failed to load ONNX model, using fallback");
                 }
             }
         }
 
         tracing::info!(dim, "embedding model initialized (hash-based fallback)");
-        Ok(Self { dim, session: None })
+        Ok(Self {
+            dim,
+            session: None,
+            tokenizer: None,
+        })
     }
 
     /// Generate an embedding vector for the given text.
     pub fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>> {
-        if let Some(ref session) = self.session {
-            let mut guard = session
-                .lock()
-                .map_err(|e| anyhow::anyhow!("mutex poisoned: {e}"))?;
-            self.embed_onnx(&mut guard, text)
-        } else {
-            self.embed_fallback(text)
+        match (&self.session, &self.tokenizer) {
+            (Some(session), Some(tokenizer)) => {
+                let mut guard = session
+                    .lock()
+                    .map_err(|e| anyhow::anyhow!("mutex poisoned: {e}"))?;
+                self.embed_onnx(&mut guard, tokenizer, text)
+            }
+            _ => self.embed_fallback(text),
         }
     }
 
-    /// Real ONNX inference for sentence embedding.
-    fn embed_onnx(&self, session: &mut Session, text: &str) -> anyhow::Result<Vec<f32>> {
+    /// Real ONNX inference for sentence embedding, using the model's real
+    /// WordPiece tokenizer + attention-mask-weighted mean pooling (the standard
+    /// sentence-transformers pooling for all-MiniLM-L6-v2).
+    fn embed_onnx(
+        &self,
+        session: &mut Session,
+        tokenizer: &tokenizers::Tokenizer,
+        text: &str,
+    ) -> anyhow::Result<Vec<f32>> {
         use ndarray::Array2;
 
-        let tokens = self.simple_tokenize(text);
-        let seq_len = tokens.len();
+        let encoding = tokenizer
+            .encode(text, true)
+            .map_err(|e| anyhow::anyhow!("tokenize failed: {e}"))?;
+        let ids: Vec<i64> = encoding.get_ids().iter().map(|&t| t as i64).collect();
+        let mask: Vec<i64> = encoding
+            .get_attention_mask()
+            .iter()
+            .map(|&m| m as i64)
+            .collect();
+        let types: Vec<i64> = encoding.get_type_ids().iter().map(|&t| t as i64).collect();
+        let seq_len = ids.len().max(1);
 
-        let input_ids =
-            Array2::from_shape_vec((1, seq_len), tokens.iter().map(|&t| t as i64).collect())?;
-        let attention_mask = Array2::from_shape_vec((1, seq_len), vec![1i64; seq_len])?;
-        let token_type_ids = Array2::from_shape_vec((1, seq_len), vec![0i64; seq_len])?;
+        let input_ids = Array2::from_shape_vec((1, seq_len), ids)?;
+        let attention_mask = Array2::from_shape_vec((1, seq_len), mask.clone())?;
+        let token_type_ids = Array2::from_shape_vec((1, seq_len), types)?;
 
         let input_ids_val = Tensor::from_array(input_ids)?;
         let attention_mask_val = Tensor::from_array(attention_mask)?;
@@ -80,8 +133,7 @@ impl EmbeddingModel {
             token_type_ids_val,
         ])?;
 
-        // try_extract_tensor returns (&Shape, &[f32])
-        // Shape derefs to &[i64], shape is [batch=1, seq_len, hidden_dim]
+        // last_hidden_state: [batch=1, seq_len, hidden_dim]
         let (shape, data) = outputs[0].try_extract_tensor::<f32>()?;
         let hidden_dim = if shape.len() >= 3 {
             shape[2] as usize
@@ -94,23 +146,29 @@ impl EmbeddingModel {
             1
         };
 
-        // Mean pool over sequence dimension
+        // Attention-mask-weighted mean pool over the sequence dimension.
         let mut pooled = vec![0.0f32; hidden_dim];
+        let mut mask_sum = 0.0f32;
         for s in 0..seq_len_out {
+            let m = *mask.get(s).unwrap_or(&1) as f32;
+            if m == 0.0 {
+                continue;
+            }
+            mask_sum += m;
             let offset = s * hidden_dim;
             for d in 0..hidden_dim {
                 if offset + d < data.len() {
-                    pooled[d] += data[offset + d];
+                    pooled[d] += data[offset + d] * m;
                 }
             }
         }
-        if seq_len_out > 0 {
+        if mask_sum > 0.0 {
             for v in &mut pooled {
-                *v /= seq_len_out as f32;
+                *v /= mask_sum;
             }
         }
 
-        // L2 normalize
+        // L2 normalize (cosine-ready).
         let norm: f32 = pooled.iter().map(|x| x * x).sum::<f32>().sqrt();
         if norm > 0.0 {
             for v in &mut pooled {
@@ -119,21 +177,6 @@ impl EmbeddingModel {
         }
 
         Ok(pooled)
-    }
-
-    /// Simple word-piece-like tokenizer placeholder.
-    /// For production, use a proper tokenizer (tokenizers crate).
-    fn simple_tokenize(&self, text: &str) -> Vec<u32> {
-        let mut tokens = vec![101u32]; // [CLS]
-        for word in text.split_whitespace().take(510) {
-            // Simple hash to vocab range (30522 for BERT-like models)
-            let hash = word
-                .bytes()
-                .fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
-            tokens.push(hash % 30520 + 2); // avoid special tokens 0,1
-        }
-        tokens.push(102); // [SEP]
-        tokens
     }
 
     /// Deterministic hash-based fallback embedding (no model needed).
@@ -155,8 +198,8 @@ impl EmbeddingModel {
         self.dim
     }
 
-    /// Whether the real ONNX model is loaded.
+    /// Whether the real ONNX model (with its real tokenizer) is loaded.
     pub fn is_onnx_loaded(&self) -> bool {
-        self.session.is_some()
+        self.session.is_some() && self.tokenizer.is_some()
     }
 }

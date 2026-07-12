@@ -356,6 +356,12 @@ impl MemoryStore {
         query: &str,
         limit: usize,
     ) -> anyhow::Result<Vec<ConversationTurn>> {
+        // RC7: sanitize arbitrary user text into an FTS5-safe MATCH expression so
+        // reserved characters (e.g. "?") can never form an invalid query.
+        let match_query = match fts5_match_query(query) {
+            Some(q) => q,
+            None => return Ok(Vec::new()),
+        };
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT c.id, c.session_id, c.role, c.content, c.tool_name, c.tool_result, c.tokens_used, c.timestamp
@@ -363,7 +369,7 @@ impl MemoryStore {
              WHERE conversations_fts MATCH ?1 ORDER BY rank LIMIT ?2"
         )?;
         let turns = stmt
-            .query_map(params![query, limit as i64], |row| {
+            .query_map(params![match_query, limit as i64], |row| {
                 Ok(ConversationTurn {
                     id: Some(row.get(0)?),
                     session_id: row.get(1)?,
@@ -426,6 +432,13 @@ impl MemoryStore {
     }
 
     pub fn search_facts(&self, query: &str, limit: usize) -> anyhow::Result<Vec<MemoryFact>> {
+        // RC7: `recall_fact` previously crashed when the query contained FTS5
+        // reserved characters (e.g. a lone "?"). Sanitize into a quoted-token
+        // MATCH expression; an all-punctuation query yields no results (not a crash).
+        let match_query = match fts5_match_query(query) {
+            Some(q) => q,
+            None => return Ok(Vec::new()),
+        };
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT f.id, f.text, f.category, f.source, f.created_at, f.last_accessed, f.access_count, f.decay_score
@@ -433,7 +446,7 @@ impl MemoryStore {
              WHERE facts_fts MATCH ?1 ORDER BY rank LIMIT ?2"
         )?;
         let facts = stmt
-            .query_map(params![query, limit as i64], |row| {
+            .query_map(params![match_query, limit as i64], |row| {
                 Ok(MemoryFact {
                     id: Some(row.get(0)?),
                     text: row.get(1)?,
@@ -878,4 +891,59 @@ fn parse_dt(s: String) -> DateTime<Utc> {
     DateTime::parse_from_rfc3339(&s)
         .map(|d| d.with_timezone(&Utc))
         .unwrap_or_else(|_| Utc::now())
+}
+
+/// Build an FTS5-safe MATCH expression from arbitrary user text (RC7).
+///
+/// FTS5 treats characters like `?`, `*`, `:`, `^`, `-`, `(`, `)`, and `"` as query
+/// syntax; passing raw user text (e.g. a lone `"?"`) to `... MATCH ?1` raises a
+/// syntax error and previously crashed `recall_fact`. Each whitespace token is
+/// stripped to alphanumerics/underscore and wrapped in double quotes (so it is a
+/// literal term), then OR-joined. Returns `None` when no usable token remains, so
+/// the caller returns no results instead of running an invalid query.
+fn fts5_match_query(query: &str) -> Option<String> {
+    let tokens: Vec<String> = query
+        .split_whitespace()
+        .map(|w| {
+            w.chars()
+                .filter(|c| c.is_alphanumeric() || *c == '_')
+                .collect::<String>()
+        })
+        .filter(|t| !t.is_empty())
+        .map(|t| format!("\"{t}\""))
+        .collect();
+    if tokens.is_empty() {
+        None
+    } else {
+        Some(tokens.join(" OR "))
+    }
+}
+
+#[cfg(test)]
+mod fts5_sanitize_tests {
+    use super::fts5_match_query;
+
+    #[test]
+    fn punctuation_only_query_yields_none() {
+        assert_eq!(fts5_match_query("?"), None);
+        assert_eq!(fts5_match_query("  *:^ () "), None);
+    }
+
+    #[test]
+    fn reserved_chars_are_stripped_and_quoted() {
+        // "what is my theme?" → each token quoted, "?" dropped from the last token.
+        assert_eq!(
+            fts5_match_query("what is my theme?"),
+            Some("\"what\" OR \"is\" OR \"my\" OR \"theme\"".to_string())
+        );
+    }
+
+    #[test]
+    fn embedded_operators_do_not_leak_into_syntax() {
+        // A raw FTS5 operator string must not survive as syntax.
+        assert_eq!(
+            fts5_match_query("theme* OR (x)"),
+            Some("\"theme\" OR \"OR\" OR \"x\"".to_string())
+        );
+    }
 }

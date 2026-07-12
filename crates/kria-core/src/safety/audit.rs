@@ -253,6 +253,33 @@ impl AuditLogger {
         rows.filter_map(|r| r.ok()).collect()
     }
 
+    /// Config-change history (settings-config-revamp Task 15): the most recent
+    /// `config_change` rows with their full parameters (section/field/prior/new/
+    /// source/change_set_id). This is the durable, cross-session record — the
+    /// audit-based alternative offered when a user asks to recall a past setting
+    /// ("what did I set yesterday?") without the memory subsystem. Newest first.
+    pub fn config_change_history(&self, limit: usize) -> Vec<serde_json::Value> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = match conn.prepare(
+            "SELECT timestamp, parameters FROM audit_log
+             WHERE action = 'config_change' ORDER BY id DESC LIMIT ?1",
+        ) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        let rows = stmt.query_map([limit as i64], |row| {
+            let timestamp: String = row.get(0)?;
+            let params_str: String = row.get(1)?;
+            let params: serde_json::Value =
+                serde_json::from_str(&params_str).unwrap_or(serde_json::Value::Null);
+            Ok(serde_json::json!({ "timestamp": timestamp, "change": params }))
+        });
+        match rows {
+            Ok(r) => r.filter_map(|x| x.ok()).collect(),
+            Err(_) => Vec::new(),
+        }
+    }
+
     /// Count entries per risk level (for dashboard stats).
     pub fn stats(&self) -> serde_json::Value {
         let conn = self.conn.lock().unwrap();
@@ -345,5 +372,57 @@ impl AuditLogger {
             count += 1;
         }
         Ok(count)
+    }
+}
+
+#[cfg(test)]
+mod config_history_tests {
+    use super::*;
+    use crate::config::service::ConfigAuditSink;
+
+    #[test]
+    fn config_change_history_returns_recorded_changes() {
+        let logger = AuditLogger::new(rusqlite::Connection::open_in_memory().unwrap());
+
+        // Record two config changes via the ConfigAuditSink impl (Task 15).
+        logger.record_config_change(
+            "ui",
+            "theme",
+            Some(&serde_json::json!("light")),
+            &serde_json::json!("dark"),
+            "ui",
+            "cs-1",
+        );
+        logger.record_config_change(
+            "voice",
+            "enabled",
+            Some(&serde_json::json!(false)),
+            &serde_json::json!(true),
+            "prompt",
+            "cs-2",
+        );
+
+        let history = logger.config_change_history(10);
+        assert_eq!(history.len(), 2);
+        // Newest first.
+        assert_eq!(history[0]["change"]["section"], "voice");
+        assert_eq!(history[0]["change"]["field"], "enabled");
+        assert_eq!(history[0]["change"]["new"], true);
+        assert_eq!(history[1]["change"]["section"], "ui");
+        assert_eq!(history[1]["change"]["change_set_id"], "cs-1");
+    }
+
+    #[test]
+    fn config_change_history_excludes_non_config_actions() {
+        let logger = AuditLogger::new(rusqlite::Connection::open_in_memory().unwrap());
+        logger.log(
+            "sess",
+            "execute_bash",
+            &serde_json::json!({ "command": "ls" }),
+            RiskLevel::Green,
+            Decision::AutoExecuted,
+            DecidedBy::Policy,
+        );
+        assert!(logger.config_change_history(10).is_empty());
     }
 }

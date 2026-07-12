@@ -21,7 +21,10 @@ use kria_core::openclaw::clawhub::ClawHubClient;
 
 /// Real network check: is the live production index reachable right now?
 pub async fn live_repo_reachable() -> bool {
-    let client = ClawHubClient::new(kria_core::openclaw::clawhub::DEFAULT_REGISTRY_URL, Vec::new());
+    let client = ClawHubClient::new(
+        kria_core::openclaw::clawhub::DEFAULT_REGISTRY_URL,
+        Vec::new(),
+    );
     client.fetch_remote_index().await.is_ok()
 }
 
@@ -45,9 +48,18 @@ mod tests {
             eprintln!("SKIPPED (Outcome::Skipped, not Pass): live repo not reachable");
             return;
         }
-        let client = ClawHubClient::new(kria_core::openclaw::clawhub::DEFAULT_REGISTRY_URL, Vec::new());
-        let entries = client.fetch_remote_index().await.expect("must fetch real live index");
-        assert!(!entries.is_empty(), "the real live index must have at least the known real skill");
+        let client = ClawHubClient::new(
+            kria_core::openclaw::clawhub::DEFAULT_REGISTRY_URL,
+            Vec::new(),
+        );
+        let entries = client
+            .fetch_remote_index()
+            .await
+            .expect("must fetch real live index");
+        assert!(
+            !entries.is_empty(),
+            "the real live index must have at least the known real skill"
+        );
         let sandbox = entries.iter().find(|e| e.slug == "oc_code_sandbox");
         assert!(
             sandbox.is_some(),
@@ -62,7 +74,10 @@ mod tests {
             eprintln!("SKIPPED (Outcome::Skipped, not Pass): live repo not reachable");
             return;
         }
-        let client = ClawHubClient::new(kria_core::openclaw::clawhub::DEFAULT_REGISTRY_URL, Vec::new());
+        let client = ClawHubClient::new(
+            kria_core::openclaw::clawhub::DEFAULT_REGISTRY_URL,
+            Vec::new(),
+        );
         let results = client
             .search_remote("sandbox", None)
             .await
@@ -76,7 +91,10 @@ mod tests {
             .search_remote("this query matches absolutely nothing real", None)
             .await
             .expect("search must not error even with zero real matches");
-        assert!(no_match.is_empty(), "a query matching nothing real must return empty, not a fabricated match");
+        assert!(
+            no_match.is_empty(),
+            "a query matching nothing real must return empty, not a fabricated match"
+        );
     }
 
     /// R3.1/R3.2/R12 real proof, full pipeline: download the REAL manifest
@@ -90,8 +108,14 @@ mod tests {
             eprintln!("SKIPPED (Outcome::Skipped, not Pass): live repo not reachable");
             return;
         }
-        let client = ClawHubClient::new(kria_core::openclaw::clawhub::DEFAULT_REGISTRY_URL, Vec::new());
-        let entries = client.fetch_remote_index().await.expect("fetch real live index");
+        let client = ClawHubClient::new(
+            kria_core::openclaw::clawhub::DEFAULT_REGISTRY_URL,
+            Vec::new(),
+        );
+        let entries = client
+            .fetch_remote_index()
+            .await
+            .expect("fetch real live index");
         let sandbox = entries
             .iter()
             .find(|e| e.slug == "oc_code_sandbox")
@@ -101,11 +125,17 @@ mod tests {
             .download_skill_manifest(&sandbox.manifest_url)
             .await
             .expect("must download the REAL manifest from the live repo");
-        assert!(raw_manifest.contains("code_sandbox"), "downloaded content must be the real manifest");
+        assert!(
+            raw_manifest.contains("code_sandbox"),
+            "downloaded content must be the real manifest"
+        );
 
         let mut descriptor = transpile_skill(
             &raw_manifest,
-            SkillSource::ClawHub { slug: sandbox.slug.clone(), version: "remote".into() },
+            SkillSource::ClawHub {
+                slug: sandbox.slug.clone(),
+                version: "remote".into(),
+            },
             false,
         )
         .expect("real live manifest must transpile successfully");
@@ -123,20 +153,29 @@ mod tests {
         let db_path = dir.path().join("task25_live.db");
         let registry = Arc::new(ProductionSkillRegistry::new(&db_path).expect("registry"));
         let audit = Arc::new(
-            kria_core::openclaw::audit::AuditLedger::open(&db_path, b"task25-live-key".to_vec()).expect("audit"),
+            kria_core::openclaw::audit::AuditLedger::open(&db_path, b"task25-live-key".to_vec())
+                .expect("audit"),
         );
         let store = dir.path().join("store");
         std::fs::create_dir_all(&store).expect("store dir");
 
-        let caps: Vec<_> = descriptor.granted.iter().map(|g| g.capability.clone()).collect();
+        let caps: Vec<_> = descriptor
+            .granted
+            .iter()
+            .map(|g| g.capability.clone())
+            .collect();
         let synth_dir = dir.path().join("synth").join(&descriptor.skill_id);
-        synth_marketplace_bundle(&descriptor, &caps, &synth_dir).expect("synth real live-skill bundle");
+        synth_marketplace_bundle(&descriptor, &caps, &synth_dir)
+            .expect("synth real live-skill bundle");
 
-        let installer = BundleInstaller::new(registry.clone(), audit, store)
-            .with_trust_policy(TrustPolicy { trusted_keys: Vec::new(), require_signature: true });
-        let outcome = installer
-            .install(&synth_dir)
-            .expect("install of the REAL live-repo skill through the unified installer must succeed");
+        let installer =
+            BundleInstaller::new(registry.clone(), audit, store).with_trust_policy(TrustPolicy {
+                trusted_keys: Vec::new(),
+                require_signature: true,
+            });
+        let outcome = installer.install(&synth_dir).expect(
+            "install of the REAL live-repo skill through the unified installer must succeed",
+        );
 
         assert_eq!(outcome.skill_id, descriptor.skill_id);
 
@@ -153,10 +192,15 @@ mod tests {
             .get_provenance(&descriptor.skill_id)
             .expect("get_provenance")
             .expect("provenance row must exist");
-        assert_ne!(prov.content_hash, "legacy", "live-repo install must produce a real content_hash via the unified installer");
+        assert_ne!(
+            prov.content_hash, "legacy",
+            "live-repo install must produce a real content_hash via the unified installer"
+        );
 
         // R6.2/R6.5 (uninstall/remove): remove it, confirm no orphans.
-        registry.uninstall(&descriptor.skill_id).expect("uninstall must succeed");
+        registry
+            .uninstall(&descriptor.skill_id)
+            .expect("uninstall must succeed");
         assert!(
             registry.get(&descriptor.skill_id).is_err(),
             "after removal the real live-repo skill must no longer be found (task 5's get() fix)"
@@ -174,7 +218,10 @@ mod tests {
         let start = std::time::Instant::now();
         let result = client.fetch_remote_index().await;
         let elapsed = start.elapsed();
-        assert!(result.is_err(), "an unreachable/nonexistent repo must fail, never fabricate an empty success");
+        assert!(
+            result.is_err(),
+            "an unreachable/nonexistent repo must fail, never fabricate an empty success"
+        );
         assert!(
             elapsed.as_secs() < 30,
             "offline/unreachable failure must be bounded-time, not a hang: took {elapsed:?}"

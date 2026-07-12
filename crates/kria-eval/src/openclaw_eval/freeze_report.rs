@@ -34,7 +34,8 @@ pub enum FreezeVerdict {
 /// Requirements R1-R19 (R20 is the benchmark itself, not a gate input;
 /// aggregated separately in task 23).
 const GATED_REQUIREMENTS: &[&str] = &[
-    "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19",
+    "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17",
+    "18", "19",
 ];
 
 /// Requirements that REQUIRE real Layer-1/Layer-2 evidence (not Skipped) per
@@ -79,9 +80,19 @@ fn coverage_section(store: &EvidenceStore) -> ReportSection {
     let mut lines = Vec::new();
     for req in GATED_REQUIREMENTS {
         let satisfied = store.requirement_satisfied(req);
-        lines.push(format!("R{req}: {}", if satisfied { "Pass" } else { "Not satisfied (no qualifying evidence)" }));
+        lines.push(format!(
+            "R{req}: {}",
+            if satisfied {
+                "Pass"
+            } else {
+                "Not satisfied (no qualifying evidence)"
+            }
+        ));
     }
-    ReportSection { title: "Coverage Report", lines }
+    ReportSection {
+        title: "Coverage Report",
+        lines,
+    }
 }
 
 fn execution_section(_store: &EvidenceStore) -> ReportSection {
@@ -145,9 +156,15 @@ fn risk_and_known_issues_section() -> ReportSection {
     let ledger = crate::openclaw_eval::honesty_sweep::honesty_ledger();
     let mut lines = vec!["Known Issues (from the R15 honesty ledger, task 21):".to_string()];
     for finding in ledger.iter().filter(|f| f.is_gap) {
-        lines.push(format!("- [{}] {} (proven in {})", finding.area, finding.description, finding.proven_in));
+        lines.push(format!(
+            "- [{}] {} (proven in {})",
+            finding.area, finding.description, finding.proven_in
+        ));
     }
-    ReportSection { title: "Risk Report / Known Issues", lines }
+    ReportSection {
+        title: "Risk Report / Known Issues",
+        lines,
+    }
 }
 
 fn technical_debt_section() -> ReportSection {
@@ -157,21 +174,31 @@ fn technical_debt_section() -> ReportSection {
             "R6.1: FIXED (post-signoff) — fresh installs now auto-enable, no separate step.".into(),
             "R17: audit coverage incomplete for uninstall/cancel/router_select.".into(),
             "R19: FIXED (post-signoff) — real PRAGMA user_version migration system added.".into(),
-            "R16: FIXED (post-signoff) — real push-based UI event forwarding wired for OpenClaw.".into(),
+            "R16: FIXED (post-signoff) — real push-based UI event forwarding wired for OpenClaw."
+                .into(),
         ],
     }
 }
 
 fn readiness_and_verdict_section(verdict: &FreezeVerdict) -> ReportSection {
     let lines = match verdict {
-        FreezeVerdict::Go => vec!["Go/No-Go: GO".to_string(), "Freeze Verdict: FROZEN".to_string()],
+        FreezeVerdict::Go => vec![
+            "Go/No-Go: GO".to_string(),
+            "Freeze Verdict: FROZEN".to_string(),
+        ],
         FreezeVerdict::NoGo { missing_or_failed } => {
-            let mut l = vec!["Go/No-Go: NO-GO".to_string(), "Freeze Verdict: NOT FROZEN".to_string()];
+            let mut l = vec![
+                "Go/No-Go: NO-GO".to_string(),
+                "Freeze Verdict: NOT FROZEN".to_string(),
+            ];
             l.push(format!("Missing/failed gate items: {missing_or_failed:?}"));
             l
         }
     };
-    ReportSection { title: "Production Readiness / Go-No-Go / Freeze Verdict", lines }
+    ReportSection {
+        title: "Production Readiness / Go-No-Go / Freeze Verdict",
+        lines,
+    }
 }
 
 /// The freeze-gate evidence rule (design.md): Skipped != Passed, fixture-LLM
@@ -191,7 +218,9 @@ pub fn compute_verdict(store: &EvidenceStore) -> FreezeVerdict {
             let records = store.for_requirement(req);
             let has_real_pass = records.iter().any(|r| r.counts_for_freeze());
             if !has_real_pass {
-                missing.push(format!("R{req}: requires real (non-Skipped, non-Fixture) evidence, none found"));
+                missing.push(format!(
+                    "R{req}: requires real (non-Skipped, non-Fixture) evidence, none found"
+                ));
             }
         }
     }
@@ -199,7 +228,9 @@ pub fn compute_verdict(store: &EvidenceStore) -> FreezeVerdict {
     if missing.is_empty() {
         FreezeVerdict::Go
     } else {
-        FreezeVerdict::NoGo { missing_or_failed: missing }
+        FreezeVerdict::NoGo {
+            missing_or_failed: missing,
+        }
     }
 }
 
@@ -220,7 +251,12 @@ pub fn render_report(report: &FreezeReport) -> String {
 pub fn group_by_requirement(records: &[EvidenceRecord]) -> BTreeMap<String, Vec<&EvidenceRecord>> {
     let mut map: BTreeMap<String, Vec<&EvidenceRecord>> = BTreeMap::new();
     for record in records {
-        let major = record.requirement.split('.').next().unwrap_or(&record.requirement).to_string();
+        let major = record
+            .requirement
+            .split('.')
+            .next()
+            .unwrap_or(&record.requirement)
+            .to_string();
         map.entry(major).or_default().push(record);
     }
     map
@@ -237,7 +273,11 @@ mod tests {
         let report = generate_freeze_report(&store);
         match &report.verdict {
             FreezeVerdict::NoGo { missing_or_failed } => {
-                assert_eq!(missing_or_failed.len(), GATED_REQUIREMENTS.len(), "every gated requirement should be missing with no evidence");
+                assert_eq!(
+                    missing_or_failed.len(),
+                    GATED_REQUIREMENTS.len(),
+                    "every gated requirement should be missing with no evidence"
+                );
             }
             FreezeVerdict::Go => panic!("an empty evidence store must never yield Go"),
         }
@@ -250,9 +290,19 @@ mod tests {
         // only Skipped evidence (R1 requires real evidence per the gate).
         for req in GATED_REQUIREMENTS {
             if *req == "1" {
-                store.record(EvidenceRecord::new("1.1", Layer::Live, "enable_ui", Outcome::Skipped("no docker".into())));
+                store.record(EvidenceRecord::new(
+                    "1.1",
+                    Layer::Live,
+                    "enable_ui",
+                    Outcome::Skipped("no docker".into()),
+                ));
             } else {
-                store.record(EvidenceRecord::new(format!("{req}.1"), Layer::Ci, "generic", Outcome::Pass));
+                store.record(EvidenceRecord::new(
+                    format!("{req}.1"),
+                    Layer::Ci,
+                    "generic",
+                    Outcome::Pass,
+                ));
             }
         }
         let verdict = compute_verdict(&store);
@@ -270,16 +320,25 @@ mod tests {
         for req in GATED_REQUIREMENTS {
             if *req == "5" {
                 store.record(
-                    EvidenceRecord::new("5.1", Layer::Ci, "generation", Outcome::Pass).with_llm_mode(LlmMode::Fixture),
+                    EvidenceRecord::new("5.1", Layer::Ci, "generation", Outcome::Pass)
+                        .with_llm_mode(LlmMode::Fixture),
                 );
             } else {
-                store.record(EvidenceRecord::new(format!("{req}.1"), Layer::Ci, "generic", Outcome::Pass));
+                store.record(EvidenceRecord::new(
+                    format!("{req}.1"),
+                    Layer::Ci,
+                    "generic",
+                    Outcome::Pass,
+                ));
             }
         }
         let verdict = compute_verdict(&store);
         match verdict {
             FreezeVerdict::NoGo { missing_or_failed } => {
-                assert!(missing_or_failed.iter().any(|m| m.contains("R5")), "fixture-LLM-only R5 evidence must trigger NoGo: {missing_or_failed:?}");
+                assert!(
+                    missing_or_failed.iter().any(|m| m.contains("R5")),
+                    "fixture-LLM-only R5 evidence must trigger NoGo: {missing_or_failed:?}"
+                );
             }
             FreezeVerdict::Go => panic!("fixture-LLM-only evidence for R5 must never yield Go"),
         }
@@ -289,9 +348,17 @@ mod tests {
     fn all_requirements_real_pass_yields_go() {
         let mut store = EvidenceStore::new();
         for req in GATED_REQUIREMENTS {
-            let layer = if REQUIRES_REAL_EVIDENCE.contains(req) { Layer::Live } else { Layer::Ci };
+            let layer = if REQUIRES_REAL_EVIDENCE.contains(req) {
+                Layer::Live
+            } else {
+                Layer::Ci
+            };
             let record = EvidenceRecord::new(format!("{req}.1"), layer, "generic", Outcome::Pass);
-            let record = if *req == "5" { record.with_llm_mode(LlmMode::Real) } else { record };
+            let record = if *req == "5" {
+                record.with_llm_mode(LlmMode::Real)
+            } else {
+                record
+            };
             store.record(record);
         }
         assert_eq!(compute_verdict(&store), FreezeVerdict::Go);
@@ -314,7 +381,10 @@ mod tests {
             "Technical Debt",
             "Production Readiness / Go-No-Go / Freeze Verdict",
         ] {
-            assert!(titles.contains(&expected), "missing expected section: {expected}");
+            assert!(
+                titles.contains(&expected),
+                "missing expected section: {expected}"
+            );
         }
         let rendered = render_report(&report);
         assert!(rendered.contains("Go-No-Go"));

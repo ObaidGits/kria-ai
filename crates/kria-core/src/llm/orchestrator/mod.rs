@@ -1518,6 +1518,11 @@ impl Orchestrator {
             "orchestrator: ensure_ready starting local runtime"
         );
 
+        // Mark the restart as an intended, bounded transition so reachability probes
+        // report "warming" instead of flipping the banner to "LLM server not reachable"
+        // while the SAME model is being brought back (crash/idle recovery).
+        self.server_manager.begin_restart();
+
         self.health.update(
             "orchestrator",
             crate::infra::health::ServiceStatus::Starting,
@@ -1611,6 +1616,10 @@ impl Orchestrator {
             }
         };
 
+        // Restart window over (success or failure) — resume normal reachability
+        // reporting so a genuinely down server is surfaced accurately.
+        self.server_manager.end_restart();
+
         match ensure_result {
             Ok(()) => {
                 let (ngl, _) = self.server_manager.current_params();
@@ -1663,6 +1672,23 @@ impl Orchestrator {
             return Ok(false);
         }
 
+        // If this llama-server build cannot unload the model without a full process
+        // restart, idle-release is net-negative: freeing VRAM now GUARANTEES a slow
+        // cold restart — and a user-visible "LLM server not reachable" window — on
+        // the very next turn. This is the exact production symptom. Keep the model
+        // resident and let the GPU watchdog handle genuine memory pressure instead.
+        if matches!(
+            self.server_manager.zero_downtime_swap_supported(),
+            Some(false)
+        ) {
+            tracing::debug!(
+                reason,
+                "orchestrator: skipping idle release — llama-server lacks zero-downtime \
+                 model unload; keeping model resident to avoid a cold-restart on the next turn"
+            );
+            return Ok(false);
+        }
+
         tracing::info!(reason, "orchestrator: idle release requested");
         self.stop_watchdog().await;
 
@@ -1697,6 +1723,20 @@ impl Orchestrator {
                 return Ok(true);
             }
             Err(e) => {
+                // Router-mode unload unsupported (the common case on stock llama.cpp
+                // builds): a process kill here forces a slow cold restart on the next
+                // turn. Keep the model resident instead — the very reason we probe the
+                // capability. The watchdog still relieves genuine VRAM pressure.
+                if is_router_mode_unavailable_error(&e.to_string()) {
+                    tracing::debug!(
+                        ?e,
+                        reason,
+                        "orchestrator: idle release skipped — zero-downtime unload unavailable; \
+                         keeping model resident to avoid a cold-restart on the next turn"
+                    );
+                    self.ensure_watchdog_running().await;
+                    return Ok(false);
+                }
                 tracing::warn!(
                     ?e,
                     "orchestrator: idle API unload failed, falling back to process stop"

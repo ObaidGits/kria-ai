@@ -59,6 +59,7 @@ pub mod error;
 pub mod events;
 pub mod grants;
 pub mod index;
+pub mod intelligence;
 pub mod permission;
 pub mod platform;
 pub mod protocol;
@@ -71,7 +72,7 @@ pub(crate) mod fake;
 #[cfg(test)]
 mod tests;
 
-pub use config::{CapabilityPlatformConfig, ProviderConfig};
+pub use config::{CapabilityIntelligenceConfig, CapabilityPlatformConfig, ProviderConfig};
 pub use descriptor::{
     CapabilityDescriptor, CapabilityTag, CostHint, DescriptorVersion, Effect, Effects,
     Expectations, FailureExample, Guidance, IoExample, Modality, QualitySignals, ResourceClass,
@@ -79,6 +80,10 @@ pub use descriptor::{
 };
 pub use error::CapError;
 pub use events::{CapabilityEvent, CapabilityEventBus, Outcome, SharedEventBus, Stage};
+pub use intelligence::{
+    infer_family, infer_kind, CapabilityFamily, CapabilityKind, GoalClass, ReasoningPolicy,
+    REASONING_POLICY_VERSION, TELEMETRY_SCHEMA_VERSION,
+};
 pub use protocol::{
     ClientCapabilities, Feature, FeatureSet, ProtocolSession, ProtocolVersion, ProviderHealth,
 };

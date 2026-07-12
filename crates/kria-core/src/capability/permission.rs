@@ -190,8 +190,13 @@ impl PermissionEngine for DefaultPermissionEngine {
             };
         }
 
-        let irreversible = matches!(req.effects.reversible, Reversibility::Irreversible)
-            || matches!(req.effects.reversible, Reversibility::Unknown);
+        // System-modifying = an EXPLICITLY irreversible effect or a host-scope
+        // subprocess. `Unknown` reversibility alone (the conservative thin-
+        // provider default, e.g. a read-only MCP tool) is still *elevated* — it
+        // requires approval — but it is NOT treated as system-modifying, so a
+        // normal per-session/workspace grant can remember it (Tier 3). Only a
+        // genuinely irreversible/host-subprocess capability is AlwaysAsk.
+        let irreversible = matches!(req.effects.reversible, Reversibility::Irreversible);
         let host_subprocess = AuthorizeRequest::has_host_subprocess(&req.effects);
 
         // ── Tier 2: system-modifying ⇒ AlwaysAsk (unless a Silent grant). ────

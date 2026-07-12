@@ -168,6 +168,13 @@ pub struct LlamaServerManager {
     /// `ROUTER_MODE_SUPPORTED` => unload/load endpoints responded successfully
     /// `ROUTER_MODE_UNSUPPORTED` => endpoint returned 404/501 (or launch is not router-mode)
     router_mode_capability: AtomicU8,
+    /// Set while the orchestrator is performing an intended, bounded restart of the
+    /// SAME model (crash/idle recovery). Like a swap, `/health` is briefly offline
+    /// during this window even though the runtime is coming back — so reachability
+    /// probes must treat it as "warming", not "unreachable". This is the analogue of
+    /// `STATE_SWAPPING` for the ensure_ready restart path, which does not go through
+    /// the swap state machine.
+    restarting: AtomicBool,
     /// The actual API URL (updated after port discovery).
     api_url: tokio::sync::RwLock<String>,
     /// The child process wrapped in a ChildGuard for safe lifecycle management.
@@ -205,6 +212,7 @@ impl LlamaServerManager {
             pre_api_unload_ngl: AtomicU32::new(0),
             pre_api_unload_vision: AtomicBool::new(false),
             router_mode_capability: AtomicU8::new(ROUTER_MODE_UNKNOWN),
+            restarting: AtomicBool::new(false),
             api_url: tokio::sync::RwLock::new(String::new()),
             child: Mutex::new(None),
             cancel_token: std::sync::Mutex::new(CancellationToken::new()),
@@ -248,6 +256,42 @@ impl LlamaServerManager {
     /// Whether a swap is in progress (streams should be cancelled).
     pub fn is_swapping(&self) -> bool {
         self.state() == STATE_SWAPPING
+    }
+
+    /// Mark the start of an intended, bounded restart of the same model.
+    /// Reachability probes treat this window as "warming", not "unreachable".
+    pub fn begin_restart(&self) {
+        self.restarting.store(true, Ordering::Release);
+    }
+
+    /// Mark the end of an intended restart (server is ready or has failed).
+    pub fn end_restart(&self) {
+        self.restarting.store(false, Ordering::Release);
+    }
+
+    /// Whether the runtime is in a controlled transition (swap OR restart) where
+    /// `/health` may be briefly offline while the SAME process/model comes back.
+    /// Consumed by the local backend's reachability probe so a deliberate,
+    /// bounded transition never flips the user-facing "LLM server not reachable"
+    /// banner.
+    pub fn is_warming(&self) -> bool {
+        self.is_swapping() || self.restarting.load(Ordering::Acquire)
+    }
+
+    /// Whether this llama-server build supports zero-downtime model unload/reload
+    /// via Router Mode (`/v1/models/load|unload`).
+    ///
+    /// - `None`  => capability not yet probed this process lifetime.
+    /// - `Some(true)`  => unload/load endpoints work (VRAM can be freed without a
+    ///   process restart).
+    /// - `Some(false)` => endpoints returned 404/501; freeing the model requires a
+    ///   full process kill + cold restart.
+    ///
+    /// Idle-release consults this: when unload is NOT zero-downtime, tearing the
+    /// process down on an idle timer guarantees a slow cold restart (and a visible
+    /// "LLM server not reachable" window) on the next turn, so it is skipped.
+    pub fn zero_downtime_swap_supported(&self) -> Option<bool> {
+        self.router_mode_supported_cached()
     }
 
     /// Current (ngl, context) parameters.
@@ -1511,6 +1555,57 @@ mod tests {
         mgr.state.store(STATE_SWAPPING, Ordering::Release);
         assert!(mgr.is_swapping());
         assert!(!mgr.is_healthy());
+    }
+
+    #[test]
+    fn is_warming_covers_both_swap_and_restart() {
+        let mgr = LlamaServerManager::new(
+            OrchestratorConfig::default(),
+            "/tmp/model.gguf".into(),
+            None,
+        );
+        // Ready & not restarting → not warming.
+        mgr.state.store(STATE_READY, Ordering::Release);
+        assert!(!mgr.is_warming());
+
+        // A swap is a warming transition.
+        mgr.state.store(STATE_SWAPPING, Ordering::Release);
+        assert!(mgr.is_warming());
+
+        // An intended restart is also a warming transition, even while the state
+        // machine is in STARTING/STOPPED (the ensure_ready cold-restart window that
+        // does NOT go through STATE_SWAPPING).
+        mgr.state.store(STATE_STARTING, Ordering::Release);
+        assert!(!mgr.is_swapping());
+        mgr.begin_restart();
+        assert!(mgr.is_warming(), "restart window must read as warming");
+        mgr.end_restart();
+        assert!(
+            !mgr.is_warming(),
+            "warming clears once the restart window is over"
+        );
+    }
+
+    #[test]
+    fn zero_downtime_capability_reflects_router_mode_cache() {
+        let mgr = LlamaServerManager::new(
+            OrchestratorConfig::default(),
+            "/tmp/model.gguf".into(),
+            None,
+        );
+        // Unknown until first probed — idle-release must NOT pre-emptively skip.
+        assert_eq!(mgr.zero_downtime_swap_supported(), None);
+
+        mgr.mark_router_mode_supported();
+        assert_eq!(mgr.zero_downtime_swap_supported(), Some(true));
+
+        // First transition to unsupported is reported; capability now Some(false),
+        // which is the signal for idle-release to keep the model resident.
+        assert!(mgr.mark_router_mode_unsupported());
+        assert_eq!(mgr.zero_downtime_swap_supported(), Some(false));
+        // Idempotent thereafter.
+        assert!(!mgr.mark_router_mode_unsupported());
+        assert_eq!(mgr.zero_downtime_swap_supported(), Some(false));
     }
 
     #[test]

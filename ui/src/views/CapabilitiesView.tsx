@@ -120,7 +120,77 @@ const outcomeColor: Record<string, string> = {
   degraded: "#d97706",
 };
 
-type Tab = "providers" | "browser" | "marketplace" | "approvals" | "timeline";
+interface CppQuarantineView {
+  provider_id: string;
+  capability_id: string;
+  reason: string;
+}
+
+interface CppHealthView {
+  provider_id: string;
+  capability_id: string;
+  family: string;
+  status: string;
+  success_rate: number | null;
+  total: number;
+  consecutive_failures: number;
+  last_failure: string | null;
+}
+
+interface CppProposalView {
+  id: string;
+  kind: string;
+  provider_id: string;
+  capability_id: string;
+  replacement: [string, string] | null;
+  rationale: string;
+  confidence: number;
+  requires_approval: boolean;
+  status: string;
+  created_at: string;
+}
+
+type Tab = "providers" | "browser" | "marketplace" | "generate" | "discovery" | "jobs" | "quarantine" | "evolution" | "approvals" | "timeline";
+
+// Wave 11: a durable job record (Execution Monitor).
+interface CppJob {
+  id: string;
+  provider_id: string;
+  capability_id: string;
+  state: string;
+  attempts: number;
+  priority: number;
+  created_at: string;
+  updated_at: string;
+  last_error: string | null;
+}
+
+// Wave 10: continuous discovery loop status.
+interface CppDiscoveryStatus {
+  enabled: boolean;
+  running: boolean;
+  total_scans: number;
+  last_scan_at: string | null;
+  next_scan_at: string | null;
+  last_scan_findings: number;
+  last_scan_skipped_quiet: boolean;
+  pending_proposals: number;
+  consecutive_errors: number;
+  last_error: string | null;
+}
+
+// Wave 9 (W9-R12): a dry-run preview of the capability KRIA would synthesize.
+interface CppSynthesisPreview {
+  synthesizable: boolean;
+  capability_id: string | null;
+  name: string | null;
+  pipeline: string[];
+  node_count: number;
+  ir_hash: string | null;
+  golden_input: string | null;
+  golden_output: string | null;
+  message: string | null;
+}
 
 const CapabilitiesView: Component = () => {
   const [tab, setTab] = createSignal<Tab>("browser");
@@ -128,10 +198,25 @@ const CapabilitiesView: Component = () => {
   const [providers, setProviders] = createSignal<CppProviderView[]>([]);
   const [caps, setCaps] = createSignal<CppCapabilityView[]>([]);
   const [recs, setRecs] = createSignal<CppCapabilityView[]>([]);
+  const [quarantined, setQuarantined] = createSignal<CppQuarantineView[]>([]);
+  const [health, setHealth] = createSignal<CppHealthView[]>([]);
+  const [proposals, setProposals] = createSignal<CppProposalView[]>([]);
+  const [autonomy, setAutonomy] = createSignal<string>("propose_only");
   const [grants, setGrants] = createSignal<CppGrantView[]>([]);
   const [events, setEvents] = createSignal<CppEventView[]>([]);
   const [query, setQuery] = createSignal("");
   const [mktQuery, setMktQuery] = createSignal("");
+  // Generate (synthesis) tab state.
+  const [synGoal, setSynGoal] = createSignal("");
+  const [synPreview, setSynPreview] = createSignal<CppSynthesisPreview | null>(null);
+  const [synResult, setSynResult] = createSignal<CppCapabilityView | null>(null);
+  const [synBusy, setSynBusy] = createSignal(false);
+  const [synLog, setSynLog] = createSignal<CppEventView[]>([]);
+  // Discovery tab state.
+  const [discovery, setDiscovery] = createSignal<CppDiscoveryStatus | null>(null);
+  const [scanning, setScanning] = createSignal(false);
+  // Jobs tab state.
+  const [jobs, setJobs] = createSignal<CppJob[]>([]);
   const [loading, setLoading] = createSignal(true);
   const [error, setError] = createSignal<string | null>(null);
 
@@ -285,8 +370,153 @@ const CapabilitiesView: Component = () => {
     }
   };
 
+  const loadQuarantine = async () => {
+    setError(null);
+    try {
+      setQuarantined(await invoke<CppQuarantineView[]>("cpp_quarantined"));
+    } catch (e: unknown) {
+      setError(String(e));
+    }
+  };
+
+  const releaseQuarantine = async (providerId: string, capabilityId: string) => {
+    try {
+      await invoke<boolean>("cpp_release_quarantine", {
+        providerId,
+        capabilityId,
+      });
+      await loadQuarantine();
+    } catch (e: unknown) {
+      setError(String(e));
+    }
+  };
+
+  const loadEvolution = async () => {
+    setError(null);
+    try {
+      setHealth(await invoke<CppHealthView[]>("cpp_health"));
+      setProposals(await invoke<CppProposalView[]>("cpp_proposals"));
+      setAutonomy(await invoke<string>("cpp_get_autonomy"));
+    } catch (e: unknown) {
+      setError(String(e));
+    }
+  };
+
+  const applyProposal = async (id: string) => {
+    try {
+      await invoke<CppProposalView>("cpp_proposal_apply", { id });
+      await loadEvolution();
+    } catch (e: unknown) {
+      setError(String(e));
+    }
+  };
+
+  const undoProposal = async (id: string) => {
+    try {
+      await invoke<CppProposalView>("cpp_proposal_undo", { id });
+      await loadEvolution();
+    } catch (e: unknown) {
+      setError(String(e));
+    }
+  };
+
+  const changeAutonomy = async (level: string) => {
+    try {
+      setAutonomy(await invoke<string>("cpp_set_autonomy", { level }));
+    } catch (e: unknown) {
+      setError(String(e));
+    }
+  };
+
+  // Wave 9 (W9-R12): preview then synthesize a capability from a goal.
+  const previewSynthesis = async () => {
+    const g = synGoal().trim();
+    setSynResult(null);
+    if (!g) {
+      setSynPreview(null);
+      return;
+    }
+    try {
+      setSynPreview(await invoke<CppSynthesisPreview>("cpp_synthesis_preview", { goal: g }));
+    } catch (e: unknown) {
+      setError(String(e));
+    }
+  };
+
+  const doSynthesize = async () => {
+    const g = synGoal().trim();
+    if (!g) return;
+    setSynBusy(true);
+    setError(null);
+    try {
+      const cap = await invoke<CppCapabilityView>("cpp_synthesize", { goal: g });
+      setSynResult(cap);
+      // Pull the granular synthesis timeline (progress + logs) as evidence.
+      try {
+        const events = await invoke<CppEventView[]>("cpp_timeline", { limit: 100 });
+        setSynLog(
+          events.filter(
+            (e) =>
+              e.stage === "synthesize" ||
+              (e.capability_id === cap.capability_id &&
+                (e.stage === "acquire" || e.stage === "execute" || e.stage === "failure")),
+          ),
+        );
+      } catch {
+        /* timeline is best-effort */
+      }
+      await refresh();
+    } catch (e: unknown) {
+      setError(String(e));
+    } finally {
+      setSynBusy(false);
+    }
+  };
+
+  // Wave 10: discovery dashboard.
+  const loadDiscovery = async () => {
+    try {
+      setDiscovery(await invoke<CppDiscoveryStatus>("cpp_discovery_status"));
+    } catch (e: unknown) {
+      setError(String(e));
+    }
+  };
+  const runDiscoveryScan = async () => {
+    setScanning(true);
+    setError(null);
+    try {
+      await invoke("cpp_discovery_scan");
+      await loadDiscovery();
+    } catch (e: unknown) {
+      setError(String(e));
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  // Wave 11: execution monitor.
+  const loadJobs = async () => {
+    try {
+      setJobs(await invoke<CppJob[]>("cpp_jobs", { limit: 200 }));
+    } catch (e: unknown) {
+      setError(String(e));
+    }
+  };
+  const cancelJob = async (id: string) => {
+    try {
+      await invoke("cpp_job_control", { id, action: "cancel" });
+      await loadJobs();
+    } catch (e: unknown) {
+      setError(String(e));
+    }
+  };
+
   const switchTab = (t: Tab) => {
     setTab(t);
+    if (t === "jobs") void loadJobs();
+    if (t === "discovery") void loadDiscovery();
+    if (t === "evolution") void loadEvolution();
+    if (t === "quarantine") void loadQuarantine();
     if (t === "approvals") void loadGrants();
     if (t === "timeline") void loadTimeline();
     if (t === "marketplace") void recommend();
@@ -297,6 +527,7 @@ const CapabilitiesView: Component = () => {
     // Poll the timeline while it is the active tab (push+poll reconcile).
     pollTimer = setInterval(() => {
       if (tab() === "timeline") void loadTimeline();
+      if (tab() === "jobs") void loadJobs();
     }, 3000);
   });
   onCleanup(() => {
@@ -307,6 +538,11 @@ const CapabilitiesView: Component = () => {
     { id: "providers", label: "Providers" },
     { id: "browser", label: "Browser" },
     { id: "marketplace", label: "Marketplace" },
+    { id: "generate", label: "Generate" },
+    { id: "discovery", label: "Discovery" },
+    { id: "jobs", label: "Execution Monitor" },
+    { id: "quarantine", label: "Quarantine" },
+    { id: "evolution", label: "Evolution" },
     { id: "approvals", label: "Approval Center" },
     { id: "timeline", label: "Timeline" },
   ];
@@ -423,6 +659,242 @@ const CapabilitiesView: Component = () => {
                   <span style={{ "margin-left": "auto", "font-size": "11px", color: "#6b7280" }}>installable</span>
                 </div>
                 <div style={{ "font-size": "12px", color: "#4b5563" }}>{c.description}</div>
+              </div>
+            )}
+          </For>
+        </div>
+      </Show>
+
+      {/* ── Quarantine (trust/integrity gate, R8.3) ───────────────── */}
+      <Show when={tab() === "quarantine"}>
+        <div style={{ display: "flex", "justify-content": "space-between", "align-items": "center", "margin-bottom": "8px" }}>
+          <h3 style={{ margin: "0" }}>Quarantined capabilities</h3>
+          <button type="button" class="btn-secondary" onClick={() => void loadQuarantine()}>Reload</button>
+        </div>
+        <p class="settings-hint">
+          Capabilities that failed the Brain's trust / integrity gate on acquisition.
+          They cannot execute until reviewed and released.
+        </p>
+        <Show when={quarantined().length === 0}><p class="settings-hint">Nothing quarantined.</p></Show>
+        <div style={{ display: "flex", "flex-direction": "column", gap: "6px" }}>
+          <For each={quarantined()}>
+            {(q) => (
+              <div style={{ padding: "8px", border: "1px solid #dc2626", "border-radius": "8px" }}>
+                <div style={{ display: "flex", "align-items": "center", gap: "8px" }}>
+                  <strong>{q.capability_id}</strong>
+                  <span class="settings-hint">{q.provider_id}</span>
+                  <button
+                    type="button"
+                    class="btn-secondary"
+                    style={{ "margin-left": "auto" }}
+                    onClick={() => void releaseQuarantine(q.provider_id, q.capability_id)}
+                  >
+                    Release
+                  </button>
+                </div>
+                <div style={{ "font-size": "12px", color: "#b91c1c" }}>{q.reason}</div>
+              </div>
+            )}
+          </For>
+        </div>
+      </Show>
+
+      {/* ── Generate: synthesize a capability from a goal (Wave 9, R7/R27) ── */}
+      <Show when={tab() === "generate"}>
+        <h3 style={{ margin: "0 0 6px" }}>Generate a capability</h3>
+        <p class="settings-hint">
+          KRIA engineers a new capability from a goal by composing audited primitives into a
+          validated Capability-Graph IR — no code generation. It runs at the lowest trust tier,
+          must pass a golden smoke test before activation, and honestly declines goals it cannot
+          express.
+        </p>
+        <div style={{ display: "flex", gap: "8px", "margin-bottom": "10px" }}>
+          <input
+            type="text"
+            placeholder="e.g. trim then uppercase then reverse"
+            value={synGoal()}
+            onInput={(e) => setSynGoal(e.currentTarget.value)}
+            onChange={() => void previewSynthesis()}
+            style={{ flex: "1", padding: "6px 10px" }}
+          />
+          <button type="button" class="btn-secondary" onClick={() => void previewSynthesis()}>
+            Preview
+          </button>
+          <button
+            type="button"
+            class="btn-primary"
+            disabled={synBusy() || !(synPreview()?.synthesizable ?? false)}
+            onClick={() => void doSynthesize()}
+          >
+            {synBusy() ? "Synthesizing…" : "Synthesize"}
+          </button>
+        </div>
+
+        <Show when={synPreview()}>
+          {(p) => (
+            <div style={{ padding: "10px", border: "1px solid #e5e7eb", "border-radius": "8px", "margin-bottom": "10px" }}>
+              <Show
+                when={p().synthesizable}
+                fallback={<p class="settings-hint" style={{ color: "#b45309" }}>{p().message}</p>}
+              >
+                <div style={{ display: "grid", "grid-template-columns": "auto 1fr", gap: "4px 12px", "font-size": "13px" }}>
+                  <strong>Capability id</strong><span>{p().capability_id}</span>
+                  <strong>Name</strong><span>{p().name}</span>
+                  <strong>Pipeline</strong><span>{p().pipeline.join("  →  ")}</span>
+                  <strong>IR nodes</strong><span>{p().node_count}</span>
+                  <strong>IR hash</strong><span style={{ "font-family": "monospace" }}>{(p().ir_hash ?? "").slice(0, 16)}</span>
+                  <strong>Golden case</strong><span>{JSON.stringify(p().golden_input)} → {JSON.stringify(p().golden_output)}</span>
+                </div>
+              </Show>
+            </div>
+          )}
+        </Show>
+
+        <Show when={synResult()}>
+          {(r) => (
+            <div style={{ padding: "10px", border: "1px solid #10b981", "border-radius": "8px" }}>
+              <strong style={{ color: "#059669" }}>Synthesized + activated:</strong>{" "}
+              {r().provider_id}/{r().capability_id}
+              <p class="settings-hint" style={{ margin: "4px 0 0" }}>
+                Now discoverable in the Browser tab and executable through the permission gate.
+              </p>
+            </div>
+          )}
+        </Show>
+
+        {/* Synthesis progress / logs (granular capability:synthesize events). */}
+        <Show when={synLog().length > 0}>
+          <h4 style={{ margin: "12px 0 4px" }}>Synthesis log</h4>
+          <div style={{ display: "flex", "flex-direction": "column", gap: "2px", "font-family": "monospace", "font-size": "12px" }}>
+            <For each={synLog()}>
+              {(e) => (
+                <div style={{ display: "flex", gap: "8px", padding: "3px 6px", "border-radius": "4px", background: "#f8fafc" }}>
+                  <span style={{ color: "#6b7280" }}>{e.timestamp.slice(11, 19)}</span>
+                  <span style={{ "min-width": "80px" }}>{e.stage}</span>
+                  <span style={{ color: outcomeColor[e.outcome] ?? "#6b7280", "min-width": "70px" }}>{e.outcome}</span>
+                  <span style={{ color: "#4b5563" }}>{e.detail}</span>
+                </div>
+              )}
+            </For>
+          </div>
+        </Show>
+      </Show>
+
+      {/* ── Execution Monitor: durable long-running jobs (Wave 11) ────────── */}
+      <Show when={tab() === "jobs"}>
+        <div style={{ display: "flex", "align-items": "center", gap: "8px", "margin-bottom": "10px" }}>
+          <h3 style={{ margin: "0" }}>Execution Monitor</h3>
+          <button type="button" class="btn-secondary" style={{ "margin-left": "auto" }} onClick={() => void loadJobs()}>Refresh</button>
+        </div>
+        <p class="settings-hint">
+          Durable, resumable jobs run through the reliable execution path (timeout + bounded retry +
+          cancellation). State survives restart. Live-updating.
+        </p>
+        <Show when={jobs().length === 0}><p class="settings-hint">No jobs.</p></Show>
+        <For each={jobs()}>
+          {(j) => (
+            <div style={{ display: "flex", "align-items": "center", gap: "8px", padding: "6px", "border-bottom": "1px solid #f1f5f9", "font-size": "13px" }}>
+              <span style={{ width: "10px", height: "10px", "border-radius": "50%", background: outcomeColor[j.state === "completed" || j.state === "recovered" ? "ok" : j.state === "failed" || j.state === "timed_out" ? "failed" : j.state === "cancelled" || j.state === "rolled_back" ? "declined" : "started"] || "#9ca3af" }} />
+              <strong>{j.provider_id}/{j.capability_id}</strong>
+              <span style={{ padding: "1px 6px", "border-radius": "4px", background: "#f1f5f9" }}>{j.state}</span>
+              <span class="settings-hint">attempts {j.attempts}</span>
+              <Show when={j.last_error}><span style={{ color: "#b45309" }}>{j.last_error}</span></Show>
+              <span class="settings-hint" style={{ "margin-left": "auto" }}>{j.updated_at.slice(11, 19)}</span>
+              <Show when={!["completed", "failed", "cancelled", "rolled_back"].includes(j.state)}>
+                <button type="button" class="btn-secondary" onClick={() => void cancelJob(j.id)}>Cancel</button>
+              </Show>
+            </div>
+          )}
+        </For>
+      </Show>
+
+      {/* ── Discovery: continuous discovery/maintenance dashboard (Wave 10) ── */}
+      <Show when={tab() === "discovery"}>
+        <div style={{ display: "flex", "align-items": "center", gap: "8px", "margin-bottom": "10px" }}>
+          <h3 style={{ margin: "0" }}>Continuous Discovery</h3>
+          <button type="button" class="btn-secondary" style={{ "margin-left": "auto" }} onClick={() => void loadDiscovery()}>Refresh</button>
+          <button type="button" class="btn-primary" disabled={scanning() || !(discovery()?.enabled ?? false)} onClick={() => void runDiscoveryScan()}>
+            {scanning() ? "Scanning…" : "Scan now"}
+          </button>
+        </div>
+        <p class="settings-hint">
+          Background maintenance scans provider health + the marketplace and writes reversible
+          proposals (Upgrade / Replace / Repair / Retire) to the Evolution feed under the autonomy
+          level. Off unless <code>continuous_discovery</code> is enabled.
+        </p>
+        <Show when={discovery()} fallback={<p class="settings-hint">Loading…</p>}>
+          {(s) => (
+            <Show
+              when={s().enabled}
+              fallback={<p class="settings-hint" style={{ color: "#b45309" }}>Continuous discovery is disabled.</p>}
+            >
+              <div style={{ display: "grid", "grid-template-columns": "auto 1fr", gap: "4px 12px", "font-size": "13px", "max-width": "560px" }}>
+                <strong>Running</strong><span>{s().running ? "yes (background loop active)" : "no"}</span>
+                <strong>Total scans</strong><span>{s().total_scans}</span>
+                <strong>Last scan</strong><span>{s().last_scan_at ?? "—"}{s().last_scan_skipped_quiet ? " (skipped: quiet hours)" : ""}</span>
+                <strong>Next scan</strong><span>{s().next_scan_at ?? "—"}</span>
+                <strong>Last findings</strong><span>{s().last_scan_findings}</span>
+                <strong>Pending proposals</strong><span>{s().pending_proposals} (see Evolution tab)</span>
+                <strong>Errors</strong><span>{s().consecutive_errors}{s().last_error ? ` · ${s().last_error}` : ""}</span>
+              </div>
+            </Show>
+          )}
+        </Show>
+      </Show>
+
+      {/* ── Evolution: health + proposals oversight (R6/R29) ──────── */}
+      <Show when={tab() === "evolution"}>
+        <div style={{ display: "flex", "align-items": "center", gap: "8px", "margin-bottom": "10px" }}>
+          <h3 style={{ margin: "0" }}>Autonomy</h3>
+          <select value={autonomy()} onChange={(e) => void changeAutonomy(e.currentTarget.value)}>
+            <option value="manual">Manual</option>
+            <option value="propose_only">Propose only</option>
+            <option value="auto_with_notice">Auto with notice</option>
+            <option value="full_auto">Full auto</option>
+          </select>
+          <button type="button" class="btn-secondary" style={{ "margin-left": "auto" }} onClick={() => void loadEvolution()}>Refresh</button>
+        </div>
+
+        <h3 style={{ margin: "10px 0 6px" }}>Evolution proposals</h3>
+        <p class="settings-hint">Auditable, reversible proposals from capability health. Elevated actions require approval.</p>
+        <Show when={proposals().length === 0}><p class="settings-hint">No proposals — ecosystem healthy.</p></Show>
+        <div style={{ display: "flex", "flex-direction": "column", gap: "6px" }}>
+          <For each={proposals()}>
+            {(p) => (
+              <div style={{ padding: "8px", border: "1px solid #cbd5e1", "border-radius": "8px" }}>
+                <div style={{ display: "flex", "align-items": "center", gap: "8px" }}>
+                  <strong style={{ "text-transform": "uppercase", "font-size": "11px", color: "#2563eb" }}>{p.kind}</strong>
+                  <span>{p.capability_id}</span>
+                  <Show when={p.replacement}><span class="settings-hint">→ {p.replacement![1]}</span></Show>
+                  <span style={{ "margin-left": "auto", "font-size": "11px", color: "#6b7280" }}>{p.status} · conf {(p.confidence * 100).toFixed(0)}%</span>
+                </div>
+                <div style={{ "font-size": "12px", color: "#4b5563", margin: "4px 0" }}>{p.rationale}</div>
+                <Show when={p.status === "pending" || p.status === "approved"}>
+                  <div style={{ display: "flex", gap: "6px" }}>
+                    <button type="button" class="btn-secondary" onClick={() => void applyProposal(p.id)}>Apply</button>
+                    <button type="button" class="btn-secondary" onClick={() => void undoProposal(p.id)}>Dismiss</button>
+                  </div>
+                </Show>
+                <Show when={p.status === "applied"}>
+                  <button type="button" class="btn-secondary" onClick={() => void undoProposal(p.id)}>Undo</button>
+                </Show>
+              </div>
+            )}
+          </For>
+        </div>
+
+        <h3 style={{ margin: "14px 0 6px" }}>Capability health</h3>
+        <Show when={health().length === 0}><p class="settings-hint">No health data yet.</p></Show>
+        <div style={{ display: "flex", "flex-direction": "column", gap: "4px" }}>
+          <For each={health()}>
+            {(h) => (
+              <div style={{ display: "flex", "align-items": "center", gap: "8px", padding: "6px", "border-bottom": "1px solid #f1f5f9" }}>
+                <span style={{ width: "10px", height: "10px", "border-radius": "50%", background: outcomeColor[h.status === "healthy" ? "ok" : h.status === "warning" ? "declined" : h.status === "critical" || h.status === "quarantined" ? "failed" : "started"] || "#9ca3af" }} />
+                <strong>{h.capability_id}</strong>
+                <span class="settings-hint">{h.provider_id} · {h.family}</span>
+                <span style={{ "margin-left": "auto", "font-size": "12px" }}>
+                  {h.status}{h.success_rate !== null ? ` · ${(h.success_rate * 100).toFixed(0)}% (${h.total})` : ""}{h.consecutive_failures > 0 ? ` · ${h.consecutive_failures}✗` : ""}
+                </span>
               </div>
             )}
           </For>

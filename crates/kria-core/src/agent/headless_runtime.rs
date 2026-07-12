@@ -51,8 +51,10 @@ pub fn build_minimal(config: &KriaConfig) -> anyhow::Result<HeadlessRuntime> {
     let policy_engine = Arc::new(PolicyEngine::new());
     let hitl = Arc::new(HitlGateway::new(HEADLESS_HITL_TIMEOUT_SECS));
 
-    // Audit log persisted to ~/.kria/audit.db (self-initialises its schema).
-    let audit_conn = rusqlite::Connection::open(paths.data_dir.join("audit.db"))
+    // Audit log persisted into the shared kria.db (self-initialises its schema).
+    // settings-config-revamp Task 9: unified onto `paths.db_path` (WAL-safe,
+    // same pattern as the desktop AppState) to retire the redundant audit.db.
+    let audit_conn = rusqlite::Connection::open(&paths.db_path)
         .map_err(|e| anyhow::anyhow!("open audit db: {e}"))?;
     let audit_logger = Arc::new(AuditLogger::new(audit_conn));
 

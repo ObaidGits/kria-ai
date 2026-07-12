@@ -287,6 +287,11 @@ const [manualToolMode, setManualToolModeSignal] = createSignal<ManualToolModeId>
   resolveInitialManualToolMode()
 );
 const [settings, setSettings] = createSignal<Record<string, any> | null>(null);
+// settings-config-revamp Task 10/11: field-level config schema (risk / restart /
+// env-lock / secret metadata) fetched from the `get_config_schema` command.
+const [configSchema, setConfigSchema] = createSignal<Record<string, any> | null>(null);
+// settings-config-revamp Task 15: durable config-change history (newest first).
+const [configHistory, setConfigHistory] = createSignal<Array<Record<string, any>>>([]);
 const [models, setModels] = createSignal<any[]>([]);
 const [audioDevices, setAudioDevices] = createSignal<AudioDevicesData | null>(null);
 const resolveInitialTheme = (): "dark" | "light" => {
@@ -3171,6 +3176,43 @@ async function loadSettings() {
   }
 }
 
+/// settings-config-revamp Task 10/11: fetch the field-level config schema
+/// (risk / restart-required / env-lock / secret metadata) so the Settings UI can
+/// render badges and "locked by env" chips. Best-effort — failure leaves the
+/// previous schema (or null) in place and the UI simply omits the badges.
+async function loadConfigSchema() {
+  try {
+    const schema = await invoke<Record<string, any>>("get_config_schema");
+    setConfigSchema(schema);
+  } catch (e) {
+    console.error("Failed to load config schema:", e);
+  }
+}
+
+/// Look up the metadata for one (section, field) from the loaded schema.
+function configFieldMeta(section: string, field: string): Record<string, any> | null {
+  const schema = configSchema();
+  return schema?.[section]?.[field] ?? null;
+}
+
+/// All fields currently locked by an environment variable, as
+/// `{ section, field, env_lock_var }` — used to surface a global notice.
+function envLockedFields(): Array<{ section: string; field: string; env_lock_var: string | null }> {
+  const schema = configSchema();
+  if (!schema) return [];
+  const out: Array<{ section: string; field: string; env_lock_var: string | null }> = [];
+  for (const section of Object.keys(schema)) {
+    const fields = schema[section];
+    if (!fields || typeof fields !== "object") continue;
+    for (const field of Object.keys(fields)) {
+      if (fields[field]?.env_locked) {
+        out.push({ section, field, env_lock_var: fields[field]?.env_lock_var ?? null });
+      }
+    }
+  }
+  return out;
+}
+
 async function loadAudioDevices() {
   try {
     const result = await invoke<AudioDevicesData>("list_audio_devices");
@@ -3186,16 +3228,95 @@ async function loadAudioDevices() {
   }
 }
 
+/// settings-config-revamp Task 11: compute the changed (section, field) leaves
+/// between the current persisted settings and the edited draft. Only top-level
+/// section → field pairs are diffed; the field value itself may be a nested
+/// object (patch_config accepts arbitrary JSON per field). Returns [] when there
+/// is no current baseline (first load) so the caller falls back to a full save.
+function diffSettingsFields(
+  current: Record<string, any> | null,
+  next: Record<string, any>,
+): Array<{ section: string; field: string; value: any }> {
+  if (!current) return [];
+  const changes: Array<{ section: string; field: string; value: any }> = [];
+  for (const section of Object.keys(next)) {
+    const nextSection = next[section];
+    // Only diff object sections field-by-field; skip non-object/top-level scalars.
+    if (nextSection === null || typeof nextSection !== "object" || Array.isArray(nextSection)) {
+      continue;
+    }
+    const curSection = current[section];
+    for (const field of Object.keys(nextSection)) {
+      const nextVal = nextSection[field];
+      const curVal =
+        curSection && typeof curSection === "object" ? curSection[field] : undefined;
+      if (JSON.stringify(curVal) !== JSON.stringify(nextVal)) {
+        changes.push({ section, field, value: nextVal });
+      }
+    }
+  }
+  return changes;
+}
+
 async function saveSettings(newSettings: Record<string, any>) {
   try {
-    await invoke("update_settings", { settings: newSettings });
+    // Prefer field-level patch_config so only changed fields are written
+    // (atomic, no whole-blob round-trip / drift — settings-config-revamp Task 11).
+    // Fall back to the whole-blob update_settings if the granular path can't be
+    // used (no baseline yet, or any patch_config call fails — e.g. older backend).
+    const changes = diffSettingsFields(settings(), newSettings);
+    let usedGranular = false;
+    if (changes.length > 0) {
+      try {
+        for (const c of changes) {
+          await invoke("patch_config", { section: c.section, field: c.field, value: c.value });
+        }
+        usedGranular = true;
+      } catch (patchErr) {
+        console.warn(
+          "patch_config field save failed, falling back to update_settings:",
+          patchErr,
+        );
+      }
+    }
+    if (!usedGranular) {
+      await invoke("update_settings", { settings: newSettings });
+    }
+    // Optimistic apply for snappy UX...
     setSettings(newSettings);
     const resolvedTheme: "dark" | "light" = newSettings?.ui?.theme === "dark" ? "dark" : "light";
     applyTheme(resolvedTheme);
     applyUiRuntimePreferences(newSettings?.ui);
+    // ...then reconcile with the persisted truth (settings-config-revamp Task 11):
+    // the backend may normalize or preserve certain fields (e.g. provider/llm),
+    // so re-fetch to avoid showing a value the backend didn't accept.
+    void loadSettings();
   } catch (e) {
     console.error("Failed to save settings:", e);
     throw e;
+  }
+}
+
+/// settings-config-revamp: send a natural-language settings command to the
+/// backend (`config_prompt`). Returns the backend's outcome
+/// ({status: applied|clarify|refused|denied|not_a_change|...}). Requires
+/// KRIA_CONFIG_PROMPT_CONTROL=1 on the backend, else {status:"disabled"}.
+async function configPrompt(prompt: string): Promise<Record<string, any>> {
+  return await invoke<Record<string, any>>("config_prompt", { prompt });
+}
+
+/// settings-config-revamp Task 15: load the durable config-change history from the
+/// hash-chained audit ledger (newest first). Best-effort.
+async function loadConfigHistory(limit = 50) {
+  try {
+    const res = await invoke<Record<string, any>>("get_config_history", { limit });
+    const entries = Array.isArray(res?.history) ? res.history : [];
+    setConfigHistory(entries);
+    return entries;
+  } catch (e) {
+    console.error("Failed to load config history:", e);
+    setConfigHistory([]);
+    return [];
   }
 }
 
@@ -4236,6 +4357,13 @@ function initListeners() {
     }
   });
 
+  // settings-config-revamp Task 11: reflect config changes (from prompt, other
+  // windows, or lagged events) by re-fetching the authoritative settings —
+  // replacing optimistic-only sync.
+  listen<{ section?: string; version?: number; lagged?: boolean }>("config-changed", () => {
+    void loadSettings();
+  });
+
   listen<AgentStageEvent>("agent:stage", (event) => {
     const stage = event.payload;
     setLatestAgentStage(stage);
@@ -5024,8 +5152,15 @@ export const appStore = {
   setMemoryEnabled,
   chatFlags: CHAT_FLAGS,
   loadSettings,
+  loadConfigSchema,
+  configSchema,
+  configFieldMeta,
+  envLockedFields,
   loadAudioDevices,
   saveSettings,
+  configPrompt,
+  configHistory,
+  loadConfigHistory,
   loadModels,
   applyTheme,
   mcpServers,

@@ -174,8 +174,9 @@ async fn main() -> anyhow::Result<()> {
     > = None;
     let remote_desktop: Option<Arc<kria_core::remote_desktop::RemoteDesktopManager>> =
         if config.remote_desktop.enabled {
-            let audit =
-                kria_core::remote_desktop::audit_logger_at(&paths.data_dir.join("audit.db"));
+            // settings-config-revamp Task 9: unified onto the shared kria.db
+            // (`paths.db_path`) to retire the redundant audit.db (WAL-safe).
+            let audit = kria_core::remote_desktop::audit_logger_at(&paths.db_path);
             let backend = Arc::new(kria_server::desktop_stream::PortalWebRtcBackend::new(
                 config.remote_desktop.clone(),
             ));

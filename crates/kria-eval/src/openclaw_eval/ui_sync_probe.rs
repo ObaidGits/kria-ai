@@ -82,19 +82,29 @@ pub fn validate_polled_data_reflects_real_state() -> Result<(), String> {
     let db_path = dir.path().join("r16_poll.db");
     let registry = Arc::new(ProductionSkillRegistry::new(&db_path).map_err(|e| e.to_string())?);
     let audit = Arc::new(
-        kria_core::openclaw::audit::AuditLedger::open(&db_path, b"r16-test-key".to_vec()).map_err(|e| e.to_string())?,
+        kria_core::openclaw::audit::AuditLedger::open(&db_path, b"r16-test-key".to_vec())
+            .map_err(|e| e.to_string())?,
     );
     let store = dir.path().join("store");
     std::fs::create_dir_all(&store).map_err(|e| e.to_string())?;
     let author_dir = dir.path().join("authored");
     std::fs::create_dir_all(&author_dir).map_err(|e| e.to_string())?;
 
-    let bundle_root = crate::openclaw_eval::installer_matrix::author_signed_bundle(&author_dir, "oc_r16_poll", [88u8; 32])?;
+    let bundle_root = crate::openclaw_eval::installer_matrix::author_signed_bundle(
+        &author_dir,
+        "oc_r16_poll",
+        [88u8; 32],
+    )?;
     let installer = BundleInstaller::new(registry.clone(), audit, store)
         .with_kria_version(Version::new(1, 0, 0))
-        .with_trust_policy(TrustPolicy { trusted_keys: Vec::new(), require_signature: true });
+        .with_trust_policy(TrustPolicy {
+            trusted_keys: Vec::new(),
+            require_signature: true,
+        });
 
-    installer.install(&bundle_root).map_err(|e| format!("install failed: {e}"))?;
+    installer
+        .install(&bundle_root)
+        .map_err(|e| format!("install failed: {e}"))?;
 
     // Immediately after install, with no delay — the data a poll-based
     // clawhub_list_skills-equivalent read would see.
@@ -112,8 +122,9 @@ mod tests {
 
     #[test]
     fn fixed_r16_event_forwarding_wired_to_frontend() {
-        validate_event_forwarding_exists()
-            .expect("REGRESSION: OpenClaw event forwarding must remain wired into the desktop frontend");
+        validate_event_forwarding_exists().expect(
+            "REGRESSION: OpenClaw event forwarding must remain wired into the desktop frontend",
+        );
     }
 
     #[test]

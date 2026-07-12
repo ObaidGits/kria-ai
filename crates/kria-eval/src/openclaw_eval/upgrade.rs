@@ -121,7 +121,9 @@ fn build_sample_skill_metadata() -> kria_core::openclaw::registry::SkillMetadata
         publisher: "test".into(),
         version: "1.0.0".into(),
         category: "test".into(),
-        discovery_source: DiscoverySource::Bundled { path: "test".into() },
+        discovery_source: DiscoverySource::Bundled {
+            path: "test".into(),
+        },
         discovered_at: chrono::Utc::now(),
         capabilities: SkillCapabilities::default(),
         runtime_requirements: "docker".into(),
@@ -158,7 +160,8 @@ mod tests {
     /// silenced.
     #[test]
     fn real_migration_brings_older_schema_forward() {
-        let findings = validate_no_migration_exists_for_older_schema().expect("test setup must succeed");
+        let findings =
+            validate_no_migration_exists_for_older_schema().expect("test setup must succeed");
         eprintln!("[R19] {findings:?}");
 
         assert!(

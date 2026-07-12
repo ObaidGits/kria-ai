@@ -45,7 +45,11 @@ pub enum RunOutcome {
 
 impl RunOutcome {
     /// Every terminal outcome must restore the pre-run baseline.
-    pub const ALL: [RunOutcome; 3] = [RunOutcome::Completed, RunOutcome::Failed, RunOutcome::Cancelled];
+    pub const ALL: [RunOutcome; 3] = [
+        RunOutcome::Completed,
+        RunOutcome::Failed,
+        RunOutcome::Cancelled,
+    ];
 }
 
 #[cfg(test)]
@@ -53,7 +57,7 @@ mod tests {
     use super::*;
     use crate::openclaw_eval::leak_detector;
     use crate::openclaw_eval::rig::{verify_docker_reachable, TestRig};
-    use kria_core::openclaw::handler::build_runtime_registry;
+    use kria_core::openclaw::runtime::build_runtime_registry;
     use kria_core::openclaw::runtime::{LaunchSpec, RuntimeContext, RuntimeKind};
     use kria_core::openclaw::types::ResourceClass;
     use std::time::Duration;
@@ -66,9 +70,10 @@ mod tests {
     /// lifecycle, so a leak would still show up).
     fn spec_for(outcome: RunOutcome, correlation_id: &str) -> LaunchSpec {
         let (skill_id, params) = match outcome {
-            RunOutcome::Completed | RunOutcome::Cancelled => {
-                ("oc_calculator".to_string(), serde_json::json!({ "expression": "5 * 5" }))
-            }
+            RunOutcome::Completed | RunOutcome::Cancelled => (
+                "oc_calculator".to_string(),
+                serde_json::json!({ "expression": "5 * 5" }),
+            ),
             RunOutcome::Failed => (
                 // No such tool is advertised by the substrate → the MCP
                 // `tools/call` returns an error → `ToolResult::err` →
@@ -98,13 +103,19 @@ mod tests {
     #[ignore = "requires real Docker; runs in the nightly/live gate (cargo test -- --ignored)"]
     async fn prop12_leak_freedom_completed_failed_cancelled_return_to_baseline() {
         if verify_docker_reachable().await.is_err() {
-            eprintln!("SKIPPED (Outcome::Skipped, not Pass): docker not reachable in this environment");
+            eprintln!(
+                "SKIPPED (Outcome::Skipped, not Pass): docker not reachable in this environment"
+            );
             return;
         }
 
-        let rig = TestRig::up().await.expect("rig must come up against real Docker");
+        let rig = TestRig::up()
+            .await
+            .expect("rig must come up against real Docker");
         let runtimes = build_runtime_registry(rig.pool.clone());
-        let runtime = runtimes.get(RuntimeKind::Docker).expect("docker runtime must be registered");
+        let runtime = runtimes
+            .get(RuntimeKind::Docker)
+            .expect("docker runtime must be registered");
 
         for outcome in RunOutcome::ALL {
             // Capture the pre-run baseline (rig containers + active leases +
@@ -123,7 +134,9 @@ mod tests {
                 RunOutcome::Cancelled => {
                     let token = CancellationToken::new();
                     token.cancel();
-                    RuntimeContext { cancellation: token }
+                    RuntimeContext {
+                        cancellation: token,
+                    }
                 }
                 _ => RuntimeContext::detached(),
             };
@@ -145,11 +158,15 @@ mod tests {
             // leaked containers, 0 leaked leases.
             leak_detector::assert_returned_to(&rig.pool, baseline)
                 .await
-                .unwrap_or_else(|e| panic!("Property 12 leak-freedom violated after {outcome:?} run: {e}"));
+                .unwrap_or_else(|e| {
+                    panic!("Property 12 leak-freedom violated after {outcome:?} run: {e}")
+                });
         }
 
         // Teardown itself asserts 0 rig containers remain (frozen invariant).
-        rig.down().await.expect("rig teardown must leave 0 leaked containers");
+        rig.down()
+            .await
+            .expect("rig teardown must leave 0 leaked containers");
     }
 
     /// CI-safe (no Docker): the outcome table Property 12 quantifies over

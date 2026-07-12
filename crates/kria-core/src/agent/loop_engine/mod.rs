@@ -35,6 +35,7 @@ use crate::tools::mount_manager::{google_meet_fallback_metadata, ToolMountManage
 use crate::tools::registry::{ToolDef, ToolRegistry};
 
 mod helpers;
+mod injection_gate;
 mod intent_extractors;
 mod intent_fallback;
 mod response_helpers;
@@ -347,11 +348,347 @@ fn try_deterministic_dispatch(user_text: &str) -> Option<(String, serde_json::Va
     try_deterministic_dispatch_with_context(user_text, None)
 }
 
+// NOTE: The deterministic `config_prompt_control_enabled` / `try_config_prompt_dispatch`
+// / `build_turn_override` deciders were REMOVED (settings-nl-control Task 16 / Wave 5
+// F15). Settings intent is now classified in exactly ONE place — the unified
+// `config::nl` pipeline driven by `run_settings_stage` below — so there is no second
+// decider competing with (or bypassing the HITL gate of) the shared handler.
+
+// ─── settings-nl-control Wave 3: first-stage NL settings gate ────────────────
+
+/// True when the unified NL settings pipeline is enabled. Delegates to the single
+/// source of truth (`config::nl::nl_settings_enabled`) — default ON, opt out with
+/// `KRIA_NL_SETTINGS=0`.
+fn nl_settings_enabled() -> bool {
+    crate::config::nl::nl_settings_enabled()
+}
+
+/// FastEmbed-backed embedder seam for the settings evidence model (Wave 2).
+/// Returns `None` when the embedding model isn't loaded → the classifier uses its
+/// lexical tier (graceful degradation).
+struct RoutingTextEmbedder;
+impl crate::config::nl::TextEmbedder for RoutingTextEmbedder {
+    fn embed(&self, text: &str) -> Option<Vec<f32>> {
+        crate::routing::embed::embed_batch(&[text])
+            .ok()
+            .and_then(|mut v| v.pop())
+    }
+}
+
+/// Evidence dependencies for the chat settings stage: the FastEmbed embedder for
+/// semantic conversation-topic evidence. Memory evidence is a future seam.
+fn settings_evidence_deps() -> crate::config::nl::EvidenceDeps {
+    crate::config::nl::EvidenceDeps::default()
+        .with_embedder(std::sync::Arc::new(RoutingTextEmbedder))
+}
+
+/// Per-process conversational provider-configuration sessions (Wave 4). Keyed by
+/// chat session id; TTL-expiring; isolated across sessions.
+static SETTINGS_FLOW_STORE: once_cell::sync::Lazy<crate::config::nl::FlowStore> =
+    once_cell::sync::Lazy::new(crate::config::nl::FlowStore::new);
+
+/// Cached, schema-derived entity index (built once — Req 12.1).
+static SETTINGS_ENTITY_INDEX: once_cell::sync::Lazy<
+    std::sync::Arc<crate::config::nl::SchemaEntityIndex>,
+> = once_cell::sync::Lazy::new(|| {
+    std::sync::Arc::new(crate::config::nl::SchemaEntityIndex::build())
+});
+
+/// Build the classifier's ConversationContext from the recent message history
+/// (the real per-turn state — NEW-12). Last few user + assistant texts.
+fn build_settings_conversation_context(
+    messages: &[ChatMessage],
+) -> crate::config::nl::ConversationContext {
+    let mut recent_user = Vec::new();
+    let mut recent_assistant = Vec::new();
+    for m in messages.iter().rev() {
+        match m.role.as_str() {
+            "user" if recent_user.len() < 4 => recent_user.push(m.content.clone()),
+            "assistant" if recent_assistant.len() < 4 => recent_assistant.push(m.content.clone()),
+            _ => {}
+        }
+        if recent_user.len() >= 4 && recent_assistant.len() >= 4 {
+            break;
+        }
+    }
+    recent_user.reverse();
+    recent_assistant.reverse();
+    crate::config::nl::ConversationContext::new(recent_user, recent_assistant)
+}
+
+/// Chat-surface approval driver: emits `StreamEvent::ApprovalRequired` and blocks
+/// on the loop's `HitlGateway` — the SAME gate every RED tool uses (Req 4.4).
+struct ChatSettingsApprovalDriver {
+    hitl: Arc<HitlGateway>,
+    event_tx: mpsc::UnboundedSender<StreamEvent>,
+}
+
+#[async_trait::async_trait]
+impl crate::config::nl::ApprovalDriver for ChatSettingsApprovalDriver {
+    async fn request(
+        &self,
+        section: &str,
+        field: &str,
+        value: &serde_json::Value,
+        risk: RiskLevel,
+    ) -> crate::config::nl::ApprovalDecision {
+        use crate::config::nl::ApprovalDecision;
+        let request_id = HitlGateway::generate_request_id();
+        let description = format!("Change {section}.{field} to {value}");
+        let args = serde_json::json!({ "section": section, "field": field, "value": value });
+        let _ = self.event_tx.send(StreamEvent::ApprovalRequired {
+            request_id: request_id.clone(),
+            action: "config_patch".to_string(),
+            risk_level: risk.as_str().to_string(),
+            parameters: args.clone(),
+        });
+        match self
+            .hitl
+            .request_approval_with_id(&request_id, "config_patch", args, risk, &description, false)
+            .await
+        {
+            crate::safety::hitl::ApprovalResponse::Approved => ApprovalDecision::Approved,
+            crate::safety::hitl::ApprovalResponse::Denied => ApprovalDecision::Denied,
+            _ => ApprovalDecision::Timeout,
+        }
+    }
+}
+
+/// Result of the first-stage settings gate.
+enum SettingsStageResult {
+    /// The turn was fully handled as a settings operation; the loop returns.
+    Claimed,
+    /// A settings clause was handled; continue the turn with this remaining text.
+    ContinueWith(String),
+    /// Not a settings turn; proceed with the normal pipeline unchanged.
+    Pass,
+}
+
+/// Render a `SettingsOutcome` to the chat stream. `finish` emits `Done` (closes the
+/// turn); when false only a `Token` note is emitted (multi-intent — turn continues).
+fn render_settings_outcome(
+    outcome: &crate::config::nl::SettingsOutcome,
+    event_tx: &mpsc::UnboundedSender<StreamEvent>,
+    finish: bool,
+) {
+    use crate::config::nl::SettingsOutcome;
+    let msg = match outcome {
+        SettingsOutcome::Applied { message, .. } => message.clone(),
+        SettingsOutcome::Answer { text } => text.clone(),
+        SettingsOutcome::Clarify { question } => question.clone(),
+        SettingsOutcome::Refused { reason } => reason.clone(),
+        SettingsOutcome::TempApplied { section, field, .. } => {
+            format!("Applied {section}.{field} for this request only.")
+        }
+        SettingsOutcome::Undone { section, field } => {
+            format!("Reverted {section}.{field} to its previous value.")
+        }
+        SettingsOutcome::NothingToUndo => "There's no recent settings change to undo.".to_string(),
+        SettingsOutcome::NeedsApproval { section, field, .. } => {
+            // resolve() already drove approval; this arm is unexpected but safe.
+            format!("Awaiting approval for {section}.{field}.")
+        }
+    };
+    let _ = event_tx.send(StreamEvent::Token(msg.clone()));
+    if finish {
+        let _ = event_tx.send(StreamEvent::Done(msg));
+    }
+}
+
+/// Detect a "[settings clause] and/then [task]" multi-intent prompt. Returns the
+/// trailing task text when it is a NON-settings remainder (so the settings clause
+/// is applied and the turn continues for the task — Wave 5 F6). `None` ⇒ full-claim.
+fn settings_multi_intent_remainder(
+    text: &str,
+    conv: &crate::config::nl::ConversationContext,
+    pipeline: &crate::config::nl::SettingsIntentPipeline,
+) -> Option<String> {
+    let lower = text.to_ascii_lowercase();
+    let sep = [" and then ", " then ", " and "]
+        .iter()
+        .filter_map(|s| lower.find(s).map(|i| (i, s.len())))
+        .min_by_key(|(i, _)| *i)?;
+    let tail = text[sep.0 + sep.1..].trim().to_string();
+    if tail.split_whitespace().count() < 2 {
+        return None;
+    }
+    // Only continue when the remainder is a genuine task, not another setting.
+    match pipeline.classify(&tail, conv) {
+        crate::config::nl::SettingsDecision::NotSettings => Some(tail),
+        _ => None,
+    }
+}
+
+impl AgentLoop {
+    /// First-stage NL settings gate (settings-nl-control Wave 3). Runs the shared
+    /// `SettingsIntentPipeline`; on a settings decision, executes the shared
+    /// `SettingsHandler` through the real HITL gate and renders the outcome. This
+    /// is the ONE path chat uses (the `config_prompt` command uses the same handler).
+    async fn run_settings_stage(
+        &self,
+        session_id: &str,
+        last_user_text: &str,
+        messages: &[ChatMessage],
+        event_tx: &mpsc::UnboundedSender<StreamEvent>,
+    ) -> SettingsStageResult {
+        use crate::config::nl::{
+            SettingsDecision, SettingsHandler, SettingsIntentPipeline, SettingsRequest,
+            SettingsRequestKind,
+        };
+        use crate::config::prompt::Scope;
+
+        let Some(config_service) = self.tool_registry.config_service() else {
+            return SettingsStageResult::Pass;
+        };
+
+        // ── Wave 4: conversational provider configuration (multi-turn) ───────
+        // If a config session is active for this chat, or the message starts one,
+        // the flow engine owns the turn (ask/confirm/correct/cancel/commit).
+        {
+            use crate::config::nl::{FlowEngine, FlowOutcome};
+            if SETTINGS_FLOW_STORE.active(session_id).is_some()
+                || FlowEngine::detects_start(last_user_text)
+            {
+                match FlowEngine::step(&SETTINGS_FLOW_STORE, session_id, last_user_text) {
+                    FlowOutcome::NotAFlow => {}
+                    FlowOutcome::Ask { message }
+                    | FlowOutcome::Confirm { summary: message }
+                    | FlowOutcome::Invalid { message }
+                    | FlowOutcome::Cancelled { message } => {
+                        let _ = event_tx.send(StreamEvent::Token(message.clone()));
+                        let _ = event_tx.send(StreamEvent::Done(message));
+                        return SettingsStageResult::Claimed;
+                    }
+                    FlowOutcome::Commit { draft, .. } => {
+                        let handler = SettingsHandler::new(config_service.clone())
+                            .with_audit(self.audit_logger.clone());
+                        let outcome = handler.commit_provider(&draft).await;
+                        render_settings_outcome(&outcome, event_tx, true);
+                        return SettingsStageResult::Claimed;
+                    }
+                }
+            }
+        }
+
+        let conv = build_settings_conversation_context(messages);
+        // Evidence-based intent (Wave 2): attach the FastEmbed embedder so semantic
+        // conversation-topic evidence can steer an AMBIGUOUS settings-like phrase
+        // away from KRIA config when it really continues the discussion. Degrades
+        // gracefully (embed returns None) when FastEmbed is unavailable.
+        let pipeline = SettingsIntentPipeline::new(SETTINGS_ENTITY_INDEX.clone())
+            .with_evidence(settings_evidence_deps());
+        let (decision, trace) = pipeline.classify_traced(last_user_text, &conv);
+        // Persist the routing decision for production diagnosability (R7.3/L4).
+        crate::config::nl::diagnostics::record(session_id, last_user_text, &trace);
+
+        let handler = SettingsHandler::new(config_service).with_audit(self.audit_logger.clone());
+
+        match decision {
+            SettingsDecision::NotSettings => SettingsStageResult::Pass,
+            SettingsDecision::Clarify { question } => {
+                let _ = event_tx.send(StreamEvent::Token(question.clone()));
+                let _ = event_tx.send(StreamEvent::Done(question));
+                SettingsStageResult::Claimed
+            }
+            SettingsDecision::Undo => {
+                let outcome = handler
+                    .handle(SettingsRequest {
+                        kind: SettingsRequestKind::Undo,
+                        section: String::new(),
+                        field: String::new(),
+                        value: None,
+                        scope: Scope::Permanent,
+                        provenance: crate::tools::TriggerProvenance::User,
+                        session_id: session_id.to_string(),
+                    })
+                    .await;
+                render_settings_outcome(&outcome, event_tx, true);
+                SettingsStageResult::Claimed
+            }
+            SettingsDecision::ReadBack { section, field } => {
+                let outcome = handler
+                    .handle(SettingsRequest::read_back(section, field).with_session(session_id))
+                    .await;
+                render_settings_outcome(&outcome, event_tx, true);
+                SettingsStageResult::Claimed
+            }
+            SettingsDecision::Info(query) => {
+                // Answer-from-system (catalog/help/explain/recent) — no LLM, no mutation.
+                let outcome = handler.info(&query).await;
+                render_settings_outcome(&outcome, event_tx, true);
+                SettingsStageResult::Claimed
+            }
+            SettingsDecision::Change {
+                section,
+                field,
+                value,
+                scope,
+            } => {
+                // Temp override (e.g. "generate this image using local AI"): install a
+                // turn-scoped RequestOverride and DO NOT claim — the actual tool runs
+                // this turn and reads it via effective_config (Task 10).
+                if scope == Scope::Temp {
+                    if let Some(v) = value {
+                        let mut ov = crate::config::RequestOverride::new();
+                        if ov.set(&section, &field, v).is_ok() {
+                            self.tool_registry
+                                .set_turn_override(std::sync::Arc::new(ov));
+                        }
+                    }
+                    return SettingsStageResult::Pass;
+                }
+
+                let multi = settings_multi_intent_remainder(last_user_text, &conv, &pipeline);
+                let req = SettingsRequest {
+                    kind: SettingsRequestKind::Change,
+                    section,
+                    field,
+                    value,
+                    scope: Scope::Permanent,
+                    provenance: crate::tools::TriggerProvenance::User,
+                    session_id: session_id.to_string(),
+                };
+                let driver = ChatSettingsApprovalDriver {
+                    hitl: self.hitl_gateway.clone(),
+                    event_tx: event_tx.clone(),
+                };
+                let outcome = handler.resolve(req, &driver).await;
+
+                match multi {
+                    // Multi-intent: note the settings result, then continue the turn
+                    // with the trailing task (Wave 5 F6).
+                    Some(remainder) => {
+                        render_settings_outcome(&outcome, event_tx, false);
+                        SettingsStageResult::ContinueWith(remainder)
+                    }
+                    None => {
+                        render_settings_outcome(&outcome, event_tx, true);
+                        SettingsStageResult::Claimed
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn try_deterministic_dispatch_with_context(
     user_text: &str,
     previous_user_text: Option<&str>,
 ) -> Option<(String, serde_json::Value)> {
     let lower = user_text.to_ascii_lowercase();
+
+    // ── Prompt-driven settings control (settings-config-revamp Task 12/13) ──
+    // Deterministically route recognized settings COMMANDS to the `config_patch`
+    // tool instead of relying on the LLM to pick it. Gated behind
+    // KRIA_CONFIG_PROMPT_CONTROL so default behaviour is byte-for-byte unchanged.
+    // Fail-toward-query: only intercept when the analyzer is confident it is an
+    // Act with a schema-grounded field AND a concrete value was extractable; a
+    // Clarify emits a single question; anything else falls through to normal flow.
+    // config_patch enforces its own injection wall + risk gate (GREEN auto-applies;
+    // YELLOW/RED return NeedsApproval — risky changes are never silently applied).
+    // NOTE: settings intent is no longer deterministically pre-dispatched here — the
+    // unified `run_settings_stage` gate (which runs earlier in the turn, before this
+    // deterministic router) is the single decider (settings-nl-control Task 16).
 
     // ── Workflow discovery ("What workflows can I run?") ────────────────────
     // Returns the list of configured n8n workflows.
@@ -3692,6 +4029,102 @@ struct PackageFlowState {
     postcheck_installed: Option<bool>,
 }
 
+/// Deterministic MARKETPLACE capability flow — the CPP analogue of
+/// [`PackageFlowState`], but for KRIA skills/tools/capabilities instead of OS
+/// software packages. When a small local model hesitates (asks "local or VM?"
+/// instead of acting) on a clear "install/search a tool/skill" request, this
+/// forces the correct provider-neutral marketplace tool. A single forced call is
+/// enough: `install_capability` internally searches the marketplace and installs
+/// the best match; `search_marketplace` returns ranked candidates. No per-prompt
+/// special casing — it triggers on generic capability nouns + install/search verbs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CapabilityFlowIntent {
+    Search,
+    Install,
+}
+
+struct CapabilityFlowState {
+    intent: CapabilityFlowIntent,
+    query: String,
+    done: bool,
+}
+
+impl CapabilityFlowState {
+    fn from_user_text(user_text: &str) -> Option<Self> {
+        if is_remote_command_context(user_text) {
+            return None;
+        }
+        // Only for requests that clearly concern a KRIA capability/skill/tool
+        // (not OS packages, not arbitrary chat).
+        if !refers_to_marketplace_capability(user_text) {
+            return None;
+        }
+        let lower = user_text.to_lowercase();
+        let install = [
+            "install", "add ", "get me", "download", "set up", "setup", "enable ",
+        ]
+        .iter()
+        .any(|m| lower.contains(m));
+        let search = [
+            "search", "find", "look for", "browse", "discover", "is there", "any ",
+        ]
+        .iter()
+        .any(|m| lower.contains(m));
+        let intent = if install {
+            CapabilityFlowIntent::Install
+        } else if search {
+            CapabilityFlowIntent::Search
+        } else {
+            return None;
+        };
+        let query = extract_capability_query(user_text)?;
+        Some(Self {
+            intent,
+            query,
+            done: false,
+        })
+    }
+
+    fn tool_name(&self) -> &'static str {
+        match self.intent {
+            CapabilityFlowIntent::Search => "search_marketplace",
+            CapabilityFlowIntent::Install => "install_capability",
+        }
+    }
+
+    fn next_required_calls(
+        &self,
+        allowed_tool_names: &std::collections::HashSet<String>,
+    ) -> Vec<ParsedToolCall> {
+        if self.done {
+            return vec![];
+        }
+        let name = self.tool_name();
+        if !allowed_tool_names.contains(name) {
+            return vec![];
+        }
+        vec![ParsedToolCall {
+            name: name.to_string(),
+            arguments: serde_json::json!({ "query": self.query }),
+        }]
+    }
+
+    fn observe_tool_result(&mut self, call: &ParsedToolCall) {
+        if call.name == self.tool_name() {
+            self.done = true;
+        }
+    }
+
+    fn status_summary(&self) -> String {
+        match self.intent {
+            CapabilityFlowIntent::Search => "Searching the capability marketplace".to_string(),
+            CapabilityFlowIntent::Install => {
+                "Installing the best-matching capability from the marketplace".to_string()
+            }
+        }
+    }
+}
+
 impl PackageFlowState {
     fn from_user_text(user_text: &str) -> Option<Self> {
         let intent = detect_package_intent(user_text)?;
@@ -4482,6 +4915,24 @@ impl AgentLoop {
     }
 
     /// Try direct tool execution via semantic tool index (Phase 3 fast path).
+    /// Categories of the tools the semantic router selected this turn — the
+    /// "domain" the cross-domain injection gate scores agreement against (Wave 5).
+    fn tool_categories_for(
+        &self,
+        routed_names: &std::collections::HashSet<String>,
+        _schemas: &[ToolSchema],
+    ) -> std::collections::HashSet<String> {
+        if routed_names.is_empty() {
+            return std::collections::HashSet::new();
+        }
+        self.tool_registry
+            .list_for_tier(&self.hardware_tier)
+            .into_iter()
+            .filter(|d| routed_names.contains(&d.name))
+            .map(|d| d.category)
+            .collect()
+    }
+
     /// Returns Some(tool_schema) if a high-confidence direct match is found.
     async fn try_direct_tool_match(&self, query_text: &str) -> Option<ToolSchema> {
         let tool_index = self.tool_index.as_ref()?;
@@ -5039,6 +5490,21 @@ impl AgentLoop {
         let turn_sidecar_cancel = turn_tree.sidecar.clone();
         let turn_mcp_cancel = turn_tree.mcp.clone();
         let turn_image_cancel = turn_tree.image.clone();
+
+        // Injection wall (Req 9, settings-nl-control Task 3, fixes NEW-5): provenance
+        // taint is PER-TURN (this local), NOT a global on the shared registry — so it
+        // cannot bleed across concurrent turns/sessions. Starts false (User); flips to
+        // true when an external-content tool runs THIS turn (set at dispatch), after
+        // which config mutations in this turn are treated as ExternalContent and refused.
+        let turn_external_taint = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+        // Clear any leftover turn-scoped RequestOverride from a previous turn.
+        self.tool_registry.clear_turn_override();
+
+        // Turn-scoped TEMPORARY overrides ("... for this one") are now installed by
+        // the unified `run_settings_stage` gate below (settings-nl-control Task 10),
+        // which classifies a Temp-scope Change and calls `set_turn_override` — the
+        // single decider. The old `build_turn_override` pre-dispatch was removed here.
         let turn_id_for_checks = turn_id.clone();
         let turn_admission_for_async = Arc::clone(&self.turn_admission);
         let session_id_for_async = session_id.to_string();
@@ -5087,6 +5553,27 @@ impl AgentLoop {
             session_id: session_id.to_string(),
             turn_id: turn_id_for_checks.clone(),
         });
+
+        // ── settings-nl-control Wave 3: first-stage NL settings gate ──────────
+        // Runs BEFORE IntentGate/forcing/deterministic dispatch so recognized
+        // settings intents (change/read-back/undo/temp) are handled by the single
+        // shared pipeline+handler through the real HITL gate — never misrouted to
+        // browser/search/GUI. `NotSettings` ⇒ untouched flow (byte-for-byte legacy
+        // when the flag is off).
+        let mut last_user_text = last_user_text;
+        let settings_turn_has_images = messages.last().is_some_and(|m| m.has_images());
+        if nl_settings_enabled() && !settings_turn_has_images {
+            match self
+                .run_settings_stage(session_id, &last_user_text, messages, &event_tx)
+                .await
+            {
+                SettingsStageResult::Claimed => return,
+                SettingsStageResult::ContinueWith(remainder) => {
+                    last_user_text = remainder;
+                }
+                SettingsStageResult::Pass => {}
+            }
+        }
 
         // ── Per-turn error-loop guards ─────────────────────────────────────────
         // Maps call_dedup_hash(tool, args) -> (failure_count, last_error_msg).
@@ -6971,6 +7458,7 @@ impl AgentLoop {
         // Key: "tool_name|args_json"
         let mut approved_this_turn: HashSet<String> = HashSet::new();
         let mut package_flow = PackageFlowState::from_user_text(&routing_focus_text);
+        let mut capability_flow = CapabilityFlowState::from_user_text(&routing_focus_text);
         let mut colab_flow = ColabFlowState::from_user_text(&routing_focus_text);
         let mut intent_fallback_used = false;
         let mut had_successful_gmail_tool = false;
@@ -7332,28 +7820,62 @@ impl AgentLoop {
             // relevant tools **regardless of ONNX domain boundaries**.
             // This runs unconditionally so the results are available for
             // the override instruction below.
-            let semantic_injections: Vec<SemanticInjection> =
-                if suppress_all_tool_routing || execution_profile.is_manual_tool_override() {
-                    Vec::new()
-                } else if self.tool_index.is_some() && !pure_image_analysis_turn {
-                    if let Some(ref tool_index) = self.tool_index {
-                        let matches = tool_index
-                            .top_k_by_text(&round_focus_text, 3, &self.hardware_tier)
-                            .await;
-                        matches
-                            .into_iter()
-                            .filter(|m| m.confidence >= 0.35)
-                            .map(|m| SemanticInjection {
-                                name: m.name,
-                                cosine_similarity: m.confidence,
-                            })
-                            .collect()
-                    } else {
-                        Vec::new()
+            let semantic_injections: Vec<SemanticInjection> = if suppress_all_tool_routing
+                || execution_profile.is_manual_tool_override()
+            {
+                Vec::new()
+            } else if self.tool_index.is_some() && !pure_image_analysis_turn {
+                if let Some(ref tool_index) = self.tool_index {
+                    // Fetch a wider candidate pool so the gate can reason about
+                    // candidate competition, then decide with fused evidence
+                    // (domain agreement + negative evidence + competition) rather
+                    // than a flat confidence floor (Wave 5).
+                    let matches = tool_index
+                        .top_k_by_text(&round_focus_text, 5, &self.hardware_tier)
+                        .await;
+                    let candidates: Vec<injection_gate::InjectionCandidate> = matches
+                        .into_iter()
+                        .map(|m| injection_gate::InjectionCandidate {
+                            name: m.name,
+                            category: m.category,
+                            confidence: m.confidence,
+                        })
+                        .collect();
+                    let domain_categories =
+                        self.tool_categories_for(&routed_tool_names, &tool_schemas);
+                    let evidence = injection_gate::InjectionEvidence {
+                        domain_categories,
+                        conversation_only: conversation_only_route,
+                    };
+                    let decision = injection_gate::gate(
+                        candidates,
+                        &evidence,
+                        &injection_gate::InjectionParams::default(),
+                    );
+                    // Persist the explainable routing decision (observability).
+                    if !decision.trace.is_empty() {
+                        tracing::debug!(
+                            target: "tool_injection",
+                            accepted = ?decision.accepted.iter().map(|c| c.name.clone()).collect::<Vec<_>>(),
+                            trace = ?decision.trace.iter().map(|t| format!("{}:{:.2}:{}:{}", t.name, t.score, t.domain_agree, t.reason)).collect::<Vec<_>>(),
+                            conversation_only = conversation_only_route,
+                            "cross-domain injection gate decision"
+                        );
                     }
+                    decision
+                        .accepted
+                        .into_iter()
+                        .map(|c| SemanticInjection {
+                            name: c.name,
+                            cosine_similarity: c.confidence,
+                        })
+                        .collect()
                 } else {
                     Vec::new()
-                };
+                }
+            } else {
+                Vec::new()
+            };
 
             if !semantic_injections.is_empty() {
                 tracing::debug!(
@@ -7810,6 +8332,7 @@ impl AgentLoop {
             let mut synthetic_package_calls = false;
             let mut synthetic_colab_calls = false;
             let mut synthetic_intent_calls = false;
+            let mut synthetic_capability_calls = false;
             if tool_calls.is_empty() {
                 if let Some(flow) = package_flow.as_ref() {
                     let fallback_calls = flow.next_required_calls();
@@ -7828,6 +8351,32 @@ impl AgentLoop {
                         let _ = event_tx.send(StreamEvent::Plan(
                             "Enforcing package workflow with pre/post verification".into(),
                         ));
+                    }
+                }
+            }
+
+            // MARKETPLACE capability flow: when the request is clearly about
+            // installing/searching a KRIA skill/tool/capability and the model
+            // produced no tool call, force the correct provider-neutral
+            // marketplace tool (search_marketplace / install_capability) instead
+            // of letting the turn stall or drift to OS package tools / web search.
+            if tool_calls.is_empty() {
+                if let Some(flow) = capability_flow.as_ref() {
+                    let cap_calls = flow.next_required_calls(&allowed_tool_names);
+                    if !cap_calls.is_empty() {
+                        synthetic_capability_calls = true;
+                        let status = flow.status_summary();
+                        tool_calls = cap_calls;
+                        log_pipeline_step(
+                            session_id,
+                            "synthetic_capability_calls",
+                            "Injected marketplace capability tool call",
+                            Some(serde_json::json!({
+                                "round": round,
+                                "tool_calls": build_tool_calls_preview(&tool_calls),
+                            })),
+                        );
+                        let _ = event_tx.send(StreamEvent::Plan(status));
                     }
                 }
             }
@@ -8132,7 +8681,7 @@ impl AgentLoop {
             }
 
             // Add assistant message to history
-            if !synthetic_package_calls && !synthetic_intent_calls {
+            if !synthetic_package_calls && !synthetic_intent_calls && !synthetic_capability_calls {
                 messages.push(ChatMessage {
                     role: "assistant".into(),
                     content: build_tool_call_history_content(&tool_calls),
@@ -8346,6 +8895,9 @@ impl AgentLoop {
                     });
                     if let Some(flow) = package_flow.as_mut() {
                         flow.observe_tool_result(call, false, &serde_json::Value::Null);
+                    }
+                    if let Some(flow) = capability_flow.as_mut() {
+                        flow.observe_tool_result(call);
                     }
                     messages.push(ChatMessage {
                         role: "tool".into(),
@@ -9198,9 +9750,27 @@ impl AgentLoop {
                             turn_tools_cancel.clone()
                         };
                         let isolation_name = format!("tool:{}", call.name);
+                        // Injection wall (Req 9, per-turn — Task 3): if THIS turn has
+                        // already run an external-content tool, config-mutating tools see
+                        // ExternalContent and refuse. Provenance is decided BEFORE the
+                        // tool runs; then this tool (if external) taints later calls.
+                        let call_provenance = if turn_external_taint
+                            .load(std::sync::atomic::Ordering::SeqCst)
+                        {
+                            crate::tools::TriggerProvenance::ExternalContent
+                        } else {
+                            crate::tools::TriggerProvenance::User
+                        };
+                        if self.tool_registry.is_external_content_tool(&call.name) {
+                            turn_external_taint
+                                .store(true, std::sync::atomic::Ordering::SeqCst);
+                        }
                         let tool_context = self
                             .tool_registry
-                            .make_tool_context(execution_cancel.clone());
+                            .make_tool_context_with_provenance(
+                                execution_cancel.clone(),
+                                call_provenance,
+                            );
                         run_isolated(
                             &isolation_name,
                             std::time::Duration::from_secs(timeout_secs),
@@ -9554,6 +10124,10 @@ impl AgentLoop {
                         // Reset so we don't inject repeatedly.
                         consecutive_failures = 0;
                     }
+                }
+
+                if let Some(flow) = capability_flow.as_mut() {
+                    flow.observe_tool_result(call);
                 }
 
                 if let Some(flow) = package_flow.as_mut() {

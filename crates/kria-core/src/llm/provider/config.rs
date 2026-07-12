@@ -83,6 +83,55 @@ impl ProviderType {
             Self::OpenAICompatible => "openai_compatible",
         }
     }
+
+    /// The full provider catalog — the single source of truth for NL provider
+    /// detection. Adding a provider variant here (and its `synonyms`) is the ONLY
+    /// change needed for the conversational configurator to support it (no routing
+    /// code changes — metadata only).
+    pub fn all() -> &'static [ProviderType] {
+        &[
+            Self::Ollama,
+            Self::LlamaCpp,
+            Self::OpenAI,
+            Self::Gemini,
+            Self::Anthropic,
+            Self::OpenRouter,
+            Self::OpenAICompatible,
+        ]
+    }
+
+    /// Natural-language names/aliases (incl. common model-family hints) used to
+    /// resolve a provider from free text. This is provider METADATA co-located with
+    /// the type — not prompt-specific routing. New providers declare their aliases
+    /// here and the conversational engine picks them up automatically.
+    pub fn synonyms(&self) -> &'static [&'static str] {
+        match self {
+            Self::Ollama => &["ollama"],
+            Self::LlamaCpp => &["llama.cpp", "llama cpp", "llamacpp", "local llama", "llama"],
+            Self::OpenAI => &["openai", "open ai", "gpt", "chatgpt"],
+            Self::Gemini => &["gemini", "google ai", "google gemini"],
+            Self::Anthropic => &["anthropic", "claude"],
+            Self::OpenRouter => &["openrouter", "open router"],
+            Self::OpenAICompatible => {
+                &["openai compatible", "openai-compatible", "custom endpoint"]
+            }
+        }
+    }
+
+    /// Resolve a provider type from free text via the catalog synonyms (longest
+    /// match wins for specificity). Schema-driven — no per-provider branches.
+    pub fn resolve(text: &str) -> Option<ProviderType> {
+        let t = text.to_ascii_lowercase();
+        let mut best: Option<(ProviderType, usize)> = None;
+        for pt in Self::all() {
+            for syn in pt.synonyms() {
+                if t.contains(syn) && best.map(|(_, l)| syn.len() > l).unwrap_or(true) {
+                    best = Some((*pt, syn.len()));
+                }
+            }
+        }
+        best.map(|(pt, _)| pt)
+    }
 }
 
 impl std::fmt::Display for ProviderType {

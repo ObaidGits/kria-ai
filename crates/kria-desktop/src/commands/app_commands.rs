@@ -702,18 +702,118 @@ pub async fn get_hardware_info(
     }))
 }
 
+/// Whether config reads/writes route through `ConfigService`
+/// (settings-config-revamp Task 2). Falsy/unset ⇒ legacy direct access.
+pub(crate) fn config_service_enabled() -> bool {
+    // The SQLite backend REQUIRES routing through ConfigService (its writes must
+    // reach the DB, not a stale TOML file), so it implies service routing.
+    if matches!(
+        kria_core::config::ConfigBackend::from_env(),
+        kria_core::config::ConfigBackend::Sqlite
+    ) {
+        return true;
+    }
+    std::env::var("KRIA_CONFIG_SERVICE")
+        .map(|v| {
+            matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
 #[tauri::command]
 pub async fn get_settings(state: State<'_, AppStateCell>) -> Result<serde_json::Value, String> {
     let state = state
         .get()
         .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
-    let config = state.config.read().await;
-    let mut redacted = config.clone();
-    redacted.llm.cloud_api_key.clear();
-    for provider in &mut redacted.providers.providers {
-        provider.endpoint.api_key.clear();
-    }
+    // Route through ConfigService when enabled. It wraps the SAME config handle,
+    // so the returned value (and thus the redacted JSON) is byte-identical to the
+    // legacy path — preserving the frontend contract (Req 12.1 / Property 1).
+    let mut redacted = if config_service_enabled() {
+        state.config_service.get().await
+    } else {
+        state.config.read().await.clone()
+    };
+    // Redact ALL known secret fields (Task 6) — not just the two legacy ones.
+    redacted.redact_secrets();
     serde_json::to_value(&redacted).map_err(|e| e.to_string())
+}
+
+/// Field-level settings patch (settings-config-revamp Task 11). The UI uses this
+/// to change ONE field without round-tripping the whole config blob. Secret
+/// fields and provider/model selection must NOT go through here (they have
+/// dedicated flows); schema validation + secret guards enforce that.
+#[tauri::command]
+pub async fn patch_config(
+    section: String,
+    field: String,
+    value: serde_json::Value,
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    let state = state
+        .get()
+        .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
+    // Validate against the schema (field exists + allowed value). This is a
+    // direct UI action (not prompt), so prompt-changeability is not required,
+    // but unknown fields / invalid values are still rejected.
+    if !kria_core::config::schema::field_exists(&section, &field) {
+        return Err(format!("unknown config field {section}.{field}"));
+    }
+    // settings-nl-control Task 1 (NEW-4): never write a secret field through the generic
+    // field patch — secrets have dedicated vault-backed flows. Guard, don't clobber/leak.
+    if kria_core::config::is_secret_field(&section, &field) {
+        return Err(format!(
+            "{section}.{field} is a secret and cannot be changed here; use its dedicated secure flow."
+        ));
+    }
+    let applied = state
+        .config_service
+        .patch(
+            &section,
+            &field,
+            value,
+            kria_core::config::ChangeSource::Ui,
+            None,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({
+        "status": "applied",
+        "section": applied.section,
+        "field": applied.field,
+        "version": applied.version,
+    }))
+}
+
+/// Field-level configuration schema for the UI (settings-config-revamp Task 10/11).
+/// Returns per `(section, field)` metadata — risk, hot-reload/effect class,
+/// prompt-changeability, restart-required, env-lock status + var, required backend,
+/// allowed values, secret/non-functional flags — so `SettingsModal` can render
+/// restart badges and "locked by env" chips without hardcoding field knowledge.
+/// `env_locked` is evaluated live at call time (reflects the current process env).
+#[tauri::command]
+pub async fn get_config_schema() -> Result<serde_json::Value, String> {
+    Ok(kria_core::config::schema::full_schema_json())
+}
+
+/// Durable config-change history from the hash-chained audit ledger
+/// (settings-config-revamp Task 15). Newest first; each entry carries the
+/// timestamp + the recorded change (section/field/prior/new/source/change_set_id).
+/// This is the cross-session record surfaced as the audit-based recall alternative.
+#[tauri::command]
+pub async fn get_config_history(
+    limit: Option<usize>,
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    let state = state
+        .get()
+        .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
+    let entries = state
+        .audit_logger
+        .config_change_history(limit.unwrap_or(50));
+    Ok(serde_json::json!({ "history": entries }))
 }
 
 #[tauri::command]
@@ -764,17 +864,18 @@ pub async fn update_settings(
         new_config.llm.active_model = current.llm.active_model.clone();
         new_config.llm.local_api_url = current.llm.local_api_url.clone();
         new_config.llm.cloud_provider = current.llm.cloud_provider.clone();
-        new_config.llm.cloud_api_key = current.llm.cloud_api_key.clone();
         new_config.llm.cloud_model_id = current.llm.cloud_model_id.clone();
         new_config.llm.cloud_endpoint = current.llm.cloud_endpoint.clone();
         new_config.llm.routing_mode = current.llm.routing_mode.clone();
         new_config.llm.models = current.llm.models.clone();
+        // settings-nl-control Task 1 (NEW-1): preserve EVERY secret field from the live
+        // config so a redacted whole-blob save can't wipe jwt_secret / telegram bot_token /
+        // planner + image_generation tokens. Derived from is_secret_field (single source).
+        new_config.preserve_secrets_from(&current);
     }
     sync_telegram_mcp_server_config(&mut new_config);
     sync_google_workspace_server_config(&mut new_config, None);
     apply_google_runtime_env_from_config(&new_config);
-    // Persist to disk first
-    new_config.save().map_err(|e| e.to_string())?;
     // Apply GPU policy tunables live (redesign G1/G2) so the Settings UI takes effect without a
     // restart. Env vars still override these at read time.
     kria_core::llm::orchestrator::gpu_policy::apply_settings(
@@ -782,11 +883,22 @@ pub async fn update_settings(
         new_config.orchestrator.cuda_reserve_mb,
         new_config.orchestrator.vram_volatility_cap_mb,
     );
-    // Then update in-memory config
-    let mut config = state.config.write().await;
-    *config = new_config;
+    // Persist + update in-memory config. When ConfigService is enabled, route the
+    // bulk save through it (persist + version bump + ConfigChanged event); the
+    // legacy path saves to disk then swaps the in-memory handle. Both leave the
+    // same effective config (Property 1 / flag-off parity).
+    if config_service_enabled() {
+        state
+            .config_service
+            .replace_all(new_config, kria_core::config::ChangeSource::Ui)
+            .await
+            .map_err(|e| e.to_string())?;
+    } else {
+        new_config.save().map_err(|e| e.to_string())?;
+        let mut config = state.config.write().await;
+        *config = new_config;
+    }
 
-    drop(config);
     let _ = apply_mcp_runtime_from_config(state).await;
 
     Ok(())
