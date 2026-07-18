@@ -66,11 +66,11 @@ pub async fn worker_main(mut cmd_rx: mpsc::UnboundedReceiver<WorkerCmd>) {
             }
             WorkerCmd::OpenPwFd(reply) => {
                 let res = match current.as_ref() {
-                    Some(a) => a
-                        .sc
-                        .open_pipe_wire_remote(&a.session, OpenPipeWireRemoteOptions::default())
-                        .await
-                        .map_err(|e| format!("open pipewire remote: {e}")),
+                    Some(a) => {
+                        a.sc.open_pipe_wire_remote(&a.session, OpenPipeWireRemoteOptions::default())
+                            .await
+                            .map_err(|e| format!("open pipewire remote: {e}"))
+                    }
                     None => Err("no active portal session".to_string()),
                 };
                 let _ = reply.send(res);
@@ -148,15 +148,14 @@ async fn inject(a: &Acquired, ev: InputEvent) {
         InputEvent::MouseMove { x, y } => {
             let px = x * a.width.max(1) as f64;
             let py = y * a.height.max(1) as f64;
-            a.rd
-                .notify_pointer_motion_absolute(
-                    &a.session,
-                    a.node_id,
-                    px,
-                    py,
-                    NotifyPointerMotionAbsoluteOptions::default(),
-                )
-                .await
+            a.rd.notify_pointer_motion_absolute(
+                &a.session,
+                a.node_id,
+                px,
+                py,
+                NotifyPointerMotionAbsoluteOptions::default(),
+            )
+            .await
         }
         InputEvent::MouseButton { button, down } => {
             let state = if down {
@@ -164,24 +163,22 @@ async fn inject(a: &Acquired, ev: InputEvent) {
             } else {
                 KeyState::Released
             };
-            a.rd
-                .notify_pointer_button(
-                    &a.session,
-                    evdev_button(button),
-                    state,
-                    NotifyPointerButtonOptions::default(),
-                )
-                .await
+            a.rd.notify_pointer_button(
+                &a.session,
+                evdev_button(button),
+                state,
+                NotifyPointerButtonOptions::default(),
+            )
+            .await
         }
         InputEvent::Wheel { dy } => {
-            a.rd
-                .notify_pointer_axis(
-                    &a.session,
-                    0.0,
-                    dy,
-                    NotifyPointerAxisOptions::default().set_finish(true),
-                )
-                .await
+            a.rd.notify_pointer_axis(
+                &a.session,
+                0.0,
+                dy,
+                NotifyPointerAxisOptions::default().set_finish(true),
+            )
+            .await
         }
         InputEvent::Key { keycode, down } => {
             let state = if down {
@@ -189,21 +186,19 @@ async fn inject(a: &Acquired, ev: InputEvent) {
             } else {
                 KeyState::Released
             };
-            a.rd
-                .notify_keyboard_keycode(
-                    &a.session,
-                    keycode as i32,
-                    state,
-                    NotifyKeyboardKeycodeOptions::default(),
-                )
-                .await
+            a.rd.notify_keyboard_keycode(
+                &a.session,
+                keycode as i32,
+                state,
+                NotifyKeyboardKeycodeOptions::default(),
+            )
+            .await
         }
         InputEvent::Unicode { ch } => {
             let mut last = Ok(());
             for c in ch.chars() {
                 let ks = char_to_keysym(c) as i32;
-                if a
-                    .rd
+                if a.rd
                     .notify_keyboard_keysym(
                         &a.session,
                         ks,
@@ -215,9 +210,8 @@ async fn inject(a: &Acquired, ev: InputEvent) {
                 {
                     break;
                 }
-                last = a
-                    .rd
-                    .notify_keyboard_keysym(
+                last =
+                    a.rd.notify_keyboard_keysym(
                         &a.session,
                         ks,
                         KeyState::Released,

@@ -435,9 +435,15 @@ async fn handle_request(request: DaemonRequest) -> DaemonResponse {
             if backend != Backend::Xdotool {
                 match with_uinput(|dev| dev.type_text(&text)) {
                     Ok(()) => {
-                        info!(chars_typed = text.len(), backend = "uinput", "Type command succeeded");
+                        info!(
+                            chars_typed = text.len(),
+                            backend = "uinput",
+                            "Type command succeeded"
+                        );
                         return DaemonResponse::Ok {
-                            data: Some(serde_json::json!({ "typed_chars": text.len(), "backend": "uinput" })),
+                            data: Some(
+                                serde_json::json!({ "typed_chars": text.len(), "backend": "uinput" }),
+                            ),
                         };
                     }
                     Err(e) => {

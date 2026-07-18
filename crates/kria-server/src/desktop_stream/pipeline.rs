@@ -30,7 +30,10 @@ use tokio::sync::mpsc as tmpsc;
 pub enum SignalOut {
     /// The server's SDP offer (webrtcbin is the offerer; sendonly video).
     Offer(String),
-    Ice { sdp_mline_index: u32, candidate: String },
+    Ice {
+        sdp_mline_index: u32,
+        candidate: String,
+    },
     Failed(String),
 }
 
@@ -49,8 +52,10 @@ impl PipelineHandle {
                     gst_webrtc::WebRTCSDPType::Answer,
                     msg,
                 );
-                self.webrtc
-                    .emit_by_name::<()>("set-remote-description", &[&answer, &None::<gst::Promise>]);
+                self.webrtc.emit_by_name::<()>(
+                    "set-remote-description",
+                    &[&answer, &None::<gst::Promise>],
+                );
                 tracing::info!("rd: set-remote-description (answer) applied");
             }
             Err(e) => tracing::warn!(error = %e, "rd: bad answer sdp"),
@@ -59,8 +64,10 @@ impl PipelineHandle {
 
     /// Add a remote ICE candidate from the browser.
     pub fn add_ice(&self, sdp_mline_index: u32, candidate: &str) {
-        self.webrtc
-            .emit_by_name::<()>("add-ice-candidate", &[&sdp_mline_index, &candidate.to_string()]);
+        self.webrtc.emit_by_name::<()>(
+            "add-ice-candidate",
+            &[&sdp_mline_index, &candidate.to_string()],
+        );
     }
 
     /// Stop the pipeline (idempotent).
@@ -166,7 +173,10 @@ pub fn spawn(
             webrtc2.emit_by_name::<()>("set-local-description", &[&offer, &None::<gst::Promise>]);
             match offer.sdp().as_text() {
                 Ok(text) => {
-                    tracing::info!(bytes = text.len(), "[STEP 8] rd: offer created, sending to client");
+                    tracing::info!(
+                        bytes = text.len(),
+                        "[STEP 8] rd: offer created, sending to client"
+                    );
                     let _ = out2.send(SignalOut::Offer(text));
                 }
                 Err(e) => {
@@ -215,12 +225,10 @@ pub fn spawn(
                 if stop_rx.try_recv().is_ok() {
                     break;
                 }
-                if let Some(msg) =
-                    bus.timed_pop_filtered(gst::ClockTime::from_mseconds(100), &[
-                        gst::MessageType::Error,
-                        gst::MessageType::Eos,
-                    ])
-                {
+                if let Some(msg) = bus.timed_pop_filtered(
+                    gst::ClockTime::from_mseconds(100),
+                    &[gst::MessageType::Error, gst::MessageType::Eos],
+                ) {
                     use gst::MessageView;
                     match msg.view() {
                         MessageView::Error(err) => {

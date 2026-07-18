@@ -48,13 +48,20 @@ mod tests {
 
     #[test]
     fn deserializes_frontend_events() {
-        let ev: InputEvent = serde_json::from_str(r#"{"kind":"mouse_move","x":0.5,"y":0.25}"#).unwrap();
+        let ev: InputEvent =
+            serde_json::from_str(r#"{"kind":"mouse_move","x":0.5,"y":0.25}"#).unwrap();
         assert!(matches!(ev, InputEvent::MouseMove { x, y } if x == 0.5 && y == 0.25));
         let ev: InputEvent = serde_json::from_str(r#"{"kind":"unicode","ch":"k"}"#).unwrap();
         assert!(matches!(ev, InputEvent::Unicode { ch } if ch == "k"));
         let ev: InputEvent =
             serde_json::from_str(r#"{"kind":"mouse_button","button":2,"down":true}"#).unwrap();
-        assert!(matches!(ev, InputEvent::MouseButton { button: 2, down: true }));
+        assert!(matches!(
+            ev,
+            InputEvent::MouseButton {
+                button: 2,
+                down: true
+            }
+        ));
     }
 
     #[test]

@@ -55,12 +55,41 @@ pub struct ConfigRow {
     pub updated_at: String,
 }
 
+/// One atomic field-level mutation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ConfigMutation {
+    Put {
+        section: String,
+        key: String,
+        value_json: String,
+        source: String,
+    },
+    Delete {
+        section: String,
+        key: String,
+    },
+}
+
 /// Field-level user-layer persistence.
 pub trait ConfigStore: Send + Sync {
+    /// Atomically apply all mutations or leave the store unchanged.
+    fn apply_batch(&self, mutations: &[ConfigMutation]) -> Result<(), String>;
     /// Upsert one field. `value_json` is the serialized JSON value.
-    fn put(&self, section: &str, key: &str, value_json: &str, source: &str) -> Result<(), String>;
+    fn put(&self, section: &str, key: &str, value_json: &str, source: &str) -> Result<(), String> {
+        self.apply_batch(&[ConfigMutation::Put {
+            section: section.to_string(),
+            key: key.to_string(),
+            value_json: value_json.to_string(),
+            source: source.to_string(),
+        }])
+    }
     /// Remove one field (revert to baseline/default for it).
-    fn delete(&self, section: &str, key: &str) -> Result<(), String>;
+    fn delete(&self, section: &str, key: &str) -> Result<(), String> {
+        self.apply_batch(&[ConfigMutation::Delete {
+            section: section.to_string(),
+            key: key.to_string(),
+        }])
+    }
     /// Read the entire user layer (all overridden fields).
     fn all(&self) -> Result<Vec<ConfigRow>, String>;
     /// The DB schema version (`PRAGMA user_version`).
@@ -127,29 +156,38 @@ impl SqliteConfigStore {
 }
 
 impl ConfigStore for SqliteConfigStore {
-    fn put(&self, section: &str, key: &str, value_json: &str, source: &str) -> Result<(), String> {
-        let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        conn.execute(
-            "INSERT INTO config (section, key, value_json, source, updated_at)
-             VALUES (?1, ?2, ?3, ?4, datetime('now'))
-             ON CONFLICT(section, key) DO UPDATE SET
-                 value_json = excluded.value_json,
-                 source     = excluded.source,
-                 updated_at = datetime('now')",
-            params![section, key, value_json, source],
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(())
-    }
-
-    fn delete(&self, section: &str, key: &str) -> Result<(), String> {
-        let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        conn.execute(
-            "DELETE FROM config WHERE section = ?1 AND key = ?2",
-            params![section, key],
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(())
+    fn apply_batch(&self, mutations: &[ConfigMutation]) -> Result<(), String> {
+        let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        for mutation in mutations {
+            match mutation {
+                ConfigMutation::Put {
+                    section,
+                    key,
+                    value_json,
+                    source,
+                } => {
+                    tx.execute(
+                        "INSERT INTO config (section, key, value_json, source, updated_at)
+                         VALUES (?1, ?2, ?3, ?4, datetime('now'))
+                         ON CONFLICT(section, key) DO UPDATE SET
+                             value_json = excluded.value_json,
+                             source     = excluded.source,
+                             updated_at = datetime('now')",
+                        params![section, key, value_json, source],
+                    )
+                    .map_err(|e| e.to_string())?;
+                }
+                ConfigMutation::Delete { section, key } => {
+                    tx.execute(
+                        "DELETE FROM config WHERE section = ?1 AND key = ?2",
+                        params![section, key],
+                    )
+                    .map_err(|e| e.to_string())?;
+                }
+            }
+        }
+        tx.commit().map_err(|e| e.to_string())
     }
 
     fn all(&self) -> Result<Vec<ConfigRow>, String> {
@@ -243,6 +281,42 @@ mod tests {
         let store = SqliteConfigStore::open_in_memory().unwrap();
         store.put("ui", "theme", "\"dark\"", "ui").unwrap();
         store.delete("ui", "theme").unwrap();
+        assert!(store.all().unwrap().is_empty());
+    }
+
+    #[test]
+    fn batch_rolls_back_when_later_mutation_fails() {
+        let store = SqliteConfigStore::open_in_memory().unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch(
+                "CREATE TRIGGER reject_failed_config
+                 BEFORE INSERT ON config
+                 WHEN NEW.key = 'reject_me'
+                 BEGIN
+                     SELECT RAISE(ABORT, 'injected config write failure');
+                 END;",
+            )
+            .unwrap();
+
+        let result = store.apply_batch(&[
+            ConfigMutation::Put {
+                section: "ui".into(),
+                key: "theme".into(),
+                value_json: "\"dark\"".into(),
+                source: "ui".into(),
+            },
+            ConfigMutation::Put {
+                section: "ui".into(),
+                key: "reject_me".into(),
+                value_json: "true".into(),
+                source: "ui".into(),
+            },
+        ]);
+
+        assert!(result.is_err());
         assert!(store.all().unwrap().is_empty());
     }
 

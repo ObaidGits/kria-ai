@@ -14,7 +14,7 @@
 mod common;
 
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -372,10 +372,7 @@ fn voice_task(text: &str) -> TaskRequest {
         TaskPayload::new(description.clone(), async move {
             let start = Instant::now();
             tokio::time::sleep(Duration::from_millis(10)).await;
-            TaskResult::Success {
-                total_duration: start.elapsed(),
-                output: Some(description),
-            }
+            TaskResult::Success { total_duration: start.elapsed(), output: Some(description) }
         }),
     )
 }
@@ -390,10 +387,7 @@ fn interactive_task(text: &str) -> TaskRequest {
         TaskPayload::new(description.clone(), async move {
             let start = Instant::now();
             tokio::time::sleep(Duration::from_millis(100)).await;
-            TaskResult::Success {
-                total_duration: start.elapsed(),
-                output: Some(description),
-            }
+            TaskResult::Success { total_duration: start.elapsed(), output: Some(description) }
         }),
     )
 }
@@ -408,10 +402,7 @@ fn background_task(description: &str) -> TaskRequest {
         TaskPayload::new(description.clone(), async move {
             let start = Instant::now();
             tokio::time::sleep(Duration::from_millis(50)).await;
-            TaskResult::Success {
-                total_duration: start.elapsed(),
-                output: Some(description),
-            }
+            TaskResult::Success { total_duration: start.elapsed(), output: Some(description) }
         }),
     )
 }
@@ -425,10 +416,7 @@ fn maintenance_task(description: &str) -> TaskRequest {
         false,
         TaskPayload::new(description.clone(), async move {
             let start = Instant::now();
-            TaskResult::Success {
-                total_duration: start.elapsed(),
-                output: Some(description),
-            }
+            TaskResult::Success { total_duration: start.elapsed(), output: Some(description) }
         }),
     )
 }
@@ -500,6 +488,70 @@ async fn e2e01_voice_preemption() {
     sender.shutdown();
     let result = tokio::time::timeout(Duration::from_secs(3), controller_handle).await;
     assert!(result.is_ok(), "Controller must shut down cleanly");
+}
+
+#[tokio::test]
+async fn executive_snapshot_and_broadcast_events_are_authoritative() {
+    let (mut controller, sender, _gpu) = build_test_controller(2);
+    let mut events = controller.subscribe_events();
+    let task = interactive_task("Observe this task");
+    let task_id = task.id;
+    let controller_handle = tokio::spawn(async move { controller.run().await });
+
+    sender.submit(task).expect("submit task");
+    let started = tokio::time::timeout(Duration::from_secs(1), events.recv())
+        .await.expect("started timeout").expect("started event");
+    assert!(matches!(started, ControllerEvent::TaskStarted {
+        task_id: id, ref description, ..
+    } if id == task_id && description == "Observe this task"));
+
+    let completed = tokio::time::timeout(Duration::from_secs(1), events.recv())
+        .await.expect("completed timeout").expect("completed event");
+    assert!(matches!(completed, ControllerEvent::TaskCompleted {
+        task_id: id, success: true, ..
+    } if id == task_id));
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while sender.snapshot().total_completed == 0 {
+            tokio::task::yield_now().await;
+        }
+    }).await.expect("snapshot update timeout");
+    assert!(sender.snapshot().active_foreground.is_none());
+
+    sender.shutdown();
+    tokio::time::timeout(Duration::from_secs(1), controller_handle)
+        .await.expect("shutdown timeout").expect("controller join");
+}
+
+#[tokio::test]
+async fn executive_cancel_stops_real_work_and_runs_cancel_handler() {
+    let (mut controller, sender, _gpu) = build_test_controller(2);
+    let mut events = controller.subscribe_events();
+    let cancel_observed = Arc::new(AtomicBool::new(false));
+    let cancel_flag = cancel_observed.clone();
+    let task = TaskRequest::new(
+        TaskPriority::Interactive,
+        TaskSource::TextChat,
+        false,
+        TaskPayload::new("Cancellable task", std::future::pending::<TaskResult>())
+            .with_cancel_handler(move || cancel_flag.store(true, Ordering::SeqCst)),
+    );
+    let task_id = task.id;
+    let controller_handle = tokio::spawn(async move { controller.run().await });
+    sender.submit(task).expect("submit task");
+    let _ = tokio::time::timeout(Duration::from_secs(1), events.recv())
+        .await.expect("started timeout").expect("started event");
+
+    sender.cancel_task(task_id).expect("cancel task");
+    let completed = tokio::time::timeout(Duration::from_secs(1), events.recv())
+        .await.expect("completion timeout").expect("completion event");
+    assert!(matches!(completed, ControllerEvent::TaskCompleted {
+        task_id: id, success: false, ..
+    } if id == task_id));
+    assert!(cancel_observed.load(Ordering::SeqCst));
+
+    sender.shutdown();
+    tokio::time::timeout(Duration::from_secs(1), controller_handle)
+        .await.expect("shutdown timeout").expect("controller join");
 }
 
 /// Verify that voice tasks are always scheduled before background tasks,

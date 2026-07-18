@@ -21,11 +21,15 @@ async fn spawn_ws_server() -> String {
         config,
         fleet,
         executive_sender: None,
+        quarantine_registry: std::sync::Arc::new(
+            kria_core::tools::quarantine::QuarantineRegistry::open_in_memory().unwrap(),
+        ),
         turn_admission: std::sync::Arc::new(kria_core::agent::TurnAdmission::new()),
         agent_loop: None,
         device_registry: None,
         notifier: None,
         session_store: None,
+        memory_system: None,
         remote_desktop: None,
         remote_desktop_backend: None,
     });

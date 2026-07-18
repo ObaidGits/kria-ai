@@ -20,8 +20,12 @@ fn portal_acquire_and_inject() {
     let backend = PortalWebRtcBackend::new(cfg);
 
     println!(">> Consent dialog #1 — pick a monitor and Share.");
-    backend.enable().expect("portal session should be acquired (1st)");
-    let capture = backend.capture().expect("capture info present after enable");
+    backend
+        .enable()
+        .expect("portal session should be acquired (1st)");
+    let capture = backend
+        .capture()
+        .expect("capture info present after enable");
     println!(
         "OK #1: portal capture node_id={} resolution={}x{}",
         capture.node_id, capture.width, capture.height
@@ -30,8 +34,14 @@ fn portal_acquire_and_inject() {
 
     // Inject a few pointer moves + a click (should not error).
     backend.send_input(InputEvent::MouseMove { x: 0.5, y: 0.5 });
-    backend.send_input(InputEvent::MouseButton { button: 0, down: true });
-    backend.send_input(InputEvent::MouseButton { button: 0, down: false });
+    backend.send_input(InputEvent::MouseButton {
+        button: 0,
+        down: true,
+    });
+    backend.send_input(InputEvent::MouseButton {
+        button: 0,
+        down: false,
+    });
     std::thread::sleep(std::time::Duration::from_millis(300));
 
     backend.disable();
@@ -43,7 +53,9 @@ fn portal_acquire_and_inject() {
     //    second session be acquired cleanly.
     std::thread::sleep(std::time::Duration::from_millis(500));
     println!(">> Consent dialog #2 — pick a monitor and Share (validates re-acquire).");
-    backend.enable().expect("SECOND portal session should be acquired (regression)");
+    backend
+        .enable()
+        .expect("SECOND portal session should be acquired (regression)");
     let cap2 = backend.capture().expect("capture info after 2nd enable");
     println!(
         "OK #2: re-acquired node_id={} resolution={}x{}",

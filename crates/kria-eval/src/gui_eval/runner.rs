@@ -517,8 +517,6 @@ impl GuiEvalRunner {
             "chrome"
         } else if prompt_lower.contains("firefox") {
             "firefox"
-        } else if prompt_lower.contains("gedit") {
-            "gedit"
         } else {
             ""
         };

@@ -1,0 +1,14 @@
+{
+  "enabled": true,
+  "name": "KRIA Impact Validation",
+  "description": "Runs one lock-protected, cached, dependency-aware validation pass after agent work without starting services or duplicate checks.",
+  "version": "1",
+  "when": {
+    "type": "agentStop"
+  },
+  "then": {
+    "type": "runCommand",
+    "command": "python3 scripts/kiro_hooks.py quick",
+    "timeout": 300
+  }
+}

@@ -163,7 +163,27 @@ pub fn recent(n: usize) -> Vec<serde_json::Value> {
         .unwrap_or_default()
 }
 
-/// Test-only: clear the ring so assertions are deterministic.
+/// Most recent `n` decisions for one session (newest last). Session-scoped
+/// reads avoid cross-session contamination in diagnostics consumers.
+pub fn recent_for_session(session_id: &str, n: usize) -> Vec<serde_json::Value> {
+    ring()
+        .lock()
+        .map(|r| {
+            let matching: Vec<_> = r
+                .iter()
+                .filter(|trace| trace.session_id == session_id)
+                .collect();
+            let skip = matching.len().saturating_sub(n);
+            matching
+                .into_iter()
+                .skip(skip)
+                .map(|trace| trace.to_json())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Test-only: clear the ring so bounded-capacity assertions are deterministic.
 #[cfg(test)]
 pub fn clear() {
     if let Ok(mut r) = ring().lock() {
@@ -178,19 +198,18 @@ mod tests {
 
     #[test]
     fn records_and_reads_back_recent_traces() {
-        clear();
         let mut t = SettingsIntentTrace::default();
         t.decision = "change";
         t.confidence = 0.91;
         t.best_field = Some(("ui".into(), "theme".into()));
         t.value_grounded = true;
-        record("sess-1", "switch to dark mode", &t);
+        record("diagnostics-test-session", "switch to dark mode", &t);
 
-        let recent = recent(10);
+        let recent = recent_for_session("diagnostics-test-session", 10);
         assert_eq!(recent.len(), 1);
         assert_eq!(recent[0]["decision"], "change");
         assert_eq!(recent[0]["field"], "ui.theme");
-        assert_eq!(recent[0]["session_id"], "sess-1");
+        assert_eq!(recent[0]["session_id"], "diagnostics-test-session");
     }
 
     #[test]

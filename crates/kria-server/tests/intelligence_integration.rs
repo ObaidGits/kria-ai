@@ -28,11 +28,15 @@ async fn build_app_default() -> Router {
         config,
         fleet,
         executive_sender: None,
+        quarantine_registry: Arc::new(
+            kria_core::tools::quarantine::QuarantineRegistry::open_in_memory().unwrap(),
+        ),
         turn_admission: Arc::new(kria_core::agent::TurnAdmission::new()),
         agent_loop: None,
         device_registry: None,
         notifier: None,
         session_store: None,
+        memory_system: None,
         remote_desktop: None,
         remote_desktop_backend: None,
     });
@@ -75,11 +79,15 @@ async fn build_app_executive() -> Router {
         config,
         fleet,
         executive_sender: Some(sender),
+        quarantine_registry: Arc::new(
+            kria_core::tools::quarantine::QuarantineRegistry::open_in_memory().unwrap(),
+        ),
         turn_admission: Arc::new(kria_core::agent::TurnAdmission::new()),
         agent_loop: None,
         device_registry: None,
         notifier: None,
         session_store: None,
+        memory_system: None,
         remote_desktop: None,
         remote_desktop_backend: None,
     });
@@ -244,9 +252,11 @@ async fn executive_snapshot_returns_structure() {
 
     assert_eq!(res.status(), StatusCode::OK);
     let body: serde_json::Value = res.json().await.unwrap();
-    // Snapshot should expose config and queue state
-    assert!(body.get("config").is_some(), "snapshot must include config");
-    assert_eq!(body["config"]["enabled"], true);
+    // Snapshot is controller-owned runtime state, not static config.
+    assert!(body.get("active_foreground").is_some());
+    assert!(body["active_background"].is_array());
+    assert!(body["queued"].is_array());
+    assert!(body["total_completed"].is_number());
 }
 
 #[tokio::test]
@@ -254,16 +264,17 @@ async fn executive_cancel_returns_ok_when_enabled() {
     let base = spawn_executive_server().await;
     let client = Client::new();
 
+    let task_id = uuid::Uuid::new_v4().to_string();
     let res = client
-        .post(format!("{base}/api/executive/tasks/test-task-42/cancel"))
+        .post(format!("{base}/api/executive/tasks/{task_id}/cancel"))
         .send()
         .await
         .unwrap();
 
     assert_eq!(res.status(), StatusCode::OK);
     let body: serde_json::Value = res.json().await.unwrap();
-    assert_eq!(body["status"], "cancelled");
-    assert_eq!(body["task_id"], "test-task-42");
+    assert_eq!(body["status"], "cancel_requested");
+    assert_eq!(body["task_id"], task_id);
 }
 
 #[tokio::test]

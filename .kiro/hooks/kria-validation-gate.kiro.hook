@@ -1,0 +1,14 @@
+{
+  "enabled": true,
+  "name": "KRIA Validation Gate",
+  "description": "Runs explicit affected-package checks, tests, safety suites, and changed-file secret scanning before major completion or release decisions.",
+  "version": "1",
+  "when": {
+    "type": "userTriggered"
+  },
+  "then": {
+    "type": "runCommand",
+    "command": "python3 scripts/kiro_hooks.py final",
+    "timeout": 900
+  }
+}

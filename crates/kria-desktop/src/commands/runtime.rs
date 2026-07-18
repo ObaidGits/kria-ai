@@ -12,54 +12,26 @@ fn spawn_executive_event_forwarding(
             let event = match events.recv().await {
                 Ok(event) => event,
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
-                    tracing::warn!(
-                        count,
-                        "Executive UI event bridge lagged; snapshot remains authoritative"
-                    );
+                    tracing::warn!(count, "Executive UI event bridge lagged; snapshot remains authoritative");
                     continue;
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             };
             let now = || chrono::Utc::now().to_rfc3339();
             match event {
-                ControllerEvent::TaskStarted {
-                    task_id,
-                    priority,
-                    source,
-                    description,
-                    ts,
-                } => {
-                    let _ = app.emit(
-                        "executive:task_started",
-                        serde_json::json!({
-                            "task_id": task_id, "priority": priority, "source": source,
-                            "description": description, "ts": ts,
-                        }),
-                    );
+                ControllerEvent::TaskStarted { task_id, priority, source, description, ts } => {
+                    let _ = app.emit("executive:task_started", serde_json::json!({
+                        "task_id": task_id, "priority": priority, "source": source,
+                        "description": description, "ts": ts,
+                    }));
                 }
-                ControllerEvent::TaskCompleted {
-                    task_id,
-                    success,
-                    duration_ms,
-                    output_summary,
-                    error,
-                    ts,
-                } => {
-                    let _ = app.emit(
-                        "executive:task_completed",
-                        serde_json::json!({
-                            "task_id": task_id, "success": success, "duration_ms": duration_ms,
-                            "output_summary": output_summary, "error": error, "ts": ts,
-                        }),
-                    );
+                ControllerEvent::TaskCompleted { task_id, success, duration_ms, output_summary, error, ts } => {
+                    let _ = app.emit("executive:task_completed", serde_json::json!({
+                        "task_id": task_id, "success": success, "duration_ms": duration_ms,
+                        "output_summary": output_summary, "error": error, "ts": ts,
+                    }));
                 }
-                ControllerEvent::TaskPreempted {
-                    victim_id,
-                    victim_priority,
-                    replacement_id,
-                    replacement_priority,
-                    ts,
-                } => {
+                ControllerEvent::TaskPreempted { victim_id, victim_priority, replacement_id, replacement_priority, ts } => {
                     let _ = app.emit("executive:preemption", serde_json::json!({
                         "victim_id": victim_id, "victim_priority": victim_priority,
                         "replacement_id": replacement_id, "replacement_priority": replacement_priority,
@@ -67,29 +39,20 @@ fn spawn_executive_event_forwarding(
                     }));
                 }
                 ControllerEvent::TaskRejected { task_id, reason } => {
-                    let _ = app.emit(
-                        "executive:task_completed",
-                        serde_json::json!({
-                            "task_id": task_id, "success": false, "duration_ms": 0,
-                            "output_summary": null, "error": reason, "ts": now(),
-                        }),
-                    );
+                    let _ = app.emit("executive:task_completed", serde_json::json!({
+                        "task_id": task_id, "success": false, "duration_ms": 0,
+                        "output_summary": null, "error": reason, "ts": now(),
+                    }));
                 }
                 ControllerEvent::GpuLeaseAcquired { task_id } => {
-                    let _ = app.emit(
-                        "executive:gpu_lease",
-                        serde_json::json!({
-                            "task_id": task_id, "action": "acquired", "ts": now(),
-                        }),
-                    );
+                    let _ = app.emit("executive:gpu_lease", serde_json::json!({
+                        "task_id": task_id, "action": "acquired", "ts": now(),
+                    }));
                 }
                 ControllerEvent::GpuLeaseReleased { task_id } => {
-                    let _ = app.emit(
-                        "executive:gpu_lease",
-                        serde_json::json!({
-                            "task_id": task_id, "action": "released", "ts": now(),
-                        }),
-                    );
+                    let _ = app.emit("executive:gpu_lease", serde_json::json!({
+                        "task_id": task_id, "action": "released", "ts": now(),
+                    }));
                 }
                 ControllerEvent::VramMaintenanceStarted { .. }
                 | ControllerEvent::VramMaintenanceCompleted { .. } => {}
@@ -129,11 +92,13 @@ fn maybe_import_toml_into_store(
             return;
         }
     };
-    // Migrate any plaintext secrets from the legacy file into the vault BEFORE
-    // backing up the file (write_user_layer_diff itself redacts secrets from the
-    // DB rows).
+    // Migrate plaintext secrets first. Failure leaves both SQLite and the
+    // legacy TOML untouched, allowing a clean retry on next startup.
     if let Some(secrets) = secrets {
-        secrets.persist(&user_cfg);
+        if let Err(e) = secrets.persist(&user_cfg) {
+            tracing::error!(error = %e, "config import: failed to persist secrets; leaving config.toml intact");
+            return;
+        }
     }
     match user_cfg.write_user_layer_diff(store, "import") {
         Ok(()) => {
@@ -2327,8 +2292,9 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
             preemption_grace_ms: executive_settings.preemption_grace_ms,
             ..Default::default()
         };
-        let policy_gate: Arc<dyn kria_core::safety::policy_gate::PolicyGate> =
-            Arc::new(kria_core::safety::policy_gate::CapabilityPolicyGate::new());
+        let policy_gate: Arc<dyn kria_core::safety::policy_gate::PolicyGate> = Arc::new(
+            kria_core::safety::policy_gate::CapabilityPolicyGate::new(),
+        );
         let (mut controller, sender) = kria_core::agent::executive::ExecutiveController::new(
             executive_config,
             shared_gpu_lease.clone(),

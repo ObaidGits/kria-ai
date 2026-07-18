@@ -68,12 +68,14 @@ impl PortalWebRtcBackend {
                 let (tx, rx) = mpsc::unbounded_channel::<WorkerCmd>();
                 std::thread::Builder::new()
                     .name("kria-portal".into())
-                    .spawn(move || match tokio::runtime::Builder::new_current_thread()
-                        .enable_all()
-                        .build()
-                    {
-                        Ok(rt) => rt.block_on(portal::worker_main(rx)),
-                        Err(e) => tracing::error!(error = %e, "portal worker runtime failed"),
+                    .spawn(move || {
+                        match tokio::runtime::Builder::new_current_thread()
+                            .enable_all()
+                            .build()
+                        {
+                            Ok(rt) => rt.block_on(portal::worker_main(rx)),
+                            Err(e) => tracing::error!(error = %e, "portal worker runtime failed"),
+                        }
                     })
                     .expect("spawn persistent portal worker");
                 tx

@@ -1,6 +1,6 @@
 //! SQLite-backed Task + Reminder store (Phase 2.1/2.3).
 //!
-//! Mirrors `memory::store::MemoryStore`: a single `Mutex<Connection>` over the
+//! A single `Mutex<Connection>` over the
 //! shared `kria.db` (WAL), `CREATE TABLE IF NOT EXISTS` migrations, RFC3339 TEXT
 //! timestamps. Backs the unified task engine, durable reminders, and
 //! productivity analytics.

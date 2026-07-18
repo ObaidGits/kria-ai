@@ -124,32 +124,59 @@ impl SecretsVault {
         self.set_entry(key, SecretEntry::new(value.into()))
     }
 
-    /// Set a full entry (value + metadata), persisting immediately.
+    /// Set a full entry (value + metadata), persisting atomically before
+    /// exposing the new value in memory.
     pub fn set_entry(&self, key: &str, mut entry: SecretEntry) -> Result<()> {
         entry.updated_at = chrono::Utc::now().timestamp();
-        {
-            let mut map = self
-                .entries
-                .write()
-                .map_err(|_| AuthError::Crypto("vault lock poisoned".into()))?;
-            map.insert(key.to_string(), entry);
-        }
-        self.persist()
+        let mut map = self
+            .entries
+            .write()
+            .map_err(|_| AuthError::Crypto("vault lock poisoned".into()))?;
+        let mut candidate = map.clone();
+        candidate.insert(key.to_string(), entry);
+        self.persist_entries(&candidate)?;
+        *map = candidate;
+        Ok(())
     }
 
-    /// Delete a secret. Returns true if it existed.
+    /// Delete a secret. Returns true if it existed. Durable storage is updated
+    /// before the in-memory map is changed.
     pub fn delete(&self, key: &str) -> Result<bool> {
-        let existed = {
-            let mut map = self
-                .entries
-                .write()
-                .map_err(|_| AuthError::Crypto("vault lock poisoned".into()))?;
-            map.remove(key).is_some()
-        };
-        if existed {
-            self.persist()?;
+        let mut map = self
+            .entries
+            .write()
+            .map_err(|_| AuthError::Crypto("vault lock poisoned".into()))?;
+        if !map.contains_key(key) {
+            return Ok(false);
         }
-        Ok(existed)
+        let mut candidate = map.clone();
+        candidate.remove(key);
+        self.persist_entries(&candidate)?;
+        *map = candidate;
+        Ok(true)
+    }
+
+    /// Atomically apply a set of value updates using one encrypted-file write.
+    /// `None` removes a key; `Some` inserts or replaces it.
+    pub fn apply_updates(&self, updates: &[(String, Option<String>)]) -> Result<()> {
+        let mut map = self
+            .entries
+            .write()
+            .map_err(|_| AuthError::Crypto("vault lock poisoned".into()))?;
+        let mut candidate = map.clone();
+        for (key, value) in updates {
+            match value {
+                Some(value) => {
+                    candidate.insert(key.clone(), SecretEntry::new(value.clone()));
+                }
+                None => {
+                    candidate.remove(key);
+                }
+            }
+        }
+        self.persist_entries(&candidate)?;
+        *map = candidate;
+        Ok(())
     }
 
     /// List all secret keys (never values).
@@ -160,15 +187,17 @@ impl SecretsVault {
             .unwrap_or_default()
     }
 
-    /// Encrypt and atomically write the vault to disk (`0600`).
+    /// Encrypt and atomically write the current vault to disk (`0600`).
     pub fn persist(&self) -> Result<()> {
-        let plaintext = {
-            let map = self
-                .entries
-                .read()
-                .map_err(|_| AuthError::Crypto("vault lock poisoned".into()))?;
-            serde_json::to_vec(&*map)?
-        };
+        let map = self
+            .entries
+            .read()
+            .map_err(|_| AuthError::Crypto("vault lock poisoned".into()))?;
+        self.persist_entries(&map)
+    }
+
+    fn persist_entries(&self, entries: &HashMap<String, SecretEntry>) -> Result<()> {
+        let plaintext = serde_json::to_vec(entries)?;
 
         let mut nonce = [0u8; NONCE_LEN];
         rand::thread_rng().fill_bytes(&mut nonce);
@@ -192,6 +221,9 @@ impl SecretsVault {
         }
         set_owner_only(&tmp)?;
         std::fs::rename(&tmp, &self.path)?;
+        if let Some(parent) = self.path.parent() {
+            std::fs::File::open(parent)?.sync_all()?;
+        }
         Ok(())
     }
 }

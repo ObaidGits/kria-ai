@@ -49,7 +49,7 @@ async fn settings_revamp_end_to_end() {
     assert!(store.all().unwrap().is_empty(), "store starts empty");
     let imported: KriaConfig =
         toml::from_str(&std::fs::read_to_string(&toml_path).unwrap()).unwrap();
-    secrets.persist(&imported);
+    secrets.persist(&imported).unwrap();
     imported
         .write_user_layer_diff(store.as_ref(), "import")
         .unwrap();

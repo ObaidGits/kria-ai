@@ -20,7 +20,7 @@ use std::collections::HashMap;
 /// Migrate new workflows to:
 /// `crate::agent::{WorkflowCompiler, GoalTree, StageExecutor, SessionManager}`
 #[deprecated(
-    since = "batch-1",
+    since = "0.1.0",
     note = "Use GoalTree + WorkflowCompiler + StageExecutor instead (RFC 007/008). \
             WorkflowEngine will be removed in Batch 2."
 )]

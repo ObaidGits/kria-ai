@@ -364,12 +364,6 @@ impl SettingsHandler {
                 reason: grounded_reject(&req.section, &req.field, &e),
             };
         }
-        // Numeric range validation → grounded rejection with the allowed range.
-        if let Err(e) = schema::validate_range(&req.section, &req.field, &value) {
-            return SettingsOutcome::Refused {
-                reason: format!("{e}."),
-            };
-        }
         // Env-lock (Req 8.3).
         if schema::is_env_locked(&req.section, &req.field) {
             let var = schema::env_lock_var(&req.section, &req.field).unwrap_or("");

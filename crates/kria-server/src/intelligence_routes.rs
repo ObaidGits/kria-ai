@@ -52,22 +52,13 @@ async fn executive_snapshot(
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
 
-    // In production, this would call into the ExecutiveController's event_tx
-    // to get a snapshot. For now, return the config as a placeholder.
-    Ok(Json(serde_json::json!({
-        "config": {
-            "enabled": state.config.executive.enabled,
-            "max_background_tasks": state.config.executive.max_background_tasks,
-            "preemption_grace_ms": state.config.executive.preemption_grace_ms,
-        },
-        "active_foreground": null,
-        "active_background": [],
-        "queued": [],
-        "gpu_lease_holder": null,
-        "gpu_lease_remaining_ms": null,
-        "total_completed": 0,
-        "total_failed": 0,
-    })))
+    let sender = state
+        .executive_sender
+        .as_ref()
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    serde_json::to_value(sender.snapshot())
+        .map(Json)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
 /// GET /api/executive/events
@@ -81,14 +72,27 @@ async fn executive_events_sse(
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
 
-    // In production, this would subscribe to the ExecutiveController's
-    // event_tx watch channel. For now, stream a heartbeat.
+    let mut events = state
+        .executive_sender
+        .as_ref()
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?
+        .subscribe_events();
     let event_stream = async_stream::stream! {
         loop {
-            yield Ok(Event::default()
-                .event("heartbeat")
-                .data(serde_json::json!({"ts": chrono::Utc::now().to_rfc3339()}).to_string()));
-            tokio::time::sleep(Duration::from_secs(5)).await;
+            match events.recv().await {
+                Ok(event) => match serde_json::to_string(&event) {
+                    Ok(payload) => yield Ok(Event::default().event("executive").data(payload)),
+                    Err(error) => {
+                        tracing::warn!(%error, "Failed to serialize Executive event");
+                    }
+                },
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
+                    yield Ok(Event::default().event("lagged").data(
+                        serde_json::json!({ "missed": count }).to_string(),
+                    ));
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
         }
     };
 
@@ -110,29 +114,18 @@ async fn cancel_task(
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
 
-    // Try the ExecutiveSender if the task_id is a valid UUID
-    if let Ok(parsed_id) = uuid::Uuid::parse_str(&task_id) {
-        if let Some(ref sender) = state.executive_sender {
-            match sender.cancel_task(parsed_id) {
-                Ok(()) => {
-                    tracing::info!(task_id = %task_id, "Task cancellation requested via ExecutiveController");
-                    return Ok(Json(serde_json::json!({
-                        "status": "cancelled",
-                        "task_id": task_id,
-                    })));
-                }
-                Err(e) => {
-                    tracing::warn!(task_id = %task_id, error = %e, "ExecutiveController cancel failed");
-                }
-            }
-        }
-    }
-
-    // Fallback: cancel via turn admission (also handles non-UUID task IDs)
-    let cancelled = state.turn_admission.cancel_session(&task_id);
-    tracing::info!(task_id = %task_id, cancelled, "Task cancellation via turn admission");
+    let parsed_id = uuid::Uuid::parse_str(&task_id).map_err(|_| StatusCode::BAD_REQUEST)?;
+    let sender = state
+        .executive_sender
+        .as_ref()
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    sender.cancel_task(parsed_id).map_err(|error| {
+        tracing::warn!(%task_id, %error, "ExecutiveController cancel failed");
+        StatusCode::SERVICE_UNAVAILABLE
+    })?;
+    tracing::info!(%task_id, "Executive task cancellation requested");
     Ok(Json(serde_json::json!({
-        "status": "cancelled",
+        "status": "cancel_requested",
         "task_id": task_id,
     })))
 }
@@ -149,11 +142,18 @@ async fn quarantine_list(
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
 
-    // In production, this would query the QuarantineRegistry's SQLite table.
+    let registry = state.quarantine_registry.clone();
+    let tools = tokio::task::spawn_blocking(move || registry.all())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let pending_approval = tools.iter().filter(|tool| {
+        tool.status == kria_core::tools::quarantine::QuarantineStatus::PendingApproval
+    }).count();
     Ok(Json(serde_json::json!({
-        "tools": [],
-        "total": 0,
-        "pending_approval": 0,
+        "total": tools.len(),
+        "pending_approval": pending_approval,
+        "tools": tools,
     })))
 }
 
@@ -168,7 +168,15 @@ async fn quarantine_approve(
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
 
-    tracing::info!(tool_id = %tool_id, "Quarantine approval requested");
+    let registry = state.quarantine_registry.clone();
+    let approved_id = tool_id.clone();
+    tokio::task::spawn_blocking(move || {
+        registry.approve(&approved_id, Some("Approved from server quarantine API"))
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .map_err(|_| StatusCode::CONFLICT)?;
+    tracing::info!(%tool_id, "Quarantined tool approved");
     Ok(Json(serde_json::json!({
         "status": "approved",
         "tool_id": tool_id,
@@ -186,7 +194,15 @@ async fn quarantine_reject(
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
 
-    tracing::info!(tool_id = %tool_id, "Quarantine rejection requested");
+    let registry = state.quarantine_registry.clone();
+    let rejected_id = tool_id.clone();
+    tokio::task::spawn_blocking(move || {
+        registry.reject(&rejected_id, Some("Rejected from server quarantine API"))
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .map_err(|_| StatusCode::CONFLICT)?;
+    tracing::info!(%tool_id, "Quarantined tool rejected");
     Ok(Json(serde_json::json!({
         "status": "rejected",
         "tool_id": tool_id,

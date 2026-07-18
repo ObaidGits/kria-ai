@@ -142,7 +142,7 @@ const ALL_KEY_CODES: &[u16] = &[
     58, // CAPSLOCK
     59, 60, 61, 62, 63, 64, 65, 66, 67, 68, // F1..F10
     69, // NUMLOCK
-    87, 88, // F11, F12
+    87, 88,  // F11, F12
     97,  // RIGHTCTRL
     100, // RIGHTALT
     102, // HOME
@@ -550,17 +550,17 @@ pub fn char_to_key(ch: char) -> Option<(u16, bool)> {
         '(' => (10, true),
         ')' => (11, true),
         // shifted symbols
-        '_' => (12, true),  // shift + MINUS
-        '+' => (13, true),  // shift + EQUAL
-        '{' => (26, true),  // shift + LEFTBRACE
-        '}' => (27, true),  // shift + RIGHTBRACE
-        ':' => (39, true),  // shift + SEMICOLON
-        '"' => (40, true),  // shift + APOSTROPHE
-        '~' => (41, true),  // shift + GRAVE
-        '|' => (43, true),  // shift + BACKSLASH
-        '<' => (51, true),  // shift + COMMA
-        '>' => (52, true),  // shift + DOT
-        '?' => (53, true),  // shift + SLASH
+        '_' => (12, true), // shift + MINUS
+        '+' => (13, true), // shift + EQUAL
+        '{' => (26, true), // shift + LEFTBRACE
+        '}' => (27, true), // shift + RIGHTBRACE
+        ':' => (39, true), // shift + SEMICOLON
+        '"' => (40, true), // shift + APOSTROPHE
+        '~' => (41, true), // shift + GRAVE
+        '|' => (43, true), // shift + BACKSLASH
+        '<' => (51, true), // shift + COMMA
+        '>' => (52, true), // shift + DOT
+        '?' => (53, true), // shift + SLASH
         _ => return None,
     };
     Some(mapped)
@@ -788,7 +788,11 @@ mod tests {
     fn abs_move_sequence_has_correct_codes_and_clamps() {
         assert_eq!(
             abs_move_event_sequence(100, 200),
-            vec![(EV_ABS, ABS_X, 100), (EV_ABS, ABS_Y, 200), (EV_SYN, SYN_REPORT, 0)]
+            vec![
+                (EV_ABS, ABS_X, 100),
+                (EV_ABS, ABS_Y, 200),
+                (EV_SYN, SYN_REPORT, 0)
+            ]
         );
         // Clamp negative -> 0 and over-range -> ABS_RANGE_MAX.
         assert_eq!(

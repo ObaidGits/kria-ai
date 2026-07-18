@@ -355,26 +355,39 @@ impl ConfigService {
         }
         // Capture the prior config so the whole-blob save can be audited at
         // field granularity (settings-config-revamp Task 15).
-        let prior_json = serde_json::to_value(&*self.inner.read().await).ok();
+        let prior_cfg = self.inner.read().await.clone();
+        let prior_json = serde_json::to_value(&prior_cfg).ok();
         let new_json = serde_json::to_value(&new_cfg).ok();
-        {
-            let mut cfg = self.inner.write().await;
-            *cfg = new_cfg;
-            if let Some(store) = &self.store {
-                // Persist only the user-layer deviations vs baseline-with-env,
-                // so env-derived values are not captured as user overrides.
-                cfg.write_user_layer_diff(store.as_ref(), source.as_str())
+        // Persist the candidate before exposing it as live state. SQLite and
+        // vault are separate durable stores, so secret changes are written
+        // first and compensated if the SQLite batch fails.
+        if let Some(store) = &self.store {
+            let secrets_updated = if let Some(secrets) = &self.secrets {
+                secrets
+                    .persist(&new_cfg)
                     .map_err(ConfigServiceError::Persist)?;
-                // Secrets go to the vault, never the config store.
-                if let Some(secrets) = &self.secrets {
-                    secrets.persist(&cfg);
-                }
+                true
             } else {
-                self.persist
-                    .persist(&cfg)
-                    .map_err(ConfigServiceError::Persist)?;
+                false
+            };
+            if let Err(error) = new_cfg.write_user_layer_diff(store.as_ref(), source.as_str()) {
+                if secrets_updated {
+                    if let Some(secrets) = &self.secrets {
+                        if let Err(rollback_error) = secrets.persist(&prior_cfg) {
+                            return Err(ConfigServiceError::Persist(format!(
+                                "{error}; secret rollback failed: {rollback_error}"
+                            )));
+                        }
+                    }
+                }
+                return Err(ConfigServiceError::Persist(error));
             }
+        } else {
+            self.persist
+                .persist(&new_cfg)
+                .map_err(ConfigServiceError::Persist)?;
         }
+        *self.inner.write().await = new_cfg;
         let version = self.version.fetch_add(1, Ordering::AcqRel) + 1;
         self.event_bus.publish(KriaEvent::ConfigChanged {
             section: "*".to_string(),
@@ -473,13 +486,15 @@ impl ConfigService {
             }
         }
 
-        let mut cfg = self.inner.write().await;
+        // Build the candidate from a snapshot. The service write mutex keeps
+        // other service writers out while persistence and publication complete.
+        let prior_cfg = self.inner.read().await.clone();
 
         // Serialize the whole config to a JSON object, apply each change at
         // field granularity, then deserialize back. This gives generic
         // field-level patching without a per-field match and preserves the
         // serde shape exactly.
-        let mut root = serde_json::to_value(&*cfg)?;
+        let mut root = serde_json::to_value(&prior_cfg)?;
         {
             let obj = root
                 .as_object_mut()
@@ -505,45 +520,61 @@ impl ConfigService {
         }
 
         // Capture prior values for the applied-change records.
-        let prior_root = serde_json::to_value(&*cfg)?;
+        let prior_root = serde_json::to_value(&prior_cfg)?;
         let prior_of = |section: &str, field: &str| -> Option<serde_json::Value> {
             prior_root.get(section).and_then(|s| s.get(field)).cloned()
         };
 
-        // Deserialize back into a typed config (serde(default) tolerant).
+        // Deserialize back into a typed candidate (serde(default) tolerant).
         let new_cfg: KriaConfig = serde_json::from_value(root)?;
-        *cfg = new_cfg;
 
-        // Persist: field-level rows when a SQLite store is present (Task 4),
-        // else the whole-blob backend (TOML file — Task 1 default).
+        // Persist the entire field batch in one SQLite transaction, or persist
+        // the whole-file candidate. Live state is swapped only after success.
+        // Secret-vault writes are atomic and compensated if SQLite rejects the
+        // accompanying non-secret batch.
         if let Some(store) = &self.store {
-            let mut touched_secret = false;
-            for ch in &changes {
-                // Never persist plaintext secrets to the config store — the
-                // vault-backed SecretStore handles those. The in-memory value is
-                // still applied so runtime clients see it.
-                if crate::config::is_secret_field(&ch.section, &ch.field) {
-                    touched_secret = true;
-                    continue;
-                }
-                let json = serde_json::to_string(&ch.value)?;
-                store
-                    .put(&ch.section, &ch.field, &json, source.as_str())
+            let touched_secret = changes
+                .iter()
+                .any(|ch| crate::config::is_secret_field(&ch.section, &ch.field));
+            let secrets_updated = touched_secret && self.secrets.is_some();
+            if secrets_updated {
+                self.secrets
+                    .as_ref()
+                    .expect("checked above")
+                    .persist(&new_cfg)
                     .map_err(ConfigServiceError::Persist)?;
             }
-            // If a secret field changed (or a provider key), persist secrets to
-            // the vault from the updated in-memory config.
-            if touched_secret {
-                if let Some(secrets) = &self.secrets {
-                    secrets.persist(&cfg);
+
+            let mut mutations = Vec::new();
+            for ch in &changes {
+                if crate::config::is_secret_field(&ch.section, &ch.field) {
+                    continue;
                 }
+                mutations.push(crate::config::store::ConfigMutation::Put {
+                    section: ch.section.clone(),
+                    key: ch.field.clone(),
+                    value_json: serde_json::to_string(&ch.value)?,
+                    source: source.as_str().to_string(),
+                });
+            }
+            if let Err(error) = store.apply_batch(&mutations) {
+                if secrets_updated {
+                    if let Some(secrets) = &self.secrets {
+                        if let Err(rollback_error) = secrets.persist(&prior_cfg) {
+                            return Err(ConfigServiceError::Persist(format!(
+                                "{error}; secret rollback failed: {rollback_error}"
+                            )));
+                        }
+                    }
+                }
+                return Err(ConfigServiceError::Persist(error));
             }
         } else {
             self.persist
-                .persist(&cfg)
+                .persist(&new_cfg)
                 .map_err(ConfigServiceError::Persist)?;
         }
-        drop(cfg);
+        *self.inner.write().await = new_cfg;
 
         let version = self.version.fetch_add(1, Ordering::AcqRel) + 1;
 
@@ -693,6 +724,101 @@ mod tests {
                 format!("{new}:{source}"),
             ));
         }
+    }
+
+    struct FailingPersist;
+
+    impl ConfigPersist for FailingPersist {
+        fn persist(&self, _cfg: &KriaConfig) -> Result<(), String> {
+            Err("injected persistence failure".to_string())
+        }
+    }
+
+    fn failing_service() -> ConfigService {
+        ConfigService::with_persist(
+            Arc::new(RwLock::new(KriaConfig::default())),
+            Arc::new(EventBus::new(16)),
+            Arc::new(FailingPersist),
+        )
+    }
+
+    async fn assert_failed_write_has_no_side_effects(
+        svc: &ConfigService,
+        rx: &mut tokio::sync::broadcast::Receiver<KriaEvent>,
+        sink: &RecordingSink,
+        prior: &serde_json::Value,
+    ) {
+        assert_eq!(serde_json::to_value(svc.get().await).unwrap(), *prior);
+        assert_eq!(svc.version(), 0);
+        assert!(rx.try_recv().is_err(), "failed write emitted config event");
+        assert!(svc.history.lock().await.is_empty());
+        assert!(sink.changes.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn persist_failure_rolls_back_patch_and_all_side_effects() {
+        let svc = failing_service();
+        let sink = Arc::new(RecordingSink::default());
+        svc.set_audit_sink(sink.clone());
+        let prior = serde_json::to_value(svc.get().await).unwrap();
+        let mut rx = svc.subscribe();
+
+        let error = svc
+            .patch(
+                "ui",
+                "theme",
+                serde_json::json!("dark"),
+                ChangeSource::Ui,
+                None,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, ConfigServiceError::Persist(_)));
+        assert_failed_write_has_no_side_effects(&svc, &mut rx, &sink, &prior).await;
+    }
+
+    #[tokio::test]
+    async fn persist_failure_rolls_back_batch_and_all_side_effects() {
+        let svc = failing_service();
+        let sink = Arc::new(RecordingSink::default());
+        svc.set_audit_sink(sink.clone());
+        let prior = serde_json::to_value(svc.get().await).unwrap();
+        let mut rx = svc.subscribe();
+
+        let error = svc
+            .patch_batch(
+                vec![
+                    Change::new("ui", "theme", serde_json::json!("dark")),
+                    Change::new("ui", "high_contrast", serde_json::json!(true)),
+                ],
+                ChangeSource::Ui,
+                None,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, ConfigServiceError::Persist(_)));
+        assert_failed_write_has_no_side_effects(&svc, &mut rx, &sink, &prior).await;
+    }
+
+    #[tokio::test]
+    async fn persist_failure_rolls_back_replace_all_and_all_side_effects() {
+        let svc = failing_service();
+        let sink = Arc::new(RecordingSink::default());
+        svc.set_audit_sink(sink.clone());
+        let prior = serde_json::to_value(svc.get().await).unwrap();
+        let mut rx = svc.subscribe();
+        let mut candidate = svc.get().await;
+        candidate.ui.theme = "dark".to_string();
+
+        let error = svc
+            .replace_all_checked(candidate, ChangeSource::Ui, Some(0))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, ConfigServiceError::Persist(_)));
+        assert_failed_write_has_no_side_effects(&svc, &mut rx, &sink, &prior).await;
     }
 
     #[tokio::test]

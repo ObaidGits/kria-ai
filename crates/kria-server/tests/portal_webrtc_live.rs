@@ -14,7 +14,6 @@ use kria_core::remote_desktop::DesktopBackend;
 use kria_server::desktop_stream::pipeline::{self, SignalOut};
 use kria_server::desktop_stream::PortalWebRtcBackend;
 
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "live: opens a screen-share consent dialog + runs a webrtc pipeline"]
 async fn webrtc_pipeline_produces_answer() {
@@ -27,7 +26,10 @@ async fn webrtc_pipeline_produces_answer() {
     println!(">> A screen-share consent dialog should appear — pick a monitor and Share.");
     backend.enable().expect("portal acquire");
     let cap = backend.capture().expect("capture info");
-    println!("capture node_id={} {}x{}", cap.node_id, cap.width, cap.height);
+    println!(
+        "capture node_id={} {}x{}",
+        cap.node_id, cap.width, cap.height
+    );
 
     let fd = backend.open_pipewire_fd().expect("open pipewire fd");
 
@@ -51,7 +53,10 @@ async fn webrtc_pipeline_produces_answer() {
     while tokio::time::Instant::now() < deadline {
         match tokio::time::timeout(Duration::from_secs(10), out_rx.recv()).await {
             Ok(Some(SignalOut::Offer(sdp))) => {
-                assert!(sdp.contains("VP8") || sdp.contains("vp8"), "offer should advertise VP8");
+                assert!(
+                    sdp.contains("VP8") || sdp.contains("vp8"),
+                    "offer should advertise VP8"
+                );
                 assert!(sdp.contains("m=video"), "offer should have a video m-line");
                 assert!(
                     sdp.contains("sendonly") || sdp.contains("sendrecv"),
@@ -72,6 +77,9 @@ async fn webrtc_pipeline_produces_answer() {
     drop(handle);
     backend.disable();
 
-    assert!(got_offer, "pipeline must produce an SDP offer with a sending video track");
+    assert!(
+        got_offer,
+        "pipeline must produce an SDP offer with a sending video track"
+    );
     println!("OK: webrtc pipeline (offerer) negotiated against live portal capture");
 }

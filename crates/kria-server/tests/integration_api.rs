@@ -27,6 +27,9 @@ async fn build_test_app() -> Router {
         config,
         fleet,
         executive_sender: None,
+        quarantine_registry: Arc::new(
+            kria_core::tools::quarantine::QuarantineRegistry::open_in_memory().unwrap(),
+        ),
         turn_admission: Arc::new(kria_core::agent::TurnAdmission::new()),
         agent_loop: None,
         device_registry: None,
@@ -70,6 +73,9 @@ async fn build_test_app_with_memory() -> (Router, Arc<kria_core::memory::api::Me
         config,
         fleet,
         executive_sender: None,
+        quarantine_registry: Arc::new(
+            kria_core::tools::quarantine::QuarantineRegistry::open_in_memory().unwrap(),
+        ),
         turn_admission: Arc::new(kria_core::agent::TurnAdmission::new()),
         agent_loop: None,
         device_registry: None,

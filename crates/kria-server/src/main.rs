@@ -220,9 +220,8 @@ async fn main() -> anyhow::Result<()> {
         };
 
     // Remote desktop view & takeover (Phase 4.6): off unless explicitly enabled.
-    let mut remote_desktop_backend: Option<
-        Arc<kria_server::desktop_stream::PortalWebRtcBackend>,
-    > = None;
+    let mut remote_desktop_backend: Option<Arc<kria_server::desktop_stream::PortalWebRtcBackend>> =
+        None;
     let remote_desktop: Option<Arc<kria_core::remote_desktop::RemoteDesktopManager>> =
         if config.remote_desktop.enabled {
             // settings-config-revamp Task 9: unified onto the shared kria.db
@@ -232,11 +231,13 @@ async fn main() -> anyhow::Result<()> {
                 config.remote_desktop.clone(),
             ));
             remote_desktop_backend = Some(backend.clone());
-            let mgr = Arc::new(kria_core::remote_desktop::RemoteDesktopManager::with_backend(
-                config.remote_desktop.clone(),
-                backend,
-                audit,
-            ));
+            let mgr = Arc::new(
+                kria_core::remote_desktop::RemoteDesktopManager::with_backend(
+                    config.remote_desktop.clone(),
+                    backend,
+                    audit,
+                ),
+            );
             // Idle / kill-switch enforcement loop.
             let mgr_loop = mgr.clone();
             tokio::spawn(async move {
@@ -255,10 +256,14 @@ async fn main() -> anyhow::Result<()> {
             None
         };
 
+    let quarantine_registry = Arc::new(
+        kria_core::tools::quarantine::QuarantineRegistry::open_path(&paths.db_path)?,
+    );
     let state = Arc::new(ServerState {
         config,
         fleet,
         executive_sender,
+        quarantine_registry,
         turn_admission,
         agent_loop,
         device_registry,

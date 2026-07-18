@@ -64,15 +64,19 @@ fn authorize(
         Some(Ok(id)) => Ok(Some(id)),
         _ => Err((
             StatusCode::UNAUTHORIZED,
-            Json(serde_json::json!({ "status": "error", "message": "valid device token required" })),
+            Json(
+                serde_json::json!({ "status": "error", "message": "valid device token required" }),
+            ),
         )),
     }
 }
 
 fn manager(
     state: &Arc<PhoneGatewayState>,
-) -> Result<&Arc<kria_core::remote_desktop::RemoteDesktopManager>, (StatusCode, Json<serde_json::Value>)>
-{
+) -> Result<
+    &Arc<kria_core::remote_desktop::RemoteDesktopManager>,
+    (StatusCode, Json<serde_json::Value>),
+> {
     state.remote_desktop.as_ref().ok_or_else(|| {
         (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -209,14 +213,23 @@ async fn rd_signal(
         return (StatusCode::SERVICE_UNAVAILABLE, "remote desktop disabled").into_response();
     };
     let Some(backend) = state.remote_desktop_backend.clone() else {
-        return (StatusCode::SERVICE_UNAVAILABLE, "stream backend unavailable").into_response();
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "stream backend unavailable",
+        )
+            .into_response();
     };
     let session_id = query.session_id.clone().unwrap_or_default();
     if !mgr.validate_session(&session_id) || !mgr.relay_allowed() {
         return (StatusCode::FORBIDDEN, "no active remote-desktop session").into_response();
     }
     // Resolve per-connection quality: manager defaults + sanitized client overrides.
-    let quality = sanitize_quality(mgr.stream_config(), query.max_dim, query.max_fps, query.encoder.clone());
+    let quality = sanitize_quality(
+        mgr.stream_config(),
+        query.max_dim,
+        query.max_fps,
+        query.encoder.clone(),
+    );
     ws.on_upgrade(move |socket| handle_signal_socket(socket, mgr, backend, device_id, quality))
         .into_response()
 }
@@ -225,8 +238,13 @@ async fn rd_signal(
 #[derive(Debug, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ClientSignal {
-    Answer { sdp: String },
-    Ice { sdp_mline_index: u32, candidate: String },
+    Answer {
+        sdp: String,
+    },
+    Ice {
+        sdp_mline_index: u32,
+        candidate: String,
+    },
     Input(kria_core_input::InputEventWire),
 }
 
@@ -255,20 +273,36 @@ async fn handle_signal_socket(
     // fire on-negotiation-needed → create-offer → SignalOut::Offer to the client.
     let pipe: Option<pipeline::PipelineHandle> = match backend.open_pipewire_fd() {
         Ok(fd) => {
-            let cap = backend.capture().unwrap_or(crate::desktop_stream::CaptureInfo {
-                node_id: 0,
-                width: 0,
-                height: 0,
-            });
+            let cap = backend
+                .capture()
+                .unwrap_or(crate::desktop_stream::CaptureInfo {
+                    node_id: 0,
+                    width: 0,
+                    height: 0,
+                });
             let (max_dim, max_fps, enc) = quality.clone();
-            tracing::info!(node_id = cap.node_id, "[STEP 4/5] rd-signal: pipewire fd acquired, building pipeline (offerer)");
-            match pipeline::spawn(fd, cap.node_id, cap.width, cap.height, max_dim, max_fps, &enc, out_tx.clone()) {
+            tracing::info!(
+                node_id = cap.node_id,
+                "[STEP 4/5] rd-signal: pipewire fd acquired, building pipeline (offerer)"
+            );
+            match pipeline::spawn(
+                fd,
+                cap.node_id,
+                cap.width,
+                cap.height,
+                max_dim,
+                max_fps,
+                &enc,
+                out_tx.clone(),
+            ) {
                 Ok(h) => Some(h),
                 Err(e) => {
                     tracing::warn!(error = %e, "rd-signal: pipeline build failed");
                     let _ = ws_tx
                         .send(Message::Text(
-                            serde_json::json!({ "type": "error", "message": e }).to_string().into(),
+                            serde_json::json!({ "type": "error", "message": e })
+                                .to_string()
+                                .into(),
                         ))
                         .await;
                     None
@@ -279,7 +313,9 @@ async fn handle_signal_socket(
             tracing::warn!(error = %e, "rd-signal: open pipewire fd failed");
             let _ = ws_tx
                 .send(Message::Text(
-                    serde_json::json!({ "type": "error", "message": e }).to_string().into(),
+                    serde_json::json!({ "type": "error", "message": e })
+                        .to_string()
+                        .into(),
                 ))
                 .await;
             None
@@ -362,7 +398,10 @@ mod tests {
 
     #[test]
     fn zero_dimension_means_native() {
-        assert_eq!(sanitize_quality(base(), Some(0), None, None), (0, 30, "vp8".to_string()));
+        assert_eq!(
+            sanitize_quality(base(), Some(0), None, None),
+            (0, 30, "vp8".to_string())
+        );
     }
 
     #[test]

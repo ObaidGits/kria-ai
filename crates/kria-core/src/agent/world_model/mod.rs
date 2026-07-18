@@ -21,8 +21,8 @@
 //!
 //! ## Storage
 //!
-//! All facts are persisted in SQLite via the existing `MemoryStore` connection.
-//! The World Model adds two tables:
+//! All facts are persisted in SQLite via a dedicated `WorldModelStore`
+//! connection on the shared `kria.db`. The World Model adds two tables:
 //! - `world_facts` — active facts
 //! - `world_facts_archive` — deprecated facts (for audit trail)
 

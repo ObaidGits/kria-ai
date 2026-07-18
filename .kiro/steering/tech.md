@@ -94,7 +94,7 @@ Cargo.toml (workspace root)
 ```toml
 opt-level = 0
 debug = 1              # Line tables only
-codegen-units = 16     # Cap parallelism
+codegen-units = 16     # Bound LLVM codegen partitions
 incremental = true
 split-debuginfo = "unpacked"
 ```
@@ -109,6 +109,14 @@ panic = "abort"
 ```
 
 ## Common Commands
+
+These commands are references, not a default sequence to run in full. Start with
+focused diagnostics, affected tests, or package checks; escalate to workspace,
+release, E2E, Docker, or packaging validation only when scope and risk justify it.
+Reuse existing development services and build caches. Keep one managed instance of
+long-running servers/watchers, stop temporary instances after use, and avoid running
+heavy builds concurrently. Control Cargo job concurrency separately from
+`codegen-units`, based on current RAM, CPU load, and task size.
 
 ### Building
 ```bash
@@ -281,4 +289,4 @@ sidecars/
 - **Dev profile**: Optimized for low compile RAM (16 codegen units) to prevent OOM on low-RAM machines
 - **Release profile**: Thin LTO, debug info stripping, abort on panic
 - **Incremental compilation**: Enabled in dev profile for faster iteration
-- **Parallel codegen**: Capped at 16 units to balance speed and memory usage
+- **Codegen partitioning**: 16 units balance compile speed and memory; control Cargo job concurrency separately based on current system load

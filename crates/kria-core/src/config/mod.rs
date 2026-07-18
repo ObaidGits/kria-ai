@@ -1403,8 +1403,15 @@ impl KriaConfig {
         }
         let toml_str = toml::to_string_pretty(self)?;
         let tmp_path = user_config_path.with_extension(format!("toml.tmp.{}", std::process::id()));
-        std::fs::write(&tmp_path, toml_str)?;
+        let mut file = std::fs::File::create(&tmp_path)?;
+        use std::io::Write as _;
+        file.write_all(toml_str.as_bytes())?;
+        file.flush()?;
+        file.sync_all()?;
         std::fs::rename(&tmp_path, &user_config_path)?;
+        if let Some(parent) = user_config_path.parent() {
+            std::fs::File::open(parent)?.sync_all()?;
+        }
         tracing::info!(path = %user_config_path.display(), "config saved");
         Ok(())
     }
@@ -1650,12 +1657,12 @@ impl KriaConfig {
         let base_v = serde_json::to_value(Self::baseline_with_env()).map_err(|e| e.to_string())?;
         let self_v = serde_json::to_value(&redacted).map_err(|e| e.to_string())?;
         let existing: std::collections::HashSet<(String, String)> = store
-            .all()
-            .unwrap_or_default()
+            .all()?
             .into_iter()
             .map(|r| (r.section, r.key))
             .collect();
 
+        let mut mutations = Vec::new();
         if let (Some(base_obj), Some(self_obj)) = (base_v.as_object(), self_v.as_object()) {
             for (section, self_section) in self_obj {
                 let base_section = base_obj.get(section);
@@ -1665,15 +1672,23 @@ impl KriaConfig {
                         if base_val != Some(self_val) {
                             let json =
                                 serde_json::to_string(self_val).map_err(|e| e.to_string())?;
-                            store.put(section, key, &json, source)?;
+                            mutations.push(crate::config::store::ConfigMutation::Put {
+                                section: section.clone(),
+                                key: key.clone(),
+                                value_json: json,
+                                source: source.to_string(),
+                            });
                         } else if existing.contains(&(section.clone(), key.clone())) {
-                            store.delete(section, key)?;
+                            mutations.push(crate::config::store::ConfigMutation::Delete {
+                                section: section.clone(),
+                                key: key.clone(),
+                            });
                         }
                     }
                 }
             }
         }
-        Ok(())
+        store.apply_batch(&mutations)
     }
 }
 

@@ -23,11 +23,13 @@ async fn rd_e2e_webrtc() {
     let backend = Arc::new(kria_server::desktop_stream::PortalWebRtcBackend::new(
         config.remote_desktop.clone(),
     ));
-    let mgr = Arc::new(kria_core::remote_desktop::RemoteDesktopManager::with_backend(
-        config.remote_desktop.clone(),
-        backend.clone(),
-        None,
-    ));
+    let mgr = Arc::new(
+        kria_core::remote_desktop::RemoteDesktopManager::with_backend(
+            config.remote_desktop.clone(),
+            backend.clone(),
+            None,
+        ),
+    );
 
     // HITL: request → confirm (acquires the portal session; consent dialog).
     let id = mgr.request().expect("request");
@@ -58,7 +60,10 @@ async fn rd_e2e_webrtc() {
     println!("probe → {ws_url}");
 
     let py = concat!(env!("CARGO_MANIFEST_DIR"), "/../../.venv/bin/python");
-    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/../../scripts/rd_webrtc_probe.py");
+    let script = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../scripts/rd_webrtc_probe.py"
+    );
     let output = tokio::process::Command::new(py)
         .arg(script)
         .arg(&ws_url)
@@ -66,8 +71,14 @@ async fn rd_e2e_webrtc() {
         .await
         .expect("run probe");
 
-    println!("──── probe stdout ────\n{}", String::from_utf8_lossy(&output.stdout));
-    println!("──── probe stderr ────\n{}", String::from_utf8_lossy(&output.stderr));
+    println!(
+        "──── probe stdout ────\n{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    println!(
+        "──── probe stderr ────\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     mgr.stop();
     assert!(

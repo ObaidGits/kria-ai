@@ -22,6 +22,8 @@ pub struct ServerState {
     pub fleet: Arc<inventory::FleetRuntime>,
     /// Executive Controller sender — present only when `executive.enabled = true`.
     pub executive_sender: Option<kria_core::agent::executive::ExecutiveSender>,
+    /// Durable generated/discovered tool trust gate.
+    pub quarantine_registry: Arc<kria_core::tools::quarantine::QuarantineRegistry>,
     /// Shared turn-admission gate so HTTP/WS cancel endpoints can cancel
     /// in-flight turns without needing a full AgentLoop handle.
     pub turn_admission: Arc<kria_core::agent::TurnAdmission>,

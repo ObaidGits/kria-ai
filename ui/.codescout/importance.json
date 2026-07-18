@@ -1,0 +1,2644 @@
+{
+  "schemaVersion": "1.0.0",
+  "scores": {
+    "playwright.config.ts": {
+      "score": 0,
+      "dependents": 0,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "vite.config.ts": {
+      "score": 3,
+      "dependents": 0,
+      "imports": 0,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "public/sw.js": {
+      "score": 3,
+      "dependents": 0,
+      "imports": 0,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "scripts/build-fonts.mjs": {
+      "score": 0,
+      "dependents": 0,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "scripts/build-icons.mjs": {
+      "score": 0,
+      "dependents": 0,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "scripts/token-lint.mjs": {
+      "score": 0,
+      "dependents": 0,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/App.tsx": {
+      "score": 92,
+      "dependents": 1,
+      "imports": 21,
+      "gitCommits": 15,
+      "routeUsage": 0
+    },
+    "src/index.tsx": {
+      "score": 22,
+      "dependents": 0,
+      "imports": 8,
+      "gitCommits": 2,
+      "routeUsage": 0
+    },
+    "storybook-static/sw.js": {
+      "score": 0,
+      "dependents": 0,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/vite-inject-mocker-entry.js": {
+      "score": 2,
+      "dependents": 0,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "tokens/build.mjs": {
+      "score": 0,
+      "dependents": 0,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/bridge/approval.ts": {
+      "score": 21,
+      "dependents": 3,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/bridge/capabilityActions.ts": {
+      "score": 26,
+      "dependents": 4,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/bridge/capabilityRun.ts": {
+      "score": 16,
+      "dependents": 2,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/bridge/index.ts": {
+      "score": 34,
+      "dependents": 4,
+      "imports": 7,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/bridge/invoke.ts": {
+      "score": 97,
+      "dependents": 19,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/bridge/listeners.ts": {
+      "score": 18,
+      "dependents": 2,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/bridge/tauriBridge.ts": {
+      "score": 11,
+      "dependents": 1,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/bridge/types.ts": {
+      "score": 25,
+      "dependents": 5,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/bridge/workflowApproval.ts": {
+      "score": 9,
+      "dependents": 1,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/components/AddTargetModal.tsx": {
+      "score": 13,
+      "dependents": 1,
+      "imports": 1,
+      "gitCommits": 2,
+      "routeUsage": 0
+    },
+    "src/components/AnalyticsDashboard.tsx": {
+      "score": 11,
+      "dependents": 1,
+      "imports": 0,
+      "gitCommits": 2,
+      "routeUsage": 0
+    },
+    "src/components/BootError.tsx": {
+      "score": 8,
+      "dependents": 1,
+      "imports": 0,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/components/BriefingBuilder.tsx": {
+      "score": 10,
+      "dependents": 1,
+      "imports": 1,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/components/ChatView.tsx": {
+      "score": 63,
+      "dependents": 1,
+      "imports": 8,
+      "gitCommits": 14,
+      "routeUsage": 0
+    },
+    "src/components/CorePresence.stories.tsx": {
+      "score": 4,
+      "dependents": 0,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/components/CorePresence.tsx": {
+      "score": 26,
+      "dependents": 4,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/components/DecisionActionCenter.tsx": {
+      "score": 13,
+      "dependents": 1,
+      "imports": 1,
+      "gitCommits": 2,
+      "routeUsage": 0
+    },
+    "src/components/DeviceMatrix.tsx": {
+      "score": 13,
+      "dependents": 1,
+      "imports": 1,
+      "gitCommits": 2,
+      "routeUsage": 0
+    },
+    "src/components/EditTargetModal.tsx": {
+      "score": 12,
+      "dependents": 1,
+      "imports": 2,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/components/ExportDropdown.tsx": {
+      "score": 10,
+      "dependents": 1,
+      "imports": 1,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/components/GuiCognitionPanel.tsx": {
+      "score": 21,
+      "dependents": 1,
+      "imports": 2,
+      "gitCommits": 4,
+      "routeUsage": 0
+    },
+    "src/components/GuiWorkflowViewer.tsx": {
+      "score": 13,
+      "dependents": 1,
+      "imports": 1,
+      "gitCommits": 2,
+      "routeUsage": 0
+    },
+    "src/components/HitlModal.tsx": {
+      "score": 15,
+      "dependents": 1,
+      "imports": 2,
+      "gitCommits": 2,
+      "routeUsage": 0
+    },
+    "src/components/Icon.stories.tsx": {
+      "score": 2,
+      "dependents": 0,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/components/Icon.tsx": {
+      "score": 330,
+      "dependents": 66,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/components/ImageProgressChip.tsx": {
+      "score": 10,
+      "dependents": 1,
+      "imports": 1,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/components/MemoryFeedbackBar.tsx": {
+      "score": 7,
+      "dependents": 1,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/components/MemoryWorkspace.tsx": {
+      "score": 13,
+      "dependents": 1,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/components/MessageBubble.tsx": {
+      "score": 44,
+      "dependents": 2,
+      "imports": 5,
+      "gitCommits": 8,
+      "routeUsage": 0
+    },
+    "src/components/MobileRemotePanel.tsx": {
+      "score": 8,
+      "dependents": 1,
+      "imports": 0,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/components/N8nDashboard.tsx": {
+      "score": 13,
+      "dependents": 1,
+      "imports": 1,
+      "gitCommits": 2,
+      "routeUsage": 0
+    },
+    "src/components/N8nDiagnosticsPanel.tsx": {
+      "score": 5,
+      "dependents": 0,
+      "imports": 1,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/components/N8nEvidenceViewer.tsx": {
+      "score": 12,
+      "dependents": 1,
+      "imports": 2,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/components/N8nRunProgress.tsx": {
+      "score": 12,
+      "dependents": 1,
+      "imports": 2,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/components/N8nRunTimeline.tsx": {
+      "score": 12,
+      "dependents": 1,
+      "imports": 2,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/components/N8nSettings.tsx": {
+      "score": 13,
+      "dependents": 2,
+      "imports": 0,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/components/N8nWorkflowBrowser.tsx": {
+      "score": 5,
+      "dependents": 0,
+      "imports": 1,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/components/N8nWorkflowCard.tsx": {
+      "score": 15,
+      "dependents": 1,
+      "imports": 2,
+      "gitCommits": 2,
+      "routeUsage": 0
+    },
+    "src/components/N8nWorkflowHub.tsx": {
+      "score": 32,
+      "dependents": 2,
+      "imports": 8,
+      "gitCommits": 2,
+      "routeUsage": 0
+    },
+    "src/components/N8nWorkflowManagementPanel.tsx": {
+      "score": 13,
+      "dependents": 1,
+      "imports": 1,
+      "gitCommits": 2,
+      "routeUsage": 0
+    },
+    "src/components/OpenClawSettings.tsx": {
+      "score": 8,
+      "dependents": 1,
+      "imports": 0,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/components/PerfHud.stories.tsx": {
+      "score": 4,
+      "dependents": 0,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/components/PerfHud.tsx": {
+      "score": 7,
+      "dependents": 1,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/components/PermissionModal.tsx": {
+      "score": 5,
+      "dependents": 0,
+      "imports": 1,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/components/PromptLabView.tsx": {
+      "score": 15,
+      "dependents": 1,
+      "imports": 2,
+      "gitCommits": 2,
+      "routeUsage": 0
+    },
+    "src/components/ProviderSettings.tsx": {
+      "score": 17,
+      "dependents": 1,
+      "imports": 0,
+      "gitCommits": 4,
+      "routeUsage": 0
+    },
+    "src/components/ResourceDashboard.tsx": {
+      "score": 10,
+      "dependents": 1,
+      "imports": 1,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/components/SessionSidebar.tsx": {
+      "score": 24,
+      "dependents": 1,
+      "imports": 2,
+      "gitCommits": 5,
+      "routeUsage": 0
+    },
+    "src/components/SettingsModal.tsx": {
+      "score": 82,
+      "dependents": 1,
+      "imports": 10,
+      "gitCommits": 19,
+      "routeUsage": 0
+    },
+    "src/components/SetupWizard.tsx": {
+      "score": 13,
+      "dependents": 1,
+      "imports": 1,
+      "gitCommits": 2,
+      "routeUsage": 0
+    },
+    "src/components/SkillMarketplace.tsx": {
+      "score": 10,
+      "dependents": 1,
+      "imports": 1,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/components/SubstrateStatus.tsx": {
+      "score": 10,
+      "dependents": 1,
+      "imports": 1,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/components/TasksView.tsx": {
+      "score": 10,
+      "dependents": 1,
+      "imports": 1,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/components/TestRunnerDashboard.tsx": {
+      "score": 8,
+      "dependents": 1,
+      "imports": 0,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/components/ToolCallBadge.tsx": {
+      "score": 8,
+      "dependents": 1,
+      "imports": 0,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/components/VoiceOnboarding.tsx": {
+      "score": 10,
+      "dependents": 1,
+      "imports": 1,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/components/VoiceOverlay.tsx": {
+      "score": 19,
+      "dependents": 1,
+      "imports": 1,
+      "gitCommits": 4,
+      "routeUsage": 0
+    },
+    "src/components/WorkflowProgress.tsx": {
+      "score": 10,
+      "dependents": 1,
+      "imports": 1,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/components/WorkflowSuggestionCard.tsx": {
+      "score": 13,
+      "dependents": 1,
+      "imports": 1,
+      "gitCommits": 2,
+      "routeUsage": 0
+    },
+    "src/hooks/useDeviceStatus.ts": {
+      "score": 69,
+      "dependents": 12,
+      "imports": 0,
+      "gitCommits": 3,
+      "routeUsage": 0
+    },
+    "src/kit/Badge.stories.tsx": {
+      "score": 2,
+      "dependents": 0,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/Badge.tsx": {
+      "score": 17,
+      "dependents": 3,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/Button.stories.tsx": {
+      "score": 2,
+      "dependents": 0,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/Button.tsx": {
+      "score": 29,
+      "dependents": 5,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/Card.stories.tsx": {
+      "score": 2,
+      "dependents": 0,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/Card.tsx": {
+      "score": 14,
+      "dependents": 2,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/Chip.stories.tsx": {
+      "score": 2,
+      "dependents": 0,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/Chip.tsx": {
+      "score": 16,
+      "dependents": 2,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/Confirm.tsx": {
+      "score": 18,
+      "dependents": 2,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/Dialog.stories.tsx": {
+      "score": 6,
+      "dependents": 0,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/Dialog.tsx": {
+      "score": 21,
+      "dependents": 3,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/EmptyState.stories.tsx": {
+      "score": 4,
+      "dependents": 0,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/EmptyState.tsx": {
+      "score": 14,
+      "dependents": 2,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/IconButton.stories.tsx": {
+      "score": 2,
+      "dependents": 0,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/IconButton.tsx": {
+      "score": 21,
+      "dependents": 3,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/index.ts": {
+      "score": 410,
+      "dependents": 74,
+      "imports": 20,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/Input.stories.tsx": {
+      "score": 2,
+      "dependents": 0,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/Input.tsx": {
+      "score": 14,
+      "dependents": 2,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/Menu.stories.tsx": {
+      "score": 2,
+      "dependents": 0,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/Menu.tsx": {
+      "score": 16,
+      "dependents": 2,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/Popover.stories.tsx": {
+      "score": 2,
+      "dependents": 0,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/Popover.tsx": {
+      "score": 16,
+      "dependents": 2,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/Progress.stories.tsx": {
+      "score": 2,
+      "dependents": 0,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/Progress.tsx": {
+      "score": 14,
+      "dependents": 2,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/Row.stories.tsx": {
+      "score": 6,
+      "dependents": 0,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/Row.tsx": {
+      "score": 14,
+      "dependents": 2,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/Search.stories.tsx": {
+      "score": 2,
+      "dependents": 0,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/Search.tsx": {
+      "score": 16,
+      "dependents": 2,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/SegmentBar.stories.tsx": {
+      "score": 2,
+      "dependents": 0,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/SegmentBar.tsx": {
+      "score": 14,
+      "dependents": 2,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/Select.stories.tsx": {
+      "score": 2,
+      "dependents": 0,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/Select.tsx": {
+      "score": 18,
+      "dependents": 2,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/StatusDot.stories.tsx": {
+      "score": 2,
+      "dependents": 0,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/StatusDot.tsx": {
+      "score": 14,
+      "dependents": 2,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/Tabs.stories.tsx": {
+      "score": 2,
+      "dependents": 0,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/Tabs.tsx": {
+      "score": 14,
+      "dependents": 2,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/Textarea.stories.tsx": {
+      "score": 2,
+      "dependents": 0,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/Textarea.tsx": {
+      "score": 14,
+      "dependents": 2,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/Tooltip.stories.tsx": {
+      "score": 4,
+      "dependents": 0,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/kit/Tooltip.tsx": {
+      "score": 14,
+      "dependents": 2,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/lib/displayResponse.ts": {
+      "score": 0,
+      "dependents": 0,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/lib/guiCognitionSummary.ts": {
+      "score": 7,
+      "dependents": 1,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/lib/markdown.ts": {
+      "score": 35,
+      "dependents": 7,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/lib/mobileClient.ts": {
+      "score": 10,
+      "dependents": 2,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/lib/n8nProgress.ts": {
+      "score": 22,
+      "dependents": 4,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/lib/n8nResponse.ts": {
+      "score": 0,
+      "dependents": 0,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/lib/sessionRuntime.ts": {
+      "score": 5,
+      "dependents": 1,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/mobile/MobileApp.tsx": {
+      "score": 16,
+      "dependents": 1,
+      "imports": 4,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/mobile/MobileChat.tsx": {
+      "score": 12,
+      "dependents": 1,
+      "imports": 2,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/mobile/MobilePairing.tsx": {
+      "score": 12,
+      "dependents": 1,
+      "imports": 2,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/mobile/mobileStore.ts": {
+      "score": 28,
+      "dependents": 5,
+      "imports": 0,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/mobile/rdpInput.ts": {
+      "score": 25,
+      "dependents": 4,
+      "imports": 1,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/mobile/rdSession.ts": {
+      "score": 14,
+      "dependents": 1,
+      "imports": 3,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/mobile/rdState.ts": {
+      "score": 13,
+      "dependents": 2,
+      "imports": 0,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/mobile/rdStats.ts": {
+      "score": 8,
+      "dependents": 1,
+      "imports": 0,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/mobile/remoteDesktopApi.ts": {
+      "score": 18,
+      "dependents": 3,
+      "imports": 0,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/mobile/RemoteDesktopView.tsx": {
+      "score": 31,
+      "dependents": 2,
+      "imports": 9,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/mobile/viewTransform.ts": {
+      "score": 13,
+      "dependents": 2,
+      "imports": 0,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/palette/CommandPalette.stories.tsx": {
+      "score": 10,
+      "dependents": 0,
+      "imports": 5,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/palette/CommandPalette.tsx": {
+      "score": 28,
+      "dependents": 2,
+      "imports": 9,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/palette/commands.ts": {
+      "score": 25,
+      "dependents": 5,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/palette/dispatch.ts": {
+      "score": 14,
+      "dependents": 2,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/palette/fuzzy.ts": {
+      "score": 10,
+      "dependents": 2,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/palette/index.ts": {
+      "score": 27,
+      "dependents": 1,
+      "imports": 11,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/palette/init.ts": {
+      "score": 11,
+      "dependents": 1,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/palette/modes.ts": {
+      "score": 12,
+      "dependents": 2,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/palette/recents.ts": {
+      "score": 15,
+      "dependents": 3,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/palette/search.ts": {
+      "score": 16,
+      "dependents": 2,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/palette/shortcuts.ts": {
+      "score": 20,
+      "dependents": 4,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/palette/sources.ts": {
+      "score": 22,
+      "dependents": 2,
+      "imports": 6,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/palette/types.ts": {
+      "score": 25,
+      "dependents": 5,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/platform/boot.ts": {
+      "score": 9,
+      "dependents": 1,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/platform/capabilities.ts": {
+      "score": 20,
+      "dependents": 4,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/platform/LensModeToggle.tsx": {
+      "score": 26,
+      "dependents": 4,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/platform/LensRenderMode.tsx": {
+      "score": 12,
+      "dependents": 2,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/platform/renderMode.ts": {
+      "score": 37,
+      "dependents": 7,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/prototypes/G1VirtualRows.tsx": {
+      "score": 7,
+      "dependents": 1,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/prototypes/G2G5G8Probes.tsx": {
+      "score": 9,
+      "dependents": 1,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/prototypes/G4LiveCharts.tsx": {
+      "score": 5,
+      "dependents": 1,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/prototypes/gateProbes.ts": {
+      "score": 17,
+      "dependents": 3,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/prototypes/Gates.stories.tsx": {
+      "score": 6,
+      "dependents": 0,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/AppShell.stories.tsx": {
+      "score": 12,
+      "dependents": 0,
+      "imports": 6,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/AppShell.tsx": {
+      "score": 47,
+      "dependents": 3,
+      "imports": 16,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/attention.ts": {
+      "score": 10,
+      "dependents": 2,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/Dock.tsx": {
+      "score": 23,
+      "dependents": 3,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/index.ts": {
+      "score": 30,
+      "dependents": 0,
+      "imports": 15,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/InspectorHost.stories.tsx": {
+      "score": 8,
+      "dependents": 0,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/InspectorHost.tsx": {
+      "score": 35,
+      "dependents": 5,
+      "imports": 5,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/inspectorRegistry.ts": {
+      "score": 42,
+      "dependents": 8,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/modalHost.ts": {
+      "score": 25,
+      "dependents": 5,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/ModalHost.tsx": {
+      "score": 24,
+      "dependents": 4,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/placePreservation.ts": {
+      "score": 10,
+      "dependents": 2,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/PresenceBar.tsx": {
+      "score": 29,
+      "dependents": 3,
+      "imports": 7,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/router.ts": {
+      "score": 90,
+      "dependents": 18,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/SpaceRouter.tsx": {
+      "score": 16,
+      "dependents": 2,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/StatusLine.tsx": {
+      "score": 23,
+      "dependents": 3,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/stores/app.ts": {
+      "score": 168,
+      "dependents": 17,
+      "imports": 4,
+      "gitCommits": 25,
+      "routeUsage": 0
+    },
+    "src/stores/approvalStore.ts": {
+      "score": 37,
+      "dependents": 7,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/stores/automationStore.ts": {
+      "score": 9,
+      "dependents": 1,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/stores/capabilityStore.ts": {
+      "score": 14,
+      "dependents": 2,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/stores/converseStore.ts": {
+      "score": 39,
+      "dependents": 7,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/stores/coreStore.ts": {
+      "score": 32,
+      "dependents": 6,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/stores/coreTray.ts": {
+      "score": 11,
+      "dependents": 1,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/stores/eventBus.ts": {
+      "score": 87,
+      "dependents": 17,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/stores/guiCognitionSession.ts": {
+      "score": 21,
+      "dependents": 2,
+      "imports": 1,
+      "gitCommits": 3,
+      "routeUsage": 0
+    },
+    "src/stores/i18n.ts": {
+      "score": 19,
+      "dependents": 1,
+      "imports": 7,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/stores/index.ts": {
+      "score": 483,
+      "dependents": 91,
+      "imports": 14,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/stores/machineStore.ts": {
+      "score": 21,
+      "dependents": 3,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/stores/memory.ts": {
+      "score": 20,
+      "dependents": 4,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/stores/memoryStore.ts": {
+      "score": 11,
+      "dependents": 1,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/stores/n8n.ts": {
+      "score": 61,
+      "dependents": 11,
+      "imports": 0,
+      "gitCommits": 2,
+      "routeUsage": 0
+    },
+    "src/stores/notificationStore.ts": {
+      "score": 7,
+      "dependents": 1,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/stores/observatoryStore.ts": {
+      "score": 11,
+      "dependents": 1,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/stores/provisioning.ts": {
+      "score": 16,
+      "dependents": 2,
+      "imports": 0,
+      "gitCommits": 2,
+      "routeUsage": 0
+    },
+    "src/stores/settingsStore.ts": {
+      "score": 12,
+      "dependents": 2,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/stores/shellStore.ts": {
+      "score": 64,
+      "dependents": 12,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/stores/voiceStore.ts": {
+      "score": 19,
+      "dependents": 3,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/stores/workflowSession.ts": {
+      "score": 27,
+      "dependents": 3,
+      "imports": 3,
+      "gitCommits": 2,
+      "routeUsage": 0
+    },
+    "src/summon/index.ts": {
+      "score": 7,
+      "dependents": 1,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/summon/summon.ts": {
+      "score": 11,
+      "dependents": 1,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/test/setup.ts": {
+      "score": 0,
+      "dependents": 0,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/types/guiAutomation.ts": {
+      "score": 16,
+      "dependents": 2,
+      "imports": 0,
+      "gitCommits": 2,
+      "routeUsage": 0
+    },
+    "src/types/guiCognition.ts": {
+      "score": 29,
+      "dependents": 4,
+      "imports": 0,
+      "gitCommits": 3,
+      "routeUsage": 0
+    },
+    "src/types/intelligence.ts": {
+      "score": 23,
+      "dependents": 4,
+      "imports": 0,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/types/ngraph.d.ts": {
+      "score": 0,
+      "dependents": 0,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/types/openclaw.ts": {
+      "score": 18,
+      "dependents": 3,
+      "imports": 0,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/types/workflowRuntime.ts": {
+      "score": 23,
+      "dependents": 4,
+      "imports": 0,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/utils/perf.ts": {
+      "score": 20,
+      "dependents": 4,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/views/CapabilitiesView.tsx": {
+      "score": 11,
+      "dependents": 1,
+      "imports": 0,
+      "gitCommits": 2,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/5WXHJDCZ-C_3fAa_j.js": {
+      "score": 142,
+      "dependents": 28,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/AGCGV7T6-Duk0d5fR.js": {
+      "score": 33,
+      "dependents": 5,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/Badge-DyAfmjOq.js": {
+      "score": 12,
+      "dependents": 2,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/Badge.stories-gz6rMlT_.js": {
+      "score": 11,
+      "dependents": 1,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/Button-CeT6HZZn.js": {
+      "score": 19,
+      "dependents": 3,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/Button.stories-CSe8gF1n.js": {
+      "score": 19,
+      "dependents": 1,
+      "imports": 7,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/Card.stories-B62fnATy.js": {
+      "score": 9,
+      "dependents": 1,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/Chip.stories-D4LRTznb.js": {
+      "score": 11,
+      "dependents": 1,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/combineProps-oHjLfPsP.js": {
+      "score": 40,
+      "dependents": 8,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/DAEKM6TG-Un8RpjqS.js": {
+      "score": 18,
+      "dependents": 2,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/Dialog.stories-DlCkvw-y.js": {
+      "score": 33,
+      "dependents": 1,
+      "imports": 14,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/E53DB7BS-CiMGbxaL.js": {
+      "score": 38,
+      "dependents": 6,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/EmptyState.stories-CVsl6rh6.js": {
+      "score": 21,
+      "dependents": 1,
+      "imports": 8,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/field-DX-I8V9j.js": {
+      "score": 25,
+      "dependents": 3,
+      "imports": 5,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/floating-megE7EPf.js": {
+      "score": 30,
+      "dependents": 4,
+      "imports": 5,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/FN6EICGO-lsa1ce7N.js": {
+      "score": 79,
+      "dependents": 15,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/Icon-CMk7y35Z.js": {
+      "score": 62,
+      "dependents": 12,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/Icon.stories-CxWh4czn.js": {
+      "score": 11,
+      "dependents": 1,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/IconButton-b5VHukFn.js": {
+      "score": 16,
+      "dependents": 2,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/IconButton.stories-BffRrenA.js": {
+      "score": 21,
+      "dependents": 1,
+      "imports": 8,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/iframe-B56awtFE.js": {
+      "score": 239,
+      "dependents": 39,
+      "imports": 22,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/index-Bd5v_M8X.js": {
+      "score": 28,
+      "dependents": 4,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/index-BQUuav8P.js": {
+      "score": 92,
+      "dependents": 18,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/index-mwHe_ltP.js": {
+      "score": 37,
+      "dependents": 7,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/Input.stories-CFdDUTTD.js": {
+      "score": 23,
+      "dependents": 1,
+      "imports": 9,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/JNCCF6MP-4sxnBYeu.js": {
+      "score": 50,
+      "dependents": 10,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/LP6E37CW-a08LwedW.js": {
+      "score": 54,
+      "dependents": 10,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/Menu.stories-C0RquYs_.js": {
+      "score": 43,
+      "dependents": 1,
+      "imports": 19,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/OYES4GOP-Ckxgmf9k.js": {
+      "score": 74,
+      "dependents": 14,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/PerfHud.stories-BwvwU7t0.js": {
+      "score": 9,
+      "dependents": 1,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/Popover.stories-DsTLxksR.js": {
+      "score": 35,
+      "dependents": 1,
+      "imports": 15,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/preload-helper-Ct5FWWRu.js": {
+      "score": 115,
+      "dependents": 23,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/Progress.stories-eYF8K-vj.js": {
+      "score": 17,
+      "dependents": 1,
+      "imports": 6,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/Row.stories-Wae-mnMD.js": {
+      "score": 13,
+      "dependents": 1,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/Search.stories-BrOefbF0.js": {
+      "score": 25,
+      "dependents": 1,
+      "imports": 10,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/SegmentBar.stories-BQE8JmhH.js": {
+      "score": 29,
+      "dependents": 1,
+      "imports": 12,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/Select.stories-B1QUIJeO.js": {
+      "score": 41,
+      "dependents": 1,
+      "imports": 18,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/SOM3K36D-Cb0hq2Qb.js": {
+      "score": 21,
+      "dependents": 3,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/StatusDot.stories-droPS86l.js": {
+      "score": 9,
+      "dependents": 1,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/Tabs.stories-DLhiQF0r.js": {
+      "score": 27,
+      "dependents": 1,
+      "imports": 11,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/Textarea.stories-D8bwqBQl.js": {
+      "score": 23,
+      "dependents": 1,
+      "imports": 9,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/Tooltip.stories-Dh4FnV6y.js": {
+      "score": 35,
+      "dependents": 1,
+      "imports": 15,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/UKTBL2JL-CFgH8K0_.js": {
+      "score": 63,
+      "dependents": 11,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/VI7QYH27-Og8YVWx8.js": {
+      "score": 14,
+      "dependents": 2,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/XTJD7L6B-CHFuNE8o.js": {
+      "score": 10,
+      "dependents": 2,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/assets/ZZYKR3VO-DAQU-s3H.js": {
+      "score": 35,
+      "dependents": 5,
+      "imports": 5,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/sb-addons/common-manager-bundle.js": {
+      "score": 0,
+      "dependents": 0,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/sb-manager/globals.js": {
+      "score": 2,
+      "dependents": 0,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/sb-manager/manager-stores.js": {
+      "score": 2,
+      "dependents": 0,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "storybook-static/sb-manager/runtime.js": {
+      "score": 0,
+      "dependents": 0,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/components/memory/MemoryGraph.tsx": {
+      "score": 7,
+      "dependents": 1,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/components/memory/MemoryOnboarding.tsx": {
+      "score": 7,
+      "dependents": 1,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/mobile/components/RdKeyboardBar.tsx": {
+      "score": 10,
+      "dependents": 1,
+      "imports": 1,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/mobile/components/RdToolbar.tsx": {
+      "score": 12,
+      "dependents": 1,
+      "imports": 2,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/shell/approvals/ApprovalCard.stories.tsx": {
+      "score": 6,
+      "dependents": 0,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/approvals/ApprovalCard.tsx": {
+      "score": 27,
+      "dependents": 3,
+      "imports": 6,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/approvals/ApprovalCenter.tsx": {
+      "score": 15,
+      "dependents": 1,
+      "imports": 5,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/approvals/index.ts": {
+      "score": 14,
+      "dependents": 2,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/notifications/index.ts": {
+      "score": 12,
+      "dependents": 2,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/notifications/NotificationCenter.stories.tsx": {
+      "score": 4,
+      "dependents": 0,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/notifications/NotificationCenter.tsx": {
+      "score": 22,
+      "dependents": 2,
+      "imports": 6,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/AutomationsSpace.stories.tsx": {
+      "score": 6,
+      "dependents": 0,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/AutomationsSpace.tsx": {
+      "score": 20,
+      "dependents": 2,
+      "imports": 5,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/CapabilitiesSpace.stories.tsx": {
+      "score": 4,
+      "dependents": 0,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/CapabilitiesSpace.tsx": {
+      "score": 26,
+      "dependents": 2,
+      "imports": 8,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/ConverseSpace.stories.tsx": {
+      "score": 6,
+      "dependents": 0,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/ConverseSpace.tsx": {
+      "score": 26,
+      "dependents": 2,
+      "imports": 8,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/index.ts": {
+      "score": 41,
+      "dependents": 5,
+      "imports": 8,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/MachinesSpace.stories.tsx": {
+      "score": 2,
+      "dependents": 0,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/MachinesSpace.tsx": {
+      "score": 22,
+      "dependents": 2,
+      "imports": 6,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/MemorySpace.stories.tsx": {
+      "score": 6,
+      "dependents": 0,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/MemorySpace.tsx": {
+      "score": 28,
+      "dependents": 2,
+      "imports": 9,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/ObservatorySpace.tsx": {
+      "score": 15,
+      "dependents": 1,
+      "imports": 5,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/SettingsSpace.tsx": {
+      "score": 13,
+      "dependents": 1,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/voice/index.ts": {
+      "score": 11,
+      "dependents": 1,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/voice/VoiceModeSwitcher.stories.tsx": {
+      "score": 4,
+      "dependents": 0,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/voice/VoiceModeSwitcher.tsx": {
+      "score": 23,
+      "dependents": 3,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/voice/VoiceSurface.stories.tsx": {
+      "score": 6,
+      "dependents": 0,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/voice/VoiceSurface.tsx": {
+      "score": 30,
+      "dependents": 2,
+      "imports": 10,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/voice/WakeWordTest.stories.tsx": {
+      "score": 2,
+      "dependents": 0,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/voice/WakeWordTest.tsx": {
+      "score": 25,
+      "dependents": 3,
+      "imports": 5,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/automations/AskKriaToPick.tsx": {
+      "score": 22,
+      "dependents": 2,
+      "imports": 6,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/automations/EvidenceViewer.tsx": {
+      "score": 23,
+      "dependents": 3,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/automations/HealthPanel.tsx": {
+      "score": 13,
+      "dependents": 1,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/automations/index.ts": {
+      "score": 39,
+      "dependents": 1,
+      "imports": 17,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/automations/NodeBuilder.stories.tsx": {
+      "score": 14,
+      "dependents": 0,
+      "imports": 7,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/automations/NodeBuilder.tsx": {
+      "score": 24,
+      "dependents": 2,
+      "imports": 7,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/automations/NodeCanvas.tsx": {
+      "score": 18,
+      "dependents": 2,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/automations/NodeInspector.tsx": {
+      "score": 25,
+      "dependents": 3,
+      "imports": 5,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/automations/NodePalette.tsx": {
+      "score": 21,
+      "dependents": 3,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/automations/PreparedInputPreview.tsx": {
+      "score": 23,
+      "dependents": 3,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/automations/registerAutomationNodeInspector.tsx": {
+      "score": 21,
+      "dependents": 3,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/automations/RegistryPanel.tsx": {
+      "score": 13,
+      "dependents": 1,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/automations/RunProgress.tsx": {
+      "score": 23,
+      "dependents": 3,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/automations/RunRegion.stories.tsx": {
+      "score": 14,
+      "dependents": 0,
+      "imports": 7,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/automations/RunRegion.tsx": {
+      "score": 22,
+      "dependents": 2,
+      "imports": 6,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/automations/ScheduleCreateBar.tsx": {
+      "score": 16,
+      "dependents": 2,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/automations/ScheduleRegion.stories.tsx": {
+      "score": 4,
+      "dependents": 0,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/automations/ScheduleRegion.tsx": {
+      "score": 20,
+      "dependents": 2,
+      "imports": 5,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/automations/SuggestionCard.tsx": {
+      "score": 23,
+      "dependents": 3,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/automations/WorkflowCard.tsx": {
+      "score": 27,
+      "dependents": 3,
+      "imports": 6,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/automations/WorkflowRuns.tsx": {
+      "score": 22,
+      "dependents": 2,
+      "imports": 6,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/capabilities/CapabilityRow.stories.tsx": {
+      "score": 4,
+      "dependents": 0,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/capabilities/CapabilityRow.tsx": {
+      "score": 16,
+      "dependents": 2,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/capabilities/DescriptorInspector.stories.tsx": {
+      "score": 6,
+      "dependents": 0,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/capabilities/DescriptorInspector.tsx": {
+      "score": 27,
+      "dependents": 3,
+      "imports": 6,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/capabilities/GeneratePanel.tsx": {
+      "score": 11,
+      "dependents": 1,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/capabilities/GovernancePanel.tsx": {
+      "score": 15,
+      "dependents": 1,
+      "imports": 5,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/capabilities/index.ts": {
+      "score": 35,
+      "dependents": 1,
+      "imports": 15,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/capabilities/IntegrationCard.tsx": {
+      "score": 11,
+      "dependents": 1,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/capabilities/IntegrationConnectDialog.tsx": {
+      "score": 13,
+      "dependents": 1,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/capabilities/ProviderCard.tsx": {
+      "score": 13,
+      "dependents": 1,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/capabilities/QuarantineReview.stories.tsx": {
+      "score": 6,
+      "dependents": 0,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/capabilities/QuarantineReview.tsx": {
+      "score": 23,
+      "dependents": 3,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/capabilities/registerDescriptorInspector.tsx": {
+      "score": 11,
+      "dependents": 1,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/capabilities/SkillCard.tsx": {
+      "score": 13,
+      "dependents": 1,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/capabilities/TrustReviewDialog.stories.tsx": {
+      "score": 4,
+      "dependents": 0,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/capabilities/TrustReviewDialog.tsx": {
+      "score": 16,
+      "dependents": 2,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/converse/Composer.stories.tsx": {
+      "score": 4,
+      "dependents": 0,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/converse/Composer.tsx": {
+      "score": 24,
+      "dependents": 2,
+      "imports": 7,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/converse/ConverseEmptyState.stories.tsx": {
+      "score": 4,
+      "dependents": 0,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/converse/ConverseEmptyState.tsx": {
+      "score": 20,
+      "dependents": 2,
+      "imports": 5,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/converse/messageActions.ts": {
+      "score": 14,
+      "dependents": 2,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/converse/MessageActionsMenu.tsx": {
+      "score": 11,
+      "dependents": 1,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/converse/MessageBubble.tsx": {
+      "score": 19,
+      "dependents": 1,
+      "imports": 7,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/converse/MessageStream.stories.tsx": {
+      "score": 4,
+      "dependents": 0,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/converse/MessageStream.tsx": {
+      "score": 18,
+      "dependents": 2,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/converse/paletteCommands.ts": {
+      "score": 13,
+      "dependents": 1,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/converse/PlanVisualization.stories.tsx": {
+      "score": 4,
+      "dependents": 0,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/converse/PlanVisualization.tsx": {
+      "score": 22,
+      "dependents": 2,
+      "imports": 6,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/converse/WorkBlock.stories.tsx": {
+      "score": 4,
+      "dependents": 0,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/converse/WorkBlock.tsx": {
+      "score": 24,
+      "dependents": 2,
+      "imports": 7,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/machines/AlertList.tsx": {
+      "score": 20,
+      "dependents": 2,
+      "imports": 5,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/machines/DeviceInspector.tsx": {
+      "score": 22,
+      "dependents": 2,
+      "imports": 6,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/machines/DeviceRow.tsx": {
+      "score": 18,
+      "dependents": 2,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/machines/EnrollWizard.tsx": {
+      "score": 11,
+      "dependents": 1,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/machines/FleetMatrix.stories.tsx": {
+      "score": 8,
+      "dependents": 0,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/machines/FleetMatrix.tsx": {
+      "score": 16,
+      "dependents": 2,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/machines/fleetPresentation.ts": {
+      "score": 29,
+      "dependents": 5,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/machines/fleetWiring.ts": {
+      "score": 7,
+      "dependents": 1,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/machines/index.ts": {
+      "score": 27,
+      "dependents": 1,
+      "imports": 11,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/machines/MobileDevicesPanel.tsx": {
+      "score": 15,
+      "dependents": 1,
+      "imports": 5,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/machines/registerDeviceInspector.tsx": {
+      "score": 11,
+      "dependents": 1,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/machines/RemoteDesktopCanvas.tsx": {
+      "score": 15,
+      "dependents": 1,
+      "imports": 5,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/machines/TerminalPane.tsx": {
+      "score": 18,
+      "dependents": 2,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/memory/CognitionPanel.stories.tsx": {
+      "score": 4,
+      "dependents": 0,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/memory/CognitionPanel.tsx": {
+      "score": 18,
+      "dependents": 2,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/memory/MemoryCard.stories.tsx": {
+      "score": 4,
+      "dependents": 0,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/memory/MemoryCard.tsx": {
+      "score": 20,
+      "dependents": 2,
+      "imports": 5,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/memory/memoryCues.ts": {
+      "score": 12,
+      "dependents": 2,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/memory/MemoryInspector.tsx": {
+      "score": 19,
+      "dependents": 1,
+      "imports": 7,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/memory/registerMemoryInspector.tsx": {
+      "score": 11,
+      "dependents": 1,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/observatory/AnalyticsTiles.tsx": {
+      "score": 11,
+      "dependents": 1,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/observatory/ExecutiveController.tsx": {
+      "score": 13,
+      "dependents": 1,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/observatory/ForensicTimeline.tsx": {
+      "score": 11,
+      "dependents": 1,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/observatory/HonestyBadge.tsx": {
+      "score": 34,
+      "dependents": 6,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/observatory/index.ts": {
+      "score": 19,
+      "dependents": 1,
+      "imports": 7,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/observatory/JobRow.tsx": {
+      "score": 9,
+      "dependents": 1,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/observatory/ResourceMeter.tsx": {
+      "score": 9,
+      "dependents": 1,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/observatory/SystemPulse.tsx": {
+      "score": 11,
+      "dependents": 1,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/observatory/TestConsole.tsx": {
+      "score": 11,
+      "dependents": 1,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/capabilities/constellation/ConstellationCanvas3D.tsx": {
+      "score": 19,
+      "dependents": 1,
+      "imports": 7,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/capabilities/constellation/constellationData.ts": {
+      "score": 31,
+      "dependents": 5,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/capabilities/constellation/ConstellationFallback.tsx": {
+      "score": 29,
+      "dependents": 3,
+      "imports": 7,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/capabilities/constellation/ConstellationLens.stories.tsx": {
+      "score": 16,
+      "dependents": 0,
+      "imports": 8,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/capabilities/constellation/ConstellationLens.tsx": {
+      "score": 30,
+      "dependents": 2,
+      "imports": 10,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/capabilities/constellation/constellationModel.ts": {
+      "score": 29,
+      "dependents": 5,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/memory/graph/GraphCanvas3D.tsx": {
+      "score": 15,
+      "dependents": 1,
+      "imports": 5,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/memory/graph/graphData.ts": {
+      "score": 24,
+      "dependents": 4,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/memory/graph/graphModel.ts": {
+      "score": 45,
+      "dependents": 9,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/memory/graph/GraphScene.ts": {
+      "score": 14,
+      "dependents": 2,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/memory/graph/KnowledgeGraphLens.stories.tsx": {
+      "score": 12,
+      "dependents": 0,
+      "imports": 6,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/memory/graph/KnowledgeGraphLens.tsx": {
+      "score": 23,
+      "dependents": 1,
+      "imports": 9,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/memory/graph/layout.worker.ts": {
+      "score": 2,
+      "dependents": 0,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/memory/graph/layoutSettle.ts": {
+      "score": 20,
+      "dependents": 4,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/memory/graph/lensController.ts": {
+      "score": 10,
+      "dependents": 2,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/shell/spaces/memory/graph/MemoryGraphFallback.tsx": {
+      "score": 18,
+      "dependents": 2,
+      "imports": 4,
+      "gitCommits": 0,
+      "routeUsage": 0
+    }
+  }
+}

@@ -24,6 +24,13 @@ pub struct SecretStore {
     vault: Arc<SecretsVault>,
 }
 
+fn secret_update(key: &str, value: &str) -> (String, Option<String>) {
+    (
+        key.to_string(),
+        (!value.is_empty()).then(|| value.to_string()),
+    )
+}
+
 impl SecretStore {
     /// Open the default vault (`~/.kria/vault.enc`).
     pub fn open_default() -> Result<Self, String> {
@@ -37,35 +44,31 @@ impl SecretStore {
         Self { vault }
     }
 
-    fn put_or_clear(&self, key: &str, value: &str) {
-        if value.is_empty() {
-            let _ = self.vault.delete(key);
-        } else {
-            let _ = self.vault.set(key, value);
-        }
-    }
-
     fn get(&self, key: &str) -> Option<String> {
-        self.vault.get(key).filter(|v| !v.is_empty())
+        self.vault.get(key).filter(|value| !value.is_empty())
     }
 
-    /// Persist every secret field's value from `cfg` into the vault. Empty
-    /// values delete the corresponding vault entry.
-    pub fn persist(&self, cfg: &KriaConfig) {
-        self.put_or_clear("config:llm.cloud_api_key", &cfg.llm.cloud_api_key);
-        self.put_or_clear("config:planner.cloud_api_key", &cfg.planner.cloud_api_key);
-        self.put_or_clear("config:server.jwt_secret", &cfg.server.jwt_secret);
-        self.put_or_clear("config:telegram.bot_token", &cfg.telegram.bot_token);
-        self.put_or_clear(
-            "config:image_generation.hf_inference_token",
-            &cfg.image_generation.hf_inference_token,
-        );
-        for p in &cfg.providers.providers {
-            self.put_or_clear(
-                &format!("config:providers.{}.api_key", p.id),
-                &p.endpoint.api_key,
-            );
-        }
+    /// Persist every secret field in one atomic encrypted-vault update.
+    pub fn persist(&self, cfg: &KriaConfig) -> Result<(), String> {
+        let mut updates = vec![
+            secret_update("config:llm.cloud_api_key", &cfg.llm.cloud_api_key),
+            secret_update("config:planner.cloud_api_key", &cfg.planner.cloud_api_key),
+            secret_update("config:server.jwt_secret", &cfg.server.jwt_secret),
+            secret_update("config:telegram.bot_token", &cfg.telegram.bot_token),
+            secret_update(
+                "config:image_generation.hf_inference_token",
+                &cfg.image_generation.hf_inference_token,
+            ),
+        ];
+        updates.extend(cfg.providers.providers.iter().map(|provider| {
+            secret_update(
+                &format!("config:providers.{}.api_key", provider.id),
+                &provider.endpoint.api_key,
+            )
+        }));
+        self.vault
+            .apply_updates(&updates)
+            .map_err(|error| error.to_string())
     }
 
     /// Fill `cfg`'s secret fields from the vault (in-memory runtime use). Only
@@ -117,7 +120,7 @@ mod tests {
         if let Some(p) = cfg.providers.providers.first_mut() {
             p.endpoint.api_key = "prov-key".to_string();
         }
-        store.persist(&cfg);
+        store.persist(&cfg).unwrap();
 
         // A fresh config (secrets empty) hydrates to the persisted values.
         let mut fresh = KriaConfig::default();
@@ -135,10 +138,10 @@ mod tests {
         let (store, _guard) = temp_vault();
         let mut cfg = KriaConfig::default();
         cfg.llm.cloud_api_key = "sk-abc".to_string();
-        store.persist(&cfg);
+        store.persist(&cfg).unwrap();
         // Now clear it.
         cfg.llm.cloud_api_key.clear();
-        store.persist(&cfg);
+        store.persist(&cfg).unwrap();
         let mut fresh = KriaConfig::default();
         store.hydrate(&mut fresh);
         assert!(fresh.llm.cloud_api_key.is_empty());

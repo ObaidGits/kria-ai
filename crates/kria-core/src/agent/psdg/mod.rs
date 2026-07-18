@@ -13,7 +13,7 @@
 //!     │  writes via DesktopGraph API
 //!     ▼
 //! WorldModelStore  ◄── existing SQLite-backed (s,p,o) Bayesian graph
-//!     │  (same db_path as MemoryStore, WAL mode handles concurrency)
+//!     │  (dedicated connection on the shared kria.db, WAL handles concurrency)
 //!     ▲
 //!     │ writes (fire-and-forget via spawn_blocking)
 //! ├── EnvironmentStateTracker (post-grounding side-channel)
@@ -32,7 +32,7 @@
 //!    at `debug` level and NEVER propagate to the caller.
 //! 2. ALL reads are bounded (max `MAX_CONTEXT_FACTS` facts, confidence ≥ `MIN_READ_CONFIDENCE`).
 //! 3. `PsdgHandle` is cheaply cloneable (`Arc` wrapper) — clone freely.
-//! 4. `WorldModelStore` uses a dedicated connection on the same db_path as `MemoryStore`.
+//! 4. `WorldModelStore` uses a dedicated WAL connection on the shared `kria.db`.
 //!    SQLite WAL mode handles concurrent access safely.
 //! 5. PSDG never bypasses safety/HITL gates — it is observational only.
 
