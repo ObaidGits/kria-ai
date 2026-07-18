@@ -184,18 +184,20 @@ pub async fn save_uploaded_image(
     // Store in SQLite chat_media table
     if let Some(s) = state.get() {
         let path_str = path.to_string_lossy().to_string();
-        let memory_writer: Arc<dyn MemoryManager> = s.memory_store.clone();
-        let _ = memory_writer.store_media(&ChatMediaRecord {
-            session_id: session_id.clone(),
-            media_type: "uploaded".into(),
-            file_path: path_str.clone(),
-            sha256: Some(sha.clone()),
-            prompt: None,
-            width: None,
-            height: None,
-            style: None,
-            provenance: Some("user_upload".into()),
-        });
+        // Migrated to the new ConversationStore (Phase-1 cutover).
+        let _ =
+            s.conversation
+                .store_chat_media(&kria_core::memory::conversation::ChatMediaRecord {
+                    session_id: session_id.clone(),
+                    media_type: "uploaded".into(),
+                    file_path: path_str.clone(),
+                    sha256: Some(sha.clone()),
+                    prompt: None,
+                    width: None,
+                    height: None,
+                    style: None,
+                    provenance: Some("user_upload".into()),
+                });
 
         // Return base64 data URL so the frontend can display immediately
         let encoded = STANDARD.encode(&data);

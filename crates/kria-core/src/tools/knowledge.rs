@@ -1,4 +1,6 @@
 use crate::infra::ToolResult;
+use crate::memory::api::MemorySystem;
+use crate::memory::types::WriteCandidate;
 use crate::memory::{MemoryFact, MemoryRuntime};
 use crate::safety::RiskLevel;
 use crate::tools::registry::{ParamDef, ToolDef, ToolHandler, ToolRegistry};
@@ -16,10 +18,15 @@ fn param(name: &str, ty: &str, desc: &str, required: bool) -> ParamDef {
     }
 }
 
-/// Shared runtime-facing memory handle injected into each handler.
+/// Shared memory handle injected into each handler. `memory` is the unified
+/// cognitive [`MemorySystem`]; when present, `remember`/`recall`/`search`/`list`
+/// route through the single retrieval pipeline (Write Policy + Retriever).
+/// `runtime` remains the backing for genuinely non-cognitive stores (code
+/// snippets) and conversation-history search.
 #[derive(Clone)]
 struct StoreHandle {
     runtime: Arc<dyn MemoryRuntime>,
+    memory: Option<Arc<MemorySystem>>,
 }
 
 struct RememberFact(StoreHandle);
@@ -28,9 +35,28 @@ impl ToolHandler for RememberFact {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
         let key = params["key"].as_str().unwrap_or("").to_string();
         let value = params["value"].as_str().unwrap_or("").to_string();
+        let text = format!("{}: {}", key, value);
+
+        // Unified path: write through the MemorySystem Write Policy (events →
+        // derived memory → retrieval + background cognition).
+        if let Some(ms) = &self.0.memory {
+            return match ms.remember(WriteCandidate::global(text)) {
+                Ok(decision) => ToolResult::ok(serde_json::json!({
+                    "stored": true, "key": key, "value": value,
+                    "decision": format!("{decision:?}"),
+                })),
+                Err(e) => ToolResult {
+                    success: false,
+                    data: serde_json::Value::Null,
+                    error: Some(e.to_string()),
+                },
+            };
+        }
+
+        // Fallback (no MemorySystem, e.g. tests): runtime fact store.
         let fact = MemoryFact {
             id: None,
-            text: format!("{}: {}", key, value),
+            text,
             category: key.clone(),
             source: "user_tool".into(),
             created_at: Utc::now(),
@@ -56,6 +82,34 @@ struct RecallFact(StoreHandle);
 impl ToolHandler for RecallFact {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
         let query = params["query"].as_str().unwrap_or("");
+
+        // Unified path: cognitive retrieval through the single Retriever.
+        if let Some(ms) = &self.0.memory {
+            return match ms.recall(query, None).await {
+                Ok(res) => {
+                    let results: Vec<serde_json::Value> = res
+                        .hits
+                        .iter()
+                        .map(|h| {
+                            serde_json::json!({
+                                "id": h.memory.id, "text": h.memory.content,
+                                "memory_type": h.memory.memory_type.as_str(),
+                                "confidence": h.memory.confidence, "score": h.score,
+                            })
+                        })
+                        .collect();
+                    ToolResult::ok(serde_json::json!({
+                        "query": query, "results": results, "count": results.len(),
+                    }))
+                }
+                Err(e) => ToolResult {
+                    success: false,
+                    data: serde_json::Value::Null,
+                    error: Some(e.to_string()),
+                },
+            };
+        }
+
         match self.0.runtime.search_facts(query, 10) {
             Ok(facts) => {
                 // Update access timestamps for returned facts
@@ -93,23 +147,35 @@ impl ToolHandler for SearchKnowledge {
         let query = params["query"].as_str().unwrap_or("");
         let max = params["max_results"].as_u64().unwrap_or(10) as usize;
 
-        // Hybrid search: FTS facts + conversation search
-        let facts = self.0.runtime.search_facts(query, max).unwrap_or_default();
+        // Cognitive knowledge via the unified retriever (when available), else
+        // the runtime fact store. Conversation-history search stays on the
+        // runtime (chat replay is a distinct concern from cognitive memory).
+        let mut all: Vec<serde_json::Value> = Vec::new();
+        if let Some(ms) = &self.0.memory {
+            if let Ok(res) = ms.search(query, None).await {
+                all.extend(res.hits.iter().map(|h| {
+                    serde_json::json!({
+                        "type": "memory", "id": h.memory.id, "text": h.memory.content,
+                        "memory_type": h.memory.memory_type.as_str(), "score": h.score,
+                    })
+                }));
+            }
+        } else {
+            let facts = self.0.runtime.search_facts(query, max).unwrap_or_default();
+            all.extend(facts.iter().map(|f| {
+                serde_json::json!({ "type": "fact", "id": f.id, "text": f.text, "category": f.category })
+            }));
+        }
+
         let convos = self
             .0
             .runtime
             .search_conversations(query, max)
             .unwrap_or_default();
-
-        let fact_results: Vec<serde_json::Value> = facts.iter().map(|f| {
-            serde_json::json!({ "type": "fact", "id": f.id, "text": f.text, "category": f.category })
-        }).collect();
-        let conv_results: Vec<serde_json::Value> = convos.iter().map(|c| {
+        all.extend(convos.iter().map(|c| {
             serde_json::json!({ "type": "conversation", "session": c.session_id, "role": c.role, "content": c.content })
-        }).collect();
+        }));
 
-        let mut all = fact_results;
-        all.extend(conv_results);
         let total = all.len();
         ToolResult::ok(serde_json::json!({ "query": query, "results": all, "count": total }))
     }
@@ -119,6 +185,28 @@ struct ListRemembered(StoreHandle);
 #[async_trait]
 impl ToolHandler for ListRemembered {
     async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+        // Unified path: list recent cognitive memories via the research timeline.
+        if let Some(ms) = &self.0.memory {
+            return match ms.research().timeline(200) {
+                Ok(entries) => {
+                    let results: Vec<serde_json::Value> = entries
+                        .iter()
+                        .map(|e| {
+                            serde_json::json!({
+                                "id": e.id, "text": e.content, "memory_type": e.memory_type,
+                                "confidence": e.confidence, "created_at": e.created_at,
+                            })
+                        })
+                        .collect();
+                    ToolResult::ok(serde_json::json!({ "facts": results, "count": results.len() }))
+                }
+                Err(e) => ToolResult {
+                    success: false,
+                    data: serde_json::Value::Null,
+                    error: Some(e.to_string()),
+                },
+            };
+        }
         match self.0.runtime.all_facts_with_decay(0.0) {
             Ok(facts) => {
                 let results: Vec<serde_json::Value> = facts
@@ -329,8 +417,15 @@ fn split_into_chunks(text: &str, chunk_size: usize) -> Vec<String> {
     chunks
 }
 
-pub fn register(reg: &ToolRegistry, store: Arc<dyn MemoryRuntime>) {
-    let h = StoreHandle { runtime: store };
+pub fn register(
+    reg: &ToolRegistry,
+    store: Arc<dyn MemoryRuntime>,
+    memory: Option<Arc<MemorySystem>>,
+) {
+    let h = StoreHandle {
+        runtime: store,
+        memory,
+    };
     let tools: Vec<(ToolDef, Arc<dyn ToolHandler>)> = vec![
         (
             ToolDef {
@@ -436,7 +531,14 @@ pub fn register(reg: &ToolRegistry, store: Arc<dyn MemoryRuntime>) {
     }
 }
 
-/// Stub registration for tests (no MemoryStore required).
+/// No-memory fallback registration for the knowledge tools (DC2).
+///
+/// Used when no [`MemoryRuntime`](crate::memory::MemoryRuntime) is available —
+/// the headless runtime's degraded "core registry only" path (memory backend
+/// unavailable) and minimal test registries. Keeps the knowledge tool *surface*
+/// present (so the agent's tool schema is stable) while each handler honestly
+/// returns a "no memory store" no-op instead of silently missing. This is NOT
+/// test-only; it is a real degraded-mode fallback, so it ships in the lib.
 pub fn register_stubs(reg: &ToolRegistry) {
     struct Stub;
     #[async_trait]

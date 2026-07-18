@@ -99,15 +99,13 @@ describe("memoryStore actions — route through EXISTING memory_* commands (Req 
     expect(memoryStore.facts()[0].updatedAt).toBeGreaterThan(1);
   });
 
-  it("correct records a correction feedback signal with the new text", async () => {
+  it("correct dispatches the authoritative correction command with the new text", async () => {
     memoryStore.setFacts([makeFact("m1")]);
     mockInvoke.mockResolvedValueOnce(ok(undefined));
     const res = await memoryStore.correct("m1", "the sky is grey today");
-    expect(mockInvoke).toHaveBeenCalledWith("memory_record_feedback", {
-      targetId: "m1",
-      targetKind: "memory",
-      signal: "correction",
-      detail: "the sky is grey today",
+    expect(mockInvoke).toHaveBeenCalledWith("memory_correct", {
+      memoryId: "m1",
+      content: "the sky is grey today",
     });
     expect(res.ok).toBe(true);
     expect(memoryStore.facts()[0].content).toBe("the sky is grey today");
@@ -154,15 +152,17 @@ describe("memoryStore actions — route through EXISTING memory_* commands (Req 
     expect(memoryStore.pendingUndo()).toBeNull();
   });
 
-  it("undoForget re-adds through memory_remember and restores the fact", async () => {
+  it("undoForget restores the same backend memory identity", async () => {
     memoryStore.setFacts([makeFact("m1")]);
-    mockInvoke.mockResolvedValueOnce(ok(1)); // forget
+    mockInvoke.mockResolvedValueOnce(ok(1));
     await memoryStore.forget("m1");
     expect(memoryStore.facts()).toHaveLength(0);
 
-    mockInvoke.mockResolvedValueOnce(ok({ decision: "stored" })); // remember
+    mockInvoke.mockResolvedValueOnce(ok(undefined));
     const res = await memoryStore.undoForget();
-    expect(mockInvoke).toHaveBeenLastCalledWith("memory_remember", { text: "the sky is blue" });
+    expect(mockInvoke).toHaveBeenLastCalledWith("memory_restore_forgotten", {
+      memoryId: "m1",
+    });
     expect(res.ok).toBe(true);
     expect(memoryStore.facts().map((f) => f.id)).toContain("m1");
     expect(memoryStore.pendingUndo()).toBeNull();

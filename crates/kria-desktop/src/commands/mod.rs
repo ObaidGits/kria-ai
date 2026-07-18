@@ -24,6 +24,7 @@ pub(crate) mod image_chat;
 pub(crate) mod local_api;
 pub(crate) mod mcp;
 pub(crate) mod media;
+pub(crate) mod memory;
 pub(crate) mod mobile_gateway;
 pub(crate) mod n8n;
 pub(crate) mod openclaw;
@@ -254,9 +255,8 @@ use kria_core::mcp::client::McpServerState;
 use kria_core::mcp::server_manager::McpServerStatus;
 use kria_core::mcp::{build_colab_capability_summary, McpServerManager};
 use kria_core::memory::embeddings::EmbeddingModel;
-use kria_core::memory::vectors::VectorIndex;
 use kria_core::memory::{
-    ChatMediaRecord, ConversationTurn, MemoryManager, MemoryRuntime, MemoryStore, MemoryTurnWrite,
+    ChatMediaRecord, ConversationTurn, MemoryManager, MemoryRuntime, MemoryTurnWrite,
     PreferenceRecord,
 };
 use kria_core::platform::detect::{

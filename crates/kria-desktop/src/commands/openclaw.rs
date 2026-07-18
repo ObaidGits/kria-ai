@@ -999,9 +999,14 @@ pub fn clawhub_uninstall_skill(
     state: State<'_, AppStateCell>,
 ) -> Result<(), String> {
     let app = state.get().ok_or("runtime not ready")?;
-    app.skill_registry
-        .uninstall(&skill_id)
-        .map_err(|e| e.to_string())
+    let result = app.skill_registry.uninstall(&skill_id);
+    super::history_helpers::observe_capability_lifecycle(
+        app.memory_system.as_ref(),
+        "uninstall",
+        &skill_id,
+        result.is_ok(),
+    );
+    result.map_err(|e| e.to_string())
 }
 
 /// Toggle a skill enabled/disabled.
@@ -1012,9 +1017,14 @@ pub fn clawhub_toggle_skill(
     state: State<'_, AppStateCell>,
 ) -> Result<(), String> {
     let app = state.get().ok_or("runtime not ready")?;
-    app.skill_registry
-        .toggle(&skill_id, enabled)
-        .map_err(|e| e.to_string())
+    let result = app.skill_registry.toggle(&skill_id, enabled);
+    super::history_helpers::observe_capability_lifecycle(
+        app.memory_system.as_ref(),
+        if enabled { "enable" } else { "disable" },
+        &skill_id,
+        result.is_ok(),
+    );
+    result.map_err(|e| e.to_string())
 }
 
 /// Return current substrate health — reads live pool counts when Docker is available.
@@ -1127,6 +1137,12 @@ pub async fn install_skill_bundle(
         .map_err(|e| e.to_string())?;
 
     let relation = format!("{:?}", outcome.relation).to_lowercase();
+    super::history_helpers::observe_capability_lifecycle(
+        app.memory_system.as_ref(),
+        "acquire",
+        &outcome.skill_id,
+        true,
+    );
     Ok(BundleInstallSummary {
         skill_id: outcome.skill_id,
         version: outcome.version,
@@ -1160,7 +1176,14 @@ pub async fn uninstall_skill_bundle(
     let mut installer = BundleInstaller::new(app.skill_registry.clone(), audit.clone(), store_dir);
     installer = installer.with_activation(Arc::new(ToolRegistryActivation::new()));
 
-    installer.uninstall(&skill_id).map_err(|e| e.to_string())
+    let result = installer.uninstall(&skill_id);
+    super::history_helpers::observe_capability_lifecycle(
+        app.memory_system.as_ref(),
+        "uninstall",
+        &skill_id,
+        result.is_ok(),
+    );
+    result.map_err(|e| e.to_string())
 }
 
 // ─── Production Settings surface (no TOML editing) ──────────────────────────

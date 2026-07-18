@@ -606,6 +606,22 @@ async fn send_message_with_profile(
             .as_deref()
             == Some("0"));
 
+    // Propagate privacy state to the unified MemorySystem so ALL memory writes
+    // for this turn (including those the core agent loop performs) respect it.
+    // Temporary chats or a user-disabled long-term memory → Incognito (Write
+    // Policy rejects persistence); otherwise Permanent. Keyed by the same stable
+    // session UUID the core loop derives.
+    {
+        let mem_mode = if session_is_temporary || !long_term_memory_enabled {
+            kria_core::memory::types::MemoryMode::Incognito
+        } else {
+            kria_core::memory::types::MemoryMode::Permanent
+        };
+        state
+            .memory_system
+            .set_mode(memory_session_uuid(&session_id), mem_mode);
+    }
+
     emit_agent_stage(
         &app,
         "building_message_history",
@@ -631,6 +647,10 @@ async fn send_message_with_profile(
     // Add recent conversation history (with compact shaping for 4K context servers)
     append_recent_turns_for_llm(&mut messages, &recent_turns);
 
+    // Memory grounding is injected centrally by the core agent loop
+    // (`AgentLoop::retrieve_memory_grounding`), so every entry point — desktop,
+    // server, telegram — is grounded identically without per-caller wiring.
+
     // Add current user message
     messages.push(ChatMessage {
         role: "user".into(),
@@ -649,6 +669,9 @@ async fn send_message_with_profile(
             None,
             None,
         ));
+        // NOTE: cognitive observation of the user turn is now performed centrally
+        // by the core agent loop (`AgentLoop::observe_user_turn`) so every host
+        // observes identically (H1). Observing here too would double-write.
     }
 
     emit_agent_stage(
@@ -702,8 +725,6 @@ async fn send_message_with_profile(
     let session_id_clone = session_id.clone();
     let memory_store_clone = memory_store.clone();
     let memory_writer_clone = memory_writer.clone();
-    let embeddings_clone = state.embeddings.clone();
-    let vectors_clone = state.vectors.clone();
     let user_message_clone = message.clone();
     let orchestrator_for_recovery = state.orchestrator.read().await.clone();
     let ironclad_orchestrator_cell_for_stream = state.orchestrator.clone();
@@ -948,17 +969,20 @@ async fn send_message_with_profile(
                         "metadata": metadata,
                     });
                     if !session_is_temporary {
+                        let tool_history = summarize_tool_turn_for_history(
+                            &name,
+                            success,
+                            &result,
+                            persisted_payload
+                                .get("metadata")
+                                .unwrap_or(&serde_json::Value::Null),
+                        );
+                        // Tool-outcome memory is recorded centrally by the core
+                        // agent loop (design §46.1); no per-path recording here.
                         let _ = memory_writer_clone.store_turn(&memory_turn_write(
                             session_id_clone.clone(),
                             String::new(),
-                            summarize_tool_turn_for_history(
-                                &name,
-                                success,
-                                &result,
-                                persisted_payload
-                                    .get("metadata")
-                                    .unwrap_or(&serde_json::Value::Null),
-                            ),
+                            tool_history,
                             Some(name),
                             Some(persisted_payload.to_string()),
                             None,
@@ -1517,20 +1541,15 @@ async fn send_message_with_profile(
             // Automatic fact extraction from user message + assistant response.
             // Suppressed for temporary chats and when the user turned memory off.
             if !session_is_temporary && long_term_memory_enabled {
-                let fact_mgr = kria_core::memory::facts::FactManager::new(
-                    memory_store_clone.as_ref(),
-                    &vectors_clone,
-                    &embeddings_clone,
-                );
-                match fact_mgr.extract_from_turn(&user_message_clone, &full_response) {
-                    Ok(ids) if !ids.is_empty() => {
-                        tracing::info!(count = ids.len(), "auto-extracted facts from conversation");
+                match auto_extract_facts(memory_store_clone.as_ref(), &user_message_clone) {
+                    Ok(count) if count > 0 => {
+                        tracing::info!(count, "auto-extracted facts from conversation");
                         emit_agent_stage(
                             &app_handle,
                             "facts_extracted",
                             "New user facts extracted from the conversation",
                             Some(serde_json::json!({
-                                "fact_count": ids.len(),
+                                "fact_count": count,
                             })),
                         );
                     }

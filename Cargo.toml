@@ -30,11 +30,14 @@ tracing-appender = "0.2"
 reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls", "multipart"], default-features = false }
 
 # Database
-rusqlite = { version = "0.32", features = ["bundled", "vtab"] }
+rusqlite = { version = "0.32", features = ["bundled", "vtab", "backup"] }
 
 # Concurrent data structures
 dashmap = "6"
 arc-swap = "1"
+
+# Approximate nearest-neighbour vector index (in-process HNSW, memory-upgrade H2)
+hnsw_rs = "=0.3.4"
 
 # System info
 sysinfo = "0.32"

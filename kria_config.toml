@@ -111,3 +111,18 @@ server_url = "https://ntfy.sh"
 topic = ""
 auth_token = ""
 default_priority = "default"
+
+# ─── Cognitive Memory System (memory-upgrade spec) ───
+# Every key below is consumed by desktop MemorySystem composition.
+[memory]
+# Retrieval fills this token budget by relevance rather than fixed top-K.
+token_budget = 800
+# Deterministic admission/backpressure and live-event capacities.
+admission_debounce_ms = 60000
+enrichment_queue_capacity = 1024
+enrichment_catchup_secs = 30
+change_channel_capacity = 256
+
+[memory.modes]
+# Default mode on a fresh session.
+default = "permanent"

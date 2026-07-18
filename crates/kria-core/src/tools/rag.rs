@@ -1,9 +1,19 @@
+//! Knowledge-base (RAG) tools, unified onto the single [`MemorySystem`]
+//! retrieval pipeline (memory-upgrade Priority 1). Ingestion records items +
+//! chunks in the authority DB via [`Library`](crate::memory::library::Library)
+//! and submits each chunk through the Write Policy so it becomes a searchable
+//! memory (`library:{item}:chunk:{idx}` provenance). Queries go through
+//! [`MemorySystem::search`], so there is exactly one retrieval path — the legacy
+//! `RagEngine` is gone.
+
 use crate::infra::ToolResult;
-use crate::memory::rag::RagEngine;
+use crate::memory::api::MemorySystem;
+use crate::memory::lifecycle::ForgetScope;
 use crate::safety::RiskLevel;
 use crate::tools::registry::{ParamDef, ToolDef, ToolHandler, ToolRegistry};
 use async_trait::async_trait;
 use std::sync::Arc;
+use uuid::Uuid;
 
 fn param(name: &str, ty: &str, desc: &str, required: bool) -> ParamDef {
     ParamDef {
@@ -16,7 +26,7 @@ fn param(name: &str, ty: &str, desc: &str, required: bool) -> ParamDef {
 }
 
 struct IngestDocument {
-    rag: Arc<RagEngine>,
+    memory: Arc<MemorySystem>,
 }
 #[async_trait]
 impl ToolHandler for IngestDocument {
@@ -35,43 +45,36 @@ impl ToolHandler for IngestDocument {
             .and_then(|n| n.to_str())
             .unwrap_or(path)
             .to_string();
-        let doc_type = file_path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("text")
-            .to_string();
 
-        // Read file content
         let text = match std::fs::read_to_string(file_path) {
             Ok(t) => t,
             Err(e) => return ToolResult::err(format!("failed to read file: {e}")),
         };
-
         if text.trim().is_empty() {
             return ToolResult::err("file is empty");
         }
 
-        let chunk_size = params["chunk_size"].as_u64().unwrap_or(512) as usize;
-        let overlap = params["overlap"].as_u64().unwrap_or(64) as usize;
-        let config = crate::memory::rag::ChunkConfig {
-            chunk_size,
-            overlap,
-        };
+        // The ONE ingestion pipeline: record item + chunks in the authority
+        // Library (dedup + versioning) and submit each chunk through the Write
+        // Policy (idempotent — dedups at both SHA and policy layers).
+        let (item_id, chunk_count, indexed) =
+            match self.memory.ingest_document(Some(&name), None, path, &text) {
+                Ok(res) => res,
+                Err(e) => return ToolResult::err(format!("ingestion failed: {e}")),
+            };
 
-        match self.rag.ingest(&name, &doc_type, &text, &config) {
-            Ok((doc_id, chunks)) => ToolResult::ok(serde_json::json!({
-                "doc_id": doc_id,
-                "name": name,
-                "chunks": chunks,
-                "characters": text.len(),
-            })),
-            Err(e) => ToolResult::err(format!("ingestion failed: {e}")),
-        }
+        ToolResult::ok(serde_json::json!({
+            "doc_id": item_id.to_string(),
+            "name": name,
+            "chunks": chunk_count,
+            "indexed": indexed,
+            "characters": text.len(),
+        }))
     }
 }
 
 struct RagQuery {
-    rag: Arc<RagEngine>,
+    memory: Arc<MemorySystem>,
 }
 #[async_trait]
 impl ToolHandler for RagQuery {
@@ -82,40 +85,31 @@ impl ToolHandler for RagQuery {
         }
         let limit = params["limit"].as_u64().unwrap_or(5) as usize;
 
-        match self.rag.retrieve(query, limit) {
-            Ok(results) => {
-                let citations: Vec<serde_json::Value> = results
+        match self.memory.search(query, None).await {
+            Ok(res) => {
+                let hits: Vec<_> = res.hits.iter().take(limit).collect();
+                let citations: Vec<serde_json::Value> = hits
                     .iter()
-                    .map(|r| {
+                    .map(|h| {
                         serde_json::json!({
-                            "content": r.content,
-                            "source": r.doc_name,
-                            "doc_id": r.doc_id,
-                            "chunk_index": r.chunk_index,
-                            "score": (r.score * 100.0).round() / 100.0,
+                            "content": h.memory.content,
+                            "source": h.memory.namespace,
+                            "id": h.memory.id.to_string(),
+                            "memory_type": h.memory.memory_type.as_str(),
+                            "score": (h.score * 100.0).round() / 100.0,
                         })
                     })
                     .collect();
-                // Build a context string for the LLM
-                let context: String = results
+                let context: String = hits
                     .iter()
                     .enumerate()
-                    .map(|(i, r)| {
-                        format!(
-                            "[{}] (from {}, chunk {}): {}",
-                            i + 1,
-                            r.doc_name,
-                            r.chunk_index,
-                            r.content
-                        )
-                    })
+                    .map(|(i, h)| format!("[{}] {}", i + 1, h.memory.content))
                     .collect::<Vec<_>>()
                     .join("\n\n");
-
                 ToolResult::ok(serde_json::json!({
                     "results": citations,
                     "context": context,
-                    "count": results.len(),
+                    "count": citations.len(),
                 }))
             }
             Err(e) => ToolResult::err(format!("retrieval failed: {e}")),
@@ -124,27 +118,28 @@ impl ToolHandler for RagQuery {
 }
 
 struct ListKnowledgeBase {
-    rag: Arc<RagEngine>,
+    memory: Arc<MemorySystem>,
 }
 #[async_trait]
 impl ToolHandler for ListKnowledgeBase {
     async fn execute(&self, _params: serde_json::Value) -> ToolResult {
-        match self.rag.list_documents() {
-            Ok(docs) => {
-                let items: Vec<serde_json::Value> = docs
+        match self.memory.library().list_items() {
+            Ok(items) => {
+                let docs: Vec<serde_json::Value> = items
                     .iter()
-                    .map(|(id, name, dtype, chunks)| {
+                    .map(|(item, chunks)| {
                         serde_json::json!({
-                            "doc_id": id,
-                            "name": name,
-                            "type": dtype,
+                            "doc_id": item.id.to_string(),
+                            "name": item.title.clone().unwrap_or_else(|| item.path.clone()),
+                            "path": item.path,
+                            "version": item.version,
                             "chunks": chunks,
                         })
                     })
                     .collect();
                 ToolResult::ok(serde_json::json!({
-                    "documents": items,
-                    "count": items.len(),
+                    "documents": docs,
+                    "count": docs.len(),
                 }))
             }
             Err(e) => ToolResult::err(format!("failed to list: {e}")),
@@ -153,7 +148,7 @@ impl ToolHandler for ListKnowledgeBase {
 }
 
 struct DeleteKnowledgeItem {
-    rag: Arc<RagEngine>,
+    memory: Arc<MemorySystem>,
 }
 #[async_trait]
 impl ToolHandler for DeleteKnowledgeItem {
@@ -162,46 +157,55 @@ impl ToolHandler for DeleteKnowledgeItem {
         if doc_id.is_empty() {
             return ToolResult::err("doc_id is required");
         }
-        match self.rag.delete_document(doc_id) {
-            Ok(deleted) => {
-                ToolResult::ok(serde_json::json!({ "deleted_chunks": deleted, "doc_id": doc_id }))
-            }
-            Err(e) => ToolResult::err(format!("delete failed: {e}")),
+        let item_id = match Uuid::parse_str(doc_id) {
+            Ok(id) => id,
+            Err(_) => return ToolResult::err(format!("invalid doc_id: {doc_id}")),
+        };
+
+        // Cascade: delete item + chunks, then hard-delete the derived memories.
+        if let Err(e) = self.memory.library().delete_item(item_id) {
+            return ToolResult::err(format!("delete failed: {e}"));
+        }
+        let scope = ForgetScope::SourcePrefix(format!("library:{item_id}"));
+        match self.memory.hard_delete(scope).await {
+            Ok(deleted) => ToolResult::ok(serde_json::json!({
+                "deleted_memories": deleted,
+                "doc_id": doc_id,
+            })),
+            Err(e) => ToolResult::err(format!("memory cascade failed: {e}")),
         }
     }
 }
 
-pub fn register(reg: &ToolRegistry, rag: Arc<RagEngine>) {
+pub fn register(reg: &ToolRegistry, memory: Arc<MemorySystem>) {
     let tools: Vec<(ToolDef, Arc<dyn ToolHandler>)> = vec![
         (ToolDef {
             name: "ingest_document_rag".into(), description: "Ingest a document into the knowledge base with chunking and vector embedding for RAG".into(),
             category: "knowledge".into(), default_tier: RiskLevel::Green, min_tier: "standard",
             parameters: vec![
                 param("path", "string", "Path to the file to ingest", true),
-                param("chunk_size", "integer", "Chunk size in characters (default: 512)", false),
-                param("overlap", "integer", "Overlap between chunks (default: 64)", false),
             ],
-        }, Arc::new(IngestDocument { rag: rag.clone() })),
+        }, Arc::new(IngestDocument { memory: memory.clone() })),
         (ToolDef {
-            name: "rag_query".into(), description: "Query the knowledge base using hybrid vector + keyword search with citations".into(),
+            name: "rag_query".into(), description: "Query the knowledge base using the unified memory retriever with citations".into(),
             category: "knowledge".into(), default_tier: RiskLevel::Green, min_tier: "standard",
             parameters: vec![
                 param("query", "string", "Question or search query", true),
                 param("limit", "integer", "Max results to return (default: 5)", false),
             ],
-        }, Arc::new(RagQuery { rag: rag.clone() })),
+        }, Arc::new(RagQuery { memory: memory.clone() })),
         (ToolDef {
-            name: "list_knowledge_base".into(), description: "List all documents in the RAG knowledge base".into(),
+            name: "list_knowledge_base".into(), description: "List all documents in the knowledge base".into(),
             category: "knowledge".into(), default_tier: RiskLevel::Green, min_tier: "lite",
             parameters: vec![],
-        }, Arc::new(ListKnowledgeBase { rag: rag.clone() })),
+        }, Arc::new(ListKnowledgeBase { memory: memory.clone() })),
         (ToolDef {
-            name: "delete_knowledge_item".into(), description: "Remove a document from the knowledge base".into(),
+            name: "delete_knowledge_item".into(), description: "Remove a document (and its derived memories) from the knowledge base".into(),
             category: "knowledge".into(), default_tier: RiskLevel::Yellow, min_tier: "standard",
             parameters: vec![
                 param("doc_id", "string", "Document ID to delete", true),
             ],
-        }, Arc::new(DeleteKnowledgeItem { rag })),
+        }, Arc::new(DeleteKnowledgeItem { memory })),
     ];
     for (def, handler) in tools {
         reg.register(def, handler);

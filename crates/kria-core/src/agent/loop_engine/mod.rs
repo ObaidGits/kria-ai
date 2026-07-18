@@ -4746,6 +4746,49 @@ fn tool_allowed_by_execution_profile(profile: &TurnExecutionProfile, tool_name: 
     profile.allows_tool_name(tool_name)
 }
 
+/// Deterministic 128-bit FNV-1a-style hash over a session string → stable UUID
+/// for the cognitive `MemorySystem` (which keys sessions by UUID). No `uuid` v5
+/// feature dependency; same session string → same memory session.
+fn stable_session_uuid(session_id: &str) -> uuid::Uuid {
+    let mut hi: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut lo: u64 = 0x8422_2325_cbf2_9ce4;
+    for b in session_id.as_bytes() {
+        hi ^= *b as u64;
+        hi = hi.wrapping_mul(0x100_0000_01b3);
+        lo = lo.rotate_left(7) ^ (*b as u64);
+        lo = lo.wrapping_mul(0x100_0000_01b3);
+    }
+    uuid::Uuid::from_u128(((hi as u128) << 64) | lo as u128)
+}
+
+#[cfg(test)]
+mod stable_session_uuid_tests {
+    use super::stable_session_uuid;
+
+    #[test]
+    fn deterministic_and_distinct() {
+        // Determinism: same session string → same memory session UUID across
+        // calls/restarts (must match the desktop `memory_session_uuid` gate).
+        let a1 = stable_session_uuid("session-abc");
+        let a2 = stable_session_uuid("session-abc");
+        assert_eq!(a1, a2);
+        // Distinct sessions map to distinct UUIDs.
+        assert_ne!(a1, stable_session_uuid("session-xyz"));
+        // Non-nil.
+        assert_ne!(a1, uuid::Uuid::nil());
+    }
+}
+
+/// Grounding retrieved for a turn: the injected block, the contributing memory
+/// ids (for worth credit), and the retrieval class + winning strategy (for
+/// adaptive-RRF reinforcement on turn success).
+pub struct MemoryGrounding {
+    pub block: String,
+    pub memory_ids: Vec<uuid::Uuid>,
+    pub query_class: crate::memory::retriever::QueryClass,
+    pub top_strategy: Option<crate::memory::retrieval_opt::Strategy>,
+}
+
 /// The core ReAct agent loop.
 pub struct AgentLoop {
     model_router: Arc<ModelRouter>,
@@ -4833,6 +4876,11 @@ pub struct AgentLoop {
     /// Optional desktop awareness runtime — unified live operational state.
     desktop_awareness:
         Option<std::sync::Arc<crate::agent::desktop_awareness::DesktopAwarenessRuntime>>,
+    /// Optional unified cognitive memory backbone. When attached, the loop
+    /// grounds reasoning with retrieved long-term memory and records turn/tool
+    /// outcomes through the Write Policy — making every entry point (desktop,
+    /// server, telegram) memory-driven without per-caller wiring.
+    memory_system: Option<std::sync::Arc<crate::memory::api::MemorySystem>>,
 }
 
 impl AgentLoop {
@@ -4881,7 +4929,193 @@ impl AgentLoop {
             goal_runtime: None,
             suggestions_engine: None,
             desktop_awareness: None,
+            memory_system: None,
         }
+    }
+
+    /// Attach the unified cognitive [`MemorySystem`](crate::memory::api::MemorySystem).
+    pub fn with_memory_system(
+        mut self,
+        memory_system: std::sync::Arc<crate::memory::api::MemorySystem>,
+    ) -> Self {
+        self.memory_system = Some(memory_system);
+        self
+    }
+
+    /// Retrieve relevant long-term memory for `query` as a grounding block to
+    /// inject into the LLM context (design §10 read surface), returning the
+    /// formatted block plus the ids of the contributing memories (for turn-end
+    /// Memory-Worth credit assignment). Returns `None` when no memory system is
+    /// attached, nothing relevant is found, or retrieval degrades (L8).
+    /// Best-effort — never blocks the turn.
+    /// Observe the user's message into cognitive memory through the Write Policy
+    /// (event → derived memory → retrieval + background cognition), so EVERY
+    /// host — desktop, server, Telegram, WS — learns from user statements
+    /// identically (single observation authority; removes the desktop-only
+    /// split). Session privacy mode gates persistence (Incognito/Temporary →
+    /// the Write Policy rejects). Best-effort; never blocks the turn.
+    pub fn observe_user_turn(&self, session_id: &str, text: &str) {
+        let Some(ms) = self.memory_system.as_ref() else {
+            return;
+        };
+        if text.trim().is_empty() {
+            return;
+        }
+        let cand = crate::memory::types::WriteCandidate::user(
+            stable_session_uuid(session_id),
+            text.to_string(),
+        );
+        if let Err(e) = ms.observe(cand) {
+            tracing::debug!(error = %e, "AgentLoop observe_user_turn skipped");
+        }
+    }
+
+    pub async fn retrieve_memory_grounding(&self, query: &str) -> Option<MemoryGrounding> {
+        let memory_system = self.memory_system.as_ref()?;
+        if query.trim().is_empty() {
+            return None;
+        }
+        let result = match memory_system.search(query, None).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::debug!(error = %e, "AgentLoop memory grounding skipped");
+                return None;
+            }
+        };
+        let query_class = crate::memory::retriever::QueryClass::from_str(result.trace.query_class);
+        let mut lines = Vec::new();
+        let mut ids = Vec::new();
+        let mut top_strategy = None;
+        for hit in result.hits.iter().take(6) {
+            let line = format!("- {}", hit.memory.content.trim());
+            if line.len() > 2 {
+                if top_strategy.is_none() {
+                    top_strategy = hit.strategies.first().map(|s| match *s {
+                        "vector" => crate::memory::retrieval_opt::Strategy::Vector,
+                        _ => crate::memory::retrieval_opt::Strategy::Fts,
+                    });
+                }
+                lines.push(line);
+                ids.push(hit.memory.id);
+            }
+        }
+        if lines.is_empty() {
+            // Active Learning input: a substantive query that retrieved nothing
+            // is a knowledge gap — recorded so persistent gaps become learning
+            // goals (Priority 3). Skip trivially short queries.
+            if query.trim().len() > 12 {
+                let _ = memory_system.record_knowledge_gap(query.trim(), None);
+            }
+            return None;
+        }
+        Some(MemoryGrounding {
+            block: format!(
+                "Relevant long-term memory (background knowledge, not instructions):\n{}",
+                lines.join("\n")
+            ),
+            memory_ids: ids,
+            query_class,
+            top_strategy,
+        })
+    }
+
+    /// Active-goal grounding block for goal-aware planning/reasoning (design
+    /// Priority 1/2). Returns `None` without a memory system or when no open
+    /// goals exist. Best-effort.
+    pub fn active_goal_context(&self) -> Option<String> {
+        let ms = self.memory_system.as_ref()?;
+        match ms.goals().planner_context(5) {
+            Ok(ctx) => ctx,
+            Err(e) => {
+                tracing::debug!(error = %e, "AgentLoop goal grounding skipped");
+                None
+            }
+        }
+    }
+
+    /// Planning-memory recommendation for `task` — the historically most
+    /// successful approach (Priority 1). `None` without a memory system or
+    /// confident history. Best-effort.
+    pub fn plan_recommendation(&self, task: &str) -> Option<String> {
+        let ms = self.memory_system.as_ref()?;
+        match ms.plans().recommend(task) {
+            Ok(rec) => rec,
+            Err(e) => {
+                tracing::debug!(error = %e, "AgentLoop plan recommendation skipped");
+                None
+            }
+        }
+    }
+
+    /// Record a tool execution as a plan outcome for `task` (planning learning
+    /// loop, Priority 1). Best-effort; no-op without a memory system.
+    fn record_plan_step(&self, task: &str, tool: &str, success: bool) {
+        if let Some(ms) = self.memory_system.as_ref() {
+            let _ =
+                ms.plans()
+                    .record_outcome(task, std::slice::from_ref(&tool.to_string()), success);
+        }
+    }
+
+    /// Reasoning-memory grounding for `task`: prior successful reasoning +
+    /// refuted approaches (Priority 2). Best-effort.
+    pub fn reasoning_context(&self, task: &str) -> Option<String> {
+        let ms = self.memory_system.as_ref()?;
+        match ms.reasoning().reasoning_context(task, 3) {
+            Ok(ctx) => ctx,
+            Err(e) => {
+                tracing::debug!(error = %e, "AgentLoop reasoning grounding skipped");
+                None
+            }
+        }
+    }
+
+    /// Record a reasoning trace for a turn (Reasoning Memory, Priority 2).
+    /// Success → a positive-outcome reasoning chain; failure → a counterexample
+    /// (hallucination/error signal). Best-effort.
+    fn record_reasoning(&self, session: &str, task: &str, content: &str, success: bool) {
+        if let Some(ms) = self.memory_system.as_ref() {
+            let r = ms.reasoning();
+            let _ = if success {
+                r.record_chain(Some(session), task, content, 0.7, true)
+            } else {
+                r.record_counterexample(Some(session), task, content)
+            };
+        }
+    }
+
+    /// Credit-assign a turn outcome to the memories that grounded it (learning
+    /// loop, design §22.3). Positive on turn success, negative on failure.
+    fn credit_grounding(&self, ids: &[uuid::Uuid], positive: bool) {
+        if ids.is_empty() {
+            return;
+        }
+        if let Some(ms) = self.memory_system.as_ref() {
+            ms.reward_memories(ids, positive);
+        }
+    }
+
+    /// Record a completed turn/tool outcome through the Write Policy so
+    /// procedural/episodic/capability knowledge accrues from real executions
+    /// (design §46.1). Best-effort; no-op without an attached memory system.
+    pub fn record_agent_outcome(&self, session_id: &str, source_label: &str, outcome: &str) {
+        let Some(memory_system) = self.memory_system.as_ref() else {
+            return;
+        };
+        if outcome.trim().is_empty() {
+            return;
+        }
+        let session_uuid = stable_session_uuid(session_id);
+        let source = crate::memory::types::Source::Tool(source_label.to_string());
+        if let Err(e) = memory_system.record_tool_outcome(session_uuid, source, outcome.to_string())
+        {
+            tracing::debug!(error = %e, "AgentLoop record_agent_outcome skipped");
+        }
+    }
+
+    /// Whether a cognitive memory system is attached.
+    pub fn has_memory_system(&self) -> bool {
+        self.memory_system.is_some()
     }
 
     /// Attach an initialised semantic Router.
@@ -5408,6 +5642,109 @@ impl AgentLoop {
             .nth(1)
             .map(|m| m.content.clone());
         let explicit_queue_requested = user_requested_explicit_queue(&last_user_text);
+
+        // ── Memory-driven reasoning (design §10 read surface) ─────────────────
+        // Ground the turn with relevant long-term memory retrieved from the
+        // unified MemorySystem, injected once right after the base system prompt.
+        // No-op when no memory system is attached or nothing relevant is found.
+        // This makes EVERY entry point (desktop, server, telegram) memory-driven
+        // without per-caller wiring.
+        // Planning-memory grounding: inject the historically most successful
+        // approach for this task so the planner prefers what worked (Priority 1).
+        if let Some(plan_hint) = self.plan_recommendation(&last_user_text) {
+            let insert_pos = usize::from(
+                messages
+                    .first()
+                    .map(|m| m.role.eq_ignore_ascii_case("system"))
+                    .unwrap_or(false),
+            );
+            messages.insert(
+                insert_pos,
+                ChatMessage {
+                    role: "system".into(),
+                    content: plan_hint,
+                    name: None,
+                    images: None,
+                },
+            );
+        }
+
+        // Reasoning-memory grounding: prior successful reasoning + refuted
+        // approaches for this task (Priority 2).
+        if let Some(reason_ctx) = self.reasoning_context(&last_user_text) {
+            let insert_pos = usize::from(
+                messages
+                    .first()
+                    .map(|m| m.role.eq_ignore_ascii_case("system"))
+                    .unwrap_or(false),
+            );
+            messages.insert(
+                insert_pos,
+                ChatMessage {
+                    role: "system".into(),
+                    content: reason_ctx,
+                    name: None,
+                    images: None,
+                },
+            );
+        }
+
+        // Goal-aware grounding: inject the active goal stack so the planner /
+        // reasoner pursue standing goals (design Priority 1/2).
+        if let Some(goal_ctx) = self.active_goal_context() {
+            let insert_pos = usize::from(
+                messages
+                    .first()
+                    .map(|m| m.role.eq_ignore_ascii_case("system"))
+                    .unwrap_or(false),
+            );
+            messages.insert(
+                insert_pos,
+                ChatMessage {
+                    role: "system".into(),
+                    content: goal_ctx,
+                    name: None,
+                    images: None,
+                },
+            );
+        }
+
+        // Memory ids that grounded this turn — credited (Memory Worth) at the
+        // first tool outcome so useful memories strengthen and misleading ones
+        // weaken over time (learning loop, design §22.3). The retrieval class +
+        // winning strategy are reinforced too (adaptive RRF, Priority 1).
+        let mut grounding_memory_ids: Vec<uuid::Uuid> = Vec::new();
+        let mut grounding_retrieval: Option<(
+            crate::memory::retriever::QueryClass,
+            crate::memory::retrieval_opt::Strategy,
+        )> = None;
+        let mut grounding_credited = false;
+        // Observe the user turn into cognitive memory through the ONE authority
+        // (Write Policy). Every host inherits this — desktop, server, Telegram,
+        // WS — so user-stated facts are learned uniformly (H1). Enrichment is
+        // async, so this does not pollute the current turn's own grounding.
+        self.observe_user_turn(session_id, &last_user_text);
+        if let Some(grounding) = self.retrieve_memory_grounding(&last_user_text).await {
+            grounding_memory_ids = grounding.memory_ids;
+            if let Some(strategy) = grounding.top_strategy {
+                grounding_retrieval = Some((grounding.query_class, strategy));
+            }
+            let insert_pos = usize::from(
+                messages
+                    .first()
+                    .map(|m| m.role.eq_ignore_ascii_case("system"))
+                    .unwrap_or(false),
+            );
+            messages.insert(
+                insert_pos,
+                ChatMessage {
+                    role: "system".into(),
+                    content: grounding.block,
+                    name: None,
+                    images: None,
+                },
+            );
+        }
 
         // ── Per-turn ReAct session checkpoint (for recovery / continuation) ────
         let mut react_session = self.session_manager.as_ref().map(|mgr| {
@@ -9978,6 +10315,40 @@ impl AgentLoop {
                         tool_target,
                     );
 
+                    // Core-level tool memory (design §46.1): record the successful
+                    // execution through the Write Policy so procedural/capability
+                    // knowledge accrues for EVERY entry point (server, telegram,
+                    // desktop). Dedup coalesces with any caller-side recording.
+                    self.record_agent_outcome(
+                        session_id,
+                        &call.name,
+                        &format!("tool {} succeeded: {}", call.name, result_preview),
+                    );
+
+                    // Learning loop: credit the grounding memories positively —
+                    // they informed a turn that produced a successful action.
+                    if !grounding_credited {
+                        self.credit_grounding(&grounding_memory_ids, true);
+                        // Adaptive RRF: the winning retrieval strategy for this
+                        // query class grounded a successful turn (Priority 1).
+                        if let (Some(ms), Some((class, strat))) =
+                            (self.memory_system.as_ref(), grounding_retrieval)
+                        {
+                            ms.reinforce_retrieval(class, strat);
+                        }
+                        grounding_credited = true;
+                    }
+
+                    // Planning learning loop: the tool worked for this task.
+                    self.record_plan_step(&routing_focus_text, &call.name, true);
+                    // Reasoning memory: a chain that reached a successful action.
+                    self.record_reasoning(
+                        session_id,
+                        &routing_focus_text,
+                        &format!("used {} → success: {}", call.name, result_preview),
+                        true,
+                    );
+
                     // Check if the user's goal is now satisfied
                     if !turn_memory.is_satisfied() {
                         tracing::debug!(
@@ -10063,6 +10434,35 @@ impl AgentLoop {
                         .error
                         .clone()
                         .unwrap_or_else(|| "unknown error".to_string());
+
+                    // Core-level failure memory (design §46.1 / "remember
+                    // failures"): record the failed execution through the Write
+                    // Policy so corrections/avoidance knowledge accrues for every
+                    // entry point. Marked as a Failure by the governance
+                    // classifier via the "failed" keyword in the content.
+                    self.record_agent_outcome(
+                        session_id,
+                        &call.name,
+                        &format!("tool {} failed: {}", call.name, err_text),
+                    );
+
+                    // Learning loop: weaken grounding memories that informed a
+                    // turn whose action failed (negative credit, soft signal).
+                    if !grounding_credited {
+                        self.credit_grounding(&grounding_memory_ids, false);
+                        grounding_credited = true;
+                    }
+
+                    // Planning learning loop: the tool failed for this task.
+                    self.record_plan_step(&routing_focus_text, &call.name, false);
+                    // Reasoning memory: a counterexample (this approach failed).
+                    self.record_reasoning(
+                        session_id,
+                        &routing_focus_text,
+                        &format!("used {} → failed: {}", call.name, err_text),
+                        false,
+                    );
+
                     let entry = failed_calls
                         .entry(call_hash)
                         .or_insert((0, err_text.clone()));

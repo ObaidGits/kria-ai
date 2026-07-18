@@ -109,7 +109,6 @@ pub async fn start_telegram_mcp(
         state.memory_store.clone(),
         state.tool_registry.clone(),
         state.embeddings.clone(),
-        state.vectors.clone(),
         hw_tier,
         state.orchestrator.clone(),
     );

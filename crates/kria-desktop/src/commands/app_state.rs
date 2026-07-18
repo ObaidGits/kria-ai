@@ -73,6 +73,19 @@ pub struct AppState {
     /// Durable safety gate for generated/discovered tools awaiting review.
     pub quarantine_registry: Arc<kria_core::tools::quarantine::QuarantineRegistry>,
     pub memory_store: Arc<dyn MemoryRuntime>,
+    /// New cognitive-memory conversation/session/preference store (Phase-1
+    /// cutover). Consumers migrate off `memory_store` onto this incrementally.
+    pub conversation: Arc<kria_core::memory::conversation::ConversationStore>,
+    /// The unified cognitive Memory System (write policy, retriever, background
+    /// cognition) — the central intelligence backbone. Every subsystem records
+    /// observations/outcomes and retrieves context through this, never bypassing
+    /// the Write Policy. Shares the single authority DB with `conversation`.
+    pub memory_system: Arc<kria_core::memory::api::MemorySystem>,
+    /// Active cold-start import cancellation handle (AUD-03 / L4). Set for the
+    /// duration of an in-flight `memory_cold_start_import`; `memory_cold_start_cancel`
+    /// cancels it. `None` when no import is running (single onboarding import at
+    /// a time).
+    pub cold_start_cancel: Arc<std::sync::Mutex<Option<tokio_util::sync::CancellationToken>>>,
     pub hitl: Arc<HitlGateway>,
     pub decision_store: Arc<kria_core::agent::collaborative_decision::DecisionStore>,
     pub policy_engine: Arc<PolicyEngine>,
@@ -86,7 +99,6 @@ pub struct AppState {
     #[allow(dead_code)]
     pub sidecar: Arc<SidecarBridge>,
     pub embeddings: Arc<EmbeddingModel>,
-    pub vectors: Arc<VectorIndex>,
     pub current_session_id: Arc<RwLock<String>>,
     pub voice_active: Arc<std::sync::atomic::AtomicBool>,
     pub voice_pipeline: Arc<RwLock<Arc<VoicePipeline>>>,

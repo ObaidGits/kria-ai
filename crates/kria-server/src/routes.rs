@@ -8,7 +8,10 @@ use axum::{
 };
 use futures::{SinkExt, StreamExt};
 use kria_connection_control::manager::{ControlPlaneEvent, DockerEvalRequest, DockerHealthStatus};
+use kria_core::agent::loop_engine::StreamEvent;
 use kria_core::infra::pipeline_trace::{log_pipeline_step, sanitize_text_for_logs};
+use kria_core::llm::ChatMessage;
+use kria_core::memory::conversation::{ConversationStore, ConversationTurn};
 use std::convert::Infallible;
 use std::sync::Arc;
 use std::time::Duration;
@@ -77,8 +80,8 @@ async fn chat(
         })),
     );
 
-    // When enabled, ExecutiveController schedules real AgentLoop work. The
-    // controller owns priority, cancellation, GPU admission, and observability;
+    // When enabled, ExecutiveController schedules the same real AgentLoop work used by
+    // the direct REST path. The controller owns priority, cancellation, and observability;
     // it never substitutes a synthetic response.
     if let Some(ref executive) = state.executive_sender {
         use kria_core::agent::executive::types::*;
@@ -89,50 +92,21 @@ async fn chat(
         let cancel_session_id = session_id.clone();
         let work_message = req.message.clone();
         let description = work_message.clone();
+        let session_store = state.session_store.clone();
         let payload = TaskPayload::new(description, async move {
             let started = std::time::Instant::now();
-            let Some(agent) = work_agent else {
+            let Some(work_agent) = work_agent else {
                 return TaskResult::Failed {
                     reason: "agent runtime not initialized".to_string(),
                     total_duration: started.elapsed(),
                 };
             };
-
-            let mut messages = vec![kria_core::llm::ChatMessage {
-                role: "user".to_string(),
-                content: work_message,
-                name: None,
-                images: None,
-            }];
-            let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<
-                kria_core::agent::loop_engine::StreamEvent,
-            >();
-            let agent_run = agent.clone();
-            tokio::spawn(async move {
-                agent_run
-                    .run(&work_session_id, &mut messages, event_tx)
-                    .await;
-            });
-
-            let mut reply = String::new();
-            let mut error = None;
-            while let Some(event) = event_rx.recv().await {
-                match event {
-                    kria_core::agent::loop_engine::StreamEvent::Token(text) => {
-                        reply.push_str(&text)
-                    }
-                    kria_core::agent::loop_engine::StreamEvent::Done(final_text)
-                        if reply.is_empty() =>
-                    {
-                        reply = final_text;
-                    }
-                    kria_core::agent::loop_engine::StreamEvent::Error(reason) => {
-                        error = Some(reason)
-                    }
-                    _ => {}
-                }
-            }
-
+            let (reply, error) = run_agent_turn(
+                work_agent,
+                &work_session_id,
+                &work_message,
+                session_store,
+            ).await;
             match error {
                 Some(reason) => TaskResult::Failed {
                     reason,
@@ -143,8 +117,7 @@ async fn chat(
                     output: Some(reply.chars().take(512).collect()),
                 },
             }
-        })
-        .with_cancel_handler(move || {
+        }).with_cancel_handler(move || {
             if let Some(agent) = cancel_agent {
                 agent.cancel_session(&cancel_session_id);
             }
@@ -156,55 +129,154 @@ async fn chat(
             payload,
         );
 
-        match executive.submit(task) {
-            Ok(()) => {
-                tracing::info!(session_id = %session_id, "Task submitted to ExecutiveController");
-                return Json(serde_json::json!({
-                    "status": "submitted",
-                    "session_id": session_id,
-                    "source": req.source.unwrap_or_else(|| "api".to_string()),
-                    "message": "Task queued for processing by ExecutiveController",
-                }));
-            }
-            Err(_) => {
-                tracing::error!("ExecutiveController channel closed");
-                return Json(serde_json::json!({
-                    "status": "error",
-                    "session_id": session_id,
-                    "message": "ExecutiveController unavailable — falling back to legacy",
-                }));
-            }
-        }
+        return match executive.submit(task) {
+            Ok(()) => Json(serde_json::json!({
+                "status": "submitted",
+                "session_id": session_id,
+                "source": req.source.unwrap_or_else(|| "api".to_string()),
+                "message": "Task queued for processing by ExecutiveController",
+            })),
+            Err(_) => Json(serde_json::json!({
+                "status": "error",
+                "session_id": session_id,
+                "message": "ExecutiveController unavailable",
+            })),
+        };
     }
 
-    // ─── Legacy path (executive.enabled = false) ─────────────────────
-    let message = req.message.clone();
-    let response = serde_json::json!({
-        "status": "received",
-        "message": message.clone(),
+    // ─── Real memory-driven agent path (executive disabled) ──────────
+    // Runs the SAME `AgentLoop` the `/ws` path streams — memory-driven when the
+    // headless runtime brought up the MemorySystem (grounding + observe +
+    // learning). Non-streaming: we drain the event channel to a final reply so
+    // Telegram/web REST callers get a complete answer. History is loaded from +
+    // persisted to the shared conversation store, exactly like `/ws`.
+    let Some(agent) = state.agent_loop.clone() else {
+        return Json(serde_json::json!({
+            "status": "unavailable",
+            "session_id": session_id,
+            "source": req.source.unwrap_or_else(|| "api".to_string()),
+            "message": "agent runtime not initialized",
+        }));
+    };
+
+    let (reply, error) = run_agent_turn(
+        agent,
+        &session_id,
+        &req.message,
+        state.session_store.clone(),
+    )
+    .await;
+
+    log_pipeline_step(
+        &session_id,
+        "server_chat_done",
+        "Server /api/chat agent response returned",
+        Some(serde_json::json!({
+            "reply_preview": sanitize_text_for_logs(&reply, 220),
+            "error": error.as_deref().map(|e| sanitize_text_for_logs(e, 220)),
+        })),
+    );
+
+    // Surface an honest status: a loop error, or an empty reply with no content,
+    // is reported as "error" rather than a silent empty "ok".
+    let status = if error.is_some() {
+        "error"
+    } else if reply.trim().is_empty() {
+        "empty"
+    } else {
+        "ok"
+    };
+
+    Json(serde_json::json!({
+        "status": status,
+        "message": req.message,
         "source": req.source.unwrap_or_else(|| "api".to_string()),
         "chat_id": req.chat_id,
         "from_user": req.from_user,
         "session_id": session_id,
-        "reply": format!("I received your message: \"{}\"", message),
+        "reply": reply,
+        "error": error,
+    }))
+}
+
+/// Run one non-streaming agent turn and return the final assistant text.
+/// Loads recent history for continuity and persists the completed turn — the
+/// REST twin of the `/ws` streaming path (shares the same AgentLoop + store).
+async fn run_agent_turn(
+    agent: Arc<kria_core::agent::AgentLoop>,
+    session_id: &str,
+    user_msg: &str,
+    session_store: Option<Arc<ConversationStore>>,
+) -> (String, Option<String>) {
+    const HISTORY_LIMIT: usize = 20;
+
+    let mut messages: Vec<ChatMessage> = Vec::new();
+    if let Some(store) = session_store.as_ref() {
+        if let Ok(turns) = store.get_recent_turns(session_id, HISTORY_LIMIT) {
+            for turn in turns {
+                messages.push(ChatMessage {
+                    role: turn.role,
+                    content: turn.content,
+                    name: turn.tool_name,
+                    images: None,
+                });
+            }
+        }
+    }
+    messages.push(ChatMessage {
+        role: "user".to_string(),
+        content: user_msg.to_string(),
+        name: None,
+        images: None,
     });
 
-    log_pipeline_step(
-        response
-            .get("session_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("server"),
-        "server_chat_done",
-        "Server /api/chat stub response returned",
-        Some(serde_json::json!({
-            "reply_preview": sanitize_text_for_logs(
-                response.get("reply").and_then(|v| v.as_str()).unwrap_or(""),
-                220,
-            ),
-        })),
-    );
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<StreamEvent>();
+    let agent_run = agent.clone();
+    let sid = session_id.to_string();
+    tokio::spawn(async move {
+        agent_run.run(&sid, &mut messages, event_tx).await;
+    });
 
-    Json(response)
+    let mut reply = String::new();
+    let mut error: Option<String> = None;
+    while let Some(event) = event_rx.recv().await {
+        match &event {
+            StreamEvent::Token(t) => reply.push_str(t),
+            StreamEvent::Done(final_text) if !final_text.is_empty() => {
+                if reply.is_empty() {
+                    reply = final_text.clone();
+                }
+            }
+            StreamEvent::Error(e) => error = Some(e.clone()),
+            _ => {}
+        }
+    }
+
+    if let Some(store) = session_store.as_ref() {
+        persist_turn(store, session_id, "user", user_msg);
+        if !reply.is_empty() {
+            persist_turn(store, session_id, "assistant", &reply);
+        }
+    }
+
+    (reply, error)
+}
+
+/// Persist a single conversation turn (best-effort; logs on failure).
+fn persist_turn(store: &Arc<ConversationStore>, session_id: &str, role: &str, content: &str) {
+    let turn = ConversationTurn {
+        id: None,
+        session_id: session_id.to_string(),
+        role: role.to_string(),
+        content: content.to_string(),
+        tool_name: None,
+        tool_result: None,
+        tokens_used: None,
+        timestamp: chrono::Utc::now(),
+    };
+    if let Err(e) = store.store_turn(&turn) {
+        tracing::warn!(error = %e, "failed to persist REST conversation turn");
+    }
 }
 
 async fn list_sessions(State(state): State<Arc<ServerState>>) -> Json<Vec<serde_json::Value>> {

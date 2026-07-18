@@ -12,8 +12,9 @@
  * OPTIMISTIC on the local read-model and return a typed result so callers can
  * surface HONEST success/failure (fixing the old silent-failure states) — the
  * store never swallows an error into a no-op. `forget` is reversible via a
- * one-shot undo buffer (undo re-adds through memory_remember); `hard_delete` is
- * irreversible and carries no undo (the deliberate confirm lives in the UI).
+ * one-shot undo buffer (`memory_restore_forgotten` restores the same backend
+ * identity); `hard_delete` is irreversible and carries no undo (the deliberate
+ * confirm lives in the UI).
  *
  * Requirements: 5.1 (Memory Space segments), 5.2 (Inspector detail),
  * 5.3 (actions + undo + deliberate confirm), 13.4 (preserve state)
@@ -576,21 +577,15 @@ async function verify(memoryId: string): Promise<MemoryActionResult<boolean>> {
 }
 
 /**
- * Correct a memory's content (Req 5.3) by recording a `correction` feedback
- * signal carrying the new text through `memory_record_feedback`. The runtime
- * owns how the correction is applied; we optimistically reflect the new content
- * locally so the card updates immediately.
+ * Correct a memory's content through the dedicated authority mutation. Backend
+ * preserves stable identity, version history, FTS, vectors, and feedback in one
+ * contract; local state updates only after durable success.
  */
 async function correct(memoryId: string, newContent: string): Promise<MemoryActionResult> {
   const text = newContent.trim();
   if (!text) return { ok: false, message: "Correction cannot be empty" };
-  const res = await bridgeInvoke("memory_record_feedback", {
-    targetId: memoryId,
-    targetKind: "memory",
-    signal: "correction",
-    detail: text,
-  });
-  if (!res.ok) return { ok: false, message: failMessage(res.message, "memory_record_feedback") };
+  const res = await bridgeInvoke<void>("memory_correct", { memoryId, content: text });
+  if (!res.ok) return { ok: false, message: failMessage(res.message, "memory_correct") };
   updateFact(memoryId, { content: text, updatedAt: Date.now() });
   return { ok: true, data: undefined };
 }
@@ -619,9 +614,8 @@ async function penalize(memoryId: string): Promise<MemoryActionResult> {
 
 /**
  * Forget a memory (Req 5.3, REVERSIBLE) via `memory_forget` (scope
- * kind=`memory`). The runtime tombstones it (reversible window). On success we
- * optimistically drop it from the local list and stash it in the one-shot undo
- * buffer so the UI can offer Undo. On failure the list is left untouched.
+ * kind=`memory`). The runtime tombstones it. On success we optimistically drop
+ * it from the local list and retain its stable id for one-shot undo.
  */
 async function forget(memoryId: string): Promise<MemoryActionResult> {
   const fact = facts().find((f) => f.id === memoryId);
@@ -632,23 +626,22 @@ async function forget(memoryId: string): Promise<MemoryActionResult> {
   return { ok: true, data: undefined };
 }
 
-/**
- * Undo the most recent `forget` (Req 5.3). Re-adds the tombstoned content
- * through the existing `memory_remember` command (the runtime re-admits it) and
- * restores it to the local list. Clears the undo buffer regardless of outcome
- * on success; a failure leaves the buffer so the user can retry.
- */
+/** Restore the most recently forgotten memory with its original identity. */
 async function undoForget(): Promise<MemoryActionResult> {
   const pending = pendingUndo();
   if (!pending) return { ok: false, message: "Nothing to undo" };
-  const res = await bridgeInvoke("memory_remember", { text: pending.fact.content });
-  if (!res.ok) return { ok: false, message: failMessage(res.message, "memory_remember") };
+  const res = await bridgeInvoke<void>("memory_restore_forgotten", {
+    memoryId: pending.fact.id,
+  });
+  if (!res.ok) {
+    return { ok: false, message: failMessage(res.message, "memory_restore_forgotten") };
+  }
   addFact(pending.fact);
   setPendingUndo(null);
   return { ok: true, data: undefined };
 }
 
-/** Discard the pending undo (the reversible window elapsed / user moved on). */
+/** Discard the pending undo (user moved on). */
 function clearUndo(): void {
   setPendingUndo(null);
 }

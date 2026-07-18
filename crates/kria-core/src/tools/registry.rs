@@ -506,46 +506,72 @@ pub fn build_default_registry() -> ToolRegistry {
     build_registry_with_store(None)
 }
 
-/// Build with MemoryStore only (no RAG).
+/// Build with a memory runtime only.
 pub fn build_registry_with_store(
     store: Option<std::sync::Arc<dyn crate::memory::MemoryRuntime>>,
 ) -> ToolRegistry {
-    build_registry_full(store, None, None)
+    build_registry_full(store, None)
 }
 
-/// Build the full tool registry with a MemoryStore, optional RagEngine, and optional ProactiveEngine.
+/// Build the full tool registry with a memory runtime and optional ProactiveEngine.
 ///
 /// Pass `psdg` to enable persistent browser/IDE cognition. All browser and IDE tools
 /// will write state to WorldModelStore after each operation when this is `Some`.
 pub fn build_registry_full(
     store: Option<std::sync::Arc<dyn crate::memory::MemoryRuntime>>,
-    rag: Option<std::sync::Arc<crate::memory::rag::RagEngine>>,
     proactive: Option<std::sync::Arc<crate::automation::proactive::ProactiveEngine>>,
 ) -> ToolRegistry {
-    build_registry_full_with_psdg(store, rag, proactive, None)
+    build_registry_full_with_psdg(store, proactive, None)
 }
 
 /// Build the full tool registry with all optional components including PSDG.
 /// For WorkflowContinuationRuntime support, use `build_registry_full_with_psdg_wcr`.
 pub fn build_registry_full_with_psdg(
     store: Option<std::sync::Arc<dyn crate::memory::MemoryRuntime>>,
-    rag: Option<std::sync::Arc<crate::memory::rag::RagEngine>>,
     proactive: Option<std::sync::Arc<crate::automation::proactive::ProactiveEngine>>,
     psdg: Option<crate::agent::psdg::PsdgHandle>,
 ) -> ToolRegistry {
-    build_registry_full_with_psdg_wcr(store, rag, proactive, psdg, None)
+    build_registry_full_with_psdg_wcr(store, proactive, psdg, None)
+}
+
+/// As [`build_registry_full_with_psdg`] but also injects the unified
+/// [`MemorySystem`](crate::memory::api::MemorySystem) so the knowledge tools
+/// (`recall_fact`/`search_knowledge`/`remember_fact`/`list_remembered`) and the
+/// RAG/library tools (`ingest_document_rag`/`rag_query`/`list_knowledge_base`/
+/// `delete_knowledge_item`) route through the single retrieval pipeline.
+pub fn build_registry_full_with_memory(
+    store: Option<std::sync::Arc<dyn crate::memory::MemoryRuntime>>,
+    proactive: Option<std::sync::Arc<crate::automation::proactive::ProactiveEngine>>,
+    psdg: Option<crate::agent::psdg::PsdgHandle>,
+    continuation_runtime: Option<
+        std::sync::Arc<crate::agent::workflow_continuation::WorkflowContinuationRuntime>,
+    >,
+    memory: Option<std::sync::Arc<crate::memory::api::MemorySystem>>,
+) -> ToolRegistry {
+    build_registry_inner(store, proactive, psdg, continuation_runtime, memory)
 }
 
 /// Build the full tool registry with all optional components including PSDG and
 /// `WorkflowContinuationRuntime` (enables the `resume_workflow` tool).
 pub fn build_registry_full_with_psdg_wcr(
     store: Option<std::sync::Arc<dyn crate::memory::MemoryRuntime>>,
-    rag: Option<std::sync::Arc<crate::memory::rag::RagEngine>>,
     proactive: Option<std::sync::Arc<crate::automation::proactive::ProactiveEngine>>,
     psdg: Option<crate::agent::psdg::PsdgHandle>,
     continuation_runtime: Option<
         std::sync::Arc<crate::agent::workflow_continuation::WorkflowContinuationRuntime>,
     >,
+) -> ToolRegistry {
+    build_registry_inner(store, proactive, psdg, continuation_runtime, None)
+}
+
+fn build_registry_inner(
+    store: Option<std::sync::Arc<dyn crate::memory::MemoryRuntime>>,
+    proactive: Option<std::sync::Arc<crate::automation::proactive::ProactiveEngine>>,
+    psdg: Option<crate::agent::psdg::PsdgHandle>,
+    continuation_runtime: Option<
+        std::sync::Arc<crate::agent::workflow_continuation::WorkflowContinuationRuntime>,
+    >,
+    memory: Option<std::sync::Arc<crate::memory::api::MemorySystem>>,
 ) -> ToolRegistry {
     let reg = ToolRegistry::new();
 
@@ -563,9 +589,11 @@ pub fn build_registry_full_with_psdg_wcr(
     super::shell::register(&reg);
     super::internet::register(&reg);
     if let Some(s) = store {
-        super::knowledge::register(&reg, s);
+        super::knowledge::register(&reg, s, memory.clone());
     } else {
-        // Register without memory backing (stubs for testing)
+        // No memory runtime available (headless degraded "core registry only"
+        // fallback, or a minimal test registry): register the knowledge tool
+        // surface with honest "no memory store" no-op handlers (DC2).
         super::knowledge::register_stubs(&reg);
     }
     super::system_config::register(&reg);
@@ -595,8 +623,8 @@ pub fn build_registry_full_with_psdg_wcr(
     let gw_sidecar = std::sync::Arc::new(crate::sidecar::SidecarBridge::new("python3", None));
     super::google_workspace::register(&reg, gw_ref, gh_ref, gw_sidecar);
 
-    if let Some(rag_engine) = rag {
-        super::rag::register(&reg, rag_engine);
+    if let Some(ms) = &memory {
+        super::rag::register(&reg, ms.clone());
     }
     if let Some(proactive_engine) = proactive {
         super::proactive::register(&reg, proactive_engine);

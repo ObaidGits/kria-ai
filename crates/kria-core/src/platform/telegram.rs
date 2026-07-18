@@ -17,7 +17,6 @@ use crate::config::TelegramConfig;
 use crate::llm::orchestrator::Orchestrator;
 use crate::llm::ChatMessage;
 use crate::memory::embeddings::EmbeddingModel;
-use crate::memory::vectors::VectorIndex;
 use crate::memory::{MemoryManager, MemoryRuntime, MemoryTurnWrite, SemanticMemoryParser};
 use crate::platform::detect::get_available_package_managers;
 use crate::safety::hitl::ApprovalResponse;
@@ -53,7 +52,6 @@ impl TelegramBridge {
         memory_store: Arc<dyn MemoryRuntime>,
         tool_registry: Arc<ToolRegistry>,
         embeddings: Arc<EmbeddingModel>,
-        vectors: Arc<VectorIndex>,
         hw_tier: String,
         orchestrator: Arc<RwLock<Option<Arc<Orchestrator>>>>,
     ) -> Self {
@@ -66,7 +64,6 @@ impl TelegramBridge {
                 memory_store,
                 tool_registry,
                 embeddings,
-                vectors,
                 hw_tier,
                 orchestrator,
                 shutdown_rx,
@@ -232,7 +229,6 @@ async fn telegram_poll_loop(
     memory_store: Arc<dyn MemoryRuntime>,
     tool_registry: Arc<ToolRegistry>,
     embeddings: Arc<EmbeddingModel>,
-    vectors: Arc<VectorIndex>,
     hw_tier: String,
     orchestrator: Arc<RwLock<Option<Arc<Orchestrator>>>>,
     mut shutdown_rx: watch::Receiver<bool>,
@@ -429,7 +425,6 @@ async fn telegram_poll_loop(
                 &memory_store,
                 &tool_registry,
                 &embeddings,
-                &vectors,
                 &hw_tier,
                 orc_snapshot.as_ref(),
                 is_owner,
@@ -458,7 +453,6 @@ pub async fn process_message(
     memory_store: &Arc<dyn MemoryRuntime>,
     tool_registry: &Arc<ToolRegistry>,
     _embeddings: &Arc<EmbeddingModel>,
-    _vectors: &Arc<VectorIndex>,
     hw_tier: &str,
     orchestrator: Option<&Arc<Orchestrator>>,
     // Whether the caller is the authenticated owner. Owner callers have their

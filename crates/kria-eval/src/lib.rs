@@ -3,6 +3,7 @@ pub mod gui_eval;
 pub mod integration_eval;
 pub mod judge;
 pub mod llm_fixture;
+pub mod memory_bench;
 pub mod openclaw_eval;
 pub mod report;
 pub mod runner;

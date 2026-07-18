@@ -23,6 +23,7 @@ reqwest = { workspace = true }
 rusqlite = { workspace = true }
 dashmap = { workspace = true }
 arc-swap = { workspace = true }
+hnsw_rs = { workspace = true }
 sysinfo = { workspace = true }
 walkdir = { workspace = true }
 globset = { workspace = true }

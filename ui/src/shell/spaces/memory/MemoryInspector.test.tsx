@@ -156,24 +156,22 @@ describe("MemoryInspector — actions (Req 5.3)", () => {
     );
   });
 
-  it("correct → inline edit then memory_record_feedback(correction)", async () => {
+  it("correct → inline edit then authoritative memory_correct", async () => {
     await ready();
     fireEvent.click(screen.getByRole("button", { name: /Correct/ }));
     const textarea = screen.getByLabelText("Corrected content") as HTMLTextAreaElement;
     fireEvent.input(textarea, { target: { value: "the sky is grey" } });
     fireEvent.click(screen.getByRole("button", { name: /Save correction/ }));
     await waitFor(() =>
-      expect(bridgeInvoke).toHaveBeenCalledWith("memory_record_feedback", {
-        targetId: "m1",
-        targetKind: "memory",
-        signal: "correction",
-        detail: "the sky is grey",
+      expect(bridgeInvoke).toHaveBeenCalledWith("memory_correct", {
+        memoryId: "m1",
+        content: "the sky is grey",
       }),
     );
   });
 
-  it("forget → memory_forget, then shows Undo which re-adds via memory_remember", async () => {
-    routeInvoke({ memory_forget: () => ok(1), memory_remember: () => ok({ decision: "stored" }) });
+  it("forget → memory_forget, then Undo restores the same memory id", async () => {
+    routeInvoke({ memory_forget: () => ok(1), memory_restore_forgotten: () => ok(undefined) });
     await ready();
     fireEvent.click(screen.getByRole("button", { name: /Forget/ }));
     await waitFor(() => expect(bridgeInvoke).toHaveBeenCalledWith("memory_forget", { kind: "memory", value: "m1" }));
@@ -181,7 +179,9 @@ describe("MemoryInspector — actions (Req 5.3)", () => {
     // Undo affordance appears (reversible, Req 5.3).
     const undo = await screen.findByRole("button", { name: /Undo/ });
     fireEvent.click(undo);
-    await waitFor(() => expect(bridgeInvoke).toHaveBeenCalledWith("memory_remember", { text: "the sky is blue" }));
+    await waitFor(() =>
+      expect(bridgeInvoke).toHaveBeenCalledWith("memory_restore_forgotten", { memoryId: "m1" }),
+    );
   });
 
   it("surfaces a notification on action failure (no silent failure)", async () => {

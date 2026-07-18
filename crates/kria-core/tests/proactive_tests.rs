@@ -146,7 +146,7 @@ async fn watch_multiple_dirs() {
 #[test]
 fn proactive_tools_registered() {
     let engine = make_engine();
-    let reg = kria_core::tools::registry::build_registry_full(None, None, Some(engine));
+    let reg = kria_core::tools::registry::build_registry_full(None, Some(engine));
     let proactive_tools = reg.list_by_category("proactive");
     assert!(
         proactive_tools.len() >= 6,
@@ -158,42 +158,42 @@ fn proactive_tools_registered() {
 #[test]
 fn check_system_health_tool_exists() {
     let engine = make_engine();
-    let reg = kria_core::tools::registry::build_registry_full(None, None, Some(engine));
+    let reg = kria_core::tools::registry::build_registry_full(None, Some(engine));
     assert!(reg.get_def("check_system_health").is_some());
 }
 
 #[test]
 fn get_alerts_tool_exists() {
     let engine = make_engine();
-    let reg = kria_core::tools::registry::build_registry_full(None, None, Some(engine));
+    let reg = kria_core::tools::registry::build_registry_full(None, Some(engine));
     assert!(reg.get_def("get_alerts").is_some());
 }
 
 #[test]
 fn dismiss_alert_tool_exists() {
     let engine = make_engine();
-    let reg = kria_core::tools::registry::build_registry_full(None, None, Some(engine));
+    let reg = kria_core::tools::registry::build_registry_full(None, Some(engine));
     assert!(reg.get_def("dismiss_alert").is_some());
 }
 
 #[test]
 fn watch_directory_tool_exists() {
     let engine = make_engine();
-    let reg = kria_core::tools::registry::build_registry_full(None, None, Some(engine));
+    let reg = kria_core::tools::registry::build_registry_full(None, Some(engine));
     assert!(reg.get_def("watch_directory").is_some());
 }
 
 #[test]
 fn smart_suggest_tool_exists() {
     let engine = make_engine();
-    let reg = kria_core::tools::registry::build_registry_full(None, None, Some(engine));
+    let reg = kria_core::tools::registry::build_registry_full(None, Some(engine));
     assert!(reg.get_def("smart_suggest").is_some());
 }
 
 #[tokio::test]
 async fn smart_suggest_returns_suggestions() {
     let engine = make_engine();
-    let reg = kria_core::tools::registry::build_registry_full(None, None, Some(engine));
+    let reg = kria_core::tools::registry::build_registry_full(None, Some(engine));
     let handler = reg.get_handler("smart_suggest").unwrap();
     let result = handler.execute(serde_json::json!({})).await;
     assert!(result.success);
@@ -203,7 +203,7 @@ async fn smart_suggest_returns_suggestions() {
 #[tokio::test]
 async fn check_system_health_tool_returns_data() {
     let engine = make_engine();
-    let reg = kria_core::tools::registry::build_registry_full(None, None, Some(engine));
+    let reg = kria_core::tools::registry::build_registry_full(None, Some(engine));
     let handler = reg.get_handler("check_system_health").unwrap();
     let result = handler.execute(serde_json::json!({})).await;
     assert!(result.success);
@@ -213,7 +213,7 @@ async fn check_system_health_tool_returns_data() {
 #[tokio::test]
 async fn dismiss_alert_tool_requires_id() {
     let engine = make_engine();
-    let reg = kria_core::tools::registry::build_registry_full(None, None, Some(engine));
+    let reg = kria_core::tools::registry::build_registry_full(None, Some(engine));
     let handler = reg.get_handler("dismiss_alert").unwrap();
     let result = handler.execute(serde_json::json!({})).await;
     assert!(!result.success);
@@ -223,7 +223,7 @@ async fn dismiss_alert_tool_requires_id() {
 #[tokio::test]
 async fn watch_directory_tool_invalid_path() {
     let engine = make_engine();
-    let reg = kria_core::tools::registry::build_registry_full(None, None, Some(engine));
+    let reg = kria_core::tools::registry::build_registry_full(None, Some(engine));
     let handler = reg.get_handler("watch_directory").unwrap();
     let result = handler
         .execute(serde_json::json!({ "path": "/nonexistent/dir/xyz" }))
@@ -234,7 +234,7 @@ async fn watch_directory_tool_invalid_path() {
 #[test]
 fn proactive_tools_lite_tier() {
     let engine = make_engine();
-    let reg = kria_core::tools::registry::build_registry_full(None, None, Some(engine));
+    let reg = kria_core::tools::registry::build_registry_full(None, Some(engine));
     let lite_tools = reg.list_for_tier("lite");
     let has_alerts = lite_tools.iter().any(|t| t.name == "get_alerts");
     assert!(has_alerts, "get_alerts should be available on lite tier");
@@ -243,7 +243,7 @@ fn proactive_tools_lite_tier() {
 #[test]
 fn watch_directory_standard_tier() {
     let engine = make_engine();
-    let reg = kria_core::tools::registry::build_registry_full(None, None, Some(engine));
+    let reg = kria_core::tools::registry::build_registry_full(None, Some(engine));
     let lite_tools = reg.list_for_tier("lite");
     let has_watch = lite_tools.iter().any(|t| t.name == "watch_directory");
     assert!(!has_watch, "watch_directory should not be on lite tier");

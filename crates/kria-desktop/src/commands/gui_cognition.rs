@@ -2264,6 +2264,15 @@ pub(super) async fn run_gui_cognition_v2(
 
     // Persist the turn to memory (mirrors the V1 path).
     let memory_writer: Arc<dyn MemoryManager> = app_state.memory_store.clone();
+    // Route the interaction + GUI-cognition outcome through the unified
+    // MemorySystem (Write Policy → cognitive memory).
+    observe_user_message(app_state.memory_system.as_ref(), &session_id, &message);
+    observe_tool_outcome(
+        app_state.memory_system.as_ref(),
+        &session_id,
+        "gui_cognition",
+        &outcome.reply,
+    );
     let _ = memory_writer.store_turn(&memory_turn_write(
         session_id.clone(),
         message,

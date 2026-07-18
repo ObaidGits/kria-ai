@@ -11,9 +11,9 @@
  *
  * Req 5.3 actions (each routes through an EXISTING memory_* command):
  *   • verify  → memory_verify
- *   • correct → memory_record_feedback(signal="correction")  (inline editor)
+ *   • correct → memory_correct  (inline editor, stable backend identity)
  *   • reinforce/penalize → memory_record_feedback(thumbs_up/thumbs_down)
- *   • forget  → memory_forget  (REVERSIBLE → inline Undo via memory_remember)
+ *   • forget  → memory_forget  (REVERSIBLE → memory_restore_forgotten)
  *   • hard-delete → memory_hard_delete  (IRREVERSIBLE → deliberate Confirm)
  *
  * HONEST STATES (fixes the old silent-failure explain/action bug): loading,

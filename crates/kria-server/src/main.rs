@@ -95,21 +95,62 @@ async fn main() -> anyhow::Result<()> {
     let turn_admission = Arc::new(kria_core::agent::TurnAdmission::new());
     // Phase 0.4: build the minimal headless agent loop so /ws streams the real
     // agent (chat + core tools), unblocking the mobile PWA path (Phase 4.5).
-    let agent_loop: Option<Arc<kria_core::agent::AgentLoop>> =
-        match kria_core::agent::headless_runtime::build_minimal(&config) {
-            Ok(rt) => {
-                tracing::info!("headless agent runtime ready — /ws chat is live");
-                Some(rt.agent_loop)
+    // P7: the headless runtime now also brings up the unified MemorySystem over
+    // the shared authority DB, so server chat is memory-driven (same retriever /
+    // planner / reasoning / graph / cognition as desktop).
+    let (agent_loop, memory_system): (
+        Option<Arc<kria_core::agent::AgentLoop>>,
+        Option<Arc<kria_core::memory::api::MemorySystem>>,
+    ) = match kria_core::agent::headless_runtime::build_minimal(&config) {
+        Ok(rt) => {
+            tracing::info!(
+                memory = rt.memory_system.is_some(),
+                "headless agent runtime ready — /ws chat is live"
+            );
+            (Some(rt.agent_loop), rt.memory_system)
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "headless agent runtime unavailable; /ws chat will report \
+                 'agent runtime not initialized'"
+            );
+            (None, None)
+        }
+    };
+
+    // P7: background cognition on the server (same scheduler as desktop). Event-
+    // driven — wakes on memory changes (coalesced) with a 300s idle fallback.
+    if let Some(ms) = &memory_system {
+        let ms_bg = ms.clone();
+        tokio::spawn(async move {
+            let monitor = std::sync::Arc::new(
+                kria_core::memory::scheduler::DefaultResourceMonitor::new(512),
+            );
+            let scheduler = ms_bg.cognitive_scheduler(monitor, None);
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(300));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            let mut changes = ms_bg.subscribe_changes();
+            loop {
+                let woke = tokio::select! {
+                    _ = tick.tick() => false,
+                    r = changes.recv() => match r {
+                        Ok(_) => { while changes.try_recv().is_ok() {} true }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => true,
+                        Err(_) => break,
+                    },
+                };
+                if woke {
+                    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                    while changes.try_recv().is_ok() {}
+                }
+                let ran = scheduler.run_ready().await;
+                if ran > 0 {
+                    tracing::debug!(jobs = ran, woke, "server cognition ran background jobs");
+                }
             }
-            Err(e) => {
-                tracing::warn!(
-                    error = %e,
-                    "headless agent runtime unavailable; /ws chat will report \
-                     'agent runtime not initialized'"
-                );
-                None
-            }
-        };
+        });
+    }
 
     // ─── Mobile prompt-control wiring (Phase 4.5) ─────────────────────
     // Device registry (4.5.4): reuses the encrypted vault for the token
@@ -154,17 +195,27 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
-    // Shared conversation store (4.5.6): co-located with the desktop DB so a
-    // session begun on one surface can resume on the other.
-    let session_store: Option<Arc<kria_core::memory::MemoryStore>> =
-        match kria_core::memory::MemoryStore::open(&paths.data_dir.join("kria.db")) {
-            Ok(store) => {
-                tracing::info!("server session store ready — /ws conversations persist");
-                Some(Arc::new(store))
+    // Shared conversation store (4.5.6): derived from the SAME MemorySystem
+    // authority DB handle so phone + desktop + server resume the same sessions
+    // with a single connection pool (no duplicate DB open). Falls back to a
+    // standalone open only when memory is unavailable.
+    let session_store: Option<Arc<kria_core::memory::conversation::ConversationStore>> =
+        match &memory_system {
+            Some(ms) => {
+                tracing::info!("server session store bound to MemorySystem authority DB");
+                Some(Arc::new(ms.conversation()))
             }
-            Err(e) => {
-                tracing::warn!(error = %e, "session store unavailable; /ws history disabled");
-                None
+            None => {
+                match kria_core::memory::db::Database::open(&paths.data_dir.join("kria_memory.db"))
+                {
+                    Ok(db) => Some(Arc::new(
+                        kria_core::memory::conversation::ConversationStore::new(Arc::new(db)),
+                    )),
+                    Err(e) => {
+                        tracing::warn!(error = %e, "session store unavailable; /ws history disabled");
+                        None
+                    }
+                }
             }
         };
 
@@ -213,6 +264,7 @@ async fn main() -> anyhow::Result<()> {
         device_registry,
         notifier,
         session_store,
+        memory_system,
         remote_desktop,
         remote_desktop_backend,
     });

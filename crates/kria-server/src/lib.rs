@@ -3,6 +3,7 @@ pub mod desktop_stream;
 pub mod gateway;
 pub mod intelligence_routes;
 pub mod inventory;
+pub mod memory_routes;
 pub mod mobile_routes;
 pub mod provider_routes;
 pub mod remote_desktop_routes;
@@ -37,7 +38,13 @@ pub struct ServerState {
     pub notifier: Option<Arc<kria_core::notify::NtfyClient>>,
     /// Shared conversation store so phone + desktop resume the same sessions
     /// (Phase 4.5.6).
-    pub session_store: Option<Arc<kria_core::memory::MemoryStore>>,
+    pub session_store: Option<Arc<kria_core::memory::conversation::ConversationStore>>,
+    /// The unified cognitive [`MemorySystem`] over the SAME authority DB the
+    /// desktop uses (P7). `Some` whenever the headless runtime brought memory
+    /// online. Server chat/retrieval/planner/reasoning and the `/memory/*`
+    /// routes all flow through this — one memory architecture, no server
+    /// bypass.
+    pub memory_system: Option<Arc<kria_core::memory::api::MemorySystem>>,
     /// Remote desktop view & takeover manager (Phase 4.6). `None` when disabled.
     pub remote_desktop: Option<Arc<kria_core::remote_desktop::RemoteDesktopManager>>,
     /// Portal + WebRTC capture backend (shares the Arc the manager holds).
@@ -72,6 +79,7 @@ pub fn build_router(state: Arc<ServerState>) -> Router {
         .merge(routes::api_routes())
         .merge(intelligence_routes::intelligence_routes())
         .merge(provider_routes::provider_routes())
+        .merge(memory_routes::memory_routes())
         .with_state(state);
 
     // API/fleet routes take precedence; the gateway adds pairing + agent WS +

@@ -151,8 +151,6 @@ pub async fn start_voice(state: State<'_, AppStateCell>, app: AppHandle) -> Resu
     let event_bus = state.event_bus.clone();
     let config = state.config.clone();
     let session_id_lock = state.current_session_id.clone();
-    let embeddings = state.embeddings.clone();
-    let vectors = state.vectors.clone();
     let hw_info_voice = state.hardware_info.clone();
     let orchestrator_voice = state.orchestrator.read().await.clone();
     let active_turns_voice = state.orchestrator_active_turns.clone();
@@ -288,6 +286,7 @@ pub async fn start_voice(state: State<'_, AppStateCell>, app: AppHandle) -> Resu
                         images: None,
                     });
                     append_recent_turns_for_llm(&mut messages, &recent_turns);
+                    // Memory grounding is injected centrally by the core agent loop.
                     messages.push(ChatMessage {
                         role: "user".into(),
                         content: text.clone(),
@@ -295,6 +294,9 @@ pub async fn start_voice(state: State<'_, AppStateCell>, app: AppHandle) -> Resu
                         images: None,
                     });
 
+                    // Cognitive observation is performed centrally by the core
+                    // agent loop (`AgentLoop::observe_user_turn`, H1) — observing
+                    // here too would double-write.
                     let _ = memory_writer.store_turn(&memory_turn_write(
                         session_id.clone(),
                         format!("🎤 {}", text),
@@ -334,8 +336,6 @@ pub async fn start_voice(state: State<'_, AppStateCell>, app: AppHandle) -> Resu
                     let ms2 = memory_store.clone();
                     let mw2 = memory_writer.clone();
                     let sid2 = session_id.clone();
-                    let emb2 = embeddings.clone();
-                    let vec2 = vectors.clone();
                     let text2 = text.clone();
                     let vp = voice_pipeline.clone();
                     let mut active_turn_id: Option<String> = None;
@@ -581,9 +581,7 @@ pub async fn start_voice(state: State<'_, AppStateCell>, app: AppHandle) -> Resu
                             None,
                             None,
                         ));
-                        let fact_mgr =
-                            kria_core::memory::facts::FactManager::new(ms2.as_ref(), &vec2, &emb2);
-                        let _ = fact_mgr.extract_from_turn(&text2, &full_response);
+                        let _ = auto_extract_facts(ms2.as_ref(), &text2);
 
                         // Speak the response via TTS
                         if let Err(e) = vp.speak(&full_response).await {

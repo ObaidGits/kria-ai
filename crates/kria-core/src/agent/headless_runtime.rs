@@ -18,10 +18,16 @@ use tokio::sync::RwLock;
 use crate::agent::AgentLoop;
 use crate::config::KriaConfig;
 use crate::llm::ModelRouter;
+use crate::memory::api::{MemoryConfig, MemorySystem};
+use crate::memory::embedding::OnnxEmbedder;
+use crate::memory::stores::ports::Embedder;
+use crate::memory::{KriaMemoryRuntime, MemoryRuntime};
 use crate::safety::hitl::HitlGateway;
 use crate::safety::{AuditLogger, PolicyEngine, RollbackManager};
 use crate::tools::mount_manager::ToolMountManager;
-use crate::tools::registry::{build_registry_with_store, ToolRegistry};
+use crate::tools::registry::{
+    build_registry_full_with_memory, build_registry_with_store, ToolRegistry,
+};
 
 /// Default HITL approval timeout for headless hosts (seconds).
 const HEADLESS_HITL_TIMEOUT_SECS: u64 = 60;
@@ -33,6 +39,13 @@ pub struct HeadlessRuntime {
     pub hitl: Arc<HitlGateway>,
     pub tool_registry: Arc<ToolRegistry>,
     pub model_router: Arc<ModelRouter>,
+    /// The unified cognitive [`MemorySystem`] over the shared authority DB.
+    /// `Some` whenever the embedder loaded (the common case); the server threads
+    /// this into its `ServerState`, `/memory/*` routes, and cognition scheduler
+    /// so desktop + server share ONE memory architecture. `None` only if the
+    /// MiniLM model is unavailable, in which case the loop degrades to no-memory
+    /// rather than failing to boot.
+    pub memory_system: Option<Arc<MemorySystem>>,
 }
 
 /// Build a minimal but functional agent loop from configuration.
@@ -44,8 +57,62 @@ pub fn build_minimal(config: &KriaConfig) -> anyhow::Result<HeadlessRuntime> {
 
     let model_router = Arc::new(ModelRouter::from_config(config));
 
-    // Core tool registry (no memory/RAG in v0 headless).
-    let tool_registry = Arc::new(build_registry_with_store(None));
+    // ── Unified cognitive Memory System over the shared authority DB ──────────
+    // The server opens the SAME `kria_memory.db` the desktop uses. When the
+    // MiniLM embedder loads, we build the full MemorySystem (Write Policy,
+    // retriever, graph, planner/goal/reasoning, cognition) and a memory-backed
+    // tool registry — identical to the desktop path. If the embedder is
+    // unavailable we degrade to the no-memory core registry so the server still
+    // boots. There is NO separate server database or retrieval pipeline.
+    let memory_db_path = paths.data_dir.join("kria_memory.db");
+    let (tool_registry, memory_system): (Arc<ToolRegistry>, Option<Arc<MemorySystem>>) =
+        match KriaMemoryRuntime::open(&memory_db_path) {
+            Ok(backend) => {
+                let backend = Arc::new(backend);
+                let store: Arc<dyn MemoryRuntime> = backend.clone();
+                match OnnxEmbedder::new_minilm() {
+                    Ok(embedder) => {
+                        let embedder: Arc<dyn Embedder> = Arc::new(embedder);
+                        match MemorySystem::open_with_db(
+                            backend.database(),
+                            MemoryConfig {
+                                db_path: memory_db_path.display().to_string(),
+                                device_id: "local-server".to_string(),
+                                ..Default::default()
+                            },
+                            embedder,
+                            true,
+                        ) {
+                            Ok(ms) => {
+                                let reg = build_registry_full_with_memory(
+                                    Some(store),
+                                    None,
+                                    None,
+                                    None,
+                                    Some(ms.clone()),
+                                );
+                                tracing::info!(
+                                    "[headless] MemorySystem online — server is memory-driven"
+                                );
+                                (Arc::new(reg), Some(ms))
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, "[headless] MemorySystem unavailable; no-memory registry");
+                                (Arc::new(build_registry_with_store(Some(store))), None)
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "[headless] embedder unavailable; no-memory registry");
+                        (Arc::new(build_registry_with_store(Some(store))), None)
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "[headless] memory backend unavailable; core registry only");
+                (Arc::new(build_registry_with_store(None)), None)
+            }
+        };
 
     let mount_manager = Arc::new(RwLock::new(ToolMountManager::new()));
     let policy_engine = Arc::new(PolicyEngine::new());
@@ -62,22 +129,29 @@ pub fn build_minimal(config: &KriaConfig) -> anyhow::Result<HeadlessRuntime> {
 
     let max_tool_rounds = config.agent.max_tool_rounds.max(1);
 
-    let agent_loop = Arc::new(
-        AgentLoop::new(
-            model_router.clone(),
-            tool_registry.clone(),
-            mount_manager,
-            policy_engine,
-            hitl.clone(),
-            audit_logger,
-            rollback_mgr,
-        )
-        .with_max_tool_rounds(max_tool_rounds)
-        .with_hardware_tier("standard"),
-    );
+    let mut loop_builder = AgentLoop::new(
+        model_router.clone(),
+        tool_registry.clone(),
+        mount_manager,
+        policy_engine,
+        hitl.clone(),
+        audit_logger,
+        rollback_mgr,
+    )
+    .with_max_tool_rounds(max_tool_rounds)
+    .with_hardware_tier("standard");
+
+    // Make the loop memory-driven (grounding + observe + learning) — identical
+    // to the desktop wiring.
+    if let Some(ms) = &memory_system {
+        loop_builder = loop_builder.with_memory_system(ms.clone());
+    }
+
+    let agent_loop = Arc::new(loop_builder);
 
     tracing::info!(
         max_tool_rounds,
+        memory = memory_system.is_some(),
         "[headless] minimal agent runtime constructed"
     );
 
@@ -86,5 +160,6 @@ pub fn build_minimal(config: &KriaConfig) -> anyhow::Result<HeadlessRuntime> {
         hitl,
         tool_registry,
         model_router,
+        memory_system,
     })
 }

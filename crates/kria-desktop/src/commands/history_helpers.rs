@@ -35,6 +35,88 @@ pub(super) fn memory_turn_write(
     }
 }
 
+/// Map a chat session string id to a stable UUID for the cognitive
+/// `MemorySystem` (which keys sessions by UUID). Deterministic so the same chat
+/// maps to the same memory session across turns and restarts.
+pub(super) fn memory_session_uuid(session_id: &str) -> uuid::Uuid {
+    // Deterministic 128-bit FNV-1a-style hash over the session string → stable
+    // UUID (no `uuid` v5 feature dependency). Same chat → same memory session.
+    let mut hi: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut lo: u64 = 0x8422_2325_cbf2_9ce4;
+    for b in session_id.as_bytes() {
+        hi ^= *b as u64;
+        hi = hi.wrapping_mul(0x100_0000_01b3);
+        lo = lo.rotate_left(7) ^ (*b as u64);
+        lo = lo.wrapping_mul(0x100_0000_01b3);
+    }
+    uuid::Uuid::from_u128(((hi as u128) << 64) | lo as u128)
+}
+
+/// Observe a completed user message through the unified `MemorySystem` so it
+/// flows through the Write Policy into cognitive memory (event → derived memory
+/// → retrieval + background cognition). Best-effort: failures never block chat.
+/// Callers must gate on privacy (temporary / long-term-memory-off) first.
+pub(super) fn observe_user_message(
+    memory_system: &kria_core::memory::api::MemorySystem,
+    session_id: &str,
+    user_message: &str,
+) {
+    if user_message.trim().is_empty() {
+        return;
+    }
+    let candidate = kria_core::memory::types::WriteCandidate::user(
+        memory_session_uuid(session_id),
+        user_message.to_string(),
+    );
+    if let Err(e) = memory_system.observe(candidate) {
+        tracing::debug!(error = %e, "MemorySystem observe(user_message) skipped");
+    }
+}
+
+/// Record a tool/agent outcome through the unified `MemorySystem` (design §46.1)
+/// so procedural/capability knowledge accrues from real executions. Best-effort.
+pub(super) fn observe_tool_outcome(
+    memory_system: &kria_core::memory::api::MemorySystem,
+    session_id: &str,
+    tool_name: &str,
+    outcome: &str,
+) {
+    if tool_name.trim().is_empty() || outcome.trim().is_empty() {
+        return;
+    }
+    let source = kria_core::memory::types::Source::Tool(tool_name.to_string());
+    if let Err(e) = memory_system.record_tool_outcome(
+        memory_session_uuid(session_id),
+        source,
+        outcome.to_string(),
+    ) {
+        tracing::debug!(error = %e, tool = tool_name, "MemorySystem record_tool_outcome skipped");
+    }
+}
+
+/// Record an OpenClaw/capability lifecycle event (acquisition, deletion,
+/// enable/disable, generation) as capability memory through the Write Policy
+/// (design §46.4). Best-effort; uses a stable `openclaw` pseudo-session.
+pub(super) fn observe_capability_lifecycle(
+    memory_system: &kria_core::memory::api::MemorySystem,
+    event: &str,
+    skill_id: &str,
+    success: bool,
+) {
+    let detail = format!(
+        "openclaw {event}: skill '{skill_id}' ({})",
+        if success { "ok" } else { "failed" }
+    );
+    if let Err(e) = memory_system.record_capability(
+        memory_session_uuid("openclaw:lifecycle"),
+        kria_core::memory::types::Source::Tool("openclaw".to_string()),
+        success,
+        detail,
+    ) {
+        tracing::debug!(error = %e, skill = skill_id, "MemorySystem record_capability skipped");
+    }
+}
+
 pub(super) fn preference_record(
     key: impl Into<String>,
     value: impl Into<String>,
@@ -42,6 +124,48 @@ pub(super) fn preference_record(
     PreferenceRecord {
         key: key.into(),
         value: value.into(),
+    }
+}
+
+/// Heuristic auto-extraction of durable user-preference facts from a turn.
+///
+/// Replaces the removed legacy `FactManager` fast path: when the user message
+/// matches a first-person preference pattern, the message is persisted as a
+/// `user_preference` fact through the unified memory runtime (authority DB +
+/// FTS). Full LLM-driven extraction flows through `SemanticMemoryParser` into
+/// `MemoryTurnWrite::extraction`. Returns the number of facts stored (0 or 1).
+pub(super) fn auto_extract_facts(
+    store: &dyn MemoryRuntime,
+    user_message: &str,
+) -> anyhow::Result<usize> {
+    const PATTERNS: [&str; 10] = [
+        "i prefer ",
+        "i like ",
+        "my name is ",
+        "i am a ",
+        "i work ",
+        "i use ",
+        "my favorite ",
+        "i always ",
+        "i never ",
+        "i live ",
+    ];
+    let lower = user_message.to_lowercase();
+    if PATTERNS.iter().any(|p| lower.contains(p)) {
+        let now = Utc::now();
+        store.store_fact(&kria_core::memory::MemoryFact {
+            id: None,
+            text: user_message.to_string(),
+            category: "user_preference".to_string(),
+            source: "conversation".to_string(),
+            created_at: now,
+            last_accessed: now,
+            access_count: 0,
+            decay_score: 1.0,
+        })?;
+        Ok(1)
+    } else {
+        Ok(0)
     }
 }
 
@@ -178,5 +302,18 @@ mod flag_tests {
             assert!(chat_flag_enabled(var), "{v:?} should enable");
         }
         std::env::remove_var(var);
+    }
+
+    // The desktop session→UUID mapping MUST match the core agent loop's
+    // `stable_session_uuid` (identical FNV constants) so the privacy-mode gate
+    // set here applies to the writes the core loop performs. This locks the
+    // desktop side's determinism; the core side has the mirror test.
+    #[test]
+    fn memory_session_uuid_is_deterministic_and_distinct() {
+        let a1 = super::memory_session_uuid("session-abc");
+        let a2 = super::memory_session_uuid("session-abc");
+        assert_eq!(a1, a2);
+        assert_ne!(a1, super::memory_session_uuid("session-xyz"));
+        assert_ne!(a1, uuid::Uuid::nil());
     }
 }

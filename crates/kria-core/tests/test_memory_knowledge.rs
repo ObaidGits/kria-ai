@@ -9,7 +9,7 @@
 mod common;
 
 use kria_core::agent::router::{Intent, IntentRouter};
-use kria_core::memory::MemoryStore;
+use kria_core::memory::{KriaMemoryRuntime, MemoryRuntime};
 use kria_core::safety::policy::{PolicyEngine, RiskLevel};
 use kria_core::tools::registry;
 use std::sync::Arc;
@@ -17,7 +17,8 @@ use std::sync::Arc;
 fn build_memory_backed_registry() -> (tempfile::TempDir, registry::ToolRegistry) {
     let tmp = tempfile::tempdir().expect("create tempdir for memory-backed registry");
     let db_path = tmp.path().join("memory_tools_test.db");
-    let store = Arc::new(MemoryStore::open(&db_path).expect("open memory store"));
+    let store: Arc<dyn MemoryRuntime> =
+        Arc::new(KriaMemoryRuntime::open(&db_path).expect("open memory runtime"));
     let reg = registry::build_registry_with_store(Some(store));
     (tmp, reg)
 }

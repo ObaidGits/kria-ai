@@ -33,7 +33,7 @@ use kria_core::agent::loop_engine::StreamEvent;
 use kria_core::agent::AgentLoop;
 use kria_core::infra::pipeline_trace::{log_pipeline_step, sanitize_text_for_logs};
 use kria_core::llm::ChatMessage;
-use kria_core::memory::{ConversationTurn, MemoryStore};
+use kria_core::memory::conversation::{ConversationStore, ConversationTurn};
 use kria_core::notify::{NtfyClient, NtfyMessage, NtfyPriority};
 use kria_core::safety::hitl::ApprovalResponse;
 use std::sync::Arc;
@@ -259,7 +259,7 @@ fn spawn_chat_turn(
     sink: WsSink,
     session_id: String,
     user_msg: String,
-    session_store: Option<Arc<MemoryStore>>,
+    session_store: Option<Arc<ConversationStore>>,
     notifier: Option<Arc<NtfyClient>>,
     device_id: Option<String>,
 ) {
@@ -361,7 +361,7 @@ fn spawn_chat_turn(
 }
 
 /// Persist a single conversation turn (best-effort; logs on failure).
-fn persist_turn(store: &Arc<MemoryStore>, session_id: &str, role: &str, content: &str) {
+fn persist_turn(store: &Arc<ConversationStore>, session_id: &str, role: &str, content: &str) {
     let turn = ConversationTurn {
         id: None,
         session_id: session_id.to_string(),

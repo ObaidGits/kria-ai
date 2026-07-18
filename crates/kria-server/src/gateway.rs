@@ -20,7 +20,7 @@ pub struct PhoneGatewayState {
     pub turn_admission: Arc<kria_core::agent::TurnAdmission>,
     pub device_registry: Option<Arc<kria_core::mobile::DeviceRegistry>>,
     pub notifier: Option<Arc<kria_core::notify::NtfyClient>>,
-    pub session_store: Option<Arc<kria_core::memory::MemoryStore>>,
+    pub session_store: Option<Arc<kria_core::memory::conversation::ConversationStore>>,
     pub remote_desktop: Option<Arc<kria_core::remote_desktop::RemoteDesktopManager>>,
     /// Portal + WebRTC capture backend driving the desktop stream (Phase 4.6 v3).
     /// Shares the same object the manager holds; `None` when remote desktop is off.

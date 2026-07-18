@@ -351,6 +351,8 @@ pub async fn send_image_message(
     }
 
     append_recent_turns_for_llm(&mut messages, &recent_turns);
+    // Memory grounding + tool-outcome memory are handled centrally by the core
+    // agent loop; no per-path injection here.
     messages.push(ChatMessage {
         role: "user".into(),
         content: build_image_llm_user_content(&user_text, &image_path_for_llm, &image_intent, None),
@@ -358,7 +360,9 @@ pub async fn send_image_message(
         images: Some(llm_images),
     });
 
-    // Persist user turn (content only, images stored in attachments/)
+    // Cognitive observation of the user turn is performed centrally by the core
+    // agent loop (`AgentLoop::observe_user_turn`, H1); conversation history is
+    // still persisted here with the image annotation for replay.
     let _ = memory_writer.store_turn(&memory_turn_write(
         session_id.clone(),
         format!("{}\n[image: {}]", user_text, filename),
@@ -417,8 +421,6 @@ pub async fn send_image_message(
     let session_id_clone = session_id.clone();
     let memory_store_clone = memory_store.clone();
     let memory_writer_clone = memory_writer.clone();
-    let embeddings_clone = state.embeddings.clone();
-    let vectors_clone = state.vectors.clone();
     let user_message_clone = user_text.clone();
     let preanalysis_summary_fallback = preanalysis_summary.clone();
     let stale_guard_agent = agent_loop.clone();
@@ -579,19 +581,20 @@ pub async fn send_image_message(
                         .get("name")
                         .and_then(|v| v.as_str())
                         .unwrap_or("tool");
+                    let tool_history = summarize_tool_turn_for_history(
+                        tool_name,
+                        success,
+                        persisted_payload
+                            .get("result")
+                            .unwrap_or(&serde_json::Value::Null),
+                        persisted_payload
+                            .get("metadata")
+                            .unwrap_or(&serde_json::Value::Null),
+                    );
                     let _ = memory_writer_clone.store_turn(&memory_turn_write(
                         session_id_clone.clone(),
                         String::new(),
-                        summarize_tool_turn_for_history(
-                            tool_name,
-                            success,
-                            persisted_payload
-                                .get("result")
-                                .unwrap_or(&serde_json::Value::Null),
-                            persisted_payload
-                                .get("metadata")
-                                .unwrap_or(&serde_json::Value::Null),
-                        ),
+                        tool_history,
                         Some(tool_name.to_string()),
                         Some(persisted_payload.to_string()),
                         None,
@@ -795,23 +798,15 @@ pub async fn send_image_message(
                 })),
             );
 
-            let fact_mgr = kria_core::memory::facts::FactManager::new(
-                memory_store_clone.as_ref(),
-                &vectors_clone,
-                &embeddings_clone,
-            );
-            match fact_mgr.extract_from_turn(&user_message_clone, &full_response) {
-                Ok(ids) if !ids.is_empty() => {
-                    tracing::info!(
-                        count = ids.len(),
-                        "auto-extracted facts from image conversation"
-                    );
+            match auto_extract_facts(memory_store_clone.as_ref(), &user_message_clone) {
+                Ok(count) if count > 0 => {
+                    tracing::info!(count, "auto-extracted facts from image conversation");
                     emit_agent_stage(
                         &app_handle,
                         "facts_extracted",
                         "New user facts extracted from the image conversation",
                         Some(serde_json::json!({
-                            "fact_count": ids.len(),
+                            "fact_count": count,
                         })),
                     );
                 }

@@ -289,12 +289,34 @@ pub struct ClassifierConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MemoryConfig {
+    // Legacy runtime/read-model limits retained for existing consumers.
     pub max_context_turns: usize,
     pub max_facts: usize,
     pub decay_threshold: f32,
     pub retrieval_top_k: usize,
     pub embedding_model: String,
     pub embedding_dim: usize,
+    // Unified cognitive MemorySystem controls consumed by desktop runtime.
+    pub token_budget: u32,
+    pub admission_debounce_ms: u64,
+    pub enrichment_queue_capacity: usize,
+    pub enrichment_catchup_secs: u64,
+    pub change_channel_capacity: usize,
+    pub modes: MemoryModesConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MemoryModesConfig {
+    pub default: String,
+}
+
+impl Default for MemoryModesConfig {
+    fn default() -> Self {
+        Self {
+            default: "permanent".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1218,6 +1240,12 @@ impl Default for MemoryConfig {
             retrieval_top_k: 5,
             embedding_model: "all-MiniLM-L6-v2".into(),
             embedding_dim: 384,
+            token_budget: 800,
+            admission_debounce_ms: 60_000,
+            enrichment_queue_capacity: 1_024,
+            enrichment_catchup_secs: 30,
+            change_channel_capacity: 256,
+            modes: MemoryModesConfig::default(),
         }
     }
 }

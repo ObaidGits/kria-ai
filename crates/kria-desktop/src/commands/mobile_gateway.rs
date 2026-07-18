@@ -20,7 +20,7 @@ struct GatewayManagers {
     remote_desktop: Arc<RemoteDesktopManager>,
     remote_desktop_backend: Arc<kria_server::desktop_stream::PortalWebRtcBackend>,
     notifier: Option<Arc<NtfyClient>>,
-    session_store: Option<Arc<kria_core::memory::MemoryStore>>,
+    session_store: Option<Arc<kria_core::memory::conversation::ConversationStore>>,
 }
 
 /// Running HTTP listener handle (None when the gateway is stopped).
@@ -98,9 +98,14 @@ fn managers(config: &KriaConfig) -> &'static GatewayManagers {
             None
         };
 
-        let session_store = kria_core::memory::MemoryStore::open(&paths.data_dir.join("kria.db"))
-            .map(Arc::new)
-            .ok();
+        let session_store =
+            kria_core::memory::db::Database::open(&paths.data_dir.join("kria_memory.db"))
+                .map(|db| {
+                    Arc::new(kria_core::memory::conversation::ConversationStore::new(
+                        Arc::new(db),
+                    ))
+                })
+                .ok();
 
         GatewayManagers {
             device_registry,

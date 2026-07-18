@@ -295,9 +295,14 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         "hardware detected"
     );
 
-    // Initialize memory store (SQLite)
-    let memory_store_backend = Arc::new(MemoryStore::open(&paths.db_path)?);
-    let memory_store: Arc<dyn MemoryRuntime> = memory_store_backend.clone();
+    // Initialize the unified memory authority backend. Conversations, derived
+    // facts, snippets, and RAG chunks all live in the single authority DB
+    // (`kria_memory.db`) via `KriaMemoryRuntime`, replacing the legacy
+    // `MemoryStore` engine and eliminating the chat-vs-memory data split.
+    let memory_backend = Arc::new(kria_core::memory::KriaMemoryRuntime::open(
+        &paths.data_dir.join("kria_memory.db"),
+    )?);
+    let memory_store: Arc<dyn MemoryRuntime> = memory_backend.clone();
 
     // ── Durable reminder scheduler (Phase 2.3) ────────────────────────────────
     // Polls the persistent `reminders` table; fires due reminders via notify-send.
@@ -864,11 +869,11 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
 
     // ── Batch 1: PSDG — Initialize WorldModelStore EARLY ─────────────────────
     // Must happen before AgentLoop construction so PsdgHandle can be wired in.
-    // Opens WorldModelStore against the same db_path as MemoryStore (WAL-safe).
+    // Opens WorldModelStore against the shared kria.db path (WAL-safe).
     let world_model_early: Option<kria_core::agent::PsdgHandle> =
         match kria_core::agent::PsdgHandle::open(&paths.db_path) {
             Ok(handle) => {
-                tracing::info!("[INIT] PSDG: WorldModelStore opened (WAL, same db as MemoryStore)");
+                tracing::info!("[INIT] PSDG: WorldModelStore opened (WAL, shared kria.db)");
                 Some(handle)
             }
             Err(e) => {
@@ -882,25 +887,59 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         tracing::warn!("embedding model load error (using fallback): {}", e);
         EmbeddingModel::load(384).expect("fallback always succeeds")
     }));
-    let vectors_path = paths.data_dir.join("vectors.bin");
-    let vectors = Arc::new(
-        VectorIndex::open(&vectors_path, 384).unwrap_or_else(|_| VectorIndex::in_memory(384)),
-    );
+    // ── Unified cognitive Memory System (the intelligence backbone) ───────────
+    // Shares the SINGLE authority DB handle with the conversation store / runtime
+    // backend (one connection pool, L10) and reuses the already-loaded embedding
+    // model (no double ONNX load). Every subsystem records observations/outcomes
+    // and retrieves context through this, always via the Write Policy.
+    let configured_memory_mode: kria_core::memory::types::MemoryMode = config
+        .memory
+        .modes
+        .default
+        .parse()
+        .expect("MemoryMode parsing is infallible");
+    let default_memory_mode = match configured_memory_mode {
+        kria_core::memory::types::MemoryMode::Other(ref value) => {
+            tracing::warn!(mode = %value, "unknown memory default mode; using permanent");
+            kria_core::memory::types::MemoryMode::Permanent
+        }
+        mode => mode,
+    };
+    let memory_system = kria_core::memory::api::MemorySystem::open_with_db(
+        memory_backend.database(),
+        kria_core::memory::api::MemoryConfig {
+            db_path: paths.data_dir.join("kria_memory.db").display().to_string(),
+            device_id: "local-desktop".to_string(),
+            default_mode: default_memory_mode,
+            admission_debounce: std::time::Duration::from_millis(
+                config.memory.admission_debounce_ms,
+            ),
+            default_token_budget: config.memory.token_budget.max(1),
+            enrichment_queue_capacity: config.memory.enrichment_queue_capacity.max(1),
+            enrichment_catchup_interval: std::time::Duration::from_secs(
+                config.memory.enrichment_catchup_secs.max(1),
+            ),
+            change_channel_capacity: config.memory.change_channel_capacity.max(1),
+        },
+        Arc::new(kria_core::memory::embedding::OnnxEmbedder::from_model(
+            embeddings.clone(),
+        )),
+        true,
+    )?;
+    tracing::info!("[INIT] Memory System online (unified cognitive authority)");
 
-    // Build the full tool registry (60+ tools + 6 precognitive) with MemoryStore, RAG, and Proactive
-    let rag_engine = Arc::new(kria_core::memory::RagEngine::new(
-        memory_store_backend.clone(),
-        vectors.clone(),
-        embeddings.clone(),
-    ));
+    // Build the full tool registry (60+ tools + 6 precognitive) with the memory
+    // runtime, unified MemorySystem, and Proactive. RAG/library tools are wired
+    // from the MemorySystem itself (single retrieval pipeline; no RagEngine).
     let proactive_engine = Arc::new(kria_core::automation::ProactiveEngine::new(
         kria_core::automation::proactive::HealthThresholds::default(),
     ));
-    let tool_registry_inner = registry::build_registry_full_with_psdg(
+    let tool_registry_inner = registry::build_registry_full_with_memory(
         Some(memory_store.clone()),
-        Some(rag_engine.clone()),
         Some(proactive_engine.clone()),
         world_model_early.clone(),
+        None,
+        Some(memory_system.clone()),
     );
     kria_core::tools::precognitive::register(&tool_registry_inner, sidecar.clone());
     kria_core::tools::news::register(&tool_registry_inner, sidecar.clone());
@@ -1726,7 +1765,8 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     .with_max_tool_rounds(max_tool_rounds)
     .with_confidence_thresholds(min_confidence_to_act, clarify_threshold)
     .with_hardware_tier(hardware_info.tier.as_str())
-    .with_execution_verifier(execution_verifier);
+    .with_execution_verifier(execution_verifier)
+    .with_memory_system(memory_system.clone());
 
     // Wire PSDG handle into AgentLoop (Batch 1 Phase 1.1 + 3.12)
     if let Some(ref psdg) = world_model_early {
@@ -1861,7 +1901,6 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     health.register("agent_loop");
     health.register("voice_pipeline");
     health.register("embeddings");
-    health.register("vectors");
     // Mark core services as healthy
     health.update("memory_store", ServiceStatus::Healthy, None);
     // model_router: probe the actual LLM server asynchronously
@@ -1878,7 +1917,6 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     health.update("agent_loop", ServiceStatus::Healthy, None);
     health.update("voice_pipeline", ServiceStatus::Healthy, None);
     health.update("embeddings", ServiceStatus::Healthy, None);
-    health.update("vectors", ServiceStatus::Healthy, None);
     // MCP servers start in background — mark as starting
     health.register("mcp_servers");
     health.update(
@@ -2022,7 +2060,6 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
                 memory_store.clone(),
                 tool_registry.clone(),
                 embeddings.clone(),
-                vectors.clone(),
                 hardware_info.tier.as_str().to_string(),
                 orch_cell.clone(),
             );
@@ -2039,7 +2076,6 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         memory_store: memory_store.clone(),
         tool_registry: tool_registry.clone(),
         embeddings: embeddings.clone(),
-        vectors: vectors.clone(),
         hw_tier: hardware_info.tier.as_str().to_string(),
         orchestrator: orch_cell.clone(),
     });
@@ -2203,6 +2239,84 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
             workflow_continuation_runtime.clone(),
         ),
     );
+    // Conversation store shares the SAME authority DB handle as the runtime
+    // backend (one `Arc<Database>`), so chat/session/preference/media writes and
+    // cognitive-memory writes hit a single database.
+    let conversation = std::sync::Arc::new(
+        kria_core::memory::conversation::ConversationStore::new(memory_backend.database()),
+    );
+
+    // ── Event-driven cognition loop + live UI bridge (design §20/§25, P8) ─────
+    // The Cognitive Scheduler owns consolidation/reflection/dreaming. It is
+    // resource-gated (suspends on battery / memory pressure) and single-flight
+    // (one task, `run_ready()` called once per iteration). Instead of a pure
+    // timer it now WAKES on memory-change events: every committed write, delete,
+    // update, relationship, goal/plan change, or cognition completion flows
+    // through `MemorySystem::subscribe_changes()`. Each change is (1) bridged to
+    // the frontend as a `memory://<kind>` + `memory://changed` Tauri event for
+    // instant live UI updates, and (2) coalesced (~1.2s) before waking cognition
+    // to avoid event storms. The 300s tick remains as an idle fallback so
+    // idle-only jobs (dreaming) still fire when nothing is happening.
+    {
+        let memory_system_bg = memory_system.clone();
+        let handle_mem = handle.clone();
+        tokio::spawn(async move {
+            let monitor = std::sync::Arc::new(
+                kria_core::memory::scheduler::DefaultResourceMonitor::new(512),
+            );
+            let scheduler = memory_system_bg.cognitive_scheduler(monitor, None);
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(300));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            let mut changes = memory_system_bg.subscribe_changes();
+
+            let emit = |change: &kria_core::memory::api::MemoryChange| {
+                let _ =
+                    handle_mem.emit(&format!("memory://{}", change.kind), change.detail.clone());
+                let _ = handle_mem.emit(
+                    "memory://changed",
+                    serde_json::json!({ "kind": change.kind, "detail": change.detail }),
+                );
+            };
+
+            loop {
+                let woke_by_change = tokio::select! {
+                    _ = tick.tick() => false,
+                    r = changes.recv() => match r {
+                        Ok(change) => {
+                            emit(&change);
+                            // Drain the rest of the burst immediately (coalescing).
+                            while let Ok(more) = changes.try_recv() {
+                                emit(&more);
+                            }
+                            true
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                            tracing::warn!(lagged = n, "memory change subscriber lagged");
+                            // Still refresh the UI broadly on lag.
+                            let _ = handle_mem.emit("memory://changed", serde_json::json!({ "kind": "lagged" }));
+                            true
+                        }
+                        Err(_) => break,
+                    },
+                };
+
+                // Debounce a change-triggered wake so a burst runs cognition once.
+                if woke_by_change {
+                    tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+                    while changes.try_recv().is_ok() {} // swallow coalesced tail
+                }
+
+                let ran = scheduler.run_ready().await;
+                if ran > 0 {
+                    tracing::debug!(
+                        jobs = ran,
+                        woke_by_change,
+                        "cognitive scheduler ran background jobs"
+                    );
+                }
+            }
+        });
+    }
     let quarantine_registry = Arc::new(
         kria_core::tools::quarantine::QuarantineRegistry::open_path(&paths.db_path)?,
     );
@@ -2239,6 +2353,9 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         tool_registry: tool_registry.clone(),
         quarantine_registry,
         memory_store,
+        conversation,
+        memory_system,
+        cold_start_cancel: Arc::new(std::sync::Mutex::new(None)),
         hitl: hitl.clone(),
         decision_store: decision_store.clone(),
         policy_engine,
@@ -2248,7 +2365,6 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         event_bus: event_bus.clone(),
         sidecar,
         embeddings,
-        vectors,
         current_session_id: Arc::new(RwLock::new(uuid::Uuid::new_v4().to_string())),
         voice_active: voice_active.clone(),
         voice_pipeline: Arc::new(RwLock::new(voice_pipeline)),

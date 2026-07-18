@@ -239,7 +239,6 @@ pub(super) struct AgentLoopLocalApiResponder {
     pub(super) memory_store: Arc<dyn MemoryRuntime>,
     pub(super) tool_registry: Arc<ToolRegistry>,
     pub(super) embeddings: Arc<EmbeddingModel>,
-    pub(super) vectors: Arc<VectorIndex>,
     pub(super) hw_tier: String,
     pub(super) orchestrator: Arc<tokio::sync::RwLock<Option<Arc<Orchestrator>>>>,
 }
@@ -258,7 +257,6 @@ impl LocalApiResponder for AgentLoopLocalApiResponder {
             &self.memory_store,
             &self.tool_registry,
             &self.embeddings,
-            &self.vectors,
             &self.hw_tier,
             orc_snapshot.as_ref(),
             // Local API bridge is always the owner — it runs inside the desktop
