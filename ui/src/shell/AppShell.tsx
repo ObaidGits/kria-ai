@@ -153,14 +153,17 @@ export function AppShell(props: AppShellProps) {
       setProvisioningResolved(true);
       void converseStore.initialize();
       void settingsStore.initialize();
-      // Browser flow fixtures become available only after Memory's initial
-      // backend read settles, preventing deterministic seeds from being
-      // overwritten by an in-flight refresh.
-      await memoryStore.initialize();
+      const memoryInitialization = memoryStore.initialize();
       void automationStore.initialize();
       if (installBrowserHarness) {
+        // Browser flow fixtures become available only after Memory's initial
+        // backend read settles, preventing deterministic seeds from being
+        // overwritten by an in-flight refresh.
+        await memoryInitialization;
         const { installE2EHarness } = await import("../test/e2eHarness");
         installE2EHarness();
+      } else {
+        void memoryInitialization;
       }
     });
     void initWindowPresentation();
