@@ -419,4 +419,3 @@ Validation used an isolated materialization of the exact staged index at `/media
 | `cargo test -p kria-server --test integration_api` | **PASS — 13/13**, including unavailable-state gating and live `MemorySystem` HTTP routes |
 
 Warnings were non-failing existing dead/unused-code warnings, including `InjectionScore` fields and test-only unused imports. No 500K-memory claim is made; scale evidence covers 500 memories only. Browser mocks remain regression evidence and do not prove native Rust/Tauri IPC. GNOME X11, KDE Wayland/X11, mixed-DPI, physical/manual scenarios, and native performance acceptance remain blocked exactly as documented above; this Memory commit does not change the overall task 17.1 verdict.
-
