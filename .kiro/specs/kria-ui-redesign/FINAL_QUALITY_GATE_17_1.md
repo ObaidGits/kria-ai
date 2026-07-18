@@ -404,7 +404,7 @@ Browser fixtures remain regression evidence, not native Tauri IPC evidence. Adva
 
 ## Committed advanced Memory backend — 2026-07-18
 
-Advanced `memory_*` AppShell behavior is now backed by committed runtime code in commit `f838a415192ce09f2c00771e5e894760885bb02c` (`Land advanced Memory architecture`). This supersedes the earlier cutover note that described the backend as excluded.
+Advanced `memory_*` AppShell behavior is now backed by committed runtime code in commit `f7cc8da3c69b8cd8c9608129c5eebe217dda6cb7` (`Land advanced Memory architecture`). This supersedes the earlier cutover note that described the backend as excluded.
 
 Validation used an isolated materialization of the exact staged index at `/media/obaid/SSD/kria-skills/.memory-staged-validation`; unrelated owner worktree changes were absent. `git diff --cached --check` passed before commit.
 
