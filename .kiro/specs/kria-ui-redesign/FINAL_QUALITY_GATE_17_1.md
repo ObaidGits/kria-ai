@@ -390,7 +390,8 @@ This gate validates the exact redesign index in the isolated worktree at `/media
 | `npm run check` | **PASS** |
 | UI consistency lints | **PASS** |
 | Full Vitest suite | **PASS — 148 files / 1,247 tests** |
-| `npm run build` | **PASS — 419 modules**; existing vendor chunk warning only |
+| Final focused AppShell + Converse Vitest | **PASS — 2 files / 21 tests** |
+| `npm run build` | **PASS — 420 modules**; existing vendor chunk warning only |
 | `cargo check -p kria-desktop` | **PASS** |
 | Core workflow-continuation tests | **PASS — 24/24** |
 | Phase-8 focused integration tests | **PASS — 3/3** |
