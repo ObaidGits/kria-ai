@@ -151,7 +151,7 @@ describe("appStore low-confidence tool choice flow", () => {
     // (the queued prompt is dispatched later, when the current turn
     // completes) — proving it was queued, not sent immediately, and not lost.
     const sendCallsWithQueuedText = invokeMock.mock.calls.filter(
-      ([command, args]: [string, any]) =>
+      ([command, args]) =>
         command === "send_message" && args?.message === "second message sent while still thinking"
     );
     expect(sendCallsWithQueuedText.length).toBe(0);

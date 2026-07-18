@@ -23,10 +23,10 @@
 //! happens inside spawned worker tasks.
 
 use std::cmp::Reverse;
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, HashMap};
 use std::sync::Arc;
 
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{broadcast, mpsc, watch};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
@@ -67,7 +67,15 @@ impl Default for ExecutiveConfig {
 /// Internal command sent to the controller's dispatch loop.
 enum ControllerCommand {
     /// Cancel a task by ID (foreground, background, or queued).
-    CancelTask { task_id: uuid::Uuid },
+    CancelTask {
+        task_id: uuid::Uuid,
+    },
+    GpuLeaseAcquired {
+        task_id: uuid::Uuid,
+    },
+    GpuLeaseReleased {
+        task_id: uuid::Uuid,
+    },
 }
 
 pub struct ExecutiveController {
@@ -77,6 +85,7 @@ pub struct ExecutiveController {
     rx: mpsc::UnboundedReceiver<TaskRequest>,
     /// Command channel: receives control commands (cancel, etc.).
     cmd_rx: mpsc::UnboundedReceiver<ControllerCommand>,
+    cmd_tx: mpsc::UnboundedSender<ControllerCommand>,
     /// Public sender for submitting tasks.
     #[allow(dead_code)]
     tx: mpsc::UnboundedSender<TaskRequest>,
@@ -86,14 +95,22 @@ pub struct ExecutiveController {
     foreground: Option<TaskHandle>,
     /// Background task pool.
     background: JoinSet<(uuid::Uuid, TaskResult)>,
+    /// Metadata + cancellation handles for running background tasks.
+    background_tasks: HashMap<uuid::Uuid, ExecutiveTaskSnapshot>,
+    background_cancellations: HashMap<uuid::Uuid, CancellationToken>,
     /// GPU lease manager (existing).
     gpu_lease: Arc<GpuLeaseManager>,
     /// Policy gate for command evaluation.
     policy_gate: Arc<dyn PolicyGate>,
     /// Preemption manager.
     preemption: PreemptionManager,
-    /// Event broadcast (for UI observability).
-    event_tx: watch::Sender<Option<ControllerEvent>>,
+    /// Event broadcast (for UI observability; bounded, every event retained until consumed).
+    event_tx: broadcast::Sender<ControllerEvent>,
+    /// Latest bounded read model used by desktop/server snapshot commands.
+    snapshot_tx: watch::Sender<ExecutiveSnapshot>,
+    gpu_lease_holder: Option<uuid::Uuid>,
+    total_completed: u64,
+    total_failed: u64,
     /// Shutdown signal.
     shutdown: CancellationToken,
     /// Tracks when the last foreground task completed (for idle detection).
@@ -143,12 +160,15 @@ impl ExecutiveController {
     ) -> (Self, ExecutiveSender) {
         let (tx, rx) = mpsc::unbounded_channel();
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
-        let (event_tx, _event_rx) = watch::channel(None);
+        let (event_tx, _) = broadcast::channel(256);
+        let (snapshot_tx, snapshot_rx) = watch::channel(ExecutiveSnapshot::default());
         let shutdown = CancellationToken::new();
 
         let sender = ExecutiveSender {
             tx: tx.clone(),
-            cmd_tx,
+            cmd_tx: cmd_tx.clone(),
+            event_tx: event_tx.clone(),
+            snapshot_rx,
             cancel: shutdown.clone(),
         };
 
@@ -159,14 +179,21 @@ impl ExecutiveController {
             config,
             rx,
             cmd_rx,
+            cmd_tx,
             tx,
             queue: BinaryHeap::new(),
             foreground: None,
             background: JoinSet::new(),
+            background_tasks: HashMap::new(),
+            background_cancellations: HashMap::new(),
             gpu_lease,
             policy_gate,
             preemption,
             event_tx,
+            snapshot_tx,
+            gpu_lease_holder: None,
+            total_completed: 0,
+            total_failed: 0,
             shutdown,
             last_foreground_completed: None,
         };
@@ -174,8 +201,8 @@ impl ExecutiveController {
         (controller, sender)
     }
 
-    /// Subscribe to controller events (for UI).
-    pub fn subscribe_events(&self) -> watch::Receiver<Option<ControllerEvent>> {
+    /// Subscribe to every controller event (for UI/runtime bridges).
+    pub fn subscribe_events(&self) -> broadcast::Receiver<ControllerEvent> {
         self.event_tx.subscribe()
     }
 
@@ -192,14 +219,21 @@ impl ExecutiveController {
                 config: _,
                 rx,
                 cmd_rx,
+                cmd_tx: _,
                 tx: _,
                 queue: _,
                 foreground,
                 background,
+                background_tasks: _,
+                background_cancellations: _,
                 gpu_lease: _,
                 policy_gate: _,
                 preemption: _,
                 event_tx: _,
+                snapshot_tx: _,
+                gpu_lease_holder: _,
+                total_completed: _,
+                total_failed: _,
                 shutdown,
                 last_foreground_completed: _,
             } = self;
@@ -239,8 +273,9 @@ impl ExecutiveController {
                 }
             }
 
-            // After any event, try to drain queued tasks
+            // After any event, drain available capacity and publish one bounded read model.
             self.try_drain_queue().await;
+            self.publish_snapshot();
         }
     }
 
@@ -342,44 +377,65 @@ impl ExecutiveController {
         let task_id = task.id;
         let priority = task.priority;
         let source = task.source.clone();
+        let description = task.payload.description();
+        let submitted_at = task.submitted_at;
+        let submitted_at_utc = Self::instant_timestamp(submitted_at);
         let requires_gpu = task.requires_gpu;
         let cancel = task.cancel.clone();
         let started_at = std::time::Instant::now();
+        let started_at_utc = chrono::Utc::now().to_rfc3339();
 
         self.emit(ControllerEvent::TaskStarted {
             task_id,
             priority,
             source: source.clone(),
+            description: description.clone(),
+            ts: started_at_utc.clone(),
         });
 
-        if priority.is_foreground() {
-            // Foreground task: spawn and track as the active foreground.
-            let gpu_lease = self.gpu_lease.clone();
-            let policy_gate = self.policy_gate.clone();
-            let cancel_clone = cancel.clone();
+        let gpu_lease = self.gpu_lease.clone();
+        let policy_gate = self.policy_gate.clone();
+        let cancel_clone = cancel.clone();
+        let cmd_tx = self.cmd_tx.clone();
 
+        if priority.is_foreground() {
             let join = tokio::spawn(async move {
-                let result = Self::execute_task(task, gpu_lease, policy_gate, cancel_clone).await;
-                result
+                Self::execute_task(task, gpu_lease, policy_gate, cancel_clone, cmd_tx).await
             });
 
             self.foreground = Some(TaskHandle {
                 id: task_id,
                 priority,
                 source,
+                description,
+                submitted_at,
+                started_at_utc,
                 cancel,
                 join,
                 started_at,
                 requires_gpu,
             });
         } else {
-            // Background task: spawn into JoinSet.
-            let gpu_lease = self.gpu_lease.clone();
-            let policy_gate = self.policy_gate.clone();
-            let cancel_clone = cancel.clone();
-
+            self.background_tasks.insert(
+                task_id,
+                ExecutiveTaskSnapshot {
+                    id: task_id,
+                    priority,
+                    source,
+                    state: TaskState::Running,
+                    description,
+                    submitted_at: submitted_at_utc,
+                    started_at: Some(started_at_utc),
+                    completed_at: None,
+                    duration_ms: None,
+                    error: None,
+                    requires_gpu,
+                },
+            );
+            self.background_cancellations.insert(task_id, cancel);
             self.background.spawn(async move {
-                let result = Self::execute_task(task, gpu_lease, policy_gate, cancel_clone).await;
+                let result =
+                    Self::execute_task(task, gpu_lease, policy_gate, cancel_clone, cmd_tx).await;
                 (task_id, result)
             });
         }
@@ -394,14 +450,9 @@ impl ExecutiveController {
         }));
     }
 
-    /// Try to drain queued tasks when resources become available.
-    /// This is a no-op future that resolves when there's capacity.
+    /// Drain queued tasks while matching foreground/background capacity exists.
     async fn try_drain_queue(&mut self) {
-        // Only drain if we have capacity
         if self.foreground.is_some() && self.background.len() >= self.config.max_background_tasks {
-            // No capacity — this branch will never resolve, which is fine
-            // (tokio::select! will pick other branches)
-            std::future::pending::<()>().await;
             return;
         }
 
@@ -434,6 +485,10 @@ impl ExecutiveController {
                     "Preempting foreground task"
                 );
 
+                let victim_priority = fg.priority;
+                let replacement_id = replacement.id;
+                let replacement_priority = replacement.priority;
+
                 // Cancel the victim
                 fg.cancel.cancel();
 
@@ -445,7 +500,10 @@ impl ExecutiveController {
 
                 self.emit(ControllerEvent::TaskPreempted {
                     victim_id,
-                    replacement_id: replacement.id,
+                    victim_priority,
+                    replacement_id,
+                    replacement_priority,
+                    ts: chrono::Utc::now().to_rfc3339(),
                 });
 
                 // Spawn the replacement
@@ -458,6 +516,8 @@ impl ExecutiveController {
     async fn on_foreground_complete(&mut self, result: TaskResult) {
         if let Some(fg) = self.foreground.take() {
             let duration_ms = fg.elapsed().as_millis() as u64;
+            let (success, output_summary, error) = Self::result_details(&result);
+            self.record_outcome(&result);
             tracing::info!(
                 task_id = %fg.id,
                 priority = %fg.priority,
@@ -467,15 +527,12 @@ impl ExecutiveController {
 
             self.emit(ControllerEvent::TaskCompleted {
                 task_id: fg.id,
-                result_summary: result.to_string(),
+                success,
                 duration_ms,
+                output_summary,
+                error,
+                ts: chrono::Utc::now().to_rfc3339(),
             });
-
-            // Release GPU lease if held
-            if fg.requires_gpu {
-                self.emit(ControllerEvent::GpuLeaseReleased { task_id: fg.id });
-            }
-
             self.last_foreground_completed = Some(std::time::Instant::now());
         }
     }
@@ -487,6 +544,11 @@ impl ExecutiveController {
     ) {
         match result {
             Ok((task_id, task_result)) => {
+                let duration_ms = Self::result_duration_ms(&task_result);
+                let (success, output_summary, error) = Self::result_details(&task_result);
+                self.background_tasks.remove(&task_id);
+                self.background_cancellations.remove(&task_id);
+                self.record_outcome(&task_result);
                 tracing::debug!(
                     task_id = %task_id,
                     result = %task_result,
@@ -494,13 +556,51 @@ impl ExecutiveController {
                 );
                 self.emit(ControllerEvent::TaskCompleted {
                     task_id,
-                    result_summary: task_result.to_string(),
-                    duration_ms: 0, // Background tasks track their own duration
+                    success,
+                    duration_ms,
+                    output_summary,
+                    error,
+                    ts: chrono::Utc::now().to_rfc3339(),
                 });
             }
-            Err(e) => {
-                tracing::error!("Background task panicked: {}", e);
+            Err(error) => {
+                tracing::error!(%error, "Background task panicked");
+                self.total_failed = self.total_failed.saturating_add(1);
             }
+        }
+    }
+
+    fn result_details(result: &TaskResult) -> (bool, Option<String>, Option<String>) {
+        match result {
+            TaskResult::Success { output, .. } => (true, output.clone(), None),
+            TaskResult::Failed { reason, .. } => (false, None, Some(reason.clone())),
+            TaskResult::Cancelled { reason } => (false, None, Some(reason.clone())),
+            TaskResult::TimedOut { timeout } => (
+                false,
+                None,
+                Some(format!("Timed out after {}ms", timeout.as_millis())),
+            ),
+        }
+    }
+
+    fn result_duration_ms(result: &TaskResult) -> u64 {
+        match result {
+            TaskResult::Success { total_duration, .. }
+            | TaskResult::Failed { total_duration, .. } => total_duration.as_millis() as u64,
+            TaskResult::TimedOut { timeout } => timeout.as_millis() as u64,
+            TaskResult::Cancelled { .. } => 0,
+        }
+    }
+
+    fn record_outcome(&mut self, result: &TaskResult) {
+        match result {
+            TaskResult::Success { .. } => {
+                self.total_completed = self.total_completed.saturating_add(1)
+            }
+            TaskResult::Failed { .. } | TaskResult::TimedOut { .. } => {
+                self.total_failed = self.total_failed.saturating_add(1)
+            }
+            TaskResult::Cancelled { .. } => {}
         }
     }
 
@@ -525,12 +625,14 @@ impl ExecutiveController {
         gpu_lease: Arc<GpuLeaseManager>,
         _policy_gate: Arc<dyn PolicyGate>,
         cancel: CancellationToken,
+        cmd_tx: mpsc::UnboundedSender<ControllerCommand>,
     ) -> TaskResult {
         let start = std::time::Instant::now();
+        let task_id = task.id;
 
         // Acquire GPU lease if needed. Routes through HRA admission (single runtime authority);
         // priority is derived from the owner class (L1Worker → InteractiveFg).
-        let _gpu_guard = if task.requires_gpu && task.priority.can_acquire_gpu() {
+        let gpu_guard = if task.requires_gpu && task.priority.can_acquire_gpu() {
             let turn_id = task.id.to_string();
             match gpu_lease
                 .acquire_guard_gated(GpuOwner::L1Worker, turn_id, None, 0)
@@ -548,161 +650,139 @@ impl ExecutiveController {
             None
         };
 
-        // Execute based on payload type
-        tokio::select! {
+        if gpu_guard.is_some() {
+            let _ = cmd_tx.send(ControllerCommand::GpuLeaseAcquired { task_id });
+        }
+        let (work, on_cancel) = task.payload.into_parts();
+        let result = tokio::select! {
             biased;
             _ = cancel.cancelled() => {
+                if let Some(cancel_work) = on_cancel {
+                    cancel_work();
+                }
                 TaskResult::Cancelled {
                     reason: "Cancelled by ExecutiveController".into(),
                 }
             }
-            result = Self::run_payload(task.payload, cancel.clone()) => {
-                result
-            }
+            result = work => result,
+        };
+        drop(gpu_guard);
+        if task.requires_gpu && task.priority.can_acquire_gpu() {
+            let _ = cmd_tx.send(ControllerCommand::GpuLeaseReleased { task_id });
         }
+        result
     }
 
-    /// Run the actual task payload. This is where the work happens.
-    async fn run_payload(payload: TaskPayload, _cancel: CancellationToken) -> TaskResult {
-        let start = std::time::Instant::now();
+    fn instant_timestamp(instant: std::time::Instant) -> String {
+        let elapsed = instant.elapsed();
+        chrono::Utc::now()
+            .checked_sub_signed(chrono::Duration::from_std(elapsed).unwrap_or_default())
+            .unwrap_or_else(chrono::Utc::now)
+            .to_rfc3339()
+    }
 
-        match payload {
-            TaskPayload::UserTurn {
-                text,
-                is_voice,
-                session_id,
-            } => {
-                // TODO: Wire into AgentLoop.run()
-                tracing::info!(
-                    text = %text,
-                    is_voice = is_voice,
-                    session_id = %session_id,
-                    "Processing user turn"
-                );
-                TaskResult::Success {
-                    total_duration: start.elapsed(),
-                    output: Some(format!("Processed: {}", text)),
-                }
-            }
+    fn publish_snapshot(&self) {
+        const QUEUED_SNAPSHOT_CAP: usize = 256;
+        let active_foreground = self.foreground.as_ref().map(|task| ExecutiveTaskSnapshot {
+            id: task.id,
+            priority: task.priority,
+            source: task.source.clone(),
+            state: TaskState::Running,
+            description: task.description.clone(),
+            submitted_at: Self::instant_timestamp(task.submitted_at),
+            started_at: Some(task.started_at_utc.clone()),
+            completed_at: None,
+            duration_ms: None,
+            error: None,
+            requires_gpu: task.requires_gpu,
+        });
+        let mut active_background = self.background_tasks.values().cloned().collect::<Vec<_>>();
+        active_background.sort_by(|left, right| left.started_at.cmp(&right.started_at));
 
-            TaskPayload::ExecuteCommand { command } => {
-                // TODO: Wire into SubprocessExecutor.execute()
-                tracing::info!(command = ?command, "Executing command");
-                TaskResult::Success {
-                    total_duration: start.elapsed(),
-                    output: Some(format!(
-                        "Executed: {} {}",
-                        command.binary,
-                        command.args.join(" ")
-                    )),
-                }
-            }
+        let mut queued_tasks = self.queue.iter().map(|item| &item.0).collect::<Vec<_>>();
+        queued_tasks.sort_by(|left, right| {
+            left.priority
+                .cmp(&right.priority)
+                .then_with(|| left.submitted_at.cmp(&right.submitted_at))
+        });
+        let queued = queued_tasks
+            .into_iter()
+            .take(QUEUED_SNAPSHOT_CAP)
+            .map(|queued| ExecutiveTaskSnapshot {
+                id: queued.request.id,
+                priority: queued.request.priority,
+                source: queued.request.source.clone(),
+                state: TaskState::Queued,
+                description: queued.request.payload.description(),
+                submitted_at: Self::instant_timestamp(queued.request.submitted_at),
+                started_at: None,
+                completed_at: None,
+                duration_ms: None,
+                error: None,
+                requires_gpu: queued.request.requires_gpu,
+            })
+            .collect();
 
-            TaskPayload::BackgroundDiagnostics { commands } => {
-                tracing::info!(count = commands.len(), "Running background diagnostics");
-                // TODO: Execute each command via SubprocessExecutor
-                TaskResult::Success {
-                    total_duration: start.elapsed(),
-                    output: Some(format!("Ran {} diagnostic commands", commands.len())),
-                }
-            }
-
-            TaskPayload::GatherEvidence { commands } => {
-                tracing::info!(count = commands.len(), "Gathering evidence");
-                // TODO: Execute each command via SubprocessExecutor
-                TaskResult::Success {
-                    total_duration: start.elapsed(),
-                    output: Some(format!(
-                        "Gathered evidence from {} commands",
-                        commands.len()
-                    )),
-                }
-            }
-
-            TaskPayload::CompileSkill { plan_json: _ } => {
-                tracing::info!("Compiling skill from plan");
-                // TODO: Wire into SkillCompiler
-                TaskResult::Success {
-                    total_duration: start.elapsed(),
-                    output: Some("Skill compiled".into()),
-                }
-            }
-
-            TaskPayload::VramMaintenanceRefresh { reason } => {
-                tracing::info!(reason = %reason, "Starting VRAM maintenance refresh");
-                // TODO: Wire into Orchestrator.evict_to_ram() → reload
-                TaskResult::Success {
-                    total_duration: start.elapsed(),
-                    output: Some("VRAM refreshed".into()),
-                }
-            }
-
-            TaskPayload::HitlResponse {
-                request_id,
-                approved,
-            } => {
-                tracing::info!(
-                    request_id = %request_id,
-                    approved = approved,
-                    "HITL response received"
-                );
-                // TODO: Wire into HitlGateway.respond()
-                TaskResult::Success {
-                    total_duration: start.elapsed(),
-                    output: Some(format!(
-                        "HITL response: {}",
-                        if approved { "approved" } else { "rejected" }
-                    )),
-                }
-            }
-
-            TaskPayload::Maintenance { description } => {
-                tracing::info!(description = %description, "Running maintenance task");
-                TaskResult::Success {
-                    total_duration: start.elapsed(),
-                    output: Some(description),
-                }
-            }
-        }
+        self.snapshot_tx.send_replace(ExecutiveSnapshot {
+            active_foreground,
+            active_background,
+            queued,
+            gpu_lease_holder: self.gpu_lease_holder,
+            gpu_lease_remaining_ms: None,
+            total_completed: self.total_completed,
+            total_failed: self.total_failed,
+        });
     }
 
     /// Emit a controller event (non-blocking, best-effort).
     fn emit(&self, event: ControllerEvent) {
-        let _ = self.event_tx.send(Some(event));
+        let _ = self.event_tx.send(event);
     }
 
-    /// Handle an internal command (cancel, etc.).
+    /// Handle an internal command (cancel + GPU lifecycle).
     fn handle_command(&mut self, cmd: ControllerCommand) {
         match cmd {
             ControllerCommand::CancelTask { task_id } => {
-                // Check foreground first
-                if let Some(ref fg) = self.foreground {
-                    if fg.id == task_id {
-                        tracing::info!(task_id = %task_id, "Cancelling foreground task via command");
-                        fg.cancel.cancel();
+                if let Some(ref foreground) = self.foreground {
+                    if foreground.id == task_id {
+                        tracing::info!(%task_id, "Cancelling foreground executive task");
+                        foreground.cancel.cancel();
                         return;
                     }
                 }
 
-                // Check queued tasks — remove and cancel matching entry
+                if let Some(cancel) = self.background_cancellations.get(&task_id) {
+                    tracing::info!(%task_id, "Cancelling background executive task");
+                    cancel.cancel();
+                    return;
+                }
+
                 let mut remaining = BinaryHeap::new();
+                let mut found = false;
                 while let Some(Reverse(queued)) = self.queue.pop() {
                     if queued.request.id == task_id {
-                        tracing::info!(task_id = %task_id, "Cancelling queued task via command");
+                        found = true;
                         queued.request.cancel.cancel();
-                        // Don't re-insert; task is cancelled
                     } else {
                         remaining.push(Reverse(queued));
                     }
                 }
                 self.queue = remaining;
-
-                // Background tasks are in a JoinSet — we can't cancel by ID
-                // directly, but the task's own CancellationToken was already
-                // cloned into the spawned future. If the caller has access to
-                // the TaskRequest they can cancel via that token; otherwise the
-                // task will complete normally.
-                tracing::debug!(task_id = %task_id, "Cancel command processed (background tasks cancel via their own token)");
+                if found {
+                    tracing::info!(%task_id, "Cancelled queued executive task");
+                } else {
+                    tracing::debug!(%task_id, "Executive cancel was idempotent; task not active");
+                }
+            }
+            ControllerCommand::GpuLeaseAcquired { task_id } => {
+                self.gpu_lease_holder = Some(task_id);
+                self.emit(ControllerEvent::GpuLeaseAcquired { task_id });
+            }
+            ControllerCommand::GpuLeaseReleased { task_id } => {
+                if self.gpu_lease_holder == Some(task_id) {
+                    self.gpu_lease_holder = None;
+                }
+                self.emit(ControllerEvent::GpuLeaseReleased { task_id });
             }
         }
     }
@@ -733,6 +813,8 @@ impl ExecutiveController {
 pub struct ExecutiveSender {
     tx: mpsc::UnboundedSender<TaskRequest>,
     cmd_tx: mpsc::UnboundedSender<ControllerCommand>,
+    event_tx: broadcast::Sender<ControllerEvent>,
+    snapshot_rx: watch::Receiver<ExecutiveSnapshot>,
     cancel: CancellationToken,
 }
 
@@ -749,6 +831,16 @@ impl ExecutiveSender {
         self.cmd_tx
             .send(ControllerCommand::CancelTask { task_id })
             .map_err(|_| "ExecutiveController has shut down".to_string())
+    }
+
+    /// Subscribe to controller lifecycle events without lossy polling.
+    pub fn subscribe_events(&self) -> broadcast::Receiver<ControllerEvent> {
+        self.event_tx.subscribe()
+    }
+
+    /// Return latest bounded controller-owned read model without blocking the dispatcher.
+    pub fn snapshot(&self) -> ExecutiveSnapshot {
+        self.snapshot_rx.borrow().clone()
     }
 
     /// Check if the controller is still running.

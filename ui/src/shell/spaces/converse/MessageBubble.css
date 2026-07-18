@@ -1,0 +1,166 @@
+/**
+ * MessageBubble — role-styled conversation turn. Token-only (Req 14.2).
+ * Conversation-dominance (Req 4.3): reply text is body-scale and opaque;
+ * result cards are caption-scale and visually secondary.
+ */
+.kria-msg__context-trigger {
+  display: block;
+}
+
+.kria-msg {
+  display: block;
+  border-radius: var(--radius-lg);
+  padding: var(--space-3) var(--space-4);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+  line-height: var(--font-line-height-normal);
+  outline: none;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-easing-standard),
+    box-shadow var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+/* Assistant/system (KRIA-authored) sit on a soft surface; user turns are
+ * accent-tinted and right-aligned in measure so authorship reads at a glance. */
+.kria-msg[data-role="assistant"],
+.kria-msg[data-role="system"] {
+  background: var(--color-surface-2);
+}
+
+.kria-msg[data-role="user"] {
+  background: var(--color-accent-soft);
+  border: 1px solid var(--color-accent-border);
+}
+
+.kria-msg[data-role="system"] {
+  border: 1px dashed var(--color-border-default);
+}
+
+/* Selection + keyboard focus (Req 17.1 focus-visible). */
+.kria-msg[data-selected="true"] {
+  box-shadow: 0 0 0 2px var(--color-accent-default);
+}
+.kria-msg:focus-visible {
+  box-shadow: 0 0 0 2px var(--color-accent-default);
+}
+
+/* ── Header: provenance cue · time · actions ─────────────────────────────── */
+.kria-msg__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  font-size: var(--font-size-caption);
+  color: var(--color-text-muted);
+}
+
+/* Shared kit ProvenanceCue owns user/KRIA authorship styling (Req 20.5). */
+
+.kria-msg__time {
+  margin-left: auto;
+  font-size: var(--font-size-micro);
+  color: var(--color-text-muted);
+}
+
+/* Actions revealed on hover / selection / keyboard focus — always in the DOM
+ * so they stay keyboard-reachable (Req 4.8 / 17.1). */
+.kria-msg__actions {
+  opacity: 0;
+  transition: opacity var(--motion-duration-fast) var(--motion-easing-standard);
+}
+.kria-msg:hover .kria-msg__actions,
+.kria-msg:focus-within .kria-msg__actions,
+.kria-msg[data-selected="true"] .kria-msg__actions {
+  opacity: 1;
+}
+
+/* ── Body (sanitized markdown) ───────────────────────────────────────────── */
+.kria-msg__body {
+  overflow-wrap: anywhere;
+}
+.kria-msg__body > :first-child {
+  margin-top: 0;
+}
+.kria-msg__body > :last-child {
+  margin-bottom: 0;
+}
+.kria-msg__body pre {
+  overflow-x: auto;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-1);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-caption);
+}
+.kria-msg__body code {
+  font-family: var(--font-family-mono);
+  font-size: 0.9em;
+}
+.kria-msg__body a {
+  color: var(--color-accent-default);
+}
+
+/* Code-block header + copy button emitted by the markdown renderer. */
+.kria-md-code__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  background: var(--color-surface-1);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-micro);
+  color: var(--color-text-muted);
+}
+.kria-md-code__copy {
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-2);
+  background: var(--color-surface-2);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-micro);
+  cursor: pointer;
+}
+.kria-md-code__copy:hover {
+  border-color: var(--color-border-strong);
+}
+.kria-md-code__limit {
+  color: var(--color-warning-text);
+}
+
+/* ── Inline result cards — secondary to the reply (Req 4.3) ───────────────── */
+.kria-msg__results {
+  margin-top: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.kria-msg__result {
+  font-size: var(--font-size-caption);
+  color: var(--color-text-secondary);
+}
+.kria-msg__result-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+}
+.kria-msg__result-title {
+  font-size: var(--font-size-caption);
+}
+.kria-msg__result-summary {
+  margin: var(--space-2) 0 0;
+}
+.kria-msg__result-body {
+  margin-top: var(--space-2);
+  overflow-wrap: anywhere;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kria-msg,
+  .kria-msg__actions {
+    transition: none;
+  }
+}

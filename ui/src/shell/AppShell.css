@@ -1,0 +1,448 @@
+/**
+ * AppShell styles — token-only (Req 14.2, zero raw color). Layered "Ink & Aura"
+ * composition (design.md §4.3): opaque content canvas, aura-glass floating
+ * regions, the luminous Core. All motion is compositor-cheap and honors
+ * reduced-motion (Req 16.3/16.4).
+ */
+
+.kria-shell {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100vh;
+  min-height: 0;
+  background: var(--color-neutral-1);
+  color: var(--color-text-primary);
+  font-family: var(--font-family-text);
+  font-size: var(--font-size-body);
+}
+
+/* ── PresenceBar ─────────────────────────────────────────────────────────── */
+.kria-presencebar {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--color-border-default);
+  background: var(--color-surface-3);
+  backdrop-filter: blur(var(--blur-floating));
+  z-index: var(--z-panel);
+}
+
+.kria-presencebar__core {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.kria-presencebar__brand {
+  font-family: var(--font-family-display);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.08em;
+  color: var(--color-text-primary);
+}
+
+/* The KRIA Core presence (CorePresence component) is the single ambient-motion
+ * element (Req 3.5); its styles live in components/CorePresence.css. */
+
+.kria-presencebar__intent {
+  display: flex;
+  justify-content: center;
+}
+
+.kria-intent-bar {
+  width: min(560px, 100%);
+  justify-content: flex-start;
+  gap: var(--space-2);
+  color: var(--color-text-secondary);
+}
+
+.kria-intent-bar__hint {
+  color: var(--color-text-muted);
+}
+
+.kria-presencebar__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.kria-presencebar__approvals {
+  position: relative;
+  display: inline-flex;
+}
+
+.kria-presencebar__badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-full);
+  background: var(--color-danger-solid);
+  color: var(--color-accent-contrast);
+  font-size: var(--font-size-micro);
+  line-height: 16px;
+  text-align: center;
+}
+
+.kria-presencebar__approvals .has-attention {
+  color: var(--color-danger-solid);
+}
+
+.kria-presencebar__notifications {
+  position: relative;
+  display: inline-flex;
+}
+.kria-presencebar__badge--notice {
+  background: var(--color-accent-default);
+}
+
+/* The single running-pulse on this surface (Req 13.1): a quiet accent breath on
+   the bell while a non-blocking "needs-you" notice waits. Frozen under
+   reduced-motion — no ambient/decorative motion (Req 13.5 / 17.4). */
+.kria-presencebar__notifications .has-pulse {
+  color: var(--color-accent-default);
+  animation: kria-bell-pulse var(--motion-duration-slow) var(--motion-easing-standard) infinite;
+}
+@keyframes kria-bell-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kria-presencebar__notifications .has-pulse { animation: none; }
+}
+
+/* ── Body: Dock · SpaceRouter · Inspector ────────────────────────────────── */
+.kria-shell__body {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ── Dock ────────────────────────────────────────────────────────────────── */
+.kria-dock {
+  border-right: 1px solid var(--color-border-default);
+  background: var(--color-surface-1);
+  padding: var(--space-2);
+  overflow-y: auto;
+}
+
+.kria-dock__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.kria-dock__button {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.kria-dock__button:hover {
+  background: var(--color-surface-2);
+  color: var(--color-text-primary);
+}
+
+.kria-dock__button.is-active {
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent-border);
+  color: var(--color-text-primary);
+}
+
+.kria-dock__label {
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+}
+
+/* ── SpaceRouter ─────────────────────────────────────────────────────────── */
+.kria-space-router {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-6);
+}
+
+.kria-space {
+  display: flex;
+  min-height: 100%;
+  align-items: center;
+  justify-content: center;
+}
+
+.kria-space-router__loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--color-text-muted);
+}
+
+/* ── Inspector (single shared, slide-in) ─────────────────────────────────── */
+.kria-inspector {
+  width: min(380px, 90vw);
+  border-left: 1px solid var(--color-border-default);
+  background: var(--color-surface-3);
+  backdrop-filter: blur(var(--blur-floating));
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  animation: kria-inspector-in var(--motion-duration-base) var(--motion-easing-entrance);
+}
+
+@keyframes kria-inspector-in {
+  from { transform: translateX(16px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.kria-inspector__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-default);
+}
+
+.kria-inspector__title {
+  margin: 0;
+  font-size: var(--font-size-heading);
+  font-weight: var(--font-weight-semibold);
+  text-transform: capitalize;
+}
+
+.kria-inspector__body {
+  padding: var(--space-4);
+  overflow: auto;
+}
+
+.kria-inspector__fallback {
+  color: var(--color-text-muted);
+}
+
+/* ── StatusLine ──────────────────────────────────────────────────────────── */
+.kria-statusline {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-1) var(--space-4);
+  border-top: 1px solid var(--color-border-default);
+  background: var(--color-surface-1);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+}
+
+.kria-statusline__group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.kria-statusline__state {
+  text-transform: capitalize;
+}
+
+.kria-statusline__approvals {
+  margin-left: auto;
+  color: var(--color-warning-text);
+}
+
+/* ── Window-mode composition (Req 15.2 degrade-by-curation) ──────────────── */
+/* Compact: drop the Dock labels + the Inspector column (curated, not squished). */
+.kria-shell[data-window-mode="compact"] .kria-dock__label {
+  display: none;
+}
+.kria-shell[data-window-mode="compact"] .kria-intent-bar__hint {
+  display: none;
+}
+
+/* ── Reduced motion (Req 16.3/16.4): freeze all shell motion. ────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .kria-inspector {
+    animation: none;
+  }
+}
+
+/* ── Intentional window-mode shell compositions (Req 15.1–15.4) ────────── */
+/* Compact curates secondary chrome away; primary task keeps normal scale. */
+.kria-shell[data-window-mode="compact"] .kria-presencebar {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  padding-inline: var(--space-2);
+}
+.kria-shell[data-window-mode="compact"] .kria-presencebar__brand,
+.kria-shell[data-window-mode="compact"] .kria-presencebar__notifications,
+.kria-shell[data-window-mode="compact"] .kria-presencebar__actions > .kit-icon-button:last-child {
+  display: none;
+}
+.kria-shell[data-window-mode="compact"] .kria-space-router {
+  padding: var(--space-3);
+}
+.kria-shell[data-window-mode="compact"] .kria-statusline {
+  overflow: hidden;
+  gap: var(--space-2);
+  padding-inline: var(--space-2);
+  white-space: nowrap;
+}
+.kria-shell[data-window-mode="compact"] .kria-inspector {
+  position: fixed;
+  inset: var(--space-3);
+  width: auto;
+  z-index: var(--z-floating);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+}
+.kria-shell[data-window-mode="compact"] .kria-converse__rail-toggle,
+.kria-shell[data-window-mode="compact"] .kria-machines [data-mode-region="mobile"],
+.kria-shell[data-window-mode="compact"] .kria-machines [data-mode-region="remote"],
+.kria-shell[data-window-mode="compact"] .kria-machines [data-mode-region="terminal"] {
+  display: none;
+}
+.kria-shell[data-window-mode="compact"] .kria-settings__groups,
+.kria-shell[data-window-mode="compact"] .kria-settings__history,
+.kria-shell[data-window-mode="compact"] .kria-settings__section-head,
+.kria-shell[data-window-mode="compact"] .kria-settings__rows > :not(:first-child) {
+  display: none;
+}
+.kria-shell[data-window-mode="compact"] .kria-settings__layout {
+  display: block;
+}
+.kria-shell[data-window-mode="compact"] .kria-settings__header {
+  align-items: stretch;
+  flex-direction: column;
+}
+.kria-shell[data-window-mode="compact"] .kria-settings__search {
+  width: 100%;
+}
+.kria-shell[data-window-mode="compact"] .kria-memory__compact,
+.kria-shell[data-window-mode="compact"] .kria-automations__compact,
+.kria-shell[data-window-mode="compact"] .kria-capabilities__compact,
+.kria-shell[data-window-mode="compact"] .kria-observatory__compact {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.kria-shell[data-window-mode="compact"] .kria-observatory__meters {
+  grid-template-columns: 1fr;
+}
+
+/* Immersive gives canvas priority. Dock becomes edge-reveal; safety controls
+   remain in thinned PresenceBar and Inspector floats above content. */
+.kria-shell[data-window-mode="immersive"] .kria-presencebar {
+  gap: var(--space-2);
+  padding-block: var(--space-1);
+  background: var(--color-surface-1);
+}
+.kria-shell[data-window-mode="immersive"] .kria-presencebar__brand,
+.kria-shell[data-window-mode="immersive"] .kria-intent-bar__hint {
+  display: none;
+}
+.kria-shell[data-window-mode="immersive"] .kria-presencebar__global-stop {
+  flex: 0 0 auto;
+}
+.kria-shell[data-window-mode="immersive"] .kria-dock {
+  inline-size: var(--space-2);
+  overflow: hidden;
+  padding: 0;
+  opacity: 0.55;
+  z-index: var(--z-floating);
+}
+.kria-shell[data-window-mode="immersive"] .kria-dock:hover,
+.kria-shell[data-window-mode="immersive"] .kria-dock:focus-within {
+  inline-size: auto;
+  overflow-y: auto;
+  padding: var(--space-2);
+  opacity: 1;
+}
+.kria-shell[data-window-mode="immersive"] .kria-space-router {
+  padding: var(--space-3);
+}
+.kria-shell[data-window-mode="immersive"] .kria-inspector {
+  position: fixed;
+  inset-block: var(--space-3);
+  inset-inline-end: var(--space-3);
+  z-index: var(--z-floating);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+}
+.kria-shell[data-window-mode="immersive"] .kria-statusline {
+  padding-block: 0;
+}
+.kria-shell[data-window-mode="immersive"] .kria-converse__stream-inner,
+.kria-shell[data-window-mode="immersive"] .kria-converse__composer-inner {
+  width: min(880px, 100%);
+}
+.kria-shell[data-window-mode="immersive"] .kria-converse__work {
+  width: clamp(320px, 30vw, 480px);
+}
+.kria-shell[data-window-mode="immersive"] .kria-machines [data-mode-region="remote"] {
+  order: -1;
+}
+.kria-shell[data-window-mode="immersive"] .kria-remote__canvas,
+.kria-shell[data-window-mode="immersive"] .kria-remote__canvas .mobile-desktop {
+  min-height: 70vh;
+}
+.kria-shell[data-window-mode="immersive"] .kria-observatory__meters,
+.kria-shell[data-window-mode="immersive"] .kria-observatory__tiles {
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+.kria-shell[data-window-mode="immersive"] .kria-settings {
+  width: min(1100px, 100%);
+  margin-inline: auto;
+}
+
+/* KRIA-owned window-mode switch. This is app navigation, not fake WM chrome. */
+.kria-window-modes {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-1);
+}
+.kria-window-modes__button {
+  padding-inline: var(--space-2);
+}
+.kria-window-modes__button[aria-pressed="true"] {
+  border-color: var(--color-accent-border);
+  color: var(--color-text-primary);
+}
+.kria-window-modes__exit {
+  margin-inline-start: var(--space-1);
+}
+.kria-shell[data-window-mode="compact"] .kria-window-modes__label {
+  display: none;
+}
+.kria-shell[data-window-mode="compact"] .kria-window-modes__button {
+  padding-inline: var(--space-1);
+}
+@media (max-width: 780px) {
+  .kria-window-modes__label { display: none; }
+}
+
+.kria-shell-boot {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: var(--color-neutral-1);
+  color: var(--color-text-muted);
+  font-family: var(--font-family-text);
+  font-size: var(--font-size-body);
+}

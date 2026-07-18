@@ -364,60 +364,72 @@ fn build_test_controller(
 
 /// Build a Voice TaskRequest (P0).
 fn voice_task(text: &str) -> TaskRequest {
+    let description = text.to_string();
     TaskRequest::new(
         TaskPriority::Voice,
         TaskSource::VoicePipeline,
         false,
-        TaskPayload::UserTurn {
-            text: text.to_string(),
-            is_voice: true,
-            session_id: "test-session".to_string(),
-        },
+        TaskPayload::new(description.clone(), async move {
+            let start = Instant::now();
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            TaskResult::Success {
+                total_duration: start.elapsed(),
+                output: Some(description),
+            }
+        }),
     )
 }
 
 /// Build an Interactive TaskRequest (P1).
 fn interactive_task(text: &str) -> TaskRequest {
+    let description = text.to_string();
     TaskRequest::new(
         TaskPriority::Interactive,
         TaskSource::TextChat,
         false,
-        TaskPayload::UserTurn {
-            text: text.to_string(),
-            is_voice: false,
-            session_id: "test-session".to_string(),
-        },
+        TaskPayload::new(description.clone(), async move {
+            let start = Instant::now();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            TaskResult::Success {
+                total_duration: start.elapsed(),
+                output: Some(description),
+            }
+        }),
     )
 }
 
 /// Build a Background TaskRequest (P3).
-fn background_task(_description: &str) -> TaskRequest {
+fn background_task(description: &str) -> TaskRequest {
+    let description = description.to_string();
     TaskRequest::new(
         TaskPriority::Background,
         TaskSource::CuriosityLoop,
         false,
-        TaskPayload::BackgroundDiagnostics {
-            commands: vec![StructuredCommand {
-                binary: "uptime".to_string(),
-                args: vec![],
-                target: "local".to_string(),
-                timeout_secs: 5,
-                working_dir: None,
-                env_vars: None,
-            }],
-        },
+        TaskPayload::new(description.clone(), async move {
+            let start = Instant::now();
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            TaskResult::Success {
+                total_duration: start.elapsed(),
+                output: Some(description),
+            }
+        }),
     )
 }
 
 /// Build a Maintenance TaskRequest (P4).
 fn maintenance_task(description: &str) -> TaskRequest {
+    let description = description.to_string();
     TaskRequest::new(
         TaskPriority::Maintenance,
         TaskSource::Maintenance,
         false,
-        TaskPayload::Maintenance {
-            description: description.to_string(),
-        },
+        TaskPayload::new(description.clone(), async move {
+            let start = Instant::now();
+            TaskResult::Success {
+                total_duration: start.elapsed(),
+                output: Some(description),
+            }
+        }),
     )
 }
 

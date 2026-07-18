@@ -1,0 +1,44 @@
+.kria-adaptive-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.kria-adaptive-controls__why {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+  line-height: var(--font-line-height-tight);
+}
+
+.kria-coach-hint {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 480px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+}
+
+.kria-coach-hint > span {
+  flex: 1 1 auto;
+}
+
+.kria-adaptive-reset {
+  appearance: none;
+  border: 0;
+  padding: var(--space-1) var(--space-2);
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: var(--font-size-caption);
+  text-decoration: underline;
+  text-underline-offset: var(--space-1);
+  cursor: pointer;
+}
+
+.kria-adaptive-reset:hover {
+  color: var(--color-text-primary);
+}

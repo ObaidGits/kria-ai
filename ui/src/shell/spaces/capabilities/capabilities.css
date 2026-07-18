@@ -1,0 +1,582 @@
+/**
+ * Capabilities Space — segments + descriptor Inspector (task 8.1, Req 7.1/7.2).
+ *
+ * Token-only (Req 14.2, zero raw color). Header (title + subtitle) above a
+ * tablist of six segments; each tabpanel scrolls independently. No ambient
+ * motion (Core-only rule, Req 13.5).
+ */
+
+.kria-capabilities {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  gap: var(--space-4);
+}
+
+/* ── Header ───────────────────────────────────────────────────────────────── */
+.kria-capabilities__header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.kria-capabilities__title {
+  margin: 0;
+  font-size: var(--font-size-title);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.kria-capabilities__subtitle {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-body);
+}
+
+/* ── Segments (tablist) ──────────────────────────────────────────────────── */
+.kria-capabilities__segments {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* ── Region (tabpanel body) ──────────────────────────────────────────────── */
+.kria-capabilities__region {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding-top: var(--space-4);
+}
+
+.kria-capabilities__region-title {
+  margin: 0;
+  font-size: var(--font-size-heading);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.kria-capabilities__status {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-body);
+  padding: var(--space-3) 0;
+}
+
+.kria-capabilities__search {
+  max-width: 380px;
+  min-width: 0;
+}
+
+.kria-capabilities__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.kria-capabilities__grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--space-3);
+}
+
+.kria-capabilities__provider-summary {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-1);
+}
+
+/* ── Capability row ──────────────────────────────────────────────────────── */
+.kria-caprow__name {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+}
+
+.kria-caprow__desc {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+
+.kria-caprow__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+/* ── Cards (skill / provider / integration) ──────────────────────────────── */
+.kria-capcard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  text-align: start;
+  width: 100%;
+}
+
+.kria-capcard__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.kria-capcard__name {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+}
+
+.kria-capcard__desc {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+  margin: 0;
+}
+
+.kria-capcard__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.kria-capcard__status-label {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+}
+
+/* ── Generate panel ──────────────────────────────────────────────────────── */
+.kria-capgenerate {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.kria-capgenerate__status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.kria-capgenerate section,
+.kria-capgenerate__details {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.kria-capgenerate__form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--space-2);
+}
+
+.kria-capgenerate__details {
+  margin: 0;
+}
+
+.kria-capgenerate__details div {
+  display: grid;
+  grid-template-columns: minmax(7rem, 0.35fr) minmax(0, 1fr);
+  gap: var(--space-2);
+}
+
+.kria-capgenerate__details dt {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+
+.kria-capgenerate__details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--color-text-secondary);
+}
+
+/* ── Descriptor Inspector body ───────────────────────────────────────────── */
+.kria-descriptor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.kria-descriptor__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.kria-descriptor__section-title {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+
+.kria-descriptor__desc {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-body);
+  line-height: 1.5;
+}
+
+.kria-descriptor__meta {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+}
+
+.kria-descriptor__meta dt {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+
+.kria-descriptor__meta dd {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-caption);
+}
+
+.kria-descriptor__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.kria-descriptor__schema {
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-1);
+  color: var(--color-text-secondary);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-micro);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.kria-descriptor__error {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-caption);
+}
+
+/* ── Card actions (task 8.2, Req 7.4) ─────────────────────────────────────── */
+.kria-capcard__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.kria-capcard__test-ok {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-caption);
+  color: var(--color-success-text);
+}
+.kria-capcard__test-err {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-caption);
+  color: var(--color-danger-text);
+}
+
+/* ── Skills browse (install with trust review) ────────────────────────────── */
+.kria-capabilities__browse {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+.kria-capabilities__browse .kria-capabilities__search {
+  flex: 1 1 auto;
+}
+
+/* ── Descriptor Run (task 8.2, Req 7.3) ───────────────────────────────────── */
+.kria-descriptor__run {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-start;
+}
+.kria-descriptor__run-note {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  font-size: var(--font-size-caption);
+  color: var(--color-text-secondary);
+}
+.kria-descriptor__run-err {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  font-size: var(--font-size-caption);
+  color: var(--color-danger-text);
+}
+
+/* ── Trust review dialog (task 8.2, Req 7.4) ──────────────────────────────── */
+.kria-trust-review {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.kria-trust-review__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.kria-trust-review__label {
+  font-size: var(--font-size-micro);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+.kria-trust-review__tier {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.kria-trust-review__note,
+.kria-trust-review__desc {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  color: var(--color-text-secondary);
+  line-height: 1.45;
+}
+.kria-trust-review__caps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.kria-trust-review__caps li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-caption);
+  color: var(--color-text-secondary);
+}
+.kria-trust-review__empty {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  color: var(--color-text-muted);
+}
+
+/* ── Integration connect dialog (task 8.2, Req 7.4) ───────────────────────── */
+.kria-integration-connect {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.kria-integration-connect__error {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  font-size: var(--font-size-caption);
+  color: var(--color-danger-text);
+}
+
+/* ── Governance revival (task 8.4): quarantine + grants + activity ────────── */
+.kria-governance__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.kria-governance__quarantine {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.kria-governance__section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.kria-governance__section-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.kria-governance__note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--font-size-caption);
+  color: var(--color-text-secondary);
+  line-height: 1.45;
+}
+
+.kria-governance__activity {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-height: 320px;
+  overflow: auto;
+}
+
+.kria-governance__activity-entry {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-border-default);
+}
+
+.kria-governance__activity-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.kria-governance__activity-detail {
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-micro);
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.kria-governance__confirm {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-caption);
+  color: var(--color-text-secondary);
+}
+
+.kria-governance__discovery,
+.kria-governance__discovery > span {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.kria-governance__discovery {
+  justify-content: space-between;
+}
+
+/* ── Production runtime/settings surfaces ────────────────────────────────── */
+.kria-capsettings,
+.kria-models-runtime {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.kria-capsettings__card,
+.kria-capsettings__form,
+.kria-runtime-status {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.kria-capsettings__grid,
+.kria-capsettings__policy-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-3);
+}
+
+.kria-capsettings__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 2.5rem;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+}
+
+.kria-capsettings__checkbox {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--color-accent-default);
+}
+
+.kria-capsettings__policy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.kria-capsettings__error,
+.kria-capsettings__success,
+.kria-capsettings__warning,
+.kria-capsettings__path {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  overflow-wrap: anywhere;
+}
+
+.kria-capsettings__error { color: var(--color-danger-text); }
+.kria-capsettings__success { color: var(--color-success-text); }
+.kria-capsettings__warning { color: var(--color-warning-text); }
+.kria-capsettings__path {
+  color: var(--color-text-muted);
+  font-family: var(--font-family-mono);
+}
+
+.kria-runtime-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--space-3);
+}
+
+.kria-runtime-summary > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  color: var(--color-text-primary);
+}
+
+.kria-capsettings__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+@media (max-width: 700px) {
+  .kria-capsettings__grid,
+  .kria-capsettings__policy-grid,
+  .kria-runtime-summary {
+    grid-template-columns: 1fr;
+  }
+}

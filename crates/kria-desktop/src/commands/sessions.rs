@@ -109,6 +109,87 @@ pub async fn create_session(
 }
 
 #[tauri::command]
+pub async fn branch_session(
+    source_session_id: String,
+    through_index: usize,
+    title: Option<String>,
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    let state = state
+        .get()
+        .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
+    if source_session_id.trim().is_empty() {
+        return Err("source_session_id is required".to_string());
+    }
+
+    let source_turns = state
+        .memory_store
+        .get_recent_turns(&source_session_id, 1_000)
+        .map_err(|e| e.to_string())?;
+    let turns_to_copy = source_turns.into_iter().take(through_index + 1);
+    let new_id = uuid::Uuid::new_v4().to_string();
+    let memory_writer: Arc<dyn MemoryManager> = state.memory_store.clone();
+    let mut copied = 0usize;
+
+    for turn in turns_to_copy {
+        let write = MemoryTurnWrite {
+            session_id: new_id.clone(),
+            user_prompt: if turn.role == "user" {
+                turn.content.clone()
+            } else {
+                String::new()
+            },
+            assistant_response: if turn.role == "user" {
+                String::new()
+            } else {
+                turn.content.clone()
+            },
+            tool_name: turn.tool_name.clone(),
+            tool_result: turn.tool_result.clone(),
+            tokens_used: turn.tokens_used.and_then(|value| i32::try_from(value).ok()),
+            timestamp: turn.timestamp,
+            extraction: None,
+        };
+        if let Err(error) = memory_writer.store_turn(&write) {
+            let _ = memory_writer.delete_session(&new_id);
+            return Err(format!("failed to create conversation branch: {error}"));
+        }
+        copied += 1;
+    }
+
+    let source_title = state
+        .memory_store
+        .get_preference(&format!("session_title:{source_session_id}"))
+        .map_err(|e| e.to_string())?
+        .unwrap_or_else(|| "Conversation".to_string());
+    let branch_title = title
+        .as_deref()
+        .and_then(normalize_session_title)
+        .unwrap_or_else(|| format!("Branch · {source_title}"));
+    for preference in [
+        preference_record(format!("session_title:{new_id}"), branch_title),
+        preference_record(format!("session_title_manual:{new_id}"), "1"),
+        preference_record(
+            format!("session_created_at:{new_id}"),
+            Utc::now().to_rfc3339(),
+        ),
+    ] {
+        if let Err(error) = memory_writer.set_preference(&preference) {
+            let _ = memory_writer.delete_session(&new_id);
+            let _ = memory_writer.delete_session_preferences(&new_id);
+            return Err(format!("failed to create branch metadata: {error}"));
+        }
+    }
+
+    *state.current_session_id.write().await = new_id.clone();
+    Ok(serde_json::json!({
+        "session_id": new_id,
+        "source_session_id": source_session_id,
+        "copied_turns": copied,
+    }))
+}
+
+#[tauri::command]
 pub async fn list_sessions(
     state: State<'_, AppStateCell>,
 ) -> Result<Vec<serde_json::Value>, String> {
@@ -143,6 +224,12 @@ pub async fn list_sessions(
                 .unwrap_or(None)
                 .as_deref()
                 == Some("1");
+            let temporary = state
+                .memory_store
+                .get_preference(&format!("session_temporary:{}", id))
+                .unwrap_or(None)
+                .as_deref()
+                == Some("1");
             serde_json::json!({
                 "id": id,
                 "title": title,
@@ -152,6 +239,7 @@ pub async fn list_sessions(
                 "is_current": id == current,
                 "pinned": pinned,
                 "archived": archived,
+                "temporary": temporary,
             })
         })
         .collect();
@@ -172,6 +260,24 @@ pub async fn list_sessions(
             .get_preference(&format!("session_created_at:{}", current))
             .unwrap_or(None)
             .unwrap_or_else(|| Utc::now().to_rfc3339());
+        let pinned = state
+            .memory_store
+            .get_preference(&format!("session_pinned:{}", current))
+            .unwrap_or(None)
+            .as_deref()
+            == Some("1");
+        let archived = state
+            .memory_store
+            .get_preference(&format!("session_archived:{}", current))
+            .unwrap_or(None)
+            .as_deref()
+            == Some("1");
+        let temporary = state
+            .memory_store
+            .get_preference(&format!("session_temporary:{}", current))
+            .unwrap_or(None)
+            .as_deref()
+            == Some("1");
         result.insert(
             0,
             serde_json::json!({
@@ -181,8 +287,9 @@ pub async fn list_sessions(
                 "message_count": 0,
                 "last_active": created_at,
                 "is_current": true,
-                "pinned": false,
-                "archived": false,
+                "pinned": pinned,
+                "archived": archived,
+                "temporary": temporary,
             }),
         );
     }

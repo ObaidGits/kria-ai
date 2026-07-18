@@ -1,0 +1,240 @@
+/**
+ * WorkBlock — typed work unit in the WorkLane (Req 4.2). Token-only (Req 14.2,
+ * zero raw color). Visually SECONDARY to the conversation (Req 4.3): caption
+ * type scale, muted surface, restrained accent. Running blocks are visually
+ * distinct (accent border + subtle status pulse that honors reduced-motion).
+ */
+
+.kria-work-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-1);
+  /* Secondary to the conversation (Req 4.3). */
+  font-size: var(--font-size-caption);
+  color: var(--color-text-secondary);
+}
+
+/* Running blocks stand out (Req 4.2 "running blocks visually distinct"). */
+.kria-work-block[data-work-status="running"] {
+  border-color: var(--color-accent-border);
+  background: var(--color-surface-2);
+}
+
+.kria-work-block[data-work-status="failed"] {
+  border-color: var(--color-danger-solid);
+}
+
+/* ── Header ──────────────────────────────────────────────────────────────── */
+.kria-work-block__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.kria-work-block__type {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+
+.kria-work-block__status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* Push Stop to the trailing edge. */
+.kria-work-block__stop {
+  margin-inline-start: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* ── Summary (always visible) ────────────────────────────────────────────── */
+.kria-work-block__summary {
+  margin: 0;
+  color: var(--color-text-primary);
+  line-height: var(--font-line-height-normal);
+}
+
+/* ── Details disclosure ──────────────────────────────────────────────────── */
+.kria-work-block__disclosure {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  align-self: flex-start;
+  padding: var(--space-1) 0;
+  border: none;
+  background: none;
+  color: var(--color-text-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.kria-work-block__disclosure:hover {
+  color: var(--color-text-primary);
+}
+
+.kria-work-block__disclosure-caret {
+  transition: transform var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.kria-work-block__disclosure-caret[data-open="true"] {
+  transform: rotate(90deg);
+}
+
+.kria-work-block__details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-2);
+}
+
+/* ── tool-call ───────────────────────────────────────────────────────────── */
+.kria-work-block__tool {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.kria-work-block__tool-name {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-family: var(--font-family-mono);
+  color: var(--color-text-primary);
+}
+
+.kria-work-block__tool-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.kria-work-block__tool-label {
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-muted);
+}
+
+.kria-work-block__tool-args,
+.kria-work-block__tool-result {
+  margin: 0;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-1);
+  color: var(--color-text-secondary);
+  font-family: var(--font-family-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+}
+
+/* ── plan-compare — the revived PlanVisualization mounts into this slot; its
+      own styles live in PlanVisualization.css. ─────────────────────────────── */
+
+/* ── gui-cognition steps ─────────────────────────────────────────────────── */
+.kria-work-block__gui-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.kria-work-block__gui-step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.kria-work-block__gui-step-label {
+  flex: 1 1 auto;
+  color: var(--color-text-primary);
+}
+
+.kria-work-block__gui-step-status {
+  color: var(--color-text-muted);
+}
+
+/* ── workflow-run ────────────────────────────────────────────────────────── */
+.kria-work-block__run {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.kria-work-block__run-log {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-1);
+  font-family: var(--font-family-mono);
+  color: var(--color-text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+/* ── Evidence ────────────────────────────────────────────────────────────── */
+.kria-work-block__evidence {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.kria-work-block__evidence-title {
+  margin: 0;
+  font-size: var(--font-size-micro);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+
+.kria-work-block__evidence-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.kria-work-block__evidence-label {
+  color: var(--color-text-primary);
+}
+
+a.kria-work-block__evidence-label {
+  color: var(--color-accent-default);
+  text-decoration: none;
+}
+
+a.kria-work-block__evidence-label:hover {
+  text-decoration: underline;
+}
+
+.kria-work-block__evidence-detail {
+  color: var(--color-text-secondary);
+}
+
+/* ── Reduced motion (Req 16.3/16.4) ──────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .kria-work-block__disclosure-caret {
+    transition: none;
+  }
+}

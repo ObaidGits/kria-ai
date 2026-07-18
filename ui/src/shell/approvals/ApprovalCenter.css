@@ -1,0 +1,93 @@
+/**
+ * Approval Center styling (design.md §6.8). Token-only (token-lint enforced).
+ * A right-side slide-in panel over a dimmed backdrop — the one surface allowed
+ * to seize focus (Req 11.5). While a decision is pending the backdrop reads as
+ * blocking (slightly desaturated room, design.md §11.11.4). Motion is
+ * compositor-cheap and frozen under reduced-motion (Req 16.4 / 17.4).
+ */
+
+.kria-approvals__overlay {
+  position: fixed;
+  inset: 0;
+  background-color: var(--color-surface-3);
+  z-index: var(--z-modal);
+}
+.kria-approvals__overlay.is-blocking {
+  background-color: var(--color-surface-3);
+}
+:root[data-blur="on"] .kria-approvals__overlay {
+  backdrop-filter: blur(var(--blur-floating));
+  -webkit-backdrop-filter: blur(var(--blur-floating));
+}
+
+.kria-approvals__positioner {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  justify-content: flex-end;
+  z-index: var(--z-modal);
+}
+
+.kria-approvals {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 440px;
+  height: 100%;
+  background-color: var(--color-surface-4);
+  border-left: 1px solid var(--color-border-default);
+  box-shadow: var(--elevation-4);
+  color: var(--color-text-primary);
+  outline: none;
+}
+
+.kria-approvals__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-default);
+}
+.kria-approvals__title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-family-display);
+  font-size: var(--font-size-title);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+.kria-approvals__count {
+  margin-left: auto;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-full);
+  background-color: var(--color-danger-soft);
+  color: var(--color-danger-text);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+}
+/* When closeable, the close button trails the header. */
+.kria-approvals__header .kit-icon-button {
+  margin-left: auto;
+}
+.kria-approvals__count + .kit-icon-button {
+  margin-left: var(--space-2);
+}
+
+.kria-approvals__list {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-4);
+}
+
+/* Entrance motion — slide-in; frozen under reduced-motion. */
+.kria-approvals {
+  animation: kria-approvals-in var(--motion-duration-base) var(--motion-easing-entrance);
+}
+@keyframes kria-approvals-in {
+  from { transform: translateX(16px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kria-approvals { animation: none; }
+}

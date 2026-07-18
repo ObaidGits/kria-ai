@@ -1,0 +1,45 @@
+/**
+ * EmptyState — calm placeholder for empty/first-run surfaces (Req 4.6).
+ * Centered icon + title + description + optional action.
+ */
+.kit-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: var(--space-3);
+  padding: var(--space-10) var(--space-6);
+  color: var(--color-text-secondary);
+}
+
+.kit-empty__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-surface-2);
+  color: var(--color-text-muted);
+  font-size: 28px;
+}
+
+.kit-empty__title {
+  font-family: var(--font-family-display);
+  font-size: var(--font-size-heading);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.kit-empty__description {
+  font-size: var(--font-size-body);
+  color: var(--color-text-secondary);
+  max-width: 44ch;
+  margin: 0;
+}
+
+.kit-empty__action {
+  margin-top: var(--space-2);
+}

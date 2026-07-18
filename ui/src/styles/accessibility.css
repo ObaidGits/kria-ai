@@ -1,0 +1,43 @@
+/* WCAG 2.2 AA runtime mappings. System colors preserve OS/DE contrast choices. */
+:root {
+  --font-size-display: 2rem;
+  --font-size-title: 1.5rem;
+  --font-size-heading: 1.125rem;
+  --font-size-body: 0.875rem;
+  --font-size-caption: 0.75rem;
+  --font-size-micro: 0.6875rem;
+}
+
+:where(a, button, input, select, textarea, summary, [tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: max(2px, 0.15em) solid var(--color-accent-default) !important;
+  outline-offset: max(2px, 0.12em) !important;
+}
+
+.kria-skip-link {
+  position: fixed;
+  inset-block-start: var(--space-2);
+  inset-inline-start: var(--space-2);
+  z-index: var(--z-approval);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-4);
+  color: var(--color-text-primary);
+  transform: translateY(-200%);
+}
+.kria-skip-link:focus-visible { transform: translateY(0); }
+
+[data-high-contrast="true"] {
+  --color-neutral-0: Canvas; --color-neutral-1: Canvas; --color-neutral-2: Canvas;
+  --color-neutral-3: Canvas; --color-neutral-4: CanvasText; --color-neutral-5: CanvasText;
+  --color-surface-1: Canvas; --color-surface-2: Canvas; --color-surface-3: Canvas; --color-surface-4: Canvas;
+  --color-text-primary: CanvasText; --color-text-secondary: CanvasText; --color-text-muted: CanvasText;
+  --color-accent-default: Highlight; --color-accent-hover: Highlight; --color-accent-contrast: HighlightText;
+  --color-accent-soft: Canvas; --color-accent-border: Highlight;
+  --color-border-default: CanvasText; --color-border-strong: Highlight;
+  --blur-floating: 0px; --elevation-1: none; --elevation-2: none; --elevation-3: none; --elevation-4: none;
+}
+
+@media (prefers-contrast: more), (forced-colors: active) {
+  :root { --color-border-default: CanvasText; --color-text-muted: CanvasText; --blur-floating: 0px; }
+  :where(button, input, select, textarea, [role="dialog"], table) { border-color: CanvasText; }
+}

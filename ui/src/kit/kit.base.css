@@ -1,0 +1,36 @@
+/**
+ * Shared kit primitives base styles (design.md §4.2/§4.3 "Ink & Aura").
+ * Token-only: consumes color, space, radius, font, motion, elevation,
+ * blur, and z-index custom properties from src/styles/tokens.generated.css.
+ *
+ * Every interactive primitive applies `.kit-focusable` (Req 14.5 / 17.1:
+ * a visible focus-visible ring on every interactive element). The ring uses
+ * the accent token so it maps automatically across dark/light themes.
+ */
+
+/* Visible focus ring — focus-visible only (keyboard), never on mouse press. */
+.kit-focusable:focus-visible {
+  outline: 2px solid var(--color-accent-default);
+  outline-offset: 2px;
+}
+
+/* Reduced-motion: no primitive animates transitions (Req 16.4 / 17.4). */
+@media (prefers-reduced-motion: reduce) {
+  .kit-focusable,
+  .kit-transition {
+    transition: none !important;
+  }
+}
+
+/* Screen-reader-only helper for labels that must exist but stay invisible. */
+.kit-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

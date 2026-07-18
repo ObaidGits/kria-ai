@@ -28,6 +28,20 @@ pub async fn cancel_turn(session_id: String, state: State<'_, AppStateCell>) -> 
 }
 
 #[tauri::command]
+pub async fn get_executive_snapshot(
+    state: State<'_, AppStateCell>,
+) -> Result<kria_core::agent::executive::ExecutiveSnapshot, String> {
+    let state = state
+        .get()
+        .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
+    state
+        .executive_sender
+        .as_ref()
+        .map(|sender| sender.snapshot())
+        .ok_or_else(|| "ExecutiveController is not available in this runtime".to_string())
+}
+
+#[tauri::command]
 pub async fn cancel_executive_task(
     task_id: String,
     state: State<'_, AppStateCell>,
@@ -36,20 +50,11 @@ pub async fn cancel_executive_task(
         .get()
         .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
     let parsed_id = uuid::Uuid::parse_str(&task_id).map_err(|e| format!("Invalid task ID: {e}"))?;
-
-    // Try the executive sender first (when executive.enabled = true)
-    {
-        let config = state.config.read().await;
-        if config.executive.enabled {
-            drop(config);
-            // The executive sender is stored in the runtime init, not AppState.
-            // Fall through to agent_loop cancel as a reliable fallback.
-        }
-    }
-
-    // Fallback: cancel via the agent loop's turn admission (works for all modes)
-    state.agent_loop.cancel_session(&parsed_id.to_string());
-    Ok(())
+    state
+        .executive_sender
+        .as_ref()
+        .ok_or_else(|| "ExecutiveController is not available in this runtime".to_string())?
+        .cancel_task(parsed_id)
 }
 
 /// Submit explicit routing feedback from the UI ("Wrong tool" / "Try differently").
@@ -750,24 +755,54 @@ pub async fn patch_config(
     section: String,
     field: String,
     value: serde_json::Value,
+    app: AppHandle,
     state: State<'_, AppStateCell>,
 ) -> Result<serde_json::Value, String> {
     let state = state
         .get()
         .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
-    // Validate against the schema (field exists + allowed value). This is a
-    // direct UI action (not prompt), so prompt-changeability is not required,
-    // but unknown fields / invalid values are still rejected.
-    if !kria_core::config::schema::field_exists(&section, &field) {
-        return Err(format!("unknown config field {section}.{field}"));
-    }
-    // settings-nl-control Task 1 (NEW-4): never write a secret field through the generic
-    // field patch — secrets have dedicated vault-backed flows. Guard, don't clobber/leak.
     if kria_core::config::is_secret_field(&section, &field) {
         return Err(format!(
             "{section}.{field} is a secret and cannot be changed here; use its dedicated secure flow."
         ));
     }
+    if kria_core::config::schema::is_non_functional(&section, &field) {
+        return Err(format!(
+            "{section}.{field} is derived and cannot be changed"
+        ));
+    }
+    if kria_core::config::schema::is_env_locked(&section, &field) {
+        let variable = kria_core::config::schema::env_lock_var(&section, &field)
+            .unwrap_or("its environment variable");
+        return Err(format!(
+            "{section}.{field} is locked by environment variable {variable}"
+        ));
+    }
+    let meta = kria_core::config::schema::validate_value(&section, &field, &value)
+        .map_err(|error| error.to_string())?;
+
+    if meta.risk != kria_core::safety::RiskLevel::Green {
+        use kria_core::safety::hitl::ApprovalResponse;
+        match super::config_prompt::request_settings_approval(
+            &app,
+            &state.hitl,
+            &section,
+            &field,
+            &value,
+            meta.risk,
+        )
+        .await
+        {
+            ApprovalResponse::Approved => {}
+            ApprovalResponse::Denied => {
+                return Err(format!("change to {section}.{field} was denied"));
+            }
+            ApprovalResponse::Timeout => {
+                return Err(format!("approval for {section}.{field} timed out"));
+            }
+        }
+    }
+
     let applied = state
         .config_service
         .patch(

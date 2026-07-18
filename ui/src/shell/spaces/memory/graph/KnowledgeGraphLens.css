@@ -1,0 +1,240 @@
+/**
+ * Knowledge Graph lens (task 6.4, Req 5.4 / 16.3) — token-only styles.
+ *
+ * Zero raw color (Req 14.2). Chrome around the on-demand 3D canvas + the 2D
+ * fallback list. Motion is limited to compositor-cheap transform/opacity and is
+ * suppressed under reduced-motion (the lens freezes to a still frame).
+ */
+
+.kria-graph {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+}
+
+.kria-graph__toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.kria-graph__count {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  color: var(--color-text-secondary);
+}
+
+.kria-graph__reason {
+  margin: 0;
+  font-size: var(--font-size-micro);
+  color: var(--color-text-secondary);
+}
+
+/* ── 3D canvas stage ─────────────────────────────────────────────────────── */
+.kria-graph__stage {
+  position: relative;
+  width: 100%;
+  height: 560px;
+  max-height: 70vh;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-2);
+  overflow: hidden;
+}
+
+.kria-graph__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+/* HTML label overlay (labels only for focused/near set — §5.4). */
+.kria-graph__labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: var(--z-panel);
+}
+
+.kria-graph__label {
+  position: absolute;
+  transform: translate(-50%, -140%);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-3);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-micro);
+  white-space: nowrap;
+  border: 1px solid var(--color-border-default);
+}
+
+.kria-graph__label[data-focused="true"] {
+  border-color: var(--color-accent-border);
+  color: var(--color-accent-default);
+}
+
+/* Focused-node side panel (predicted links / pin / hide). */
+.kria-graph__panel {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  width: 260px;
+  max-height: calc(100% - var(--space-6));
+  overflow: auto;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-3);
+  border: 1px solid var(--color-border-default);
+  z-index: var(--z-floating);
+}
+
+.kria-graph__panel-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.kria-graph__pred {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+  font-size: var(--font-size-caption);
+  color: var(--color-text-secondary);
+}
+
+/* ── 2D / keyboard fallback table (task 6.5, Req 5.5 / 17.5) ──────────────── */
+.kria-graph__fallback {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.kria-graph__fallback-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.kria-graph__fallback-search {
+  flex: 1 1 240px;
+  max-width: 360px;
+}
+
+.kria-graph__table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+}
+
+.kria-graph__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-body);
+}
+
+.kria-graph__table caption {
+  text-align: left;
+}
+
+.kria-graph__table th,
+.kria-graph__table td {
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-default);
+  vertical-align: middle;
+}
+
+.kria-graph__table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--color-surface-2);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  z-index: var(--z-panel);
+}
+
+.kria-graph__table th[data-numeric="true"],
+.kria-graph__table td[data-numeric="true"] {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.kria-graph__table tbody tr[data-focused="true"] {
+  background: var(--color-accent-soft);
+}
+
+.kria-graph__sort {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.kria-graph__row-select {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: none;
+  border: none;
+  padding: var(--space-1) var(--space-1);
+  margin: 0;
+  color: var(--color-text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.kria-graph__cell-actions {
+  display: flex;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+
+.kria-graph__muted {
+  color: var(--color-text-secondary);
+}
+
+.kria-graph__status-real {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-success-text);
+}
+
+/* ── Expanded focus view (relationships + predicted links) ───────────────── */
+.kria-graph__focus {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-2);
+}
+
+.kria-graph__focus-title {
+  margin: 0;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.kria-graph__table--rel {
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+}

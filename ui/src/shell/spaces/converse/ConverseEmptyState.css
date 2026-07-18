@@ -1,0 +1,111 @@
+/**
+ * ConverseEmptyState — Core-forward cold/warm empty state (task 3.6, Req 4.6).
+ *
+ * Token-only (Req 14.2, zero raw color). Calm, centered layout. The ONLY
+ * animating element is the Core (CorePresence owns its motion + reduced-motion
+ * handling) — this surface adds no ambient motion of its own (Req 13.5).
+ */
+
+.kria-converse-empty {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  padding: var(--space-8) var(--space-6);
+  text-align: center;
+}
+
+/* Core-forward: give the presence breathing room above the copy. */
+.kria-converse-empty__core {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: var(--space-2);
+}
+
+.kria-converse-empty__title {
+  margin: 0;
+  font-size: var(--font-size-title);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+}
+
+/* Cold: ≤3 example intents. Warm: ≤3 continue-suggestions. Shared list reset. */
+.kria-converse-empty__intents,
+.kria-converse-empty__suggestions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  gap: var(--space-3);
+  width: 100%;
+  max-width: 480px;
+}
+
+/* Cold intents read as a quiet row of chips-cards; wrap on narrow widths. */
+.kria-converse-empty__intents {
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* Warm suggestions stack as a quiet vertical list. */
+.kria-converse-empty__suggestions {
+  flex-direction: column;
+}
+
+.kria-converse-empty__intent,
+.kria-converse-empty__suggestion {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  font-size: var(--font-size-body);
+  color: var(--color-text-secondary);
+  text-align: left;
+}
+
+.kria-converse-empty__intent {
+  border-radius: var(--radius-lg);
+}
+
+.kria-converse-empty__target {
+  appearance: none;
+  border: 0;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.kria-converse-empty__intents > li {
+  flex: 1 1 140px;
+}
+
+/* Warm suggestion: title takes the row, the go-arrow sits at the end. */
+.kria-converse-empty__suggestion {
+  width: 100%;
+}
+
+.kria-converse-empty__suggestion-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kria-converse-empty__suggestion-go {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+}

@@ -13120,7 +13120,9 @@ pub async fn test_n8n_workflow_draft(
     }
     let config = app_state.config.read().await.n8n.clone();
     let client = reqwest::Client::new();
-    if workflow.trigger_strategy == "webhook" && !workflow.n8n_workflow_id.trim().is_empty() {
+    let temporarily_activated =
+        is_direct_polling_trigger(&workflow) && !workflow.n8n_workflow_id.trim().is_empty();
+    if temporarily_activated {
         set_n8n_workflow_activation(&client, &config, &workflow.n8n_workflow_id, true).await?;
     }
     workflow.status = N8nWorkflowStatus::Approved;
@@ -13161,7 +13163,16 @@ pub async fn test_n8n_workflow_draft(
             run_mode: "authoring_test".into(),
         },
     )
-    .await?;
+    .await;
+    let deactivation = if temporarily_activated {
+        set_n8n_workflow_activation(&client, &config, &workflow.n8n_workflow_id, false).await
+    } else {
+        Ok(())
+    };
+    let result = result?;
+    deactivation.map_err(|error| {
+        format!("draft test ran, but n8n draft could not be returned to inactive state: {error}")
+    })?;
     store.workflows[index].workflow.test_execution_id = correlation_id.clone();
     store.workflows[index].workflow.test_result_preview =
         "Draft test started; check Run History for extracted output.".into();
@@ -13222,7 +13233,7 @@ pub async fn approve_n8n_workflow_draft(
     workflow.lifecycle_warnings.clear();
     let mut workflow = workflow.clone();
     save_workflow_registry_store(&store)?;
-    if workflow.trigger_strategy == "webhook" && !workflow.n8n_workflow_id.trim().is_empty() {
+    if is_direct_polling_trigger(&workflow) && !workflow.n8n_workflow_id.trim().is_empty() {
         let client = reqwest::Client::new();
         set_n8n_workflow_activation(&client, &config, &workflow.n8n_workflow_id, true).await?;
         let activated_detail =
@@ -13589,6 +13600,158 @@ pub async fn rollback_n8n_workflow_backup(
     }))
 }
 
+fn canvas_authoring_workflow_config(
+    request: &CreateOrUpdateN8nWorkflowDraftRequest,
+    config: &N8nConfig,
+    workflow_detail: &serde_json::Value,
+    n8n_workflow_id: &str,
+) -> Result<N8nWorkflowConfig, String> {
+    let profile = analyze_n8n_runtime_profile(workflow_detail, &[]);
+    if matches!(profile.trigger_strategy, N8nTriggerStrategy::Unsupported) {
+        return Err("canvas workflow does not contain a supported n8n trigger".into());
+    }
+    if matches!(profile.result_mode, N8nResultMode::Unsupported) {
+        return Err("canvas workflow does not expose a supported n8n result mode".into());
+    }
+
+    let inferred_endpoint = infer_webhook_endpoint_path(workflow_detail).or_else(|| {
+        let path = profile.webhook_path.trim();
+        (!path.is_empty()).then(|| path.to_string())
+    });
+    let endpoint_path = if !request.endpoint_path.trim().is_empty() {
+        request.endpoint_path.trim().to_string()
+    } else if let Some(path) = inferred_endpoint {
+        path
+    } else if matches!(
+        profile.trigger_strategy,
+        N8nTriggerStrategy::ManualApiExecute
+    ) {
+        format!("/api/v1/workflows/{n8n_workflow_id}")
+    } else {
+        return Err("n8n did not provide an endpoint for the workflow trigger".into());
+    };
+
+    let mut workflow = workflow_config_from_authoring_request(request, endpoint_path.clone())?;
+    let (runner_backend, runner_container_name) =
+        default_runner_backend_for_profile(config, &profile);
+    workflow.n8n_workflow_id = n8n_workflow_id.to_string();
+    workflow.trigger_strategy = json_enum_string(&profile.trigger_strategy);
+    workflow.result_mode = json_enum_string(&profile.result_mode);
+    workflow.webhook_method = if matches!(
+        profile.trigger_strategy,
+        N8nTriggerStrategy::FormSubmit | N8nTriggerStrategy::ChatTrigger
+    ) {
+        "POST".into()
+    } else {
+        detect_webhook_method_from_workflow(workflow_detail, &endpoint_path)
+            .unwrap_or_else(|| profile.webhook_method.trim().to_ascii_uppercase())
+    };
+    workflow.webhook_path = profile
+        .webhook_path
+        .trim()
+        .is_empty()
+        .then(|| endpoint_path.clone())
+        .unwrap_or_else(|| profile.webhook_path.trim().to_string());
+    workflow.output_strategy = json_enum_string(&profile.output_strategy);
+    workflow.n8n_workflow_hash = semantic_workflow_hash(workflow_detail);
+    workflow.n8n_workflow_semantic_hash = workflow.n8n_workflow_hash.clone();
+    workflow.runner_backend = runner_backend;
+    workflow.runner_target = profile.runner_target.trim().to_string();
+    workflow.runner_container_name = runner_container_name;
+    workflow.execution_timeout_secs = Some(profile_timeout_secs(&profile));
+    workflow.requires_callback = Some(matches!(profile.result_mode, N8nResultMode::Callback));
+    workflow.adaptation_strategy = "chat_canvas_authored_draft".into();
+    workflow.adaptation_status = "draft".into();
+    workflow.lifecycle_status = "authoring_draft".into();
+    workflow.lifecycle_severity = "info".into();
+    workflow.lifecycle_warnings =
+        vec!["Canvas draft must be tested and reviewed before approval.".into()];
+    workflow.generated_copy_n8n_verified = true;
+
+    if workflow.owner.trim().is_empty() {
+        workflow.owner = "local-user".into();
+    }
+    if workflow.input_schema_ref.trim().is_empty() {
+        workflow.input_schema_ref = format!("schemas/n8n/{}.input.json", workflow.workflow_id);
+    }
+    if workflow.output_schema_ref.trim().is_empty() {
+        workflow.output_schema_ref = format!("schemas/n8n/{}.output.json", workflow.workflow_id);
+    }
+    if workflow.expected_evidence.is_empty() {
+        workflow.expected_evidence = vec!["n8n_execution_output".into()];
+    }
+    if workflow.credential_requirements.is_empty() {
+        workflow.credential_requirements = if profile.credential_requirements.is_empty() {
+            vec!["none".into()]
+        } else {
+            profile.credential_requirements.clone()
+        };
+    }
+    if workflow.data_scope.is_empty() {
+        workflow.data_scope = if profile.data_scope.is_empty() {
+            vec!["workflow_input".into(), "n8n_execution_output".into()]
+        } else {
+            profile.data_scope.clone()
+        };
+    }
+    if workflow.hitl_policy.trim().is_empty() {
+        workflow.hitl_policy = if profile.hitl_detected {
+            "required_review".into()
+        } else {
+            "none".into()
+        };
+    }
+    if workflow.category.trim().is_empty() {
+        workflow.category = if profile.category.trim().is_empty() {
+            "automation".into()
+        } else {
+            profile.category.clone()
+        };
+    }
+    if workflow.description.trim().is_empty() {
+        workflow.description = "Canvas-authored n8n workflow draft".into();
+    }
+    if workflow.example_prompts.is_empty() {
+        workflow.example_prompts = vec![format!("Run {}", workflow.display_name)];
+    }
+    if workflow.tags.is_empty() {
+        workflow.tags = vec!["n8n".into(), "kria_canvas_authoring".into()];
+    }
+    if workflow.aliases.is_empty() {
+        workflow.aliases = vec![workflow.display_name.clone(), workflow.workflow_id.clone()];
+    }
+    if workflow.allowed_actions.is_empty() {
+        workflow.allowed_actions = vec!["draft".into(), "test_after_review".into()];
+    }
+    Ok(workflow)
+}
+
+async fn rollback_canvas_n8n_draft_write(
+    client: &reqwest::Client,
+    config: &N8nConfig,
+    n8n_workflow_id: &str,
+    previous_detail: Option<&serde_json::Value>,
+) {
+    if let Some(detail) = previous_detail {
+        let was_active = detail
+            .get("active")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let _ = update_n8n_workflow_json(
+            client,
+            config,
+            n8n_workflow_id,
+            n8n_update_payload_from_detail(detail),
+        )
+        .await;
+        if was_active {
+            let _ = set_n8n_workflow_activation(client, config, n8n_workflow_id, true).await;
+        }
+    } else {
+        let _ = delete_n8n_temporary_workflow(client, config, n8n_workflow_id).await;
+    }
+}
+
 #[tauri::command]
 pub async fn create_or_update_n8n_workflow_draft(
     request: CreateOrUpdateN8nWorkflowDraftRequest,
@@ -13596,7 +13759,7 @@ pub async fn create_or_update_n8n_workflow_draft(
 ) -> Result<serde_json::Value, String> {
     let workflow_id = request.workflow_id.trim().to_string();
     validate_registry_workflow_id(&workflow_id)?;
-    let requires_callback = request.requires_callback.unwrap_or(true);
+    let requires_callback = request.requires_callback.unwrap_or(false);
     let validation_report = validate_n8n_workflow_json(
         &request.workflow_json,
         N8nWorkflowValidationOptions {
@@ -13615,81 +13778,214 @@ pub async fn create_or_update_n8n_workflow_draft(
         }));
     }
 
-    let endpoint_path = if request.endpoint_path.trim().is_empty() {
-        infer_webhook_endpoint_path(&request.workflow_json).ok_or_else(|| {
-            "endpoint_path is required when it cannot be inferred from a webhook node".to_string()
-        })?
-    } else {
-        request.endpoint_path.trim().to_string()
-    };
-    let workflow = workflow_config_from_authoring_request(&request, endpoint_path)?;
-
     let app_state = state
         .get()
         .ok_or_else(|| "runtime still initializing".to_string())?;
     let config = app_state.config.read().await.n8n.clone();
+    if !config.enabled {
+        return Err("n8n integration is disabled".into());
+    }
+    if config.resolve_api_key().trim().is_empty() {
+        return Err("n8n API key is required to persist canvas workflow drafts".into());
+    }
+
     let mut store = load_workflow_registry_store()?;
+    let original_store = store.clone();
     let existing_index = store
         .workflows
         .iter()
-        .position(|existing| existing.workflow.workflow_id == workflow.workflow_id);
+        .position(|existing| existing.workflow.workflow_id == workflow_id);
+    if existing_index.is_some() && !request.update_existing {
+        return Err(format!(
+            "workflow '{}' already exists; set update_existing=true to replace it as a draft",
+            workflow_id
+        ));
+    }
 
-    let backup = if let Some(index) = existing_index {
-        if !request.update_existing {
-            return Err(format!(
-                "workflow '{}' already exists; set update_existing=true to replace it as a draft",
-                workflow.workflow_id
-            ));
-        }
+    let registry_backup = if let Some(index) = existing_index {
         let payload = serde_json::to_value(&store.workflows[index].workflow)
             .map_err(|error| format!("failed to serialize pre-update workflow backup: {error}"))?;
         Some(write_n8n_workflow_backup(
             n8n_workflow_backup_dir(),
-            &workflow.workflow_id,
+            &workflow_id,
             "kria_registry_workflow",
-            "automatic backup before workflow draft update",
+            "automatic backup before canvas workflow draft update",
             payload,
         )?)
     } else {
         None
     };
 
-    upsert_workflow_registry_record(
-        &mut store,
-        workflow.clone(),
-        N8N_WORKFLOW_REGISTRY_AUTHORING_SOURCE,
-    )
-    .map_err(|error| format!("failed to update n8n workflow registry: {error}"))?;
-    save_workflow_registry_store(&store)?;
-    let workflow_count = store.workflows.len();
-    let rebuilt = rebuild_catalog_from_workflows(&config, workflow_registry_workflows(&store));
-    *app_state.n8n_catalog.write().await = rebuilt;
+    let client = reqwest::Client::new();
+    let existing_n8n_id = existing_index.and_then(|index| {
+        let id = store.workflows[index].workflow.n8n_workflow_id.trim();
+        (!id.is_empty()).then(|| id.to_string())
+    });
+    let payload = n8n_update_payload_from_detail(&request.workflow_json);
+    let mut previous_detail = None;
+    let n8n_workflow_id = if let Some(id) = existing_n8n_id {
+        let detail = fetch_n8n_workflow_detail(&client, &config, &id).await?;
+        write_n8n_workflow_backup(
+            n8n_workflow_backup_dir(),
+            &workflow_id,
+            "n8n_workflow_json",
+            "automatic backup before canvas workflow update",
+            detail.clone(),
+        )?;
+        if detail
+            .get("active")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+        {
+            set_n8n_workflow_activation(&client, &config, &id, false).await?;
+        }
+        previous_detail = Some(detail);
+        if let Err(error) = update_n8n_workflow_json(&client, &config, &id, payload.clone()).await {
+            rollback_canvas_n8n_draft_write(&client, &config, &id, previous_detail.as_ref()).await;
+            return Err(error);
+        }
+        id
+    } else {
+        create_n8n_workflow_copy(&client, &config, payload.clone()).await?
+    };
 
-    let draft_backup = write_n8n_workflow_backup(
+    let workflow_detail = match fetch_n8n_workflow_detail(&client, &config, &n8n_workflow_id).await
+    {
+        Ok(detail) => detail,
+        Err(error) => {
+            rollback_canvas_n8n_draft_write(
+                &client,
+                &config,
+                &n8n_workflow_id,
+                previous_detail.as_ref(),
+            )
+            .await;
+            return Err(error);
+        }
+    };
+    let mut workflow = match canvas_authoring_workflow_config(
+        &request,
+        &config,
+        &workflow_detail,
+        &n8n_workflow_id,
+    ) {
+        Ok(workflow) => workflow,
+        Err(error) => {
+            rollback_canvas_n8n_draft_write(
+                &client,
+                &config,
+                &n8n_workflow_id,
+                previous_detail.as_ref(),
+            )
+            .await;
+            return Err(error);
+        }
+    };
+    if let Err(error) = ensure_workflow_schema_files(&mut workflow) {
+        rollback_canvas_n8n_draft_write(
+            &client,
+            &config,
+            &n8n_workflow_id,
+            previous_detail.as_ref(),
+        )
+        .await;
+        return Err(error);
+    }
+
+    let draft_backup = match write_n8n_workflow_backup(
         n8n_workflow_backup_dir(),
         &workflow.workflow_id,
         "n8n_workflow_json_draft",
-        "workflow draft JSON saved after validation",
-        request.workflow_json,
-    )?;
+        "canvas workflow draft persisted after validation",
+        workflow_detail.clone(),
+    ) {
+        Ok(backup) => backup,
+        Err(error) => {
+            rollback_canvas_n8n_draft_write(
+                &client,
+                &config,
+                &n8n_workflow_id,
+                previous_detail.as_ref(),
+            )
+            .await;
+            return Err(error);
+        }
+    };
+
+    if let Err(error) = upsert_workflow_registry_record(
+        &mut store,
+        workflow.clone(),
+        N8N_WORKFLOW_REGISTRY_AUTHORING_SOURCE,
+    ) {
+        rollback_canvas_n8n_draft_write(
+            &client,
+            &config,
+            &n8n_workflow_id,
+            previous_detail.as_ref(),
+        )
+        .await;
+        return Err(format!("failed to update n8n workflow registry: {error}"));
+    }
+    if let Err(error) = save_workflow_registry_store(&store) {
+        rollback_canvas_n8n_draft_write(
+            &client,
+            &config,
+            &n8n_workflow_id,
+            previous_detail.as_ref(),
+        )
+        .await;
+        return Err(error);
+    }
+
+    let profile_path = default_runtime_profile_store_path();
+    let original_profile_store = load_runtime_profile_store_at(&profile_path).unwrap_or_default();
+    let mut profile_store = original_profile_store.clone();
+    let mut profile = analyze_n8n_runtime_profile(&workflow_detail, &[workflow.clone()]);
+    profile.workflow_id = workflow.workflow_id.clone();
+    profile.display_name = workflow.display_name.clone();
+    profile.status = N8nRuntimeProfileStatus::NeedsReview;
+    profile.lifecycle_status = "authoring_draft".into();
+    profile.generated_copy_n8n_verified = true;
+    profile
+        .lifecycle_warnings
+        .push("Canvas draft must be tested and reviewed before approval.".into());
+    upsert_runtime_profile(&mut profile_store, profile);
+    if let Err(error) = save_runtime_profile_store_at(&profile_path, &profile_store) {
+        let _ = save_workflow_registry_store(&original_store);
+        rollback_canvas_n8n_draft_write(
+            &client,
+            &config,
+            &n8n_workflow_id,
+            previous_detail.as_ref(),
+        )
+        .await;
+        return Err(format!(
+            "failed to save canvas workflow runtime profile: {error}"
+        ));
+    }
+
+    let rebuilt = rebuild_catalog_from_workflows(&config, workflow_registry_workflows(&store));
+    *app_state.n8n_catalog.write().await = rebuilt;
+    let workflow_count = store.workflows.len();
 
     tracing::info!(
         target: "n8n_authoring",
         workflow_id = %workflow.workflow_id,
+        n8n_workflow_id = %workflow.n8n_workflow_id,
         workflow_version = %workflow.workflow_version,
         workflow_count,
-        backup_id = ?backup.as_ref().map(|backup| backup.backup_id.as_str()),
+        registry_backup_id = ?registry_backup.as_ref().map(|backup| backup.backup_id.as_str()),
         draft_backup_id = %draft_backup.backup_id,
-        "saved validated n8n workflow as KRIA draft"
+        "persisted canvas-authored workflow draft in n8n and KRIA registry"
     );
 
     Ok(serde_json::json!({
-        "status": if backup.is_some() { "updated_as_draft" } else { "created_as_draft" },
+        "status": if registry_backup.is_some() { "updated_as_draft" } else { "created_as_draft" },
         "workflow": workflow,
         "report": validation_report,
-        "backup_id": backup.as_ref().map(|backup| backup.backup_id.clone()),
+        "backup_id": registry_backup.as_ref().map(|backup| backup.backup_id.clone()),
         "draft_backup_id": draft_backup.backup_id,
-        "message": "Workflow saved as draft. Approval and safe test execution are required before activation.",
+        "message": "Inactive workflow draft persisted in n8n and registered in KRIA. Run a backend test before approval.",
     }))
 }
 
@@ -18495,6 +18791,38 @@ mod tests {
         }
     }
 
+    fn canvas_authoring_request(
+        workflow_id: &str,
+        workflow_json: serde_json::Value,
+    ) -> CreateOrUpdateN8nWorkflowDraftRequest {
+        CreateOrUpdateN8nWorkflowDraftRequest {
+            workflow_id: workflow_id.into(),
+            workflow_json,
+            workflow_version: "v1".into(),
+            display_name: "Canvas Test".into(),
+            endpoint_path: String::new(),
+            update_existing: false,
+            owner: "local-user".into(),
+            requires_callback: Some(false),
+            input_schema_ref: String::new(),
+            output_schema_ref: String::new(),
+            expected_evidence: vec!["n8n_execution_output".into()],
+            credential_requirements: vec!["none".into()],
+            data_scope: vec!["workflow_input".into()],
+            hitl_policy: "none".into(),
+            category: "automation".into(),
+            description: "Canvas test workflow".into(),
+            example_prompts: vec!["Run Canvas Test".into()],
+            tags: vec!["canvas".into()],
+            aliases: vec!["Canvas Test".into()],
+            allowed_actions: vec!["draft".into()],
+            risk_tier: Some(RiskLevel::Yellow),
+            irreversibility_class: Some(N8nIrreversibilityClass::ReadOnly),
+            timeout_class: Some(N8nTimeoutClass::Background),
+            environment: Some(N8nWorkflowEnvironment::Dev),
+        }
+    }
+
     fn runtime_profile_fixture(
         workflow_id: &str,
         n8n_workflow_id: &str,
@@ -19233,6 +19561,68 @@ mod tests {
         assert_eq!(workflow.workflow_version, "v2");
         assert_eq!(workflow.status, N8nWorkflowStatus::Draft);
         assert!(workflow.is_ready_for_approval());
+    }
+
+    #[test]
+    fn canvas_authoring_manual_trigger_gets_runnable_n8n_metadata() {
+        let detail = serde_json::json!({
+            "id": "n8n-manual-1",
+            "name": "Canvas Manual",
+            "nodes": [{
+                "id": "manual",
+                "name": "Manual Trigger",
+                "type": "n8n-nodes-base.manualTrigger",
+                "typeVersion": 1,
+                "position": [0, 0],
+                "parameters": {}
+            }],
+            "connections": {},
+            "settings": { "executionOrder": "v1" }
+        });
+        let request = canvas_authoring_request("canvas_manual", detail.clone());
+        let mut config = N8nConfig::default();
+        config.base_url = "http://127.0.0.1:5678".into();
+
+        let workflow =
+            canvas_authoring_workflow_config(&request, &config, &detail, "n8n-manual-1").unwrap();
+
+        assert_eq!(workflow.n8n_workflow_id, "n8n-manual-1");
+        assert_eq!(workflow.trigger_strategy, "manual_api_execute");
+        assert_eq!(workflow.result_mode, "poll_execution");
+        assert_eq!(workflow.runner_backend, "local_cli");
+        assert_eq!(workflow.adaptation_strategy, "chat_canvas_authored_draft");
+        assert!(workflow.generated_copy_n8n_verified);
+        assert!(workflow.is_ready_for_approval());
+    }
+
+    #[test]
+    fn canvas_authoring_chat_trigger_gets_public_endpoint_metadata() {
+        let detail = serde_json::json!({
+            "id": "n8n-chat-1",
+            "name": "Canvas Chat",
+            "nodes": [{
+                "id": "chat",
+                "name": "Chat Trigger",
+                "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+                "typeVersion": 1.1,
+                "webhookId": "canvas-chat-hook",
+                "position": [0, 0],
+                "parameters": {}
+            }],
+            "connections": {},
+            "settings": { "executionOrder": "v1" }
+        });
+        let request = canvas_authoring_request("canvas_chat", detail.clone());
+        let config = N8nConfig::default();
+
+        let workflow =
+            canvas_authoring_workflow_config(&request, &config, &detail, "n8n-chat-1").unwrap();
+
+        assert_eq!(workflow.trigger_strategy, "chat_trigger");
+        assert_eq!(workflow.result_mode, "poll_execution");
+        assert_eq!(workflow.webhook_method, "POST");
+        assert_eq!(workflow.endpoint_path, "/webhook/canvas-chat-hook/chat");
+        assert_eq!(workflow.webhook_path, "/webhook/canvas-chat-hook/chat");
     }
 
     #[test]

@@ -1,0 +1,33 @@
+/**
+ * Card — content surface (opaque content tier, Ink & Aura §4.3).
+ * Variants: default / elevated / interactive (hover + focus when actionable).
+ */
+.kit-card {
+  display: block;
+  background-color: var(--color-surface-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  color: var(--color-text-primary);
+}
+
+.kit-card--elevated {
+  box-shadow: var(--elevation-2);
+}
+
+.kit-card--interactive {
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  transition:
+    border-color var(--motion-duration-fast) var(--motion-easing-standard),
+    background-color var(--motion-duration-fast) var(--motion-easing-standard),
+    box-shadow var(--motion-duration-fast) var(--motion-easing-standard);
+}
+.kit-card--interactive:hover {
+  border-color: var(--color-border-strong);
+  box-shadow: var(--elevation-1);
+}
+.kit-card--interactive:active {
+  transform: translateY(1px);
+}

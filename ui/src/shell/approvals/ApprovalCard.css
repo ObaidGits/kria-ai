@@ -1,0 +1,201 @@
+/**
+ * ApprovalCard styling (design.md §4.1/§4.2). Token-only (token-lint enforced).
+ * The risk ramp is the reserved consequence scale (green→yellow→red→black); it
+ * always appears with an icon + text label so meaning never rests on color
+ * alone (Req 17.3). Calm by default — no ambient motion (Req 13.5).
+ */
+
+.kria-approval-card {
+  display: block;
+  padding: var(--space-4);
+}
+/* Programmatic focus target (Center seizes focus here) — no persistent ring. */
+.kria-approval-card__body {
+  outline: none;
+}
+
+.kria-approval-card + .kria-approval-card {
+  margin-top: var(--space-3);
+}
+
+/* ── Risk ramp ──────────────────────────────────────────────────────────── */
+.kria-approval-card__risk {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+}
+.kria-approval-card__risk--green {
+  color: var(--color-risk-green);
+}
+.kria-approval-card__risk--yellow {
+  color: var(--color-risk-yellow);
+}
+.kria-approval-card__risk--red {
+  color: var(--color-risk-red);
+}
+.kria-approval-card__risk--black {
+  color: var(--color-text-primary);
+}
+.kria-approval-card__risklabel {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.kria-approval-card__ramp {
+  display: inline-flex;
+  gap: 3px;
+  margin-left: auto;
+}
+.kria-approval-card__rampseg {
+  width: 22px;
+  height: 5px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-surface-2);
+  border: 1px solid var(--color-border-default);
+}
+.kria-approval-card__rampseg.is-filled.kria-approval-card__rampseg--green {
+  background-color: var(--color-risk-green);
+  border-color: var(--color-risk-green);
+}
+.kria-approval-card__rampseg.is-filled.kria-approval-card__rampseg--yellow {
+  background-color: var(--color-risk-yellow);
+  border-color: var(--color-risk-yellow);
+}
+.kria-approval-card__rampseg.is-filled.kria-approval-card__rampseg--red {
+  background-color: var(--color-risk-red);
+  border-color: var(--color-risk-red);
+}
+.kria-approval-card__rampseg.is-filled.kria-approval-card__rampseg--black {
+  background-color: var(--color-risk-black);
+  border-color: var(--color-risk-black);
+}
+.kria-approval-card__rampseg.is-active {
+  box-shadow: 0 0 0 2px var(--color-accent-border);
+}
+
+/* ── Body sections ──────────────────────────────────────────────────────── */
+.kria-approval-card__what {
+  margin: 0 0 var(--space-2);
+  font-family: var(--font-family-display);
+  font-size: var(--font-size-heading);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  line-height: 1.3;
+}
+.kria-approval-card__sectionlabel {
+  display: block;
+  margin-bottom: var(--space-1);
+  font-size: var(--font-size-micro);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+.kria-approval-card__why {
+  margin: 0 0 var(--space-3);
+  font-size: var(--font-size-body);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+.kria-approval-card__effects {
+  margin-bottom: var(--space-3);
+}
+.kria-approval-card__effectlist {
+  margin: 0;
+  padding-left: var(--space-4);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-body);
+}
+.kria-approval-card__effectlist li {
+  margin-bottom: var(--space-1);
+}
+.kria-approval-card__evidence {
+  margin-bottom: var(--space-3);
+}
+.kria-approval-card__evidencebody {
+  max-height: 180px;
+  overflow-y: auto;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-2);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── Scope ladder (Req 7.3) ─────────────────────────────────────────────── */
+.kria-approval-card__scope {
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  border: 0;
+}
+.kria-approval-card__scopeoptions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+.kria-approval-card__scopeopt {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-2);
+  color: var(--color-text-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+.kria-approval-card__scopeopt:focus-visible {
+  outline: 2px solid var(--color-accent-border);
+  outline-offset: 2px;
+}
+.kria-approval-card__scopeopt.is-selected {
+  border-color: var(--color-accent-border);
+  background-color: var(--color-accent-soft);
+  color: var(--color-text-primary);
+}
+.kria-approval-card__scopelabel {
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+}
+.kria-approval-card__scopehint {
+  grid-column: 2;
+  font-size: var(--font-size-micro);
+  color: var(--color-text-muted);
+}
+
+/* ── Actions ────────────────────────────────────────────────────────────── */
+.kria-approval-card__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+.kria-approval-card__deny {
+  color: var(--color-danger-text);
+}
+/* Approve is pushed to the trailing edge so it is spatially deliberate. */
+.kria-approval-card__approve {
+  margin-left: auto;
+}
+
+/* ── High-risk confirm note (modal host body) ───────────────────────────── */
+.kria-approval-confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-danger-solid);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-danger-soft);
+  color: var(--color-danger-text);
+  font-size: var(--font-size-body);
+  line-height: 1.45;
+}

@@ -21,7 +21,6 @@ use kria_core::safety::hitl::{ApprovalResponse, HitlGateway};
 use kria_core::safety::RiskLevel;
 use kria_core::tools::TriggerProvenance;
 use std::sync::{Arc, OnceLock};
-use tauri::Emitter;
 
 /// Cached, schema-derived entity index (built once — Req 12.1). Mirrors the loop's
 /// `SETTINGS_ENTITY_INDEX`; both build from the same `FieldMeta` registry.
@@ -46,6 +45,32 @@ struct CommandSettingsApprovalDriver {
     hitl: Arc<HitlGateway>,
 }
 
+pub(crate) async fn request_settings_approval(
+    app: &AppHandle,
+    hitl: &HitlGateway,
+    section: &str,
+    field: &str,
+    value: &serde_json::Value,
+    risk: RiskLevel,
+) -> ApprovalResponse {
+    let request_id = HitlGateway::generate_request_id();
+    let description = format!("Change {section}.{field} to {value}");
+    let args = serde_json::json!({ "section": section, "field": field, "value": value });
+    let envelope = super::approval::ApprovalEnvelope::tool_hitl(
+        request_id.clone(),
+        "config_patch",
+        risk.as_str(),
+        args.clone(),
+        &description,
+        super::approval::now_ms(),
+    );
+    let rx = hitl
+        .prepare_approval_with_id(&request_id, "config_patch", args, risk, &description, false)
+        .await;
+    super::approval::emit_approval_request(app, &envelope);
+    hitl.await_prepared_approval(&request_id, rx).await
+}
+
 #[async_trait::async_trait]
 impl ApprovalDriver for CommandSettingsApprovalDriver {
     async fn request(
@@ -55,24 +80,7 @@ impl ApprovalDriver for CommandSettingsApprovalDriver {
         value: &serde_json::Value,
         risk: RiskLevel,
     ) -> ApprovalDecision {
-        let request_id = HitlGateway::generate_request_id();
-        let description = format!("Change {section}.{field} to {value}");
-        let args = serde_json::json!({ "section": section, "field": field, "value": value });
-        let _ = self.app.emit(
-            "agent:approval_required",
-            serde_json::json!({
-                "requestId": request_id,
-                "toolName": "config_patch",
-                "riskLevel": risk.as_str(),
-                "args": args,
-                "reason": description,
-            }),
-        );
-        match self
-            .hitl
-            .request_approval_with_id(&request_id, "config_patch", args, risk, &description, false)
-            .await
-        {
+        match request_settings_approval(&self.app, &self.hitl, section, field, value, risk).await {
             ApprovalResponse::Approved => ApprovalDecision::Approved,
             ApprovalResponse::Denied => ApprovalDecision::Denied,
             ApprovalResponse::Timeout => ApprovalDecision::Timeout,

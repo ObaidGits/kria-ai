@@ -158,6 +158,10 @@ impl QuarantineRegistry {
         Self::open(conn)
     }
 
+    pub fn open_in_memory() -> anyhow::Result<Self> {
+        Self::open(rusqlite::Connection::open_in_memory()?)
+    }
+
     fn migrate(&self) -> anyhow::Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute_batch(
@@ -345,10 +349,13 @@ impl QuarantineRegistry {
     /// Approve a pending tool (HITL response).
     pub fn approve(&self, name: &str, notes: Option<&str>) -> anyhow::Result<()> {
         let conn = self.conn.lock().unwrap();
-        conn.execute(
+        let changed = conn.execute(
             "UPDATE quarantine SET status = 'active', review_notes = ?1 WHERE name = ?2 AND status = 'pending_approval'",
             params![notes.unwrap_or(""), name],
         )?;
+        if changed == 0 {
+            anyhow::bail!("tool '{name}' is not awaiting quarantine approval");
+        }
         log_action_inner(&conn, name, "approved", notes.unwrap_or("HITL approved"))?;
         Ok(())
     }
@@ -356,10 +363,13 @@ impl QuarantineRegistry {
     /// Reject a pending tool (HITL response).
     pub fn reject(&self, name: &str, notes: Option<&str>) -> anyhow::Result<()> {
         let conn = self.conn.lock().unwrap();
-        conn.execute(
+        let changed = conn.execute(
             "UPDATE quarantine SET status = 'rejected', review_notes = ?1 WHERE name = ?2 AND status = 'pending_approval'",
             params![notes.unwrap_or(""), name],
         )?;
+        if changed == 0 {
+            anyhow::bail!("tool '{name}' is not awaiting quarantine rejection");
+        }
         log_action_inner(&conn, name, "rejected", notes.unwrap_or("HITL rejected"))?;
         Ok(())
     }
@@ -416,6 +426,22 @@ impl QuarantineRegistry {
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
+        Ok(tools)
+    }
+
+    /// Get every quarantine record for operator review.
+    pub fn all(&self) -> anyhow::Result<Vec<QuarantinedTool>> {
+        let mut tools = Vec::new();
+        for status in [
+            QuarantineStatus::Testing,
+            QuarantineStatus::PendingApproval,
+            QuarantineStatus::Active,
+            QuarantineStatus::Disabled,
+            QuarantineStatus::Rejected,
+        ] {
+            tools.extend(self.get_by_status(status)?);
+        }
+        tools.sort_by(|left, right| right.created_at.cmp(&left.created_at));
         Ok(tools)
     }
 

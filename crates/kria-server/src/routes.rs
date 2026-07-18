@@ -77,21 +77,83 @@ async fn chat(
         })),
     );
 
-    // ─── Feature-flag cutover ────────────────────────────────────────
-    // If executive.enabled = true, route through the ExecutiveController.
-    // Otherwise, fall through to the legacy stub.
+    // When enabled, ExecutiveController schedules real AgentLoop work. The
+    // controller owns priority, cancellation, GPU admission, and observability;
+    // it never substitutes a synthetic response.
     if let Some(ref executive) = state.executive_sender {
         use kria_core::agent::executive::types::*;
 
+        let work_agent = state.agent_loop.clone();
+        let cancel_agent = work_agent.clone();
+        let work_session_id = session_id.clone();
+        let cancel_session_id = session_id.clone();
+        let work_message = req.message.clone();
+        let description = work_message.clone();
+        let payload = TaskPayload::new(description, async move {
+            let started = std::time::Instant::now();
+            let Some(agent) = work_agent else {
+                return TaskResult::Failed {
+                    reason: "agent runtime not initialized".to_string(),
+                    total_duration: started.elapsed(),
+                };
+            };
+
+            let mut messages = vec![kria_core::llm::ChatMessage {
+                role: "user".to_string(),
+                content: work_message,
+                name: None,
+                images: None,
+            }];
+            let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<
+                kria_core::agent::loop_engine::StreamEvent,
+            >();
+            let agent_run = agent.clone();
+            tokio::spawn(async move {
+                agent_run
+                    .run(&work_session_id, &mut messages, event_tx)
+                    .await;
+            });
+
+            let mut reply = String::new();
+            let mut error = None;
+            while let Some(event) = event_rx.recv().await {
+                match event {
+                    kria_core::agent::loop_engine::StreamEvent::Token(text) => {
+                        reply.push_str(&text)
+                    }
+                    kria_core::agent::loop_engine::StreamEvent::Done(final_text)
+                        if reply.is_empty() =>
+                    {
+                        reply = final_text;
+                    }
+                    kria_core::agent::loop_engine::StreamEvent::Error(reason) => {
+                        error = Some(reason)
+                    }
+                    _ => {}
+                }
+            }
+
+            match error {
+                Some(reason) => TaskResult::Failed {
+                    reason,
+                    total_duration: started.elapsed(),
+                },
+                None => TaskResult::Success {
+                    total_duration: started.elapsed(),
+                    output: Some(reply.chars().take(512).collect()),
+                },
+            }
+        })
+        .with_cancel_handler(move || {
+            if let Some(agent) = cancel_agent {
+                agent.cancel_session(&cancel_session_id);
+            }
+        });
         let task = TaskRequest::new(
             TaskPriority::Interactive,
             TaskSource::TextChat,
-            true, // may require GPU for planner
-            TaskPayload::UserTurn {
-                text: req.message.clone(),
-                is_voice: false,
-                session_id: session_id.clone(),
-            },
+            true,
+            payload,
         );
 
         match executive.submit(task) {

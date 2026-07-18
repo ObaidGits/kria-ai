@@ -1,0 +1,9 @@
+{
+  "z": {
+    "canvas": { "value": "0" },
+    "panel": { "value": "10" },
+    "floating": { "value": "100" },
+    "modal": { "value": "1000" },
+    "approval": { "value": "2000" }
+  }
+}

@@ -1,0 +1,880 @@
+/**
+ * Machines Space — fleet matrix + terminal + alerts + enroll wizard + device
+ * Inspector (task 9.1, Req 8.1).
+ *
+ * Token-only (Req 14.2, zero raw color). No ambient motion (Core-only rule,
+ * Req 13.5). Health/state/docker/test are conveyed by icon + text, never by
+ * color alone (Req 17.3). The fleet matrix is a REAL semantic <table>
+ * (Req 17.2 — tabular data).
+ */
+
+.kria-machines {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  gap: var(--space-4);
+}
+
+/* ── Header ───────────────────────────────────────────────────────────────── */
+.kria-machines__header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.kria-machines__title {
+  margin: 0;
+  font-size: var(--font-size-title);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.kria-machines__subtitle {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-body);
+}
+
+.kria-machines__toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.kria-machines__toolbar-spacer {
+  flex: 1 1 auto;
+}
+
+.kria-machines__stream {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-caption);
+  color: var(--color-text-secondary);
+}
+
+.kria-machines__region {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding-top: var(--space-4);
+}
+
+.kria-machines__region-title {
+  margin: 0;
+  font-size: var(--font-size-heading);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.kria-machines__status {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-body);
+  padding: var(--space-3) 0;
+}
+
+/* ── Fleet matrix (real table, Req 17.2) ─────────────────────────────────── */
+.kria-fleet {
+  width: 100%;
+  max-height: min(480px, 58vh);
+  overflow: auto;
+  contain: layout paint;
+  scrollbar-gutter: stable;
+}
+
+.kria-fleet__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-caption);
+}
+
+.kria-fleet__table caption {
+  text-align: start;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+  padding-bottom: var(--space-2);
+}
+
+.kria-fleet__table th,
+.kria-fleet__table td {
+  text-align: start;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-default);
+  vertical-align: top;
+}
+
+.kria-fleet__table thead th {
+  color: var(--color-text-muted);
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-micro);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.kria-fleet__row {
+  cursor: pointer;
+}
+
+.kria-fleet__row:hover {
+  background: var(--color-surface-1);
+}
+
+.kria-fleet__row[aria-selected="true"] {
+  background: var(--color-surface-2);
+}
+
+.kria-fleet__name-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+}
+
+.kria-fleet__name {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+}
+
+.kria-fleet__id {
+  color: var(--color-text-muted);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-micro);
+}
+
+.kria-fleet__cell-meta {
+  display: block;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-micro);
+}
+
+.kria-fleet__cell-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  white-space: nowrap;
+}
+
+.kria-fleet__health {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 88px;
+}
+
+.kria-fleet__health-value {
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.kria-fleet__taint {
+  display: block;
+  margin-top: 2px;
+  color: var(--color-warning-text);
+  font-size: var(--font-size-micro);
+}
+
+.kria-fleet__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.kria-fleet__spacer td {
+  padding: 0;
+  border: 0;
+}
+
+.kria-fleet__empty {
+  color: var(--color-text-secondary);
+  padding: var(--space-4) var(--space-3);
+}
+
+/* ── Terminal pane ────────────────────────────────────────────────────────── */
+.kria-terminal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-1);
+  min-height: 0;
+}
+
+.kria-terminal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-default);
+}
+
+.kria-terminal__title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.kria-terminal__name {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+}
+
+.kria-terminal__body {
+  margin: 0;
+  padding: var(--space-3);
+  max-height: 320px;
+  overflow: auto;
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-micro);
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.kria-terminal__body:focus-visible {
+  outline: 2px solid var(--color-accent-border);
+  outline-offset: -2px;
+}
+
+.kria-terminal__line {
+  display: flex;
+  gap: var(--space-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.kria-terminal__offset {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.kria-terminal__line--stderr .kria-terminal__text {
+  color: var(--color-danger-text);
+}
+
+.kria-terminal__line--system .kria-terminal__text {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.kria-terminal__empty {
+  padding: var(--space-4) var(--space-3);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+
+/* ── Alert list ───────────────────────────────────────────────────────────── */
+.kria-alerts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-height: 320px;
+  overflow: auto;
+}
+
+.kria-alerts__item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+}
+
+.kria-alerts__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.kria-alerts__category {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-medium);
+}
+
+.kria-alerts__time {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-micro);
+}
+
+.kria-alerts__message {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+}
+
+.kria-alerts__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-micro);
+}
+
+/* ── Enroll wizard ────────────────────────────────────────────────────────── */
+.kria-enroll {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: min(440px, 80vw);
+}
+
+.kria-enroll__steps {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.kria-enroll__step {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+
+.kria-enroll__step[aria-current="step"] {
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-semibold);
+}
+
+.kria-enroll__fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.kria-enroll__review {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+}
+
+.kria-enroll__review dt {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+
+.kria-enroll__review dd {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-caption);
+  word-break: break-word;
+}
+
+.kria-enroll__note {
+  display: flex;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+  line-height: 1.45;
+}
+
+.kria-enroll__error {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  color: var(--color-danger-text);
+  font-size: var(--font-size-caption);
+}
+
+.kria-enroll__error pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-micro);
+}
+
+.kria-enroll__ok {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-success-text);
+  font-size: var(--font-size-caption);
+}
+
+.kria-enroll__nav {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.kria-enroll__nav-spacer {
+  flex: 1 1 auto;
+}
+
+/* ── Device Inspector body ───────────────────────────────────────────────── */
+.kria-device {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.kria-device__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.kria-device__section-title {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+
+.kria-device__meta {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+}
+
+.kria-device__meta dt {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+
+.kria-device__meta dd {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-caption);
+  word-break: break-word;
+}
+
+.kria-device__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.kria-device__desc {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+  line-height: 1.45;
+}
+
+/* Health meter (progress element). Color is supplementary to the % text. */
+.kria-fleet__health-meter {
+  width: 100%;
+  height: 4px;
+  appearance: none;
+  border: none;
+  border-radius: var(--radius-full);
+  background: var(--color-surface-2);
+  overflow: hidden;
+}
+
+.kria-fleet__health-meter::-webkit-progress-bar {
+  background: var(--color-surface-2);
+  border-radius: var(--radius-full);
+}
+
+.kria-fleet__health-meter::-webkit-progress-value {
+  background: var(--color-accent-default);
+  border-radius: var(--radius-full);
+}
+
+.kria-fleet__health-meter::-moz-progress-bar {
+  background: var(--color-accent-default);
+  border-radius: var(--radius-full);
+}
+
+/* ── Remote desktop canvas (task 9.2, Req 8.2/8.3) ─────────────────────── */
+.kria-remote {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  background: var(--color-surface-1);
+}
+
+.kria-remote[data-active="true"] {
+  border-color: var(--color-danger-solid);
+}
+
+.kria-remote__head,
+.kria-remote__active,
+.kria-remote__inactive,
+.kria-remote__active > span {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.kria-remote__head {
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.kria-remote__summary {
+  margin: var(--space-1) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+
+.kria-remote__head-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.kria-remote__active {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  padding: var(--space-2);
+  border: 1px solid var(--color-danger-solid);
+  border-radius: var(--radius-sm);
+  color: var(--color-danger-text);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+}
+
+.kria-remote__inactive {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+
+.kria-remote__capabilities {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.kria-remote__capabilities > div {
+  min-width: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-2);
+}
+
+.kria-remote__capabilities dt {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-micro);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.kria-remote__capabilities dd {
+  margin: var(--space-1) 0 0;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-caption);
+  overflow-wrap: anywhere;
+}
+
+.kria-remote__error {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-danger-solid);
+  border-radius: var(--radius-sm);
+  color: var(--color-danger-text);
+  font-size: var(--font-size-caption);
+}
+
+.kria-remote__canvas {
+  position: relative;
+  min-height: 360px;
+  overflow: hidden;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  background: var(--color-neutral-0);
+}
+
+.kria-remote__canvas .mobile-desktop {
+  min-height: 360px;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.kria-remote__unavailable {
+  min-height: 360px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-5);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.kria-remote__unavailable h3,
+.kria-remote__unavailable p {
+  margin: 0;
+}
+
+.kria-remote__unavailable h3 {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+}
+
+.kria-remote__unavailable p {
+  max-width: 56ch;
+  font-size: var(--font-size-caption);
+  line-height: 1.5;
+}
+
+@media (max-width: 980px) {
+  .kria-remote__capabilities {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .kria-remote__capabilities {
+    grid-template-columns: 1fr;
+  }
+
+  .kria-remote__active {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
+
+/* ── Mobile pairing + devices (task 9.3, Req 8.1/8.4) ─────────────────── */
+.kria-mobile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  background: var(--color-surface-1);
+}
+
+.kria-mobile__head,
+.kria-mobile__actions,
+.kria-mobile__gateway-state,
+.kria-mobile__error,
+.kria-mobile__notice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.kria-mobile__head {
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.kria-mobile__summary {
+  margin: var(--space-1) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+
+.kria-mobile__gateway-state {
+  flex-wrap: wrap;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+}
+
+.kria-mobile__gateway-state code,
+.kria-mobile__pairing-meta code {
+  overflow-wrap: anywhere;
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-micro);
+}
+
+.kria-mobile__actions {
+  flex-wrap: wrap;
+}
+
+.kria-mobile__error,
+.kria-mobile__notice {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-danger-solid);
+  border-radius: var(--radius-sm);
+  color: var(--color-danger-text);
+  font-size: var(--font-size-caption);
+}
+
+.kria-mobile__notice {
+  border-color: var(--color-warning-solid);
+  color: var(--color-warning-text);
+}
+
+.kria-mobile__pairing {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.7fr) minmax(240px, 1.3fr);
+  gap: var(--space-4);
+  padding: var(--space-3);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-2);
+}
+
+.kria-mobile__pairing-copy {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+}
+
+.kria-mobile__eyebrow {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-micro);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.kria-mobile__code {
+  color: var(--color-text-primary);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-title);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.12em;
+}
+
+.kria-mobile__pairing-meta {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+}
+
+.kria-mobile__pairing-meta dt {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+
+.kria-mobile__pairing-meta dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--color-text-primary);
+}
+
+.kria-mobile__devices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.kria-mobile__devices h3 {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+}
+
+.kria-mobile__empty {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+
+.kria-mobile__table-wrap {
+  overflow-x: auto;
+}
+
+.kria-mobile__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-caption);
+}
+
+.kria-mobile__table caption {
+  padding-bottom: var(--space-2);
+  color: var(--color-text-muted);
+  text-align: start;
+}
+
+.kria-mobile__table th,
+.kria-mobile__table td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-default);
+  text-align: start;
+  vertical-align: middle;
+}
+
+.kria-mobile__table th {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-micro);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.kria-mobile__table td {
+  color: var(--color-text-secondary);
+}
+
+.kria-mobile__table td strong,
+.kria-mobile__device-id {
+  display: block;
+}
+
+.kria-mobile__table td strong {
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-medium);
+}
+
+.kria-mobile__device-id {
+  color: var(--color-text-muted);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-micro);
+}
+
+.kria-mobile__row-action {
+  text-align: end;
+}
+
+@media (max-width: 720px) {
+  .kria-mobile__pairing {
+    grid-template-columns: 1fr;
+  }
+}
+
+.kria-terminal__sizer { position: relative; width: 100%; }
+.kria-terminal__sizer .kria-terminal__line {
+  position: absolute;
+  inset: 0 0 auto;
+  width: 100%;
+}

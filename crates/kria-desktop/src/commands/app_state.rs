@@ -67,7 +67,11 @@ pub struct AppState {
     #[allow(dead_code)]
     pub model_router: Arc<ModelRouter>,
     pub agent_loop: Arc<AgentLoop>,
+    /// Live ExecutiveController handle when enabled; owns cancellation + bounded snapshots.
+    pub executive_sender: Option<kria_core::agent::executive::ExecutiveSender>,
     pub tool_registry: Arc<ToolRegistry>,
+    /// Durable safety gate for generated/discovered tools awaiting review.
+    pub quarantine_registry: Arc<kria_core::tools::quarantine::QuarantineRegistry>,
     pub memory_store: Arc<dyn MemoryRuntime>,
     pub hitl: Arc<HitlGateway>,
     pub decision_store: Arc<kria_core::agent::collaborative_decision::DecisionStore>,

@@ -1012,6 +1012,23 @@ async fn send_message_with_profile(
                             "risk_level": risk_level.clone(),
                         })),
                     );
+                    // kria-ui-redesign task 4.2 (Req 11.1 / design.md §3.3 contract
+                    // change a): additionally emit the unified approval envelope the
+                    // Approval Center consumes. Additive — the legacy
+                    // `{session}:approval_required` event below is untouched. Built
+                    // before the legacy emit (which moves the fields). Best-effort;
+                    // the runtime still holds the HITL gate regardless of webview.
+                    crate::commands::approval::emit_approval_request(
+                        &app_handle,
+                        &crate::commands::approval::ApprovalEnvelope::tool_hitl(
+                            request_id.clone(),
+                            action.clone(),
+                            &risk_level,
+                            parameters.clone(),
+                            "",
+                            crate::commands::approval::now_ms(),
+                        ),
+                    );
                     let _ = app_handle.emit(
                         &ev_approval_required,
                         serde_json::json!({

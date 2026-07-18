@@ -1,0 +1,312 @@
+/**
+ * Converse Space — three-lane layout (Req 4.1) + sticky Composer (Req 4.4) with
+ * the conversation-dominance rule (Req 4.3) enforced by layout + type scale.
+ *
+ * Token-only (Req 14.2, zero raw color). Layout is CSS grid with token spacing
+ * (design.md §6.1). Motion is compositor-cheap and honors reduced-motion.
+ *
+ *   ┌ lanes row (1fr) ─────────────────────────────────────────────┐
+ *   │ ThreadSidebar │ ConversationLane[focal] │ WorkLane │ Context  │
+ *   │   (auto)      │      minmax(0,1fr)      │  (auto)  │  (auto)  │
+ *   └───────────────────────────────────────────────────────────────┘
+ *   ┌ composer row (auto, sticky) ─────────────────────────────────┐
+ *   └───────────────────────────────────────────────────────────────┘
+ *
+ * Conversation-dominance (Req 4.3): the ConversationLane is the ONLY 1fr track
+ * (all secondary lanes are content-sized `auto` tracks capped by clamp widths),
+ * AND the reply text uses the body type scale while work blocks / rail content
+ * use the smaller caption scale — so the conversation reads dominant by both
+ * width and type at all times.
+ */
+
+.kria-converse {
+  position: relative;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  height: 100%;
+  min-height: 0;
+  gap: 0;
+  /* The Space router already pads; the Converse Space manages its own edges. */
+  margin: calc(-1 * var(--space-6));
+}
+
+/* Conversation actions share toolbar flow so controls never overlap. */
+.kria-converse__toolbar-actions,
+.kria-converse__rail-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.kria-converse__toolbar-actions {
+  flex: 0 0 auto;
+}
+
+/* ── Lanes row ───────────────────────────────────────────────────────────── */
+.kria-converse__lanes {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ── ThreadSidebar[C] (collapsible, secondary) ───────────────────────────── */
+.kria-converse__threads {
+  width: clamp(180px, 16vw, 240px);
+  min-width: 0;
+  border-right: 1px solid var(--color-border-default);
+  background: var(--color-surface-1);
+  overflow-y: auto;
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.kria-converse__threads-title {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+
+/* ── ConversationLane[focal, dominant] ───────────────────────────────────── */
+.kria-converse__conversation {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  /* Focal reading measure kept comfortable; lane itself fills the 1fr track. */
+}
+
+.kria-converse__conversation-toolbar {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--color-border-default);
+  background: var(--color-surface-1);
+}
+
+.kria-converse__conversation-title {
+  overflow: hidden;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kria-converse__export-control {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 0 0 auto;
+}
+
+.kria-converse__export-status {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+
+.kria-converse__stream {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  /* The virtualized MessageStream owns its own scroll + measure; the empty
+     state centers within this container. */
+  overflow: hidden;
+  /* Reply text is the dominant type (Req 4.3). */
+  font-size: var(--font-size-body);
+  line-height: var(--font-line-height-normal);
+  color: var(--color-text-primary);
+}
+
+.kria-converse__stream-inner {
+  width: min(720px, 100%);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* ── WorkLane[C/adaptive] (revealed on work activity — Req 4.2) ───────────── */
+.kria-converse__work {
+  width: clamp(280px, 26vw, 360px);
+  min-width: 0;
+  border-left: 1px solid var(--color-border-default);
+  background: var(--color-surface-2);
+  overflow-y: auto;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  /* Secondary to the conversation: smaller type scale (Req 4.3). */
+  font-size: var(--font-size-caption);
+  color: var(--color-text-secondary);
+  animation: kria-lane-in var(--motion-duration-base) var(--motion-easing-entrance);
+}
+
+.kria-converse__lane-title {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+
+/* ── ContextRail[C] (on-demand — Req 4.1) ────────────────────────────────── */
+.kria-converse__context {
+  width: clamp(240px, 22vw, 320px);
+  min-width: 0;
+  border-left: 1px solid var(--color-border-default);
+  background: var(--color-surface-2);
+  overflow-y: auto;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  /* Secondary to the conversation (Req 4.3). */
+  font-size: var(--font-size-caption);
+  color: var(--color-text-secondary);
+  animation: kria-lane-in var(--motion-duration-base) var(--motion-easing-entrance);
+}
+
+/* ── Composer[sticky] (Req 4.4 — never covers the last message) ──────────── */
+/* The Composer lives in its own grid row, so it is always visible and can
+ * NEVER overlap the scrollable message stream above it. `position: sticky`
+ * pins it as belt-and-braces when the Space itself scrolls. */
+.kria-converse__composer {
+  position: sticky;
+  bottom: 0;
+  border-top: 1px solid var(--color-border-default);
+  background: var(--color-surface-3);
+  backdrop-filter: blur(var(--blur-floating));
+  padding: var(--space-3) var(--space-6);
+  z-index: var(--z-panel);
+}
+
+.kria-converse__composer-inner {
+  width: min(720px, 100%);
+  margin: 0 auto;
+}
+
+.kria-converse__composer-placeholder {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-1);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-body);
+}
+
+/* ── Empty state placeholder region (full states: task 3.6) ──────────────── */
+.kria-converse__empty {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+}
+
+@keyframes kria-lane-in {
+  from { opacity: 0; transform: translateX(8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* ── Window-mode curation (Req 15.2 degrade-by-curation) ─────────────────── */
+/* Compact drops the secondary lanes entirely (the component also refuses to
+ * render them). Belt-and-braces so no track leaks in. */
+.kria-shell[data-window-mode="compact"] .kria-converse__threads,
+.kria-shell[data-window-mode="compact"] .kria-converse__work,
+.kria-shell[data-window-mode="compact"] .kria-converse__context {
+  display: none;
+}
+
+/* ── Reduced motion (Req 16.3/16.4): freeze lane reveal motion. ──────────── */
+@media (prefers-reduced-motion: reduce) {
+  .kria-converse__work,
+  .kria-converse__context {
+    animation: none;
+  }
+}
+
+.kria-converse__threads-header,
+.kria-converse__thread-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.kria-converse__threads-title {
+  flex: 1;
+}
+
+.kria-converse__thread-search {
+  width: 100%;
+  min-height: 32px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-2);
+  color: var(--color-text-primary);
+  padding: 0 var(--space-2);
+}
+
+.kria-converse__archive-toggle {
+  align-self: flex-start;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+
+.kria-converse__thread-row {
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  padding: var(--space-1);
+}
+
+.kria-converse__thread-row:focus-within,
+.kria-converse__thread-row:hover {
+  border-color: var(--color-border-default);
+  background: var(--color-surface-2);
+}
+
+.kria-converse__thread {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-primary);
+  text-align: left;
+  cursor: pointer;
+  padding: var(--space-1);
+  overflow: hidden;
+}
+
+.kria-converse__thread[aria-current="page"] {
+  color: var(--color-accent-default);
+  font-weight: var(--font-weight-semibold);
+}
+
+.kria-converse__thread-flag,
+.kria-converse__thread-status {
+  display: block;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+
+.kria-converse__thread-actions {
+  justify-content: flex-end;
+}

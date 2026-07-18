@@ -1,0 +1,184 @@
+/**
+ * MemoryInspector body — token-only (Req 14.2, zero raw color). Lives inside
+ * the shared Inspector <aside>. Calm, type-led layout; no ambient motion.
+ */
+
+.kria-mem-insp {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.kria-mem-insp__status {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-body);
+}
+
+.kria-mem-insp__error {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-danger-solid);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-1);
+  color: var(--color-text-primary);
+}
+
+.kria-mem-insp__error-detail {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+
+.kria-mem-insp__forgotten {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-2);
+}
+
+.kria-mem-insp__forgotten p {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-body);
+}
+
+/* ── Content ─────────────────────────────────────────────────────────────── */
+.kria-mem-insp__content-text {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+  line-height: var(--font-line-height-normal);
+}
+
+/* ── Cues row ────────────────────────────────────────────────────────────── */
+.kria-mem-insp__cues {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.kria-mem-insp__cue {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* ── Field grid ──────────────────────────────────────────────────────────── */
+.kria-mem-insp__fields {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.kria-mem-insp__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.kria-mem-insp__field-label {
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+
+.kria-mem-insp__field-value {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+  word-break: break-word;
+}
+
+/* ── Sections ────────────────────────────────────────────────────────────── */
+.kria-mem-insp__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border-default);
+}
+
+.kria-mem-insp__section-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+}
+
+.kria-mem-insp__muted {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+
+.kria-mem-insp__idlist {
+  margin: 0;
+  padding-left: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  color: var(--color-text-secondary);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-caption);
+  word-break: break-all;
+}
+
+.kria-mem-insp__explanation {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-body);
+  line-height: var(--font-line-height-normal);
+}
+
+/* ── Actions ─────────────────────────────────────────────────────────────── */
+.kria-mem-insp__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border-default);
+}
+
+/* ── Inline correction editor ────────────────────────────────────────────── */
+.kria-mem-insp__editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.kria-mem-insp__textarea {
+  width: 100%;
+  min-height: 96px;
+  resize: vertical;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-neutral-0);
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: var(--font-size-body);
+  line-height: var(--font-line-height-normal);
+}
+
+.kria-mem-insp__editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}

@@ -1,0 +1,371 @@
+/**
+ * 2D node builder — palette, canvas, node inspector (task 7.3, Req 6.3 / 6.4).
+ *
+ * Token-only (Req 14.2, zero raw color). The canvas is a lightweight in-house
+ * DOM + SVG surface (design.md §6.3) — no 3D, no heavy graph lib. Motion is
+ * limited to focus/hover state changes; no ambient animation (Req 13.5 /
+ * 17.4 — reduced-motion needs no extra handling since there are no keyframes).
+ */
+
+.kria-nb {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+}
+
+/* ── Lifecycle bar ────────────────────────────────────────────────────────── */
+.kria-nb__bar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.kria-nb__bar-main {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.kria-nb__lifecycle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-bottom: var(--space-1);
+}
+
+.kria-nb__persist {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-micro);
+  color: var(--color-text-muted);
+}
+
+.kria-nb__persist[data-persisted="true"] {
+  color: var(--color-accent-default);
+}
+
+.kria-nb__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.kria-nb__status {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  color: var(--color-text-secondary);
+}
+
+.kria-nb__status[data-error="true"] {
+  color: var(--color-warning-solid);
+}
+
+.kria-nb__issues {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.kria-nb__issues li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-caption);
+  color: var(--color-warning-solid);
+}
+
+/* ── Workspace: palette + canvas ──────────────────────────────────────────── */
+.kria-nb__workspace {
+  display: flex;
+  gap: var(--space-3);
+  min-height: 420px;
+  min-width: 0;
+}
+
+/* ── Palette ──────────────────────────────────────────────────────────────── */
+.kria-nb-palette {
+  flex: 0 0 200px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-1);
+}
+
+.kria-nb-palette__title {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+
+.kria-nb-palette__hint {
+  margin: 0;
+  font-size: var(--font-size-micro);
+  color: var(--color-text-muted);
+}
+
+.kria-nb-palette__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.kria-nb-palette__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-2);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-caption);
+  text-align: left;
+  cursor: grab;
+}
+
+.kria-nb-palette__item:hover {
+  border-color: var(--color-border-strong);
+}
+
+.kria-nb-palette__item:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-accent-default);
+}
+
+.kria-nb-palette__icon {
+  display: inline-flex;
+  color: var(--color-accent-default);
+}
+
+/* ── Canvas ───────────────────────────────────────────────────────────────── */
+.kria-nb-canvas {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 420px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-1);
+  overflow: auto;
+}
+
+.kria-nb-canvas[data-connecting="true"] {
+  border-color: var(--color-accent-border);
+}
+
+.kria-nb-canvas__live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.kria-nb-canvas__edges {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.kria-nb-canvas__edge {
+  stroke: var(--color-border-strong);
+  stroke-width: 2;
+}
+
+.kria-nb-canvas__empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+  text-align: center;
+  padding: var(--space-4);
+}
+
+.kria-nb-canvas__connect-banner {
+  position: sticky;
+  bottom: var(--space-2);
+  left: var(--space-2);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  background: var(--color-accent-soft);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-caption);
+}
+
+/* ── Node ─────────────────────────────────────────────────────────────────── */
+.kria-nb-node {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-4);
+  box-shadow: var(--elevation-1);
+  touch-action: none;
+}
+
+.kria-nb-node--selected {
+  border-color: var(--color-accent-default);
+  box-shadow: 0 0 0 2px var(--color-accent-default);
+}
+
+.kria-nb-node--connect-source {
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-soft);
+}
+
+.kria-nb-node__body {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-1) var(--space-1);
+  border: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-medium);
+  text-align: left;
+  cursor: pointer;
+}
+
+.kria-nb-node__body:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-accent-default);
+  border-radius: var(--radius-sm);
+}
+
+.kria-nb-node__icon {
+  display: inline-flex;
+  color: var(--color-accent-default);
+}
+
+.kria-nb-node__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kria-nb-node__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1);
+}
+
+/* ── Node inspector body (inside the shared Inspector) ────────────────────── */
+.kria-nb-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.kria-nb-inspector__type {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-accent-default);
+  font-size: var(--font-size-caption);
+}
+
+.kria-nb-inspector__desc,
+.kria-nb-inspector__muted,
+.kria-nb-inspector__empty {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+
+.kria-nb-inspector__section-title {
+  margin: 0;
+  font-size: var(--font-size-micro);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+
+.kria-nb-inspector__params,
+.kria-nb-inspector__connections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.kria-nb-inspector__param-list,
+.kria-nb-inspector__conn-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.kria-nb-inspector__conn-list li {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-2);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+}
+
+.kria-nb-inspector__param {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+}
+
+.kria-nb-inspector__param > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.kria-nb-inspector__add-param {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}

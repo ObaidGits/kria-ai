@@ -1,0 +1,367 @@
+/**
+ * Automations · Build segment — Health/diagnostics + advanced registry panels
+ * (task 7.5, Req 20.2 / 20.3).
+ *
+ * Token-only (Req 14.2, zero raw color). No ambient motion.
+ */
+
+/* ── HealthPanel ─────────────────────────────────────────────────────────── */
+.kria-health {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.kria-health__card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: 100%;
+}
+
+.kria-health__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.kria-health__row-label {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+}
+
+.kria-health__hint {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+
+.kria-health__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-3);
+}
+
+.kria-health__fact {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-1);
+}
+
+.kria-health__fact-label {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-micro);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.kria-health__fact-value {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+}
+
+.kria-health__fact-note {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+  word-break: break-word;
+}
+
+.kria-health__readiness,
+.kria-health__deadletters {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.kria-health__readiness-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.kria-health__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.kria-health__list ul {
+  margin: 0;
+  padding-left: var(--space-4);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+}
+
+/* ── RegistryPanel ───────────────────────────────────────────────────────── */
+.kria-registry {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.kria-registry__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.kria-registry__search {
+  max-width: 360px;
+}
+
+.kria-registry__count {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+
+.kria-registry__error {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-danger-text);
+  font-size: var(--font-size-caption);
+}
+
+.kria-registry__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.kria-registry__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.kria-registry__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.kria-registry__name {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+}
+
+.kria-registry__meta {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+  font-family: var(--font-family-mono);
+}
+
+.kria-registry__tags {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+
+.kria-registry__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.kria-registry__profiles {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-border-default);
+}
+
+.kria-registry__section-head,
+.kria-registry__profile-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.kria-registry__section-head h3,
+.kria-registry__section-head p,
+.kria-registry__message {
+  margin: 0;
+}
+
+.kria-registry__section-head h3 {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+}
+
+.kria-registry__section-head p,
+.kria-registry__message {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+
+.kria-registry__profile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 100%;
+}
+
+.kria-registry__warnings {
+  margin: 0;
+  padding-left: var(--space-4);
+  color: var(--color-warning-text);
+  font-size: var(--font-size-caption);
+}
+
+.kria-registry__review {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+}
+
+.kria-registry__review summary {
+  cursor: pointer;
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-medium);
+}
+
+.kria-registry__review-grid,
+.kria-registry__runtime-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-3);
+  margin: var(--space-3) 0;
+}
+
+.kria-registry__runtime-fields {
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+}
+
+.kria-registry__runtime-fields legend {
+  padding: 0 var(--space-1);
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-medium);
+}
+
+.kria-registry__message {
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-1);
+}
+
+.kria-health__audit-head,
+.kria-health__audit-actions,
+.kria-health__finding-main {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.kria-health__audit-head {
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.kria-health__audit-actions {
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.kria-health__message {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  background: var(--color-surface-1);
+  font-size: var(--font-size-caption);
+}
+
+.kria-health__audit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-3);
+}
+
+.kria-health__findings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.kria-health__findings > li {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-1);
+  flex-wrap: wrap;
+}
+
+.kria-health__finding-main {
+  flex: 1 1 320px;
+  min-width: 0;
+  flex-direction: column;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+}
+
+.kria-health__finding-main strong {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+}
+
+.kria-health__finding-main small {
+  color: var(--color-text-muted);
+}
+
+.kria-health__lifecycle {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.kria-registry__credentials {
+  flex: 1 0 100%;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border-default);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+}
+
+.kria-registry__credentials summary {
+  cursor: pointer;
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-medium);
+  margin-bottom: var(--space-2);
+}
+
+.kria-registry__credential-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}

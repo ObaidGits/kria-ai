@@ -1,0 +1,42 @@
+/**
+ * StatusDot — a small colored dot paired with a text label. Status is never
+ * conveyed by color alone (Req 17.3): the label (visible or sr-only) always
+ * carries the meaning.
+ */
+.kit-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-family-text);
+  font-size: var(--font-size-caption);
+  color: var(--color-text-secondary);
+}
+
+.kit-status__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  flex: none;
+  background-color: var(--color-text-muted);
+}
+
+.kit-status--online .kit-status__dot { background-color: var(--color-success-solid); }
+.kit-status--busy .kit-status__dot { background-color: var(--color-warning-solid); }
+.kit-status--error .kit-status__dot { background-color: var(--color-danger-solid); }
+.kit-status--info .kit-status__dot { background-color: var(--color-info-solid); }
+.kit-status--offline .kit-status__dot { background-color: var(--color-text-muted); }
+
+.kit-status--pulse .kit-status__dot {
+  box-shadow: 0 0 0 0 var(--color-accent-soft);
+  animation: kit-status-pulse 1.8s var(--motion-easing-standard) infinite;
+}
+
+@keyframes kit-status-pulse {
+  0% { box-shadow: 0 0 0 0 var(--color-accent-soft); }
+  70% { box-shadow: 0 0 0 6px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kit-status--pulse .kit-status__dot { animation: none; }
+}

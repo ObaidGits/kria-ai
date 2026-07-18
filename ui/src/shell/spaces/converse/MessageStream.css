@@ -1,0 +1,40 @@
+/**
+ * MessageStream — virtualized viewport. Token-only (Req 14.2).
+ * The absolute-positioned rows are translated by the virtualizer; the sizer
+ * holds the full scroll height so the scrollbar reads the true thread length.
+ */
+.kria-stream {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+}
+
+.kria-stream__viewport {
+  height: 100%;
+  overflow-y: auto;
+  /* Isolate layout/paint so scrolling a long thread stays cheap (Req 16). */
+  contain: strict;
+}
+
+.kria-stream__sizer {
+  position: relative;
+  width: min(720px, 100%);
+  margin: 0 auto;
+}
+
+.kria-stream__row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  padding-block: var(--space-2);
+}
+
+/* Jump-to-latest control — floats above the composer edge of the viewport. */
+.kria-stream__jump {
+  position: absolute;
+  right: var(--space-4);
+  bottom: var(--space-4);
+  z-index: var(--z-floating);
+}

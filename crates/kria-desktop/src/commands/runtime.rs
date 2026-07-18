@@ -2,6 +2,102 @@ use super::*;
 use crate::commands::colab::migrate_legacy_colab_server_command;
 use std::collections::HashMap;
 
+fn spawn_executive_event_forwarding(
+    app: AppHandle,
+    mut events: tokio::sync::broadcast::Receiver<kria_core::agent::executive::ControllerEvent>,
+) {
+    use kria_core::agent::executive::ControllerEvent;
+    tokio::spawn(async move {
+        loop {
+            let event = match events.recv().await {
+                Ok(event) => event,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
+                    tracing::warn!(
+                        count,
+                        "Executive UI event bridge lagged; snapshot remains authoritative"
+                    );
+                    continue;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            };
+            let now = || chrono::Utc::now().to_rfc3339();
+            match event {
+                ControllerEvent::TaskStarted {
+                    task_id,
+                    priority,
+                    source,
+                    description,
+                    ts,
+                } => {
+                    let _ = app.emit(
+                        "executive:task_started",
+                        serde_json::json!({
+                            "task_id": task_id, "priority": priority, "source": source,
+                            "description": description, "ts": ts,
+                        }),
+                    );
+                }
+                ControllerEvent::TaskCompleted {
+                    task_id,
+                    success,
+                    duration_ms,
+                    output_summary,
+                    error,
+                    ts,
+                } => {
+                    let _ = app.emit(
+                        "executive:task_completed",
+                        serde_json::json!({
+                            "task_id": task_id, "success": success, "duration_ms": duration_ms,
+                            "output_summary": output_summary, "error": error, "ts": ts,
+                        }),
+                    );
+                }
+                ControllerEvent::TaskPreempted {
+                    victim_id,
+                    victim_priority,
+                    replacement_id,
+                    replacement_priority,
+                    ts,
+                } => {
+                    let _ = app.emit("executive:preemption", serde_json::json!({
+                        "victim_id": victim_id, "victim_priority": victim_priority,
+                        "replacement_id": replacement_id, "replacement_priority": replacement_priority,
+                        "ts": ts,
+                    }));
+                }
+                ControllerEvent::TaskRejected { task_id, reason } => {
+                    let _ = app.emit(
+                        "executive:task_completed",
+                        serde_json::json!({
+                            "task_id": task_id, "success": false, "duration_ms": 0,
+                            "output_summary": null, "error": reason, "ts": now(),
+                        }),
+                    );
+                }
+                ControllerEvent::GpuLeaseAcquired { task_id } => {
+                    let _ = app.emit(
+                        "executive:gpu_lease",
+                        serde_json::json!({
+                            "task_id": task_id, "action": "acquired", "ts": now(),
+                        }),
+                    );
+                }
+                ControllerEvent::GpuLeaseReleased { task_id } => {
+                    let _ = app.emit(
+                        "executive:gpu_lease",
+                        serde_json::json!({
+                            "task_id": task_id, "action": "released", "ts": now(),
+                        }),
+                    );
+                }
+                ControllerEvent::VramMaintenanceStarted { .. }
+                | ControllerEvent::VramMaintenanceCompleted { .. } => {}
+            }
+        }
+    });
+}
+
 /// One-time migration (settings-config-revamp Task 5): if the SQLite config
 /// store is empty and a legacy `~/.kria/config.toml` exists, import its
 /// user-layer deviations into field-level rows and back up the file as
@@ -2107,13 +2203,41 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
             workflow_continuation_runtime.clone(),
         ),
     );
+    let quarantine_registry = Arc::new(
+        kria_core::tools::quarantine::QuarantineRegistry::open_path(&paths.db_path)?,
+    );
+    let executive_settings = config.read().await.executive.clone();
+    let executive_sender = if executive_settings.enabled {
+        let executive_config = kria_core::agent::executive::ExecutiveConfig {
+            max_background_tasks: executive_settings.max_background_tasks,
+            preemption_grace_ms: executive_settings.preemption_grace_ms,
+            ..Default::default()
+        };
+        let policy_gate: Arc<dyn kria_core::safety::policy_gate::PolicyGate> =
+            Arc::new(kria_core::safety::policy_gate::CapabilityPolicyGate::new());
+        let (mut controller, sender) = kria_core::agent::executive::ExecutiveController::new(
+            executive_config,
+            shared_gpu_lease.clone(),
+            policy_gate,
+        );
+        spawn_executive_event_forwarding(handle.clone(), controller.subscribe_events());
+        tokio::spawn(async move { controller.run().await });
+        tracing::info!("ExecutiveController enabled — desktop dispatch loop started");
+        Some(sender)
+    } else {
+        tracing::info!("ExecutiveController disabled — desktop uses AgentLoop authority");
+        None
+    };
+
     let state = AppState {
         config,
         config_service,
         audit_logger: audit_logger.clone(),
         model_router,
         agent_loop,
+        executive_sender,
         tool_registry: tool_registry.clone(),
+        quarantine_registry,
         memory_store,
         hitl: hitl.clone(),
         decision_store: decision_store.clone(),

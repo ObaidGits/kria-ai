@@ -1,0 +1,163 @@
+/**
+ * CognitionPanel — controls + persistent result panel (task 6.3, Req 5.6).
+ * Token-only (Req 14.2, zero raw color). No ambient motion; the only motion is
+ * the kit Progress indeterminate bar, which reduced-motion neutralizes.
+ */
+
+.kria-cognition {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+/* Visually-quiet live region; still reachable by assistive tech. */
+.kria-cognition__status {
+  min-height: var(--space-4);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+
+/* ── Controls ─────────────────────────────────────────────────────────────── */
+
+.kria-cognition__jobs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: var(--space-3);
+}
+
+.kria-cognition__job-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-start;
+  height: 100%;
+}
+
+.kria-cognition__job-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-primary);
+}
+
+.kria-cognition__job-title {
+  margin: 0;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+}
+
+.kria-cognition__job-desc {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+  line-height: var(--font-line-height-normal);
+}
+
+.kria-cognition__job-progress {
+  width: 100%;
+}
+
+.kria-cognition__job-note {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+
+.kria-cognition__job-run {
+  margin-top: auto;
+}
+
+/* ── Results ──────────────────────────────────────────────────────────────── */
+
+.kria-cognition__results-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.kria-cognition__results-title {
+  margin: 0;
+  font-size: var(--font-size-heading);
+  color: var(--color-text-primary);
+}
+
+.kria-cognition__result-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.kria-cognition__result-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.kria-cognition__result-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-primary);
+}
+
+.kria-cognition__result-name {
+  font-weight: var(--font-weight-medium);
+}
+
+.kria-cognition__result-when {
+  margin-left: auto;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+
+.kria-cognition__result-summary {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+  line-height: var(--font-line-height-normal);
+}
+
+.kria-cognition__result-none,
+.kria-cognition__result-error {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  font-size: var(--font-size-caption);
+}
+
+.kria-cognition__result-none {
+  color: var(--color-text-muted);
+}
+
+.kria-cognition__result-error {
+  color: var(--color-danger-text);
+}
+
+.kria-cognition__changes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.kria-cognition__change {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: var(--font-size-caption);
+  color: var(--color-text-secondary);
+}

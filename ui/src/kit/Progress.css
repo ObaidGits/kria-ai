@@ -1,0 +1,58 @@
+/**
+ * Progress / Meter — Kobalte Progress. Determinate + indeterminate. Label and
+ * value are real text (Req 17.2), not conveyed by the bar alone.
+ */
+.kit-progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 160px;
+}
+.kit-progress__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-family: var(--font-family-text);
+  font-size: var(--font-size-caption);
+}
+.kit-progress__label {
+  color: var(--color-text-secondary);
+  font-weight: var(--font-weight-medium);
+}
+.kit-progress__value {
+  color: var(--color-text-muted);
+}
+.kit-progress__track {
+  position: relative;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-surface-2);
+  overflow: hidden;
+}
+.kit-progress__fill {
+  height: 100%;
+  border-radius: var(--radius-full);
+  background-color: var(--color-accent-default);
+  transition: width var(--motion-duration-base) var(--motion-easing-standard);
+}
+.kit-progress__fill--tone-success { background-color: var(--color-success-solid); }
+.kit-progress__fill--tone-warning { background-color: var(--color-warning-solid); }
+.kit-progress__fill--tone-danger { background-color: var(--color-danger-solid); }
+
+/* Indeterminate: a sliding segment. */
+.kit-progress[data-indeterminate] .kit-progress__fill {
+  width: 40% !important;
+  animation: kit-progress-indeterminate 1.4s var(--motion-easing-standard) infinite;
+}
+@keyframes kit-progress-indeterminate {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(320%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kit-progress__fill { transition: none; }
+  .kit-progress[data-indeterminate] .kit-progress__fill {
+    animation: none;
+    width: 100% !important;
+    opacity: 0.4;
+  }
+}

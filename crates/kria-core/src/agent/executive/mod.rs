@@ -17,4 +17,7 @@ pub mod preemption;
 pub mod types;
 
 pub use controller::{ExecutiveConfig, ExecutiveController, ExecutiveSender};
-pub use types::{ScheduleDecision, TaskHandle, TaskPayload, TaskPriority, TaskRequest, TaskSource};
+pub use types::{
+    ControllerEvent, ExecutiveSnapshot, ExecutiveTaskSnapshot, ScheduleDecision, TaskHandle,
+    TaskPayload, TaskPriority, TaskRequest, TaskSource, TaskState,
+};

@@ -38,7 +38,7 @@ use kria_core::capability::provider::{CapabilityOutcome, CapabilityRequest, Requ
 use kria_core::capability::registry::ProviderRegistry;
 use kria_core::openclaw::runtime::{DockerRuntime, SkillRuntime};
 use serde::Serialize;
-use tauri::{command, State};
+use tauri::{command, AppHandle, State};
 use tokio::sync::OnceCell;
 
 use crate::commands::app_state::AppStateCell;
@@ -656,6 +656,87 @@ pub async fn cpp_release_quarantine(
         .release_quarantine(&provider_id, &capability_id))
 }
 
+/// Durable generated/discovered tool quarantine record for Governance review.
+#[derive(Debug, Serialize)]
+pub struct QuarantineToolView {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub risk_level: kria_core::safety::RiskLevel,
+    pub status: kria_core::tools::quarantine::QuarantineStatus,
+    pub source: kria_core::tools::quarantine::ToolSource,
+    pub success_count: i64,
+    pub consecutive_failures: i64,
+    pub total_executions: i64,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub last_tested: chrono::DateTime<chrono::Utc>,
+    pub review_notes: Option<String>,
+    pub parameters_schema: Option<serde_json::Value>,
+}
+
+impl From<kria_core::tools::quarantine::QuarantinedTool> for QuarantineToolView {
+    fn from(tool: kria_core::tools::quarantine::QuarantinedTool) -> Self {
+        Self {
+            id: tool.name.clone(),
+            name: tool.name,
+            description: "Generated or discovered tool awaiting runtime trust review".to_string(),
+            risk_level: tool.risk_level,
+            status: tool.status,
+            source: tool.source,
+            success_count: tool.success_count,
+            consecutive_failures: tool.consecutive_failures,
+            total_executions: tool.total_executions,
+            created_at: tool.created_at,
+            last_tested: tool.last_tested,
+            review_notes: tool.review_notes,
+            parameters_schema: None,
+        }
+    }
+}
+
+#[command]
+pub async fn list_quarantined_tools(
+    state: State<'_, AppStateCell>,
+) -> Result<Vec<QuarantineToolView>, String> {
+    let app = state.get().ok_or("runtime not ready")?;
+    let registry = app.quarantine_registry.clone();
+    tokio::task::spawn_blocking(move || registry.all())
+        .await
+        .map_err(|error| error.to_string())?
+        .map(|tools| tools.into_iter().map(QuarantineToolView::from).collect())
+        .map_err(|error| error.to_string())
+}
+
+#[command]
+pub async fn approve_quarantined_tool(
+    tool_id: String,
+    state: State<'_, AppStateCell>,
+) -> Result<(), String> {
+    let app = state.get().ok_or("runtime not ready")?;
+    let registry = app.quarantine_registry.clone();
+    tokio::task::spawn_blocking(move || {
+        registry.approve(&tool_id, Some("Approved from Capabilities governance"))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())
+}
+
+#[command]
+pub async fn reject_quarantined_tool(
+    tool_id: String,
+    state: State<'_, AppStateCell>,
+) -> Result<(), String> {
+    let app = state.get().ok_or("runtime not ready")?;
+    let registry = app.quarantine_registry.clone();
+    tokio::task::spawn_blocking(move || {
+        registry.reject(&tool_id, Some("Rejected from Capabilities governance"))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())
+}
+
 /// The full descriptor for the Descriptor Viewer.
 #[command]
 pub async fn cpp_descriptor(
@@ -1101,25 +1182,54 @@ pub async fn cpp_get_autonomy(state: State<'_, AppStateCell>) -> Result<String, 
     Ok(autonomy_level(&state).await.as_str().to_string())
 }
 
-/// Set the autonomy level for the running session (spec R29.2). Validates the
-/// value; updates the in-memory config so the Evolution Engine honors it
-/// immediately. Persistence to the config store is handled by the settings save
-/// path.
+/// Set the capability-evolution autonomy level. Validates the enum, routes
+/// elevated levels through canonical settings approval, then persists and
+/// hot-swaps the complete intelligence config atomically through ConfigService.
 #[command]
 pub async fn cpp_set_autonomy(
     level: String,
+    app_handle: AppHandle,
     state: State<'_, AppStateCell>,
 ) -> Result<String, String> {
     use kria_core::capability::intelligence::AutonomyLevel;
+    use kria_core::config::ChangeSource;
+    use kria_core::safety::{hitl::ApprovalResponse, RiskLevel};
+
     let parsed =
         AutonomyLevel::parse(&level).ok_or_else(|| format!("invalid autonomy level '{level}'"))?;
     let app = state.get().ok_or("runtime not ready")?;
-    app.config
-        .write()
+    let mut intelligence = app.config.read().await.capability.intelligence.clone();
+    intelligence.autonomy_level = parsed.as_str().to_string();
+    let value = serde_json::to_value(&intelligence).map_err(|error| error.to_string())?;
+    let risk = match parsed {
+        AutonomyLevel::Manual | AutonomyLevel::ProposeOnly => RiskLevel::Green,
+        AutonomyLevel::AutoWithNotice => RiskLevel::Yellow,
+        AutonomyLevel::FullAuto => RiskLevel::Red,
+    };
+
+    if risk != RiskLevel::Green {
+        match super::config_prompt::request_settings_approval(
+            &app_handle,
+            &app.hitl,
+            "capability",
+            "intelligence",
+            &value,
+            risk,
+        )
         .await
-        .capability
-        .intelligence
-        .autonomy_level = parsed.as_str().to_string();
+        {
+            ApprovalResponse::Approved => {}
+            ApprovalResponse::Denied => return Err("capability autonomy change was denied".into()),
+            ApprovalResponse::Timeout => {
+                return Err("capability autonomy approval timed out".into())
+            }
+        }
+    }
+
+    app.config_service
+        .patch("capability", "intelligence", value, ChangeSource::Ui, None)
+        .await
+        .map_err(|error| error.to_string())?;
     Ok(parsed.as_str().to_string())
 }
 

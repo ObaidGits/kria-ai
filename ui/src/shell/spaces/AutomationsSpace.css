@@ -1,0 +1,320 @@
+/**
+ * Automations Space — segments + top-level workflow surfacing (task 7.1,
+ * Req 6.1 / 6.2).
+ *
+ * Token-only (Req 14.2, zero raw color). Header (title + subtitle) above a
+ * tablist of segments; each segment's tabpanel scrolls independently. Motion is
+ * limited to the kit Tabs indicator; regions add no ambient animation.
+ */
+
+.kria-automations {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  gap: var(--space-4);
+}
+
+/* ── Header ───────────────────────────────────────────────────────────────── */
+.kria-automations__header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.kria-automations__title {
+  margin: 0;
+  font-size: var(--font-size-title);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.kria-automations__subtitle {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-body);
+}
+
+/* ── Segments (tablist) ──────────────────────────────────────────────────── */
+.kria-automations__segments {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* ── Region (tabpanel body) ──────────────────────────────────────────────── */
+.kria-automations__region {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding-top: var(--space-4);
+}
+
+.kria-automations__region-title {
+  margin: 0;
+  font-size: var(--font-size-heading);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.kria-automations__muted {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-body);
+}
+
+.kria-automations__status {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-body);
+  padding: var(--space-3) 0;
+}
+
+.kria-automations__count {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+
+/* ── Run: top-level workflows ────────────────────────────────────────────── */
+.kria-automations__run {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.kria-automations__run-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.kria-automations__search {
+  flex: 1 1 240px;
+  max-width: 380px;
+  min-width: 0;
+}
+
+.kria-automations__cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.kria-automations__card-item {
+  display: block;
+}
+
+.kria-automations__workflow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  width: 100%;
+}
+
+.kria-automations__workflow-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.kria-automations__workflow-name {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+}
+
+.kria-automations__workflow-desc {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+
+.kria-automations__workflow-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.kria-automations__workflow-status-label {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+}
+
+/* ── Schedule ────────────────────────────────────────────────────────────── */
+.kria-automations__schedule,
+.kria-automations__history {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.kria-automations__panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.kria-automations__panel-title {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+
+.kria-automations__rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.kria-automations__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-1);
+  flex-wrap: wrap;
+}
+
+.kria-automations__row-title {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+}
+
+.kria-automations__row-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.kria-automations__row-when {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-micro);
+}
+
+/* ── History ─────────────────────────────────────────────────────────────── */
+.kria-automations__history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.kria-automations__history-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--color-border-default);
+  flex-wrap: wrap;
+}
+
+.kria-automations__history-when {
+  font-size: var(--font-size-micro);
+  color: var(--color-text-muted);
+  min-width: 160px;
+}
+
+.kria-automations__history-what {
+  font-size: var(--font-size-body);
+  color: var(--color-text-secondary);
+  flex: 1 1 auto;
+}
+
+.kria-automations__history-status-label {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+}
+
+/* ── Build (2D node builder) ─────────────────────────────────────────────── */
+.kria-automations__build {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+}
+
+/* ── Placeholder regions ─────────────────────────────────────────────────── */
+.kria-automations__placeholder {
+  display: flex;
+  min-height: 240px;
+  align-items: center;
+  justify-content: center;
+}
+
+.kria-automations__history-head,
+.kria-automations__history-panel,
+.kria-automations__execution-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.kria-automations__history-workflows {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.kria-automations__history-error,
+.kria-automations__history-message {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-caption);
+}
+
+.kria-automations__history-error {
+  color: var(--color-danger-text);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-danger-text);
+}
+
+.kria-automations__history-message {
+  color: var(--color-text-secondary);
+  background: var(--color-surface-1);
+}
+
+.kria-automations__execution {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-1);
+  flex-wrap: wrap;
+}
+
+.kria-automations__execution-main {
+  min-width: 0;
+  flex: 1 1 320px;
+}
+
+.kria-automations__history-detail {
+  color: var(--color-text-muted);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-micro);
+  overflow-wrap: anywhere;
+}

@@ -1,0 +1,52 @@
+/**
+ * IconButton — square, icon-only button. Always needs an accessible label
+ * (Req 17.2). Same interaction-state grammar as Button.
+ */
+.kit-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  background-color: transparent;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-easing-standard),
+    color var(--motion-duration-fast) var(--motion-easing-standard),
+    border-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.kit-icon-button--sm { width: 28px; height: 28px; font-size: 16px; }
+.kit-icon-button--md { width: 36px; height: 36px; font-size: 18px; }
+.kit-icon-button--lg { width: 44px; height: 44px; font-size: 22px; }
+
+.kit-icon-button--ghost:hover {
+  background-color: var(--color-surface-1);
+  color: var(--color-text-primary);
+}
+.kit-icon-button--solid {
+  background-color: var(--color-surface-2);
+  border-color: var(--color-border-default);
+  color: var(--color-text-primary);
+}
+.kit-icon-button--solid:hover {
+  background-color: var(--color-surface-1);
+  border-color: var(--color-border-strong);
+}
+.kit-icon-button--danger:hover {
+  background-color: var(--color-danger-soft);
+  color: var(--color-danger-text);
+}
+
+.kit-icon-button:active {
+  transform: translateY(1px);
+}
+
+.kit-icon-button:disabled,
+.kit-icon-button[data-disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+  transform: none;
+}

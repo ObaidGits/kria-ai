@@ -6,6 +6,15 @@
 //! - Workflow cancellation
 //! - Continuation actions (bring to front, open URL, retry)
 //! - Workflow state queries
+//!
+//! Architecture invariant: KRIA is the authoritative orchestrator. These
+//! commands hand the human decision to the canonical
+//! [`WorkflowContinuationRuntime`], which owns resume/teardown; the substrate
+//! never self-resumes. Cancellation therefore propagates through the runtime's
+//! own session store (see [`WorkflowContinuationRuntime::cancel_workflow`]).
+
+use crate::commands::app_state::AppStateCell;
+use tauri::State;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // §1 — HITL Response Command
@@ -16,12 +25,12 @@
 /// Called when the user clicks a button in the HITL modal (approve, deny,
 /// retry, skip, cancel, choose alternative, etc.)
 #[tauri::command]
-#[allow(dead_code)] // Will be registered in Tauri builder when HITL frontend is fully wired
 pub async fn workflow_hitl_respond(
     workflow_id: String,
     option_id: String,
     action_type: String,
     value: Option<String>,
+    state: State<'_, AppStateCell>,
 ) -> Result<serde_json::Value, String> {
     tracing::info!(
         target: "workflow_commands",
@@ -49,14 +58,46 @@ pub async fn workflow_hitl_respond(
         "HITL decision recorded"
     );
 
-    // TODO: Wire to actual workflow lifecycle resume when
-    // canonical executor supports HITL suspension/resume.
-    // For now, acknowledge the response.
+    // Route the human decision into the canonical runtime. A deny/cancel is a
+    // terminal cancellation (propagated through the runtime's session store);
+    // any other decision (approve/retry/skip/manual_complete/choose_alternative)
+    // resumes the paused workflow. The substrate never self-resumes — KRIA
+    // hands the decision to the runtime, which owns re-grounding + teardown.
+    let Some(app) = state.get() else {
+        // Runtime not ready yet — acknowledge so the UI degrades gracefully
+        // (Req 20.4) instead of surfacing a hard error during early init.
+        return Ok(serde_json::json!({
+            "status": "acknowledged_no_runtime",
+            "workflow_id": workflow_id,
+            "option_id": option_id,
+            "action_type": action_type,
+        }));
+    };
+
+    let is_cancel = matches!(action_type.as_str(), "deny" | "cancel");
+    if is_cancel {
+        let cancelled = app.workflow_continuation.cancel_workflow(&workflow_id);
+        return Ok(serde_json::json!({
+            "status": if cancelled { "cancelled" } else { "cancel_noop" },
+            "workflow_id": workflow_id,
+            "option_id": option_id,
+            "action_type": action_type,
+        }));
+    }
+
+    let resume = app.workflow_continuation.resume_workflow(&workflow_id);
     Ok(serde_json::json!({
-        "status": "acknowledged",
+        "status": if resume.success { "resume_prepared" } else { "decision_recorded" },
         "workflow_id": workflow_id,
         "option_id": option_id,
         "action_type": action_type,
+        "resume": {
+            "success": resume.success,
+            "summary": resume.summary,
+            "next_action": format!("{:?}", resume.next_action),
+            "requires_reground": true,
+            "note": "Workflow continuation must re-ground before executing any side-effecting action."
+        }
     }))
 }
 
@@ -69,8 +110,10 @@ pub async fn workflow_hitl_respond(
 /// Called when the user clicks the Cancel button during workflow execution.
 /// Propagates cancellation to the canonical runtime.
 #[tauri::command]
-#[allow(dead_code)]
-pub async fn workflow_cancel(workflow_id: String) -> Result<serde_json::Value, String> {
+pub async fn workflow_cancel(
+    workflow_id: String,
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
     tracing::info!(
         target: "workflow_commands",
         workflow_id = %workflow_id,
@@ -81,13 +124,19 @@ pub async fn workflow_cancel(workflow_id: String) -> Result<serde_json::Value, S
         return Err("workflow_id is required".into());
     }
 
-    // TODO: Wire to CancellationToken for the active workflow.
-    // The canonical executor already respects cancellation tokens.
-    // This command needs to find the token for the given workflow_id
-    // and cancel it.
+    // Propagate cancellation through the canonical runtime's session store so
+    // the workflow is neither resumed nor continued. KRIA records the terminal
+    // decision; the substrate cannot self-resume afterward.
+    let Some(app) = state.get() else {
+        return Ok(serde_json::json!({
+            "status": "acknowledged_no_runtime",
+            "workflow_id": workflow_id,
+        }));
+    };
 
+    let cancelled = app.workflow_continuation.cancel_workflow(&workflow_id);
     Ok(serde_json::json!({
-        "status": "cancellation_requested",
+        "status": if cancelled { "cancelled" } else { "cancellation_requested" },
         "workflow_id": workflow_id,
     }))
 }
@@ -101,12 +150,12 @@ pub async fn workflow_cancel(workflow_id: String) -> Result<serde_json::Value, S
 /// Called when the user clicks a continuation button (Bring to Front,
 /// Open URL, Retry, etc.)
 #[tauri::command]
-#[allow(dead_code)]
 pub async fn workflow_continuation(
     workflow_id: String,
     action_id: String,
     action_type: String,
     payload: Option<String>,
+    state: State<'_, AppStateCell>,
 ) -> Result<serde_json::Value, String> {
     tracing::info!(
         target: "workflow_commands",
@@ -116,42 +165,75 @@ pub async fn workflow_continuation(
         "Continuation action requested from frontend"
     );
 
+    if workflow_id.trim().is_empty() || action_id.trim().is_empty() {
+        return Err("workflow_id and action_id are required".into());
+    }
+
+    let require_payload = |kind: &str| {
+        payload
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| format!("{kind} continuation requires a payload"))
+    };
+
     match action_type.as_str() {
         "bring_to_front" => {
-            if let Some(app) = &payload {
-                // Attempt to focus the app window
-                tracing::info!(target: "workflow_commands", app = %app, "Bringing app to front");
-                // Use wmctrl/xdotool to focus (best-effort)
-                let _ = tokio::process::Command::new("wmctrl")
-                    .args(["-a", app])
-                    .output()
-                    .await;
+            let app = require_payload("bring_to_front")?;
+            tracing::info!(target: "workflow_commands", app, "Bringing app to front");
+            let output = tokio::process::Command::new("wmctrl")
+                .args(["-a", app])
+                .output()
+                .await
+                .map_err(|error| format!("failed to start wmctrl: {error}"))?;
+            if !output.status.success() {
+                return Err(format!(
+                    "wmctrl could not focus '{app}': {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ));
             }
-            Ok(serde_json::json!({ "status": "attempted", "action": "bring_to_front" }))
+            Ok(serde_json::json!({ "status": "completed", "action": "bring_to_front" }))
         }
-        "open_url" => {
-            if let Some(url) = &payload {
-                tracing::info!(target: "workflow_commands", url = %url, "Opening URL");
-                let _ = tokio::process::Command::new("xdg-open").arg(url).spawn();
+        "open_url" | "open_file" => {
+            let target = require_payload(&action_type)?;
+            tracing::info!(target: "workflow_commands", %target, "Opening continuation target");
+            tokio::process::Command::new("xdg-open")
+                .arg(target)
+                .spawn()
+                .map_err(|error| format!("failed to start xdg-open: {error}"))?;
+            Ok(serde_json::json!({ "status": "started", "action": action_type }))
+        }
+        "show_output" => {
+            let content = require_payload("show_output")?;
+            Ok(serde_json::json!({
+                "status": "presented",
+                "action": "show_output",
+                "content": content,
+            }))
+        }
+        "retry_step" | "retry_workflow" => {
+            let app = state.get().ok_or_else(|| {
+                "KRIA is still initializing — please try again in a moment".to_string()
+            })?;
+            let resume = app.workflow_continuation.resume_workflow(&workflow_id);
+            if !resume.success {
+                return Err(resume.summary);
             }
-            Ok(serde_json::json!({ "status": "attempted", "action": "open_url" }))
+            Ok(serde_json::json!({
+                "status": "resume_prepared",
+                "action": action_type,
+                "workflow_id": workflow_id,
+                "resume": {
+                    "success": true,
+                    "summary": resume.summary,
+                    "next_action": format!("{:?}", resume.next_action),
+                    "requires_reground": true,
+                }
+            }))
         }
-        "open_file" => {
-            if let Some(path) = &payload {
-                tracing::info!(target: "workflow_commands", path = %path, "Opening file");
-                let _ = tokio::process::Command::new("xdg-open").arg(path).spawn();
-            }
-            Ok(serde_json::json!({ "status": "attempted", "action": "open_file" }))
-        }
-        "retry_workflow" => {
-            tracing::info!(target: "workflow_commands", "Retry workflow requested");
-            // TODO: Re-trigger the workflow with the same intent
-            Ok(serde_json::json!({ "status": "retry_queued", "workflow_id": workflow_id }))
-        }
-        _ => Ok(serde_json::json!({
-            "status": "unknown_action",
-            "action_type": action_type,
-        })),
+        _ => Err(format!(
+            "unsupported workflow continuation action: {action_type}"
+        )),
     }
 }
 
@@ -163,7 +245,6 @@ pub async fn workflow_continuation(
 ///
 /// Returns activation status, metrics, and recent workflow summaries.
 #[tauri::command]
-#[allow(dead_code)]
 pub async fn workflow_runtime_status() -> Result<serde_json::Value, String> {
     use kria_core::agent::workflow_activation::{
         ActivationMetrics, ActivationStage, CanonicalActivationPolicy, CanonicalActivationReport,

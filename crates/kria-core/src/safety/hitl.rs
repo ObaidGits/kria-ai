@@ -19,7 +19,7 @@ pub struct ApprovalRequest {
 }
 
 /// User response to an approval request.
-#[derive(Debug, Clone, Copy, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 pub enum ApprovalResponse {
     Approved,
     Denied,
@@ -62,6 +62,56 @@ impl HitlGateway {
         uuid::Uuid::new_v4().to_string()
     }
 
+    /// Register a pending request before any UI event is emitted. Callers that
+    /// own presentation use this to avoid a race where an immediate response
+    /// arrives before the request exists in the gateway.
+    pub async fn prepare_approval_with_id(
+        &self,
+        request_id: &str,
+        action: &str,
+        parameters: serde_json::Value,
+        risk_level: RiskLevel,
+        description: &str,
+        rollback_available: bool,
+    ) -> oneshot::Receiver<ApprovalResponse> {
+        let request = ApprovalRequest {
+            id: request_id.to_string(),
+            action: action.to_string(),
+            parameters,
+            risk_level,
+            description: description.to_string(),
+            timeout_seconds: self.default_timeout.as_secs(),
+            rollback_available,
+        };
+        let (tx, rx) = oneshot::channel();
+        self.pending.lock().await.insert(
+            request_id.to_string(),
+            PendingRequest {
+                request: request.clone(),
+                responder: tx,
+            },
+        );
+        let _ = self.request_tx.send(request);
+        rx
+    }
+
+    /// Await a response to a request registered by
+    /// [`prepare_approval_with_id`](Self::prepare_approval_with_id).
+    pub async fn await_prepared_approval(
+        &self,
+        request_id: &str,
+        rx: oneshot::Receiver<ApprovalResponse>,
+    ) -> ApprovalResponse {
+        match tokio::time::timeout(self.default_timeout, rx).await {
+            Ok(Ok(response)) => response,
+            _ => {
+                self.pending.lock().await.remove(request_id);
+                tracing::warn!(request_id = %request_id, "HITL request timed out, auto-denying");
+                ApprovalResponse::Timeout
+            }
+        }
+    }
+
     /// Submit a RED action for approval using a pre-generated request ID.
     /// Blocks until the user responds or timeout.
     pub async fn request_approval_with_id(
@@ -73,45 +123,17 @@ impl HitlGateway {
         description: &str,
         rollback_available: bool,
     ) -> ApprovalResponse {
-        let id = request_id.to_string();
-        let timeout = self.default_timeout;
-
-        let request = ApprovalRequest {
-            id: id.clone(),
-            action: action.to_string(),
-            parameters,
-            risk_level,
-            description: description.to_string(),
-            timeout_seconds: timeout.as_secs(),
-            rollback_available,
-        };
-
-        let (tx, rx) = oneshot::channel();
-        {
-            let mut pending = self.pending.lock().await;
-            pending.insert(
-                id.clone(),
-                PendingRequest {
-                    request: request.clone(),
-                    responder: tx,
-                },
-            );
-        }
-
-        // Notify frontends
-        let _ = self.request_tx.send(request);
-
-        // Wait for response with timeout
-        match tokio::time::timeout(timeout, rx).await {
-            Ok(Ok(response)) => response,
-            _ => {
-                // Timeout or channel dropped → auto-deny for RED
-                let mut pending = self.pending.lock().await;
-                pending.remove(&id);
-                tracing::warn!(request_id = %id, "HITL request timed out, auto-denying");
-                ApprovalResponse::Timeout
-            }
-        }
+        let rx = self
+            .prepare_approval_with_id(
+                request_id,
+                action,
+                parameters,
+                risk_level,
+                description,
+                rollback_available,
+            )
+            .await;
+        self.await_prepared_approval(request_id, rx).await
     }
 
     /// Submit a RED action for approval. Blocks until the user responds or timeout.
@@ -165,5 +187,37 @@ impl HitlGateway {
         for (_, req) in pending.drain() {
             let _ = req.responder.send(ApprovalResponse::Denied);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn prepared_request_accepts_immediate_response_without_race() {
+        let gateway = HitlGateway::new(1);
+        let request_id = HitlGateway::generate_request_id();
+        let rx = gateway
+            .prepare_approval_with_id(
+                &request_id,
+                "config_patch",
+                serde_json::json!({ "section": "ui", "field": "theme" }),
+                RiskLevel::Yellow,
+                "change theme",
+                false,
+            )
+            .await;
+
+        assert!(
+            gateway
+                .respond(&request_id, ApprovalResponse::Approved)
+                .await
+        );
+        assert_eq!(
+            gateway.await_prepared_approval(&request_id, rx).await,
+            ApprovalResponse::Approved
+        );
+        assert!(gateway.pending_requests().await.is_empty());
     }
 }

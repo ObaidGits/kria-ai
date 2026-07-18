@@ -1,6 +1,7 @@
 import { Component, For, Show, createMemo, createSignal } from "solid-js";
 import type { GuiCognitionLifecycle, GuiCognitionSessionState } from "../types/guiCognition";
 import { deriveGuiCognitionSummary } from "../lib/guiCognitionSummary";
+import "./GuiCognitionPanel.css";
 
 interface GuiCognitionPanelProps {
   session: GuiCognitionSessionState;

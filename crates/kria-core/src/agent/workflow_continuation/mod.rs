@@ -723,6 +723,42 @@ impl WorkflowContinuationRuntime {
         self.session_mgr.find_continuable()
     }
 
+    /// Cancel a workflow, propagating cancellation into the canonical session
+    /// store so the runtime neither resumes nor continues it.
+    ///
+    /// Loads the persisted session, marks it terminally cancelled (clears the
+    /// continuation hint so `find_continuable`/`find_resumable` exclude it, and
+    /// sets `complete` so [`resume_workflow`](Self::resume_workflow) refuses
+    /// it), then saves. Returns `true` when a session was found and cancelled.
+    ///
+    /// This is the authoritative cancellation seam for user-initiated
+    /// `workflow_cancel`: KRIA (the orchestrator) records the terminal decision
+    /// in the runtime's own store; the substrate cannot self-resume afterward.
+    pub fn cancel_workflow(&self, session_id: &str) -> bool {
+        let Some(mut session) = self.session_mgr.load(session_id) else {
+            return false;
+        };
+        session.error = Some("Cancelled by user".to_string());
+        session.continuation_hint = None;
+        session.complete = true;
+        session.updated_at = now_epoch();
+        if let Err(e) = self.session_mgr.save(&session) {
+            warn!(
+                target: "workflow_continuation",
+                session_id = %session_id,
+                error = %e,
+                "Failed to persist workflow cancellation (non-fatal)"
+            );
+            return false;
+        }
+        info!(
+            target: "workflow_continuation",
+            session_id = %session_id,
+            "Workflow cancelled by user — cleared from the resumable set"
+        );
+        true
+    }
+
     /// Record that one exact action blocked on a collaborative decision was
     /// verified complete. This is action-level progress only; it does not mark
     /// the stage or workflow complete.
@@ -1062,6 +1098,38 @@ mod tests {
         assert!(result.success);
         assert!(matches!(result.next_action, RecoveryAction::Retry { .. }));
         rt.session_mgr.delete("resume-failed-001");
+    }
+
+    #[test]
+    fn cancel_workflow_makes_session_terminal_and_unresumable() {
+        let rt = runtime();
+        // A paused (failed-with-hint) session is normally resumable.
+        let mut session =
+            WorkflowSession::new("cancel-001".into(), "send email".into(), "Comms".into());
+        session.mark_failed(
+            "awaiting approval".into(),
+            Some("resume after approve".into()),
+        );
+        rt.session_mgr.save(&session).unwrap();
+        assert!(rt.resume_workflow("cancel-001").success);
+
+        // Cancelling propagates a terminal decision into the runtime's store.
+        assert!(rt.cancel_workflow("cancel-001"));
+
+        // It is now neither resumable nor listed as continuable.
+        assert!(!rt.resume_workflow("cancel-001").success);
+        assert!(!rt
+            .find_resumable()
+            .iter()
+            .any(|s| s.session_id == "cancel-001"));
+
+        rt.session_mgr.delete("cancel-001");
+    }
+
+    #[test]
+    fn cancel_unknown_workflow_returns_false() {
+        let rt = runtime();
+        assert!(!rt.cancel_workflow("no-such-session-xyz"));
     }
 
     // ── Interruption classification properties ─────────────────────────────

@@ -118,6 +118,44 @@ jobs:
             testing/eval_reports/n8n_stage3_routing_eval_*.txt
             testing/eval_reports/n8n_workflow_authoring_validation_*.txt
 
+  # ── UI design tokens & token-lint gate ──────────────────────────
+  # Enforces token purity (raw colors + undefined vars, Req 14.2), canonical
+  # component ownership (Req 14.4), and design-system tests.
+  ui-tokens:
+    name: "UI — Design Tokens & Lint Gate"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install UI dependencies
+        working-directory: ui
+        run: npm ci
+
+      - name: Regenerate design tokens
+        working-directory: ui
+        run: npm run tokens:build
+
+      - name: Fail if generated tokens are out of date
+        working-directory: ui
+        run: |
+          if ! git diff --quiet -- src/styles/tokens.generated.css; then
+            echo "::error::src/styles/tokens.generated.css is stale — run 'npm run tokens:build' and commit the result."
+            git --no-pager diff -- src/styles/tokens.generated.css
+            exit 1
+          fi
+
+      - name: UI consistency lint (tokens + one component per concept)
+        working-directory: ui
+        run: npm run lint:ui-consistency
+
+      - name: Run design-system unit tests
+        working-directory: ui
+        run: npm run test:run -- src/design-system
+
   # ─────────────────────────────────────────────────────────────────
   # TEMPORARILY DISABLED FOR FASTER CI ITERATION
   # Uncomment the jobs below when ready for full test suite

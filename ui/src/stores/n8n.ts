@@ -1,6 +1,7 @@
-import { createMemo, createSignal } from "solid-js";
+import { createSignal } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { isTauriAvailable } from "../bridge/types";
 
 export interface N8nWorkflow {
   workflow_id: string;
@@ -724,6 +725,19 @@ const [credentialSummaries, setCredentialSummaries] = createSignal<N8nCredential
 let initialized = false;
 let unlisteners: Array<() => void> = [];
 let refreshPromise: Promise<N8nStatusPayload | null> | null = null;
+const statusSubscribers = new Set<(payload: N8nStatusPayload | null) => void>();
+
+function publishStatus(payload: N8nStatusPayload | null): void {
+  for (const subscriber of statusSubscribers) subscriber(payload);
+}
+
+export function subscribeN8nStatus(
+  subscriber: (payload: N8nStatusPayload | null) => void,
+): () => void {
+  statusSubscribers.add(subscriber);
+  subscriber(status());
+  return () => statusSubscribers.delete(subscriber);
+}
 
 function normalize(value: unknown): string {
   return String(value ?? "").trim().toLowerCase();
@@ -876,53 +890,59 @@ export function isDeletingWorkflow(workflowId: string): boolean {
   return deletingWorkflowIds().includes(workflowId);
 }
 
-export const configuredWorkflows = createMemo(() =>
-  (status()?.configured_workflows ?? []).filter((workflow) => !workflowIsHidden(workflow.workflow_id))
-);
+export function configuredWorkflows(): N8nWorkflow[] {
+  return (status()?.configured_workflows ?? []).filter(
+    (workflow) => !workflowIsHidden(workflow.workflow_id),
+  );
+}
 
-export const archivedWorkflows = createMemo(() => {
+export function archivedWorkflows(): N8nWorkflow[] {
   const direct = status()?.workflow_registry?.archived_workflows ?? [];
   if (direct.length > 0) return direct;
   const records = (status()?.workflow_registry?.records ?? []) as any[];
   return records
     .map((record) => record?.workflow ?? record)
     .filter((workflow) => workflow?.archived || workflow?.n8n_deleted_at_ms || workflow?.n8n_delete_status);
-});
+}
 
-export const approvedWorkflows = createMemo(() =>
-  configuredWorkflows().filter((workflow) => normalize(workflow.status) === "approved")
-);
+export function approvedWorkflows(): N8nWorkflow[] {
+  return configuredWorkflows().filter((workflow) => normalize(workflow.status) === "approved");
+}
 
 /** Workflow IDs that came from bundled sample/test-harness provisioning. */
-export const sampleWorkflowIds = createMemo(() => {
+export function sampleWorkflowIds(): string[] {
   const records = (status()?.workflow_registry?.records ?? []) as any[];
   return records
     .filter((record) => isSampleSource(record?.source))
     .map((record) => String(record?.workflow_id ?? record?.workflow?.workflow_id ?? ""))
     .filter(Boolean);
-});
+}
 
-export const sampleWorkflows = createMemo(() => {
+export function sampleWorkflows(): N8nWorkflow[] {
   const ids = new Set(sampleWorkflowIds());
   return configuredWorkflows().filter((workflow) => ids.has(workflow.workflow_id));
-});
+}
 
 export function workflowIsSample(workflowId: string): boolean {
   return sampleWorkflowIds().includes(workflowId);
 }
 
-export const runs = createMemo<N8nRunState[]>(() => {
+export function runs(): N8nRunState[] {
   const backendRuns = status()?.runs ?? [];
   const backendIds = new Set(backendRuns.map((run) => run.correlation_id));
   const optimistic = pendingRuns().filter((run) => !backendIds.has(run.correlation_id));
   return [...backendRuns, ...optimistic].sort((a, b) => latestTimestamp(b) - latestTimestamp(a));
-});
+}
 
-export const runningRuns = createMemo(() => runs().filter((run) => !run.terminal));
+export function runningRuns(): N8nRunState[] {
+  return runs().filter((run) => !run.terminal);
+}
 
-export const terminalRuns = createMemo(() => runs().filter((run) => run.terminal));
+export function terminalRuns(): N8nRunState[] {
+  return runs().filter((run) => run.terminal);
+}
 
-export const runsByWorkflowId = createMemo(() => {
+export function runsByWorkflowId(): Map<string, N8nRunState[]> {
   const grouped = new Map<string, N8nRunState[]>();
   for (const run of runs()) {
     const bucket = grouped.get(run.workflow_id) ?? [];
@@ -930,9 +950,9 @@ export const runsByWorkflowId = createMemo(() => {
     grouped.set(run.workflow_id, bucket);
   }
   return grouped;
-});
+}
 
-export const deadLettersByWorkflowId = createMemo(() => {
+export function deadLettersByWorkflowId(): Map<string, N8nDeadLetter[]> {
   const grouped = new Map<string, N8nDeadLetter[]>();
   for (const deadLetter of status()?.dead_letters ?? []) {
     const bucket = grouped.get(deadLetter.workflow_id) ?? [];
@@ -940,9 +960,9 @@ export const deadLettersByWorkflowId = createMemo(() => {
     grouped.set(deadLetter.workflow_id, bucket);
   }
   return grouped;
-});
+}
 
-export const filteredWorkflows = createMemo(() => {
+export function filteredWorkflows(): N8nWorkflow[] {
   const query = normalize(search());
   return configuredWorkflows().filter((workflow) => {
     const workflowStatus = normalize(workflow.status);
@@ -955,7 +975,7 @@ export const filteredWorkflows = createMemo(() => {
     if (query && !workflowHaystack(workflow).includes(query)) return false;
     return true;
   });
-});
+}
 
 export function latestRunForWorkflow(workflowId: string): N8nRunState | undefined {
   return runsByWorkflowId().get(workflowId)?.[0];
@@ -981,6 +1001,7 @@ export async function refreshN8nStatus(): Promise<N8nStatusPayload | null> {
         invoke<N8nExecutionHistoryPayload>("list_n8n_executions").catch(() => null),
       ]);
       setStatus(result);
+      publishStatus(result);
       setRuntimeStatus(runtime);
       setExecutionHistory(history);
       setError(null);
@@ -2334,11 +2355,22 @@ export async function reconcileRun(correlationId: string) {
 
 export async function initializeN8nStore() {
   if (initialized) {
-    await Promise.all([refreshN8nStatus(), loadRuntimeProfiles().catch(() => []), loadProductionAuditSummary()]);
+    await Promise.all([
+      refreshN8nStatus(),
+      loadRuntimeProfiles().catch(() => []),
+      loadProductionAuditSummary(),
+      loadCopyLifecycleItems().catch(() => []),
+    ]);
     return;
   }
   initialized = true;
-  await Promise.all([refreshN8nStatus(), loadRuntimeProfiles().catch(() => []), loadProductionAuditSummary()]);
+  await Promise.all([
+    refreshN8nStatus(),
+    loadRuntimeProfiles().catch(() => []),
+    loadProductionAuditSummary(),
+    loadCopyLifecycleItems().catch(() => []),
+  ]);
+  if (!isTauriAvailable()) return;
   unlisteners = await Promise.all([
     listen("n8n:callback", () => {
       void refreshN8nStatus();
@@ -2495,6 +2527,7 @@ export const n8nStore = {
   viewWorkflowExecution,
   resumeWaitingExecution,
   reconcileRun,
+  subscribeStatus: subscribeN8nStatus,
   initialize: initializeN8nStore,
   dispose: disposeN8nStoreListeners,
 };

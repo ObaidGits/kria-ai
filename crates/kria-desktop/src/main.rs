@@ -5,27 +5,27 @@
 
 mod commands;
 mod device_control;
+mod safe_mode;
+mod summon;
 mod tray;
+mod windows;
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::Manager;
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 static RUNTIME_SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 fn main() {
-    // Linux/webkit2gtk blank-window workaround. On several GPU/driver combos —
-    // notably NVIDIA under Wayland/XWayland (this project's target hardware) —
-    // webkit2gtk's DMABUF renderer paints a BLANK white WebView (the Rust
-    // backend boots fine but no UI shows). Forcing the DMABUF renderer off makes
-    // the WebView fall back to a reliable GL/software path that renders. We only
-    // set it when the user has NOT already chosen a value, so an explicit
-    // override still wins, and it is a no-op on non-Linux platforms.
+    // Establish the Linux rendering baseline (kria-ui-redesign task 0.6) BEFORE
+    // the webview initializes. On WebKitGTK — notably NVIDIA under Wayland (this
+    // project's target hardware) — the DMABUF/accelerated-compositing paths can
+    // paint a BLANK white WebView or crash. `establish_baseline` detects a
+    // problematic env, resolves safe-mode (`--safe-mode` / `KRIA_SAFE_MODE`),
+    // and sets the appropriate WEBKIT_DISABLE_* flags without ever clobbering an
+    // explicit user value. No-op on non-Linux platforms. See
+    // docs/LINUX_GRAPHICS.md for the user-facing guidance.
     #[cfg(target_os = "linux")]
-    {
-        if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
-            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
-        }
-    }
+    let boot_env = safe_mode::establish_baseline();
 
     // Ring 4 — install Linux seccomp-BPF filter before anything else.
     // On non-Linux platforms this is a no-op.
@@ -46,13 +46,44 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
+            // Create the primary webview once instead of declaring it in
+            // `tauri.conf.json`. On Linux with a GTK application ID, a second
+            // desktop activation asks Tauri to apply declarative windows again;
+            // that panics when `main` already exists. Setup runs once, so this
+            // keeps launcher/summon reactivation non-destructive while App URLs
+            // still resolve to Vite in dev and embedded assets in bundles.
+            if app.get_webview_window("main").is_none() {
+                WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+                    .title("K.R.I.A.")
+                    .inner_size(900.0, 700.0)
+                    .min_inner_size(400.0, 500.0)
+                    .resizable(true)
+                    .decorations(true)
+                    .center()
+                    .build()?;
+            }
+
             // Register the AppStateCell immediately so Tauri never panics with
             // "state not managed" — commands that arrive before init_runtime()
             // finishes will get a clean "still initializing" error instead.
             app.handle().manage(commands::AppStateCell::new());
+            app.handle().manage(tray::TrayPresentationState::default());
+            app.handle()
+                .manage(windows::WindowPresentationState::default());
 
-            // Initialize tray icon
-            tray::create_tray(app.handle())?;
+            // Tray is an enhancement, never a startup dependency. GNOME/KDE
+            // Wayland sessions may have no StatusNotifier/AppIndicator host;
+            // in-app Core, Approval Center, palette, and Mini remain available.
+            if let Err(error) = tray::create_tray(app.handle()) {
+                tracing::warn!("tray unavailable ({error}); in-app fallbacks remain active");
+            }
+
+            // Register the global summon hotkey (kria-ui-redesign task 2.5,
+            // Req 2.5/18.2). ENHANCEMENT ONLY — try/degrade: if the OS/DE
+            // refuses a system-wide hotkey (e.g. Wayland) this logs and
+            // continues; the in-app Ctrl/Cmd+K webview hotkey is the guaranteed
+            // fallback, so summon never breaks.
+            let _global_summon = summon::register_global_summon(app.handle());
 
             // Wave 9 warm path: bind the wake-daemon IPC socket so an optional
             // running kria-wake-daemon can start a session without relaunch.
@@ -85,6 +116,7 @@ fn main() {
             commands::chat::send_lab_message,
             commands::sessions::get_session_history,
             commands::sessions::create_session,
+            commands::sessions::branch_session,
             commands::sessions::list_sessions,
             commands::sessions::switch_session,
             commands::sessions::delete_session,
@@ -99,6 +131,7 @@ fn main() {
             commands::sessions::set_memory_enabled,
             commands::app_commands::cancel_request,
             commands::app_commands::cancel_turn,
+            commands::app_commands::get_executive_snapshot,
             commands::app_commands::cancel_executive_task,
             commands::app_commands::submit_turn_feedback,
             commands::app_commands::approve_action,
@@ -340,6 +373,9 @@ fn main() {
             commands::capability::cpp_recommend,
             commands::capability::cpp_quarantined,
             commands::capability::cpp_release_quarantine,
+            commands::capability::list_quarantined_tools,
+            commands::capability::approve_quarantined_tool,
+            commands::capability::reject_quarantined_tool,
             commands::capability::cpp_health,
             commands::capability::cpp_proposals,
             commands::capability::cpp_proposal_apply,
@@ -380,9 +416,55 @@ fn main() {
             commands::providers::upsert_provider,
             commands::providers::remove_provider,
             commands::providers::get_provider_types,
+            // Core state → OS tray glyph (kria-ui-redesign task 2.3, Req 3.4/18.2).
+            // Enhancement with in-app fallback; degrades silently when no tray.
+            tray::set_tray_core_state,
+            // Capped detachable presentation surfaces (task 12.3) plus two
+            // optional Mini companions (task 12.4). Stable labels enforce one
+            // window per supported kind; none owns runtime authority.
+            windows::open_detached_surface,
+            windows::open_companion,
+            windows::mirror_approval_presentation,
+            windows::get_pending_approval_presentations,
+            windows::sync_approval_presentation,
+            // Summon: focus the main window (tray item + KRIA Mini call this);
+            // the webview opens the Command Palette (kria-ui-redesign task 2.5,
+            // Req 2.5/18.2).
+            summon::summon,
+            // Workflow runtime controls (kria-ui-redesign task 4.2 / design.md
+            // §3.3 contract change b, Req 11.6): register the previously-
+            // unregistered `workflow_*` commands so the Approval Center's
+            // workflow HITL / cancel / continuation controls are no longer
+            // inert. Cancellation propagation is preserved by the runtime.
+            commands::workflow::workflow_hitl_respond,
+            commands::workflow::workflow_cancel,
+            commands::workflow::workflow_continuation,
+            commands::workflow::workflow_runtime_status,
         ])
-        .build(tauri::generate_context!())
-        .expect("error while building tauri application");
+        .build(tauri::generate_context!());
+
+    // Graceful boot-error fallback (task 0.6 / design.md §11.4): if the very
+    // first (accelerated) boot fails to build the webview, and we are NOT
+    // already in safe mode, relaunch ourselves in safe mode so a Wayland+NVIDIA
+    // blank-screen/crash is self-healing instead of a dead white window.
+    let app = match app {
+        Ok(app) => app,
+        Err(e) => {
+            eprintln!("[KRIA] failed to build the application webview: {e}");
+            #[cfg(target_os = "linux")]
+            {
+                if !boot_env.safe_mode_requested {
+                    // Relaunches with KRIA_SAFE_MODE=1 and exits; only returns
+                    // false if the relaunch could not be spawned.
+                    safe_mode::relaunch_in_safe_mode();
+                }
+                eprintln!(
+                    "[KRIA] already in safe mode (or relaunch failed). See docs/LINUX_GRAPHICS.md for manual env-flag guidance."
+                );
+            }
+            std::process::exit(1);
+        }
+    };
 
     app.run(|app_handle, event| {
         if let tauri::RunEvent::ExitRequested { .. } = event {

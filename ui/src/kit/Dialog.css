@@ -1,0 +1,98 @@
+/**
+ * Dialog / Confirm — modal on Kobalte Dialog. Overlay dims the canvas; the
+ * panel is a floating layer (blur). Focus is trapped and Escape closes
+ * (Req 17.6). One modal at a time is enforced by the app shell, not here.
+ */
+.kit-dialog__overlay {
+  position: fixed;
+  inset: 0;
+  background-color: var(--color-surface-3);
+  backdrop-filter: blur(var(--blur-floating));
+  -webkit-backdrop-filter: blur(var(--blur-floating));
+  z-index: var(--z-modal);
+}
+
+.kit-dialog__positioner {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  z-index: var(--z-modal);
+}
+
+.kit-dialog__panel {
+  position: relative;
+  width: 100%;
+  max-width: 480px;
+  background-color: var(--color-surface-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elevation-4);
+  padding: var(--space-6);
+  color: var(--color-text-primary);
+}
+
+.kit-dialog__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-3);
+}
+.kit-dialog__title {
+  font-family: var(--font-family-display);
+  font-size: var(--font-size-title);
+  font-weight: var(--font-weight-semibold);
+  margin: 0;
+}
+.kit-dialog__description {
+  font-size: var(--font-size-body);
+  color: var(--color-text-secondary);
+  margin: 0 0 var(--space-5);
+}
+.kit-dialog__close {
+  flex: none;
+}
+.kit-dialog__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-5);
+}
+
+/* Risk banner (Req 11: risk not by color alone — icon + text). */
+.kit-dialog__risk {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-caption);
+  margin-bottom: var(--space-4);
+}
+.kit-dialog__risk--danger {
+  background-color: var(--color-danger-soft);
+  color: var(--color-danger-text);
+}
+.kit-dialog__risk--warning {
+  background-color: var(--color-warning-soft);
+  color: var(--color-warning-text);
+}
+
+.kit-dialog__overlay[data-expanded] {
+  animation: kit-dialog-fade var(--motion-duration-base) var(--motion-easing-entrance);
+}
+.kit-dialog__panel[data-expanded] {
+  animation: kit-dialog-pop var(--motion-duration-base) var(--motion-easing-entrance);
+}
+@keyframes kit-dialog-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes kit-dialog-pop {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kit-dialog__overlay[data-expanded],
+  .kit-dialog__panel[data-expanded] { animation: none; }
+}

@@ -1,0 +1,114 @@
+/**
+ * Shared styling for floating layers (Select/Menu/Popover/Tooltip/Dialog).
+ * Ink & Aura §4.3: blur is applied ONLY on floating layers. Token-only.
+ *
+ * WebKitGTK correction (design.md §11.2 / §11.3 G8): backdrop-filter blur is a
+ * compositing cost that is unreliable/expensive on WebKitGTK. It is therefore
+ * gated on the root `data-blur` attribute, which platform/boot.ts sets to "on"
+ * only when the device actually supports backdrop-filter AND the user has not
+ * requested reduced motion. When blur is "off" the surface degrades to a SOLID
+ * translucent fallback (no backdrop-filter) so the visual language survives
+ * without blur. Default (attribute unset) is the safe solid fallback.
+ */
+.kit-floating {
+  background-color: var(--color-surface-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--elevation-3);
+  color: var(--color-text-primary);
+  z-index: var(--z-floating);
+  overflow: hidden;
+}
+
+/* Aura-glass: apply the semi-transparent surface + blur only when enabled. */
+:root[data-blur="on"] .kit-floating {
+  background-color: var(--color-surface-3);
+  backdrop-filter: blur(var(--blur-floating));
+  -webkit-backdrop-filter: blur(var(--blur-floating));
+}
+
+.kit-floating--menu {
+  padding: var(--space-1);
+  min-width: 200px;
+}
+
+/* Menu / listbox items */
+.kit-menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-body);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  user-select: none;
+  outline: none;
+}
+/* Kobalte drives keyboard highlight via data-highlighted. */
+.kit-menu-item[data-highlighted] {
+  background-color: var(--color-accent-soft);
+}
+.kit-menu-item[data-disabled] {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.kit-menu-item__indicator {
+  margin-left: auto;
+  display: inline-flex;
+  color: var(--color-accent-default);
+}
+
+.kit-menu-separator {
+  height: 1px;
+  background-color: var(--color-border-default);
+  margin: var(--space-1) 0;
+  border: 0;
+}
+
+.kit-menu-label {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--font-size-micro);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Tooltip is text-only, smaller, opaque-ish */
+.kit-tooltip {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-size-caption);
+  max-width: 260px;
+}
+
+/* Popover body padding */
+.kit-popover {
+  padding: var(--space-4);
+  max-width: 320px;
+}
+.kit-popover__title {
+  font-family: var(--font-family-display);
+  font-size: var(--font-size-heading);
+  font-weight: var(--font-weight-semibold);
+  margin: 0 0 var(--space-2);
+}
+.kit-popover__close {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+}
+
+/* Entrance/exit motion (compositor-cheap; frozen under reduced-motion). */
+.kit-floating[data-expanded],
+.kit-floating[data-opened] {
+  animation: kit-floating-in var(--motion-duration-fast) var(--motion-easing-entrance);
+}
+@keyframes kit-floating-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kit-floating[data-expanded],
+  .kit-floating[data-opened] { animation: none; }
+}

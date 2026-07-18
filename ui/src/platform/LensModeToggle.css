@@ -1,0 +1,15 @@
+/**
+ * LensModeToggle (task 6.5, Req 5.5 / 17.5) — token-only styles for the manual
+ * 2D/3D representation switch. Zero raw color (Req 14.2).
+ */
+.kria-lens-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.kria-lens-mode__note {
+  font-size: var(--font-size-micro);
+  color: var(--color-text-secondary);
+}

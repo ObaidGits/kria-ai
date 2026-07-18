@@ -1,0 +1,163 @@
+/**
+ * PlanVisualization — the revived plan-compare view (Req 20.3), mounted in the
+ * WorkBlock's plan-visualization-slot. Token-only (Req 14.2, zero raw color)
+ * and visually SECONDARY to the conversation (Req 4.3): caption type scale,
+ * muted surfaces, restrained accent. Recommended plan gets an accent border;
+ * risk/status are icon + text (Req 17.3), never color alone.
+ */
+
+.kria-plan-viz {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* ── Goal-verification banner ────────────────────────────────────────────── */
+.kria-plan-viz__outcome {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-1);
+}
+
+.kria-plan-viz__outcome-reason,
+.kria-plan-viz__selection-reason {
+  color: var(--color-text-secondary);
+}
+
+/* ── Selection reason ────────────────────────────────────────────────────── */
+.kria-plan-viz__selection-reason {
+  padding: var(--space-2);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-1);
+}
+
+/* ── Candidate cards (side-by-side, wraps when narrow) ───────────────────── */
+.kria-plan-viz__cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.kria-plan-viz__card {
+  flex: 1 1 240px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-1);
+}
+
+.kria-plan-viz__card[data-recommended="true"] {
+  border-color: var(--color-accent-border);
+  background: var(--color-surface-2);
+}
+
+.kria-plan-viz__card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.kria-plan-viz__card-label {
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.kria-plan-viz__recommended,
+.kria-plan-viz__risk {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.kria-plan-viz__risk {
+  align-self: flex-start;
+}
+
+.kria-plan-viz__summary {
+  color: var(--color-text-secondary);
+  line-height: var(--font-line-height-normal);
+}
+
+/* ── Section titles ──────────────────────────────────────────────────────── */
+.kria-plan-viz__section-title {
+  display: block;
+  font-size: var(--font-size-micro);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-1);
+}
+
+.kria-plan-viz__tradeoffs-body {
+  color: var(--color-text-secondary);
+}
+
+/* ── Steps ───────────────────────────────────────────────────────────────── */
+.kria-plan-viz__step-list {
+  list-style: decimal;
+  margin: 0;
+  padding-inline-start: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.kria-plan-viz__step {
+  color: var(--color-text-primary);
+}
+
+.kria-plan-viz__step-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-inline-end: var(--space-1);
+  color: var(--color-text-muted);
+}
+
+.kria-plan-viz__step-status-label {
+  font-size: var(--font-size-micro);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.kria-plan-viz__step-detail {
+  display: block;
+  font-family: var(--font-family-mono);
+  color: var(--color-text-muted);
+  word-break: break-word;
+}
+
+.kria-plan-viz__step-outcome {
+  display: block;
+  font-family: var(--font-family-mono);
+  color: var(--color-text-secondary);
+}
+
+/* ── Select action ───────────────────────────────────────────────────────── */
+.kria-plan-viz__select {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: auto;
+}
+
+/* ── Empty state ─────────────────────────────────────────────────────────── */
+.kria-plan-viz__empty {
+  margin: 0;
+  color: var(--color-text-muted);
+}

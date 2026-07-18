@@ -1,17 +1,7 @@
+/* Shared foundations only. Feature and shell styles are component-owned. */
+@import "./fonts.css";
+@import "./tokens.generated.css";
 @import "./base.css";
-@import "./theme-shell.css";
-@import "./setup-wizard.css";
-@import "./messages.css";
-@import "./devices.css";
-@import "./modern-layout.css";
-@import "./providers.css";
-@import "./n8n.css";
-
-/* Mobile & Remote Desktop settings panel (Phase 4.5/4.6) */
-.settings-field-group { display: flex; flex-direction: column; gap: 10px; }
-.settings-toggle { display: flex; align-items: center; gap: 8px; font-size: 14px; }
-.settings-hint { font-size: 12px; opacity: 0.7; margin: 4px 0; }
-.settings-error { background: #7f1d1d; color: #fecaca; padding: 10px; border-radius: 8px; margin-bottom: 10px; font-size: 13px; }
-.settings-pairing-card { margin-top: 12px; padding: 14px; border: 1px solid var(--border, #334155); border-radius: 10px; }
-.settings-pairing-code { font-size: 28px; font-weight: 700; letter-spacing: 2px; word-break: break-all; padding: 10px; text-align: center; background: rgba(56,189,248,0.12); border-radius: 8px; margin-top: 6px; }
-.settings-device-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border, #334155); font-size: 14px; }
+@import "./accessibility.css";
+/* Must remain last: universal reduced-motion rules override every surface. */
+@import "./motion.css";

@@ -1,0 +1,17 @@
+.kit-provenance {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-micro);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.02em;
+}
+
+.kit-provenance[data-provenance-cue="kria"] {
+  color: var(--color-accent-default);
+}
+
+.kit-provenance[data-provenance-cue="user"] {
+  color: var(--color-text-secondary);
+}

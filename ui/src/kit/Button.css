@@ -1,0 +1,103 @@
+/**
+ * Button — primary/secondary/ghost/danger variants, sm/md/lg sizes.
+ * Full interaction states: default / hover / active / focus-visible / disabled
+ * (Req 14.5). Token-only styling.
+ */
+.kit-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font-family: var(--font-family-text);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--font-line-height-tight);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-easing-standard),
+    border-color var(--motion-duration-fast) var(--motion-easing-standard),
+    color var(--motion-duration-fast) var(--motion-easing-standard),
+    transform var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+/* Sizes */
+.kit-button--sm {
+  font-size: var(--font-size-caption);
+  padding: var(--space-1) var(--space-3);
+  min-height: 28px;
+}
+.kit-button--md {
+  font-size: var(--font-size-body);
+  padding: var(--space-2) var(--space-4);
+  min-height: 36px;
+}
+.kit-button--lg {
+  font-size: var(--font-size-heading);
+  padding: var(--space-3) var(--space-5);
+  min-height: 44px;
+}
+
+/* Primary (accent) */
+.kit-button--primary {
+  background-color: var(--color-accent-default);
+  color: var(--color-accent-contrast);
+}
+.kit-button--primary:hover {
+  background-color: var(--color-accent-hover);
+}
+.kit-button--primary:active {
+  transform: translateY(1px);
+}
+
+/* Secondary (neutral surface) */
+.kit-button--secondary {
+  background-color: var(--color-surface-2);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-default);
+}
+.kit-button--secondary:hover {
+  background-color: var(--color-surface-1);
+  border-color: var(--color-border-strong);
+}
+.kit-button--secondary:active {
+  transform: translateY(1px);
+}
+
+/* Ghost (text-led) */
+.kit-button--ghost {
+  background-color: transparent;
+  color: var(--color-text-secondary);
+}
+.kit-button--ghost:hover {
+  background-color: var(--color-surface-1);
+  color: var(--color-text-primary);
+}
+.kit-button--ghost:active {
+  transform: translateY(1px);
+}
+
+/* Danger (destructive / high-risk) */
+.kit-button--danger {
+  background-color: var(--color-danger-soft);
+  color: var(--color-danger-text);
+  border-color: var(--color-danger-solid);
+}
+.kit-button--danger:hover {
+  background-color: var(--color-danger-solid);
+  color: var(--color-text-inverse);
+}
+.kit-button--danger:active {
+  transform: translateY(1px);
+}
+
+/* Disabled — Kobalte sets [data-disabled]; also handle native :disabled. */
+.kit-button:disabled,
+.kit-button[data-disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  pointer-events: none;
+}

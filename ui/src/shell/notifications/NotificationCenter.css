@@ -1,0 +1,151 @@
+/**
+ * Notification Center styling (design.md §6.8). Token-only (token-lint
+ * enforced). A quiet right-side slide-in panel. NON-blocking: the click-away
+ * layer is transparent (it captures clicks to close but never dims/blocks the
+ * room the way the Approval Center does — Req 13.2). Motion is compositor-cheap
+ * and frozen under reduced-motion (Req 13.5 / 16.4 / 17.4). No decorative or
+ * ambient motion.
+ */
+
+.kria-notifications__overlay {
+  position: fixed;
+  inset: 0;
+  background: transparent;
+  z-index: var(--z-floating);
+}
+
+.kria-notifications__positioner {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  justify-content: flex-end;
+  pointer-events: none;
+  z-index: var(--z-floating);
+}
+
+.kria-notifications {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 400px;
+  height: 100%;
+  background-color: var(--color-surface-4);
+  border-left: 1px solid var(--color-border-default);
+  box-shadow: var(--elevation-3);
+  color: var(--color-text-primary);
+  outline: none;
+}
+:root[data-blur="on"] .kria-notifications {
+  background-color: var(--color-surface-3);
+  backdrop-filter: blur(var(--blur-floating));
+  -webkit-backdrop-filter: blur(var(--blur-floating));
+}
+
+.kria-notifications__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-default);
+}
+.kria-notifications__title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-family-display);
+  font-size: var(--font-size-title);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+.kria-notifications__tools {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+
+.kria-notifications__list {
+  flex: 1;
+  overflow-y: auto;
+  margin: 0;
+  padding: var(--space-2);
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* ── A single notice row ─────────────────────────────────────────────────── */
+.kria-notification {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-2);
+  border: 1px solid var(--color-border-default);
+}
+/* The non-blocking "needs-you" tier reads with the scarce accent — quietly. */
+.kria-notification.is-needs-you {
+  border-color: var(--color-accent-border);
+  background-color: var(--color-accent-soft);
+}
+
+.kria-notification__icon {
+  display: inline-flex;
+  flex: none;
+  margin-top: var(--space-1);
+}
+.kria-notification__icon--info { color: var(--color-info-solid); }
+.kria-notification__icon--success { color: var(--color-success-solid); }
+.kria-notification__icon--warning { color: var(--color-warning-solid); }
+.kria-notification__icon--danger { color: var(--color-danger-solid); }
+.kria-notification__icon--accent { color: var(--color-accent-default); }
+.kria-notification__icon--neutral { color: var(--color-text-secondary); }
+
+.kria-notification__body {
+  flex: 1;
+  min-width: 0;
+}
+.kria-notification__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+.kria-notification__count {
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+}
+.kria-notification__source {
+  font-size: var(--font-size-caption);
+  color: var(--color-text-muted);
+}
+.kria-notification__message {
+  font-size: var(--font-size-body);
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+.kria-notification__detail {
+  margin-top: var(--space-1);
+  font-size: var(--font-size-caption);
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+.kria-notification__actions {
+  margin-top: var(--space-2);
+}
+
+/* Entrance motion — slide-in; frozen under reduced-motion (no ambient motion). */
+.kria-notifications {
+  animation: kria-notifications-in var(--motion-duration-base) var(--motion-easing-entrance);
+}
+@keyframes kria-notifications-in {
+  from { transform: translateX(16px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kria-notifications { animation: none; }
+}

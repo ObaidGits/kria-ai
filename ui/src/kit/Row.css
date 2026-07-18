@@ -1,0 +1,66 @@
+/**
+ * Row / ListItem — a horizontal list entry with leading + content + trailing
+ * slots. Selectable rows become keyboard-operable buttons with focus ring.
+ */
+.kit-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  background-color: transparent;
+  border: 1px solid transparent;
+  text-align: left;
+}
+
+button.kit-row {
+  cursor: pointer;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-easing-standard),
+    border-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+button.kit-row:hover {
+  background-color: var(--color-surface-1);
+}
+
+.kit-row[aria-selected="true"],
+.kit-row--selected {
+  background-color: var(--color-accent-soft);
+  border-color: var(--color-accent-border);
+}
+
+.kit-row:disabled,
+.kit-row[data-disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.kit-row__leading,
+.kit-row__trailing {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  color: var(--color-text-secondary);
+}
+.kit-row__content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.kit-row__title {
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kit-row__subtitle {
+  font-size: var(--font-size-caption);
+  color: var(--color-text-muted);
+}

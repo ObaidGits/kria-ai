@@ -1,0 +1,390 @@
+/**
+ * Automations · Run segment — ask-KRIA-to-pick, SuggestionCard, WorkflowCard,
+ * PreparedInputPreview, run progress + EvidenceViewer (task 7.2, Req 6.3/6.5).
+ *
+ * Token-only (Req 14.2, zero raw color). No ambient motion — only the kit
+ * Progress fill animates while a determinate/indeterminate run advances.
+ */
+
+.kria-run {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.kria-run__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.kria-run__section-title {
+  margin: 0;
+  font-size: var(--font-size-heading);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.kria-run__muted {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+
+.kria-run__count {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+
+.kria-run__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* ── ask-KRIA-to-pick ────────────────────────────────────────────────────── */
+.kria-ask {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-1);
+}
+
+.kria-ask__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.kria-ask__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.kria-ask__status {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+}
+
+.kria-ask__error {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-danger-text);
+  font-size: var(--font-size-caption);
+}
+
+.kria-ask__message {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+}
+
+/* ── SuggestionCard ──────────────────────────────────────────────────────── */
+.kria-suggestion {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+/* Shared kit ProvenanceCue owns authorship styling (Req 20.5). */
+
+.kria-suggestion__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.kria-suggestion__name {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+}
+
+.kria-suggestion__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.kria-suggestion__reason {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+}
+
+.kria-suggestion__missing {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-warning-text);
+  font-size: var(--font-size-caption);
+}
+
+.kria-suggestion__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/* ── WorkflowCard ────────────────────────────────────────────────────────── */
+.kria-wfcard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 100%;
+}
+
+.kria-wfcard__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.kria-wfcard__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.kria-wfcard__name {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+}
+
+.kria-wfcard__desc {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+
+.kria-wfcard__status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.kria-wfcard__status-label {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+}
+
+.kria-wfcard__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/* HITL pointer — calm, routes attention to the Approval Center (Req 6.5/11).
+   NOT an inline modal; the scarce accent signals "needs you" quietly. */
+.kria-wfcard__hitl {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  background: var(--color-accent-soft);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-caption);
+}
+
+.kria-wfcard__error {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-danger-text);
+  font-size: var(--font-size-caption);
+}
+
+/* ── RunProgress ─────────────────────────────────────────────────────────── */
+.kria-runprogress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.kria-runprogress__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.kria-runprogress__phase {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-caption);
+  color: var(--color-text-secondary);
+}
+
+.kria-runprogress__message {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-micro);
+}
+
+/* ── PreparedInputPreview ────────────────────────────────────────────────── */
+.kria-prepared {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-1);
+}
+
+.kria-prepared__head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.kria-prepared__title {
+  margin: 0;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.kria-prepared__explanation {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+}
+
+.kria-prepared__fields {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-caption);
+}
+
+.kria-prepared__fields th,
+.kria-prepared__fields td {
+  text-align: left;
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--color-border-default);
+  color: var(--color-text-secondary);
+  vertical-align: top;
+}
+
+.kria-prepared__fields th {
+  color: var(--color-text-muted);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: var(--font-size-micro);
+}
+
+.kria-prepared__field-name {
+  color: var(--color-text-primary);
+  font-family: var(--font-family-mono);
+}
+
+.kria-prepared__payload-label {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-micro);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.kria-prepared__payload {
+  margin: 0;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-2);
+  color: var(--color-text-secondary);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-micro);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.kria-prepared__warning {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-warning-text);
+  font-size: var(--font-size-caption);
+}
+
+.kria-prepared__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/* ── EvidenceViewer ──────────────────────────────────────────────────────── */
+.kria-evidence {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.kria-evidence__title {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+
+.kria-evidence__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.kria-evidence__item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border-left: 2px solid var(--color-border-default);
+}
+
+.kria-evidence__label {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-medium);
+}
+
+a.kria-evidence__label {
+  color: var(--color-accent-default);
+  text-decoration: none;
+}
+
+a.kria-evidence__label:hover {
+  text-decoration: underline;
+}
+
+.kria-evidence__detail {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+  word-break: break-word;
+}

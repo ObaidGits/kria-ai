@@ -7,6 +7,8 @@
 
 use std::cmp::Ordering;
 use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
 use std::time::{Duration, Instant};
 
 use tokio::task::JoinHandle;
@@ -107,45 +109,59 @@ impl fmt::Display for TaskSource {
 
 // ─── Task Payload ────────────────────────────────────────────────────────────
 
-/// What kind of work the task wants to do.
-/// Each variant carries enough context for the worker to execute without
-/// calling back into the ExecutiveController.
-#[derive(Debug)]
-pub enum TaskPayload {
-    /// Process a user utterance (voice or text). Goes through the full
-    /// routing → uncertainty → planning → execution pipeline.
-    UserTurn {
-        text: String,
-        is_voice: bool,
-        session_id: String,
-    },
+/// Real work submitted to the scheduler. Work is created by the owning subsystem,
+/// preserving its runtime dependencies instead of duplicating or faking execution here.
+pub struct TaskPayload {
+    description: String,
+    work: Pin<Box<dyn Future<Output = TaskResult> + Send + 'static>>,
+    on_cancel: Option<Box<dyn FnOnce() + Send + 'static>>,
+}
 
-    /// Execute a single pre-planned command (from StructuredBranchingPlanner).
-    ExecuteCommand {
-        command: crate::tools::subprocess_executor::StructuredCommand,
-    },
+impl fmt::Debug for TaskPayload {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TaskPayload")
+            .field("description", &self.description)
+            .finish_non_exhaustive()
+    }
+}
 
-    /// Run background diagnostics (read-only, no GPU).
-    BackgroundDiagnostics {
-        commands: Vec<crate::tools::subprocess_executor::StructuredCommand>,
-    },
+impl TaskPayload {
+    pub fn new<F>(description: impl Into<String>, work: F) -> Self
+    where
+        F: Future<Output = TaskResult> + Send + 'static,
+    {
+        const MAX_DESCRIPTION_CHARS: usize = 160;
+        Self {
+            description: description
+                .into()
+                .chars()
+                .take(MAX_DESCRIPTION_CHARS)
+                .collect(),
+            work: Box::pin(work),
+            on_cancel: None,
+        }
+    }
 
-    /// Gather evidence for the Uncertainty Engine (read-only).
-    GatherEvidence {
-        commands: Vec<crate::tools::subprocess_executor::StructuredCommand>,
-    },
+    pub fn with_cancel_handler<F>(mut self, handler: F) -> Self
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        self.on_cancel = Some(Box::new(handler));
+        self
+    }
 
-    /// Compile a skill from a successful plan.
-    CompileSkill { plan_json: String },
+    pub fn description(&self) -> String {
+        self.description.clone()
+    }
 
-    /// VRAM maintenance: checkpoint → drop → reload the Planner model.
-    VramMaintenanceRefresh { reason: String },
-
-    /// HITL response: unblock a blocked task.
-    HitlResponse { request_id: String, approved: bool },
-
-    /// Generic maintenance task.
-    Maintenance { description: String },
+    pub(crate) fn into_parts(
+        self,
+    ) -> (
+        Pin<Box<dyn Future<Output = TaskResult> + Send + 'static>>,
+        Option<Box<dyn FnOnce() + Send + 'static>>,
+    ) {
+        (self.work, self.on_cancel)
+    }
 }
 
 // ─── Task Request ────────────────────────────────────────────────────────────
@@ -208,6 +224,9 @@ pub struct TaskHandle {
     pub id: uuid::Uuid,
     pub priority: TaskPriority,
     pub source: TaskSource,
+    pub description: String,
+    pub submitted_at: Instant,
+    pub started_at_utc: String,
     pub cancel: CancellationToken,
     pub join: JoinHandle<TaskResult>,
     pub started_at: Instant,
@@ -296,6 +315,44 @@ pub enum ScheduleDecision {
     Reject { task_id: uuid::Uuid, reason: String },
 }
 
+// ─── Serializable Runtime Snapshot ──────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum TaskState {
+    Queued,
+    Running,
+    Completed,
+    Failed,
+    Cancelled,
+    Preempted,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ExecutiveTaskSnapshot {
+    pub id: uuid::Uuid,
+    pub priority: TaskPriority,
+    pub source: TaskSource,
+    pub state: TaskState,
+    pub description: String,
+    pub submitted_at: String,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub duration_ms: Option<u64>,
+    pub error: Option<String>,
+    pub requires_gpu: bool,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct ExecutiveSnapshot {
+    pub active_foreground: Option<ExecutiveTaskSnapshot>,
+    pub active_background: Vec<ExecutiveTaskSnapshot>,
+    pub queued: Vec<ExecutiveTaskSnapshot>,
+    pub gpu_lease_holder: Option<uuid::Uuid>,
+    pub gpu_lease_remaining_ms: Option<u64>,
+    pub total_completed: u64,
+    pub total_failed: u64,
+}
+
 // ─── Controller Event ────────────────────────────────────────────────────────
 
 /// Events emitted by the ExecutiveController for observability.
@@ -305,15 +362,23 @@ pub enum ControllerEvent {
         task_id: uuid::Uuid,
         priority: TaskPriority,
         source: TaskSource,
+        description: String,
+        ts: String,
     },
     TaskCompleted {
         task_id: uuid::Uuid,
-        result_summary: String,
+        success: bool,
         duration_ms: u64,
+        output_summary: Option<String>,
+        error: Option<String>,
+        ts: String,
     },
     TaskPreempted {
         victim_id: uuid::Uuid,
+        victim_priority: TaskPriority,
         replacement_id: uuid::Uuid,
+        replacement_priority: TaskPriority,
+        ts: String,
     },
     TaskRejected {
         task_id: uuid::Uuid,

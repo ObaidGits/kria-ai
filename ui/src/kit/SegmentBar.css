@@ -1,0 +1,43 @@
+/**
+ * SegmentBar — segmented single-select control (Kobalte ToggleGroup).
+ * States: default/hover/selected/focus-visible/disabled.
+ */
+.kit-segment {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background-color: var(--color-surface-2);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+}
+
+.kit-segment__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  border: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-family: var(--font-family-text);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-medium);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-easing-standard),
+    color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+.kit-segment__item:hover {
+  color: var(--color-text-primary);
+}
+.kit-segment__item[data-pressed],
+.kit-segment__item[aria-checked="true"] {
+  background-color: var(--color-accent-soft);
+  color: var(--color-text-primary);
+}
+.kit-segment__item[data-disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}

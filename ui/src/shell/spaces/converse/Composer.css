@@ -1,0 +1,72 @@
+/**
+ * Composer — sticky Converse input (task 3.4, Req 4.4 / 4.5 / 4.9).
+ * Token-only (Req 14.2, zero raw color). Grow-then-scroll is driven by the
+ * `rows` attribute (line-count → rows, capped) plus a max-height + internal
+ * scroll so the field grows to a max then scrolls (Req 4.4).
+ */
+
+.kria-composer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* ── Attachments ─────────────────────────────────────────────────────────── */
+.kria-composer__attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kria-composer__attachment-name {
+  max-width: 16ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Textarea (grow-then-scroll) ─────────────────────────────────────────── */
+/* Override the kit textarea defaults: single-row min, no manual resize, cap the
+ * growth then scroll internally (Req 4.4). MAX_ROWS in the component keeps the
+ * `rows` attribute bounded; this cap is the visual backstop. */
+.kria-composer__textarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 0;
+  max-height: calc(var(--font-line-height-normal) * 8em + var(--space-4));
+  resize: none;
+  overflow-y: auto;
+}
+
+/* ── Controls row ────────────────────────────────────────────────────────── */
+.kria-composer__controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.kria-composer__tools {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.kria-composer__mode {
+  gap: var(--space-1);
+}
+
+/* Hidden native file input — triggered by the Attach IconButton. */
+.kria-composer__file-input {
+  display: none;
+}
+
+/* The single primary action reads prominent; Stop uses the danger variant so it
+ * is unmistakable while KRIA works (Req 4.4) — icon + text, never color alone. */
+.kria-composer__send,
+.kria-composer__stop {
+  gap: var(--space-1);
+}

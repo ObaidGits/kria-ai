@@ -1,0 +1,63 @@
+/**
+ * WakeWordTest styling (task 5.3, Req 12.4). Token-only (token-lint enforced).
+ * A compact panel that mounts inside the voice surface / onboarding — no
+ * ambient motion lives here (only the Core may breathe).
+ */
+
+.kria-wake-test {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background-color: var(--color-surface-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  min-width: 0;
+}
+
+.kria-wake-test__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.kria-wake-test__title {
+  margin: 0;
+  font-size: var(--font-size-heading);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.kria-wake-test__status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+}
+
+/* Redundant color cue (icon + text remain the primary signal, Req 17.3). */
+.kria-wake-test[data-status="detected"] .kria-wake-test__status {
+  color: var(--color-success-text);
+}
+.kria-wake-test[data-status="failed"] .kria-wake-test__status,
+.kria-wake-test[data-status="unavailable"] .kria-wake-test__status {
+  color: var(--color-danger-text);
+}
+.kria-wake-test[data-status="listening"] .kria-wake-test__status {
+  color: var(--color-accent-default);
+}
+
+.kria-wake-test__detail {
+  margin: 0;
+  font-size: var(--font-size-body);
+  color: var(--color-text-secondary);
+}
+
+.kria-wake-test__actions {
+  display: flex;
+  gap: var(--space-2);
+}

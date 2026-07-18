@@ -1,0 +1,67 @@
+/**
+ * MemoryCard — compact clickable memory tile (task 6.2). Token-only (Req 14.2,
+ * zero raw color). The card is a semantic <button>; the focus ring comes from
+ * `kit-focusable`. No ambient motion — only a calm hover/selection transition
+ * that reduced-motion neutralizes.
+ */
+
+.kria-memory-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-start;
+  width: 100%;
+  text-align: left;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-1);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: border-color var(--motion-duration-fast) var(--motion-easing-standard),
+    background var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.kria-memory-card:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface-2);
+}
+
+.kria-memory-card[aria-selected="true"] {
+  border-color: var(--color-accent-default);
+  background: var(--color-surface-2);
+}
+
+.kria-memory-card__content {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+  line-height: var(--font-line-height-normal);
+}
+
+.kria-memory-card__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.kria-memory-card__cue {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.kria-memory-card__source {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kria-memory-card {
+    transition: none;
+  }
+}

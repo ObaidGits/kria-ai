@@ -10,8 +10,13 @@
  * @module workflowSession
  */
 
-import { createSignal, createMemo } from "solid-js";
+import { createSignal } from "solid-js";
 import { createStore, produce } from "solid-js/store";
+import { bridgeInvoke } from "../bridge/invoke";
+import {
+  enqueueWorkflowHitl,
+  dismissWorkflowHitl,
+} from "../bridge/workflowApproval";
 import type {
   TelemetryEnvelope,
   WorkflowTelemetry,
@@ -43,29 +48,43 @@ const [state, setState] = createStore<WorkflowStoreState>({
   activeWorkflowId: null,
   maxSessions: 20,
 });
+const [continuationNotices, setContinuationNotices] = createSignal<Record<string, string>>({});
+
+export function continuationNotice(workflowId: string): string | null {
+  return continuationNotices()[workflowId] ?? null;
+}
+
+function setContinuationNotice(workflowId: string, message: string | null): void {
+  setContinuationNotices((previous) => {
+    const next = { ...previous };
+    if (message) next[workflowId] = message;
+    else delete next[workflowId];
+    return next;
+  });
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// §2 — Derived State (Memos)
+// §2 — Derived State
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /** The currently active workflow session (if any). */
-export const activeSession = createMemo<WorkflowSession | null>(() => {
+export function activeSession(): WorkflowSession | null {
   const id = state.activeWorkflowId;
   if (!id) return null;
   return state.sessions[id] ?? null;
-});
+}
 
 /** Whether any workflow is currently executing. */
-export const hasActiveWorkflow = createMemo(() => {
+export function hasActiveWorkflow(): boolean {
   return Object.values(state.sessions).some(
     (s) => s.lifecycle === 'executing' || s.lifecycle === 'hitl_pending'
   );
-});
+}
 
 /** All sessions sorted by most recent first. */
-export const recentSessions = createMemo(() => {
+export function recentSessions(): WorkflowSession[] {
   return Object.values(state.sessions).sort((a, b) => b.updatedAt - a.updatedAt);
-});
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // §3 — Telemetry Event Handler (Primary Input)
@@ -227,6 +246,16 @@ function setHitlPending(
       session.updatedAt = now;
     })
   );
+
+  // Route the pause into the ONE unified Approval Center (Req 11.1 / 11.6).
+  // The Approval Center owns the decision; the resolver routes approve/deny
+  // back through `workflow_hitl_respond` / `workflow_cancel`. No inline modal.
+  enqueueWorkflowHitl(workflowId, {
+    reason: event.reason,
+    options: event.options,
+    context: event.context,
+    receivedAt: now,
+  });
 }
 
 function finalizeWorkflow(
@@ -250,6 +279,9 @@ function finalizeWorkflow(
       }
     })
   );
+
+  // The run resolved on its own — drop any lingering approval card (Req 11.1).
+  dismissWorkflowHitl(workflowId);
 }
 
 function cancelWorkflow(workflowId: string, reason: string, now: number): void {
@@ -262,6 +294,9 @@ function cancelWorkflow(workflowId: string, reason: string, now: number): void {
       session.updatedAt = now;
     })
   );
+
+  // Cancelled — drop any pending approval card for this workflow (Req 11.1).
+  dismissWorkflowHitl(workflowId);
 }
 
 function appendTelemetry(workflowId: string, envelope: TelemetryEnvelope): void {
@@ -292,13 +327,33 @@ function workflowDebug(...args: unknown[]): void {
 // §5 — Public Actions
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/** Send a HITL response back to the backend. */
+/**
+ * Send a HITL response back to the backend via the now-registered
+ * `workflow_hitl_respond` command (kria-ui-redesign task 4.2 / design.md §3.3
+ * contract change b, Req 11.6). Graceful degradation: an unavailable command
+ * is logged, not thrown (Req 20.4). Optimistic UI update only applies once the
+ * decision has been handed to the runtime.
+ */
 export async function respondToHitl(response: HitlResponse): Promise<void> {
-  // This will be wired to a Tauri invoke command
   workflowDebug('[WorkflowStore] HITL response:', response);
-  // TODO: invoke("workflow_hitl_respond", { response })
 
-  // Optimistically update state
+  const result = await bridgeInvoke('workflow_hitl_respond', {
+    workflowId: response.workflow_id,
+    optionId: response.option_id,
+    actionType: response.action_type.type,
+    value: 'value' in response.action_type ? response.action_type.value : null,
+  });
+
+  if (!result.ok) {
+    workflowDebug('[WorkflowStore] HITL respond not completed:', result);
+    return;
+  }
+
+  // Decision handed to the runtime — clear the unified approval card too, so a
+  // response made from the legacy inline path doesn't leave a stale card.
+  dismissWorkflowHitl(response.workflow_id);
+
+  // Optimistically resume once the runtime has accepted the decision.
   setState(
     produce((s) => {
       const session = s.sessions[response.workflow_id];
@@ -310,12 +365,27 @@ export async function respondToHitl(response: HitlResponse): Promise<void> {
   );
 }
 
-/** Cancel the active workflow. */
+/**
+ * Cancel the active workflow via the now-registered `workflow_cancel` command
+ * (Req 11.6). Cancellation propagates to the runtime, which owns teardown.
+ */
 export async function cancelActiveWorkflow(): Promise<void> {
   const id = state.activeWorkflowId;
   if (!id) return;
   workflowDebug('[WorkflowStore] Cancelling workflow:', id);
-  // TODO: invoke("workflow_cancel", { workflow_id: id })
+  await bridgeInvoke('workflow_cancel', { workflowId: id });
+}
+
+/**
+ * Cancel a specific workflow by id via the now-registered `workflow_cancel`
+ * command (Req 11.6). Used by the Automations Space run list, where several
+ * runs may be visible. Cancellation propagates to the runtime, which owns
+ * teardown; the pending approval card (if any) clears via telemetry.
+ */
+export async function cancelWorkflowById(workflowId: string): Promise<void> {
+  if (!workflowId) return;
+  workflowDebug('[WorkflowStore] Cancelling workflow by id:', workflowId);
+  await bridgeInvoke('workflow_cancel', { workflowId });
 }
 
 /** Clear a completed/cancelled workflow from the active slot. */
@@ -329,13 +399,55 @@ export function dismissWorkflow(workflowId: string): void {
   );
 }
 
-/** Execute a continuation action. */
+/** Execute a continuation action and surface its authoritative outcome. */
 export async function executeContinuation(
   workflowId: string,
   action: ContinuationAction,
 ): Promise<void> {
   workflowDebug('[WorkflowStore] Continuation action:', workflowId, action);
-  // TODO: invoke("workflow_continuation", { workflow_id: workflowId, action })
+  const at = action.action_type;
+  let payload: string | null = null;
+  switch (at.type) {
+    case 'bring_to_front':
+      payload = at.app;
+      break;
+    case 'open_url':
+      payload = at.url;
+      break;
+    case 'open_file':
+      payload = at.path;
+      break;
+    case 'show_output':
+      payload = at.content;
+      break;
+    case 'retry_step':
+      payload = String(at.step_index);
+      break;
+    case 'retry_workflow':
+      payload = null;
+      break;
+  }
+  setContinuationNotice(workflowId, null);
+  const result = await bridgeInvoke<{
+    status: string;
+    action?: string;
+    content?: string;
+    resume?: { summary?: string };
+  }>('workflow_continuation', {
+    workflowId,
+    actionId: action.id,
+    actionType: at.type,
+    payload,
+  });
+
+  if (!result.ok) {
+    setContinuationNotice(workflowId, result.message);
+    return;
+  }
+  const message = result.data.content
+    ?? result.data.resume?.summary
+    ?? (result.data.status === 'started' ? `${action.label} started.` : `${action.label} completed.`);
+  setContinuationNotice(workflowId, message);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -350,6 +462,7 @@ export const workflowStore = {
   handleTelemetryEvent,
   respondToHitl,
   cancelActiveWorkflow,
+  cancelWorkflowById,
   dismissWorkflow,
   executeContinuation,
 };

@@ -663,32 +663,18 @@ pub fn field_exists(section: &str, field: &str) -> bool {
     false
 }
 
-/// Validate a proposed prompt-driven change against the schema:
-/// field exists → prompt-changeable → (temp allowed if temp) → value allowed.
-pub fn validate_change(
+/// Validate a value for any field-level config mutation. This is shared by
+/// prompt and direct-UI paths so enum and numeric constraints cannot diverge.
+pub fn validate_value(
     section: &str,
     field: &str,
     value: &serde_json::Value,
-    is_temp: bool,
 ) -> Result<FieldMeta, SchemaError> {
     if !field_exists(section, field) {
         return Err(SchemaError::UnknownField(section.into(), field.into()));
     }
     let meta = field_meta(section, field);
-    if !meta.prompt_changeable {
-        return Err(SchemaError::NotPromptChangeable(
-            section.into(),
-            field.into(),
-        ));
-    }
-    if is_temp && !meta.temp_overridable {
-        return Err(SchemaError::NotTempOverridable(
-            section.into(),
-            field.into(),
-        ));
-    }
     if let Some(allowed) = meta.valid_values {
-        // Compare against the string form (handles "dark", "true", numbers).
         let as_str = match value {
             serde_json::Value::String(s) => s.clone(),
             other => other.to_string(),
@@ -701,6 +687,31 @@ pub fn validate_change(
                 allowed: allowed.join(", "),
             });
         }
+    }
+    validate_range(section, field, value)?;
+    Ok(meta)
+}
+
+/// Validate a proposed prompt-driven change against the schema:
+/// field exists → prompt-changeable → (temp allowed if temp) → value allowed.
+pub fn validate_change(
+    section: &str,
+    field: &str,
+    value: &serde_json::Value,
+    is_temp: bool,
+) -> Result<FieldMeta, SchemaError> {
+    let meta = validate_value(section, field, value)?;
+    if !meta.prompt_changeable {
+        return Err(SchemaError::NotPromptChangeable(
+            section.into(),
+            field.into(),
+        ));
+    }
+    if is_temp && !meta.temp_overridable {
+        return Err(SchemaError::NotTempOverridable(
+            section.into(),
+            field.into(),
+        ));
     }
     Ok(meta)
 }

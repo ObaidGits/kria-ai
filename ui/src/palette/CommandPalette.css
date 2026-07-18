@@ -1,0 +1,209 @@
+/**
+ * Command Palette styling (design.md §1.12). Token-only (token-lint enforced).
+ * The palette is a top overlay: a dimmed backdrop + a centred floating panel.
+ * Motion is compositor-cheap and frozen under reduced-motion (Req 16.4/17.4).
+ */
+
+.kria-palette__overlay {
+  position: fixed;
+  inset: 0;
+  background-color: var(--color-surface-3);
+  z-index: var(--z-modal);
+}
+:root[data-blur="on"] .kria-palette__overlay {
+  backdrop-filter: blur(var(--blur-floating));
+  -webkit-backdrop-filter: blur(var(--blur-floating));
+}
+
+.kria-palette__positioner {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+  padding-left: var(--space-4);
+  padding-right: var(--space-4);
+  z-index: var(--z-modal);
+}
+
+.kria-palette {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 640px;
+  max-height: 70vh;
+  background-color: var(--color-surface-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elevation-4);
+  color: var(--color-text-primary);
+  overflow: hidden;
+}
+
+/* ── Mode chips ─────────────────────────────────────────────────────────── */
+.kria-palette__modes {
+  display: flex;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3) 0;
+}
+.kria-palette__mode {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+}
+.kria-palette__mode.is-active {
+  background-color: var(--color-accent-soft);
+  border-color: var(--color-accent-border);
+  color: var(--color-text-primary);
+}
+
+/* ── Search input ───────────────────────────────────────────────────────── */
+.kria-palette__search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-default);
+  color: var(--color-text-muted);
+}
+.kria-palette__input {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-family: var(--font-family-text);
+  font-size: var(--font-size-heading);
+  line-height: 1.4;
+  outline: none;
+}
+.kria-palette__input::placeholder {
+  color: var(--color-text-muted);
+}
+
+/* ── Results ────────────────────────────────────────────────────────────── */
+.kria-palette__results {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-2);
+}
+.kria-palette__group {
+  margin-bottom: var(--space-2);
+}
+.kria-palette__grouplabel {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--font-size-micro);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.kria-palette__option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  user-select: none;
+}
+.kria-palette__option.is-active {
+  background-color: var(--color-accent-soft);
+}
+.kria-palette__optionicon {
+  flex: none;
+  color: var(--color-text-secondary);
+}
+.kria-palette__optiontext {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.kria-palette__optiontitle {
+  font-size: var(--font-size-body);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kria-palette__optionsub {
+  font-size: var(--font-size-caption);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Free-text (Ask/Change) affordance ─────────────────────────────────────── */
+.kria-palette__texthint {
+  padding: var(--space-2);
+}
+.kria-palette__submit {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-accent-soft);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+  text-align: left;
+  cursor: pointer;
+}
+.kria-palette__empty {
+  padding: var(--space-4);
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-body);
+  text-align: center;
+}
+
+/* ── Footer ─────────────────────────────────────────────────────────────── */
+.kria-palette__footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--color-border-default);
+  font-size: var(--font-size-micro);
+  color: var(--color-text-muted);
+}
+.kria-palette__footerhint {
+  margin-left: auto;
+}
+.kria-palette__kbd {
+  display: inline-block;
+  min-width: 18px;
+  padding: 0 var(--space-1);
+  margin: 0 2px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-2);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-micro);
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+
+/* Entrance motion — frozen under reduced-motion. */
+.kria-palette {
+  animation: kria-palette-in var(--motion-duration-fast) var(--motion-easing-entrance);
+}
+@keyframes kria-palette-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kria-palette { animation: none; }
+}

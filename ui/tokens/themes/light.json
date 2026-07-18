@@ -1,0 +1,61 @@
+{
+  "color": {
+    "neutral": {
+      "0": { "value": "#f8fbff" },
+      "1": { "value": "#f4f8fb" },
+      "2": { "value": "#e8eff4" },
+      "3": { "value": "#d9e5ee" },
+      "4": { "value": "#c3d3de" },
+      "5": { "value": "#6f8796" }
+    },
+    "surface": {
+      "1": { "value": "rgba(16, 33, 45, 0.05)" },
+      "2": { "value": "rgba(16, 33, 45, 0.09)" },
+      "3": { "value": "rgba(255, 255, 255, 0.86)" },
+      "4": { "value": "#ffffff" }
+    },
+    "accent": {
+      "default": { "value": "#0f8f6b" },
+      "hover": { "value": "#0b7a5a" },
+      "soft": { "value": "rgba(15, 143, 107, 0.14)" },
+      "border": { "value": "rgba(15, 143, 107, 0.38)" },
+      "contrast": { "value": "#0c1216" }
+    },
+    "text": {
+      "primary": { "value": "#182833" },
+      "secondary": { "value": "#486071" },
+      "muted": { "value": "#6f8796" },
+      "inverse": { "value": "#ffffff" }
+    },
+    "border": {
+      "default": { "value": "rgba(56, 88, 108, 0.22)" },
+      "strong": { "value": "rgba(15, 143, 107, 0.62)" }
+    },
+    "success": {
+      "soft": { "value": "rgba(30, 154, 90, 0.16)" },
+      "solid": { "value": "#1e9a5a" },
+      "text": { "value": "#0f5c34" }
+    },
+    "warning": {
+      "soft": { "value": "rgba(162, 107, 0, 0.16)" },
+      "solid": { "value": "#a26b00" },
+      "text": { "value": "#6b4700" }
+    },
+    "danger": {
+      "soft": { "value": "rgba(207, 74, 74, 0.16)" },
+      "solid": { "value": "#cf4a4a" },
+      "text": { "value": "#872323" }
+    },
+    "info": {
+      "soft": { "value": "rgba(36, 126, 194, 0.14)" },
+      "solid": { "value": "#2275ac" },
+      "text": { "value": "#12405f" }
+    },
+    "risk": {
+      "green": { "value": "#1e9a5a" },
+      "yellow": { "value": "#a26b00" },
+      "red": { "value": "#cf4a4a" },
+      "black": { "value": "#0b0f12" }
+    }
+  }
+}

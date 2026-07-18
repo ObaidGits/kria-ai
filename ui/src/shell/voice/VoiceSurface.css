@@ -1,0 +1,108 @@
+/**
+ * VoiceSurface styling (design.md §6.8, Req 12.1). Token-only (token-lint
+ * enforced). A COMPACT bottom-center dock/pill — never full-screen. Motion is a
+ * single compositor-cheap entrance, frozen under reduced-motion (Req 16.4/
+ * 17.4). No ambient motion lives here — only the Core may breathe, and it
+ * renders its own static frame under reduced-motion.
+ */
+
+.kria-voice {
+  position: fixed;
+  left: 50%;
+  bottom: var(--space-5);
+  transform: translateX(-50%);
+  z-index: var(--z-floating);
+
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+
+  /* Compact: sized to content, capped so it never grows into a takeover. */
+  width: max-content;
+  max-width: min(520px, calc(100vw - var(--space-8)));
+  padding: var(--space-2) var(--space-3);
+
+  background-color: var(--color-surface-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-full);
+  box-shadow: var(--elevation-3);
+  color: var(--color-text-primary);
+}
+:root[data-blur="on"] .kria-voice {
+  background-color: var(--color-surface-3);
+  backdrop-filter: blur(var(--blur-floating));
+  -webkit-backdrop-filter: blur(var(--blur-floating));
+}
+
+.kria-voice__core {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+}
+
+.kria-voice__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.kria-voice__phase {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+}
+
+/* ONE line — truncates rather than wrapping into a growing panel. */
+.kria-voice__transcript {
+  margin: 0;
+  font-size: var(--font-size-body);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.kria-voice__hint {
+  color: var(--color-text-muted);
+}
+
+/* task 5.2 mount point — no box until it has content. */
+.kria-voice__modes-slot:empty {
+  display: none;
+}
+.kria-voice__modes-slot {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* task 5.3 wake-test disclosure — breaks the pill into a small stacked panel. */
+.kria-voice__wake-test-slot {
+  margin-top: var(--space-2);
+  width: min(360px, calc(100vw - var(--space-8)));
+}
+
+.kria-voice__interrupt,
+.kria-voice__stop {
+  flex: none;
+}
+
+/* Entrance only; frozen under reduced-motion (no ambient motion). */
+.kria-voice {
+  animation: kria-voice-in var(--motion-duration-base) var(--motion-easing-entrance);
+}
+@keyframes kria-voice-in {
+  from { transform: translate(-50%, var(--space-3)); opacity: 0; }
+  to { transform: translate(-50%, 0); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kria-voice { animation: none; }
+}
+:root[data-reduced-motion="on"] .kria-voice {
+  animation: none;
+}

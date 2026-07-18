@@ -1,0 +1,234 @@
+/**
+ * Automations · Schedule segment — scheduled tasks + routines + reminders +
+ * to-dos merged (task 7.4, Req 6.6).
+ *
+ * Token-only (Req 14.2, zero raw color). No ambient motion. Status is always
+ * shown as icon + text (Req 17.3), never color alone.
+ */
+
+.kria-schedule {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.kria-schedule__lead {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+
+/* ── Create bar ──────────────────────────────────────────────────────────── */
+.kria-schedule__create {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-1);
+}
+
+.kria-schedule__create-kind {
+  flex: 0 0 auto;
+}
+
+.kria-schedule__create-fields {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.kria-schedule__create-submit {
+  flex: 0 0 auto;
+}
+
+.kria-schedule__create-status {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--color-success-text);
+  font-size: var(--font-size-caption);
+}
+
+/* ── Groups ──────────────────────────────────────────────────────────────── */
+.kria-schedule__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.kria-schedule__group-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--font-size-heading);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.kria-schedule__rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.kria-schedule__row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+/* ── Row card ────────────────────────────────────────────────────────────── */
+.kria-schedule__card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.kria-schedule__row-check {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.kria-schedule__checkbox {
+  margin-top: 0.2em;
+  width: 1.05rem;
+  height: 1.05rem;
+  accent-color: var(--color-accent-default);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.kria-schedule__row-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1 1 260px;
+  min-width: 0;
+  cursor: default;
+}
+
+.kria-schedule__row-title {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+  word-break: break-word;
+}
+
+.kria-schedule__row-title--done {
+  text-decoration: line-through;
+  color: var(--color-text-muted);
+}
+
+.kria-schedule__row-sub {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+  word-break: break-word;
+}
+
+.kria-schedule__row-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  flex: 0 1 auto;
+}
+
+.kria-schedule__row-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.kria-schedule__row-error {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  padding-left: var(--space-2);
+  color: var(--color-danger-text);
+  font-size: var(--font-size-caption);
+}
+
+/* ── Backend-owned briefing editor ───────────────────────────────────────── */
+.kria-schedule__briefing-heading,
+.kria-schedule__briefing-fields,
+.kria-schedule__briefing-actions,
+.kria-schedule__check-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.kria-schedule__briefing-heading {
+  justify-content: space-between;
+}
+
+.kria-schedule__briefing-heading .kria-schedule__row-sub {
+  margin: var(--space-1) 0 0;
+}
+
+.kria-schedule__briefing,
+.kria-schedule__briefing-sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.kria-schedule__briefing-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-3);
+}
+
+.kria-schedule__briefing-fields {
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.kria-schedule__briefing-grow {
+  flex: 1 1 280px;
+}
+
+.kria-schedule__briefing-max {
+  flex: 0 1 140px;
+}
+
+.kria-schedule__briefing-delivery {
+  background: var(--color-surface-2);
+}
+
+.kria-schedule__check-label {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+  cursor: pointer;
+}
+
+.kria-schedule__source {
+  text-transform: capitalize;
+}
+
+.kria-schedule__briefing-actions {
+  flex-wrap: wrap;
+}
+
+.kria-schedule__briefing-actions .kria-schedule__create-status {
+  flex-basis: auto;
+}

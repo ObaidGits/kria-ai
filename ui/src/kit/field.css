@@ -1,0 +1,89 @@
+/**
+ * Shared text-field styling for Input / Textarea / Search (Kobalte TextField).
+ * States: default / hover / focus-visible / disabled / invalid (Req 14.5).
+ */
+.kit-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.kit-field__label {
+  font-family: var(--font-family-text);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+}
+
+.kit-field__control {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--font-family-text);
+  font-size: var(--font-size-body);
+  color: var(--color-text-primary);
+  background-color: var(--color-surface-2);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  transition:
+    border-color var(--motion-duration-fast) var(--motion-easing-standard),
+    background-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.kit-field__control::placeholder {
+  color: var(--color-text-muted);
+}
+
+.kit-field__control:hover {
+  border-color: var(--color-border-strong);
+}
+
+/* Kobalte drives focus-visible on the input element directly. */
+.kit-field__control:focus-visible {
+  outline: 2px solid var(--color-accent-default);
+  outline-offset: 1px;
+  border-color: var(--color-accent-default);
+}
+
+.kit-field__control:disabled,
+.kit-field__control[data-disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Invalid — Kobalte sets data-invalid on the root/control (Req 17.3: not
+   color-only — an ErrorMessage text node accompanies it). */
+.kit-field[data-invalid] .kit-field__control,
+.kit-field__control[data-invalid],
+.kit-field__control[aria-invalid="true"] {
+  border-color: var(--color-danger-solid);
+}
+
+.kit-field__error {
+  font-size: var(--font-size-caption);
+  color: var(--color-danger-text);
+}
+
+.kit-field__textarea {
+  min-height: 88px;
+  resize: vertical;
+  line-height: var(--font-line-height-normal);
+}
+
+/* Search variant: leading icon + rounded pill. */
+.kit-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.kit-search__icon {
+  position: absolute;
+  left: var(--space-3);
+  color: var(--color-text-muted);
+  pointer-events: none;
+  display: inline-flex;
+}
+.kit-search .kit-field__control {
+  padding-left: var(--space-8);
+  border-radius: var(--radius-full);
+}

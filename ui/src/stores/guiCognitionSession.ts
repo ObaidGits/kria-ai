@@ -1,4 +1,3 @@
-import { createMemo } from "solid-js";
 import { createStore, produce, reconcile } from "solid-js/store";
 import type {
   GuiCognitionActionBackendCapabilities,
@@ -60,13 +59,12 @@ const [state, setState] = createStore<{ active: GuiCognitionSessionState }>({
   active: emptySession(),
 });
 
-export const activeGuiCognitionSession = createMemo(() =>
-  state.active.lifecycle === "idle" ? null : state.active
-);
+export const activeGuiCognitionSession = () =>
+  state.active.lifecycle === "idle" ? null : state.active;
 
-export const hasActiveGuiCognitionSession = createMemo(() => activeGuiCognitionSession() !== null);
+export const hasActiveGuiCognitionSession = () => activeGuiCognitionSession() !== null;
 
-export const guiCognitionRoutingStatus = createMemo(() => {
+export const guiCognitionRoutingStatus = () => {
   const session = activeGuiCognitionSession();
   if (!session) return null;
 
@@ -91,7 +89,7 @@ export const guiCognitionRoutingStatus = createMemo(() => {
     default:
       return null;
   }
-});
+};
 
 export function clearGuiCognitionSession(): void {
   setState("active", reconcile(emptySession()));

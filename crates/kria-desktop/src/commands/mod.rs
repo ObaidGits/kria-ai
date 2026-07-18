@@ -3,6 +3,7 @@ pub(crate) mod api_auth;
 pub(crate) mod api_hitl;
 pub(crate) mod app_commands;
 pub(crate) mod app_state;
+pub(crate) mod approval;
 pub(crate) mod automation;
 pub(crate) mod briefing;
 pub(crate) mod capability;
@@ -75,8 +76,8 @@ pub use app_commands::{
     approve_action, cancel_continuation, cancel_executive_task, cancel_interaction_decision,
     cancel_interaction_execution, cancel_request, cancel_turn, check_continuation_after_decision,
     continue_after_decision_execution, deny_action, execute_resolved_interaction_decision,
-    get_alerts, get_hardware_info, get_health, get_runtime_diagnostics, get_settings,
-    list_audio_devices, list_interaction_decisions, list_knowledge_base, list_models,
+    get_alerts, get_executive_snapshot, get_hardware_info, get_health, get_runtime_diagnostics,
+    get_settings, list_audio_devices, list_interaction_decisions, list_knowledge_base, list_models,
     replay_interaction_decisions, resolve_interaction_decision, resume_interaction_decision,
     submit_turn_feedback, update_settings,
 };
@@ -184,7 +185,7 @@ pub use runtime_status::{
 };
 #[allow(unused_imports)]
 pub use sessions::{
-    auto_rename_session, clear_all_chat_sessions, create_session, delete_session,
+    auto_rename_session, branch_session, clear_all_chat_sessions, create_session, delete_session,
     get_memory_enabled, get_session_history, list_sessions, rename_session, search_sessions,
     set_memory_enabled, set_session_archived, set_session_pinned, set_session_temporary,
     switch_session,

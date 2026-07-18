@@ -17,8 +17,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -61,6 +61,10 @@ lerna-debug.log*
 # ── UI & E2E build artifacts ──────────────────────────────────────
 /ui/dist/
 /ui/node_modules/
+/ui/storybook-static/
+/ui/playwright-report/
+/ui/test-results/
+/ui/blob-report/
 /testing/suites/playwright/node_modules/
 /testing/suites/playwright/test-results/
 /testing/suites/playwright/playwright-report/

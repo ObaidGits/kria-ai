@@ -1,0 +1,34 @@
+/* Global motion budget + reduced-motion kill-switch (Req 16.3/16.4/17.4).
+ * Interactive transitions use 120/200ms tokens; 400ms is reserved for
+ * deliberate Space/window-mode changes. Reduced motion freezes every CSS
+ * animation/transition, including pseudo-elements and smooth scrolling. */
+:root {
+  --motion-transition-max: var(--motion-duration-base);
+  --motion-deliberate-max: var(--motion-duration-slow);
+}
+
+:root[data-reduced-motion="on"] {
+  scroll-behavior: auto !important;
+}
+
+:root[data-reduced-motion="on"] *,
+:root[data-reduced-motion="on"] *::before,
+:root[data-reduced-motion="on"] *::after {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    scroll-behavior: auto !important;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}

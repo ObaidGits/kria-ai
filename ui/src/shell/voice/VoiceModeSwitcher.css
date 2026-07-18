@@ -1,0 +1,48 @@
+/**
+ * VoiceModeSwitcher styling (task 5.2, Req 12.2/12.3). Token-only (token-lint
+ * enforced). Compact: a current-mode chip + a small popover trigger that live
+ * inside the VoiceSurface pill. No ambient motion (only the Core may breathe).
+ */
+
+.kria-voice-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Current mode — a static, compact chip (icon + label). */
+.kria-voice-switcher__current {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 12ch;
+}
+.kria-voice-switcher__current-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Popover body: stacked labelled selects + a discoverable mode list. */
+.kria-voice-switcher__panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 15rem;
+}
+
+.kria-voice-switcher__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.kria-voice-switcher__group-label {
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+}
+.kria-voice-switcher__modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
