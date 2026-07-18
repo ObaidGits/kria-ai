@@ -401,3 +401,22 @@ This gate validates the exact redesign index in the isolated worktree at `/media
 The browser gate initially exposed three real integration defects after first-run provisioning became backend-authoritative: test fixtures did not declare completed provisioning, deterministic Memory seeds raced the initial backend refresh, and floating Converse rail controls obscured the export target. Fixtures now provide explicit backend state, the dev-only harness becomes ready after Memory initialization, and all conversation actions share normal toolbar flow. Workflow authoring E2E now follows the authoritative save → backend-test lifecycle instead of expecting a client-only dry run.
 
 Browser fixtures remain regression evidence, not native Tauri IPC evidence. Advanced `memory_*` AppShell behavior still depends on the separate Memory backend upgrade; that backend is intentionally excluded from this cutover commit. GNOME X11, KDE Wayland/X11, mixed-DPI, and remaining physical/manual cells above remain blocked and are not represented as passed.
+
+## Committed advanced Memory backend — 2026-07-18
+
+Advanced `memory_*` AppShell behavior is now backed by committed runtime code in commit `f838a415192ce09f2c00771e5e894760885bb02c` (`Land advanced Memory architecture`). This supersedes the earlier cutover note that described the backend as excluded.
+
+Validation used an isolated materialization of the exact staged index at `/media/obaid/SSD/kria-skills/.memory-staged-validation`; unrelated owner worktree changes were absent. `git diff --cached --check` passed before commit.
+
+| Exact staged gate | Result |
+|---|---|
+| `cargo check -p kria-core -p kria-server` | **PASS** |
+| `cargo check -p kria-desktop` | **PASS** |
+| `cargo test -p kria-core --lib memory::` | **PASS — 212/212** |
+| `cargo test -p kria-core --test memory_invariants` | **PASS — 3/3** |
+| `cargo test -p kria-core --test memory_recovery` | **PASS — 2/2** |
+| `cargo test -p kria-core --test memory_scale` | **PASS — 1/1**, exercising **500 memories** |
+| `cargo test -p kria-server --test integration_api` | **PASS — 13/13**, including unavailable-state gating and live `MemorySystem` HTTP routes |
+
+Warnings were non-failing existing dead/unused-code warnings, including `InjectionScore` fields and test-only unused imports. No 500K-memory claim is made; scale evidence covers 500 memories only. Browser mocks remain regression evidence and do not prove native Rust/Tauri IPC. GNOME X11, KDE Wayland/X11, mixed-DPI, physical/manual scenarios, and native performance acceptance remain blocked exactly as documented above; this Memory commit does not change the overall task 17.1 verdict.
+
