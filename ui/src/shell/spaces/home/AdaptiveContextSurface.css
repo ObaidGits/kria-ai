@@ -1,0 +1,155 @@
+/**
+ * AdaptiveContextSurface — living-glass Focus body (design.md §6.2, Req 8).
+ *
+ * Token-only (Req 16.2 — zero raw color). A single-layer living-glass panel
+ * (glass tokens, task 0.1): one blurred surface, no stacked blurs (Req 17.2).
+ * Motion is opacity-only (crossfade / dissolve) and token-driven; under reduced
+ * motion / the global kill-switch it collapses to an instant swap (Req 17.4).
+ *
+ * The emerald accent appears ONLY on the single action verb + focus rings
+ * (earn-the-accent, L4); the resting surface carries no accent. This file
+ * styles `.kria-acs*` only — it never touches the Room base, so it stays clear
+ * of the accent-on-room-base guardrail.
+ */
+
+/* The slot stacks the live surface + the outgoing ghost in one cell so the
+   crossfade is a true cross-dissolve (both occupy the same space; no shift). */
+.kria-acs-slot {
+  display: grid;
+  width: 100%;
+  max-width: 32rem;
+  margin: 0 auto;
+}
+
+.kria-acs {
+  grid-area: 1 / 1;
+  display: block;
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background-color: var(--glass-fill-rest);
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
+  text-align: left;
+}
+
+/* Incoming surface fades in over the recede duration (opacity-only). */
+.kria-acs {
+  animation: kria-acs-in var(--motion-duration-recede) var(--motion-easing-presence) both;
+}
+
+/* Outgoing ghost fades out; aria-hidden + non-interactive. */
+.kria-acs--ghost {
+  z-index: 0;
+  pointer-events: none;
+  animation: kria-acs-out var(--motion-duration-recede) var(--motion-easing-exit) both;
+}
+
+.kria-acs__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.kria-acs__title {
+  margin: 0;
+  font-family: var(--font-family-display);
+  font-size: var(--font-size-heading);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.3;
+  color: var(--color-text-primary);
+}
+
+.kria-acs__line {
+  margin: 0;
+  font-family: var(--font-family-text);
+  font-size: var(--font-size-body);
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.kria-acs__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-top: var(--space-2);
+}
+
+/* The single action verb — meaningful accent (earn-the-accent, L4). */
+.kria-acs__action {
+  appearance: none;
+  margin: 0;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-accent-soft);
+  font-family: var(--font-family-text);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-accent-text);
+  cursor: pointer;
+}
+
+.kria-acs__action:hover {
+  background-color: var(--glass-fill-active);
+  color: var(--color-accent-hover);
+}
+
+/* "More detail" reads as an inline routing link (no accent fill). */
+.kria-acs__detail {
+  appearance: none;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: var(--font-family-text);
+  font-size: var(--font-size-body);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.kria-acs__detail:hover {
+  color: var(--color-text-secondary);
+}
+
+.kria-acs__action:focus-visible,
+.kria-acs__detail:focus-visible {
+  outline: 2px solid var(--color-accent-border);
+  outline-offset: var(--space-1);
+  border-radius: var(--radius-sm);
+}
+
+@keyframes kria-acs-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes kria-acs-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* ── Reduced-motion / kill-switch (Req 17.4 / 21.4): freeze the fade. The
+      component already omits the ghost in this mode; belt-and-braces, disable
+      the entrance animation too so nothing animates. ── */
+.kria-acs[data-motion="static"],
+.kria-acs--ghost[data-motion="static"] {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kria-acs,
+  .kria-acs--ghost {
+    animation: none;
+  }
+}

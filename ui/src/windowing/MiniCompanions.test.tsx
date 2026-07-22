@@ -53,7 +53,7 @@ describe("KRIA Mini", () => {
     fireEvent.submit(container.querySelector("form")!);
 
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(
-      "send_message", { message: "check current state" },
+      "send_message", { message: "check current state", sessionId: "" },
     ));
     expect(converseStore.composerDraft()).toMatchObject({ text: "main-window draft", mode: "lab" });
   });
@@ -61,7 +61,7 @@ describe("KRIA Mini", () => {
   it("routes Stop through existing cancellation", async () => {
     coreStore.setState("acting");
     render(() => <KriaMiniCompanion />);
-    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop response" }));
     await vi.waitFor(() => expect(invokeOptional).toHaveBeenCalledWith(
       "cancel_turn", { sessionId: "" },
     ));
@@ -101,6 +101,10 @@ describe("Now mini", () => {
 
     expect(screen.getAllByRole("listitem")).toHaveLength(NOW_MINI_JOB_CAP);
     expect(screen.getByText("+2 more in Observatory")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Cancel" })).toHaveLength(NOW_MINI_JOB_CAP);
+    // Each per-job Cancel now carries a full accessible scope name
+    // (`Cancel Job N`, UIE-M-015) while its visible label stays "Cancel".
+    expect(screen.getAllByRole("button", { name: /^Cancel Job \d+$/ })).toHaveLength(
+      NOW_MINI_JOB_CAP,
+    );
   });
 });

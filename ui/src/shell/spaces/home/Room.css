@@ -1,0 +1,164 @@
+/**
+ * Room — homepage environment layers (design.md §3, Requirement 1).
+ *
+ * Token-only (Req 1.2 / 16.2 — zero raw color; color-mix always over tokens).
+ * Four back-to-front layers (design §3.1): base gradient, particle field,
+ * floor sheen, peripheral darkness. All motion is transform/opacity only and
+ * driven by CSS keyframes (Req 17.2) so idle JS cost stays at zero (Req 20.1).
+ *
+ * ACCENT DISCIPLINE (Req 1.2 / L4, enforced by scripts/guardrail-lint.mjs):
+ * the emerald accent appears ONLY in the floor sheen and particle motes (the
+ * Core's light). The `.kria-room` root and `.kria-room__base` selectors carry
+ * NO accent token — the Room base is neutral charcoal only.
+ *
+ * Shared light (design §3.2): this stylesheet only READS `--core-x/-y/
+ * -intensity/-hue`; publication is owned by the Core render tick (task 1.2).
+ * At rest the token defaults render a correct, inhabited Room.
+ */
+
+/* ── Root: full-bleed environment container. Neutral only (no accent). ── */
+.kria-room {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--room-gradient-edge);
+}
+
+/* ── Layer 1 — Room base: full-bleed radial, neutral-2 center → neutral-0
+      edges. Off-center light pool follows the Core's X (design §3.1). No
+      accent fill (Req 1.2). The time-of-day undertone (task 1.3) overlays
+      via --room-undertone; at rest it is transparent (no shift). ── */
+.kria-room__base {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background:
+    linear-gradient(var(--room-undertone), var(--room-undertone)),
+    radial-gradient(
+      circle at calc(var(--core-x) * 100%) calc(var(--core-y) * 100%),
+      var(--room-gradient-center) 0%,
+      var(--room-gradient-edge) 70%
+    );
+}
+
+/* ── Layer 2 — Particle field: ≤30 emerald motes, central band only, never at
+      the frame edges (Req 1.3). Transform-only drift (design §3.1/§11.4). ── */
+.kria-room__particles {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.kria-room__particle {
+  /* Local defaults (overridden per-mote by inline style); also satisfy the
+     token-lint undefined-token gate by declaring the referenced vars. */
+  --particle-size: 2px;
+  --particle-duration: 18s;
+  --particle-delay: 0s;
+  --particle-drift-x: 0px;
+  --particle-drift-y: 0px;
+
+  position: absolute;
+  width: var(--particle-size);
+  height: var(--particle-size);
+  border-radius: var(--radius-full);
+  /* Emerald mote at the tokenized particle alpha; brightness tracks the Core. */
+  background: radial-gradient(
+    circle,
+    color-mix(
+      in oklab,
+      var(--core-hue) calc(var(--particle-alpha) * var(--core-intensity) * 100%),
+      transparent
+    )
+      0%,
+    transparent 70%
+  );
+  will-change: transform, opacity;
+  animation: kria-room-drift var(--particle-duration) var(--motion-easing-breath)
+    var(--particle-delay) infinite alternate;
+}
+
+@keyframes kria-room-drift {
+  from {
+    transform: translate3d(0, 0, 0);
+    opacity: 0.55;
+  }
+  to {
+    transform: translate3d(var(--particle-drift-x), var(--particle-drift-y), 0);
+    opacity: 1;
+  }
+}
+
+/* ── Layer 3 — Floor sheen: wide, blurred low-opacity emerald radial in the
+      lower third, offset by the Core's downward light. Brightness = the
+      tokenized sheen alpha scaled by live Core intensity (design §3.1). ── */
+.kria-room__floor {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 60% 40% at calc(var(--core-x) * 100%) 88%,
+    color-mix(
+      in oklab,
+      var(--core-hue) calc(var(--floor-sheen-alpha) * var(--core-intensity) * 100%),
+      transparent
+    )
+      0%,
+    transparent 65%
+  );
+  filter: blur(var(--blur-floating, 12px));
+}
+
+/* ── Layer 4 — Peripheral darkness: corners fall to near-black (Req 1.1). ── */
+.kria-room__vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 90% 90% at center,
+    transparent 55%,
+    color-mix(in oklab, var(--color-neutral-0) 88%, transparent) 100%
+  );
+}
+
+/* ── Foreground content plane — sits above every environment layer. ── */
+.kria-room__content {
+  position: relative;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+/* ── Static / reduced-motion frame (Req 1.6 / 17.4): freeze all drift. The
+      layout, colors, and meaning are unchanged — only motion stops. Honors the
+      component `reducedMotion`/kill-switch (data-motion) AND the OS preference
+      as defense in depth (mirrors CorePresence). ── */
+.kria-room[data-motion="static"] .kria-room__particle {
+  animation: none;
+  transform: none;
+  opacity: 0.8;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kria-room__particle {
+    animation: none;
+    transform: none;
+    opacity: 0.8;
+  }
+}
+
+/* ── Degraded frame (design §14): flat neutral background only. Belt-and-braces
+      with the component, which already omits the atmosphere layers. ── */
+.kria-room[data-degraded="true"] .kria-room__particles,
+.kria-room[data-degraded="true"] .kria-room__floor,
+.kria-room[data-degraded="true"] .kria-room__vignette {
+  display: none;
+}

@@ -2,7 +2,7 @@ use super::*;
 use crate::commands::colab::migrate_legacy_colab_server_command;
 use std::collections::HashMap;
 
-fn spawn_executive_event_forwarding(
+pub(super) fn spawn_executive_event_forwarding(
     app: AppHandle,
     mut events: tokio::sync::broadcast::Receiver<kria_core::agent::executive::ControllerEvent>,
 ) {
@@ -12,26 +12,54 @@ fn spawn_executive_event_forwarding(
             let event = match events.recv().await {
                 Ok(event) => event,
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
-                    tracing::warn!(count, "Executive UI event bridge lagged; snapshot remains authoritative");
+                    tracing::warn!(
+                        count,
+                        "Executive UI event bridge lagged; snapshot remains authoritative"
+                    );
                     continue;
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             };
             let now = || chrono::Utc::now().to_rfc3339();
             match event {
-                ControllerEvent::TaskStarted { task_id, priority, source, description, ts } => {
-                    let _ = app.emit("executive:task_started", serde_json::json!({
-                        "task_id": task_id, "priority": priority, "source": source,
-                        "description": description, "ts": ts,
-                    }));
+                ControllerEvent::TaskStarted {
+                    task_id,
+                    priority,
+                    source,
+                    description,
+                    ts,
+                } => {
+                    let _ = app.emit(
+                        "executive:task_started",
+                        serde_json::json!({
+                            "task_id": task_id, "priority": priority, "source": source,
+                            "description": description, "ts": ts,
+                        }),
+                    );
                 }
-                ControllerEvent::TaskCompleted { task_id, success, duration_ms, output_summary, error, ts } => {
-                    let _ = app.emit("executive:task_completed", serde_json::json!({
-                        "task_id": task_id, "success": success, "duration_ms": duration_ms,
-                        "output_summary": output_summary, "error": error, "ts": ts,
-                    }));
+                ControllerEvent::TaskCompleted {
+                    task_id,
+                    success,
+                    duration_ms,
+                    output_summary,
+                    error,
+                    ts,
+                } => {
+                    let _ = app.emit(
+                        "executive:task_completed",
+                        serde_json::json!({
+                            "task_id": task_id, "success": success, "duration_ms": duration_ms,
+                            "output_summary": output_summary, "error": error, "ts": ts,
+                        }),
+                    );
                 }
-                ControllerEvent::TaskPreempted { victim_id, victim_priority, replacement_id, replacement_priority, ts } => {
+                ControllerEvent::TaskPreempted {
+                    victim_id,
+                    victim_priority,
+                    replacement_id,
+                    replacement_priority,
+                    ts,
+                } => {
                     let _ = app.emit("executive:preemption", serde_json::json!({
                         "victim_id": victim_id, "victim_priority": victim_priority,
                         "replacement_id": replacement_id, "replacement_priority": replacement_priority,
@@ -39,26 +67,99 @@ fn spawn_executive_event_forwarding(
                     }));
                 }
                 ControllerEvent::TaskRejected { task_id, reason } => {
-                    let _ = app.emit("executive:task_completed", serde_json::json!({
-                        "task_id": task_id, "success": false, "duration_ms": 0,
-                        "output_summary": null, "error": reason, "ts": now(),
-                    }));
+                    let _ = app.emit(
+                        "executive:task_completed",
+                        serde_json::json!({
+                            "task_id": task_id, "success": false, "duration_ms": 0,
+                            "output_summary": null, "error": reason, "ts": now(),
+                        }),
+                    );
                 }
                 ControllerEvent::GpuLeaseAcquired { task_id } => {
-                    let _ = app.emit("executive:gpu_lease", serde_json::json!({
-                        "task_id": task_id, "action": "acquired", "ts": now(),
-                    }));
+                    let _ = app.emit(
+                        "executive:gpu_lease",
+                        serde_json::json!({
+                            "task_id": task_id, "action": "acquired", "ts": now(),
+                        }),
+                    );
                 }
                 ControllerEvent::GpuLeaseReleased { task_id } => {
-                    let _ = app.emit("executive:gpu_lease", serde_json::json!({
-                        "task_id": task_id, "action": "released", "ts": now(),
-                    }));
+                    let _ = app.emit(
+                        "executive:gpu_lease",
+                        serde_json::json!({
+                            "task_id": task_id, "action": "released", "ts": now(),
+                        }),
+                    );
                 }
                 ControllerEvent::VramMaintenanceStarted { .. }
                 | ControllerEvent::VramMaintenanceCompleted { .. } => {}
             }
         }
     });
+}
+
+pub(super) fn spawn_memory_cognition_task(
+    memory_system: Arc<kria_core::memory::api::MemorySystem>,
+    app: AppHandle,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let monitor = std::sync::Arc::new(
+            kria_core::memory::scheduler::DefaultResourceMonitor::new(512),
+        );
+        let scheduler = memory_system.cognitive_scheduler(monitor, None);
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(300));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut changes = memory_system.subscribe_changes();
+
+        let emit = |change: &kria_core::memory::api::MemoryChange| {
+            let _ = app.emit(&format!("memory://{}", change.kind), change.detail.clone());
+            let _ = app.emit(
+                "memory://changed",
+                serde_json::json!({ "kind": change.kind, "detail": change.detail }),
+            );
+        };
+
+        loop {
+            let woke_by_change = tokio::select! {
+                _ = tick.tick() => false,
+                result = changes.recv() => match result {
+                    Ok(change) => {
+                        emit(&change);
+                        while let Ok(more) = changes.try_recv() {
+                            emit(&more);
+                        }
+                        true
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
+                        tracing::warn!(lagged = count, "memory change subscriber lagged");
+                        let _ = app.emit(
+                            "memory://changed",
+                            serde_json::json!({ "kind": "lagged" }),
+                        );
+                        true
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                },
+            };
+
+            if woke_by_change {
+                tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+                while changes.try_recv().is_ok() {}
+            }
+
+            if !memory_system.is_enabled() {
+                continue;
+            }
+            let ran = scheduler.run_ready().await;
+            if ran > 0 {
+                tracing::debug!(
+                    jobs = ran,
+                    woke_by_change,
+                    "cognitive scheduler ran background jobs"
+                );
+            }
+        }
+    })
 }
 
 /// One-time migration (settings-config-revamp Task 5): if the SQLite config
@@ -415,6 +516,7 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         }
         booted
     };
+    let openclaw_pool_slot = Arc::new(RwLock::new(openclaw_pool.clone()));
 
     // Initialize model router from config
     let model_router = Arc::new(ModelRouter::from_config(&config));
@@ -555,6 +657,8 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     let model_router_bg_ref = model_router.clone();
     let orch_cell: Arc<tokio::sync::RwLock<Option<Arc<Orchestrator>>>> =
         Arc::new(tokio::sync::RwLock::new(None));
+    let orchestrator_tasks: Arc<tokio::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>> =
+        Arc::new(tokio::sync::Mutex::new(Vec::new()));
 
     // Resolve model paths now (cheap, synchronous) so the background task
     // captures owned Strings rather than borrowing from `config`.
@@ -873,6 +977,7 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     let memory_system = kria_core::memory::api::MemorySystem::open_with_db(
         memory_backend.database(),
         kria_core::memory::api::MemoryConfig {
+            enabled: config.memory.enabled,
             db_path: paths.data_dir.join("kria_memory.db").display().to_string(),
             device_id: "local-desktop".to_string(),
             default_mode: default_memory_mode,
@@ -891,7 +996,11 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         )),
         true,
     )?;
-    tracing::info!("[INIT] Memory System online (unified cognitive authority)");
+    memory_system.set_enabled(config.memory.enabled);
+    tracing::info!(
+        enabled = config.memory.enabled,
+        "[INIT] Memory System authority ready"
+    );
 
     // Build the full tool registry (60+ tools + 6 precognitive) with the memory
     // runtime, unified MemorySystem, and Proactive. RAG/library tools are wired
@@ -1116,77 +1225,6 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         }
     }
 
-    // ── n8n Background Maintenance Task ──────────────────────────────────────
-    // Periodically checks for:
-    // 1. Timed-out workflow runs (no callback within deadline)
-    // 2. Stale HITL responses (expire after 10 min)
-    // 3. Old completed runs (evict from memory after 1 hour)
-    {
-        let state_store = n8n_state_store.clone();
-        let hitl_responses = n8n_hitl_responses.clone();
-        let handle_n8n_timeout = handle.clone();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
-            loop {
-                interval.tick().await;
-
-                // 1. Check for timed-out runs (use Background deadline: 5 min)
-                let timed_out = state_store.check_timeouts(300_000);
-                if !timed_out.is_empty() {
-                    tracing::warn!(
-                        target: "n8n_maintenance",
-                        count = timed_out.len(),
-                        "Marked n8n runs as timed out (no callback within deadline)"
-                    );
-                    for run in &timed_out {
-                        let _ = handle_n8n_timeout.emit(
-                            "n8n:workflow_timeout",
-                            serde_json::json!({
-                                "event_type": "n8n:workflow_timeout",
-                                "workflow_id": run.workflow_id,
-                                "workflow_version": run.workflow_version,
-                                "correlation_id": run.correlation_id,
-                                "status": "timed_out",
-                                "timestamp_ms": std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .map(|d| d.as_millis() as u64)
-                                    .unwrap_or(0),
-                                "user_visible_summary": "Workflow timed out while waiting for an n8n terminal callback.",
-                            }),
-                        );
-                    }
-                }
-
-                // 2. Expire old HITL responses (>10 min)
-                {
-                    let now_ms = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_millis() as u64)
-                        .unwrap_or(0);
-                    let mut responses = hitl_responses.write().await;
-                    let before = responses.len();
-                    responses.retain(|_, v| {
-                        v.get("decided_at_unix_ms")
-                            .and_then(|t| t.as_u64())
-                            .map(|t| now_ms.saturating_sub(t) < 600_000) // 10 min
-                            .unwrap_or(true) // keep if no timestamp
-                    });
-                    let removed = before - responses.len();
-                    if removed > 0 {
-                        tracing::debug!(target: "n8n_maintenance", removed, "Expired old HITL responses");
-                    }
-                }
-
-                // 3. Evict completed runs older than 1 hour from memory
-                let evicted = state_store.evict_old_runs(3_600_000);
-                if evicted > 0 {
-                    tracing::debug!(target: "n8n_maintenance", evicted, "Evicted old completed n8n runs");
-                }
-            }
-        });
-        tracing::info!("[n8n] background maintenance task started (timeout check + cleanup)");
-    }
-
     let fleet_control_runtime = match DesktopFleetControlRuntime::initialize(
         paths.data_dir.as_path(),
     )
@@ -1225,7 +1263,7 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     // Register the semantic OpenClaw handler. Pass the model router so RC1
     // schema-driven argument generation can translate natural-language requests
     // into each skill's typed `inputSchema` arguments.
-    if let (Some(_subsystem), Some(ref pool)) = (&openclaw_subsystem, &openclaw_pool) {
+    if let Some(_subsystem) = &openclaw_subsystem {
         // ── M12 (Option A): the ONE execution pipeline. The `openclaw` chat tool
         //    and `list_installed_skills` are served entirely by the Capability
         //    Provider Platform — discover → permission (one engine + one durable
@@ -1238,7 +1276,7 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
             use kria_core::capability::index::{InMemoryFederatedIndex, MemoryEmbedder};
             use kria_core::capability::platform::CapabilityPlatform;
             use kria_core::capability::registry::ProviderRegistry as CapProviderRegistry;
-            use kria_core::openclaw::runtime::{DockerRuntime, SkillRuntime};
+            use kria_core::openclaw::runtime::SkillRuntime;
             use kria_core::safety::RiskLevel;
             use kria_core::tools::capability_dispatch::{
                 CapabilityDispatchHandler, CapabilityListHandler, MarketplaceInstallHandler,
@@ -1250,7 +1288,9 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
             let cap_embedder = Arc::new(MemoryEmbedder::from_model(embeddings.clone(), 384));
             let cap_index = Arc::new(InMemoryFederatedIndex::new(cap_embedder));
             let cap_registry = Arc::new(CapProviderRegistry::new(cap_index));
-            let cap_runtime: Arc<dyn SkillRuntime> = Arc::new(DockerRuntime::new(pool.clone()));
+            let cap_runtime: Arc<dyn SkillRuntime> = Arc::new(
+                super::feature_controls::HotSwapDockerRuntime::new(openclaw_pool_slot.clone()),
+            );
             let mut oc = OpenClawProvider::new(openclaw_registry.clone(), cap_runtime);
             let store_dir = paths.data_dir.join("openclaw_skills");
             let _ = std::fs::create_dir_all(&store_dir);
@@ -1498,16 +1538,22 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         // schema. Background + non-fatal: needs Docker and adds container
         // latency, so it must never block or fail boot — OpenClaw keeps
         // whatever the registry already had if the container is unreachable.
-        let sync_registry = openclaw_registry.clone();
-        let sync_pool = pool.clone();
-        tokio::spawn(async move {
-            match kria_core::openclaw::init::sync_registry_from_container(&sync_registry, sync_pool)
+        if let Some(sync_pool) = openclaw_pool.clone() {
+            let sync_registry = openclaw_registry.clone();
+            tokio::spawn(async move {
+                match kria_core::openclaw::init::sync_registry_from_container(
+                    &sync_registry,
+                    sync_pool,
+                )
                 .await
-            {
-                Ok(n) => tracing::info!(changed = n, "[OpenClaw] registry↔container sync complete"),
-                Err(e) => tracing::warn!("[OpenClaw] registry↔container sync skipped: {e}"),
-            }
-        });
+                {
+                    Ok(n) => {
+                        tracing::info!(changed = n, "[OpenClaw] registry↔container sync complete")
+                    }
+                    Err(e) => tracing::warn!("[OpenClaw] registry↔container sync skipped: {e}"),
+                }
+            });
+        }
     }
 
     tracing::info!(
@@ -1516,8 +1562,19 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         tool_registry.len()
     );
 
-    // Create MCP manager (servers not started yet — will launch in background)
-    let mcp_configs = config.mcp.servers.clone();
+    // Create MCP manager with effective startup gates. Persisted per-server
+    // preferences remain unchanged; disabled masters/integrations spawn nothing.
+    let mut mcp_configs = config.mcp.servers.clone();
+    for server in &mut mcp_configs {
+        let integration_enabled = if server.name.eq_ignore_ascii_case("telegram") {
+            config.telegram.enabled
+        } else if server.name == config.colab.mcp_server_name {
+            config.colab.enabled
+        } else {
+            true
+        };
+        server.enabled = server.enabled && config.mcp.enabled && integration_enabled;
+    }
     let mcp_manager: Arc<tokio::sync::Mutex<McpServerManager>> =
         Arc::new(tokio::sync::Mutex::new(McpServerManager::new(mcp_configs)));
 
@@ -2171,15 +2228,20 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     let gui_orchestrator = match kria_core::orchestrator::OrchestratorConfig::auto_detect() {
         Ok(cfg) => {
             let orch = Arc::new(kria_core::orchestrator::ServiceOrchestrator::new(cfg));
-            // start() is best-effort: individual service spawn failures are logged
-            // and retried by the health monitor. We always store the orchestrator
-            // so the health monitor can run and auto-restart failed services.
-            if let Err(e) = orch.start().await {
-                tracing::warn!(
-                    "[INIT] GUI service orchestrator start warning: {e} — health monitor will retry"
-                );
+            let gui_enabled = config.read().await.gui_cognition.enabled;
+            if gui_enabled {
+                // start() is best-effort: individual service spawn failures are logged
+                // and retried by the health monitor.
+                if let Err(e) = orch.start().await {
+                    tracing::warn!(
+                        "[INIT] GUI service orchestrator start warning: {e} — health monitor will retry"
+                    );
+                } else {
+                    tracing::info!("[INIT] GUI service orchestrator started");
+                }
             } else {
-                tracing::info!("[INIT] GUI service orchestrator started");
+                orch.set_automation_enabled(false).await.ok();
+                tracing::info!("[INIT] GUI Cognition disabled; sidecars skipped");
             }
             Some(orch)
         }
@@ -2222,66 +2284,9 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     // instant live UI updates, and (2) coalesced (~1.2s) before waking cognition
     // to avoid event storms. The 300s tick remains as an idle fallback so
     // idle-only jobs (dreaming) still fire when nothing is happening.
-    {
-        let memory_system_bg = memory_system.clone();
-        let handle_mem = handle.clone();
-        tokio::spawn(async move {
-            let monitor = std::sync::Arc::new(
-                kria_core::memory::scheduler::DefaultResourceMonitor::new(512),
-            );
-            let scheduler = memory_system_bg.cognitive_scheduler(monitor, None);
-            let mut tick = tokio::time::interval(std::time::Duration::from_secs(300));
-            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            let mut changes = memory_system_bg.subscribe_changes();
-
-            let emit = |change: &kria_core::memory::api::MemoryChange| {
-                let _ =
-                    handle_mem.emit(&format!("memory://{}", change.kind), change.detail.clone());
-                let _ = handle_mem.emit(
-                    "memory://changed",
-                    serde_json::json!({ "kind": change.kind, "detail": change.detail }),
-                );
-            };
-
-            loop {
-                let woke_by_change = tokio::select! {
-                    _ = tick.tick() => false,
-                    r = changes.recv() => match r {
-                        Ok(change) => {
-                            emit(&change);
-                            // Drain the rest of the burst immediately (coalescing).
-                            while let Ok(more) = changes.try_recv() {
-                                emit(&more);
-                            }
-                            true
-                        }
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                            tracing::warn!(lagged = n, "memory change subscriber lagged");
-                            // Still refresh the UI broadly on lag.
-                            let _ = handle_mem.emit("memory://changed", serde_json::json!({ "kind": "lagged" }));
-                            true
-                        }
-                        Err(_) => break,
-                    },
-                };
-
-                // Debounce a change-triggered wake so a burst runs cognition once.
-                if woke_by_change {
-                    tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
-                    while changes.try_recv().is_ok() {} // swallow coalesced tail
-                }
-
-                let ran = scheduler.run_ready().await;
-                if ran > 0 {
-                    tracing::debug!(
-                        jobs = ran,
-                        woke_by_change,
-                        "cognitive scheduler ran background jobs"
-                    );
-                }
-            }
-        });
-    }
+    let memory_cognition_task = memory_system
+        .is_enabled()
+        .then(|| spawn_memory_cognition_task(memory_system.clone(), handle.clone()));
     let quarantine_registry = Arc::new(
         kria_core::tools::quarantine::QuarantineRegistry::open_path(&paths.db_path)?,
     );
@@ -2292,9 +2297,8 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
             preemption_grace_ms: executive_settings.preemption_grace_ms,
             ..Default::default()
         };
-        let policy_gate: Arc<dyn kria_core::safety::policy_gate::PolicyGate> = Arc::new(
-            kria_core::safety::policy_gate::CapabilityPolicyGate::new(),
-        );
+        let policy_gate: Arc<dyn kria_core::safety::policy_gate::PolicyGate> =
+            Arc::new(kria_core::safety::policy_gate::CapabilityPolicyGate::new());
         let (mut controller, sender) = kria_core::agent::executive::ExecutiveController::new(
             executive_config,
             shared_gpu_lease.clone(),
@@ -2315,12 +2319,13 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         audit_logger: audit_logger.clone(),
         model_router,
         agent_loop,
-        executive_sender,
+        executive_sender: Arc::new(RwLock::new(executive_sender)),
         tool_registry: tool_registry.clone(),
         quarantine_registry,
         memory_store,
         conversation,
         memory_system,
+        memory_cognition_task: tokio::sync::Mutex::new(memory_cognition_task),
         cold_start_cancel: Arc::new(std::sync::Mutex::new(None)),
         hitl: hitl.clone(),
         decision_store: decision_store.clone(),
@@ -2341,9 +2346,11 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         macro_recorder: macro_recorder_arc,
         started_at: std::time::Instant::now(),
         hardware_info,
+        gpu_lease: shared_gpu_lease.clone(),
         proactive: proactive_engine,
         telegram_bridge,
         mcp_manager: mcp_manager.clone(),
+        mcp_heartbeat: tokio::sync::Mutex::new(None),
         gw_client_ref: gw_client_ref.clone(),
         colab_runtime: colab_runtime.clone(),
         mcp_failure_history: mcp_failure_history.clone(),
@@ -2352,13 +2359,16 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         fleet_runtime: fleet_runtime.clone(),
         fleet_control_runtime,
         orchestrator: orch_cell.clone(),
+        orchestrator_tasks: orchestrator_tasks.clone(),
         llm_runtime_apply_lock: Arc::new(tokio::sync::Mutex::new(())),
         llm_runtime_apply_status: Arc::new(RwLock::new(LlmRuntimeApplySnapshot::default())),
         orchestrator_active_turns: orchestrator_active_turns.clone(),
         orchestrator_last_activity_at: orchestrator_last_activity_at.clone(),
         image_orchestrator,
         skill_registry: openclaw_registry.clone(),
-        container_pool: openclaw_pool,
+        container_pool: openclaw_pool_slot,
+        feature_controls: Arc::new(super::feature_controls::FeatureControlRuntime::new()),
+        n8n_maintenance: tokio::sync::Mutex::new(None),
         n8n_catalog: n8n_catalog.clone(),
         n8n_state_store: n8n_state_store.clone(),
         n8n_inbox_path: n8n_inbox_path.clone(),
@@ -2377,6 +2387,7 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
     }
 
     tracing::info!("[INIT] AppState set — frontend is now unblocked");
+    super::feature_controls::initialize(handle).await;
 
     // Task 13.4 (R10.2): push-sync event bridge for the frozen `RegistryEvent`
     // stream. Wired here (not in `main.rs::setup`) because `RegistryEvent` is
@@ -2551,8 +2562,9 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         let handle_bg = handle.clone();
         let fleet_runtime_bg = fleet_runtime.clone();
         let hra_data_dir_bg = paths.data_dir.clone();
+        let orchestrator_tasks_bg = orchestrator_tasks.clone();
 
-        tokio::spawn(async move {
+        let startup_task = tokio::spawn(async move {
             tracing::info!("orchestrator: starting in background");
             match Orchestrator::start(
                 orch_config,
@@ -2711,7 +2723,7 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
                         // whose holder vanished (TTL), freeing reservations + cooling the model.
                         // Bounded, best-effort; runs for the process lifetime.
                         let hra_sweep = hra.clone();
-                        tokio::spawn(async move {
+                        let task = tokio::spawn(async move {
                             let mut tick =
                                 tokio::time::interval(std::time::Duration::from_secs(30));
                             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -2727,11 +2739,12 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
                                 }
                             }
                         });
+                        orchestrator_tasks_bg.lock().await.push(task);
 
                         // Periodic shadow telemetry → DeviceTable + UI status, sourced from the
                         // single telemetry hub (HRA Phase A1 — no second device context here).
                         let handle_hra = handle_bg.clone();
-                        tokio::spawn(async move {
+                        let task = tokio::spawn(async move {
                             let mut rx = match kria_core::resource::global_telemetry_hub() {
                                 Some(hub) => hub.subscribe(),
                                 None => return, // hub always set at startup; nothing to do otherwise
@@ -2750,6 +2763,7 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
                                 );
                             }
                         });
+                        orchestrator_tasks_bg.lock().await.push(task);
                     }
 
                     // Start idle-release monitor if enabled (HRA Phase A3 — re-enabled).
@@ -2782,7 +2796,7 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
                             "orchestrator: idle release monitor enabled"
                         );
 
-                        tokio::spawn(async move {
+                        let task = tokio::spawn(async move {
                             let idle_after = std::time::Duration::from_secs(idle_after_secs);
                             let check_interval =
                                 std::time::Duration::from_secs(check_interval_secs);
@@ -2832,13 +2846,14 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
                                 }
                             }
                         });
+                        orchestrator_tasks_bg.lock().await.push(task);
                     }
 
                     // Start orchestrator event forwarder.
                     {
                         let handle_orch = handle_bg.clone();
                         let mut rx = event_bus_bg.subscribe();
-                        tokio::spawn(async move {
+                        let task = tokio::spawn(async move {
                             use kria_core::infra::event_bus::KriaEvent;
                             loop {
                                 match rx.recv().await {
@@ -2919,6 +2934,7 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
                                 }
                             }
                         });
+                        orchestrator_tasks_bg.lock().await.push(task);
                     }
 
                     // Finally, store the orchestrator in the shared cell so
@@ -2940,6 +2956,7 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
                 }
             }
         });
+        orchestrator_tasks.lock().await.push(startup_task);
     }
 
     // ── settings-config-revamp Task 3: config-change → frontend forwarder ─────
@@ -3174,9 +3191,9 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
                 tool_reg_bg.len()
             );
 
-            // Start MCP health heartbeat (pings servers every 30s, auto-restarts on failure)
             drop(mgr);
-            McpServerManager::spawn_health_heartbeat(mcp_mgr_bg, tool_reg_bg, 30);
+            // Heartbeat ownership follows the global MCP feature switch and is
+            // started/stopped by feature_controls reconciliation.
         });
     }
 
@@ -3221,6 +3238,9 @@ pub async fn shutdown_runtime(handle: &AppHandle) {
     if let Some(gui_orch) = state.gui_orchestrator.as_ref() {
         gui_orch.shutdown().await;
     }
+    if let Some(sender) = state.executive_sender.write().await.take() {
+        sender.shutdown();
+    }
 
     state
         .voice_active
@@ -3239,20 +3259,37 @@ pub async fn shutdown_runtime(handle: &AppHandle) {
         }
     }
 
+    if let Err(error) = super::n8n::reconcile_n8n_feature(state, false, handle).await {
+        tracing::warn!(%error, "shutdown: failed to stop n8n cleanly");
+    }
+
+    if let Some(heartbeat) = state.mcp_heartbeat.lock().await.take() {
+        heartbeat.abort();
+        tracing::info!("shutdown: MCP heartbeat stopped");
+    }
     {
         let mut manager = state.mcp_manager.lock().await;
         manager.stop_all(&state.tool_registry).await;
     }
 
+    super::mobile_gateway::shutdown_runtime().await;
+    super::capability::stop_discovery();
+    state.image_orchestrator.shutdown().await;
+    if let Some(task) = state.memory_cognition_task.lock().await.take() {
+        task.abort();
+    }
+    state.memory_system.shutdown();
+
     if let Err(e) = state.sidecar.shutdown().await {
         tracing::warn!("shutdown: failed to stop sidecar cleanly: {e}");
     }
 
-    if let Some(orchestrator) = state.orchestrator.read().await.as_ref().cloned() {
+    super::feature_controls::stop_orchestrator_tasks(state).await;
+    if let Some(orchestrator) = state.orchestrator.write().await.take() {
         orchestrator.shutdown().await;
     }
 
-    if let Some(pool) = state.container_pool.as_ref() {
+    if let Some(pool) = state.container_pool.write().await.take() {
         if let Err(e) = pool.shutdown().await {
             tracing::warn!("shutdown: container pool cleanup failed: {e}");
         } else {

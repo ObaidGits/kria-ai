@@ -45,7 +45,7 @@ pub struct WritePolicy {
     /// path (R1 backpressure). When absent (e.g. minimal tests), enrichment is
     /// not scheduled. A full channel drops the *wake*, never the data — the
     /// event is already durable and the slow-path catch-up sweep recovers it.
-    slow_tx: Option<Sender<Uuid>>,
+    slow_tx: std::sync::RwLock<Option<Sender<Uuid>>>,
     /// Fires on every committed write so the app can react event-driven (P8).
     /// The `&str` is a coarse change kind (e.g. `"created"`). `None` in tests.
     notifier: Option<Arc<dyn Fn(&str) + Send + Sync>>,
@@ -70,7 +70,7 @@ impl WritePolicy {
             admission,
             hlc: HlcGenerator::new(),
             device_id: device_id.into(),
-            slow_tx,
+            slow_tx: std::sync::RwLock::new(slow_tx),
             notifier: None,
         }
     }
@@ -79,6 +79,13 @@ impl WritePolicy {
     pub fn with_change_notifier(mut self, notifier: Arc<dyn Fn(&str) + Send + Sync>) -> Self {
         self.notifier = Some(notifier);
         self
+    }
+
+    pub(crate) fn set_slow_sender(&self, sender: Option<Sender<Uuid>>) {
+        *self
+            .slow_tx
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = sender;
     }
 
     fn notify(&self, kind: &str) {
@@ -183,7 +190,12 @@ impl WritePolicy {
         // (the event is already durable + tracked by the consumer cursor), so
         // the catch-up sweep enriches it later. `submit` never blocks or grows
         // memory unboundedly (R1).
-        if let Some(tx) = &self.slow_tx {
+        if let Some(tx) = self
+            .slow_tx
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_ref()
+        {
             let _ = tx.try_send(event.id);
         }
 

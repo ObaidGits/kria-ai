@@ -5,8 +5,9 @@ use crate::infra::ToolResult;
 use crate::safety::RiskLevel;
 use crate::tools::ToolContext;
 use async_trait::async_trait;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
@@ -102,6 +103,12 @@ pub struct ToolRegistry {
     resume_capabilities: RwLock<HashMap<String, ToolResumeCapability>>,
     env_provider: RwLock<Arc<dyn EnvironmentProvider>>,
     shell_state: SharedShellState,
+    tools_enabled: AtomicBool,
+    disabled_categories: RwLock<HashSet<String>>,
+    disabled_tools: RwLock<HashSet<String>>,
+    /// Optional runtime adapter injected into feature status/control tool contexts.
+    feature_control_backend:
+        RwLock<Option<Arc<dyn crate::tools::feature_control::FeatureControlBackend>>>,
     /// Optional live ConfigService, injected into every ToolContext so tools
     /// like `config_patch` can read/mutate configuration (settings-config-revamp).
     config_service: RwLock<Option<Arc<crate::config::ConfigService>>>,
@@ -130,6 +137,10 @@ impl ToolRegistry {
             resume_capabilities: RwLock::new(HashMap::new()),
             env_provider: RwLock::new(env_provider),
             shell_state: Arc::new(Mutex::new(default_shell_state())),
+            tools_enabled: AtomicBool::new(true),
+            disabled_categories: RwLock::new(HashSet::new()),
+            disabled_tools: RwLock::new(HashSet::new()),
+            feature_control_backend: RwLock::new(None),
             config_service: RwLock::new(None),
             turn_override: RwLock::new(None),
         }
@@ -211,6 +222,17 @@ impl ToolRegistry {
         )
     }
 
+    /// Inject the host-owned feature lifecycle backend into every tool context.
+    pub fn set_feature_control_backend(
+        &self,
+        backend: Arc<dyn crate::tools::feature_control::FeatureControlBackend>,
+    ) {
+        *self
+            .feature_control_backend
+            .write()
+            .expect("tool registry feature_control_backend lock poisoned") = Some(backend);
+    }
+
     /// The live ConfigService, if injected (used by the settings NL pipeline +
     /// `config_patch`). `None` before runtime wiring.
     pub fn config_service(&self) -> Option<Arc<crate::config::ConfigService>> {
@@ -268,6 +290,14 @@ impl ToolRegistry {
             cancellation,
         )
         .with_provenance(provenance);
+        if let Some(backend) = self
+            .feature_control_backend
+            .read()
+            .expect("tool registry feature_control_backend lock poisoned")
+            .clone()
+        {
+            ctx = ctx.with_feature_control_backend(backend);
+        }
         if let Some(svc) = self
             .config_service
             .read()
@@ -347,17 +377,81 @@ impl ToolRegistry {
         }
     }
 
+    fn is_control_tool(name: &str) -> bool {
+        matches!(name, "feature_status" | "feature_control" | "config_patch")
+    }
+
+    fn definition_enabled(&self, def: &ToolDef) -> bool {
+        if Self::is_control_tool(&def.name) {
+            return true;
+        }
+        self.tools_enabled.load(Ordering::Acquire)
+            && !self
+                .disabled_categories
+                .read()
+                .expect("tool registry disabled_categories lock poisoned")
+                .contains(&def.category)
+            && !self
+                .disabled_tools
+                .read()
+                .expect("tool registry disabled_tools lock poisoned")
+                .contains(&def.name)
+    }
+
+    /// Atomically replace native-tool visibility/execution controls.
+    pub fn set_availability(
+        &self,
+        enabled: bool,
+        disabled_categories: impl IntoIterator<Item = String>,
+        disabled_tools: impl IntoIterator<Item = String>,
+    ) {
+        self.tools_enabled.store(enabled, Ordering::Release);
+        *self
+            .disabled_categories
+            .write()
+            .expect("tool registry disabled_categories lock poisoned") =
+            disabled_categories.into_iter().collect();
+        *self
+            .disabled_tools
+            .write()
+            .expect("tool registry disabled_tools lock poisoned") =
+            disabled_tools.into_iter().collect();
+    }
+
+    pub fn is_available(&self, name: &str) -> bool {
+        self.defs
+            .read()
+            .expect("tool registry defs lock poisoned")
+            .get(name)
+            .map(|def| self.definition_enabled(def))
+            .unwrap_or(false)
+    }
+
+    /// All definitions, including currently disabled tools. Used by Settings.
+    pub fn all_defs(&self) -> Vec<ToolDef> {
+        self.defs
+            .read()
+            .expect("tool registry defs lock poisoned")
+            .values()
+            .cloned()
+            .collect()
+    }
+
     /// Get a tool definition by name.
     pub fn get_def(&self, name: &str) -> Option<ToolDef> {
         self.defs
             .read()
             .expect("tool registry defs lock poisoned")
             .get(name)
+            .filter(|def| self.definition_enabled(def))
             .cloned()
     }
 
     /// Get a tool handler by name.
     pub fn get_handler(&self, name: &str) -> Option<Arc<dyn ToolHandler>> {
+        if !self.is_available(name) {
+            return None;
+        }
         self.handlers
             .read()
             .expect("tool registry handlers lock poisoned")
@@ -365,12 +459,13 @@ impl ToolRegistry {
             .cloned()
     }
 
-    /// List all tool definitions (for LLM system prompt).
+    /// List all enabled tool definitions (for LLM system prompt).
     pub fn list_defs(&self) -> Vec<ToolDef> {
         self.defs
             .read()
             .expect("tool registry defs lock poisoned")
             .values()
+            .filter(|def| self.definition_enabled(def))
             .cloned()
             .collect()
     }
@@ -391,7 +486,7 @@ impl ToolRegistry {
             .read()
             .expect("tool registry defs lock poisoned")
             .values()
-            .filter(|d| tier_rank(d.min_tier) <= rank)
+            .filter(|d| self.definition_enabled(d) && tier_rank(d.min_tier) <= rank)
             .cloned()
             .collect()
     }
@@ -402,7 +497,7 @@ impl ToolRegistry {
             .read()
             .expect("tool registry defs lock poisoned")
             .values()
-            .filter(|d| d.category == category)
+            .filter(|d| d.category == category && self.definition_enabled(d))
             .cloned()
             .collect()
     }
@@ -481,17 +576,11 @@ impl ToolRegistry {
 
     /// Total number of registered tools.
     pub fn len(&self) -> usize {
-        self.defs
-            .read()
-            .expect("tool registry defs lock poisoned")
-            .len()
+        self.list_defs().len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.defs
-            .read()
-            .expect("tool registry defs lock poisoned")
-            .is_empty()
+        self.list_defs().is_empty()
     }
 }
 
@@ -582,6 +671,7 @@ fn build_registry_inner(
         super::config_patch::ConfigPatchTool::def(),
         Arc::new(super::config_patch::ConfigPatchTool),
     );
+    super::feature_control::register(&reg);
 
     super::system_info::register(&reg);
     super::file_ops::register(&reg);

@@ -43,8 +43,11 @@ function CueBadge(props: { cue: MemoryCue }) {
 }
 
 export function MemoryCard(props: MemoryCardProps) {
-  const open = () =>
-    (props.onOpen ?? ((f: MemoryFact) => shellStore.openInspector("memory", f.id, f)))(props.fact);
+  // User-click open: the card button is the semantic invoking control, so pass
+  // it as the explicit Focus_Return_Owner (§20.3) — close returns focus here.
+  const open = (opener?: HTMLElement) =>
+    (props.onOpen ??
+      ((f: MemoryFact) => shellStore.openInspector("memory", f.id, f, { opener })))(props.fact);
 
   const cues = (): MemoryCue[] => [
     confidenceCue(props.fact.confidence),
@@ -59,7 +62,7 @@ export function MemoryCard(props: MemoryCardProps) {
       data-fact-id={props.fact.id}
       aria-selected={props.selected ? "true" : "false"}
       aria-label={`Memory: ${props.fact.content}`}
-      onClick={() => open()}
+      onClick={(e) => open(e.currentTarget)}
     >
       <p class="kria-memory-card__content">{props.fact.content}</p>
       <div class="kria-memory-card__meta">

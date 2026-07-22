@@ -1,5 +1,23 @@
 use super::*;
 
+async fn persist_google_workspace_servers(
+    state: &AppState,
+    config: &KriaConfig,
+) -> Result<(), String> {
+    state
+        .config_service
+        .patch(
+            "mcp",
+            "servers",
+            serde_json::json!(config.mcp.servers),
+            kria_core::config::ChangeSource::Ui,
+            None,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 // ── Google Workspace Commands ────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -305,13 +323,12 @@ pub async fn set_google_workspace_account(
         return Err("Google account name cannot be empty".into());
     }
 
-    let mut config = state.config.write().await;
+    let mut config = state.config.read().await.clone();
     let updated = sync_google_workspace_server_config(&mut config, Some(account));
     apply_google_runtime_env_from_config(&config);
     if updated {
-        config.save().map_err(|e| e.to_string())?;
+        persist_google_workspace_servers(state, &config).await?;
     }
-    drop(config);
 
     let runtime = apply_mcp_runtime_from_config(state).await;
 
@@ -333,11 +350,11 @@ pub async fn connect_google_workspace(
         .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
 
     if let Some(requested) = account.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-        let mut config = state.config.write().await;
+        let mut config = state.config.read().await.clone();
         let changed = sync_google_workspace_server_config(&mut config, Some(requested));
         apply_google_runtime_env_from_config(&config);
         if changed {
-            config.save().map_err(|e| e.to_string())?;
+            persist_google_workspace_servers(state, &config).await?;
         }
     }
 
@@ -494,11 +511,11 @@ pub async fn disconnect_google_workspace(
         .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
 
     if let Some(requested) = account.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-        let mut config = state.config.write().await;
+        let mut config = state.config.read().await.clone();
         let changed = sync_google_workspace_server_config(&mut config, Some(requested));
         apply_google_runtime_env_from_config(&config);
         if changed {
-            config.save().map_err(|e| e.to_string())?;
+            persist_google_workspace_servers(state, &config).await?;
         }
     }
 

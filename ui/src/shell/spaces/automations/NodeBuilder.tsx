@@ -62,7 +62,13 @@ export function NodeBuilder() {
     on(
       () => automationStore.selectedNodeId(),
       (id) => {
-        if (id) shellStore.setInspectorTarget({ type: "automation-node", id });
+        // Reactive (selection-driven) open: not a click, so activeElement is not
+        // the semantic control. Hand the stable Automations region as the
+        // Focus_Return_Owner (§20.3/§20.4). Replace keeps the existing owner.
+        if (id)
+          shellStore.openInspector("automation-node", id, undefined, {
+            regionSelector: '[data-space="automations"]',
+          });
         else {
           const t = shellStore.inspectorTarget();
           if (t?.type === "automation-node") shellStore.setInspectorTarget(null);
@@ -183,7 +189,7 @@ export function NodeBuilder() {
         <ul class="kria-nb__issues" aria-label="Dry-run issues">
           {testResult()!.issues.map((issue) => (
             <li>
-              <Icon name="triangle-alert" size={13} aria-hidden="true" /> {issue}
+              <Icon name="alert-triangle" size={13} aria-hidden="true" /> {issue}
             </li>
           ))}
         </ul>

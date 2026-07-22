@@ -29,92 +29,134 @@ struct ServerHandle {
     bound_addr: String,
 }
 
-static MANAGERS: OnceLock<GatewayManagers> = OnceLock::new();
+struct GatewayManagersRuntime {
+    current: Option<Arc<GatewayManagers>>,
+    remote_desktop_monitor: Option<tokio::task::JoinHandle<()>>,
+}
+
+static MANAGERS: OnceLock<AsyncMutex<GatewayManagersRuntime>> = OnceLock::new();
 static SERVER: OnceLock<AsyncMutex<Option<ServerHandle>>> = OnceLock::new();
 
 fn server_slot() -> &'static AsyncMutex<Option<ServerHandle>> {
     SERVER.get_or_init(|| AsyncMutex::new(None))
 }
 
-/// Build (once) the long-lived managers from the given config. The remote-desktop
-/// idle / kill-switch enforcement loop is spawned on first init.
-fn managers(config: &KriaConfig) -> &'static GatewayManagers {
+fn manager_slot() -> &'static AsyncMutex<GatewayManagersRuntime> {
     MANAGERS.get_or_init(|| {
-        let paths = kria_core::platform::paths::KriaPaths::resolve();
+        AsyncMutex::new(GatewayManagersRuntime {
+            current: None,
+            remote_desktop_monitor: None,
+        })
+    })
+}
 
-        let device_registry = kria_core::auth::SecretsVault::open_default()
-            .map_err(|e| e.to_string())
-            .and_then(|vault| {
-                DeviceRegistry::open(paths.data_dir.join("devices.db"), &Arc::new(vault))
-                    .map_err(|e| e.to_string())
-            })
-            .map(|reg| {
-                Arc::new(
-                    reg.with_token_ttl(config.mobile.token_ttl_secs)
-                        .with_pairing_ttl(config.mobile.pairing_ttl_secs),
+/// Build one live manager set from current config. Remote-desktop monitoring is
+/// owned by the slot and exists only while that feature is enabled.
+async fn managers(config: &KriaConfig) -> Arc<GatewayManagers> {
+    let mut runtime = manager_slot().lock().await;
+    if let Some(current) = runtime.current.as_ref() {
+        return current.clone();
+    }
+
+    let paths = kria_core::platform::paths::KriaPaths::resolve();
+    let device_registry = kria_core::auth::SecretsVault::open_default()
+        .map_err(|e| e.to_string())
+        .and_then(|vault| {
+            DeviceRegistry::open(paths.data_dir.join("devices.db"), &Arc::new(vault))
+                .map_err(|e| e.to_string())
+        })
+        .map(|reg| {
+            Arc::new(
+                reg.with_token_ttl(config.mobile.token_ttl_secs)
+                    .with_pairing_ttl(config.mobile.pairing_ttl_secs),
+            )
+        })
+        .unwrap_or_else(|e| {
+            tracing::error!(error = %e, "mobile: device registry init failed");
+            Arc::new(
+                DeviceRegistry::open(
+                    std::env::temp_dir().join("kria_devices_fallback.db"),
+                    &Arc::new(
+                        kria_core::auth::SecretsVault::open_default()
+                            .expect("vault open (fallback)"),
+                    ),
                 )
-            })
-            .unwrap_or_else(|e| {
-                tracing::error!(error = %e, "mobile: device registry init failed");
-                // A registry over an in-data-dir db should not normally fail;
-                // fall back to a temp db so the app still runs.
-                Arc::new(
-                    DeviceRegistry::open(
-                        std::env::temp_dir().join("kria_devices_fallback.db"),
-                        &Arc::new(
-                            kria_core::auth::SecretsVault::open_default()
-                                .expect("vault open (fallback)"),
-                        ),
-                    )
-                    .expect("device registry (fallback)"),
-                )
-            });
-
-        let audit = kria_core::remote_desktop::audit_logger_at(&paths.data_dir.join("audit.db"));
-        let remote_desktop_backend = Arc::new(
-            kria_server::desktop_stream::PortalWebRtcBackend::new(config.remote_desktop.clone()),
-        );
-        let remote_desktop = Arc::new(RemoteDesktopManager::with_backend(
-            config.remote_desktop.clone(),
-            remote_desktop_backend.clone(),
-            audit,
-        ));
-        // Reconcile on startup: never leave capture enabled from a previous crash.
-        remote_desktop.reconcile_disabled();
-
-        // Idle + global-halt enforcement loop.
-        let rd = remote_desktop.clone();
-        tokio::spawn(async move {
-            let mut tick = tokio::time::interval(std::time::Duration::from_secs(15));
-            loop {
-                tick.tick().await;
-                rd.enforce_idle();
-            }
+                .expect("device registry (fallback)"),
+            )
         });
 
-        let notifier = if config.ntfy.enabled {
-            Some(Arc::new(NtfyClient::new(config.ntfy.clone())))
-        } else {
-            None
-        };
+    let audit = kria_core::remote_desktop::audit_logger_at(&paths.data_dir.join("audit.db"));
+    let remote_desktop_backend = Arc::new(kria_server::desktop_stream::PortalWebRtcBackend::new(
+        config.remote_desktop.clone(),
+    ));
+    let remote_desktop = Arc::new(RemoteDesktopManager::with_backend(
+        config.remote_desktop.clone(),
+        remote_desktop_backend.clone(),
+        audit,
+    ));
+    remote_desktop.reconcile_disabled();
 
-        let session_store =
-            kria_core::memory::db::Database::open(&paths.data_dir.join("kria_memory.db"))
-                .map(|db| {
-                    Arc::new(kria_core::memory::conversation::ConversationStore::new(
-                        Arc::new(db),
-                    ))
-                })
-                .ok();
+    if config.remote_desktop.enabled {
+        let manager = remote_desktop.clone();
+        runtime.remote_desktop_monitor = Some(tokio::spawn(async move {
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(15));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                tick.tick().await;
+                manager.enforce_idle();
+            }
+        }));
+    }
 
-        GatewayManagers {
-            device_registry,
-            remote_desktop,
-            remote_desktop_backend,
-            notifier,
-            session_store,
-        }
-    })
+    let notifier = config
+        .ntfy
+        .enabled
+        .then(|| Arc::new(NtfyClient::new(config.ntfy.clone())));
+    let session_store =
+        kria_core::memory::db::Database::open(&paths.data_dir.join("kria_memory.db"))
+            .map(|db| {
+                Arc::new(kria_core::memory::conversation::ConversationStore::new(
+                    Arc::new(db),
+                ))
+            })
+            .ok();
+
+    let managers = Arc::new(GatewayManagers {
+        device_registry,
+        remote_desktop,
+        remote_desktop_backend,
+        notifier,
+        session_store,
+    });
+    runtime.current = Some(managers.clone());
+    managers
+}
+
+async fn reset_managers() {
+    let mut runtime = manager_slot().lock().await;
+    if let Some(monitor) = runtime.remote_desktop_monitor.take() {
+        monitor.abort();
+    }
+    if let Some(managers) = runtime.current.take() {
+        managers.remote_desktop.stop();
+    }
+}
+
+pub(super) async fn shutdown_runtime() {
+    stop_gateway().await;
+    reset_managers().await;
+}
+
+pub(super) async fn reconcile_auxiliary_managers(app: &AppState) -> Result<(), String> {
+    let was_running = gateway_running().await;
+    if was_running {
+        stop_gateway().await;
+    }
+    reset_managers().await;
+    if was_running && app.config.read().await.mobile.enabled {
+        start_gateway(app).await?;
+    }
+    Ok(())
 }
 
 fn cell<'a>(state: &'a State<'_, AppStateCell>) -> Result<&'a AppState, String> {
@@ -190,7 +232,7 @@ pub async fn mobile_gateway_status(
 ) -> Result<serde_json::Value, String> {
     let app = cell(&state)?;
     let config = app.config.read().await.clone();
-    let mgrs = managers(&config);
+    let mgrs = managers(&config).await;
     let slot = server_slot().lock().await;
     let running = slot.is_some();
     let bound = slot.as_ref().map(|h| h.bound_addr.clone());
@@ -204,13 +246,16 @@ pub async fn mobile_gateway_status(
     }))
 }
 
-#[tauri::command]
-pub async fn mobile_gateway_start(
-    state: State<'_, AppStateCell>,
-) -> Result<serde_json::Value, String> {
-    let app = cell(&state)?;
+pub(super) async fn gateway_running() -> bool {
+    server_slot().lock().await.is_some()
+}
+
+pub(super) async fn start_gateway(app: &AppState) -> Result<serde_json::Value, String> {
     let config = app.config.read().await.clone();
-    let mgrs = managers(&config);
+    if !config.mobile.enabled {
+        return Err("Mobile gateway is disabled in Settings".into());
+    }
+    let mgrs = managers(&config).await;
 
     let mut slot = server_slot().lock().await;
     if let Some(h) = slot.as_ref() {
@@ -289,12 +334,23 @@ pub async fn mobile_gateway_start(
 }
 
 #[tauri::command]
-pub async fn mobile_gateway_stop(_state: State<'_, AppStateCell>) -> Result<(), String> {
+pub async fn mobile_gateway_start(
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    start_gateway(cell(&state)?).await
+}
+
+pub(super) async fn stop_gateway() {
     let mut slot = server_slot().lock().await;
     if let Some(handle) = slot.take() {
         let _ = handle.shutdown.send(());
         tracing::info!("mobile gateway stopped");
     }
+}
+
+#[tauri::command]
+pub async fn mobile_gateway_stop(_state: State<'_, AppStateCell>) -> Result<(), String> {
+    stop_gateway().await;
     Ok(())
 }
 
@@ -304,7 +360,7 @@ pub async fn mobile_begin_pairing(
 ) -> Result<serde_json::Value, String> {
     let app = cell(&state)?;
     let config = app.config.read().await.clone();
-    let mgrs = managers(&config);
+    let mgrs = managers(&config).await;
     let host = {
         let slot = server_slot().lock().await;
         slot.as_ref()
@@ -333,7 +389,7 @@ pub async fn mobile_list_devices(
 ) -> Result<serde_json::Value, String> {
     let app = cell(&state)?;
     let config = app.config.read().await.clone();
-    let mgrs = managers(&config);
+    let mgrs = managers(&config).await;
     let devices = mgrs
         .device_registry
         .list_devices()
@@ -348,7 +404,7 @@ pub async fn mobile_revoke_device(
 ) -> Result<serde_json::Value, String> {
     let app = cell(&state)?;
     let config = app.config.read().await.clone();
-    let mgrs = managers(&config);
+    let mgrs = managers(&config).await;
     let revoked = mgrs
         .device_registry
         .revoke(&device_id)
@@ -362,7 +418,7 @@ pub async fn remote_desktop_status(
 ) -> Result<serde_json::Value, String> {
     let app = cell(&state)?;
     let config = app.config.read().await.clone();
-    let mgrs = managers(&config);
+    let mgrs = managers(&config).await;
     Ok(serde_json::to_value(mgrs.remote_desktop.status()).unwrap_or_default())
 }
 
@@ -371,7 +427,7 @@ pub async fn remote_desktop_status(
 pub async fn remote_desktop_kill(state: State<'_, AppStateCell>) -> Result<(), String> {
     let app = cell(&state)?;
     let config = app.config.read().await.clone();
-    let mgrs = managers(&config);
+    let mgrs = managers(&config).await;
     mgrs.remote_desktop.stop();
     Ok(())
 }
@@ -386,13 +442,40 @@ pub async fn set_mobile_config(
     state: State<'_, AppStateCell>,
 ) -> Result<(), String> {
     let app = cell(&state)?;
-    {
-        let mut config = app.config.write().await;
-        config.mobile.enabled = mobile_enabled;
-        config.mobile.require_device_auth = require_device_auth;
-        config.mobile.bind_interface = bind_interface;
-        config.remote_desktop.enabled = remote_desktop_enabled;
-        config.save().map_err(|e| e.to_string())?;
+    app.config_service
+        .patch_batch(
+            vec![
+                kria_core::config::Change::new(
+                    "mobile",
+                    "enabled",
+                    serde_json::json!(mobile_enabled),
+                ),
+                kria_core::config::Change::new(
+                    "mobile",
+                    "require_device_auth",
+                    serde_json::json!(require_device_auth),
+                ),
+                kria_core::config::Change::new(
+                    "mobile",
+                    "bind_interface",
+                    serde_json::json!(bind_interface),
+                ),
+                kria_core::config::Change::new(
+                    "remote_desktop",
+                    "enabled",
+                    serde_json::json!(remote_desktop_enabled),
+                ),
+            ],
+            kria_core::config::ChangeSource::Ui,
+            None,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+
+    stop_gateway().await;
+    reset_managers().await;
+    if mobile_enabled {
+        start_gateway(app).await?;
     }
     Ok(())
 }

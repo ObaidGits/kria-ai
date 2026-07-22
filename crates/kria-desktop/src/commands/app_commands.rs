@@ -36,6 +36,8 @@ pub async fn get_executive_snapshot(
         .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
     state
         .executive_sender
+        .read()
+        .await
         .as_ref()
         .map(|sender| sender.snapshot())
         .ok_or_else(|| "ExecutiveController is not available in this runtime".to_string())
@@ -52,6 +54,8 @@ pub async fn cancel_executive_task(
     let parsed_id = uuid::Uuid::parse_str(&task_id).map_err(|e| format!("Invalid task ID: {e}"))?;
     state
         .executive_sender
+        .read()
+        .await
         .as_ref()
         .ok_or_else(|| "ExecutiveController is not available in this runtime".to_string())?
         .cancel_task(parsed_id)
@@ -918,23 +922,13 @@ pub async fn update_settings(
         new_config.orchestrator.cuda_reserve_mb,
         new_config.orchestrator.vram_volatility_cap_mb,
     );
-    // Persist + update in-memory config. When ConfigService is enabled, route the
-    // bulk save through it (persist + version bump + ConfigChanged event); the
-    // legacy path saves to disk then swaps the in-memory handle. Both leave the
-    // same effective config (Property 1 / flag-off parity).
-    if config_service_enabled() {
-        state
-            .config_service
-            .replace_all(new_config, kria_core::config::ChangeSource::Ui)
-            .await
-            .map_err(|e| e.to_string())?;
-    } else {
-        new_config.save().map_err(|e| e.to_string())?;
-        let mut config = state.config.write().await;
-        *config = new_config;
-    }
-
-    let _ = apply_mcp_runtime_from_config(state).await;
+    // ConfigService is the single writer so all feature lifecycle listeners see
+    // whole-settings saves as well as field patches and prompt changes.
+    state
+        .config_service
+        .replace_all(new_config, kria_core::config::ChangeSource::Ui)
+        .await
+        .map_err(|e| e.to_string())?;
 
     Ok(())
 }

@@ -7,6 +7,7 @@
 
 .kria-shell {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto 1fr auto;
   height: 100vh;
   min-height: 0;
@@ -27,6 +28,14 @@
   background: var(--color-surface-3);
   backdrop-filter: blur(var(--blur-floating));
   z-index: var(--z-panel);
+  /* Shell-header narrow-width safeguard (Req 11.1 / §14): the header must never
+   * expand the shell horizontally. min-width:0 lets the grid shrink below its
+   * children's min-content; overflow:hidden is the backstop so intrinsic
+   * content (intent bar + actions cluster) can never push shell scrollWidth
+   * past the viewport. Every control stays reachable — labels truncate, they
+   * don't clip out of the layout. */
+  min-width: 0;
+  overflow: hidden;
 }
 
 .kria-presencebar__core {
@@ -35,11 +44,23 @@
   gap: var(--space-2);
 }
 
+/* Brand doubles as the always-reachable Home affordance (click → homepage). */
 .kria-presencebar__brand {
   font-family: var(--font-family-display);
   font-weight: var(--font-weight-semibold);
   letter-spacing: 0.08em;
   color: var(--color-text-primary);
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font-size: inherit;
+  transition: color var(--motion-duration-fast) var(--motion-easing-standard),
+    text-shadow var(--motion-duration-fast) var(--motion-easing-standard);
+}
+.kria-presencebar__brand:hover {
+  color: var(--color-accent-default);
+  text-shadow: 0 0 16px var(--color-accent-soft);
 }
 
 /* The KRIA Core presence (CorePresence component) is the single ambient-motion
@@ -48,23 +69,97 @@
 .kria-presencebar__intent {
   display: flex;
   justify-content: center;
+  /* Allow the 1fr intent track to shrink below its min-content (the trigger's
+   * 360px preference) at narrow widths — shell-header narrow-width safeguard. */
+  min-width: 0;
 }
 
+/* Reduced idle visual weight (UIE-H-001, Req 5.2): the palette trigger is a
+ * secondary utility, not a second task-entry field. It keeps a labelled button,
+ * shortcut hint, and full focus access, but sits at a bounded width with muted
+ * (ghost) styling so the Composer reads as the primary entry point. */
 .kria-intent-bar {
-  width: min(560px, 100%);
+  width: min(360px, 100%);
   justify-content: flex-start;
   gap: var(--space-2);
-  color: var(--color-text-secondary);
+  color: var(--color-text-muted);
+  /* Shrink below 360px min-content when the row is tight; the hint text keeps
+   * its ellipsis truncation instead of forcing the track wider. */
+  min-width: 0;
 }
 
 .kria-intent-bar__hint {
   color: var(--color-text-muted);
+  flex: 1;
+  text-align: start;
+}
+
+/* Shortcut hint keeps the proven Ctrl/Cmd+K chord discoverable on the trigger. */
+.kria-intent-bar__kbd {
+  flex: none;
+  padding: var(--space-0) var(--space-1);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-micro);
+  line-height: 1.4;
+}
+
+.kria-shell[data-window-mode="mini"] .kria-intent-bar__kbd,
+.kria-shell[data-window-mode="immersive"] .kria-intent-bar__kbd {
+  display: none;
 }
 
 .kria-presencebar__actions {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  /* Let the actions cluster (work summary + window-mode switch + safety
+   * controls) shrink so the work-summary label truncates instead of expanding
+   * the auto track — shell-header narrow-width safeguard. */
+  min-width: 0;
+}
+
+/* Cross-Space Current Work Summary indicator (UIE-H-010). A concise status
+ * pill: the active variant is a low-emphasis link into the Work lane; the idle
+ * variant is a muted, non-interactive cue. Token-only, no raw color. */
+.kria-work-summary {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.kria-work-summary__active {
+  gap: var(--space-1);
+  max-width: 14rem;
+  color: var(--color-text-secondary);
+}
+
+.kria-work-summary__active[data-work-state="resumable"] {
+  color: var(--color-warning-text, var(--color-text-secondary));
+}
+
+.kria-work-summary__idle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+
+/* Truncation owned by the shared `.kria-bounded` utility (task 10.7,
+ * styles/bounded-text.css) applied in markup; the label keeps only its flex
+ * min-width reset so a long work label clamps without overflowing the bar. */
+.kria-work-summary__label {
+  min-width: 0;
+}
+
+/* Mini/Immersive: keep the active work link (critical awareness) but drop
+ * the idle cue to conserve chrome (idle carries no unique actionable fact). */
+.kria-shell[data-window-mode="mini"] .kria-work-summary__idle,
+.kria-shell[data-window-mode="immersive"] .kria-work-summary__idle {
+  display: none;
 }
 
 .kria-presencebar__approvals {
@@ -123,11 +218,33 @@
 }
 
 /* ── Dock ────────────────────────────────────────────────────────────────── */
+/* Unified sidebar — matches the homepage sidebar: navy glass panel, bounded
+   width, a cyan right-edge light strip, and rounded glass items with an active
+   gradient + accent bar. Uses design tokens only (they resolve to the migrated
+   HUD navy/cyan palette). */
 .kria-dock {
-  border-right: 1px solid var(--color-border-default);
-  background: var(--color-surface-1);
-  padding: var(--space-2);
+  position: relative;
+  inline-size: clamp(208px, 15vw, 244px);
+  border-right: 1px solid var(--color-border-strong);
+  /* Near-opaque navy panel — identical tone to the homepage sidedock gradient. */
+  background: linear-gradient(180deg, var(--color-neutral-2), var(--color-neutral-1));
+  backdrop-filter: blur(24px) saturate(1.1);
+  padding: 16px 12px;
   overflow-y: auto;
+}
+/* Cyan right-edge glow (mirrors the homepage sidedock edge strip). */
+.kria-dock::after {
+  content: "";
+  position: absolute;
+  right: -1px;
+  top: 8%;
+  bottom: 8%;
+  inline-size: 2px;
+  border-radius: 2px;
+  background: var(--color-accent-default);
+  box-shadow: 0 0 14px var(--color-accent-border);
+  opacity: 0.7;
+  pointer-events: none;
 }
 
 .kria-dock__list {
@@ -136,46 +253,128 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: 3px;
 }
 
+/* Item metrics match the homepage nav item exactly (padding 9/11, gap 11,
+   radius 8, 13px label, dim text). */
 .kria-dock__button {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: 11px;
   width: 100%;
-  padding: var(--space-2) var(--space-3);
+  padding: 9px 11px;
   border: 1px solid transparent;
-  border-radius: var(--radius-md);
+  border-radius: 8px;
   background: transparent;
   color: var(--color-text-secondary);
   font: inherit;
+  font-size: 13px;
   cursor: pointer;
   text-align: left;
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard),
+    color var(--motion-duration-fast) var(--motion-easing-standard),
+    border-color var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
 .kria-dock__button:hover {
-  background: var(--color-surface-2);
+  background: var(--color-surface-3);
   color: var(--color-text-primary);
 }
 
+/* Active = homepage blue→violet gradient + inset cyan bar + soft blue glow. */
 .kria-dock__button.is-active {
-  background: var(--color-accent-soft);
-  border-color: var(--color-accent-border);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--color-info-solid) 32%, transparent),
+    color-mix(in srgb, var(--color-accent-secondary) 14%, transparent)
+  );
+  border-color: var(--color-border-strong);
   color: var(--color-text-primary);
+  box-shadow: inset 3px 0 0 var(--color-accent-default),
+    0 0 20px color-mix(in srgb, var(--color-info-solid) 25%, transparent);
 }
+.kria-dock__button.is-active :where(svg) { color: var(--color-accent-default); }
 
 .kria-dock__label {
-  font-size: var(--font-size-body);
-  font-weight: var(--font-weight-medium);
+  font-size: 13px;
+  font-weight: var(--font-weight-regular);
+}
+
+/* Beginner-oriented grouping/emphasis (Req 7.2 / design §12; UIE-H-003).
+   PRESENTATION ONLY: emphasis + decorative separators never change the
+   canonical DOM/focus order of the seven Space buttons or add a route. */
+
+/* Uniform items to match the homepage sidebar (no per-item emphasis); the
+   Converse "primary" class is retained for governance/DOM but styled like the
+   rest so the rail reads identically to the homepage nav. */
+.kria-dock__button--primary .kria-dock__label {
+  font-weight: var(--font-weight-regular);
+  color: inherit;
+}
+
+/* Decorative group divider (supporting → system → utility). It is an
+   aria-hidden, non-focusable presentational list item, so it draws a visual
+   group boundary without becoming a focus stop or implying a new route. */
+.kria-dock__separator {
+  block-size: 1px;
+  margin: var(--space-1) var(--space-2);
+  background: var(--color-border-default);
+}
+
+/* Immersive rail collapses to icons; keep separator spacing subtle there too. */
+.kria-shell[data-window-mode="mini"] .kria-dock__separator,
+.kria-shell[data-window-mode="immersive"] .kria-dock__separator {
+  margin-inline: 0;
 }
 
 /* ── SpaceRouter ─────────────────────────────────────────────────────────── */
+/*
+ * SCROLL-OWNERSHIP CONTRACT — one primary scroll owner per visible region/axis
+ * (design.md §21 UIE-M-005; Req 10.4–10.5). Authoritative matrix lives in
+ * `.kiro/specs/ui-enhancement-implementation-guide/evidence/task-9.1-scroll-place-inventory.md §1`
+ * and `task-9.2-scroll-owner-contract.md`. Summary of Y-axis owners:
+ *   • `.kria-space-router#space-root`  → Y owner for NON-Converse Spaces only.
+ *   • `.kria-stream__viewport`         → the ONE conversation Y owner (virtualized).
+ *   • `.kria-converse__threads` / `__work` / `__context` → independent bounded lanes.
+ *   • `.kria-inspector__body`          → bounded non-modal aside.
+ *   • `.kria-composer__textarea`       → grow-then-scroll (MAX_ROWS=8).
+ * X-axis: `.kria-space-router` is the single owner; all Converse children clip on X.
+ * Redundant overflow removed: while Converse is active the router must NOT also
+ * own vertical scroll (Converse fills its grid + manages per-lane scroll) — see
+ * the `[data-active-space="converse"]` rule below (G1).
+ */
 .kria-space-router {
+  /* Pin the workspace to the middle `1fr` track of the body grid
+     (`auto 1fr auto` = Dock | SpaceRouter | Inspector). This must be EXPLICIT:
+     when the Dock is out of flow (`position:fixed`) — the Hidden Dock on the
+     presence homepage, and the edge-reveal Dock in Immersive mode — it occupies
+     no grid cell, so without an explicit column the router would auto-place into
+     the leading `auto` track and shrink to its min-content width (a narrow left
+     strip with the rest of the screen empty). Forcing column 2 keeps the
+     workspace full-width regardless of whether the Dock is in flow. */
+  grid-column: 2;
+  /* Shell-owned active Space edge contract. Most Spaces consume the inset as
+     normal router padding; edge-filling Spaces may consume the inverse fill. */
+  --kria-active-space-inset: var(--space-6);
+  --kria-active-space-fill: calc(-1 * var(--kria-active-space-inset));
   min-width: 0;
   min-height: 0;
   overflow: auto;
-  padding: var(--space-6);
+  padding: var(--kria-active-space-inset);
+}
+
+/* G1 (task 9.2, UIE-M-005): Converse owns its own vertical scroll — the
+   virtualized `.kria-stream__viewport` is THE conversation Y owner and each lane
+   (threads/work/context) is a bounded independent Y owner. Converse fills the
+   router via `.kria-converse { height:100%; margin: <active-space-fill> }`, so a
+   router-level `overflow-y:auto` would be a SECOND vertical owner over the same
+   content (§21 "one primary scroll owner per region/axis"). Scope it off here.
+   `overflow-x` is left as `auto` (single X owner, Task 8 no-horizontal-overflow
+   invariant). Non-Converse Spaces are untouched and keep the router as their
+   scroll owner. */
+.kria-space-router[data-active-space="converse"] {
+  overflow-y: hidden;
 }
 
 .kria-space {
@@ -206,8 +405,12 @@
 }
 
 @keyframes kria-inspector-in {
-  from { transform: translateX(16px); opacity: 0; }
-  to { transform: translateX(0); opacity: 1; }
+  /* Enter on the Y axis. In Standard mode the Inspector is an in-flow grid
+   * column, so an X-axis entrance transiently extends `.kria-shell__body`'s
+   * (clipped) horizontal scroll area during the slide. A vertical rise + fade
+   * stays compositor-cheap without touching horizontal shell overflow. */
+  from { transform: translateY(16px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
 }
 
 .kria-inspector__header {
@@ -251,23 +454,56 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
+}
+
+.kria-statusline__brain {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  margin-left: auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .kria-statusline__state {
   text-transform: capitalize;
 }
 
-.kria-statusline__approvals {
-  margin-left: auto;
-  color: var(--color-warning-text);
+/* Concise situational narration paired with the Core state (UIE-H-013).
+   Low-emphasis text — CorePresence remains the sole ambient focal point. */
+.kria-statusline__narration {
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 32ch;
+}
+
+.kria-statusline__narration[data-actionable="true"] {
+  color: var(--color-text-primary);
+}
+
+/* Idle minimization (UIE-L-001, §11.4, Req 9.5): when the line carries no
+   unique actionable fact it yields persistent vertical space to conversation.
+   The resting Core dot stays as the sole ambient anchor (its redundant label is
+   sr-only via `hideLabel`), and the footprint collapses to a slim, stable line.
+   The element is NOT removed — a relevant fact restores full presentation in
+   place. Treatment is static (no motion-dependent meaning; the risk called out
+   in the UIE-L-001 record). */
+.kria-statusline[data-minimized="true"] {
+  padding-block: 0;
+  min-height: var(--space-2);
+  color: var(--color-text-muted);
 }
 
 /* ── Window-mode composition (Req 15.2 degrade-by-curation) ──────────────── */
-/* Compact: drop the Dock labels + the Inspector column (curated, not squished). */
-.kria-shell[data-window-mode="compact"] .kria-dock__label {
+/* Mini: drop the Dock labels + the Inspector column (curated, not squished). */
+.kria-shell[data-window-mode="mini"] .kria-dock__label {
   display: none;
 }
-.kria-shell[data-window-mode="compact"] .kria-intent-bar__hint {
+.kria-shell[data-window-mode="mini"] .kria-intent-bar__hint {
   display: none;
 }
 
@@ -279,27 +515,29 @@
 }
 
 /* ── Intentional window-mode shell compositions (Req 15.1–15.4) ────────── */
-/* Compact curates secondary chrome away; primary task keeps normal scale. */
-.kria-shell[data-window-mode="compact"] .kria-presencebar {
+/* Mini curates secondary chrome away; primary task keeps normal scale. */
+.kria-shell[data-window-mode="mini"] .kria-presencebar {
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: var(--space-2);
   padding-inline: var(--space-2);
 }
-.kria-shell[data-window-mode="compact"] .kria-presencebar__brand,
-.kria-shell[data-window-mode="compact"] .kria-presencebar__notifications,
-.kria-shell[data-window-mode="compact"] .kria-presencebar__actions > .kit-icon-button:last-child {
+/* Brand wordmark is non-critical decoration → curated away in Mini. The
+   notifications bell + Settings entry are NOT hidden here: PresenceBar relocates
+   them into one labelled, badged, keyboard-reachable disclosure in Mini so
+   critical awareness adapts rather than disappearing (UIE-H-007). */
+.kria-shell[data-window-mode="mini"] .kria-presencebar__brand {
   display: none;
 }
-.kria-shell[data-window-mode="compact"] .kria-space-router {
-  padding: var(--space-3);
+.kria-shell[data-window-mode="mini"] .kria-space-router {
+  --kria-active-space-inset: var(--space-3);
 }
-.kria-shell[data-window-mode="compact"] .kria-statusline {
+.kria-shell[data-window-mode="mini"] .kria-statusline {
   overflow: hidden;
   gap: var(--space-2);
   padding-inline: var(--space-2);
   white-space: nowrap;
 }
-.kria-shell[data-window-mode="compact"] .kria-inspector {
+.kria-shell[data-window-mode="mini"] .kria-inspector {
   position: fixed;
   inset: var(--space-3);
   width: auto;
@@ -307,38 +545,37 @@
   border: 1px solid var(--color-border-default);
   border-radius: var(--radius-lg);
 }
-.kria-shell[data-window-mode="compact"] .kria-converse__rail-toggle,
-.kria-shell[data-window-mode="compact"] .kria-machines [data-mode-region="mobile"],
-.kria-shell[data-window-mode="compact"] .kria-machines [data-mode-region="remote"],
-.kria-shell[data-window-mode="compact"] .kria-machines [data-mode-region="terminal"] {
+.kria-shell[data-window-mode="mini"] .kria-machines [data-mode-region="mobile"],
+.kria-shell[data-window-mode="mini"] .kria-machines [data-mode-region="remote"],
+.kria-shell[data-window-mode="mini"] .kria-machines [data-mode-region="terminal"] {
   display: none;
 }
-.kria-shell[data-window-mode="compact"] .kria-settings__groups,
-.kria-shell[data-window-mode="compact"] .kria-settings__history,
-.kria-shell[data-window-mode="compact"] .kria-settings__section-head,
-.kria-shell[data-window-mode="compact"] .kria-settings__rows > :not(:first-child) {
+.kria-shell[data-window-mode="mini"] .kria-settings__groups,
+.kria-shell[data-window-mode="mini"] .kria-settings__history,
+.kria-shell[data-window-mode="mini"] .kria-settings__section-head,
+.kria-shell[data-window-mode="mini"] .kria-settings__rows > :not(:first-child) {
   display: none;
 }
-.kria-shell[data-window-mode="compact"] .kria-settings__layout {
+.kria-shell[data-window-mode="mini"] .kria-settings__layout {
   display: block;
 }
-.kria-shell[data-window-mode="compact"] .kria-settings__header {
+.kria-shell[data-window-mode="mini"] .kria-settings__header {
   align-items: stretch;
   flex-direction: column;
 }
-.kria-shell[data-window-mode="compact"] .kria-settings__search {
+.kria-shell[data-window-mode="mini"] .kria-settings__search {
   width: 100%;
 }
-.kria-shell[data-window-mode="compact"] .kria-memory__compact,
-.kria-shell[data-window-mode="compact"] .kria-automations__compact,
-.kria-shell[data-window-mode="compact"] .kria-capabilities__compact,
-.kria-shell[data-window-mode="compact"] .kria-observatory__compact {
+.kria-shell[data-window-mode="mini"] .kria-memory__compact,
+.kria-shell[data-window-mode="mini"] .kria-automations__compact,
+.kria-shell[data-window-mode="mini"] .kria-capabilities__compact,
+.kria-shell[data-window-mode="mini"] .kria-observatory__compact {
   display: flex;
   min-height: 0;
   flex-direction: column;
   gap: var(--space-3);
 }
-.kria-shell[data-window-mode="compact"] .kria-observatory__meters {
+.kria-shell[data-window-mode="mini"] .kria-observatory__meters {
   grid-template-columns: 1fr;
 }
 
@@ -371,7 +608,7 @@
   opacity: 1;
 }
 .kria-shell[data-window-mode="immersive"] .kria-space-router {
-  padding: var(--space-3);
+  --kria-active-space-inset: var(--space-3);
 }
 .kria-shell[data-window-mode="immersive"] .kria-inspector {
   position: fixed;
@@ -383,13 +620,6 @@
 }
 .kria-shell[data-window-mode="immersive"] .kria-statusline {
   padding-block: 0;
-}
-.kria-shell[data-window-mode="immersive"] .kria-converse__stream-inner,
-.kria-shell[data-window-mode="immersive"] .kria-converse__composer-inner {
-  width: min(880px, 100%);
-}
-.kria-shell[data-window-mode="immersive"] .kria-converse__work {
-  width: clamp(320px, 30vw, 480px);
 }
 .kria-shell[data-window-mode="immersive"] .kria-machines [data-mode-region="remote"] {
   order: -1;
@@ -407,15 +637,19 @@
   margin-inline: auto;
 }
 
-/* KRIA-owned window-mode switch. This is app navigation, not fake WM chrome. */
+/* KRIA-owned window-mode control. A SECONDARY shell preference (UIE-H-009,
+   UIE-L-004): lower idle visual weight than primary work, current mode always
+   visible, explicit Immersive exit. This is app navigation, not fake WM chrome.
+   No heavy segmented-control container — it must not read as a primary action. */
 .kria-window-modes {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: var(--space-1);
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-1);
+}
+.kria-window-modes__options {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
 }
 .kria-window-modes__button {
   padding-inline: var(--space-2);
@@ -424,21 +658,44 @@
   border-color: var(--color-accent-border);
   color: var(--color-text-primary);
 }
+/* Stacked, purpose-annotated variant shown inside the disclosure. */
+.kria-window-modes__options--menu {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-1);
+  min-width: 15rem;
+}
+.kria-window-modes__options--menu .kria-window-modes__button {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+.kria-window-modes__purpose {
+  flex-basis: 100%;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
 .kria-window-modes__exit {
   margin-inline-start: var(--space-1);
 }
-.kria-shell[data-window-mode="compact"] .kria-window-modes__label {
+.kria-shell[data-window-mode="mini"] .kria-window-modes__label {
   display: none;
 }
-.kria-shell[data-window-mode="compact"] .kria-window-modes__button {
-  padding-inline: var(--space-1);
+
+/* Boot/setup shell: a full-height column whose content fills and whose footer
+   (StatusLine) stays pinned to the bottom, so the app/LLM status is visible
+   from the very first paint (persistent-footer requirement). */
+.kria-boot-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
 }
-@media (max-width: 780px) {
-  .kria-window-modes__label { display: none; }
+.kria-boot-shell > :first-child {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .kria-shell-boot {
-  min-height: 100vh;
+  min-height: 0;
   display: grid;
   place-items: center;
   background: var(--color-neutral-1);

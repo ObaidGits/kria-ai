@@ -34,6 +34,28 @@ describe("Icon", () => {
     expect(c2.querySelector("svg")?.getAttribute("width")).toBe("20px");
   });
 
+  it("maps type-scale size roles to the matching font-size token", () => {
+    const roles = {
+      micro: "var(--font-size-micro)",
+      caption: "var(--font-size-caption)",
+      body: "var(--font-size-body)",
+      heading: "var(--font-size-heading)",
+      title: "var(--font-size-title)",
+      display: "var(--font-size-display)",
+    } as const;
+    for (const [role, token] of Object.entries(roles)) {
+      const { container } = render(() => <Icon name="x" size={role as keyof typeof roles} />);
+      const svg = container.querySelector("svg");
+      expect(svg?.getAttribute("width"), `role ${role} width`).toBe(token);
+      expect(svg?.getAttribute("height"), `role ${role} height`).toBe(token);
+    }
+  });
+
+  it("passes through an arbitrary CSS length that is not a role keyword", () => {
+    const { container } = render(() => <Icon name="x" size="1.5rem" />);
+    expect(container.querySelector("svg")?.getAttribute("width")).toBe("1.5rem");
+  });
+
   it("uses a single consistent stroke weight (currentColor, stroke-width 2)", () => {
     const { container } = render(() => <Icon name="check" />);
     const svg = container.querySelector("svg");

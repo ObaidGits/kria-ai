@@ -119,12 +119,20 @@ export default function MachinesSpace() {
     return fleet.targets().find((t) => t.targetId === id) ?? null;
   });
 
-  // Open the device Inspector on the shared Inspector (Req 1.6).
-  function inspect(device: DeviceTargetView) {
-    shellStore.openInspector("device", device.targetId, {
-      device,
-      testResult: fleet.lastTestResultByTarget(device.targetId),
-    });
+  // Open the device Inspector on the shared Inspector (Req 1.6). A user row
+  // click leaves activeElement on the control (correct owner via the default);
+  // the deep-link path passes an explicit region owner (§20.3/§20.4) since it
+  // is programmatic.
+  function inspect(device: DeviceTargetView, opts?: { region?: boolean }) {
+    shellStore.openInspector(
+      "device",
+      device.targetId,
+      {
+        device,
+        testResult: fleet.lastTestResultByTarget(device.targetId),
+      },
+      opts?.region ? { regionSelector: '[data-space="machines"]' } : undefined,
+    );
   }
 
   // Device palette/hash deep links wait for the authoritative fleet snapshot,
@@ -139,7 +147,7 @@ export default function MachinesSpace() {
     const routeKey = `${route.space}/${route.segment}/${route.entityId}`;
     if (handledDeviceRoute === routeKey) return;
 
-    inspect(device);
+    inspect(device, { region: true });
     queueMicrotask(() => {
       if (currentRoute().entityId !== device.targetId) return;
       const row = Array.from(

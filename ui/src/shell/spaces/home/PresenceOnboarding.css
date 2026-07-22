@@ -1,0 +1,81 @@
+/**
+ * PresenceOnboarding — first-run presence teaching (design.md §17, Req 19).
+ *
+ * Token-only (zero raw color, Req 14.2). One calm whisper: a quiet line + an
+ * optional detail + a muted "Got it" dismissal. The ONLY motion is a gentle
+ * fade-in, frozen under reduced-motion (Req 17.4 / 21.4) via both the global
+ * kill-switch attribute and the OS media query. It renders only on first run and
+ * never at rest thereafter, so it adds no ambient cost.
+ */
+
+.kria-onboarding {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 34ch;
+  margin-inline: auto;
+  text-align: center;
+  animation: kria-onboarding-in var(--motion-duration-recede)
+    var(--motion-easing-presence, ease-out) both;
+}
+
+.kria-onboarding__message {
+  margin: 0;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+}
+
+.kria-onboarding__detail {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  color: var(--color-text-muted);
+  letter-spacing: 0.02em;
+}
+
+.kria-onboarding__dismiss {
+  margin-top: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-full);
+  background: var(--glass-fill-rest);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+  cursor: pointer;
+  /* Hover feedback is an interaction — interaction budget (200ms base), not the
+     5s Core-breath token that was here by mistake (Req 20.4). */
+  transition: background var(--motion-duration-base)
+    var(--motion-easing-standard, ease);
+}
+
+.kria-onboarding__dismiss:hover {
+  background: var(--glass-fill-active);
+  color: var(--color-text-primary);
+}
+
+@keyframes kria-onboarding-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Reduced motion: no fade, no transition — instant, static teaching cue. Honors
+   both the global kill-switch and the OS preference (mirrors the rest of the
+   homepage so the surface freezes together). */
+:root[data-reduced-motion="on"] .kria-onboarding,
+:root[data-reduced-motion="on"] .kria-onboarding__dismiss {
+  animation: none !important;
+  transition: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kria-onboarding,
+  .kria-onboarding__dismiss {
+    animation: none !important;
+    transition: none !important;
+  }
+}

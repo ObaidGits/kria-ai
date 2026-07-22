@@ -1,0 +1,17 @@
+/**
+ * OverflowControl — trigger + decorative count/state badge.
+ * Token-only styling (no raw colors); the Badge itself carries semantic tone.
+ */
+.kria-overflow-control {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+/* Decorative badge overlaps the trigger's top-right corner. */
+.kria-overflow-control__badge {
+  position: absolute;
+  top: calc(-1 * var(--space-1));
+  right: calc(-1 * var(--space-1));
+  pointer-events: none;
+}

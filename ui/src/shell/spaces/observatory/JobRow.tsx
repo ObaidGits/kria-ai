@@ -29,7 +29,17 @@ export function JobRow(props: { job: Job; onCancel: (id: string) => Promise<bool
         <Show when={props.job.error}><span role="alert">{props.job.error}</span></Show>
         <Show when={failed()}><span role="alert">Cancellation failed; job remains authoritative.</span></Show>
       </div>
-      <Button variant="secondary" size="sm" disabled={!canCancel() || cancelling()} onClick={cancel}>
+      {/* Full accessible scope name (UIE-M-015): the visible label stays a
+          concise "Cancel"/"Cancelling…", while the accessible name states the
+          exact job this cancels, so the control never reads as an ambiguous or
+          global stop. Invokes only the existing `onCancel` handler. */}
+      <Button
+        variant="secondary"
+        size="sm"
+        aria-label={cancelling() ? `Cancelling ${props.job.name}` : `Cancel ${props.job.name}`}
+        disabled={!canCancel() || cancelling()}
+        onClick={cancel}
+      >
         {cancelling() ? "Cancelling…" : "Cancel"}
       </Button>
     </li>

@@ -1,10 +1,6 @@
 /**
- * graphGate tests (task 6.4) — the capability gate for the Knowledge Graph
- * lens. Verifies the 2D-first / 3D-as-gated-enhancement contract the lens uses
- * (LensRenderMode + renderMode gate): the 3D branch does NOT mount when the gate
- * is off (no WebGL / reduced-motion / no passing probe) and mounts ONLY when a
- * passing on-device probe flips the gate. WebGL can't run under jsdom, so the
- * 3D branch is represented by a marker to prove the mount decision without GL.
+ * Generic LensRenderMode gate tests. Marker branches verify gate mechanics;
+ * they do not mount `GraphCanvas3D` or prove Memory Graph 3D integration.
  */
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@solidjs/testing-library";
@@ -39,7 +35,7 @@ function Lens() {
   );
 }
 
-describe("Knowledge Graph capability gate", () => {
+describe("generic lens capability gate (not Memory Graph integration)", () => {
   it("yields to the 2D fallback and does NOT mount 3D when WebGL is absent", () => {
     initRenderMode(snapshot({ hasWebGL: false, webglTier: "none" }));
     render(() => <Lens />);

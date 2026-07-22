@@ -20,9 +20,10 @@
  *
  * Requirements: 13.1, 13.2, 13.3, 13.4, 13.5
  */
-import { For, Show, createEffect, createMemo } from "solid-js";
+import { For, Show, createEffect, createMemo, onCleanup } from "solid-js";
 import { Portal } from "solid-js/web";
 import { Icon } from "../../components/Icon";
+import { registerOverlaySurface } from "../overlayLayers";
 import { IconButton, Button, Badge, EmptyState } from "../../kit";
 import type { BadgeTone } from "../../kit";
 import { notificationStore, shellStore } from "../../stores";
@@ -99,6 +100,15 @@ function NotificationRow(props: { item: Notification }) {
 
 export function NotificationCenter() {
   let panelRef: HTMLDivElement | undefined;
+  // Non-blocking floating surface: inerted while a pending approval or modal is
+  // up so it cannot receive interaction priority over decisions (§20.3, Req 11.13).
+  let unregisterSurface: (() => void) | undefined;
+  const bindPanel = (el: HTMLDivElement) => {
+    panelRef = el;
+    unregisterSurface?.();
+    unregisterSurface = registerOverlaySurface(el, "floating");
+  };
+  onCleanup(() => unregisterSurface?.());
   const open = () => shellStore.notificationsOpen();
   const items = createMemo(() => notificationStore.active());
 
@@ -127,7 +137,7 @@ export function NotificationCenter() {
         <div class="kria-notifications__overlay" aria-hidden={true} onClick={close} />
         <div class="kria-notifications__positioner">
           <div
-            ref={panelRef}
+            ref={bindPanel}
             class="kria-notifications"
             role="dialog"
             aria-modal={false}

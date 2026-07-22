@@ -3,5 +3,6 @@
 @import "./tokens.generated.css";
 @import "./base.css";
 @import "./accessibility.css";
+@import "./bounded-text.css";
 /* Must remain last: universal reduced-motion rules override every surface. */
 @import "./motion.css";

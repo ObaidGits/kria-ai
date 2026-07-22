@@ -58,6 +58,14 @@
   display: inline-flex;
   color: var(--color-accent-default);
 }
+/* Per-item accessible description (e.g. why a disabled item is unavailable).
+   Rendered on its own line, low-emphasis, wired via aria-describedby. */
+.kit-menu-item-description {
+  display: block;
+  flex-basis: 100%;
+  font-size: var(--font-size-micro);
+  color: var(--color-text-muted);
+}
 
 .kit-menu-separator {
   height: 1px;

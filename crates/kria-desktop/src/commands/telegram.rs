@@ -1,6 +1,86 @@
 use super::*;
 
+async fn persist_telegram_config(state: &AppState, config: &KriaConfig) -> Result<(), String> {
+    let fields = serde_json::to_value(&config.telegram)
+        .map_err(|error| format!("failed to serialize Telegram config: {error}"))?
+        .as_object()
+        .cloned()
+        .ok_or_else(|| "Telegram config did not serialize as an object".to_string())?;
+    let mut changes: Vec<_> = fields
+        .into_iter()
+        .map(|(field, value)| kria_core::config::Change::new("telegram", field, value))
+        .collect();
+    changes.push(kria_core::config::Change::new(
+        "mcp",
+        "servers",
+        serde_json::json!(config.mcp.servers),
+    ));
+    state
+        .config_service
+        .patch_batch(changes, kria_core::config::ChangeSource::Ui, None)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 // ── Telegram Integration Commands ───────────────────────────────────
+
+pub(super) async fn reconcile_telegram_feature(
+    state: &AppState,
+    enabled: bool,
+) -> Result<(), String> {
+    if !enabled {
+        if let Some(bridge) = state.telegram_bridge.write().await.take() {
+            bridge.stop();
+        }
+        let _ = apply_mcp_runtime_from_config(state).await;
+        return Ok(());
+    }
+
+    let config = state.config.read().await.clone();
+    let mcp_configured = config
+        .mcp
+        .servers
+        .iter()
+        .any(|server| server.name.eq_ignore_ascii_case("telegram"));
+    if mcp_configured {
+        let runtime = apply_mcp_runtime_from_config(state).await;
+        let running = runtime["servers"]
+            .as_array()
+            .and_then(|servers| {
+                servers.iter().find(|server| {
+                    server["name"]
+                        .as_str()
+                        .map(|name| name.eq_ignore_ascii_case("telegram"))
+                        .unwrap_or(false)
+                })
+            })
+            .map(|server| server["state"] == "running")
+            .unwrap_or(false);
+        return if running {
+            Ok(())
+        } else {
+            Err("Telegram MCP server failed to start".into())
+        };
+    }
+
+    if config.telegram.bot_token.trim().is_empty() {
+        return Err("Telegram bot token is not configured".into());
+    }
+    let mut bridge = state.telegram_bridge.write().await;
+    if bridge.is_none() {
+        *bridge = Some(TelegramBridge::spawn(
+            config.telegram,
+            state.agent_loop.clone(),
+            state.memory_store.clone(),
+            state.tool_registry.clone(),
+            state.embeddings.clone(),
+            state.hardware_info.tier.as_str().to_string(),
+            state.orchestrator.clone(),
+        ));
+    }
+    Ok(())
+}
 
 #[tauri::command]
 pub async fn get_telegram_config(
@@ -29,17 +109,14 @@ pub async fn update_telegram_config(
     let state = state
         .get()
         .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
-    let mut config = state.config.write().await;
+    let mut config = state.config.read().await.clone();
     config.telegram.enabled = enabled;
     config.telegram.bot_token = bot_token;
     config.telegram.allowed_chat_ids = allowed_chat_ids;
     config.telegram.auto_start = auto_start;
     sync_telegram_mcp_server_config(&mut config);
-    config.save().map_err(|e| e.to_string())?;
-    drop(config);
-
-    let _ = apply_mcp_runtime_from_config(state).await;
-    Ok(())
+    persist_telegram_config(state, &config).await?;
+    reconcile_telegram_feature(state, enabled).await
 }
 
 #[tauri::command]
@@ -49,7 +126,7 @@ pub async fn start_telegram_mcp(
     let state = state
         .get()
         .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
-    let mut config = state.config.write().await;
+    let mut config = state.config.read().await.clone();
     config.telegram.enabled = true;
     sync_telegram_mcp_server_config(&mut config);
     let tg_config = config.telegram.clone();
@@ -58,8 +135,7 @@ pub async fn start_telegram_mcp(
         .servers
         .iter()
         .any(|s| s.name.eq_ignore_ascii_case("telegram"));
-    config.save().map_err(|e| e.to_string())?;
-    drop(config);
+    persist_telegram_config(state, &config).await?;
 
     if tg_config.bot_token.is_empty() {
         return Err("Telegram bot token is not configured".into());
@@ -135,15 +211,12 @@ pub async fn stop_telegram_mcp(state: State<'_, AppStateCell>) -> Result<(), Str
         }
     }
 
-    // Update config
-    let mut config = state.config.write().await;
+    // Update authoritative config and reconcile MCP/direct bridge state.
+    let mut config = state.config.read().await.clone();
     config.telegram.enabled = false;
     sync_telegram_mcp_server_config(&mut config);
-    config.save().map_err(|e| e.to_string())?;
-    drop(config);
-
-    let _ = apply_mcp_runtime_from_config(state).await;
-    Ok(())
+    persist_telegram_config(state, &config).await?;
+    reconcile_telegram_feature(state, false).await
 }
 
 #[tauri::command]

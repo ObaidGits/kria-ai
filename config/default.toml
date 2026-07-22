@@ -111,9 +111,18 @@ model_path = "~/.kria/models/classifier/model.onnx"
 
 
 [memory]
+enabled = true
 max_facts = 10000
 decay_half_life_days = 7
 prune_threshold = 0.01
+
+[gui_cognition]
+enabled = true
+
+[tools]
+enabled = true
+disabled_groups = []
+disabled_tools = []
 
 [safety]
 require_approval_for_red = true
@@ -174,6 +183,9 @@ news_feeds = [
     "https://feeds.arstechnica.com/arstechnica/index",
     "https://hnrss.org/frontpage",
 ]
+
+[mcp]
+enabled = true
 
 [hardware]
 tier = ""                                   # "" = auto-detect; or lite|standard|performance|high

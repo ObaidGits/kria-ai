@@ -1,0 +1,95 @@
+/**
+ * ReadingBackdrop — receded Room + ambient Core + hard-dim (design.md §11,
+ * Requirement 11.1 / 11.2 / 11.3).
+ *
+ * Token-only (Req 16.2, zero raw color). This layer is the depth-recession:
+ * the Room + Core are pushed BACK (transform scale/translate + reduced opacity)
+ * so they recede in the SAME space rather than being swapped out (Req 11.1),
+ * and a hard-dim scrim (`--reading-dim`) mutes the atmosphere behind text
+ * (Req 11.2). Motion is transform/opacity only (design §11.4) and settles into
+ * place over `--motion-duration-recede`; under reduced motion it is instant.
+ *
+ * Accent discipline / guardrail-lint: this file styles ONLY `.kria-reading-*`
+ * selectors — it never references a `.kria-room*` selector, so it cannot spend
+ * the accent on the Room base (the Room owns its own accent-clean styling).
+ */
+
+/* ── Backdrop root: fills the conversation surface, sits BEHIND its content.
+      Rendered as the first child of a `position: relative` conversation
+      surface; `z-index: -1` keeps the receded Room behind the in-flow toolbar +
+      message stream (whose near-solid backing paints over it), while `inset: 0`
+      contains it to the surface (design §11.1 — recession in the SAME space). ── */
+.kria-reading-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* ── Receded Room wrapper: pushes the reused Room back in depth (Req 11.1).
+      Transform + opacity only (GPU-composited). The settle entrance eases it
+      from very slightly forward to its receded resting depth so the recession
+      reads as one calm motion (Req 11.2 settle motion). ── */
+.kria-reading-backdrop__room {
+  position: absolute;
+  inset: 0;
+  transform: scale(0.94) translateY(calc(var(--space-6) * -1));
+  transform-origin: center 38%;
+  opacity: 0.55;
+  will-change: transform, opacity;
+  animation: kria-reading-recede var(--motion-duration-recede) var(--motion-easing-presence) both;
+}
+
+.kria-reading-backdrop__room .kria-reading-backdrop__core {
+  /* Ambient Core drifts UP toward where it will rest as a dim glow (Req 11.1). */
+  margin-bottom: auto;
+  margin-top: var(--space-8);
+  opacity: 0.7;
+}
+
+/* ── Hard-dim scrim: the Room recedes HARD behind text (Req 11.2). Above the
+      receded Room, beneath the reading column backing. ── */
+.kria-reading-backdrop__dim {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: var(--reading-dim);
+  animation: kria-reading-dim-in var(--motion-duration-recede) var(--motion-easing-presence) both;
+}
+
+/* Settle the recession: Room eases from slightly-forward to its receded depth. */
+@keyframes kria-reading-recede {
+  from {
+    transform: scale(1) translateY(0);
+    opacity: 0.85;
+  }
+  to {
+    transform: scale(0.94) translateY(calc(var(--space-6) * -1));
+    opacity: 0.55;
+  }
+}
+
+@keyframes kria-reading-dim-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* ── Reduced motion / kill-switch (Req 11.2 "settle motion" → instant): drop the
+      settle animation; the receded frame + dim simply appear at their resting
+      values. Honors BOTH the global kill-switch and the OS preference. ── */
+[data-reduced-motion="on"] .kria-reading-backdrop__room,
+[data-reduced-motion="on"] .kria-reading-backdrop__dim {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kria-reading-backdrop__room,
+  .kria-reading-backdrop__dim {
+    animation: none;
+  }
+}

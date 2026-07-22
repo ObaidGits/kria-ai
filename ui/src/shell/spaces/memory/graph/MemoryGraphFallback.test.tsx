@@ -1,13 +1,6 @@
 /**
- * MemoryGraphFallback tests (task 6.5) — the mandatory 2D/keyboard
- * representation of the Knowledge Graph (Req 5.5 / 16.3 / 17.5).
- *
- * Verifies the fallback renders a REAL accessible table of nodes with
- * sort/filter/search, keyboard row navigation, select→focus+expand, pin/hide,
- * predicted-link materialize (routes through the existing command — bridge
- * mocked), the "showing N of M" cap notice, and table a11y (header scope /
- * aria-sort). No WebGL / Tauri needed: graphData is seeded directly and the
- * bridge is mocked.
+ * MemoryGraphFallback tests for the mandatory semantic table paired with the
+ * current 2D Knowledge Graph view.
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@solidjs/testing-library";
@@ -15,6 +8,7 @@ import { render, screen, fireEvent, waitFor, within } from "@solidjs/testing-lib
 const invokeMock = vi.fn();
 vi.mock("../../../../bridge/invoke", () => ({
   bridgeInvoke: (command: string, args?: Record<string, unknown>) => invokeMock(command, args),
+  bridgeInvokeOptional: vi.fn(async () => null),
 }));
 
 import { MemoryGraphFallback } from "./MemoryGraphFallback";
@@ -59,7 +53,7 @@ describe("2D fallback table — structure + cap", () => {
     render(() => <MemoryGraphFallback reason="2D default (test)" />);
 
     expect(screen.getByRole("table")).toBeInTheDocument();
-    for (const header of ["Entity", "Community", "Centrality", "Connections", "Actions"]) {
+    for (const header of ["Entity", "Component", "Centrality", "Connections", "Actions"]) {
       expect(screen.getByRole("columnheader", { name: new RegExp(header) })).toBeInTheDocument();
     }
     // Row header uses scope="row" for the entity (real table semantics).
@@ -165,13 +159,12 @@ describe("2D fallback table — select → focus + expand", () => {
   });
 });
 
-describe("2D fallback table — pin / hide", () => {
-  it("toggles pin state", () => {
+describe("2D fallback table — available view actions", () => {
+  it("does not expose inert pin controls", () => {
     seed();
     render(() => <MemoryGraphFallback />);
-    const pinButton = screen.getAllByRole("button", { name: /^Pin$/ })[0];
-    fireEvent.click(pinButton);
-    expect(graphData.pinned().size).toBe(1);
+    expect(screen.queryByRole("button", { name: /^(?:Pin|Unpin)$/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /Expand/ })).toHaveLength(nodes().length);
   });
 
   it("hides a node so it leaves the table and can be restored", async () => {

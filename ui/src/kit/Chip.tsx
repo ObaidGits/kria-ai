@@ -15,6 +15,12 @@ export interface ChipProps extends ParentProps {
   onRemove?: () => void;
   /** Accessible label for the remove control. */
   removeLabel?: string;
+  /**
+   * Optional hover/focus tooltip describing the chip's outcome. Surfaced on the
+   * underlying element so decision-point copy (e.g. a mode chip) can carry a
+   * concise, grounded description without a separate wrapper.
+   */
+  title?: string;
   class?: string;
 }
 
@@ -25,6 +31,7 @@ export function Chip(props: ChipProps) {
     "onToggle",
     "onRemove",
     "removeLabel",
+    "title",
     "class",
     "children",
   ]);
@@ -59,7 +66,10 @@ export function Chip(props: ChipProps) {
     <Show
       when={local.onToggle}
       fallback={
-        <span class={`kit-chip ${local.selected ? "kit-chip--selected" : ""} ${local.class ?? ""}`}>
+        <span
+          class={`kit-chip ${local.selected ? "kit-chip--selected" : ""} ${local.class ?? ""}`}
+          title={local.title}
+        >
           {body}
         </span>
       }
@@ -69,6 +79,7 @@ export function Chip(props: ChipProps) {
         class={`kit-chip kit-focusable ${local.class ?? ""}`}
         aria-pressed={local.selected ? "true" : "false"}
         disabled={local.disabled}
+        title={local.title}
         onClick={() => local.onToggle?.()}
       >
         {body}

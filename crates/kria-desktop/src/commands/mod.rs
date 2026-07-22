@@ -16,6 +16,7 @@ pub(crate) mod constants;
 pub(crate) mod device_enrollment;
 pub(crate) mod device_tools;
 pub(crate) mod document_chat;
+pub(crate) mod feature_controls;
 pub(crate) mod google_workspace;
 pub(crate) mod gui_automation_control;
 pub(crate) mod gui_cognition;
@@ -77,9 +78,8 @@ pub use app_commands::{
     approve_action, cancel_continuation, cancel_executive_task, cancel_interaction_decision,
     cancel_interaction_execution, cancel_request, cancel_turn, check_continuation_after_decision,
     continue_after_decision_execution, deny_action, execute_resolved_interaction_decision,
-    get_executive_snapshot,
-    get_alerts, get_hardware_info, get_health, get_runtime_diagnostics, get_settings,
-    list_audio_devices, list_interaction_decisions, list_knowledge_base, list_models,
+    get_alerts, get_executive_snapshot, get_hardware_info, get_health, get_runtime_diagnostics,
+    get_settings, list_audio_devices, list_interaction_decisions, list_knowledge_base, list_models,
     replay_interaction_decisions, resolve_interaction_decision, resume_interaction_decision,
     submit_turn_feedback, update_settings,
 };

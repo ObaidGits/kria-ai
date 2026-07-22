@@ -1,61 +1,111 @@
 {
   "color": {
     "neutral": {
-      "0": { "value": "#0c1216" },
-      "1": { "value": "#0f1417" },
-      "2": { "value": "#172027" },
-      "3": { "value": "#24323c" },
-      "4": { "value": "#2f3f4b" },
-      "5": { "value": "#7b919f" }
+      "0": { "value": "#04070f" },
+      "1": { "value": "#070d1c" },
+      "2": { "value": "#0e1830" },
+      "3": { "value": "#182a52" },
+      "4": { "value": "#243a6e" },
+      "5": { "value": "#5d6f9c" }
     },
     "surface": {
       "1": { "value": "rgba(255, 255, 255, 0.02)" },
       "2": { "value": "rgba(255, 255, 255, 0.06)" },
-      "3": { "value": "rgba(9, 15, 20, 0.72)" },
-      "4": { "value": "#101920" }
+      "3": { "value": "rgba(12, 21, 46, 0.62)" },
+      "4": { "value": "#121e3c" }
     },
     "accent": {
-      "default": { "value": "#18a57a" },
-      "hover": { "value": "#23bf8f" },
-      "soft": { "value": "rgba(24, 165, 122, 0.20)" },
-      "border": { "value": "rgba(24, 165, 122, 0.50)" },
-      "contrast": { "value": "#0c1216" }
+      "default": { "value": "#35e3ff" },
+      "hover": { "value": "#6bebff" },
+      "soft": { "value": "rgba(53, 227, 255, 0.20)" },
+      "border": { "value": "rgba(53, 227, 255, 0.50)" },
+      "contrast": { "value": "#04070f" },
+      "secondary": { "value": "#9a7bff", "comment": "HUD secondary accent (neon violet). Matches the homepage --cc-violet; used for secondary highlights (e.g. sidebar active gradient) so every surface shares the homepage's cyan+violet identity." },
+      "text": {
+        "value": "#6be7ff",
+        "comment": "Text-safe accent (HUD cyan). Reserved for accent-colored caption/authorship text; the bright cyan on the deep-navy surfaces composites well above WCAG AA. accent-default stays for fills/borders/focus/Core."
+      }
     },
     "text": {
-      "primary": { "value": "#f4f8fb" },
-      "secondary": { "value": "#b2c3cf" },
-      "muted": { "value": "#7b919f" },
-      "inverse": { "value": "#0c1216" }
+      "primary": { "value": "#eaf0ff" },
+      "secondary": { "value": "#9db0da" },
+      "muted": { "value": "#5d6f9c" },
+      "inverse": { "value": "#04070f" }
     },
     "border": {
-      "default": { "value": "rgba(149, 180, 199, 0.20)" },
-      "strong": { "value": "rgba(24, 165, 122, 0.80)" }
+      "default": { "value": "rgba(120, 160, 240, 0.14)" },
+      "strong": { "value": "rgba(130, 180, 255, 0.42)" }
     },
     "success": {
-      "soft": { "value": "rgba(59, 201, 117, 0.18)" },
-      "solid": { "value": "#3bc975" },
-      "text": { "value": "#9be7b3" }
+      "soft": { "value": "rgba(67, 224, 160, 0.18)" },
+      "solid": { "value": "#43e0a0" },
+      "text": { "value": "#b6f5d5" }
     },
     "warning": {
-      "soft": { "value": "rgba(243, 181, 74, 0.18)" },
-      "solid": { "value": "#f3b54a" },
-      "text": { "value": "#ffd59f" }
+      "soft": { "value": "rgba(245, 180, 81, 0.18)" },
+      "solid": { "value": "#f5b451" },
+      "text": { "value": "#ffdca6" }
     },
     "danger": {
-      "soft": { "value": "rgba(248, 109, 109, 0.20)" },
-      "solid": { "value": "#f86d6d" },
-      "text": { "value": "#ffd8d8" }
+      "soft": { "value": "rgba(255, 107, 127, 0.20)" },
+      "solid": { "value": "#ff6b7f" },
+      "text": { "value": "#ffd5dc" }
     },
     "info": {
-      "soft": { "value": "rgba(53, 133, 255, 0.18)" },
-      "solid": { "value": "#3585ff" },
-      "text": { "value": "#bcd4ff" }
+      "soft": { "value": "rgba(59, 130, 255, 0.18)" },
+      "solid": { "value": "#3b82ff" },
+      "text": { "value": "#c3d9ff" }
     },
     "risk": {
-      "green": { "value": "#3bc975" },
-      "yellow": { "value": "#f3b54a" },
-      "red": { "value": "#f86d6d" },
-      "black": { "value": "#0b0f12" }
+      "green": { "value": "#43e0a0" },
+      "yellow": { "value": "#f5b451" },
+      "red": { "value": "#ff6b7f" },
+      "black": { "value": "#04070f" }
     }
+  },
+  "core": {
+    "x": { "value": "0.5", "comment": "Shared-light default (design §3.2/§12.1): normalized Core X. Runtime-updated <=1/frame by the Core render tick; this is the SSR/first-paint default." },
+    "y": { "value": "0.42", "comment": "Shared-light default (design §3.2/§12.1): normalized Core Y (off-center light pool)." },
+    "intensity": { "value": "0.8", "comment": "Shared-light default (design §3.2/§12.1): 0..1 Core luminance (breath + state)." },
+    "hue": { "value": "{color.accent.default}", "comment": "Shared-light default (design §3.2/§12.1): Core temperature within the accent family. Runtime-updated per state via the presence-* hue tokens; default resolves to the theme accent for first paint." },
+    "lean": { "value": "0", "comment": "Shared-light default (design §3.2/§12.1): signed lean toward the Composer/arrival." },
+    "depth": { "value": "0", "comment": "Shared-light signal (design §4.1, Req 2.6): signed Core depth — positive glides the Core forward (blocked/needs-you), negative recedes it (working/turn-active). Runtime-updated per state by the Core render tick; 0 at rest." }
+  },
+  "room": {
+    "gradient": {
+      "center": { "value": "{color.neutral.2}", "comment": "Environmental (design §3.1/§12.1): Room radial center." },
+      "edge": { "value": "{color.neutral.0}", "comment": "Environmental (design §3.1/§12.1): Room radial edge falling to near-black." }
+    },
+    "undertone": { "value": "transparent", "comment": "Environmental (design §3.3/§12.1): interpolated time-of-day mood overlay. Default is no shift (transparent); runtime interpolates <=6% toward info (morning) / warning (night). Disabled under steady-lighting." }
+  },
+  "reading": {
+    "backing": { "value": "rgba(9, 15, 32, 0.96)", "comment": "Reading Mode (design §11, Req 11.2): near-solid reading-column backing (deep navy) so body/caption text meets WCAG AA (>=4.5) over the receded Room." },
+    "dim": { "value": "rgba(3, 6, 16, 0.82)", "comment": "Reading Mode (design §11, Req 11.2): hard-dim scrim over the receded Room so the atmosphere recedes behind text." }
+  },
+  "glass": {
+    "fill": {
+      "rest": { "value": "{color.surface.1}", "comment": "Glass/material (design §12.1): resting living-glass fill." },
+      "active": { "value": "{color.surface.2}", "comment": "Glass/material (design §12.1): active/hover living-glass fill." }
+    },
+    "blur": { "value": "{blur.floating}", "comment": "Glass/material (design §12.1): living-glass backdrop blur (single-layer; no stacked blurs per Req 17.2)." },
+    "border": { "value": "{color.border.default}", "comment": "Glass/material (design §12.1): living-glass hairline border." }
+  },
+  "presence": {
+    "idle": { "value": "{color.accent.default}", "comment": "Presence-state hue (design §4.1/§12.1): idle/waiting-relaxed -> accent-default." },
+    "listening": { "value": "{color.accent.hover}", "comment": "Presence-state hue (design §4.1): listening/attention -> accent-hover." },
+    "thinking": { "value": "{color.info.solid}", "comment": "Presence-state hue (design §4.1): thinking -> cool accent/info." },
+    "planning": { "value": "{color.info.solid}", "comment": "Presence-state hue (design §4.1): planning -> accent+info (cool)." },
+    "speaking": { "value": "{color.accent.hover}", "comment": "Presence-state hue (design §4.1): speaking -> warm accent-hover." },
+    "responding": { "value": "{color.accent.hover}", "comment": "Presence-state hue (design §4.1): responding -> warm accent-hover." },
+    "acting": { "value": "{color.accent.default}", "comment": "Presence-state hue (design §4.1): working/acting -> accent." },
+    "running-automation": { "value": "{color.accent.default}", "comment": "Presence-state hue (design §4.1): running-automation -> accent." },
+    "watching": { "value": "{color.info.solid}", "comment": "Presence-state hue (design §4.1): watching/protecting -> info/accent." },
+    "remembering": { "value": "{color.accent.default}", "comment": "Presence-state hue (design §4.1): remembering/learning gather -> accent." },
+    "reflecting": { "value": "{color.info.solid}", "comment": "Presence-state hue (design §4.1): reflecting -> cool info." },
+    "learning": { "value": "{color.accent.default}", "comment": "Presence-state hue (design §4.1): learning -> accent." },
+    "waiting": { "value": "{color.warning.solid}", "comment": "Presence-state hue (design §4.1, Req 2.6/10.3): waiting/needs-you -> attention warning." },
+    "blocked": { "value": "{color.warning.solid}", "comment": "Presence-state hue (design §4.1, Req 2.6/10.3): blocked/needs-approval -> attention warning." },
+    "error": { "value": "{color.danger.solid}", "comment": "Presence-state hue (design §4.1): error -> calm danger." },
+    "recovering": { "value": "{color.danger.solid}", "comment": "Presence-state hue (design §4.1): recovering -> cooling from danger." }
   }
 }

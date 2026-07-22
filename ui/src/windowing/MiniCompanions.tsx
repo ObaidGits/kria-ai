@@ -41,9 +41,13 @@ function CompanionActions() {
           Approvals ({approvalStore.pendingCount()})
         </Button>
       </Show>
+      {/* Mini companion Stop — same response/turn scope as the Composer and the
+          Immersive shell Stop (invokes stopTurn). Its accessible name states
+          that honest scope, not a generic "Stop" (UIE-M-015). */}
       <Button
         size="sm"
         variant="danger"
+        aria-label="Stop response"
         disabled={!coreStore.isActive()}
         onClick={() => void converseStore.stopTurn()}
       >

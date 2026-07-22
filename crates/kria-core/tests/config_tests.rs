@@ -28,9 +28,13 @@ fn default_config_has_expected_values() {
     assert_eq!(cfg.voice.mode, "push_to_talk");
     assert_eq!(cfg.voice.stt_model, "ggml-base.en.bin");
 
+    assert!(cfg.memory.enabled);
     assert_eq!(cfg.memory.max_context_turns, 20);
     assert_eq!(cfg.memory.max_facts, 1000);
     assert_eq!(cfg.memory.embedding_dim, 384);
+    assert!(cfg.mcp.enabled);
+    assert!(cfg.mcp.servers.is_empty());
+    assert!(cfg.gui_cognition.enabled);
 
     assert_eq!(cfg.safety.hitl_timeout_secs, 30);
     assert!(!cfg.safety.emergency_mode);
@@ -41,6 +45,15 @@ fn default_config_has_expected_values() {
 
     assert_eq!(cfg.ui.theme, "dark");
     assert_eq!(cfg.ui.window_width, 1200);
+}
+
+#[test]
+fn hot_feature_controls_default_on_for_legacy_config() {
+    let cfg: KriaConfig = toml::from_str("").unwrap();
+    assert!(cfg.mcp.enabled);
+    assert!(cfg.mcp.servers.is_empty());
+    assert!(cfg.memory.enabled);
+    assert!(cfg.gui_cognition.enabled);
 }
 
 // ── Loading from TOML ───────────────────────────────────────────────
@@ -110,6 +123,46 @@ cloud_api_key = "sk-test-key"
     assert_eq!(cfg.llm.routing_mode, "gemini");
     assert_eq!(cfg.llm.cloud_api_key, "sk-test-key");
     assert_eq!(cfg.llm.active_model, "override-model");
+}
+
+#[test]
+fn hot_feature_control_overrides_preserve_explicit_boolean_values() {
+    let mut base_f = NamedTempFile::new().unwrap();
+    writeln!(
+        base_f,
+        r#"
+[mcp]
+enabled = false
+
+[memory]
+enabled = true
+
+[gui_cognition]
+enabled = false
+"#
+    )
+    .unwrap();
+
+    let mut override_f = NamedTempFile::new().unwrap();
+    writeln!(
+        override_f,
+        r#"
+[mcp]
+enabled = true
+
+[memory]
+enabled = false
+
+[gui_cognition]
+enabled = true
+"#
+    )
+    .unwrap();
+
+    let cfg = load_config(base_f.path(), Some(override_f.path())).unwrap();
+    assert!(cfg.mcp.enabled);
+    assert!(!cfg.memory.enabled);
+    assert!(cfg.gui_cognition.enabled);
 }
 
 // ── Env-var overrides ───────────────────────────────────────────────

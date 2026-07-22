@@ -7,8 +7,9 @@
  * the existing voice-stop path (never a tool/orchestration call). The default
  * stop mocks the bridge so no Tauri runtime is required.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@solidjs/testing-library";
+import voiceSurfaceCss from "./VoiceSurface.css?raw";
 
 // Mock the optional bridge invoke so the default Stop can be asserted without a
 // Tauri runtime. Hoisted by Vitest before the component import below.
@@ -22,7 +23,24 @@ vi.mock("../../bridge/invoke", async (importOriginal) => {
 });
 
 import { VoiceSurface, voicePhaseToCoreState } from "./VoiceSurface";
-import { voiceStore } from "../../stores";
+import { voiceStore, approvalStore } from "../../stores";
+import { initOverlayInertness } from "../overlayLayers";
+import type { ApprovalRequest } from "../../stores/approvalStore";
+
+function makeRequest(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest {
+  return {
+    id: "req-1",
+    type: "tool-hitl",
+    title: "Send the drafted email",
+    description: "why",
+    risk: "yellow",
+    effects: ["Sends 1 email"],
+    payload: {},
+    createdAt: Date.now(),
+    status: "pending",
+    ...overrides,
+  };
+}
 
 function resetVoice(): void {
   voiceStore.deactivate(); // → inactive, idle, transcripts cleared
@@ -174,5 +192,136 @@ describe("VoiceSurface — barge-in is always honored (Req 12.5)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Interrupt (barge-in)" }));
     expect(onInterrupt).toHaveBeenCalledTimes(1);
     expect(bridgeInvokeOptional).not.toHaveBeenCalled();
+  });
+});
+
+describe("VoiceSurface — no focus theft (task 8.7, §20.3 Focus_Return_Owner, Req 12.5)", () => {
+  afterEach(() => {
+    document.querySelectorAll("[data-test-external]").forEach((n) => n.remove());
+  });
+
+  it("does not move focus away from a pre-focused element when voice activates", () => {
+    const input = document.createElement("input");
+    input.setAttribute("data-test-external", "");
+    document.body.appendChild(input);
+    input.focus();
+    expect(document.activeElement).toBe(input);
+
+    voiceStore.activate();
+    render(() => <VoiceSurface />);
+
+    // Surface mounted (Portal → document), but focus stays put — no auto-seize.
+    expect(document.querySelector(".kria-voice")).toBeInTheDocument();
+    expect(document.activeElement).toBe(input);
+  });
+});
+
+describe("VoiceSurface — Escape is internal + non-modal (task 8.7, Req 12.1/12.5)", () => {
+  afterEach(() => {
+    document.querySelectorAll("[data-test-external]").forEach((n) => n.remove());
+  });
+
+  it("dismisses (Stop) when Escape fires with focus INSIDE the surface, without preventDefault", () => {
+    const onStop = vi.fn();
+    voiceStore.activate();
+    render(() => <VoiceSurface onStop={onStop} />);
+
+    const stopBtn = screen.getByRole("button", { name: "Stop voice" });
+    stopBtn.focus();
+
+    const event = new KeyboardEvent("keydown", {
+      key: "Escape",
+      bubbles: true,
+      cancelable: true,
+    });
+    stopBtn.dispatchEvent(event);
+
+    // Surface dismiss fired…
+    expect(onStop).toHaveBeenCalledTimes(1);
+    // …but it did NOT preventDefault (one-layer; global Escape unaffected).
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("does NOT dismiss when Escape fires with focus OUTSIDE the surface", () => {
+    const onStop = vi.fn();
+    const outside = document.createElement("input");
+    outside.setAttribute("data-test-external", "");
+    document.body.appendChild(outside);
+
+    voiceStore.activate();
+    render(() => <VoiceSurface onStop={onStop} />);
+
+    outside.focus();
+    outside.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+    );
+
+    expect(onStop).not.toHaveBeenCalled();
+  });
+});
+
+describe("VoiceSurface — scoped Stop + barge-in always reachable across phases (task 8.7, Req 12.5)", () => {
+  const PHASES = ["idle", "listening", "speaking", "error"] as const;
+  for (const p of PHASES) {
+    it(`keeps Stop and Interrupt present + enabled in phase "${p}"`, () => {
+      voiceStore.activate();
+      voiceStore.setState(p);
+      render(() => <VoiceSurface />);
+
+      const stopBtn = screen.getByRole("button", { name: "Stop voice" });
+      const interruptBtn = screen.getByRole("button", { name: "Interrupt (barge-in)" });
+      expect(stopBtn).toBeInTheDocument();
+      expect(stopBtn).not.toBeDisabled();
+      expect(interruptBtn).toBeInTheDocument();
+      expect(interruptBtn).not.toBeDisabled();
+    });
+  }
+});
+
+describe("VoiceSurface — yields to a blocking approval (task 8.7, §20.3, Req 11.3/11.13)", () => {
+  let disposeInertness: (() => void) | undefined;
+
+  afterEach(() => {
+    disposeInertness?.();
+    disposeInertness = undefined;
+    approvalStore.setQueue([]);
+  });
+
+  it("is inert + aria-hidden while an approval is pending (outranked, not covering)", () => {
+    approvalStore.setQueue([]);
+    voiceStore.activate();
+    render(() => <VoiceSurface />);
+    disposeInertness = initOverlayInertness();
+
+    const surface = document.querySelector<HTMLElement>(".kria-voice")!;
+    // No blocking layer yet → interactive.
+    expect(surface.hasAttribute("inert")).toBe(false);
+
+    // A blocking approval outranks the floating voice surface.
+    approvalStore.setQueue([makeRequest()]);
+    expect(surface.hasAttribute("inert")).toBe(true);
+    expect(surface.getAttribute("aria-hidden")).toBe("true");
+
+    // Clearing the queue restores interactivity (never a permanent block).
+    approvalStore.setQueue([]);
+    expect(surface.hasAttribute("inert")).toBe(false);
+  });
+});
+
+describe("VoiceSurface.css — safe-area bounds + reserved bottom band (task 8.7, Req 11.3/11.4)", () => {
+  const css = voiceSurfaceCss;
+
+  it("uses env(safe-area-inset* so the pill never sits under OS chrome", () => {
+    expect(css).toContain("env(safe-area-inset-bottom");
+    expect(css).toContain("env(safe-area-inset-left");
+    expect(css).toContain("env(safe-area-inset-right");
+  });
+
+  it("lifts off the raw bottom edge via a reserved bottom band (clears the Composer)", () => {
+    expect(css).toContain("--kria-voice-reserved-bottom");
+    // The bottom offset composes the reserved band + the safe-area inset — it is
+    // NOT the raw `bottom: var(--space-5)` that collided with the Composer.
+    expect(css).toMatch(/bottom:\s*calc\(var\(--kria-voice-reserved-bottom\)/);
+    expect(css).not.toMatch(/bottom:\s*var\(--space-5\);/);
   });
 });

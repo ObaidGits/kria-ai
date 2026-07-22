@@ -54,7 +54,7 @@ export function Popover(props: PopoverProps) {
       <KPopover.Portal>
         <KPopover.Content class="kit-floating kit-popover">
           <KPopover.CloseButton class="kit-popover__close kit-focusable" aria-label="Close">
-            <Icon name="x" size={16} />
+            <Icon name="x" size="body" />
           </KPopover.CloseButton>
           <Show when={local.title}>
             <KPopover.Title class="kit-popover__title">{local.title}</KPopover.Title>

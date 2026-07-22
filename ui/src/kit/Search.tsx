@@ -51,7 +51,7 @@ export function Search(props: SearchProps) {
       </TextField.Label>
       <div class="kit-search">
         <span class="kit-search__icon">
-          <Icon name="search" size={16} />
+          <Icon name="search" size="body" />
         </span>
         <TextField.Input
           class="kit-field__control"

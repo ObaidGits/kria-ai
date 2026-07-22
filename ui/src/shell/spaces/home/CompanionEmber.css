@@ -1,0 +1,84 @@
+/**
+ * CompanionEmber styles — the floating cross-application ember (design §8/§9,
+ * Req 15.1–15.5). Token-only (Req 16.2: zero raw color). The ember is a small,
+ * edge-anchored, always-present glow that reuses the cheap 2D `CorePresence`
+ * glyph; it brightens ONLY for meaningful needs (`data-brightened="true"`).
+ *
+ * Motion is confined to opacity/transform and honors reduced-motion (Req 17.4):
+ * the brighten transition is removed under the global kill-switch / OS
+ * preference, and CorePresence freezes its own breath independently.
+ */
+
+.kria-companion-ember {
+  position: fixed;
+  z-index: var(--z-floating);
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-radius: var(--radius-full);
+
+  /* Living-glass backing — single-layer blur (no stacked blurs, Req 17.2). */
+  background: var(--glass-fill-rest);
+  border: 1px solid var(--glass-border);
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
+
+  /* Rests dim; a meaningful need lifts opacity + a soft accent halo. */
+  opacity: 0.72;
+  transition:
+    opacity var(--motion-duration-recede) var(--motion-easing-presence),
+    box-shadow var(--motion-duration-recede) var(--motion-easing-presence),
+    background var(--motion-duration-base) var(--motion-easing-standard);
+}
+
+/* Brighten ONLY for meaningful needs (Req 15.2): fuller opacity + accent halo
+ * (the halo hue tracks the Core state via the shared `--core-hue`). */
+.kria-companion-ember[data-brightened="true"] {
+  opacity: 1;
+  background: var(--glass-fill-active);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--core-hue) 45%, transparent),
+    0 0 16px 2px color-mix(in oklab, var(--core-hue) 30%, transparent);
+}
+
+/* The ember glyph wrapper — the CorePresence carries its own visuals. */
+.kria-companion-ember__glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Controls: compact, keyboard-focusable buttons beneath the glyph. Hidden from
+ * pointer clutter but always present in the DOM for keyboard/AT (Req 15.4). */
+.kria-companion-ember__controls {
+  display: inline-flex;
+  gap: var(--space-1);
+}
+
+/* Visually-hidden AT live region (Req 15.4) — announced, not shown. */
+.kria-companion-ember__live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ── Reduced motion (Req 17.4) ─────────────────────────────────────────────
+ * Remove the brighten transition so the state snaps rather than animates; the
+ * meaning is still carried by opacity/halo + the live-region text. */
+@media (prefers-reduced-motion: reduce) {
+  .kria-companion-ember {
+    transition: none;
+  }
+}
+
+:root[data-reduced-motion="on"] .kria-companion-ember {
+  transition: none;
+}

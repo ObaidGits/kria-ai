@@ -3,12 +3,28 @@
     "duration": {
       "fast": { "value": "120ms" },
       "base": { "value": "200ms" },
-      "slow": { "value": "400ms" }
+      "slow": { "value": "400ms" },
+      "breath": {
+        "value": "5000ms",
+        "comment": "Homepage presence redesign (design §11.6/§12.1): slow Core breath cycle (~5s). Only the Core is permitted ambient motion (Req 17)."
+      },
+      "recede": {
+        "value": "600ms",
+        "comment": "Homepage presence redesign (design §11.6/§12.1): depth-recession into Reading Mode and Core float-forward on return (~600ms)."
+      }
     },
     "easing": {
       "standard": { "value": "cubic-bezier(0.2, 0, 0, 1)" },
       "entrance": { "value": "cubic-bezier(0, 0, 0, 1)" },
-      "exit": { "value": "cubic-bezier(0.3, 0, 1, 1)" }
+      "exit": { "value": "cubic-bezier(0.3, 0, 1, 1)" },
+      "breath": {
+        "value": "cubic-bezier(0.37, 0, 0.63, 1)",
+        "comment": "Homepage presence redesign (design §11.6/§12.1): soft symmetric ease-in-out for the Core breath loop."
+      },
+      "presence": {
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "comment": "Homepage presence redesign (design §11.6/§12.1): long, calm entrance curve for bloom/recede continuity."
+      }
     }
   }
 }

@@ -371,6 +371,16 @@ impl ModelRouter {
         }
     }
 
+    /// Detach the managed local runtime after shutdown or before replacement.
+    pub fn detach_server_manager(&self) {
+        if let Some(ref backend) = self.local_concrete {
+            backend.detach_server_manager();
+        }
+        if let Some(ref backend) = self.vision_local_concrete {
+            backend.detach_server_manager();
+        }
+    }
+
     /// Returns the currently attached orchestrator server manager, if local
     /// backends are orchestrator-managed.
     pub fn orchestrator_server_manager(&self) -> Option<Arc<LlamaServerManager>> {

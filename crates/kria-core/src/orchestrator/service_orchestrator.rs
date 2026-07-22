@@ -838,6 +838,15 @@ impl ServiceOrchestrator {
         tracing::info!(target: "orchestrator", enabled, "user toggled automation");
 
         {
+            let state = self.state.read().await;
+            let already_applied = state.automation_enabled == enabled
+                && (!enabled || (state.vision_child.is_some() && state.uinput_child.is_some()));
+            if already_applied {
+                return Ok(());
+            }
+        }
+
+        {
             let mut state = self.state.write().await;
             state.automation_enabled = enabled;
         }

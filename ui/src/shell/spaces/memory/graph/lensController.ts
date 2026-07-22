@@ -1,8 +1,9 @@
 /**
- * lensController — render lifecycle for the 3D Knowledge Graph lens
- * (task 6.4, Req 5.4 / 16.3).
+ * lensController — dormant Phase 7 candidate lifecycle helper.
  *
- * Enforces the §5.4 render-governance HARD RULES as a small, GL-free state
+ * No shipped Memory Graph route constructs this controller. A future MGR-030
+ * integration may use it to enforce bounded rendering; helper tests alone do
+ * not prove renderer integration.
  * machine so the lifecycle is unit-testable without WebGL:
  *   • Freeze to a STILL FRAME when idle/unfocused; resume the render loop ONLY
  *     during interaction or while the layout is still streaming.

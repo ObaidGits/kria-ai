@@ -19,6 +19,10 @@ vi.mock("../bridge/invoke", () => ({
 import { converseStore } from "./converseStore";
 import { eventBus } from "./eventBus";
 import { bridgeInvoke, bridgeInvokeOptional } from "../bridge/invoke";
+import {
+  cancellationAnnouncement,
+  resetCancellationAnnouncerForTest,
+} from "./cancellationAnnouncer";
 
 const mockInvoke = bridgeInvoke as unknown as ReturnType<typeof vi.fn>;
 const mockInvokeOptional = bridgeInvokeOptional as unknown as ReturnType<typeof vi.fn>;
@@ -49,14 +53,20 @@ describe("converseStore.sendMessage — routes through the existing pipeline (Re
     await converseStore.sendMessage();
 
     expect(mockInvoke).toHaveBeenCalledTimes(1);
-    expect(mockInvoke).toHaveBeenCalledWith("send_message", { message: "hello there" });
+    expect(mockInvoke).toHaveBeenCalledWith("send_message", {
+      message: "hello there",
+      sessionId: "",
+    });
   });
 
   it("Lab mode sends via the existing send_lab_message command (tool-locked)", async () => {
     converseStore.updateDraft({ text: "run analysis", mode: "lab" });
     await converseStore.sendMessage();
 
-    expect(mockInvoke).toHaveBeenCalledWith("send_lab_message", { message: "run analysis" });
+    expect(mockInvoke).toHaveBeenCalledWith("send_lab_message", {
+      message: "run analysis",
+      sessionId: "",
+    });
   });
 
   it("appends an optimistic user turn and clears the draft on send", async () => {
@@ -92,7 +102,10 @@ describe("converseStore.submitIntent — Mini uses authoritative pipeline (Req 1
 
     await expect(converseStore.submitIntent("  bounded mini intent  ")).resolves.toBe(true);
 
-    expect(mockInvoke).toHaveBeenCalledWith("send_message", { message: "bounded mini intent" });
+    expect(mockInvoke).toHaveBeenCalledWith("send_message", {
+      message: "bounded mini intent",
+      sessionId: "",
+    });
     expect(converseStore.composerDraft()).toMatchObject({ text: "keep this draft", mode: "lab" });
   });
 
@@ -107,6 +120,47 @@ describe("converseStore.stopTurn — reuses the existing cancellation (Req 4.4)"
     converseStore.setActiveThread("thread-9");
     await converseStore.stopTurn();
     expect(mockInvokeOptional).toHaveBeenCalledWith("cancel_turn", { sessionId: "thread-9" });
+  });
+});
+
+/**
+ * Scoped-Stop milestone announcements (Req 12.12; UIE-M-015 / §17.5). Each
+ * existing cancellation handler announces its SEMANTIC scope milestone once to
+ * the polite region — proving the Stop scope is named truthfully and that the
+ * announcement is a milestone, not a raw tick, while the handler itself still
+ * invokes only the existing matching cancellation command.
+ */
+describe("converseStore scoped Stop — announces the scope milestone once (UIE-M-015)", () => {
+  const flush = () => Promise.resolve();
+
+  beforeEach(() => resetCancellationAnnouncerForTest());
+
+  it("stopTurn announces 'Response stopped'", async () => {
+    converseStore.setActiveThread("thread-9");
+    await converseStore.stopTurn();
+    await flush();
+    expect(cancellationAnnouncement()).toBe("Response stopped");
+  });
+
+  it("cancelGuiCognitionTurn announces 'GUI cognition stopped'", async () => {
+    converseStore.setActiveThread("thread-gui");
+    await converseStore.cancelGuiCognitionTurn();
+    await flush();
+    expect(cancellationAnnouncement()).toBe("GUI cognition stopped");
+  });
+
+  it("cancelWorkBlock announces the scope-named work item milestone once", async () => {
+    converseStore.clearWorkBlocks();
+    converseStore.addWorkBlock({
+      id: "wb-1",
+      type: "tool-call",
+      status: "running",
+      summary: "Running a tool",
+      startedAt: 1,
+    });
+    converseStore.cancelWorkBlock("wb-1");
+    await flush();
+    expect(cancellationAnnouncement()).toBe("Tool call stopped");
   });
 });
 
@@ -165,7 +219,10 @@ describe("converseStore per-message actions — authoritative backend commands",
 
     await expect(converseStore.retryMessage("assistant-1")).resolves.toBe(true);
 
-    expect(mockInvoke).toHaveBeenCalledWith("send_message", { message: "original question" });
+    expect(mockInvoke).toHaveBeenCalledWith("send_message", {
+      message: "original question",
+      sessionId: "thread-actions",
+    });
   });
 
   it("requests explanation through the assistant pipeline", async () => {
@@ -175,6 +232,7 @@ describe("converseStore per-message actions — authoritative backend commands",
 
     expect(mockInvoke).toHaveBeenCalledWith("send_message", {
       message: "Explain this response, including assumptions and evidence:\n\noriginal answer",
+      sessionId: "thread-actions",
     });
   });
 
@@ -406,7 +464,10 @@ describe("converseStore attachments — real backend payloads", () => {
       files: [{ name: "report.txt", mime: "text/plain", bytes: [97, 98, 99] }],
       text: "Summarize this",
     }, { timeoutMs: 120_000 });
-    expect(mockInvoke).toHaveBeenNthCalledWith(2, "send_message", { message: "indexed prompt" });
+    expect(mockInvoke).toHaveBeenNthCalledWith(2, "send_message", {
+      message: "indexed prompt",
+      sessionId: "thread-doc",
+    });
     expect(converseStore.composerDraft().attachments).toEqual([]);
   });
 
@@ -480,5 +541,349 @@ describe("converseStore attachments — real backend payloads", () => {
     expect(mockInvoke).not.toHaveBeenCalled();
     expect(converseStore.composerDraft().attachments).toHaveLength(2);
     expect(notifications).toContain("Send documents together, or one image/audio file per message");
+  });
+});
+
+
+const activeThread = (id: string, updatedAt = 1) => ({
+  id,
+  title: id,
+  createdAt: 1,
+  updatedAt,
+  pinned: false,
+  archived: false,
+  temporary: false,
+});
+
+describe("converseStore — Intentional New Thread intent + empty-state class (Req 6.1, UIE-H-005)", () => {
+  function mockCreateFlow(newId: string, existing: Array<{ id: string; title?: string }> = []): void {
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === "create_session") return { ok: true, data: { session_id: newId } };
+      if (command === "list_sessions") {
+        return {
+          ok: true,
+          data: [{ id: newId, title: newId }, ...existing],
+        };
+      }
+      if (command === "get_session_history") return { ok: true, data: [] };
+      return { ok: true, data: undefined };
+    });
+  }
+
+  it("createThread raises intent and classifies new-task even with unrelated history", async () => {
+    mockCreateFlow("new-1", [{ id: "old-1", title: "Old" }]);
+
+    const id = await converseStore.createThread();
+
+    expect(id).toBe("new-1");
+    expect(converseStore.newThreadIntentId()).toBe("new-1");
+    expect(converseStore.activeThreadId()).toBe("new-1");
+    // Unrelated history must NOT force continuation — explicit intent outranks it.
+    expect(converseStore.emptyStateClass()).toBe("intentional-new-thread");
+  });
+
+  it("boot auto-create (non-intentional) stays Cold Start on genuine first run", async () => {
+    mockCreateFlow("boot-1", []);
+
+    const id = await converseStore.createThread({ intentional: false });
+
+    expect(id).toBe("boot-1");
+    expect(converseStore.newThreadIntentId()).toBeNull();
+    expect(converseStore.emptyStateClass()).toBe("cold-start");
+  });
+
+  it("opening an existing empty thread with other history classifies as Continuation", () => {
+    converseStore.setThreads([activeThread("t-open", 2), activeThread("t-other", 1)]);
+    converseStore.setActiveThread("t-open");
+
+    expect(converseStore.newThreadIntentId()).toBeNull();
+    expect(converseStore.emptyStateClass()).toBe("continuation");
+  });
+
+  it("a thread with messages classifies as Active (content outranks history)", () => {
+    converseStore.setThreads([activeThread("t-msg"), activeThread("t-other")]);
+    converseStore.setActiveThread("t-msg");
+    converseStore.addMessage({
+      id: "m1",
+      threadId: "t-msg",
+      role: "user",
+      content: "hi",
+      timestamp: 1,
+    });
+
+    expect(converseStore.emptyStateClass()).toBe("active");
+  });
+
+  it("no usable history and no intent classifies as Cold Start", () => {
+    converseStore.setThreads([activeThread("solo")]);
+    converseStore.setActiveThread("solo");
+
+    expect(converseStore.emptyStateClass()).toBe("cold-start");
+  });
+
+  it("first message in the intent thread clears the intent → Active", async () => {
+    mockCreateFlow("new-2", []);
+    await converseStore.createThread();
+    expect(converseStore.newThreadIntentId()).toBe("new-2");
+
+    converseStore.addMessage({
+      id: "m1",
+      threadId: "new-2",
+      role: "user",
+      content: "start",
+      timestamp: 1,
+    });
+
+    expect(converseStore.newThreadIntentId()).toBeNull();
+    expect(converseStore.emptyStateClass()).toBe("active");
+  });
+
+  it("switching to a different existing thread clears intent and does not leak", async () => {
+    mockCreateFlow("new-3", [{ id: "old-3", title: "Old" }]);
+    await converseStore.createThread();
+    expect(converseStore.newThreadIntentId()).toBe("new-3");
+
+    converseStore.setActiveThread("old-3");
+
+    expect(converseStore.newThreadIntentId()).toBeNull();
+    // old-3 is empty with new-3 as usable history → Continuation, never
+    // intentional-new-thread from the stale intent.
+    expect(converseStore.emptyStateClass()).toBe("continuation");
+  });
+
+  it("switching back to the intent thread preserves the intent (create→activate path)", async () => {
+    mockCreateFlow("new-4", []);
+    await converseStore.createThread();
+    // Simulate activate keeping the same active thread; intent must persist.
+    expect(converseStore.newThreadIntentId()).toBe("new-4");
+    expect(converseStore.emptyStateClass()).toBe("intentional-new-thread");
+  });
+});
+
+
+/**
+ * Task 6.7 — scenario coverage for the empty-state classifier + intent plumbing
+ * at the STORE level (the layer that maps Thread → classifier inputs and owns
+ * the documented intent reset points).
+ *
+ * Each scenario maps to the correct empty-state class and/or behavior:
+ *   • history + new thread ....... createThread({intentional:true}) with prior
+ *                                  non-archived history → intentional-new-thread
+ *                                  (explicit intent outranks unrelated history,
+ *                                  UIE-H-005).
+ *   • archived-only history ...... only archived threads + empty active + no
+ *                                  intent → cold-start (archived ≠ usable
+ *                                  continuation, UIE-H-008).
+ *   • selected empty old thread .. activating an existing empty thread that is
+ *                                  NOT the intent thread clears intent
+ *                                  (setActiveThread reset point); → continuation
+ *                                  when other usable history remains, else
+ *                                  cold-start.
+ *   • failed create .............. create_session error → no intent, runtimeError
+ *                                  surfaced, classification does NOT become
+ *                                  intentional-new-thread.
+ *   • temporary thread ........... temporary flag never breaks classification; a
+ *                                  temporary NON-archived thread counts as usable
+ *                                  continuation, a temporary ARCHIVED thread does
+ *                                  not.
+ *   • repeated starter ........... staging is idempotent at the store contract
+ *                                  the starter path uses (component-level
+ *                                  Property 5 lives in ConverseEmptyState, 6.6).
+ *   • continuation ............... usable non-archived history + empty active +
+ *                                  no intent → continuation.
+ *   • active conversation ........ active thread with messages → active; the
+ *                                  first message in the intent thread clears
+ *                                  intent (addMessage reset point).
+ *
+ * Requirements: 6.1–6.6 · UIE-H-004/005/008 · UIE-L-002
+ */
+describe("converseStore — task 6.7 empty-state scenario coverage (Req 6.1–6.6)", () => {
+  const archivedThread = (id: string, updatedAt = 1) => ({
+    ...activeThread(id, updatedAt),
+    archived: true,
+  });
+  const temporaryThread = (id: string, updatedAt = 1) => ({
+    ...activeThread(id, updatedAt),
+    temporary: true,
+  });
+
+  function mockCreateFlow(
+    newId: string,
+    existing: Array<{ id: string; title?: string; archived?: boolean }> = [],
+  ): void {
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === "create_session") return { ok: true, data: { session_id: newId } };
+      if (command === "list_sessions") {
+        return { ok: true, data: [{ id: newId, title: newId }, ...existing] };
+      }
+      if (command === "get_session_history") return { ok: true, data: [] };
+      return { ok: true, data: undefined };
+    });
+  }
+
+  it("history + new thread: createThread({intentional:true}) with prior non-archived history → intentional-new-thread", async () => {
+    mockCreateFlow("nt-1", [
+      { id: "old-a", title: "Old A" },
+      { id: "old-b", title: "Old B" },
+    ]);
+
+    const id = await converseStore.createThread({ intentional: true });
+
+    expect(id).toBe("nt-1");
+    expect(converseStore.newThreadIntentId()).toBe("nt-1");
+    expect(converseStore.activeThreadId()).toBe("nt-1");
+    // Unrelated non-archived history is present …
+    expect(converseStore.threads().some((t) => t.id === "old-a" && !t.archived)).toBe(true);
+    // … but explicit intent outranks it (UIE-H-005).
+    expect(converseStore.emptyStateClass()).toBe("intentional-new-thread");
+  });
+
+  it("archived-only history: only archived threads + empty active + no intent → cold-start (UIE-H-008)", () => {
+    converseStore.setThreads([
+      activeThread("cur"),
+      archivedThread("arch-1"),
+      archivedThread("arch-2"),
+    ]);
+    converseStore.setActiveThread("cur");
+
+    expect(converseStore.newThreadIntentId()).toBeNull();
+    // Active thread excluded from history; the rest are archived → not usable.
+    expect(converseStore.emptyStateClass()).toBe("cold-start");
+  });
+
+  it("selected empty old thread (not intent thread) with other usable history → intent cleared, continuation", async () => {
+    mockCreateFlow("nt-2", [{ id: "old-c", title: "Old C" }]);
+    await converseStore.createThread({ intentional: true });
+    expect(converseStore.newThreadIntentId()).toBe("nt-2");
+
+    // Activate an existing empty thread that is NOT the intent thread.
+    converseStore.setActiveThread("old-c");
+
+    // setActiveThread reset point: switching to a non-intent thread clears intent.
+    expect(converseStore.newThreadIntentId()).toBeNull();
+    // nt-2 remains as usable non-archived history → continuation (no stale-intent leak).
+    expect(converseStore.emptyStateClass()).toBe("continuation");
+  });
+
+  it("selected empty old thread with NO other usable history → intent cleared, cold-start", async () => {
+    mockCreateFlow("was-intent", [{ id: "selected", title: "Selected" }]);
+    await converseStore.createThread({ intentional: true });
+    expect(converseStore.newThreadIntentId()).toBe("was-intent");
+
+    // Archive the intent thread so it stops being usable continuation material.
+    mockInvoke.mockResolvedValue({ ok: true, data: undefined });
+    await converseStore.setThreadArchived("was-intent", true);
+
+    // Select the other empty thread (not the intent thread) → intent clears.
+    converseStore.setActiveThread("selected");
+
+    expect(converseStore.newThreadIntentId()).toBeNull();
+    // active=selected (excluded), only other thread archived → no usable history.
+    expect(converseStore.emptyStateClass()).toBe("cold-start");
+  });
+
+  it("failed create: create_session error → no intent, runtimeError surfaced, not intentional-new-thread", async () => {
+    converseStore.setThreads([activeThread("existing")]);
+    converseStore.setActiveThread("existing");
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === "create_session") {
+        return { ok: false, code: "error", message: "session backend offline" };
+      }
+      return { ok: true, data: undefined };
+    });
+
+    const id = await converseStore.createThread({ intentional: true });
+
+    expect(id).toBeNull();
+    // No intent may be raised on a failed create …
+    expect(converseStore.newThreadIntentId()).toBeNull();
+    // … the failure is surfaced …
+    expect(converseStore.runtimeError()).toBe("session backend offline");
+    // … and classification must NOT falsely become a new-task state.
+    expect(converseStore.emptyStateClass()).not.toBe("intentional-new-thread");
+    expect(converseStore.emptyStateClass()).toBe("cold-start");
+  });
+
+  it("temporary thread: a temporary NON-archived thread counts as usable continuation history", () => {
+    converseStore.setThreads([activeThread("cur", 1), temporaryThread("temp-hist", 2)]);
+    converseStore.setActiveThread("cur");
+
+    expect(converseStore.threads().some((t) => t.id === "temp-hist" && t.temporary)).toBe(true);
+    // Temporary flag doesn't break classification; non-archived → usable.
+    expect(converseStore.emptyStateClass()).toBe("continuation");
+  });
+
+  it("temporary thread: a temporary AND archived thread is not usable continuation → cold-start", () => {
+    converseStore.setThreads([
+      activeThread("cur"),
+      { ...temporaryThread("temp-arch"), archived: true },
+    ]);
+    converseStore.setActiveThread("cur");
+
+    // Archived overrides temporary for usability → not resumable.
+    expect(converseStore.emptyStateClass()).toBe("cold-start");
+  });
+
+  it("temporary thread: an active temporary thread with messages classifies as active", () => {
+    converseStore.setThreads([temporaryThread("temp-active")]);
+    converseStore.setActiveThread("temp-active");
+    converseStore.addMessage({
+      id: "tm-1",
+      threadId: "temp-active",
+      role: "user",
+      content: "hi",
+      timestamp: 1,
+    });
+
+    // Content outranks everything, temporary or not.
+    expect(converseStore.emptyStateClass()).toBe("active");
+  });
+
+  it("repeated starter: staging is idempotent at the store contract (updateDraft replaces, never accumulates)", () => {
+    // The full component-level property (repeated selection stages only, never
+    // sends/invokes/approves/navigates) is proven in ConverseEmptyState Property
+    // 5 (task 6.6). This asserts the underlying store contract the starter path
+    // relies on: repeated staging of the same draft is idempotent.
+    converseStore.setActiveThread("t-stage");
+    const draft = "What can you help me with?";
+    converseStore.updateDraft({ text: draft });
+    converseStore.updateDraft({ text: draft });
+    converseStore.updateDraft({ text: draft });
+
+    expect(converseStore.composerDraft().text).toBe(draft);
+    expect(converseStore.composerDraft().attachments).toEqual([]);
+  });
+
+  it("continuation: usable non-archived history + empty active + no intent → continuation", () => {
+    // ≤3 resumptions is a presentation cap owned by ConverseEmptyState (task
+    // 6.4); the store's job is the classification decision.
+    converseStore.setThreads([
+      activeThread("a", 4),
+      activeThread("b", 3),
+      activeThread("c", 2),
+      activeThread("d", 1),
+    ]);
+    converseStore.setActiveThread("a");
+
+    expect(converseStore.newThreadIntentId()).toBeNull();
+    expect(converseStore.emptyStateClass()).toBe("continuation");
+  });
+
+  it("active conversation: first message in the intent thread clears intent → active (addMessage reset point)", async () => {
+    mockCreateFlow("nt-active", [{ id: "old-z", title: "Old Z" }]);
+    await converseStore.createThread({ intentional: true });
+    expect(converseStore.emptyStateClass()).toBe("intentional-new-thread");
+
+    converseStore.addMessage({
+      id: "am-1",
+      threadId: "nt-active",
+      role: "user",
+      content: "go",
+      timestamp: 1,
+    });
+
+    // addMessage reset point: first message promotes the intent thread to Active.
+    expect(converseStore.newThreadIntentId()).toBeNull();
+    expect(converseStore.emptyStateClass()).toBe("active");
   });
 });

@@ -1,0 +1,116 @@
+/**
+ * ContextualOrbit — partial, temporary capability-awareness light-points around
+ * the Core (design.md §6.4, Requirement 6).
+ *
+ * Token-only (Req 16.2 — zero raw color). The Orbit is body language, not a
+ * menu or a permanent ring: it overlays the Core box and places each LIT point
+ * around a shared circle via a single `--orbit-angle` custom property, so a
+ * partial set stays balanced and a complete ring is almost never painted.
+ *
+ * Motion is opacity/transform only (GPU-cheap, Req 17.2): points fade+drift in
+ * on engagement and fade out on disengage (`data-engaged`). Under reduced
+ * motion / the global kill-switch (`data-motion="static"`) the fade and drift
+ * are removed — the SAME points render as plain static labelled dots (Req 6.6).
+ * The emerald accent appears only on an actionable point's hover/focus (earn
+ * the accent — L4); resting points carry no accent fill. This file styles
+ * `.kria-orbit*` only — it never touches the Room base, so it stays clear of
+ * the accent-on-room-base guardrail.
+ */
+
+.kria-orbit {
+  /* Overlay the Core box without affecting layout. The parent
+     (`.kria-home__core`) is positioned, so the Orbit centers on the Core. */
+  position: absolute;
+  inset: 0;
+  display: block;
+  pointer-events: none; /* only the points themselves are interactive */
+  /* Radius of the point ring, relative to the Core box. */
+  --orbit-radius: calc(50% + var(--space-6));
+  opacity: 1;
+  transition: opacity var(--motion-duration-recede) var(--motion-easing-presence);
+}
+
+/* Fade in/out with engagement (Req 6.1). */
+.kria-orbit[data-engaged="false"] {
+  opacity: 0;
+}
+
+.kria-orbit__point {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-full);
+  background-color: var(--glass-fill-rest);
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
+  font-family: var(--font-family-text);
+  font-size: var(--font-size-caption);
+  line-height: 1.2;
+  color: var(--color-text-secondary);
+  pointer-events: auto;
+  /* Per-point placement angle; set inline by the component, defaulted here so
+     it is a declared local custom property (not a raw/undefined token). */
+  --orbit-angle: 0deg;
+  /* Place around the Core: rotate to the point's angle, translate out by the
+     radius, then counter-rotate so the label stays upright. Transform-only. */
+  transform: translate(-50%, -50%) rotate(var(--orbit-angle, 0deg))
+    translateY(calc(-1 * var(--orbit-radius))) rotate(calc(-1 * var(--orbit-angle, 0deg)));
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-easing-standard),
+    border-color var(--motion-duration-fast) var(--motion-easing-standard),
+    color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+button.kria-orbit__point {
+  appearance: none;
+  cursor: pointer;
+}
+
+.kria-orbit__icon {
+  flex: none;
+  color: var(--color-text-muted);
+}
+
+.kria-orbit__label {
+  white-space: nowrap;
+}
+
+/* Actionable points earn the accent on hover/focus only (L4). */
+button.kria-orbit__point:hover {
+  background-color: var(--glass-fill-active);
+  border-color: var(--color-accent-border);
+  color: var(--color-text-primary);
+}
+
+button.kria-orbit__point:hover .kria-orbit__icon {
+  color: var(--color-accent-text);
+}
+
+button.kria-orbit__point:focus-visible {
+  outline: 2px solid var(--color-accent-border);
+  outline-offset: var(--space-1);
+  color: var(--color-text-primary);
+}
+
+/* ── Reduced-motion / kill-switch (Req 6.6 / 17.4): static labelled dots.
+      Same points, labels, routing — no fade, no transition. ── */
+.kria-orbit[data-motion="static"] {
+  transition: none;
+}
+
+.kria-orbit[data-motion="static"] .kria-orbit__point {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kria-orbit,
+  .kria-orbit__point {
+    transition: none;
+  }
+}

@@ -352,6 +352,7 @@ struct ResolvedJob {
 
 /// Manages the full image generation pipeline.
 pub struct ImageOrchestrator {
+    enabled: AtomicBool,
     cfg: ImageGenerationConfig,
     sidecar: Arc<ComfySidecar>,
     cloud: Arc<CloudFallback>,
@@ -408,6 +409,14 @@ fn log_missing_style_lora_once(style: ImageStyle, lora_file: &str, lora_path: &P
 }
 
 impl ImageOrchestrator {
+    pub fn set_enabled(&self, enabled: bool) {
+        self.enabled.store(enabled, Ordering::Release);
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        self.enabled.load(Ordering::Acquire)
+    }
+
     /// Build an orchestrator from config with its own (unshared) GPU lease manager.
     ///
     /// `kria_data_dir` is the resolved `~/.kria/` directory. Prefer
@@ -463,8 +472,10 @@ impl ImageOrchestrator {
         let lora_strength = cfg.default_lora_strength;
 
         let cache_dir = kria_data_dir.join("cache");
+        let enabled = cfg.enabled;
 
         Arc::new(Self {
+            enabled: AtomicBool::new(enabled),
             cfg,
             sidecar,
             cloud,
@@ -638,7 +649,7 @@ impl ImageOrchestrator {
         emitter: Option<EventEmitter>,
         llm_evictor: Option<Arc<dyn crate::image::swap::LlmEvictionController>>,
     ) -> Result<ImageResult, ImageError> {
-        if !self.cfg.enabled {
+        if !self.is_enabled() {
             return Err(ImageError::Disabled);
         }
 
@@ -1932,7 +1943,7 @@ impl ImageBackend for ImageOrchestrator {
     }
 
     async fn health(&self) -> ImageBackendHealth {
-        if !self.cfg.enabled {
+        if !self.is_enabled() {
             return ImageBackendHealth::unhealthy("image generation disabled in config");
         }
 

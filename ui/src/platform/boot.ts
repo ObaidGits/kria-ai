@@ -22,6 +22,14 @@ import {
   type ReducedMotionController,
 } from "./motion";
 import { initRenderMode, setReducedMotion } from "./renderMode";
+import {
+  applyCoreGateResult,
+  initCoreRenderMode,
+  setCoreReducedMotion,
+  type CoreRenderDecision,
+} from "./coreRenderMode";
+import type { ProbeResult } from "./capabilities";
+import { runCoreGateProbe } from "../prototypes/gateProbes";
 
 /** Blur treatment applied to floating surfaces at boot. */
 export type BlurTreatment = "on" | "off";
@@ -52,6 +60,9 @@ function applyReducedMotion(reducedMotion: boolean, doc?: Document): void {
   if (!currentSnapshot) return;
   currentSnapshot = { ...currentSnapshot, prefersReducedMotion: reducedMotion };
   const state = setReducedMotion(reducedMotion);
+  // Keep the homepage Core gate in sync with the lens gate: reduced-motion
+  // forces the Core to its 2D/static path too (Req 17.4 / 20.3).
+  setCoreReducedMotion(reducedMotion);
   if (doc) {
     applyBootAttributes(doc, currentSnapshot);
     doc.documentElement.setAttribute("data-render-mode", state.mode);
@@ -61,6 +72,26 @@ function applyReducedMotion(reducedMotion: boolean, doc?: Document): void {
 /** Force all motion off; false returns control to the OS preference. */
 export function setGlobalReducedMotion(enabled: boolean): void {
   motionController?.setKillSwitch(enabled);
+}
+
+/**
+ * Run the on-device Core-3D gate probe (design §13.3) and feed the result into
+ * the render-mode resolver. This is the ONLY path that satisfies the resolver's
+ * "failed-gate" trigger for `auto`: the homepage Core stays on its permanent 2D
+ * path until a probe passes (Req 20.2 / 20.3). The probe returns `null` when
+ * WebGL is unavailable (WebKitGTK software-raster / jsdom) → the gate stays
+ * failed → 2D, an ACCEPTED outcome. `probeRunner` is injectable for tests.
+ */
+export async function runCoreGateAndApply(
+  probeRunner: () => Promise<ProbeResult | null> = runCoreGateProbe,
+): Promise<CoreRenderDecision> {
+  let probe: ProbeResult | null = null;
+  try {
+    probe = await probeRunner();
+  } catch {
+    probe = null; // any probe failure = failed gate = first-class 2D path
+  }
+  return applyCoreGateResult(probe);
 }
 
 /** Remove platform listeners. Intended for tests/window teardown. */
@@ -79,6 +110,18 @@ export function initPlatform(
   const caps = detectCapabilities();
   currentSnapshot = caps;
   initRenderMode(caps);
+  // Seed the homepage Core-3D gate/resolver from the same snapshot. 2D-first:
+  // the Core stays on its permanent 2D path until a Core-3D gate probe passes
+  // (design §13.3 / §13.4, Req 20.3). Task 7.x runs the probe + wires degrade.
+  initCoreRenderMode(caps);
+  // Kick off the async Core-3D gate probe only when it could plausibly pass
+  // (WebGL present + motion allowed). On pass the resolver flips `auto` to 3D;
+  // otherwise the Core stays on its permanent 2D path (Req 20.2 / 20.3). Fire-
+  // and-forget: the 2D Core renders immediately and the 3D Core (CoreShell3D)
+  // reactively upgrades if/when the gate passes — no reload.
+  if (caps.hasWebGL && !caps.prefersReducedMotion) {
+    void runCoreGateAndApply().catch(() => {});
+  }
   if (doc) applyBootAttributes(doc, caps);
   motionController = createReducedMotionController({
     document: doc,

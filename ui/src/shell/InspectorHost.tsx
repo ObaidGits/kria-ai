@@ -16,6 +16,10 @@
  *
  * Behaviour contract:
  *   • One-at-a-time: exactly one <aside> renders; a new target swaps its body.
+ *   • Target-removal: if a REGISTERED renderer resolves to `null` (its target
+ *     entity was deleted/removed while open), the host closes the Inspector in
+ *     ONE place and returns focus via the §20.4 ladder — never rendering a
+ *     dangling entity, never resetting work state (task 9.4, G6).
  *   • Non-modal: focus moves INTO the panel on open (so AT announces it) but is
  *     NOT trapped — Tab leaves naturally.
  *   • Keyboard: Esc closes the inspector WHEN focus is inside it (non-modal, so
@@ -30,10 +34,10 @@
  *
  * Requirements: 1.6, 5.2, 7.2, 17.2
  */
-import { Show, createEffect, on, type JSX } from "solid-js";
+import { Show, createEffect, createMemo, on } from "solid-js";
 import { shellStore } from "../stores";
 import { IconButton } from "../kit";
-import type { InspectorTarget } from "../stores/shellStore";
+import { captureFocusOwner, returnFocus, type FocusReturnOwner } from "./focusReturn";
 import {
   getInspectorRenderer,
   registryVersion,
@@ -57,26 +61,62 @@ export interface InspectorHostProps {
 export function InspectorHost(props: InspectorHostProps) {
   const target = () => shellStore.inspectorTarget();
   let panelRef: HTMLElement | undefined;
+  // §20.3 InspectorHost Focus_Return_Owner = "Invoking control, or nearest
+  // stable owning region if removed". Captured on the INITIAL open (before the
+  // panel steals focus), restored via the §20.4 ladder on close (G6, task 8.9).
+  // A REPLACE (target stays non-null, type/id changes) keeps the forward focus
+  // move into the new panel and does NOT re-capture or restore.
+  let focusOwner: FocusReturnOwner | null = null;
 
-  const resolved = (): InspectorContent | null => {
+  // Single reactive resolution of the current target. `removed` is true ONLY
+  // when a REGISTERED renderer resolves to `null` — the decoupled §20.1/§20.4
+  // "target entity no longer live" signal (task 9.4, G6). An unregistered type
+  // is NOT removal (titled fallback, so a lazily-loaded Space can still take
+  // over). Computed once here and shared by both the render and the removal
+  // guard so the renderer runs a single time per change.
+  const resolution = createMemo<{ content: InspectorContent | null; removed: boolean }>(() => {
     const t = target();
-    if (!t) return null;
+    if (!t) return { content: null, removed: false };
     // Depend on the registry version so a renderer registered AFTER this mounted
     // (e.g. a lazily-loaded Space) re-resolves without reopening the target.
     registryVersion();
     const renderer = props.renderers?.[t.type] ?? getInspectorRenderer(t.type);
-    if (renderer) return renderer(t);
+    if (renderer) {
+      const content = renderer(t);
+      return { content, removed: content === null };
+    }
     // Titled fallback for a type no Space has registered yet — keeps the
     // single-inspector contract testable and honest before wave-4 lands.
     return {
-      title: t.type,
-      body: (
-        <p class="kria-inspector__fallback">
-          No inspector view is registered for “{t.type}” yet.
-        </p>
-      ),
+      content: {
+        title: t.type,
+        body: (
+          <p class="kria-inspector__fallback">
+            No inspector view is registered for “{t.type}” yet.
+          </p>
+        ),
+      },
+      removed: false,
     };
-  };
+  });
+
+  const resolved = (): InspectorContent | null => resolution().content;
+
+  // Target-removal guard (§20.1 / §20.4, gap G6): when the entity an open
+  // Inspector targets is DELETED/removed from its source store WITHOUT an
+  // explicit user close, its registered renderer resolves to `null`. Close the
+  // single Inspector here — in ONE place — so it never renders a dangling
+  // entity. The close routes through the `on(...)` effect below, which returns
+  // focus via the §20.4 ladder (opener likely gone on a removal → owning region
+  // → #space-root → stable shell) and never resets draft/route/selection/scroll
+  // /work state. Deferred a microtask so we never mutate the target during the
+  // memo's own read pass; re-checked inside so a concurrent replace wins.
+  createEffect(() => {
+    if (!resolution().removed) return;
+    queueMicrotask(() => {
+      if (resolution().removed) shellStore.closeInspector();
+    });
+  });
 
   // Move focus INTO the panel when a target opens or is replaced (Req 17.2 —
   // AT announces the complementary region + title). Not trapped: we only focus
@@ -88,8 +128,35 @@ export function InspectorHost(props: InspectorHostProps) {
         const t = target();
         return t ? `${t.type}:${t.id}` : null;
       },
-      (key) => {
-        if (key && panelRef) panelRef.focus();
+      (key, prevKey) => {
+        if (key) {
+          // Consume any Focus_Return_Owner descriptor the caller supplied (§20.3).
+          // Always consumed so it never bleeds into a later open; USED only on
+          // an initial open (prevKey null). On replace, keep the existing owner
+          // and only forward focus into the fresh panel.
+          const opener = shellStore.consumeInspectorOpener();
+          if (!prevKey) {
+            const region =
+              opener?.region ??
+              (opener?.regionSelector && typeof document !== "undefined"
+                ? document.querySelector<HTMLElement>(opener.regionSelector)
+                : null);
+            // Explicit opener → capture it. Region-only (programmatic) → capture
+            // with opener=null so the §20.4 ladder resolves the stable region.
+            // No descriptor → default to document.activeElement (user-click).
+            focusOwner =
+              opener && (opener.opener !== undefined || region)
+                ? captureFocusOwner(opener.opener ?? null, region)
+                : captureFocusOwner();
+          }
+          if (panelRef) panelRef.focus();
+        } else if (prevKey) {
+          // Close: return focus to the invoking control via the §20.4 ladder
+          // (opener → nearest stable owning region → #space-root → stable
+          // shell), never resetting draft/route/selection/scroll/work state.
+          returnFocus(focusOwner);
+          focusOwner = null;
+        }
       },
     ),
   );

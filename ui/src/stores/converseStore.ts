@@ -11,11 +11,16 @@ import { createSignal } from "solid-js";
 import { eventBus, type Unsubscribe } from "./eventBus";
 import { bridgeInvoke, bridgeInvokeOptional } from "../bridge/invoke";
 import {
+  classifyEmptyState,
+  type EmptyStateClass,
+} from "../shell/spaces/converse/emptyStateClassifier";
+import {
   activeGuiCognitionSession,
   clearGuiCognitionSession,
   handleGuiCognitionEvent,
   markGuiCognitionCancelled,
 } from "./guiCognitionSession";
+import { announceCancellation } from "./cancellationAnnouncer";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -81,6 +86,20 @@ export type WorkBlockType =
   | "workflow-run";
 
 export type WorkBlockStatus = "pending" | "running" | "completed" | "failed" | "stopped";
+
+/**
+ * Human, scope-named label per work-block type, used to build the once-only
+ * cancellation milestone announcement (UIE-M-015 / §17.5). Kept in sync with
+ * the visual `TYPE_META` labels in WorkBlock.tsx; this is announcement copy for
+ * the accessible milestone, so the per-item Stop names exactly what it stopped.
+ */
+const WORK_BLOCK_STOP_SCOPE: Record<WorkBlockType, string> = {
+  reasoning: "Reasoning",
+  "tool-call": "Tool call",
+  "plan-compare": "Plan",
+  "gui-cognition": "GUI cognition",
+  "workflow-run": "Workflow run",
+};
 
 /**
  * A single evidence item attached to a work block — a source/artifact KRIA used
@@ -161,6 +180,13 @@ export interface WorkBlock {
   id: string;
   type: WorkBlockType;
   status: WorkBlockStatus;
+  /**
+   * The conversation turn this block belongs to — the id of the user message
+   * that started the turn. Drives the inline per-turn activity trace (rendered
+   * right after that user message, ChatGPT/Gemini style) instead of a separate
+   * Work lane. Absent for blocks produced outside a tracked turn.
+   */
+  turnId?: string;
   /** Plain-language summary — always visible (Req 4.2). */
   summary: string;
   /** Generic collapsible detail text (markdown, sanitized at render). */
@@ -192,6 +218,26 @@ export interface ContextRailItem {
   type: "memory" | "document" | "tool-result" | "custom";
   label: string;
   data: unknown;
+  /**
+   * Provenance — where this item came from (a memory id, document name, tool
+   * name, …). Source-owned, OPTIONAL: a value only appears when a real writer
+   * provides it. This is a frontend-only shape field (Task 10.4 / G2), NOT new
+   * backend data; absent → rendered as nothing (never inferred). See
+   * capabilityFieldMap F2 / MUST_OMIT_FACTS M2.
+   */
+  source?: string;
+  /**
+   * Available-vs-consumed distinction (UIE-M-011 / MUST_OMIT M2). OPTIONAL
+   * because no authoritative field expresses it today: it is rendered ONLY when
+   * a writer sets it, and stays absent (omitted) otherwise — the UI never
+   * synthesizes a use-state it cannot prove.
+   */
+  use?: "available" | "used";
+  /**
+   * A concise, bounded detail string, source-owned. OPTIONAL; omitted when
+   * absent. Long values are truncated at the presentation layer (10.7).
+   */
+  detail?: string;
 }
 
 export interface ComposerAttachment {
@@ -216,8 +262,16 @@ export type ConversationExportFormat = "text" | "markdown" | "pdf";
 const [threads, setThreads] = createSignal<Thread[]>([]);
 const [activeThreadId, setActiveThreadIdSignal] = createSignal<string | null>(null);
 const [messages, setMessages] = createSignal<Message[]>([]);
+// The thread explicitly created/selected as an Intentional New Thread (UIE-H-005).
+// Owned here; reset only at documented lifecycle transitions (see setActiveThread
+// and addMessage). null means "no explicit new-thread intent is active".
+const [newThreadIntentId, setNewThreadIntentId] = createSignal<string | null>(null);
 const [thinking, setThinking] = createSignal(false);
 const [workBlocks, setWorkBlocks] = createSignal<WorkBlock[]>([]);
+// The turn (user-message id) currently receiving work blocks. Set when a send
+// path adds its optimistic user turn; runtime work events tag their blocks with
+// it so the inline activity trace groups under the right message.
+const [currentTurnId, setCurrentTurnId] = createSignal<string | null>(null);
 const [contextRail, setContextRail] = createSignal<ContextRailItem[]>([]);
 const [composerDraft, setComposerDraft] = createSignal<ComposerDraft>({
   text: "",
@@ -319,13 +373,17 @@ async function loadThreads(): Promise<Thread[]> {
 
 async function activateThread(threadId: string): Promise<void> {
   if (!threadId) return;
-  setActiveThread(threadId);
   setRuntimeError(null);
   const switched = await bridgeInvoke<void>("switch_session", { sessionId: threadId });
   if (!switched.ok) {
     setRuntimeError(switched.message);
     return;
   }
+
+  // Publish selection only after backend session authority has switched. This
+  // prevents streamed events from being tagged with the prior session and then
+  // rejected by ownsActiveThread().
+  setActiveThread(threadId);
   const history = await bridgeInvoke<RawHistoryMessage[]>(
     "get_session_history",
     { sessionId: threadId },
@@ -340,13 +398,29 @@ async function activateThread(threadId: string): Promise<void> {
   }
 }
 
-async function createThread(): Promise<string | null> {
+/**
+ * Create a new thread.
+ *
+ * `intentional` (default true) marks the new empty thread as an Intentional New
+ * Thread so the empty-state classifier presents a new-task state regardless of
+ * unrelated history (UIE-H-005, Req 6.1). The boot auto-create (see
+ * `initialize`) passes `intentional: false` so genuine first-run stays Cold
+ * Start rather than being mislabelled as an explicit new-thread action.
+ *
+ * The intent is set BEFORE `activateThread` so the switch to the new thread does
+ * not clear it (setActiveThread only clears intent when switching to a thread
+ * that is NOT the intent thread).
+ */
+async function createThread(
+  options: { intentional?: boolean } = {},
+): Promise<string | null> {
   const created = await bridgeInvoke<{ session_id: string }>("create_session");
   if (!created.ok) {
     setRuntimeError(created.message);
     return null;
   }
   const id = created.data.session_id;
+  if (options.intentional !== false) setNewThreadIntentId(id);
   await loadThreads();
   await activateThread(id);
   return id;
@@ -587,6 +661,7 @@ function initRuntimeSubscriptions(): void {
         status: "running",
         summary: `Running ${name}`,
         startedAt: Date.now(),
+        turnId: currentTurnId() ?? undefined,
         toolCall: { name, args: toolResultText(params) },
       });
     }),
@@ -610,18 +685,22 @@ function initRuntimeSubscriptions(): void {
         role: "assistant",
         content: summary ?? "",
         timestamp: Date.now(),
+        // The conversational line lives in `content`; the card carries the
+        // STRUCTURED payload (rendered as a collapsed, wrapped JSON block) so the
+        // same text is not shown twice and a large blob never overflows.
         results: [{
           id: crypto.randomUUID(),
           kind: "tool-result",
           title: name,
-          summary,
           data: result,
         }],
       });
     }),
     eventBus.on("agent:stage", ({ step, message, detail }) => {
-      const threadId = activeThreadId() || "";
-      const id = `reasoning:${threadId}`;
+      const turn = currentTurnId() ?? activeThreadId() ?? "";
+      // Keyed per-turn so each turn owns its own reasoning block in the inline
+      // activity trace (rather than a single per-thread block).
+      const id = `reasoning:${turn}`;
       const existing = workBlocks().find((item) => item.id === id);
       const terminal = step === "completed";
       const failed = step.includes("fail") || step.includes("error") || step.includes("timed_out");
@@ -640,6 +719,7 @@ function initRuntimeSubscriptions(): void {
           summary: message,
           details: detail ? toolResultText(detail) : undefined,
           startedAt: Date.now(),
+          turnId: currentTurnId() ?? undefined,
           completedAt: terminal || failed ? Date.now() : undefined,
         });
       }
@@ -678,7 +758,9 @@ async function initialize(): Promise<void> {
   try {
     let loaded = await loadThreads();
     if (loaded.length === 0) {
-      const id = await createThread();
+      // Boot auto-create is NOT an explicit user "new thread" action — keep it
+      // non-intentional so genuine first-run classifies as Cold Start.
+      const id = await createThread({ intentional: false });
       if (!id) return;
       loaded = threads();
     }
@@ -702,6 +784,9 @@ async function cancelGuiCognitionTurn(): Promise<void> {
   const sessionId = activeGuiCognitionSession()?.sessionId ?? activeThreadId();
   markGuiCognitionCancelled("Turn cancelled by you.");
   setThinkingState(sessionId ?? "", false);
+  // Semantic milestone, announced once (UIE-M-015 / §17.5): the GUI-cognition
+  // scope stopped. Not a raw tick of the cancelling lifecycle.
+  announceCancellation("GUI cognition stopped");
   if (!sessionId) return;
   await bridgeInvoke("cancel_gui_cognition_turn", { sessionId, reason: "Turn cancelled by you." });
 }
@@ -717,6 +802,16 @@ const DRAFTS_STORAGE_KEY = "kria.converse.drafts";
 const DRAFT_PERSIST_DEBOUNCE_MS = 200;
 
 const DEFAULT_DRAFT: ComposerDraft = { text: "", attachments: [], mode: "assistant" };
+
+/**
+ * Draft-map key for the home / no-thread draft (Req 4.5). When no thread is
+ * active (the presence homepage, or before the first thread is opened) the
+ * Composer draft is keyed here so it is saved on thread switch and restored on
+ * return home — a home draft persists exactly like a per-thread draft, rather
+ * than living only in the volatile `composerDraft` signal and being lost the
+ * moment the user switches into a thread.
+ */
+export const HOME_DRAFT_KEY = "__home__";
 
 /** Load persisted drafts, degrading to an empty map on any corruption. */
 function loadDrafts(): Record<string, ComposerDraft> {
@@ -748,6 +843,16 @@ function loadDrafts(): Record<string, ComposerDraft> {
 
 const [draftMap, setDraftMap] = createSignal<Record<string, ComposerDraft>>(loadDrafts());
 
+// Restore the home/no-thread draft at boot (Req 4.5). No thread is active on the
+// presence homepage, so nothing calls setActiveThread to hydrate it; seed the
+// live draft directly from the persisted map so a home draft survives relaunch.
+{
+  const homeDraft = draftMap()[HOME_DRAFT_KEY];
+  if (homeDraft && (homeDraft.text.length > 0 || homeDraft.mode !== "assistant")) {
+    setComposerDraft({ ...homeDraft });
+  }
+}
+
 let draftPersistTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** Debounced persist of the draft map so keystrokes don't thrash storage (Req 16). */
@@ -776,26 +881,65 @@ function setActiveThread(threadId: string | null): void {
   const previous = activeThreadId();
   if (previous === threadId) return;
 
-  // Save current draft before switching (per-thread persistence, Req 4.5).
-  if (previous) {
-    setDraftMap((prev) => ({ ...prev, [previous]: composerDraft() }));
-  }
+  // Intent reset point (documented lifecycle transition): switching the active
+  // thread to any thread that is NOT the intent thread clears the Intentional
+  // New Thread intent. Switching TO the intent thread (e.g. the create→activate
+  // path) preserves it. This keeps intent from leaking across unrelated
+  // thread switches (UIE-H-005).
+  if (threadId !== newThreadIntentId()) setNewThreadIntentId(null);
+
+  // Save current draft before switching (per-thread persistence, Req 4.5). The
+  // home/no-thread draft is keyed under HOME_DRAFT_KEY so it survives a switch
+  // into a thread and is restored on return home.
+  setDraftMap((prev) => ({ ...prev, [previous ?? HOME_DRAFT_KEY]: composerDraft() }));
 
   setActiveThreadIdSignal(threadId);
 
-  // Restore draft for new thread (falls back to a clean draft).
-  if (threadId) {
-    const saved = draftMap()[threadId];
-    setComposerDraft(saved ? { ...saved } : { ...DEFAULT_DRAFT });
-  }
+  // Restore the target's draft (thread id, or the home draft when going home);
+  // falls back to a clean draft when none was saved.
+  const restoreKey = threadId ?? HOME_DRAFT_KEY;
+  const saved = draftMap()[restoreKey];
+  setComposerDraft(saved ? { ...saved } : { ...DEFAULT_DRAFT });
 
   persistDrafts();
   eventBus.emit("converse:thread-switched", { threadId: threadId ?? "" });
 }
 
 function addMessage(msg: Message): void {
+  // Intent reset point (documented lifecycle transition): the first message in
+  // the intent thread promotes it to an Active conversation, so the Intentional
+  // New Thread intent is cleared (UIE-H-005).
+  if (msg.threadId && msg.threadId === newThreadIntentId()) setNewThreadIntentId(null);
   setMessages((prev) => [...prev, msg]);
   eventBus.emit("converse:message-added", { sessionId: msg.threadId, messageId: msg.id });
+}
+
+/**
+ * Derive the current empty-state class from authoritative signals only (Req 6.1,
+ * design Property 3). Single source of truth consumed by ConverseEmptyState
+ * (task 6.4). Pure delegation to the deterministic classifier.
+ */
+function emptyStateClass(): EmptyStateClass {
+  return classifyEmptyState({
+    activeThreadId: activeThreadId(),
+    hasMessages: messages().length > 0,
+    newThreadIntentId: newThreadIntentId(),
+    threads: threads(),
+  });
+}
+
+/**
+ * Deterministically place the store into the Intentional New Thread state:
+ * activate `threadId` (an empty thread) and raise the explicit new-thread
+ * intent for it, so `emptyStateClass()` returns "intentional-new-thread"
+ * regardless of unrelated history (UIE-H-005, Req 6.1). This is the same
+ * post-condition `createThread()` establishes, exposed as a bridge-free seam
+ * for the dev-only E2E harness and deterministic tests — it performs NO backend
+ * call, sends nothing, and invokes no tool.
+ */
+function markIntentionalNewThread(threadId: string): void {
+  setActiveThread(threadId);
+  setNewThreadIntentId(threadId);
 }
 
 function appendToken(sessionId: string, token: string): void {
@@ -823,6 +967,17 @@ function appendToken(sessionId: string, token: string): void {
 function setThinkingState(sessionId: string, value: boolean): void {
   setThinking(value);
   eventBus.emit("converse:thinking-changed", { sessionId, thinking: value });
+}
+
+/** Mark the turn (user-message id) that subsequent work blocks belong to. */
+function setCurrentTurn(turnId: string | null): void {
+  setCurrentTurnId(turnId && turnId.trim() ? turnId : null);
+}
+
+/** Work blocks for one turn (inline activity trace), in arrival order. */
+function workBlocksForTurn(turnId: string): WorkBlock[] {
+  if (!turnId) return [];
+  return workBlocks().filter((block) => block.turnId === turnId);
 }
 
 function addWorkBlock(block: WorkBlock): void {
@@ -859,6 +1014,9 @@ function cancelWorkBlock(blockId: string): void {
     blockId,
     blockType: block.type,
   });
+  // Semantic milestone, announced once (UIE-M-015 / §17.5): this specific,
+  // scope-named work item stopped — never a raw tick or a global "stopped".
+  announceCancellation(`${WORK_BLOCK_STOP_SCOPE[block.type]} stopped`);
 }
 
 /**
@@ -888,12 +1046,11 @@ function updateDraft(update: Partial<ComposerDraft>): void {
   const next = { ...composerDraft(), ...update };
   setComposerDraft(next);
   // Mirror the live draft into the per-thread map so it survives relaunch
-  // without waiting for a thread switch (Req 4.5).
-  const tid = activeThreadId();
-  if (tid) {
-    setDraftMap((prev) => ({ ...prev, [tid]: next }));
-    persistDrafts();
-  }
+  // without waiting for a thread switch (Req 4.5). With no active thread the
+  // draft is keyed under HOME_DRAFT_KEY so the home draft persists too.
+  const tid = activeThreadId() ?? HOME_DRAFT_KEY;
+  setDraftMap((prev) => ({ ...prev, [tid]: next }));
+  persistDrafts();
 }
 
 async function readFileBytes(file: File): Promise<Uint8Array> {
@@ -1001,7 +1158,9 @@ async function sendMessage(): Promise<void> {
 
   let sessionId = activeThreadId() ?? "";
   if (attachments.length > 0 && !sessionId) {
-    sessionId = (await createThread()) ?? "";
+    // Creating a thread to carry an immediate send is not an empty new-task
+    // state — don't raise Intentional New Thread intent for it.
+    sessionId = (await createThread({ intentional: false })) ?? "";
     if (!sessionId) {
       actionNotification("error", "Couldn't create a conversation for attachments");
       return;
@@ -1014,8 +1173,9 @@ async function sendMessage(): Promise<void> {
       ? `Transcribe audio: ${attachments[0].name}`
       : `Analyze these files: ${attachments.map((attachment) => attachment.name).join(", ")}`);
 
+  const userTurnId = crypto.randomUUID();
   addMessage({
-    id: crypto.randomUUID(),
+    id: userTurnId,
     threadId: sessionId,
     role: "user",
     content: displayText,
@@ -1030,6 +1190,7 @@ async function sendMessage(): Promise<void> {
   });
 
   updateDraft({ text: "", attachments: [] });
+  setCurrentTurn(userTurnId);
   setThinkingState(sessionId, true);
 
   let failure: string | null = null;
@@ -1048,7 +1209,10 @@ async function sendMessage(): Promise<void> {
     } else if (indexed.data.status !== "indexed" || !indexed.data.prompt) {
       failure = "document indexing returned no agent prompt";
     } else {
-      const sent = await bridgeInvoke(SEND_COMMAND[draft.mode], { message: indexed.data.prompt });
+      const sent = await bridgeInvoke(SEND_COMMAND[draft.mode], {
+        message: indexed.data.prompt,
+        sessionId,
+      });
       if (!sent.ok) failure = sent.message;
     }
   } else if (hasImages) {
@@ -1086,7 +1250,7 @@ async function sendMessage(): Promise<void> {
       setThinkingState(sessionId, false);
     }
   } else {
-    const sent = await bridgeInvoke(SEND_COMMAND[draft.mode], { message: text });
+    const sent = await bridgeInvoke(SEND_COMMAND[draft.mode], { message: text, sessionId });
     if (!sent.ok) failure = sent.message;
   }
 
@@ -1107,16 +1271,18 @@ async function submitIntent(rawText: string): Promise<boolean> {
   if (text.length === 0) return false;
 
   const sessionId = activeThreadId() ?? "";
+  const userTurnId = crypto.randomUUID();
   addMessage({
-    id: crypto.randomUUID(),
+    id: userTurnId,
     threadId: sessionId,
     role: "user",
     content: text,
     timestamp: Date.now(),
   });
+  setCurrentTurn(userTurnId);
   setThinkingState(sessionId, true);
 
-  const result = await bridgeInvoke("send_message", { message: text });
+  const result = await bridgeInvoke("send_message", { message: text, sessionId });
   if (result.ok) return true;
 
   setThinkingState(sessionId, false);
@@ -1136,6 +1302,11 @@ async function submitIntent(rawText: string): Promise<boolean> {
 async function stopTurn(): Promise<void> {
   const sessionId = activeThreadId() ?? "";
   setThinkingState(sessionId, false);
+  // Semantic milestone, announced once (UIE-M-015 / §17.5): the response/turn
+  // scope stopped. Both the Composer primary Stop and the immersive PresenceBar
+  // Stop funnel through here, so the milestone is deduplicated to a single
+  // announcement rather than one per control or per reactive tick.
+  announceCancellation("Response stopped");
   await bridgeInvokeOptional("cancel_turn", { sessionId });
 }
 
@@ -1170,15 +1341,20 @@ async function retryMessage(messageId: string): Promise<boolean> {
   if (!message || !source) return false;
 
   if (activeThreadId() !== message.threadId) await activateThread(message.threadId);
+  const userTurnId = crypto.randomUUID();
   addMessage({
-    id: crypto.randomUUID(),
+    id: userTurnId,
     threadId: message.threadId,
     role: "user",
     content: source.content,
     timestamp: Date.now(),
   });
+  setCurrentTurn(userTurnId);
   setThinkingState(message.threadId, true);
-  const result = await bridgeInvoke("send_message", { message: source.content });
+  const result = await bridgeInvoke("send_message", {
+    message: source.content,
+    sessionId: message.threadId,
+  });
   if (result.ok) return true;
 
   setThinkingState(message.threadId, false);
@@ -1192,7 +1368,10 @@ async function explainMessage(messageId: string): Promise<boolean> {
   if (activeThreadId() !== message.threadId) await activateThread(message.threadId);
   const prompt = `Explain this response, including assumptions and evidence:\n\n${message.content}`;
   setThinkingState(message.threadId, true);
-  const result = await bridgeInvoke("send_message", { message: prompt });
+  const result = await bridgeInvoke("send_message", {
+    message: prompt,
+    sessionId: message.threadId,
+  });
   if (result.ok) return true;
 
   setThinkingState(message.threadId, false);
@@ -1302,6 +1481,8 @@ export const converseStore = {
   messages,
   thinking,
   workBlocks,
+  workBlocksForTurn,
+  currentTurnId,
   contextRail,
   composerDraft,
   loadingThreads,
@@ -1312,6 +1493,11 @@ export const converseStore = {
   exportFormat,
   exportingConversation,
   activeGuiCognitionSession,
+  newThreadIntentId,
+
+  // Empty-state classification (IU-05, Req 6.1)
+  emptyStateClass,
+  markIntentionalNewThread,
 
   // Runtime lifecycle / persisted sessions
   initialize,
@@ -1333,6 +1519,7 @@ export const converseStore = {
   addMessage,
   appendToken,
   setThinkingState,
+  setCurrentTurn,
   addWorkBlock,
   updateWorkBlock,
   clearWorkBlocks,

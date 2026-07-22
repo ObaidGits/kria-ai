@@ -19,6 +19,8 @@ pub type MemoryResult<T> = Result<T, MemoryError>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum MemoryError {
+    #[error("memory feature is disabled")]
+    Disabled,
     #[error("storage: {0}")]
     Storage(#[from] StorageError),
     #[error("retrieval: {0}")]

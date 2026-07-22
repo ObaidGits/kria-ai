@@ -1,8 +1,9 @@
 /**
- * GraphCanvas3D — the 3D branch of the Knowledge Graph lens (task 6.4, §5.4).
+ * GraphCanvas3D — dormant Phase 7 candidate; not mounted by shipped Memory Graph.
  *
- * Mounted ONLY when the capability gate has enabled 3D (see KnowledgeGraphLens).
- * It wires together the three isolated pieces:
+ * No active import path reaches this component. A future integration may mount
+ * it only after MGR-030 gates pass; otherwise this file and graph-only support
+ * code are deleted. It wires together three isolated pieces:
  *   • the layout Web Worker (ngraph.forcelayout, off-thread, stops on settle),
  *   • the Three.js GraphScene (instanced nodes/edges, LOD labels, damped orbit),
  *   • the LensController (freeze-on-idle, resume-on-interaction, unload-on-exit,
@@ -10,10 +11,11 @@
  *
  * GL and the worker are DYNAMICALLY imported inside onMount so the module graph
  * (and jsdom tests / the 2D path) never pull in three or the worker. onCleanup
- * tears everything down (Req 5.4 unload on Space exit).
+ * tears everything down if this dormant candidate is exercised.
  */
-import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
-import { Button } from "../../../../kit";
+import { For, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { Button, EmptyState } from "../../../../kit";
+import { degradeToTwoD } from "../../../../platform/renderMode";
 import { graphData } from "./graphData";
 import type { GraphScene as GraphSceneType, ScreenLabel } from "./GraphScene";
 import type { LensController as LensControllerType } from "./lensController";
@@ -63,64 +65,83 @@ export function GraphCanvas3D(props: GraphCanvas3DProps) {
     disposed = true;
   });
 
+  // Keep the scene synchronized when async loads, refreshes, expands, or
+  // hide/unhide actions change the reactive graph model after mount.
+  createEffect(() => {
+    const nextNodes = graphData.visibleNodes();
+    const nextEdges = graphData.visibleEdges();
+    if (!scene || !worker || !controller) return;
+
+    scene.setGraph(nextNodes, nextEdges);
+    startLayout();
+    controller.noteInteraction();
+  });
+
   onMount(async () => {
-    // Dynamic imports keep three + the worker out of the 2D / test paths.
-    const [{ GraphScene }, { LensController }] = await Promise.all([
-      import("./GraphScene"),
-      import("./lensController"),
-    ]);
-    // Reduced-motion may have unmounted this branch while imports resolved.
-    if (disposed) return;
+    try {
+      // Dynamic imports keep three + the worker out of the 2D / test paths.
+      const [{ GraphScene }, { LensController }] = await Promise.all([
+        import("./GraphScene"),
+        import("./lensController"),
+      ]);
+      // Reduced-motion may have unmounted this branch while imports resolved.
+      if (disposed) return;
 
-    scene = new GraphScene(canvas);
-    scene.setGraph(graphData.visibleNodes(), graphData.visibleEdges());
+      scene = new GraphScene(canvas);
+      scene.setGraph(graphData.visibleNodes(), graphData.visibleEdges());
 
-    controller = new LensController({
-      reducedMotion: !!props.static,
-      render: () => {
-        scene?.render();
-        refreshLabels();
-      },
-      dispose: () => scene?.dispose(),
-    });
+      controller = new LensController({
+        reducedMotion: !!props.static,
+        render: () => {
+          scene?.render();
+          refreshLabels();
+        },
+        dispose: () => scene?.dispose(),
+      });
 
-    // Orbit/zoom is an interaction (resumes the loop); a node click focuses +
-    // expands it (read-only view action), then re-layouts the enlarged graph.
-    scene.setOnInteraction(() => controller?.noteInteraction());
-    scene.setOnPick((id) => {
-      scene?.setSelected(id);
-      void graphData.expand(id).then(() => {
-        scene?.setGraph(graphData.visibleNodes(), graphData.visibleEdges());
+      // Orbit/zoom is an interaction (resumes the loop); a node click focuses +
+      // expands it (read-only view action), then re-layouts the enlarged graph.
+      scene.setOnInteraction(() => controller?.noteInteraction());
+      scene.setOnPick((id) => {
         scene?.setSelected(id);
-        startLayout();
+        void graphData.expand(id).then(() => {
+          scene?.setGraph(graphData.visibleNodes(), graphData.visibleEdges());
+          scene?.setSelected(id);
+          startLayout();
+          controller?.noteInteraction();
+        });
+      });
+
+      // Spin up the layout worker (Vite resolves the URL at build time).
+      worker = new Worker(new URL("./layout.worker.ts", import.meta.url), { type: "module" });
+      worker.onmessage = (event: MessageEvent<LayoutResponse>) => {
+        const msg = event.data;
+        if (msg.type === "tick") {
+          scene?.applyPositions(msg.positions);
+          controller?.noteLayoutTick();
+        } else if (msg.type === "settled") {
+          scene?.applyPositions(msg.positions);
+          controller?.noteLayoutSettled();
+        }
+      };
+      worker.onerror = () => {
+        if (!disposed) degradeToTwoD("2D fallback: 3D graph layout failed");
+      };
+
+      controller.mount();
+      startLayout();
+      setReady(true);
+
+      // Keep the drawing buffer sized to the stage; a resize is an interaction.
+      resizeObserver = new ResizeObserver(() => {
+        if (!scene) return;
+        scene.resize(stage.clientWidth, stage.clientHeight);
         controller?.noteInteraction();
       });
-    });
-
-    // Spin up the layout worker (Vite resolves the URL at build time).
-    worker = new Worker(new URL("./layout.worker.ts", import.meta.url), { type: "module" });
-    worker.onmessage = (event: MessageEvent<LayoutResponse>) => {
-      const msg = event.data;
-      if (msg.type === "tick") {
-        scene?.applyPositions(msg.positions);
-        controller?.noteLayoutTick();
-      } else if (msg.type === "settled") {
-        scene?.applyPositions(msg.positions);
-        controller?.noteLayoutSettled();
-      }
-    };
-
-    controller.mount();
-    startLayout();
-    setReady(true);
-
-    // Keep the drawing buffer sized to the stage; a resize is an interaction.
-    resizeObserver = new ResizeObserver(() => {
-      if (!scene) return;
-      scene.resize(stage.clientWidth, stage.clientHeight);
-      controller?.noteInteraction();
-    });
-    resizeObserver.observe(stage);
+      resizeObserver.observe(stage);
+    } catch {
+      if (!disposed) degradeToTwoD("2D fallback: 3D graph could not start");
+    }
   });
 
   onCleanup(() => {
@@ -190,6 +211,36 @@ export function GraphCanvas3D(props: GraphCanvas3DProps) {
 
       <div class="kria-graph__stage" ref={stage}>
         <canvas class="kria-graph__canvas" ref={canvas} />
+
+        <Show when={graphData.loading()}>
+          <div class="kria-graph__stage-state" role="status" aria-live="polite">
+            Loading knowledge graph…
+          </div>
+        </Show>
+        <Show when={graphData.error()}>
+          <div class="kria-graph__stage-state">
+            <EmptyState
+              icon="alert-triangle"
+              title="Couldn't load the knowledge graph"
+              description={graphData.error() ?? "The graph service is unavailable."}
+            />
+          </div>
+        </Show>
+        <Show
+          when={
+            !graphData.loading() &&
+            !graphData.error() &&
+            graphData.visibleNodes().length === 0
+          }
+        >
+          <div class="kria-graph__stage-state">
+            <EmptyState
+              icon="network"
+              title="No graph yet"
+              description="No extracted knowledge entities exist yet. Add memories or run entity extraction from Cognition."
+            />
+          </div>
+        </Show>
 
         <div class="kria-graph__labels" aria-hidden="true">
           <For each={labels()}>

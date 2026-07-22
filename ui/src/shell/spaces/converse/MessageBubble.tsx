@@ -9,8 +9,10 @@
  *    content from the user's (Req 20.5).
  *  • Inline result cards render tool/result payloads, kept visually secondary
  *    to the reply text (Req 4.3 conversation-dominance).
- *  • Per-message actions (Req 4.8) via right-click (ContextMenu) AND an
- *    always-keyboard-reachable actions button revealed on selection/hover.
+ *  • Per-message actions (Req 4.8 / 12.2) via right-click (ContextMenu) AND one
+ *    persistent, low-emphasis, always-keyboard-reachable actions trigger that is
+ *    visible at rest (discoverable without hover) and promoted on
+ *    focus/selection/hover (UIE-M-007).
  *
  * Pure presentation + action-dispatch: actions route through converseStore
  * (typed event requests), never a prompt→tool shortcut (KRIA invariant).
@@ -21,6 +23,7 @@ import { Card, ProvenanceCue } from "../../../kit";
 import { renderMarkdown, sanitizeHtml } from "../../../lib/markdown";
 import type { Message, MessageResult } from "../../../stores";
 import { buildMessageActions } from "./messageActions";
+import { announceCopyOutcome } from "./copyAnnouncer";
 import { MessageActionsMenu, MessageContextMenu } from "./MessageActionsMenu";
 import "./MessageBubble.css";
 
@@ -41,6 +44,22 @@ function formatTime(ts: number): string {
 }
 
 /**
+ * Render a structured result payload as legible, bounded text. Objects are
+ * pretty-printed JSON; strings pass through. Used inside a collapsed disclosure
+ * so a large blob never dominates the conversation and always wraps/scrolls
+ * inside its card rather than overflowing the bubble.
+ */
+function formatResultData(data: unknown): string {
+  if (data == null) return "";
+  if (typeof data === "string") return data;
+  try {
+    return JSON.stringify(data, null, 2);
+  } catch {
+    return String(data);
+  }
+}
+
+/**
  * Copy-code handler for the buttons emitted by the markdown renderer. Delegated
  * from the body root so it survives re-render without per-button listeners.
  */
@@ -53,11 +72,22 @@ function onBodyClick(event: MouseEvent): void {
   const code = header?.nextElementSibling?.querySelector("code");
   const text = code?.textContent ?? "";
   if (!text) return;
-  void navigator.clipboard?.writeText(text).then(() => {
-    const prev = button.textContent ?? "Copy";
-    button.textContent = "Copied";
-    window.setTimeout(() => (button.textContent = prev), 1500);
-  });
+  const clipboard = navigator.clipboard;
+  if (!clipboard) {
+    announceCopyOutcome("failure");
+    return;
+  }
+  // Retain the existing visual Copy→Copied swap AND announce the outcome to the
+  // polite copy-status region without moving focus (Req 12.3; UIE-M-009).
+  void clipboard.writeText(text).then(
+    () => {
+      const prev = button.textContent ?? "Copy";
+      button.textContent = "Copied";
+      window.setTimeout(() => (button.textContent = prev), 1500);
+      announceCopyOutcome("success");
+    },
+    () => announceCopyOutcome("failure"),
+  );
 }
 
 export interface MessageBubbleProps {
@@ -82,6 +112,15 @@ export function MessageBubble(props: MessageBubbleProps) {
         data-role={props.message.role}
         data-provenance={isKriaAuthored() ? "kria" : "user"}
         data-selected={props.selected ? "true" : undefined}
+        /* Programmatic selected-state for the article/log pattern (Req 12.1;
+           UIE-M-008). These rows are standalone <article> elements inside a
+           role="log" region — NOT a composite widget (listbox/grid), so
+           `aria-selected` would be invalid here. `aria-current="true"` is the
+           valid semantic for "the current item within a set" and pairs the
+           visible selection ring with an AT-exposed state, while keeping the
+           article/log reading semantics intact. Single-select mirrors the
+           existing `selectedId` signal (one current article at a time). */
+        aria-current={props.selected ? "true" : undefined}
         aria-label={`${props.message.role} message`}
         tabindex="0"
         onClick={select}
@@ -97,7 +136,8 @@ export function MessageBubble(props: MessageBubbleProps) {
             <ProvenanceCue source={isKriaAuthored() ? "kria" : "user"} />
           </span>
           <time class="kria-msg__time">{formatTime(props.message.timestamp)}</time>
-          {/* Keyboard-reachable actions (Req 4.8 / 17.1). */}
+          {/* One persistent low-emphasis trigger, visible without hover and
+              enhanced on focus/selection/hover (Req 12.2 / 4.8 / 17.1). */}
           <div class="kria-msg__actions">
             <MessageActionsMenu actions={actions()} />
           </div>
@@ -122,6 +162,15 @@ export function MessageBubble(props: MessageBubbleProps) {
                   <Show when={result.html}>
                     {/* Tool/result HTML is untrusted → sanitized before display. */}
                     <div class="kria-msg__result-body" innerHTML={sanitizeHtml(result.html!)} />
+                  </Show>
+                  {/* Structured payload (e.g. tool JSON) — collapsed by default,
+                      escaped as text (never executed), wrapped + scrollable so it
+                      never overflows the bubble. */}
+                  <Show when={!result.html && result.data != null}>
+                    <details class="kria-msg__result-detail">
+                      <summary>View data</summary>
+                      <pre class="kria-msg__result-data">{formatResultData(result.data)}</pre>
+                    </details>
                   </Show>
                 </Card>
               )}

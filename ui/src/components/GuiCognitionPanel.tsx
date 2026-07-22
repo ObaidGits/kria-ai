@@ -165,8 +165,8 @@ export const GuiCognitionPanel: Component<GuiCognitionPanelProps> = (props) => {
               type="button"
               class="gui-cognition-stop"
               onClick={() => props.onStop?.()}
-              title="Stop the active GUI Cognition turn"
-              aria-label="Stop the active GUI Cognition turn"
+              title="Stop GUI cognition"
+              aria-label="Stop GUI cognition"
             >
               <svg width="12" height="12" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true" style="vertical-align: middle; margin-right: 4px;">
                 <rect x="1" y="1" width="12" height="12" rx="2" />

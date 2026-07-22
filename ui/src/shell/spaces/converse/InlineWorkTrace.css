@@ -1,0 +1,77 @@
+/**
+ * InlineWorkTrace — per-turn activity trace styling.
+ *
+ * Visually SECONDARY to the conversation (Req 4.3): muted surface, caption
+ * scale, indented under the user turn. It reads as KRIA's working notes, not as
+ * a message bubble.
+ */
+
+.kria-inline-work {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 var(--space-3);
+  padding: var(--space-2);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-1);
+  font-size: var(--font-size-caption);
+}
+
+.kria-inline-work[data-attention="true"] {
+  border-color: var(--color-danger-solid);
+}
+
+.kria-inline-work__summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-1) var(--space-2);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.kria-inline-work__summary:hover {
+  background: var(--color-surface-2);
+  color: var(--color-text-primary);
+}
+
+.kria-inline-work__summary:focus-visible {
+  outline: 2px solid var(--color-accent-default);
+  outline-offset: 2px;
+}
+
+.kria-inline-work__summary-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kria-inline-work__spinner {
+  animation: kria-inline-work-spin 1s linear infinite;
+}
+
+@keyframes kria-inline-work-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kria-inline-work__spinner {
+    animation: none;
+  }
+}
+
+.kria-inline-work__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-left: var(--space-2);
+}

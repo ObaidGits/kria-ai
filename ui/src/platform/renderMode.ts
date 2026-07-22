@@ -1,10 +1,10 @@
 /**
- * platform/renderMode — the shared lens render-mode gate/store.
+ * platform/renderMode — shared generic lens render-mode gate/store.
  *
- * Design source: design.md §11.2 (WebKitGTK Correction), §11.3 G2, §5.4 (3D
- * lens governance). This is the SINGLE place the Memory graph (tasks 6.4/6.5)
- * and Capability constellation (task 8.3) consume to decide whether to mount a
- * 3D scene or their mandatory 2D representation.
+ * Capability constellation may consume this state for renderer selection.
+ * Shipped Memory Graph currently reads only `isStatic`; it always mounts its
+ * authoritative 2D SVG and does not consume `enable3D`. `GraphCanvas3D` remains
+ * dormant unless a future MGR-030 Phase 7 integration passes every gate.
  *
  * ── Contract for lens surfaces ──────────────────────────────────────────────
  * A lens MUST:
@@ -52,21 +52,35 @@ export interface LensRenderState {
   snapshot: CapabilitySnapshot;
 }
 
-/** Reason shown when the user has manually forced the 2D representation. */
+/** Reason shown when the user explicitly selects a representation. */
 const MANUAL_TWO_D_REASON = "2D fallback: your preference (low power / accessibility)";
+const MANUAL_THREE_D_REASON = "3D enabled: your preference";
 
 /**
- * Derive the lens render state from a capability snapshot and the user's manual
- * 2D preference. A manual `preferTwoD` ALWAYS wins (Req 5.5 / 17.5: the 2D
- * representation must be reachable on demand, even when the device could do 3D).
+ * Derive the lens render state from capabilities and explicit user preference.
+ * Hard capability constraints (WebGL and reduced motion) still win over a
+ * manual 3D request; the performance probe only governs automatic selection.
  */
-function computeState(snapshot: CapabilitySnapshot, preferTwoD: boolean): LensRenderState {
+function computeState(
+  snapshot: CapabilitySnapshot,
+  preferTwoD: boolean,
+  preferThreeD = false,
+): LensRenderState {
   if (preferTwoD) {
     return {
       mode: "2d",
       enable3D: false,
       reason: MANUAL_TWO_D_REASON,
       isStatic: snapshot.prefersReducedMotion,
+      snapshot,
+    };
+  }
+  if (preferThreeD && snapshot.hasWebGL && !snapshot.prefersReducedMotion) {
+    return {
+      mode: "3d",
+      enable3D: true,
+      reason: MANUAL_THREE_D_REASON,
+      isStatic: false,
       snapshot,
     };
   }
@@ -92,24 +106,36 @@ const store = createRoot(() => {
   const initial = detectCapabilities();
   const [snapshot, setSnapshot] = createSignal<CapabilitySnapshot>(initial);
   const [preferTwoD, setPreferTwoDSignal] = createSignal(false);
+  const [preferThreeD, setPreferThreeDSignal] = createSignal(false);
   const [state, setState] = createSignal<LensRenderState>(computeState(initial, false));
-  return { snapshot, setSnapshot, preferTwoD, setPreferTwoDSignal, state, setState };
+  return {
+    snapshot,
+    setSnapshot,
+    preferTwoD,
+    setPreferTwoDSignal,
+    preferThreeD,
+    setPreferThreeDSignal,
+    state,
+    setState,
+  };
 });
 
 /** Reactive accessor for the current lens render state. */
 export const lensRenderMode: Accessor<LensRenderState> = store.state;
 
-/** Reactive accessor for the user's manual "force 2D" preference. */
+/** Reactive accessors for explicit representation preferences. */
 export const preferTwoD: Accessor<boolean> = store.preferTwoD;
+export const preferThreeD: Accessor<boolean> = store.preferThreeD;
 
 /**
  * (Re)initialize the gate from a capability snapshot. Called once at boot
  * (see platform/boot.ts). Pass an explicit snapshot in tests; defaults to a
- * fresh device detection. Resets the manual 2D preference to auto.
+ * fresh device detection. Resets manual representation preferences.
  */
 export function initRenderMode(snapshot: CapabilitySnapshot = detectCapabilities()): LensRenderState {
   store.setSnapshot(snapshot);
   store.setPreferTwoDSignal(false);
+  store.setPreferThreeDSignal(false);
   const next = computeState(snapshot, false);
   store.setState(next);
   return next;
@@ -127,7 +153,7 @@ export function setReducedMotion(reducedMotion: boolean): LensRenderState {
     prefersReducedMotion: reducedMotion,
   };
   store.setSnapshot(snapshot);
-  const next = computeState(snapshot, store.preferTwoD());
+  const next = computeState(snapshot, store.preferTwoD(), store.preferThreeD());
   store.setState(next);
   return next;
 }
@@ -141,7 +167,7 @@ export function setReducedMotion(reducedMotion: boolean): LensRenderState {
 export function applyProbeResult(probe: ProbeResult | null): LensRenderState {
   const snapshot: CapabilitySnapshot = { ...store.snapshot(), probe };
   store.setSnapshot(snapshot);
-  const next = computeState(snapshot, store.preferTwoD());
+  const next = computeState(snapshot, store.preferTwoD(), store.preferThreeD());
   store.setState(next);
   return next;
 }
@@ -154,9 +180,11 @@ export function applyProbeResult(probe: ProbeResult | null): LensRenderState {
 export function degradeToTwoD(reason = "auto-degraded to 2D under load"): LensRenderState {
   const current = store.state();
   if (!current.enable3D && current.mode === "2d") return current;
-  // Drop the probe so the decision stays 2D until a lens re-probes.
+  // Drop the probe and explicit 3D preference so the decision stays 2D until
+  // the user requests 3D again or a lens re-probes successfully.
   const snapshot: CapabilitySnapshot = { ...store.snapshot(), probe: null };
   store.setSnapshot(snapshot);
+  store.setPreferThreeDSignal(false);
   const next: LensRenderState = {
     ...computeState(snapshot, store.preferTwoD()),
     mode: "2d",
@@ -176,7 +204,20 @@ export function degradeToTwoD(reason = "auto-degraded to 2D under load"): LensRe
  */
 export function setPreferTwoD(prefer: boolean): LensRenderState {
   store.setPreferTwoDSignal(prefer);
-  const next = computeState(store.snapshot(), prefer);
+  if (prefer) store.setPreferThreeDSignal(false);
+  const next = computeState(store.snapshot(), prefer, store.preferThreeD());
+  store.setState(next);
+  return next;
+}
+
+/**
+ * Explicitly request 3D. This bypasses only the automatic performance probe;
+ * WebGL support and reduced-motion remain hard constraints.
+ */
+export function setPreferThreeD(): LensRenderState {
+  store.setPreferTwoDSignal(false);
+  store.setPreferThreeDSignal(true);
+  const next = computeState(store.snapshot(), false, true);
   store.setState(next);
   return next;
 }

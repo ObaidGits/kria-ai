@@ -20,6 +20,7 @@ export function ModalHost() {
           description={modal().description}
           footer={modal().footer}
           hideClose={modal().hideClose}
+          layer={modal().layer}
           onOpenChange={(next) => {
             if (!next) closeModal(modal().id);
           }}

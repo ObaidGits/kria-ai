@@ -7,9 +7,25 @@
  */
 
 .kria-voice {
+  /*
+   * Bound to the visible work area (§14, Req 11.3). The pill is LIFTED above the
+   * bottom action band so it never covers the sticky Composer, the last
+   * readable message, an approval affordance, or the primary bottom-center
+   * controls. The Composer is the primary idle task-entry control (a bordered,
+   * raised surface: primary-entry padding + textarea + controls row), so its
+   * resting height is ≈130px, and it sits above the bottom shell chrome
+   * (StatusLine/Dock), which lifts its top edge ≈200px off the viewport bottom.
+   * The reserved band is a shell-overridable custom property; its deterministic
+   * default clears that resting Composer + bottom action band so the pill floats
+   * fully above it (§14, Req 11.3). `env()` is a platform primitive (not a raw
+   * color) so token-lint permits it, and it keeps the pill off OS safe-area
+   * insets on scaled/compositor surfaces (Req 11.4).
+   */
+  --kria-voice-reserved-bottom: calc(var(--space-20) * 2 + var(--space-16));
+
   position: fixed;
   left: 50%;
-  bottom: var(--space-5);
+  bottom: calc(var(--kria-voice-reserved-bottom) + env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%);
   z-index: var(--z-floating);
 
@@ -17,9 +33,13 @@
   align-items: center;
   gap: var(--space-3);
 
-  /* Compact: sized to content, capped so it never grows into a takeover. */
+  /* Compact: sized to content, capped so it never grows into a takeover. Insets
+     are subtracted so the pill never clips under left/right OS chrome. */
   width: max-content;
-  max-width: min(520px, calc(100vw - var(--space-8)));
+  max-width: min(
+    520px,
+    calc(100vw - var(--space-8) - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px))
+  );
   padding: var(--space-2) var(--space-3);
 
   background-color: var(--color-surface-4);

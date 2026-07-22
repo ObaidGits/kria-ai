@@ -25,9 +25,15 @@
   padding-left: var(--space-4);
   padding-right: var(--space-4);
   z-index: var(--z-modal);
+  /* The transparent positioner must let empty-area clicks fall through to the
+     backdrop overlay beneath (which closes the palette); only the panel itself
+     captures pointer events. Mirrors the NotificationCenter click-through
+     pattern so backdrop dismissal works in a real browser, not only jsdom. */
+  pointer-events: none;
 }
 
 .kria-palette {
+  pointer-events: auto;
   display: flex;
   flex-direction: column;
   width: 100%;

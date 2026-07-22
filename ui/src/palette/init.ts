@@ -8,9 +8,25 @@
 import { settingsStore, shellStore } from "../stores";
 import { registerCommands, type PaletteCommand } from "./commands";
 import { registerShortcuts, DEFAULT_SHORTCUTS } from "./shortcuts";
+import { requestWindowMode } from "../windowing/modeTransitionCoordinator";
+import { setFeatureFlag } from "../featureFlags";
 
 function defaultCommands(): PaletteCommand[] {
   return [
+    {
+      // Always-reachable Home: return to the Command Center homepage from any
+      // Space. Re-enables the home surface flag and reloads so the full-screen
+      // HUD mounts (the AppShell home gate resolves at boot).
+      id: "cmd.home",
+      title: "Home — Command Center",
+      subtitle: "Return to the KRIA homepage",
+      icon: "sparkles",
+      keywords: "home homepage command center core start hud dashboard",
+      run: () => {
+        setFeatureFlag("home.command-center", true);
+        if (typeof window !== "undefined") window.location.reload();
+      },
+    },
     {
       id: "cmd.theme.toggle",
       title: "Toggle theme (dark / light)",
@@ -45,25 +61,34 @@ function defaultCommands(): PaletteCommand[] {
       run: () => shellStore.setDensity("dense"),
     },
     {
-      id: "cmd.mode.compact",
-      title: "Window mode: Compact",
-      icon: "minimize-2",
-      keywords: "window size",
-      run: () => shellStore.setWindowMode("compact"),
-    },
-    {
       id: "cmd.mode.standard",
       title: "Window mode: Standard",
       icon: "monitor",
       keywords: "window size",
-      run: () => shellStore.setWindowMode("standard"),
+      // Route through the coordinator so the switch is continuous (Core as
+      // continuity anchor) and preserves shared state (Req 13.2/13.3/13.5).
+      run: () => void requestWindowMode("standard"),
+    },
+    {
+      id: "cmd.mode.mini",
+      title: "Window mode: Mini",
+      icon: "minimize-2",
+      keywords: "window size compact",
+      run: () => void requestWindowMode("mini"),
     },
     {
       id: "cmd.mode.immersive",
       title: "Window mode: Immersive",
       icon: "maximize-2",
       keywords: "window size fullscreen",
-      run: () => shellStore.setWindowMode("immersive"),
+      run: () => void requestWindowMode("immersive"),
+    },
+    {
+      id: "cmd.mode.companion",
+      title: "Window mode: Companion",
+      icon: "message-circle",
+      keywords: "window ember floating cross-application",
+      run: () => void requestWindowMode("companion"),
     },
   ];
 }

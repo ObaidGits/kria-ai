@@ -63,7 +63,7 @@ export function Select(props: SelectProps) {
         <KSelect.Item item={itemProps.item} class="kit-menu-item">
           <KSelect.ItemLabel>{itemProps.item.rawValue.label}</KSelect.ItemLabel>
           <KSelect.ItemIndicator class="kit-menu-item__indicator">
-            <Icon name="check" size={16} />
+            <Icon name="check" size="body" />
           </KSelect.ItemIndicator>
         </KSelect.Item>
       )}
@@ -80,7 +80,7 @@ export function Select(props: SelectProps) {
           {(state) => state.selectedOption().label}
         </KSelect.Value>
         <KSelect.Icon class="kit-select__icon">
-          <Icon name="chevron-down" size={16} />
+          <Icon name="chevron-down" size="body" />
         </KSelect.Icon>
       </KSelect.Trigger>
       <Show when={local.errorMessage}>

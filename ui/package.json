@@ -25,8 +25,9 @@
     "lint:tokens": "node scripts/token-lint.mjs",
     "lint:components": "node scripts/component-concept-audit.mjs",
     "lint:expansion": "node scripts/expansion-governance-lint.mjs",
+    "lint:guardrails": "node scripts/guardrail-lint.mjs",
     "test:expansion-lint": "node --test scripts/expansion-governance-lint.test.mjs",
-    "lint:ui-consistency": "npm run lint:tokens && npm run lint:components && npm run lint:expansion",
+    "lint:ui-consistency": "npm run lint:tokens && npm run lint:components && npm run lint:expansion && npm run lint:guardrails",
     "quality:final": "npm run check && npm run lint:ui-consistency && npm run test:run && npm run build && npm run e2e",
     "quality:evidence": "npm run lint:ui-consistency; npm run test:run; npm run build; npm run e2e"
   },
@@ -59,6 +60,7 @@
     "@testing-library/jest-dom": "^6.6.3",
     "@types/dompurify": "^3.0.5",
     "@types/three": "0.169.0",
+    "fast-check": "3.23.2",
     "jsdom": "^25.0.1",
     "lucide-static": "0.544.0",
     "storybook": "10.5.0",

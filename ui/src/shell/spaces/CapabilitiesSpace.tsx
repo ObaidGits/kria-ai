@@ -104,7 +104,7 @@ function routedSegment(): CapabilitySegment {
 // ─── Space ─────────────────────────────────────────────────────────────────────
 
 export default function CapabilitiesSpace() {
-  const isCompact = createMemo(() => shellStore.windowMode() === "compact");
+  const isMini = createMemo(() => shellStore.windowMode() === "mini");
 
   // Register the descriptor Inspector body (type "capability") so selecting a
   // CapabilityRow opens it in the ONE shared Inspector (Req 1.6 / 7.2). The
@@ -149,11 +149,18 @@ export default function CapabilitiesSpace() {
 
     const capability = capabilities.find((item) => item.id === route.entityId);
     if (!capability) return;
-    shellStore.openInspector("capability", capability.id, {
-      providerId: capability.providerId ?? "",
-      capabilityId: capability.capabilityId ?? "",
-      name: capability.name,
-    });
+    // Programmatic (route/deep-link) open: hand the stable Capabilities region
+    // as the Focus_Return_Owner (§20.3/§20.4).
+    shellStore.openInspector(
+      "capability",
+      capability.id,
+      {
+        providerId: capability.providerId ?? "",
+        capabilityId: capability.capabilityId ?? "",
+        name: capability.name,
+      },
+      { regionSelector: '[data-space="capabilities"]' },
+    );
     handledEntityRoute = routeKey;
   });
 
@@ -178,7 +185,7 @@ export default function CapabilitiesSpace() {
       </header>
 
       <Show
-        when={isCompact()}
+        when={isMini()}
         fallback={
           <Tabs
             class="kria-capabilities__segments"

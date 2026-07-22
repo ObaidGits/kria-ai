@@ -1,22 +1,43 @@
-/* Global document foundation. Product surfaces own their component styles. */
+/* Global document foundation. Product surfaces own their component styles.
+   Foundation colours mirror the migrated HUD dark theme (deep-navy + cyan) so
+   the base document layer behind every surface matches the design tokens. */
 :root {
-  --bg-primary: #0d1117;
-  --bg-secondary: #161b22;
-  --bg-tertiary: #21262d;
-  --bg-hover: #30363d;
-  --text-primary: #e6edf3;
-  --text-secondary: #8b949e;
-  --text-muted: #484f58;
-  --accent: #58a6ff;
-  --accent-hover: #79c0ff;
-  --success: #3fb950;
-  --warning: #d29922;
-  --danger: #f85149;
-  --border: #30363d;
+  --bg-primary: #04070f;
+  --bg-secondary: #070d1c;
+  --bg-tertiary: #0e1830;
+  --bg-hover: #182a52;
+  --text-primary: #eaf0ff;
+  --text-secondary: #9db0da;
+  --text-muted: #5d6f9c;
+  --accent: #35e3ff;
+  --accent-hover: #6bebff;
+  --success: #43e0a0;
+  --warning: #f5b451;
+  --danger: #ff6b7f;
+  --border: rgba(120, 160, 240, 0.14);
   --radius: 8px;
   --radius-sm: 4px;
   --font-mono: var(--font-family-mono);
   --font-sans: var(--font-family-text);
+}
+
+/* App-wide themed scrollbars (Firefox + WebKit/Chromium) — subtle blue track,
+   cyan-on-hover thumb, matching the HUD. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(120, 160, 240, 0.38) transparent;
+}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(120, 160, 240, 0.34);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(53, 227, 255, 0.5);
+  background-clip: padding-box;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }

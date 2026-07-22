@@ -286,6 +286,11 @@ impl ResidencyManager {
         );
     }
 
+    /// Remove a stopped model lifecycle so authority actions cannot retain or drive it.
+    pub async fn unregister(&self, model: &str) -> bool {
+        self.inner.lock().await.models.remove(model).is_some()
+    }
+
     pub async fn state(&self, model: &str) -> Option<ResidencyState> {
         self.inner.lock().await.models.get(model).map(|e| e.state)
     }

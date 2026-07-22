@@ -118,6 +118,7 @@ pub fn metrics(ms: &MemorySystem) -> MemoryResult<Value> {
 }
 
 pub fn timeline(ms: &MemorySystem, limit: usize) -> MemoryResult<Value> {
+    ms.ensure_enabled()?;
     let entries = ms.research().timeline(limit)?;
     let out: Vec<Value> = entries
         .iter()
@@ -130,6 +131,7 @@ pub fn timeline(ms: &MemorySystem, limit: usize) -> MemoryResult<Value> {
 }
 
 pub fn goals(ms: &MemorySystem, limit: usize) -> MemoryResult<Value> {
+    ms.ensure_enabled()?;
     let gs = ms.goals().active_goals(limit)?;
     let out: Vec<Value> = gs
         .iter()
@@ -142,6 +144,7 @@ pub fn goals(ms: &MemorySystem, limit: usize) -> MemoryResult<Value> {
 }
 
 pub fn plans(ms: &MemorySystem) -> MemoryResult<Value> {
+    ms.ensure_enabled()?;
     let a = ms.plans().analytics()?;
     Ok(json!({
         "distinct_plans": a.distinct_plans,
@@ -151,6 +154,7 @@ pub fn plans(ms: &MemorySystem) -> MemoryResult<Value> {
 }
 
 pub fn reasoning(ms: &MemorySystem) -> MemoryResult<Value> {
+    ms.ensure_enabled()?;
     let a = ms.reasoning().analytics()?;
     Ok(json!({
         "chains": a.chains,
@@ -163,6 +167,7 @@ pub fn reasoning(ms: &MemorySystem) -> MemoryResult<Value> {
 }
 
 pub fn research(ms: &MemorySystem) -> MemoryResult<Value> {
+    ms.ensure_enabled()?;
     let m = ms.research().meta()?;
     Ok(json!({
         "active": m.active,
@@ -174,6 +179,7 @@ pub fn research(ms: &MemorySystem) -> MemoryResult<Value> {
 }
 
 pub fn graph(ms: &MemorySystem, limit: usize) -> MemoryResult<Value> {
+    ms.ensure_enabled()?;
     let hits = ms.graph_intelligence().degree_centrality(limit)?;
     let out: Vec<Value> = hits
         .iter()
@@ -185,6 +191,7 @@ pub fn graph(ms: &MemorySystem, limit: usize) -> MemoryResult<Value> {
 }
 
 pub fn library(ms: &MemorySystem) -> MemoryResult<Value> {
+    ms.ensure_enabled()?;
     let items = ms.library().list_items()?;
     let out: Vec<Value> = items
         .iter()

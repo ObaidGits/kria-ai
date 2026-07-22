@@ -427,7 +427,7 @@ fn mutate_selection_config(
     Ok((config, provider, changed))
 }
 
-async fn start_local_orchestrator(
+pub(super) async fn start_local_orchestrator(
     state: &AppState,
     config: &KriaConfig,
     provider: &ProviderConfig,
@@ -476,7 +476,9 @@ async fn restore_previous_runtime(
         .cloned()
         .ok_or_else(|| "Previous provider is missing; rollback cannot continue".to_string())?;
 
-    if previous_provider.provider_type == ProviderType::LlamaCpp {
+    if previous_provider.provider_type == ProviderType::LlamaCpp
+        && previous_config.orchestrator.enabled
+    {
         publish_apply_status(
             state,
             app,
@@ -493,7 +495,8 @@ async fn restore_previous_runtime(
         state
             .model_router
             .attach_server_manager(rollback_orchestrator.server_manager.clone());
-        *state.orchestrator.write().await = Some(rollback_orchestrator);
+        *state.orchestrator.write().await = Some(rollback_orchestrator.clone());
+        super::feature_controls::start_orchestrator_tasks(state, app, rollback_orchestrator).await;
     } else {
         state
             .model_router
@@ -517,6 +520,7 @@ async fn apply_provider_selection(
         .llm_runtime_apply_lock
         .try_lock()
         .map_err(|_| "Another model/provider switch is already in progress".to_string())?;
+    let lifecycle_guard = state.feature_controls.lifecycle_guard().await;
 
     if state.orchestrator_active_turns.load(Ordering::SeqCst) > 0 {
         return Err(
@@ -555,6 +559,7 @@ async fn apply_provider_selection(
             .await
     };
 
+    drop(lifecycle_guard);
     drop(apply_guard);
 
     if let Err(error) = result {
@@ -639,6 +644,7 @@ async fn apply_external_provider_selection(
     *state.config.write().await = desired_config;
     state.model_router.sync_active_provider(&provider).await;
 
+    super::feature_controls::stop_orchestrator_tasks(state).await;
     if let Some(orchestrator) = state.orchestrator.write().await.take() {
         publish_apply_status(
             state,
@@ -678,6 +684,39 @@ async fn apply_local_runtime_selection(
 ) -> Result<(), String> {
     let _validated_runtime = prepare_local_runtime(state, &desired_config, &provider)?;
 
+    if !desired_config.orchestrator.enabled {
+        publish_apply_status(
+            state,
+            app,
+            "switching",
+            "disabling_local_runtime",
+            Some(provider.id.clone()),
+            Some(provider.active_model.clone()),
+            "Saving local model selection without starting the disabled orchestrator",
+            None,
+        )
+        .await;
+        super::feature_controls::stop_orchestrator_tasks(state).await;
+        if let Some(existing) = state.orchestrator.write().await.take() {
+            existing.shutdown().await;
+        }
+        desired_config.save().map_err(|error| error.to_string())?;
+        *state.config.write().await = desired_config;
+        state.model_router.sync_active_provider(&provider).await;
+        publish_apply_status(
+            state,
+            app,
+            "ready",
+            "disabled",
+            Some(provider.id),
+            Some(provider.active_model),
+            "Local model selected; model orchestrator remains disabled",
+            None,
+        )
+        .await;
+        return Ok(());
+    }
+
     publish_apply_status(
         state,
         app,
@@ -690,6 +729,7 @@ async fn apply_local_runtime_selection(
     )
     .await;
 
+    super::feature_controls::stop_orchestrator_tasks(state).await;
     if let Some(existing) = state.orchestrator.write().await.take() {
         existing.shutdown().await;
     }
@@ -712,7 +752,8 @@ async fn apply_local_runtime_selection(
                 .model_router
                 .attach_server_manager(orchestrator.server_manager.clone());
             state.model_router.sync_active_provider(&provider).await;
-            *state.orchestrator.write().await = Some(orchestrator);
+            *state.orchestrator.write().await = Some(orchestrator.clone());
+            super::feature_controls::start_orchestrator_tasks(state, app, orchestrator).await;
             desired_config.save().map_err(|error| error.to_string())?;
             *state.config.write().await = desired_config;
 

@@ -26,12 +26,16 @@ pub struct KriaConfig {
     pub voice: VoiceConfig,
     pub classifier: ClassifierConfig,
     pub memory: MemoryConfig,
+    pub gui_cognition: GuiCognitionConfig,
     pub safety: SafetyConfig,
     pub agent: AgentConfig,
     pub server: ServerConfig,
     pub ui: UiConfig,
     pub search: SearchConfig,
     pub mcp: McpConfig,
+    /// Native tool visibility controls. Definitions stay registered so hot
+    /// re-enable is instant; disabled entries are hidden and non-executable.
+    pub tools: ToolControlsConfig,
     pub telegram: TelegramConfig,
     pub hardware: HardwareConfig,
     pub orchestrator: OrchestratorConfig,
@@ -289,6 +293,8 @@ pub struct ClassifierConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MemoryConfig {
+    /// Master control for persistent memory and retrieval.
+    pub enabled: bool,
     // Legacy runtime/read-model limits retained for existing consumers.
     pub max_context_turns: usize,
     pub max_facts: usize,
@@ -315,6 +321,38 @@ impl Default for MemoryModesConfig {
     fn default() -> Self {
         Self {
             default: "permanent".to_string(),
+        }
+    }
+}
+
+/// GUI cognition feature control.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GuiCognitionConfig {
+    pub enabled: bool,
+}
+
+impl Default for GuiCognitionConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+/// Master/group/per-tool controls for native tools.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ToolControlsConfig {
+    pub enabled: bool,
+    pub disabled_groups: Vec<String>,
+    pub disabled_tools: Vec<String>,
+}
+
+impl Default for ToolControlsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            disabled_groups: Vec::new(),
+            disabled_tools: Vec::new(),
         }
     }
 }
@@ -403,10 +441,21 @@ impl Default for TelegramConfig {
 }
 
 /// MCP (Model Context Protocol) configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct McpConfig {
+    /// Master control for all MCP integrations.
+    pub enabled: bool,
     pub servers: Vec<McpServerConfig>,
+}
+
+impl Default for McpConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            servers: Vec::new(),
+        }
+    }
 }
 
 /// Configuration for a single MCP server.
@@ -1234,6 +1283,7 @@ impl Default for ClassifierConfig {
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             max_context_turns: 20,
             max_facts: 1000,
             decay_threshold: 0.05,
@@ -1434,7 +1484,8 @@ pub fn load_config(
         if p.exists() {
             let text = std::fs::read_to_string(p)?;
             let user: KriaConfig = toml::from_str(&text)?;
-            merge_config(&mut config, &user);
+            let user_document: toml::Value = toml::from_str(&text)?;
+            merge_config(&mut config, &user, &user_document);
         }
     }
 
@@ -1813,7 +1864,36 @@ fn sync_legacy_llm_from_active_provider(config: &mut KriaConfig) {
     }
 }
 
-fn merge_config(base: &mut KriaConfig, user: &KriaConfig) {
+fn merge_config(base: &mut KriaConfig, user: &KriaConfig, user_document: &toml::Value) {
+    // Presence-aware merge for booleans whose default is true. Comparing the
+    // typed value to its default would lose an explicit user `true` when the
+    // lower layer is `false`; inspecting the source document preserves both
+    // directions while omitted fields continue to inherit the lower layer.
+    if user_document
+        .get("mcp")
+        .and_then(|section| section.get("enabled"))
+        .is_some()
+    {
+        base.mcp.enabled = user.mcp.enabled;
+    }
+    if user_document
+        .get("memory")
+        .and_then(|section| section.get("enabled"))
+        .is_some()
+    {
+        base.memory.enabled = user.memory.enabled;
+    }
+    if user_document
+        .get("gui_cognition")
+        .and_then(|section| section.get("enabled"))
+        .is_some()
+    {
+        base.gui_cognition.enabled = user.gui_cognition.enabled;
+    }
+    if user_document.get("tools").is_some() {
+        base.tools = user.tools.clone();
+    }
+
     if !user.llm.active_model.is_empty() {
         base.llm.active_model = user.llm.active_model.clone();
     }

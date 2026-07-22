@@ -258,7 +258,7 @@ pub fn field_meta(section: &str, field: &str) -> FieldMeta {
         // ── Voice (YELLOW, per-session) ────────────────────────────────────
         ("voice", "enabled") => FieldMeta {
             risk: RiskLevel::Yellow,
-            hot_reload: false,
+            hot_reload: true,
             effect_kind: EffectKind::None,
             prompt_changeable: true,
             temp_overridable: false,
@@ -377,7 +377,7 @@ pub fn field_meta(section: &str, field: &str) -> FieldMeta {
         },
         ("remote_desktop", "enabled") => FieldMeta {
             risk: RiskLevel::Red,
-            hot_reload: false,
+            hot_reload: true,
             effect_kind: EffectKind::None,
             prompt_changeable: true, // HITL-gated at RED
             temp_overridable: false,
@@ -387,7 +387,7 @@ pub fn field_meta(section: &str, field: &str) -> FieldMeta {
         },
         ("mobile", "enabled") => FieldMeta {
             risk: RiskLevel::Red,
-            hot_reload: false,
+            hot_reload: true,
             effect_kind: EffectKind::None,
             prompt_changeable: true, // HITL-gated at RED
             temp_overridable: false,
@@ -426,6 +426,30 @@ pub fn field_meta(section: &str, field: &str) -> FieldMeta {
                 "planning",
                 "evidence",
             ],
+            requires_backend: None,
+        },
+
+        // ── Hot feature controls (YELLOW, live) ────────────────────────────
+        ("mcp", "enabled")
+        | ("memory", "enabled")
+        | ("gui_cognition", "enabled")
+        | ("tools", "enabled")
+        | ("n8n", "enabled")
+        | ("openclaw", "enabled")
+        | ("telegram", "enabled")
+        | ("colab", "enabled")
+        | ("executive", "enabled")
+        | ("orchestrator", "enabled")
+        | ("classifier", "enabled")
+        | ("capability", "enabled")
+        | ("ntfy", "enabled") => FieldMeta {
+            risk: RiskLevel::Yellow,
+            hot_reload: true,
+            effect_kind: EffectKind::None,
+            prompt_changeable: true,
+            temp_overridable: false,
+            valid_values: Some(&["true", "false"]),
+            synonyms: &["feature control", "enable feature", "disable feature"],
             requires_backend: None,
         },
 
@@ -868,6 +892,23 @@ mod tests {
         }
         // Non-functional + secret stay locked.
         assert!(!field_meta("memory", "embedding_dim").prompt_changeable);
+    }
+
+    #[test]
+    fn hot_feature_controls_are_yellow_and_restart_free() {
+        let schema = full_schema_json();
+        for (section, field) in [
+            ("mcp", "enabled"),
+            ("memory", "enabled"),
+            ("gui_cognition", "enabled"),
+        ] {
+            let meta = field_meta(section, field);
+            assert_eq!(meta.risk, RiskLevel::Yellow);
+            assert!(meta.hot_reload);
+            assert!(meta.prompt_changeable);
+            assert_eq!(meta.valid_values, Some(&["true", "false"][..]));
+            assert_eq!(schema[section][field]["restart_required"], false);
+        }
     }
 
     #[test]

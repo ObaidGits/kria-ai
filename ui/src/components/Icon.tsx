@@ -18,18 +18,47 @@ import { splitProps, type JSX } from "solid-js";
 
 const SPRITE_URL = "/icons/lucide-sprite.svg";
 
+/**
+ * Named icon sizes tied to the type scale (tokens.generated.css / type.json),
+ * so explicit sizes reference a documented role instead of an ad-hoc pixel
+ * value (design.md §13; task 13.3). Prefer these — or the default 1em, which
+ * inherits the surrounding control's tokenized font-size — over raw numbers.
+ */
+export type IconSizeRole = "micro" | "caption" | "body" | "heading" | "title" | "display";
+
+const SIZE_ROLE_TOKENS: Record<IconSizeRole, string> = {
+  micro: "var(--font-size-micro)",
+  caption: "var(--font-size-caption)",
+  body: "var(--font-size-body)",
+  heading: "var(--font-size-heading)",
+  title: "var(--font-size-title)",
+  display: "var(--font-size-display)",
+};
+
 export interface IconProps extends JSX.SvgSVGAttributes<SVGSVGElement> {
   /** Lucide icon id (kebab-case) present in the sprite. */
   name: string;
-  /** Size in px or any CSS length. Defaults to "1em" (scales with text). */
-  size?: number | string;
+  /**
+   * Icon size. Prefer a type-scale role ("caption" | "body" | "heading" | …)
+   * so the size maps to the token scale; a number is treated as px and any
+   * other CSS length is passed through. Defaults to "1em" (scales with the
+   * surrounding text / control font-size).
+   */
+  size?: number | IconSizeRole | (string & {});
   /** Accessible name. When omitted the icon is aria-hidden (decorative). */
   title?: string;
 }
 
+function resolveSize(size: IconProps["size"]): string {
+  if (size == null) return "1em";
+  if (typeof size === "number") return `${size}px`;
+  if (size in SIZE_ROLE_TOKENS) return SIZE_ROLE_TOKENS[size as IconSizeRole];
+  return size;
+}
+
 export function Icon(props: IconProps) {
   const [local, rest] = splitProps(props, ["name", "size", "title", "class"]);
-  const size = () => (local.size == null ? "1em" : typeof local.size === "number" ? `${local.size}px` : local.size);
+  const size = () => resolveSize(local.size);
 
   return (
     <svg

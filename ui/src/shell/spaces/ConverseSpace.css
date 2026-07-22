@@ -20,39 +20,154 @@
  */
 
 .kria-converse {
+  /* One focal-width contract is shared by MessageStream and Composer. Visible
+     secondary lanes contribute offsets; released lanes contribute nothing. */
+  --kria-conversation-reading-measure: 720px;
+  --kria-conversation-inline-gutter: var(--space-3);
+  --kria-threads-lane-width: clamp(180px, 16vw, 240px);
+  --kria-work-lane-width: clamp(280px, 26vw, 360px);
+  --kria-context-lane-width: clamp(240px, 22vw, 320px);
+  --kria-converse-leading-lanes: 0px;
+  --kria-converse-trailing-lanes: 0px;
   position: relative;
   display: grid;
+  grid-template-areas:
+    "lanes"
+    "composer";
   grid-template-rows: minmax(0, 1fr) auto;
   height: 100%;
+  min-width: 0;
   min-height: 0;
   gap: 0;
-  /* The Space router already pads; the Converse Space manages its own edges. */
-  margin: calc(-1 * var(--space-6));
+  /* Shell owns active inset and inverse fill for every Window Mode. Converse
+     consumes fill without assuming Standard's router-padding token. */
+  margin: var(--kria-active-space-fill);
 }
 
-/* Conversation actions share toolbar flow so controls never overlap. */
-.kria-converse__toolbar-actions,
-.kria-converse__rail-toggle {
+/* Width Profiles tune only intentional whitespace. Lane admission remains the
+ * deterministic composition signal; reading text never stretches edge-to-edge. */
+.kria-converse[data-width-profile="focus"] {
+  --kria-conversation-inline-gutter: var(--space-3);
+}
+
+.kria-converse[data-width-profile="dual"],
+.kria-converse[data-width-profile="assisted"] {
+  --kria-conversation-inline-gutter: var(--space-4);
+}
+
+.kria-converse[data-width-profile="full"] {
+  --kria-conversation-inline-gutter: var(--space-6);
+}
+
+/* Immersive intentionally permits a wider canvas and Work lane while retaining
+ * hard caps. Shared lane variable keeps Composer alignment exact. */
+.kria-converse[data-window-mode="immersive"] {
+  --kria-conversation-reading-measure: 880px;
+  --kria-work-lane-width: clamp(320px, 30vw, 480px);
+}
+
+/* Composer background spans the workspace, but its interactive measure centers
+ * in the same actual focal lane as MessageStream. Hidden lanes have no offset. */
+.kria-converse:has(> .kria-converse__lanes > .kria-converse__threads) {
+  --kria-converse-leading-lanes: var(--kria-threads-lane-width);
+}
+
+.kria-converse:has(> .kria-converse__lanes > .kria-converse__work) {
+  --kria-converse-trailing-lanes: var(--kria-work-lane-width);
+}
+
+.kria-converse:has(> .kria-converse__lanes > .kria-converse__context):not(:has(> .kria-converse__lanes > .kria-converse__work)) {
+  --kria-converse-trailing-lanes: var(--kria-context-lane-width);
+}
+
+.kria-converse:has(> .kria-converse__lanes > .kria-converse__work):has(> .kria-converse__lanes > .kria-converse__context) {
+  --kria-converse-trailing-lanes: calc(var(--kria-work-lane-width) + var(--kria-context-lane-width));
+}
+
+/* Conversation actions share one toolbar row. `flex-wrap: nowrap` is explicit:
+ * profile adaptation (task 8.6, UIE-M-002) collapses secondary actions into the
+ * labelled OverflowControl rather than wrapping, so toolbar height stays stable
+ * (uncontrolled multi-line wrap is the rejected alternative). */
+.kria-converse__toolbar-actions {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-}
-
-.kria-converse__toolbar-actions {
   flex: 0 0 auto;
+  flex-wrap: nowrap;
 }
 
 /* ── Lanes row ───────────────────────────────────────────────────────────── */
 .kria-converse__lanes {
+  grid-area: lanes;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-areas: "conversation";
+  grid-template-columns: minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
 }
 
+/* Each template contains only rendered lanes. Conversation is always the sole
+ * flexible track; absent secondary lanes create neither a placeholder nor a
+ * zero-width track. Source, visual, and keyboard order remain aligned. */
+.kria-converse__lanes:has(> .kria-converse__threads):not(:has(> .kria-converse__work)):not(:has(> .kria-converse__context)) {
+  grid-template-areas: "threads conversation";
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.kria-converse__lanes:has(> .kria-converse__work):not(:has(> .kria-converse__threads)):not(:has(> .kria-converse__context)) {
+  grid-template-areas: "conversation work";
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.kria-converse__lanes:has(> .kria-converse__context):not(:has(> .kria-converse__threads)):not(:has(> .kria-converse__work)) {
+  grid-template-areas: "conversation context";
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.kria-converse__lanes:has(> .kria-converse__threads):has(> .kria-converse__work):not(:has(> .kria-converse__context)) {
+  grid-template-areas: "threads conversation work";
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.kria-converse__lanes:has(> .kria-converse__threads):has(> .kria-converse__context):not(:has(> .kria-converse__work)) {
+  grid-template-areas: "threads conversation context";
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.kria-converse__lanes:has(> .kria-converse__work):has(> .kria-converse__context):not(:has(> .kria-converse__threads)) {
+  grid-template-areas: "conversation work context";
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.kria-converse__lanes:has(> .kria-converse__threads):has(> .kria-converse__work):has(> .kria-converse__context) {
+  grid-template-areas: "threads conversation work context";
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+}
+
+/* Semantic area names match the component's inline placement contract. Named
+ * templates own track occupancy; hidden lanes never require numeric slots. */
+.kria-converse__threads { grid-area: threads; }
+.kria-converse__conversation { grid-area: conversation; }
+.kria-converse__work { grid-area: work; }
+.kria-converse__context { grid-area: context; }
+
+/*
+ * SCROLL OWNERSHIP within Converse (design.md §21 UIE-M-005; Req 10.4–10.5).
+ * Converse owns ALL of its vertical scroll internally, so the shell router does
+ * not double-own it (AppShell.css `.kria-space-router[data-active-space="converse"]
+ * { overflow-y:hidden }`). One primary Y owner per region:
+ *   • `.kria-stream__viewport` → the single conversation Y owner (virtualized).
+ *   • `.kria-converse__threads` / `__work` / `__context` → independent bounded
+ *     lane Y owners (`overflow-y:auto`) — semantically required independent
+ *     reading; DO NOT remove.
+ *   • WorkBlock code (`overflow-x:auto`) + run-log (`max-height:160px;
+ *     overflow-y:auto`) → bounded nested scroll, semantically required; keep.
+ * Full matrix: evidence/task-9.1-scroll-place-inventory.md §1 + task-9.2-*.
+ */
+
 /* ── ThreadSidebar[C] (collapsible, secondary) ───────────────────────────── */
 .kria-converse__threads {
-  width: clamp(180px, 16vw, 240px);
+  width: var(--kria-threads-lane-width);
   min-width: 0;
   border-right: 1px solid var(--color-border-default);
   background: var(--color-surface-1);
@@ -74,6 +189,10 @@
 
 /* ── ConversationLane[focal, dominant] ───────────────────────────────────── */
 .kria-converse__conversation {
+  /* Positioning context for the Reading Mode depth-recession backdrop (task
+     8.4): the receded Room sits at z-index:-1 behind the in-flow content in the
+     SAME space (design §11.1 — recession, not a page swap). */
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -128,9 +247,41 @@
   color: var(--color-text-primary);
 }
 
+/* ── Reading Mode reading column (task 8.4, Req 11.2) ─────────────────────────
+   While reading, the conversation column carries a NEAR-SOLID backing so text
+   legibility is never sacrificed for atmosphere. The backing is token-driven
+   (`--reading-backing`) and meets WCAG AA (>=4.5) for body/caption text over
+   the hard-dimmed, receded Room (contrast property-tested in readingMode's
+   contrast test). `position: relative` lifts the stream above the z-index:-1
+   receded-Room backdrop; the toolbar keeps its own opaque-enough surface. The
+   backing eases in over the recede duration and is instant under reduced
+   motion (settle motion, Req 11.2). */
+.kria-converse__stream[data-reading="true"] {
+  position: relative;
+  z-index: 0;
+  background: var(--reading-backing);
+  transition: background var(--motion-duration-recede) var(--motion-easing-presence);
+}
+
+.kria-converse__conversation[data-reading="true"] .kria-converse__conversation-toolbar {
+  position: relative;
+  z-index: 0;
+}
+
+[data-reduced-motion="on"] .kria-converse__stream[data-reading="true"] {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kria-converse__stream[data-reading="true"] {
+    transition: none;
+  }
+}
+
 .kria-converse__stream-inner {
-  width: min(720px, 100%);
-  margin: 0 auto;
+  width: calc(100% - var(--kria-conversation-inline-gutter) - var(--kria-conversation-inline-gutter));
+  max-width: var(--kria-conversation-reading-measure);
+  margin-inline: auto;
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
@@ -138,7 +289,7 @@
 
 /* ── WorkLane[C/adaptive] (revealed on work activity — Req 4.2) ───────────── */
 .kria-converse__work {
-  width: clamp(280px, 26vw, 360px);
+  width: var(--kria-work-lane-width);
   min-width: 0;
   border-left: 1px solid var(--color-border-default);
   background: var(--color-surface-2);
@@ -164,7 +315,7 @@
 
 /* ── ContextRail[C] (on-demand — Req 4.1) ────────────────────────────────── */
 .kria-converse__context {
-  width: clamp(240px, 22vw, 320px);
+  width: var(--kria-context-lane-width);
   min-width: 0;
   border-left: 1px solid var(--color-border-default);
   background: var(--color-surface-2);
@@ -179,23 +330,134 @@
   animation: kria-lane-in var(--motion-duration-base) var(--motion-easing-entrance);
 }
 
+/* ── ContextRail item (Task 10.4 / UIE-M-011): type + optional source/use/detail.
+ *    Reuses the existing card/item pattern; enrichment fields are omitted (not
+ *    rendered) when a writer hasn't provided them. ────────────────────────── */
+.kria-converse__context-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-1);
+}
+
+/* Linked variant (Task 10.5): a `memory` item that deep-links to the shared
+ * Memory Inspector renders as a real keyboard-operable button. Reset native
+ * button chrome and inherit the item layout; add affordance + focus ring so it
+ * reads as an actionable, keyboard-reachable control (never a click-only div). */
+.kria-converse__context-item--link {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+  appearance: none;
+}
+
+.kria-converse__context-item--link:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface-2);
+}
+
+.kria-converse__context-item--link:focus-visible {
+  outline: 2px solid var(--color-accent-default);
+  outline-offset: 2px;
+}
+
+.kria-converse__context-item-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.kria-converse__context-item-icon {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+}
+
+.kria-converse__context-item-type {
+  font-size: var(--font-size-micro);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+
+/* Available-vs-used badge — distinguished by TEXT (never colour alone, Req 17.3);
+ * the "used" state additionally gets an accent tint as a redundant cue. */
+.kria-converse__context-item-use {
+  margin-inline-start: auto;
+  flex: 0 0 auto;
+  padding-inline: var(--space-2);
+  padding-block: var(--space-1);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-micro);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+}
+
+.kria-converse__context-item-use[data-use="used"] {
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-soft);
+  color: var(--color-text-primary);
+}
+
+/* Truncation is owned by the shared `.kria-bounded*` utility (task 10.7,
+ * styles/bounded-text.css) applied in markup — these rules keep only the
+ * surface-specific typography/colour so long values clamp consistently across
+ * every Task-10 surface without duplicating the clamp declarations. */
+.kria-converse__context-item-label {
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+}
+
+.kria-converse__context-item-meta {
+  display: flex;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--color-text-secondary);
+}
+
+.kria-converse__context-item-meta-key {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+}
+
+.kria-converse__context-item-meta-value {
+  color: var(--color-text-secondary);
+}
+
+.kria-converse__context-item-detail {
+  color: var(--color-text-secondary);
+}
+
 /* ── Composer[sticky] (Req 4.4 — never covers the last message) ──────────── */
 /* The Composer lives in its own grid row, so it is always visible and can
  * NEVER overlap the scrollable message stream above it. `position: sticky`
  * pins it as belt-and-braces when the Space itself scrolls. */
 .kria-converse__composer {
+  grid-area: composer;
   position: sticky;
   bottom: 0;
+  min-width: 0;
   border-top: 1px solid var(--color-border-default);
   background: var(--color-surface-3);
   backdrop-filter: blur(var(--blur-floating));
-  padding: var(--space-3) var(--space-6);
+  padding-block: var(--space-3);
+  padding-inline-start: calc(var(--kria-converse-leading-lanes) + var(--kria-conversation-inline-gutter));
+  padding-inline-end: calc(var(--kria-converse-trailing-lanes) + var(--kria-conversation-inline-gutter));
   z-index: var(--z-panel);
 }
 
 .kria-converse__composer-inner {
-  width: min(720px, 100%);
-  margin: 0 auto;
+  width: 100%;
+  max-width: var(--kria-conversation-reading-measure);
+  margin-inline: auto;
 }
 
 .kria-converse__composer-placeholder {
@@ -220,17 +482,12 @@
 }
 
 @keyframes kria-lane-in {
-  from { opacity: 0; transform: translateX(8px); }
-  to { opacity: 1; transform: translateX(0); }
-}
-
-/* ── Window-mode curation (Req 15.2 degrade-by-curation) ─────────────────── */
-/* Compact drops the secondary lanes entirely (the component also refuses to
- * render them). Belt-and-braces so no track leaks in. */
-.kria-shell[data-window-mode="compact"] .kria-converse__threads,
-.kria-shell[data-window-mode="compact"] .kria-converse__work,
-.kria-shell[data-window-mode="compact"] .kria-converse__context {
-  display: none;
+  /* Enter on the Y axis: a trailing lane translated on X would extend the
+   * clipped lanes grid's horizontal scroll area during the entrance (a
+   * transient, invisible horizontal overflow). A vertical rise + fade keeps
+   * the motion compositor-cheap without touching horizontal shell overflow. */
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 /* ── Reduced motion (Req 16.3/16.4): freeze lane reveal motion. ──────────── */

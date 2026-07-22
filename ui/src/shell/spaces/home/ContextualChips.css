@@ -1,0 +1,96 @@
+/**
+ * ContextualChips — ≤3 next-action affordances beneath the Composer
+ * (design.md §2/§6.3, Requirement 5).
+ *
+ * Token-only (Req 16.2 — zero raw color). A single calm row of living-glass
+ * chips beneath the Composer; they wrap on narrow widths (design §2 responsive:
+ * chips wrap to ≤2). Each chip carries an icon + text label (Req 5.4).
+ *
+ * The only motion is a token-driven hover lift (design §11.2 "chip lift on
+ * hover"); under reduced motion / the global kill-switch it is frozen (Req
+ * 17.4 / 21.4). The emerald accent appears ONLY on hover/focus (a meaningful,
+ * earn-the-accent affordance — L4); the resting chip carries no accent fill.
+ * This file styles `.kria-chip*` only — it never touches the Room base, so it
+ * stays clear of the accent-on-room-base guardrail.
+ */
+
+.kria-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  width: 100%;
+  max-width: 32rem;
+  margin: 0 auto;
+}
+
+.kria-chip {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-full);
+  background-color: var(--glass-fill-rest);
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
+  font-family: var(--font-family-text);
+  font-size: var(--font-size-body);
+  line-height: 1.2;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  /* Chip lift on hover (design §11.2) — opacity/transform only, GPU-cheap. */
+  transition:
+    transform var(--motion-duration-fast) var(--motion-easing-standard),
+    background-color var(--motion-duration-fast) var(--motion-easing-standard),
+    border-color var(--motion-duration-fast) var(--motion-easing-standard),
+    color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.kria-chip__icon {
+  flex: none;
+  color: var(--color-text-muted);
+}
+
+.kria-chip__label {
+  white-space: nowrap;
+}
+
+.kria-chip:hover {
+  transform: translateY(-1px);
+  background-color: var(--glass-fill-active);
+  border-color: var(--color-accent-border);
+  color: var(--color-text-primary);
+}
+
+.kria-chip:hover .kria-chip__icon {
+  color: var(--color-accent-text);
+}
+
+.kria-chip:focus-visible {
+  outline: 2px solid var(--color-accent-border);
+  outline-offset: var(--space-1);
+  color: var(--color-text-primary);
+}
+
+/* ── Reduced-motion / kill-switch (Req 17.4 / 21.4): freeze the lift. Tint
+      changes remain (they carry meaning, not motion), but no transform. ── */
+.kria-chips[data-motion="static"] .kria-chip {
+  transition: none;
+}
+
+.kria-chips[data-motion="static"] .kria-chip:hover {
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kria-chip {
+    transition: none;
+  }
+  .kria-chip:hover {
+    transform: none;
+  }
+}

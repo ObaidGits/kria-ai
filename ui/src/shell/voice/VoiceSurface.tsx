@@ -50,9 +50,10 @@
  *
  * Requirements: 12.1
  */
-import { createMemo, createSignal, Show } from "solid-js";
+import { createMemo, createSignal, onCleanup, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 import { voiceStore, coreStore } from "../../stores";
+import { registerOverlaySurface } from "../overlayLayers";
 import type { VoiceUiState } from "../../stores/voiceStore";
 import type { CoreState } from "../../stores/coreStore";
 import { CorePresence } from "../../components/CorePresence";
@@ -142,6 +143,31 @@ export function VoiceSurface(props: VoiceSurfaceProps) {
   // demand so the surface stays compact until the user asks to test.
   const [showWakeTest, setShowWakeTest] = createSignal(false);
 
+  // Non-blocking floating surface: yields interaction priority to a pending
+  // approval/modal by becoming inert while one is up (§20.3, Req 11.13/12.12).
+  let surfaceEl: HTMLElement | undefined;
+  let unregisterSurface: (() => void) | undefined;
+  const bindSurface = (el: HTMLElement) => {
+    surfaceEl = el;
+    unregisterSurface?.();
+    unregisterSurface = registerOverlaySurface(el, "floating");
+  };
+  onCleanup(() => unregisterSurface?.());
+
+  // Escape — INTERNAL, non-modal dismiss (§20.3, Req 12.1/12.5). Mirrors the
+  // non-modal Inspector pattern: only act when focus is WITHIN this surface, and
+  // `stopPropagation()` (NOT `preventDefault`) so it stays one-layer and never
+  // fights the global Escape when focus is elsewhere. Voice does NOT trap focus,
+  // and Escape from OUTSIDE the surface is not its concern (the handler is scoped
+  // to the surface subtree, and the containment guard makes that explicit).
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (event.key !== "Escape") return;
+    const target = event.target as Node | null;
+    if (!surfaceEl || !target || !surfaceEl.contains(target)) return;
+    event.stopPropagation();
+    stop();
+  };
+
   // Keep the global Core in sync as a fallback: if voice ever became active
   // without the bus having driven the Core, the Core still reads its own store.
   // (No mutation here — reflection only, per the read-model invariant.)
@@ -151,11 +177,13 @@ export function VoiceSurface(props: VoiceSurfaceProps) {
     <Show when={active()}>
       <Portal>
         <section
+          ref={bindSurface}
           class="kria-voice"
           data-variant="compact"
           data-voice-phase={phase()}
           role="region"
           aria-label="Voice"
+          onKeyDown={onKeyDown}
         >
           {/* Core + phase label — the state, expressed through the Core. */}
           <div class="kria-voice__core">

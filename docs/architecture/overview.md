@@ -170,6 +170,12 @@ Desktop GUI with SolidJS frontend. Exposes kria-core via Tauri commands.
 | `tray/` | System tray icon and menu |
 | `updater/` | Auto-update mechanism |
 
+The SolidJS frontend (`ui/`) includes the **presence homepage** — a
+presentation + pure read-model layer over existing commands/events/stores,
+shipped behind `home.presence.v2`. It adds no backend capability and cannot
+bypass planning, policy, HITL, or audit. See
+`presence-homepage-runtime.md`.
+
 ### `kria-server` — HTTP/WebSocket Server
 
 Optional headless server mode for remote access.
@@ -382,6 +388,7 @@ The architecture is designed to scale to:
 - **`safety-hitl-runtime.md`** — Safety model, policy engine, HITL, and audit
 - **`core-runtime.md`** — Core runtime, memory, verification, recovery, operational cognition, and result synthesis
 - **`gui-cognition-runtime.md`** — Semantic GUI workflow intelligence, substrates, verifier authority, and live GUI limitations
+- **`presence-homepage-runtime.md`** — Presence homepage: Room, Core, Focus engine (read-model), navigation, view modes, and 2D/3D render split
 - **`llm-orchestrator-runtime.md`** — Model routing and LLM/tool orchestration authority boundaries
 - **`../operations/hardware.md`** — Hardware lease/orchestration behavior
 - **`../operations/development.md`** — Development workflow and engineering contracts

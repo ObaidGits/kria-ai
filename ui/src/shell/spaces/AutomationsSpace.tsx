@@ -74,7 +74,7 @@ export default function AutomationsSpace() {
   // owns selection + arrow-key nav (Kobalte); each switch re-routes below,
   // keeping the route the single address for the active segment. (Uncontrolled-
   // seeded-from-route — the Kobalte controlled-tabs limitation noted in 6.1.)
-  const isCompact = createMemo(() => shellStore.windowMode() === "compact");
+  const isMini = createMemo(() => shellStore.windowMode() === "mini");
 
   // Mirror the routed segment into the store so downstream Run/Build/Schedule
   // tasks (7.2–7.4) read a single source of truth.
@@ -101,7 +101,7 @@ export default function AutomationsSpace() {
       </header>
 
       <Show
-        when={isCompact()}
+        when={isMini()}
         fallback={
           <Tabs
             class="kria-automations__segments"

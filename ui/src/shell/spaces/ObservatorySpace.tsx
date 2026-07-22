@@ -31,7 +31,7 @@ function routedSegment(): ObservatorySegment {
 }
 
 export default function ObservatorySpace() {
-  const isCompact = createMemo(() => shellStore.windowMode() === "compact");
+  const isMini = createMemo(() => shellStore.windowMode() === "mini");
   createEffect(() => observatoryStore.setActiveSegment(routedSegment()));
   onMount(() => {
     void observatoryStore.loadExecutiveSnapshot();
@@ -69,7 +69,7 @@ export default function ObservatorySpace() {
         <p>KRIA system state, history, and bounded diagnostics.</p>
       </header>
       <Show
-        when={isCompact()}
+        when={isMini()}
         fallback={<Tabs items={items} value={routedSegment()} onChange={selectSegment} />}
       >
         <div class="kria-observatory__compact" data-curated-primary="now-mini">

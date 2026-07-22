@@ -10,6 +10,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, cleanup, waitFor } from "@solidjs/testing-library";
 import Composer from "./Composer";
 import { converseStore, coreStore } from "../../../stores";
+import { getTerm } from "../../terminology";
 
 function resetDraft(): void {
   converseStore.setActiveThread(null);
@@ -21,6 +22,33 @@ function resetDraft(): void {
 beforeEach(() => {
   cleanup();
   resetDraft();
+});
+
+describe("Composer — primary idle task-entry hierarchy (UIE-H-001, Req 5.1)", () => {
+  it("marks the composer root as the primary task-entry control", () => {
+    const { container } = render(() => <Composer />);
+    const root = container.querySelector(".kria-composer");
+    expect(root).not.toBeNull();
+    // The prominence marker the CSS keys off so the Composer visually dominates
+    // the reduced-weight command-palette trigger.
+    expect(root?.getAttribute("data-primary-entry")).toBe("true");
+  });
+
+  it("gives the composer a bordered, raised surface for visual prominence", async () => {
+    const { default: composerCss } = await import("./Composer.css?raw");
+    expect(composerCss).toMatch(
+      /\.kria-composer\[data-primary-entry="true"\]\s*\{[\s\S]*?border:\s*1px\s+solid\s+var\(--color-border-default\);[\s\S]*?background:\s*var\(--color-surface-2\);/,
+    );
+    // Focus-within accent ring reinforces it as the place work begins.
+    expect(composerCss).toMatch(
+      /\.kria-composer\[data-primary-entry="true"\]:focus-within\s*\{[\s\S]*?border-color:\s*var\(--color-accent-border\);/,
+    );
+  });
+
+  it("keeps the labelled Message KRIA field as the focal input", () => {
+    render(() => <Composer />);
+    expect(screen.getByLabelText("Message KRIA")).toBeInTheDocument();
+  });
 });
 
 describe("Composer — grow-then-scroll (Req 4.4)", () => {
@@ -37,6 +65,34 @@ describe("Composer — grow-then-scroll (Req 4.4)", () => {
 
     // Twenty lines → capped at 8 rows (then scrolls internally via CSS).
     converseStore.updateDraft({ text: Array.from({ length: 20 }, (_, i) => `l${i}`).join("\n") });
+    expect(textarea.rows).toBe(8);
+  });
+});
+
+describe("Composer — tall-draft clearance backstop (task 9.5, IU-10; Req 15.5–15.7)", () => {
+  // A grown draft must NOT let the Composer expand without bound: once the
+  // `rows` attribute clamps at MAX_ROWS=8, the CSS max-height + internal scroll
+  // is the visual backstop so a tall draft scrolls INSIDE the textarea instead
+  // of growing the Composer row and covering the last readable message. This
+  // locks the CSS half of the grow-then-scroll contract the rows-clamp test
+  // above proves on the component side.
+  it("caps the textarea height and scrolls internally (max-height + overflow-y:auto)", async () => {
+    const { default: composerCss } = await import("./Composer.css?raw");
+    expect(composerCss).toMatch(
+      /\.kria-composer__textarea\s*\{[\s\S]*?max-height:\s*calc\([\s\S]*?\);[\s\S]*?overflow-y:\s*auto;/,
+    );
+    // The cap is tied to 8 rows (MAX_ROWS) so growth stops exactly where the
+    // component clamps `rows` — the two halves agree.
+    expect(composerCss).toMatch(/\.kria-composer__textarea\s*\{[\s\S]*?max-height:\s*calc\([\s\S]*?8em/);
+  });
+
+  it("keeps the tall-draft textarea itself the only Composer scroller (not the last message)", () => {
+    render(() => <Composer />);
+    const textarea = screen.getByLabelText("Message KRIA") as HTMLTextAreaElement;
+    // Even a very tall draft clamps rows at MAX_ROWS=8; past the cap the textarea
+    // (overflow-y:auto) owns the overflow — the Composer row height stays bounded,
+    // so the stream above it is never pushed/covered.
+    converseStore.updateDraft({ text: Array.from({ length: 200 }, (_, i) => `l${i}`).join("\n") });
     expect(textarea.rows).toBe(8);
   });
 });
@@ -91,9 +147,9 @@ describe("Composer — single Send⇄Stop action (Req 4.4)", () => {
     coreStore.setState("thinking"); // Core active → working
     render(() => <Composer onStop={onStop} />);
 
-    // Send is replaced by Stop.
+    // Send is replaced by Stop (scope-named "Stop response", UIE-M-015).
     expect(screen.queryByRole("button", { name: "Send message" })).toBeNull();
-    const stop = screen.getByRole("button", { name: "Stop" });
+    const stop = screen.getByRole("button", { name: "Stop response" });
     expect(stop).not.toBeDisabled();
 
     fireEvent.click(stop);
@@ -114,6 +170,18 @@ describe("Composer — mode chip Assistant⇆Lab, per-thread (Req 4.9 / 4.5)", (
     const lab = screen.getByRole("button", { name: "Lab" });
     expect(lab).toHaveAttribute("aria-pressed", "true");
     expect(converseStore.composerDraft().mode).toBe("lab");
+  });
+
+  it("describes the Lab-mode decision with the concise matrix outcome (task 7.7, Req 7.6)", () => {
+    resetDraft();
+    converseStore.setActiveThread("mode-desc-thread");
+    render(() => <Composer />);
+
+    // The mode chip carries the Lab-mode outcome READ FROM the terminology
+    // matrix (single source of truth) as its hover/focus description — so the
+    // Assistant⇆Lab distinction is explained at this decision point.
+    const chip = screen.getByRole("button", { name: "Assistant" });
+    expect(chip.getAttribute("title")).toBe(`Lab mode: ${getTerm("lab-mode").outcome}`);
   });
 
   it("persists the mode per thread (restores Lab on return)", () => {
@@ -218,5 +286,130 @@ describe("Composer — no separate slash menu (Req 4.7)", () => {
 
     fireEvent.keyDown(textarea, { key: "Enter" });
     expect(onSend).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Composer — Width Profile control adaptation (task 8.6, UIE-M-003)", () => {
+  const profiles = ["focus", "dual", "assisted", "full"] as const;
+
+  /** Open a kit Menu / OverflowControl trigger via its accessible name (a11y path). */
+  function openDisclosure(name: string): void {
+    const trigger = screen.getByRole("button", { name });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "Enter" });
+  }
+
+  it("keeps Send⇄Stop inline and full-size at every profile", () => {
+    for (const profile of profiles) {
+      cleanup();
+      resetDraft();
+      converseStore.updateDraft({ text: "ready" });
+      render(() => <Composer widthProfile={profile} />);
+      // Send is a direct, full-size Button (never in a disclosure) at all widths.
+      expect(screen.getByRole("button", { name: "Send message" }), `${profile}: Send inline`).toBeInTheDocument();
+
+      // While working, the same slot is a direct Stop.
+      cleanup();
+      resetDraft();
+      converseStore.updateDraft({ text: "working…" });
+      coreStore.setState("thinking");
+      render(() => <Composer widthProfile={profile} />);
+      expect(screen.getByRole("button", { name: "Stop response" }), `${profile}: Stop inline`).toBeInTheDocument();
+    }
+  });
+
+  it("keeps Attach and Voice REACHABLE at every profile (inline or labelled disclosure)", () => {
+    for (const profile of profiles) {
+      cleanup();
+      resetDraft();
+      render(() => <Composer widthProfile={profile} />);
+
+      const inlineAttach = screen.queryByRole("button", { name: "Attach a file" });
+      const inlineVoice = screen.queryByRole("button", { name: "Start voice input" });
+
+      if (inlineAttach && inlineVoice) {
+        // Wide profiles: both tools inline, no disclosure needed.
+        expect(screen.queryByRole("button", { name: "More composer actions" }), `${profile}: no disclosure`).toBeNull();
+      } else {
+        // Narrow profile: both fold into ONE labelled disclosure — never absent.
+        expect(inlineAttach, `${profile}: attach not inline`).toBeNull();
+        expect(inlineVoice, `${profile}: voice not inline`).toBeNull();
+        openDisclosure("More composer actions");
+        expect(screen.getByRole("menuitem", { name: "Attach a file" }), `${profile}: attach reachable`).toBeInTheDocument();
+        expect(screen.getByRole("menuitem", { name: "Start voice input" }), `${profile}: voice reachable`).toBeInTheDocument();
+      }
+    }
+  });
+
+  it("collapses Attach + Voice into the disclosure at the narrowest (focus) profile, keeping the mode chip inline", () => {
+    render(() => <Composer widthProfile="focus" />);
+    // Mode chip (primary) stays directly reachable.
+    expect(screen.getByRole("button", { name: "Assistant" })).toBeInTheDocument();
+    // Attach/Voice are not inline buttons at focus.
+    expect(screen.queryByRole("button", { name: "Attach a file" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Start voice input" })).toBeNull();
+    // One labelled disclosure carries them.
+    expect(screen.getByRole("button", { name: "More composer actions" })).toBeInTheDocument();
+  });
+
+  it("shows Attach + Voice inline with no disclosure at wide profiles (dual/assisted/full)", () => {
+    for (const profile of ["dual", "assisted", "full"] as const) {
+      cleanup();
+      resetDraft();
+      render(() => <Composer widthProfile={profile} />);
+      expect(screen.getByRole("button", { name: "Attach a file" }), `${profile}: attach inline`).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Start voice input" }), `${profile}: voice inline`).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "More composer actions" }), `${profile}: no disclosure`).toBeNull();
+    }
+  });
+
+  it("never renders a tool both inline and in the disclosure (no duplicate action)", () => {
+    render(() => <Composer widthProfile="focus" />);
+    // Collapsed: attach absent inline.
+    expect(screen.queryByRole("button", { name: "Attach a file" })).toBeNull();
+    openDisclosure("More composer actions");
+    // Present as exactly one menuitem, and still not as an inline button.
+    expect(screen.getAllByRole("menuitem", { name: "Attach a file" })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Attach a file" })).toBeNull();
+  });
+
+  it("keeps the textarea grow-then-scroll behavior unchanged at the narrowest profile", () => {
+    render(() => <Composer widthProfile="focus" />);
+    const textarea = screen.getByLabelText("Message KRIA") as HTMLTextAreaElement;
+    expect(textarea.rows).toBe(1);
+    converseStore.updateDraft({ text: "a\nb\nc" });
+    expect(textarea.rows).toBe(3);
+    converseStore.updateDraft({ text: Array.from({ length: 20 }, (_, i) => `l${i}`).join("\n") });
+    expect(textarea.rows).toBe(8);
+  });
+
+  it("preserves draft text, attachments, and mode across a focus→full→focus tool transition", () => {
+    converseStore.setActiveThread("composer-preserve");
+    converseStore.updateDraft({
+      text: "keep this draft",
+      mode: "lab",
+      attachments: [{
+        id: "keep-attachment",
+        name: "keep.txt",
+        mime: "text/plain",
+        size: 3,
+        bytes: new Uint8Array([97, 98, 99]),
+      }],
+    });
+
+    // Narrow → Attach/Voice collapsed.
+    const view = render(() => <Composer widthProfile="focus" />);
+    expect(screen.getByRole("button", { name: "More composer actions" })).toBeInTheDocument();
+    expect((screen.getByLabelText("Message KRIA") as HTMLTextAreaElement).value).toBe("keep this draft");
+
+    // Widen → tools inline. Draft/attachment/mode are store-owned, so they hold.
+    view.unmount();
+    render(() => <Composer widthProfile="full" />);
+    expect(screen.getByRole("button", { name: "Attach a file" })).toBeInTheDocument();
+    expect(screen.getByText("keep.txt")).toBeInTheDocument();
+    expect((screen.getByLabelText("Message KRIA") as HTMLTextAreaElement).value).toBe("keep this draft");
+    expect(converseStore.composerDraft().mode).toBe("lab");
+    // Mode chip reflects the preserved Lab mode.
+    expect(screen.getByRole("button", { name: "Lab" })).toHaveAttribute("aria-pressed", "true");
   });
 });

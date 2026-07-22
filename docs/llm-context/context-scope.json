@@ -36,7 +36,6 @@
     "__pycache__",
     "docs/llm-context",
     "testing/eval_reports",
-    "graphify-out",
     "models",
     "target",
     "tests-logs",

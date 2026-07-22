@@ -5,6 +5,23 @@
  * scroll so the field grows to a max then scrolls (Req 4.4).
  */
 
+/* Primary idle task-entry control (UIE-H-001, Req 5.1): the Composer reads as
+ * the single, unmistakable entry point. A bordered, raised surface gives it
+ * clear visual prominence over the reduced-weight command-palette trigger, and
+ * a focus-within accent ring reinforces it as the place work begins. Token-only
+ * (Req 14.2); no change to send/staging behavior or the runtime-authority
+ * invariant. */
+.kria-composer[data-primary-entry="true"] {
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-2);
+}
+
+.kria-composer[data-primary-entry="true"]:focus-within {
+  border-color: var(--color-accent-border);
+}
+
 .kria-composer {
   display: flex;
   flex-direction: column;
@@ -42,17 +59,24 @@
 }
 
 /* ── Controls row ────────────────────────────────────────────────────────── */
+/* Controls row stays single-line: Send⇄Stop is always inline/full-size, and
+ * profile adaptation (task 8.6, UIE-M-003) collapses secondary tools into the
+ * labelled disclosure instead of wrapping — so the row height stays bounded and
+ * never clips (no uncontrolled multi-line wrap). */
 .kria-composer__controls {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
+  flex-wrap: nowrap;
 }
 
 .kria-composer__tools {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
+  flex-wrap: nowrap;
 }
 
 .kria-composer__mode {

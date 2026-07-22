@@ -32,9 +32,22 @@
 .kria-work-block__header {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-2);
 }
 
+/* Work-type label is actionable metadata (identifies the running/failed unit),
+   not a nonessential badge. Caption size is inherited from .kria-work-block;
+   moved off the muted token to meet the readable-contrast minimum on the
+   tinted work surface (Req 12.7 / design §13). Task 13.2.
+   Task 13.8: --color-text-secondary cleared AA on the dark work surface (7.43)
+   but measured only 4.36 (<4.5) composited on the LIGHT work surface. Promoted
+   to --color-text-primary — the sole existing token that clears AA on both
+   themes' work surface (dark 12.6 / light 10.0 measured) — keeping the fix at
+   the token layer for this one uppercase semibold work-type label rather than
+   darkening the shared secondary token (broad drift). Mirrors the task-11.8
+   precedent of moving a failing caption off an insufficient token; accent
+   identity and surface tokens are untouched. */
 .kria-work-block__type {
   display: inline-flex;
   align-items: center;
@@ -42,7 +55,7 @@
   font-weight: var(--font-weight-semibold);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--color-text-muted);
+  color: var(--color-text-primary);
 }
 
 .kria-work-block__status {
@@ -57,6 +70,20 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
+}
+
+/* Long tool summaries / reasoning / evidence must wrap inside the block rather
+   than push it past its column. */
+.kria-work-block__summary,
+.kria-work-block__reasoning,
+.kria-work-block__details-text,
+.kria-work-block__evidence-detail,
+.kria-work-block__evidence-label,
+.kria-work-block__gui-step-label,
+.kria-work-block__run-log-line {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  min-width: 0;
 }
 
 /* ── Summary (always visible) ────────────────────────────────────────────── */

@@ -65,17 +65,25 @@ struct CppState {
 /// Process-global cached CPP state (one desktop app instance).
 static CPP: OnceCell<Arc<CppState>> = OnceCell::const_new();
 
-/// Process-global continuous-discovery engine handle (Wave 10). Spawned once
-/// (at boot by the runtime, or lazily by the first capability command) so there
-/// is exactly ONE background loop, and the status/scan commands read it.
+/// Process-global hot slot for continuous discovery. Disable cancels and
+/// removes current engine; re-enable creates exactly one fresh loop.
 static DISCOVERY: std::sync::OnceLock<
-    Arc<kria_core::capability::intelligence::ContinuousDiscoveryEngine>,
+    std::sync::RwLock<Option<Arc<kria_core::capability::intelligence::ContinuousDiscoveryEngine>>>,
 > = std::sync::OnceLock::new();
+
+fn discovery_slot() -> &'static std::sync::RwLock<
+    Option<Arc<kria_core::capability::intelligence::ContinuousDiscoveryEngine>>,
+> {
+    DISCOVERY.get_or_init(|| std::sync::RwLock::new(None))
+}
 
 /// The live discovery engine, if the loop has been spawned.
 pub(crate) fn discovery_engine(
 ) -> Option<Arc<kria_core::capability::intelligence::ContinuousDiscoveryEngine>> {
-    DISCOVERY.get().cloned()
+    discovery_slot()
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
 }
 
 /// Process-global job manager (Wave 11). One durable job lifecycle for the app.
@@ -131,26 +139,50 @@ pub(crate) fn ensure_discovery_spawned(
     autonomy: kria_core::capability::intelligence::AutonomyLevel,
 ) {
     use kria_core::capability::intelligence::{ContinuousDiscoveryEngine, DiscoveryPolicy};
-    if DISCOVERY.get().is_some() {
+    let mut slot = discovery_slot()
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if slot
+        .as_ref()
+        .map(|engine| engine.status().running)
+        .unwrap_or(false)
+    {
         return;
+    }
+    if let Some(previous) = slot.take() {
+        previous.cancel();
     }
     let engine = Arc::new(ContinuousDiscoveryEngine::new(
         platform,
         DiscoveryPolicy::default(),
         autonomy,
     ));
-    if DISCOVERY.set(engine.clone()).is_ok() {
-        engine.spawn();
-        tracing::info!(
-            "[CPP] Continuous discovery loop spawned (autonomy {})",
-            autonomy.as_str()
-        );
+    *slot = Some(engine.clone());
+    drop(slot);
+    engine.spawn();
+    tracing::info!(
+        "[CPP] Continuous discovery loop spawned (autonomy {})",
+        autonomy.as_str()
+    );
+}
+
+pub(crate) fn stop_discovery() {
+    if let Some(engine) = discovery_slot()
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .take()
+    {
+        engine.cancel();
+        tracing::info!("[CPP] Continuous discovery loop stopped");
     }
 }
 
 /// Build (once) the whole CPP state from live app state + config.
 async fn cpp(state: &State<'_, AppStateCell>) -> Result<Arc<CppState>, String> {
     let app = state.get().ok_or("runtime not ready")?;
+    if !app.config.read().await.capability.enabled {
+        return Err("Capability Platform is disabled in Settings".into());
+    }
 
     if let Some(s) = CPP.get() {
         return Ok(s.clone());
@@ -170,8 +202,8 @@ async fn cpp(state: &State<'_, AppStateCell>) -> Result<Arc<CppState>, String> {
     // The LIFECYCLE facet (marketplace acquire/remove) is wired from the live
     // OpenClaw registry config so the desktop can acquire capabilities on a goal
     // miss through the same frozen installer the manual install path uses.
-    if let Some(pool) = &app.container_pool {
-        let runtime: Arc<dyn SkillRuntime> = Arc::new(DockerRuntime::new(pool.clone()));
+    if let Some(pool) = app.container_pool.read().await.clone() {
+        let runtime: Arc<dyn SkillRuntime> = Arc::new(DockerRuntime::new(pool));
         let oc_cfg = app.config.read().await.openclaw.clone();
         let store_dir = data_dir.join("openclaw_skills");
         let _ = std::fs::create_dir_all(&store_dir);
@@ -541,6 +573,14 @@ async fn require_descriptor(
 pub async fn cpp_status(state: State<'_, AppStateCell>) -> Result<CppStatus, String> {
     let app = state.get().ok_or("runtime not ready")?;
     let enabled = app.config.read().await.capability.enabled;
+    if !enabled {
+        return Ok(CppStatus {
+            enabled: false,
+            provider_count: 0,
+            healthy_providers: 0,
+            descriptor_count: 0,
+        });
+    }
     let cpp = cpp(&state).await?;
     let report = cpp.platform.refresh().await;
     Ok(CppStatus {

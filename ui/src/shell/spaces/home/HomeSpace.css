@@ -1,0 +1,101 @@
+/**
+ * HomeSpace — presence homepage scaffold (task 0.2, Req 22).
+ *
+ * Token-only (Req 14.2, zero raw color). Calm, centered, Core-forward layout.
+ * The ONLY animating element is the Core (CorePresence owns its own motion +
+ * reduced-motion handling); this surface adds no ambient motion of its own.
+ * Later phases (Room, Focus UI, Composer) layer on top of this shell.
+ */
+
+.kria-home {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  /* The home surface must FILL its container. Its host `.kria-converse__empty`
+     centers children (align/justify: center) for the compact legacy empty
+     state, which would shrink-wrap the presence homepage to ~0 height (the
+     Room's layers are all position:absolute + a height:100% content plane, so
+     the Room has no intrinsic height and must be stretched by its parent).
+     Stretch on both axes so the Room fills and the Core/Focus/Composer are
+     visible; this is scoped to `.kria-home`, so the legacy empty state is
+     unaffected. */
+  align-self: stretch;
+  width: 100%;
+}
+
+/* The Room fills the home surface; its content plane centers the Core + copy. */
+.kria-home__room {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.kria-home__room .kria-room__content {
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  padding: var(--space-8) var(--space-6);
+  text-align: center;
+}
+
+/* Core-forward: give the presence breathing room above the copy. Positioned so
+   the Contextual Orbit can overlay + center its light-points on the Core. */
+.kria-home__core {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: var(--space-2);
+}
+
+.kria-home__title {
+  margin: 0;
+  font-size: var(--font-size-title);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+}
+
+/* Presence onboarding sits just beneath the greeting as a calm first-run
+   whisper. It renders nothing once every hint is retired, so this slot adds no
+   box at rest; a small top margin gives the whisper breathing room when it is
+   present on first run only. */
+.kria-home__onboarding {
+  margin-top: var(--space-2);
+}
+
+/* The Adaptive Context Surface sits beneath the Voice Line as the one fixed
+   Focus-body slot. It self-dissolves when empty, so this slot adds no box at
+   rest; a small top margin gives the surface breathing room when present. */
+.kria-home__acs {
+  margin-top: var(--space-4);
+}
+
+/* The Permission UX sits beneath the Focus body. It renders nothing at rest and
+   defers to any open overlay/modal, so this slot adds no box at rest; a small
+   top margin gives the ask breathing room when present (design §10.4). */
+.kria-home__permission {
+  margin-top: var(--space-4);
+}
+
+/* Contextual Chips sit beneath the Composer position as the ≤3 next-action row.
+   They render nothing when there is no real action, so this slot adds no box at
+   rest; a small top margin gives the row breathing room when present. */
+.kria-home__chips {
+  margin-top: var(--space-4);
+}
+
+/* The Composer slot — the vertical-axis anchor. It bounds its own width and
+   centers itself; this slot just gives it breathing room from the Focus body
+   above and the chip row below (design §2). */
+.kria-home__composer {
+  margin-top: var(--space-4);
+  width: 100%;
+}
+
+/* Trust confirmation sits just beneath the Composer/chips as a small, muted,
+   glanceable cue (design §2 "on-device (trust confirmation, muted, near
+   Composer)"). It is always present (lit online or offline — Req 9.1) but
+   quiet; a small top margin separates it from the chip row. */
+.kria-home__trust {
+  margin-top: var(--space-3);
+}

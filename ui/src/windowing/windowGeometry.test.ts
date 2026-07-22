@@ -28,6 +28,33 @@ describe("window geometry memory", () => {
     expect(restored).toMatchObject({ width: 1200, height: 1000, scaleFactor: 2 });
   });
 
+  it("clamps an oversized geometry down to the target monitor work area", () => {
+    const restored = normalizeGeometry(
+      { x: -100, y: -100, width: 5000, height: 5000, scaleFactor: 1 },
+      [MONITORS[0]],
+    );
+    expect(restored).not.toBeNull();
+    // Size cannot exceed the work area, and origin is pulled back on-screen.
+    expect(restored!.width).toBeLessThanOrEqual(MONITORS[0].workArea.size.width);
+    expect(restored!.height).toBeLessThanOrEqual(MONITORS[0].workArea.size.height);
+    expect(restored!.x).toBeGreaterThanOrEqual(MONITORS[0].workArea.position.x);
+    expect(restored!.y).toBeGreaterThanOrEqual(MONITORS[0].workArea.position.y);
+    // Fully contained within the work area (no overflow past the right/bottom edges).
+    expect(restored!.x + restored!.width).toBeLessThanOrEqual(
+      MONITORS[0].workArea.position.x + MONITORS[0].workArea.size.width,
+    );
+    expect(restored!.y + restored!.height).toBeLessThanOrEqual(
+      MONITORS[0].workArea.position.y + MONITORS[0].workArea.size.height,
+    );
+  });
+
+  it("returns null when there is no monitor or the geometry is invalid", () => {
+    expect(normalizeGeometry({ x: 0, y: 0, width: 800, height: 600, scaleFactor: 1 }, [])).toBeNull();
+    expect(
+      normalizeGeometry({ x: 0, y: 0, width: -1, height: 600, scaleFactor: 1 }, [MONITORS[0]]),
+    ).toBeNull();
+  });
+
   it("keeps generated valid geometries fully visible across mixed-DPI work areas", () => {
     for (let seed = 0; seed < 200; seed += 1) {
       const geometry = {

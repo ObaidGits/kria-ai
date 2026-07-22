@@ -134,6 +134,47 @@ describe("ApprovalCard (task 4.1)", () => {
     expect(onApprove).toHaveBeenCalledTimes(1);
   });
 
+  it("opens the high-risk confirm on the approval-confirm layer so it renders above + inerts the Center (Req 11.9, §20.3)", () => {
+    render(() => (
+      <ApprovalCard
+        request={makeRequest({ risk: "red" })}
+        onApprove={vi.fn()}
+        onDeny={vi.fn()}
+        onKeepPaused={vi.fn()}
+      />
+    ));
+    fireEvent.click(screen.getByRole("button", { name: /Approve/ }));
+    const modal = modalHost.activeModal();
+    expect(modal).not.toBeNull();
+    // The confirm is NOT incidental portal/DOM order — it is explicitly tagged
+    // "approval-confirm" (--z-approval-confirm), the layer overlayLayers uses to
+    // rank it above the pending Approval Center and inert the Center beneath it.
+    expect(modal!.layer).toBe("approval-confirm");
+  });
+
+  it("returns focus to the originating Approve control when the confirm closes (§20.3, gap G4)", async () => {
+    render(() => (
+      <ApprovalCard
+        request={makeRequest({ risk: "red" })}
+        onApprove={vi.fn()}
+        onDeny={vi.fn()}
+        onKeepPaused={vi.fn()}
+      />
+    ));
+    const approve = screen.getByRole("button", { name: /Approve/ });
+    // A real click focuses the button; the confirm modal captures it as the
+    // §20.3 "Originating ApprovalCard decision control" owner.
+    approve.focus();
+    fireEvent.click(approve);
+    expect(modalHost.activeModal()!.id).toBe("approval-confirm-req-1");
+
+    // Cancelling the confirm returns focus to the Approve control it opened from
+    // — even though Approve is a destructive control (allowed for this layer).
+    closeModal("approval-confirm-req-1");
+    await Promise.resolve();
+    expect(document.activeElement).toBe(approve);
+  });
+
   it("irreversible (green risk) still requires an explicit confirm (Req 11.3)", () => {
     const onApprove = vi.fn();
     render(() => (

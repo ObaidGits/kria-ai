@@ -48,4 +48,57 @@ describe("Menu", () => {
     fireEvent.keyUp(item, { key: "Enter" });
     expect(onSelect).toHaveBeenCalledOnce();
   });
+
+  it("does not describe the trigger when no triggerDescription is given", () => {
+    render(() => (
+      <Menu triggerLabel="Actions" items={[{ id: "a", label: "Alpha" }]} />
+    ));
+    expect(screen.getByRole("button", { name: "Actions" })).not.toHaveAttribute(
+      "aria-describedby",
+    );
+  });
+
+  it("wires triggerDescription to the trigger via aria-describedby (not hover-only)", () => {
+    render(() => (
+      <Menu
+        triggerLabel="Export conversation"
+        triggerIcon="download"
+        triggerDescription="No messages to export yet. Send a message to enable export."
+        items={[{ id: "a", label: "Plain text" }]}
+      />
+    ));
+    const trigger = screen.getByRole("button", { name: "Export conversation" });
+    const describedBy = trigger.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    const description = document.getElementById(describedBy!);
+    expect(description).not.toBeNull();
+    // Reason text is present in the DOM (visible helper, not a hover tooltip).
+    expect(description).toHaveTextContent(
+      "No messages to export yet. Send a message to enable export.",
+    );
+  });
+
+  it("exposes a disabled item's reason via ItemDescription / aria-describedby", () => {
+    render(() => (
+      <Menu
+        triggerLabel="Actions"
+        items={[
+          {
+            id: "a",
+            label: "Plain text",
+            disabled: true,
+            description: "Export running. Export is available again when the current export finishes.",
+          },
+        ]}
+      />
+    ));
+    openMenu("Actions");
+    const item = screen.getByRole("menuitem", { name: /Plain text/ });
+    const describedBy = item.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    const description = document.getElementById(describedBy!);
+    expect(description).toHaveTextContent(
+      "Export running. Export is available again when the current export finishes.",
+    );
+  });
 });

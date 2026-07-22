@@ -28,19 +28,57 @@
  * cancellation command (propagation preserved). The `on*` props exist only so
  * stories/tests can inject stubs; production uses the store defaults.
  *
- * Requirements: 4.4, 4.5, 4.9, 17.1, 17.2, 17.3
+ * ── Primary idle task-entry (UIE-H-001, Req 5.1) ────────────────────────────
+ * The root carries `data-primary-entry="true"` and a bordered, raised surface
+ * so the Composer is the unmistakable primary Homepage entry point, dominating
+ * the reduced-weight command-palette trigger in the PresenceBar. This is a
+ * VISUAL hierarchy marker only — send/staging behavior and the runtime-authority
+ * invariant above are unchanged.
+ *
+ * Requirements: 4.4, 4.5, 4.9, 5.1, 17.1, 17.2, 17.3
  */
 import { createMemo, createUniqueId, For, Show } from "solid-js";
 import { converseStore, coreStore, voiceStore } from "../../../stores";
 import { bridgeInvokeOptional } from "../../../bridge/invoke";
-import { Button, Chip, IconButton } from "../../../kit";
+import { Button, Chip, IconButton, type MenuItem } from "../../../kit";
+import { OverflowControl } from "../../OverflowControl";
+import { controlTier, partitionControls, type TieredControl } from "../../controlPriority";
+import type { WidthProfile } from "../converseComposition";
 import { Icon } from "../../../components/Icon";
 import type { ComposerDraft } from "../../../stores/converseStore";
+import { getTerm } from "../../terminology";
 import "../../../kit/field.css";
 import "./Composer.css";
 
+/**
+ * Concise Lab-mode outcome read from the terminology matrix (single source of
+ * truth, task 7.5). Surfaced as the mode chip's description at this decision
+ * point (Assistant ⇆ Lab) so the distinction is explained before choosing,
+ * without re-authoring copy here (Req 7.6, 7.7).
+ */
+const LAB_MODE_OUTCOME = getTerm("lab-mode").outcome;
+
 const MIN_ROWS = 1;
 const MAX_ROWS = 8; // grow to this many rows, then scroll internally (Req 4.4)
+
+/**
+ * Composer tool-cluster inline capacity per Width Profile (task 8.6, UIE-M-003).
+ *
+ * Send⇄Stop is CRITICAL and is rendered OUTSIDE this partition — always inline
+ * and full-size at every profile. Only the primary tools (mode chip, attach,
+ * voice) are partitioned:
+ *
+ *   • focus → capacity 1: the mode chip stays inline; Attach + Voice move into
+ *     ONE labelled disclosure (OverflowControl) — preserved, never dropped
+ *     (design §11.5 "preserve attachment/voice"). No free-wrap → bounded height.
+ *   • dual / assisted / full → capacity 3: all tools inline.
+ */
+const COMPOSER_TOOLS_CAPACITY: Readonly<Record<WidthProfile, number>> = {
+  focus: 1,
+  dual: 3,
+  assisted: 3,
+  full: 3,
+};
 
 /**
  * Default voice-entry: activate the voice store surface and ask the backend to
@@ -59,6 +97,12 @@ export interface ComposerProps {
   onStop?: () => void;
   /** Voice-entry handler (defaults to the existing voice-start path). */
   onVoiceStart?: () => void;
+  /**
+   * Active Width Profile (from ConverseSpace). Drives which primary tools stay
+   * inline vs. collapse into the labelled disclosure (task 8.6, UIE-M-003).
+   * Defaults to "full" so standalone/story/test usage shows every tool inline.
+   */
+  widthProfile?: WidthProfile;
 }
 
 export function Composer(props: ComposerProps) {
@@ -82,6 +126,30 @@ export function Composer(props: ComposerProps) {
   const send = () => (props.onSend ?? (() => void converseStore.sendMessage()))();
   const stop = () => (props.onStop ?? (() => void converseStore.stopTurn()))();
   const voiceStart = () => (props.onVoiceStart ?? startVoiceEntry)();
+
+  // ── Tool cluster inline-vs-overflow by Width Profile (task 8.6, UIE-M-003) ──
+  // Only the primary tools are partitioned; Send⇄Stop (critical) is rendered
+  // separately and never overflows. Attach + Voice, when collapsed, remain
+  // reachable through the labelled OverflowControl (preserved, never dropped).
+  const composerToolProfile = (): WidthProfile => props.widthProfile ?? "full";
+  const composerTools = createMemo<TieredControl[]>(() =>
+    ["mode-chip", "attach", "voice"].map((id) => ({ id, tier: controlTier(id)!, label: id })),
+  );
+  const composerPartition = createMemo(() =>
+    partitionControls(composerTools(), COMPOSER_TOOLS_CAPACITY[composerToolProfile()]),
+  );
+  const toolsInline = createMemo(() => new Set(composerPartition().inline.map((c) => c.id)));
+  const composerOverflowItems = createMemo<MenuItem[]>(() => {
+    const items: MenuItem[] = [];
+    for (const control of composerPartition().overflow) {
+      if (control.id === "attach") {
+        items.push({ id: "attach", label: "Attach a file", icon: "file", onSelect: () => fileInput?.click() });
+      } else if (control.id === "voice") {
+        items.push({ id: "voice", label: "Start voice input", icon: "mic", onSelect: () => voiceStart() });
+      }
+    }
+    return items;
+  });
 
   function onKeyDown(e: KeyboardEvent): void {
     // Enter sends; Shift+Enter newlines. Ignore while composing (IME).
@@ -112,7 +180,12 @@ export function Composer(props: ComposerProps) {
   }
 
   return (
-    <div class="kria-composer" data-mode={mode()} data-working={working() ? "true" : "false"}>
+    <div
+      class="kria-composer"
+      data-primary-entry="true"
+      data-mode={mode()}
+      data-working={working() ? "true" : "false"}
+    >
       {/* ── Attachment previews (add/remove chips) ────────────────────────── */}
       <Show when={attachments().length > 0}>
         <ul class="kria-composer__attachments" aria-label="Attachments">
@@ -142,6 +215,7 @@ export function Composer(props: ComposerProps) {
       <textarea
         id={fieldId}
         class="kit-field__control kit-field__textarea kria-composer__textarea"
+        aria-label="Message KRIA"
         placeholder="Message KRIA…"
         rows={rows()}
         value={text()}
@@ -154,23 +228,32 @@ export function Composer(props: ComposerProps) {
       {/* ── Controls row ──────────────────────────────────────────────────── */}
       <div class="kria-composer__controls">
         <div class="kria-composer__tools">
-          {/* Mode chip — Assistant ⇆ Lab (tool-locked), Req 4.9. */}
-          <Chip
-            selected={isLab()}
-            onToggle={toggleMode}
-            class="kria-composer__mode"
-          >
-            <Icon name={isLab() ? "sparkles" : "message-circle"} size={13} />
-            <span>{isLab() ? "Lab" : "Assistant"}</span>
-          </Chip>
+          {/* Mode chip — Assistant ⇆ Lab (tool-locked), Req 4.9. Primary tool;
+              stays inline at every profile (seated first by capacity). */}
+          <Show when={toolsInline().has("mode-chip")}>
+            <Chip
+              selected={isLab()}
+              onToggle={toggleMode}
+              title={`Lab mode: ${LAB_MODE_OUTCOME}`}
+              class="kria-composer__mode"
+            >
+              <Icon name={isLab() ? "sparkles" : "message-circle"} size={13} />
+              <span>{isLab() ? "Lab" : "Assistant"}</span>
+            </Chip>
+          </Show>
 
-          {/* Attach */}
-          <IconButton
-            icon="file"
-            label="Attach a file"
-            size="sm"
-            onClick={() => fileInput?.click()}
-          />
+          {/* Attach — inline where it fits; otherwise reachable via the
+              disclosure below (never dropped, §11.5). */}
+          <Show when={toolsInline().has("attach")}>
+            <IconButton
+              icon="file"
+              label="Attach a file"
+              size="sm"
+              onClick={() => fileInput?.click()}
+            />
+          </Show>
+          {/* Hidden native file input is ALWAYS mounted so the disclosure's
+              "Attach a file" item can trigger it while collapsed. */}
           <input
             ref={fileInput}
             type="file"
@@ -182,12 +265,20 @@ export function Composer(props: ComposerProps) {
           />
 
           {/* Voice entry (affordance only — full surface is task 5.x). */}
-          <IconButton
-            icon="mic"
-            label="Start voice input"
-            size="sm"
-            onClick={voiceStart}
-          />
+          <Show when={toolsInline().has("voice")}>
+            <IconButton
+              icon="mic"
+              label="Start voice input"
+              size="sm"
+              onClick={voiceStart}
+            />
+          </Show>
+
+          {/* ONE labelled disclosure for collapsed tools (narrowest profile).
+              Preserves attachment/voice reachability without free-wrap. */}
+          <Show when={composerOverflowItems().length > 0}>
+            <OverflowControl label="More composer actions" items={composerOverflowItems()} />
+          </Show>
         </div>
 
         {/* SINGLE primary action — Send ⇄ Stop (Req 4.4). */}
@@ -209,7 +300,7 @@ export function Composer(props: ComposerProps) {
           <Button
             variant="danger"
             class="kria-composer__stop"
-            aria-label="Stop"
+            aria-label="Stop response"
             onClick={stop}
           >
             <Icon name="square" size={14} />

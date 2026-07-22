@@ -130,6 +130,9 @@ export function ApprovalCard(props: ApprovalCardProps) {
       title: "Confirm this action",
       description: r().title,
       hideClose: false,
+      // Render ABOVE the pending Approval Center and inert it while confirming
+      // (§20.3, Req 11.9). Not incidental DOM/portal order.
+      layer: "approval-confirm",
       render: () => (
         <div class="kria-approval-confirm" role="note">
           <Icon name="shield-alert" size={16} aria-hidden={true} />

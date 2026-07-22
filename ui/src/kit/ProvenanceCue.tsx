@@ -23,7 +23,7 @@ export function ProvenanceCue(props: ProvenanceCueProps) {
       data-provenance-cue={props.source}
       aria-label={isKria() ? "AI-authored by KRIA" : "User-authored"}
     >
-      <Icon name={isKria() ? "sparkles" : "user"} size={12} aria-hidden />
+      <Icon name={isKria() ? "sparkles" : "user"} size="caption" aria-hidden />
       <span>{label()}</span>
     </span>
   );

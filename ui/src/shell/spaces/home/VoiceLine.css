@@ -1,0 +1,109 @@
+/**
+ * VoiceLine — Focus headline styling (design.md §2/§6.1, Requirement 3).
+ *
+ * Token-only (Req 16.2 — zero raw color). One calm line beneath the Core:
+ * IBM Plex Sans body, secondary text color (design §2 typography). Motion is
+ * opacity-only (crossfade) and token-driven (Req 17.2); under reduced motion /
+ * the global kill-switch it collapses to an instant fade-only swap (Req 17.4).
+ *
+ * The emerald accent appears ONLY on the actionable deep link's text +
+ * focus ring (a meaningful, earn-the-accent affordance — L4); the resting line
+ * carries no accent. This file styles `.kria-voiceline` only — it never touches
+ * the Room base, so it stays clear of the accent-on-room-base guardrail.
+ */
+
+.kria-voiceline {
+  position: relative;
+  display: block;
+  max-width: var(--font-measure, 66ch);
+  margin: 0 auto;
+  text-align: center;
+}
+
+/* The live line + the outgoing ghost share the same grid cell so the crossfade
+   is a true cross-dissolve (both occupy the same space; no layout shift). */
+.kria-voiceline__line,
+.kria-voiceline__ghost {
+  grid-area: 1 / 1;
+  margin: 0;
+  font-family: var(--font-family-text);
+  font-size: var(--font-size-body);
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.kria-voiceline {
+  display: grid;
+}
+
+/* Incoming line fades in over the recede duration (opacity-only, GPU-cheap). */
+.kria-voiceline__line {
+  position: relative;
+  z-index: 1;
+  animation: kria-voiceline-in var(--motion-duration-recede) var(--motion-easing-presence) both;
+}
+
+/* Outgoing ghost fades out; aria-hidden so AT never reads stale content. */
+.kria-voiceline__ghost {
+  z-index: 0;
+  pointer-events: none;
+  animation: kria-voiceline-out var(--motion-duration-recede) var(--motion-easing-exit) both;
+}
+
+@keyframes kria-voiceline-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes kria-voiceline-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* ── Routing-only deep link (Req 3.6): a keyboard-operable control that reads as
+      an inline link. Meaningful accent (earn-the-accent, L4). ── */
+.kria-voiceline__link {
+  appearance: none;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--color-accent-text);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.kria-voiceline__link:hover {
+  color: var(--color-accent-hover);
+}
+
+.kria-voiceline__link:focus-visible {
+  outline: 2px solid var(--color-accent-border);
+  outline-offset: var(--space-1);
+}
+
+/* ── Reduced-motion / kill-switch (Req 17.4 / 21.4): fade-only becomes an
+      instant swap. The component omits the ghost in this mode; belt-and-braces,
+      freeze the entrance animation too so nothing animates. ── */
+.kria-voiceline[data-motion="static"] .kria-voiceline__line,
+.kria-voiceline[data-motion="static"] .kria-voiceline__ghost {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kria-voiceline__line,
+  .kria-voiceline__ghost {
+    animation: none;
+  }
+}

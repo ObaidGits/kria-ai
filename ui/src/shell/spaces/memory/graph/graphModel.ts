@@ -1,9 +1,9 @@
 /**
- * graphModel — pure, framework/GL-free logic for the Knowledge Graph lens
- * (task 6.4, Req 5.4 / 16.3).
+ * graphModel — pure, framework/GL-free logic for current graph read models.
  *
- * This module holds EVERY non-GL decision the 3D lens (and its 2D fallback)
- * depend on, so the maths is unit-testable under jsdom (WebGL itself cannot run
+ * Shipped 2D SVG/table consume core node/edge mapping and caps. Dormant GL
+ * helpers also consume LOD/culling math, but utility tests do not establish a
+ * shipped 3D capability. Logic remains unit-testable under jsdom (WebGL cannot run
  * there — the surrounding logic can and must):
  *   • data → graph mapping (memory_graph_* payloads → typed nodes/edges),
  *   • node/element caps ("showing N of M" — §5.4 hard rule),

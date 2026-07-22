@@ -1,0 +1,161 @@
+/**
+ * TrustIndicator — muted on-device trust confirmation styling (design.md §9,
+ * Req 9).
+ *
+ * Token-only (Req 16.2 — zero raw color). The confirmation is deliberately
+ * NEUTRAL/muted (Req 9.2): it uses text/border/neutral tokens and NEVER the
+ * emerald accent (reserved for the Core; guardrails.md L4). This file styles
+ * `.kria-trust*` only — it never selects the Room base, so it stays clear of the
+ * accent-on-room-base guardrail.
+ *
+ * Behavior-first cues:
+ *   • The status dot is ALWAYS lit (present) — offline is healthy, never an
+ *     error (Req 9.1). There is no "off"/error dot variant.
+ *   • The Core→edge reach cue (`.kria-trust__reach`) is visible only while
+ *     `data-reach="true"` (KRIA acting on the device). It is a directed,
+ *     token-driven glow that reuses the published `--core-*` shared-light so it
+ *     reads as a reach FROM the Core. It is bounded to the action and collapses
+ *     to a static cue under reduced motion / the global kill-switch (Req 17.4).
+ */
+
+.kria-trust {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+}
+
+.kria-trust__button {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-full);
+  background-color: var(--glass-fill-rest);
+  color: var(--color-text-muted);
+  font-family: var(--font-family-text);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-medium);
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color var(--motion-duration-fast) var(--motion-easing-standard),
+    color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.kria-trust__button:hover {
+  background-color: var(--glass-fill-active);
+  color: var(--color-text-secondary);
+}
+
+/* Visible focus on the sole control (Req 21.1). Neutral ring — not the accent,
+   keeping the whole affordance muted. */
+.kria-trust__button:focus-visible {
+  outline: 2px solid var(--color-text-secondary);
+  outline-offset: var(--space-1);
+}
+
+/* ── Always-lit status dot (Req 9.1) — muted/neutral, never emerald. ── */
+.kria-trust__dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-text-muted);
+  /* Lit = present. A soft neutral halo confirms "on"; no color-only meaning
+     (the label carries it). Single-layer, cheap. */
+  box-shadow: 0 0 0 3px var(--glass-fill-active);
+}
+
+.kria-trust__label {
+  color: inherit;
+}
+
+/* Offline word — calm secondary hint, still lit (never an error tone). */
+.kria-trust__offline {
+  color: var(--color-text-muted);
+  opacity: 0.85;
+}
+
+.kria-trust__offline::before {
+  content: "·";
+  margin-right: var(--space-2);
+}
+
+/* ── Core→edge reach cue (Req 9.1) ──────────────────────────────────────────
+ * Hidden at rest; revealed only while acting on the device. A directed glow
+ * whose horizontal drift follows the published `--core-lean` shared-light so it
+ * points away from the Core toward the edge. Intensity follows `--core-intensity`.
+ * Compositor-only (opacity + transform); no layout, no per-frame JS. */
+.kria-trust__reach {
+  position: absolute;
+  right: calc(-1 * var(--space-3));
+  top: 50%;
+  width: var(--space-4);
+  height: 2px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-text-muted);
+  opacity: 0;
+  transform: translateY(-50%) translateX(0) scaleX(0.4);
+  transform-origin: left center;
+  pointer-events: none;
+  transition: opacity var(--motion-duration-recede) var(--motion-easing-presence),
+    transform var(--motion-duration-recede) var(--motion-easing-presence);
+}
+
+/* Acting on the device → the reach lights and extends toward the edge, biased by
+   the Core's published lean/intensity so it reads as one shared light. */
+.kria-trust[data-reach="true"] .kria-trust__reach {
+  opacity: calc(0.35 + 0.4 * var(--core-intensity, 0.8));
+  transform: translateY(-50%)
+    translateX(calc(var(--core-lean, 0) * var(--space-2)))
+    scaleX(1);
+  animation: kria-trust-reach var(--motion-duration-breath) var(--motion-easing-breath) infinite;
+}
+
+@keyframes kria-trust-reach {
+  0%,
+  100% {
+    opacity: calc(0.3 + 0.3 * var(--core-intensity, 0.8));
+  }
+  50% {
+    opacity: calc(0.45 + 0.45 * var(--core-intensity, 0.8));
+  }
+}
+
+/* ── Reduced motion / kill-switch (Req 17.4 / 21.4) ─────────────────────────
+ * The reach degrades to a STATIC visible cue (still shown when acting, but no
+ * pulsing/drift). Meaning stays available (data-reach + live region). */
+.kria-trust[data-motion="static"] .kria-trust__reach,
+.kria-trust[data-motion="static"] .kria-trust__button {
+  animation: none;
+  transition: none;
+}
+
+.kria-trust[data-motion="static"][data-reach="true"] .kria-trust__reach {
+  transform: translateY(-50%) scaleX(1);
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kria-trust__reach,
+  .kria-trust__button {
+    animation: none;
+    transition: none;
+  }
+}
+
+/* Visually-hidden AT live region — announced, not shown (Req 21.2). */
+.kria-trust__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

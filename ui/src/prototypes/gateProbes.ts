@@ -145,6 +145,37 @@ export async function runG2Probe(options: G2ProbeOptions = {}): Promise<ProbeRes
   };
 }
 
+// --- Core-3D gate: homepage Core sustained-fps viability -------------------
+
+export interface CoreGateProbeOptions {
+  /**
+   * Point count standing in for the homepage Core's low-poly WebGL surface
+   * (design §4.3: translucent shell + one filament + motes + ring + aura).
+   * Deliberately small vs. the graph probe — the Core is ONE light object.
+   */
+  nodeCount?: number;
+  /** How many animated frames to sample before freezing. */
+  frames?: number;
+}
+
+/**
+ * Run the on-device Core-3D gate probe (design §13.3 "a new Core-3D gate:
+ * sustained fps at target size"). It measures the sustained WebGL frame rate at
+ * the Core's target size using the shared frame-timing machinery, so the
+ * homepage gate reuses the same probe path as the lens gates rather than
+ * duplicating GPU code.
+ *
+ * Returns a {@link ProbeResult} the resolver evaluates via
+ * `platform/coreRenderMode.ts::coreGatePasses`, or `null` when WebGL is
+ * unavailable (WebKitGTK software-raster case / jsdom) — which the resolver
+ * treats as a failed gate → the first-class 2D path.
+ */
+export function runCoreGateProbe(options: CoreGateProbeOptions = {}): Promise<ProbeResult | null> {
+  // The Core is a single low-poly object, so a few hundred points is a faithful
+  // GPU stand-in; reuse the shared WebGL sustained-fps probe.
+  return runG2Probe({ nodeCount: options.nodeCount ?? 400, frames: options.frames ?? 60 });
+}
+
 // --- G5: command-palette fuzzy index timing --------------------------------
 
 export interface FuzzyItem {

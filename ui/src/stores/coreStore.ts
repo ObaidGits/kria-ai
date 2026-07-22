@@ -40,6 +40,7 @@ export type CoreState =
   | "thinking"
   | "planning"
   | "speaking"
+  | "responding"
   | "acting"
   | "running-automation"
   | "watching"
@@ -57,6 +58,7 @@ export const ACTIVE_STATES: ReadonlySet<CoreState> = new Set([
   "thinking",
   "planning",
   "speaking",
+  "responding",
   "acting",
   "running-automation",
   "watching",
@@ -85,6 +87,7 @@ export const STATE_PRIORITY: Readonly<Record<CoreState, number>> = {
   blocked: 90,
   waiting: 60,
   speaking: 52,
+  responding: 51,
   listening: 50,
   "running-automation": 46,
   acting: 44,
@@ -199,7 +202,8 @@ export function mapDomainEvent(event: CoreDomainEvent): ActivityOp {
         case "planning":
           return { op: "begin", source, state: "planning" };
         case "streaming":
-          return { op: "begin", source, state: "speaking" };
+          // Text token streaming is a distinct phase from voice TTS `speaking`.
+          return { op: "begin", source, state: "responding" };
         case "error":
           // Route through the dedicated error activity so precedence applies.
           return { op: "begin", source: "error", state: "error", error: event.message };
@@ -282,11 +286,12 @@ export function mapDomainEvent(event: CoreDomainEvent): ActivityOp {
  * bypasses this check (it is always a valid derived state).
  */
 const VALID_TRANSITIONS: Partial<Record<CoreState, readonly CoreState[]>> = {
-  idle: ["listening", "thinking", "planning", "speaking", "acting", "running-automation", "watching", "remembering", "reflecting", "learning", "waiting", "blocked", "error"],
-  listening: ["idle", "thinking", "speaking", "blocked", "error"],
-  thinking: ["idle", "planning", "speaking", "acting", "blocked", "error", "waiting"],
-  planning: ["idle", "thinking", "acting", "blocked", "error"],
-  speaking: ["idle", "listening", "thinking", "error"],
+  idle: ["listening", "thinking", "planning", "speaking", "responding", "acting", "running-automation", "watching", "remembering", "reflecting", "learning", "waiting", "blocked", "error"],
+  listening: ["idle", "thinking", "speaking", "responding", "blocked", "error"],
+  thinking: ["idle", "planning", "speaking", "responding", "acting", "blocked", "error", "waiting"],
+  planning: ["idle", "thinking", "responding", "acting", "blocked", "error"],
+  speaking: ["idle", "listening", "thinking", "responding", "error"],
+  responding: ["idle", "listening", "thinking", "error"],
   acting: ["idle", "thinking", "blocked", "error", "waiting"],
   "running-automation": ["idle", "acting", "blocked", "error", "waiting"],
   watching: ["idle", "acting", "thinking", "error"],
@@ -522,9 +527,18 @@ function initCoreStateMachine(): Unsubscribe {
     eventBus.on("voice:state-changed", (p) => {
       ingest({ kind: "voice", state: (p.state || "idle") as VoicePhase });
     }),
-    eventBus.on("converse:thinking-changed", (p) => {
-      ingest({ kind: "agent", phase: p.thinking ? "thinking" : "done", sessionId: p.sessionId });
-    }),
+    // Both the turn bracket (thinking→done) and streaming tokens are coalesced
+    // on the SAME rAF queue so their emission order is preserved. Otherwise a
+    // trailing rAF-batched token could re-`begin` the agent activity AFTER a
+    // synchronously-processed `done` already ended it, leaving the Core stuck in
+    // `responding` (Stop button + statusline never returning to idle).
+    eventBus.on(
+      "converse:thinking-changed",
+      (p) => {
+        ingest({ kind: "agent", phase: p.thinking ? "thinking" : "done", sessionId: p.sessionId });
+      },
+      "raf"
+    ),
     eventBus.on(
       "converse:token",
       (p) => {

@@ -8,12 +8,9 @@ import { applyNodeCap, type GraphEdge, type GraphNode } from "./graphModel";
 import "./KnowledgeGraphLens.css";
 
 /**
- * Knowledge Graph lens (tasks 6.4 / 6.5). The 3D scene needs WebGL, which the
- * docs workbench can't guarantee (and jsdom can't run at all), so these stories
- * exercise the ALWAYS-AVAILABLE 2D/keyboard representation — the mandatory
- * fallback the lens yields to when the capability gate keeps 2D (design.md
- * §11.2), plus the manual 2D/3D toggle. Each story seeds the graphData
- * read-model directly (no bridge/Tauri needed).
+ * Knowledge Graph shipped-2D stories. These stories exercise the active SVG/
+ * table representations. Any generic gate toggle shown here is docs-only and
+ * does not make dormant `GraphCanvas3D` reachable from product routing.
  */
 const meta = {
   title: "Spaces/Memory/KnowledgeGraphLens",
@@ -74,7 +71,7 @@ export const Empty: Story = {
   },
 };
 
-/** The manual 2D/3D representation toggle (Req 5.5 / 17.5). */
+/** Docs-only generic gate demo; not a shipped Memory Graph renderer selector. */
 export const ModeToggle: Story = {
   render: () => {
     initRenderMode({

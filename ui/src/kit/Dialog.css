@@ -9,7 +9,13 @@
   background-color: var(--color-surface-3);
   backdrop-filter: blur(var(--blur-floating));
   -webkit-backdrop-filter: blur(var(--blur-floating));
+  /* Default modal layer, below the Approval Center. An approval confirmation
+   * elevates to --z-approval-confirm (via data-layer) so it sits ABOVE the
+   * pending Approval Center (§20.3, Req 11.9). Never relies on portal order. */
   z-index: var(--z-modal);
+}
+.kit-dialog__overlay[data-layer="approval-confirm"] {
+  z-index: var(--z-approval-confirm);
 }
 
 .kit-dialog__positioner {
@@ -20,6 +26,9 @@
   justify-content: center;
   padding: var(--space-6);
   z-index: var(--z-modal);
+}
+.kit-dialog__positioner[data-layer="approval-confirm"] {
+  z-index: var(--z-approval-confirm);
 }
 
 .kit-dialog__panel {

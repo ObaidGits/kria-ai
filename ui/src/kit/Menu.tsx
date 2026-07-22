@@ -4,7 +4,7 @@
  * Items are declarative; separators and disabled items supported.
  */
 import { DropdownMenu } from "@kobalte/core/dropdown-menu";
-import { For, Show, splitProps } from "solid-js";
+import { createUniqueId, For, Show, splitProps } from "solid-js";
 import { Icon } from "../components/Icon";
 import "./kit.base.css";
 import "./floating.css";
@@ -16,6 +16,13 @@ export interface MenuItem {
   icon?: string;
   onSelect?: () => void;
   disabled?: boolean;
+  /**
+   * Optional accessible description for the item (e.g. why it is disabled and
+   * what would re-enable it). Rendered via Kobalte `ItemDescription`, which
+   * wires the item's `aria-describedby`, so the reason is programmatically
+   * associated with the item — not hover-only content.
+   */
+  description?: string;
   separator?: boolean;
 }
 
@@ -24,6 +31,14 @@ export interface MenuProps {
   triggerLabel: string;
   /** Icon id → renders an icon-only trigger; otherwise the label is shown. */
   triggerIcon?: string;
+  /**
+   * Optional accessible description for the trigger (e.g. why the menu's
+   * actions are currently unavailable and what enables them). Rendered as
+   * visible, low-emphasis helper text and wired to the trigger via
+   * `aria-describedby` — reachable by AT on focus, never hover-only, and the
+   * trigger control itself is never hidden.
+   */
+  triggerDescription?: string;
   items: MenuItem[];
   /** Optional group label shown at the top of the menu. */
   label?: string;
@@ -36,12 +51,15 @@ export function Menu(props: MenuProps) {
   const [local] = splitProps(props, [
     "triggerLabel",
     "triggerIcon",
+    "triggerDescription",
     "items",
     "label",
     "open",
     "defaultOpen",
     "onOpenChange",
   ]);
+  const descriptionId = createUniqueId();
+  const hasTriggerDescription = () => !!local.triggerDescription;
   const iconMode = () => !!local.triggerIcon;
   const triggerClass = () =>
     iconMode()
@@ -54,11 +72,20 @@ export function Menu(props: MenuProps) {
       defaultOpen={local.defaultOpen}
       onOpenChange={local.onOpenChange}
     >
-      <DropdownMenu.Trigger class={triggerClass()} aria-label={local.triggerLabel}>
+      <DropdownMenu.Trigger
+        class={triggerClass()}
+        aria-label={local.triggerLabel}
+        aria-describedby={hasTriggerDescription() ? descriptionId : undefined}
+      >
         <Show when={iconMode()} fallback={local.triggerLabel}>
           <Icon name={local.triggerIcon!} />
         </Show>
       </DropdownMenu.Trigger>
+      <Show when={hasTriggerDescription()}>
+        <span id={descriptionId} class="kit-menu-trigger-description" role="note">
+          {local.triggerDescription}
+        </span>
+      </Show>
       <DropdownMenu.Portal>
         <DropdownMenu.Content class="kit-floating kit-floating--menu">
           <Show when={local.label}>
@@ -78,9 +105,14 @@ export function Menu(props: MenuProps) {
                   onSelect={() => item.onSelect?.()}
                 >
                   <Show when={item.icon}>
-                    <Icon name={item.icon!} size={16} />
+                    <Icon name={item.icon!} size="body" />
                   </Show>
                   <DropdownMenu.ItemLabel>{item.label}</DropdownMenu.ItemLabel>
+                  <Show when={item.description}>
+                    <DropdownMenu.ItemDescription class="kit-menu-item-description">
+                      {item.description}
+                    </DropdownMenu.ItemDescription>
+                  </Show>
                 </DropdownMenu.Item>
               </Show>
             )}

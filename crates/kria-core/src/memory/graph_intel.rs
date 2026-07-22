@@ -115,19 +115,50 @@ impl GraphIntelligence {
     }
 
     /// Degree centrality (most-connected entities first), top `limit`.
+    /// Standalone entities are included with degree 0 so newly extracted
+    /// knowledge appears before it gains relationships.
     pub fn degree_centrality(&self, limit: usize) -> MemoryResult<Vec<CentralityHit>> {
-        let adj = self.adjacency()?;
-        let mut hits: Vec<CentralityHit> = Vec::with_capacity(adj.len());
-        for (id, neigh) in &adj {
-            hits.push(CentralityHit {
-                entity: *id,
-                display_name: self.display_name(*id)?,
-                degree: neigh.len(),
-            });
-        }
-        hits.sort_by(|a, b| b.degree.cmp(&a.degree).then(a.entity.cmp(&b.entity)));
-        hits.truncate(limit);
-        Ok(hits)
+        self.db.with_read(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT e.id, e.display_name, \
+                     COUNT(DISTINCT CASE \
+                       WHEN r.source_id = e.id THEN r.target_id \
+                       ELSE r.source_id \
+                     END) AS degree \
+                     FROM entities e \
+                     LEFT JOIN relationships r \
+                       ON r.valid_until IS NULL \
+                      AND r.source_id <> r.target_id \
+                      AND (r.source_id = e.id OR r.target_id = e.id) \
+                     GROUP BY e.id, e.display_name \
+                     ORDER BY degree DESC, e.id ASC \
+                     LIMIT ?1",
+                )
+                .map_err(StorageError::Sqlite)?;
+            let rows = stmt
+                .query_map(params![limit as i64], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                })
+                .map_err(StorageError::Sqlite)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(StorageError::Sqlite)?;
+
+            Ok(rows
+                .into_iter()
+                .filter_map(|(id, display_name, degree)| {
+                    Uuid::parse_str(&id).ok().map(|entity| CentralityHit {
+                        entity,
+                        display_name,
+                        degree: degree.max(0) as usize,
+                    })
+                })
+                .collect())
+        })
     }
 
     /// Community detection via union-find over the undirected graph. Returns

@@ -10,7 +10,10 @@
   position: fixed;
   inset: 0;
   background-color: var(--color-surface-3);
-  z-index: var(--z-modal);
+  /* Pending approval outranks command palette / user modals (§20.3, Req 11.9).
+   * Explicit token, not incidental DOM order. Its nested confirm sits above
+   * this at --z-approval-confirm. */
+  z-index: var(--z-approval);
 }
 .kria-approvals__overlay.is-blocking {
   background-color: var(--color-surface-3);
@@ -25,7 +28,7 @@
   inset: 0;
   display: flex;
   justify-content: flex-end;
-  z-index: var(--z-modal);
+  z-index: var(--z-approval);
 }
 
 .kria-approvals {

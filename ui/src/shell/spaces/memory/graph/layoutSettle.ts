@@ -1,8 +1,7 @@
 /**
- * layoutSettle — pure settle/stop detection for the graph layout worker
- * (task 6.4, Req 5.4 / 16.3).
+ * layoutSettle — pure settle/stop detection for dormant graph layout support.
  *
- * The §5.4 hard rule: the force layout runs in a Worker and STOPS when settled →
+ * No shipped Memory Graph route consumes this protocol. A future MGR-030
  * the scene then becomes static (no perpetual simulation). ngraph.forcelayout
  * itself lives in the worker (browser/worker-only); this module holds the
  * settle DECISION so it is unit-testable without a Worker or WebGL.

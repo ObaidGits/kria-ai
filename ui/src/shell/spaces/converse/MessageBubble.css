@@ -8,7 +8,15 @@
 }
 
 .kria-msg {
+  /* Chat bubble: hugs its content, capped to a readable measure, and aligned
+     by author (user → right, KRIA → left) so the exchange reads as a dialogue
+     at a glance (Req 4.3). `min-width: 0` lets long tokens wrap instead of
+     forcing the bubble past its column. */
   display: block;
+  position: relative;
+  width: fit-content;
+  min-width: 0;
+  max-width: min(85%, 64ch);
   border-radius: var(--radius-lg);
   padding: var(--space-3) var(--space-4);
   color: var(--color-text-primary);
@@ -20,16 +28,21 @@
     box-shadow var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
-/* Assistant/system (KRIA-authored) sit on a soft surface; user turns are
- * accent-tinted and right-aligned in measure so authorship reads at a glance. */
+/* Assistant/system (KRIA-authored) sit on a soft surface, aligned LEFT. The
+ * slightly squared bottom-left corner reads as a conversation "tail". */
 .kria-msg[data-role="assistant"],
 .kria-msg[data-role="system"] {
+  margin-inline-end: auto;
   background: var(--color-surface-2);
+  border-bottom-left-radius: var(--radius-sm);
 }
 
+/* User turns are accent-tinted and aligned RIGHT, with the tail on the right. */
 .kria-msg[data-role="user"] {
+  margin-inline-start: auto;
   background: var(--color-accent-soft);
   border: 1px solid var(--color-accent-border);
+  border-bottom-right-radius: var(--radius-sm);
 }
 
 .kria-msg[data-role="system"] {
@@ -59,13 +72,20 @@
 .kria-msg__time {
   margin-left: auto;
   font-size: var(--font-size-micro);
-  color: var(--color-text-muted);
+  /* Secondary (not muted): muted text fails WCAG AA contrast on the tinted
+     user bubble (4.26:1 < 4.5:1). Secondary clears AA on both bubble
+     backgrounds (Req 19.1–19.7; task 11.8 a11y gate). */
+  color: var(--color-text-secondary);
 }
 
-/* Actions revealed on hover / selection / keyboard focus — always in the DOM
- * so they stay keyboard-reachable (Req 4.8 / 17.1). */
+/* One persistent low-emphasis action trigger — always in the DOM AND visible
+ * at rest (not hover-gated) so it is discoverable by touch/novice pointer users
+ * without hovering, while staying keyboard-reachable. Emphasis is promoted to
+ * full on hover / keyboard focus / selection (Req 12.2 / 4.8 / 17.1;
+ * UIE-M-007). Single tab stop per message: the '⋯' trigger opens the menu that
+ * holds all six actions — no per-action tab stop is added. */
 .kria-msg__actions {
-  opacity: 0;
+  opacity: 0.55;
   transition: opacity var(--motion-duration-fast) var(--motion-easing-standard);
 }
 .kria-msg:hover .kria-msg__actions,
@@ -76,13 +96,55 @@
 
 /* ── Body (sanitized markdown) ───────────────────────────────────────────── */
 .kria-msg__body {
+  /* Long URLs / unbroken tokens wrap inside the bubble instead of pushing it
+     past its column ("response comes out of div" fix). */
   overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .kria-msg__body > :first-child {
   margin-top: 0;
 }
 .kria-msg__body > :last-child {
   margin-bottom: 0;
+}
+
+/* Vertical rhythm for markdown block elements. Without this, multi-paragraph /
+   list replies render with no separation ("no proper space is followed"). */
+.kria-msg__body p,
+.kria-msg__body ul,
+.kria-msg__body ol,
+.kria-msg__body blockquote,
+.kria-msg__body pre,
+.kria-msg__body table {
+  margin-block: var(--space-2);
+}
+.kria-msg__body h1,
+.kria-msg__body h2,
+.kria-msg__body h3,
+.kria-msg__body h4 {
+  margin-block: var(--space-3) var(--space-2);
+  line-height: var(--font-line-height-tight);
+}
+.kria-msg__body ul,
+.kria-msg__body ol {
+  padding-inline-start: var(--space-4);
+}
+.kria-msg__body li {
+  margin-block: var(--space-1);
+}
+.kria-msg__body li > ul,
+.kria-msg__body li > ol {
+  margin-block: var(--space-1);
+}
+.kria-msg__body blockquote {
+  padding-inline-start: var(--space-3);
+  border-inline-start: 2px solid var(--color-border-default);
+  color: var(--color-text-secondary);
+}
+.kria-msg__body hr {
+  margin-block: var(--space-3);
+  border: none;
+  border-top: 1px solid var(--color-border-default);
 }
 .kria-msg__body pre {
   overflow-x: auto;
@@ -95,6 +157,24 @@
 .kria-msg__body code {
   font-family: var(--font-family-mono);
   font-size: 0.9em;
+}
+/* Wide tables must not blow out the bubble — scroll them horizontally. */
+.kria-msg__body table {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+.kria-msg__body th,
+.kria-msg__body td {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border-default);
+  text-align: start;
+}
+.kria-msg__body img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-md);
 }
 .kria-msg__body a {
   color: var(--color-accent-default);
@@ -137,6 +217,10 @@
   gap: var(--space-2);
 }
 .kria-msg__result {
+  /* Constrain to the bubble and let content wrap rather than pushing the card
+     (and its parent bubble) past its column. */
+  min-width: 0;
+  max-width: 100%;
   font-size: var(--font-size-caption);
   color: var(--color-text-secondary);
 }
@@ -144,18 +228,53 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
   font-weight: var(--font-weight-medium);
   color: var(--color-text-secondary);
 }
 .kria-msg__result-title {
   font-size: var(--font-size-caption);
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .kria-msg__result-summary {
   margin: var(--space-2) 0 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .kria-msg__result-body {
   margin-top: var(--space-2);
   overflow-wrap: anywhere;
+}
+
+/* Structured tool/result payload — collapsed by default so a large JSON blob
+   never dominates the conversation, and always wraps + scrolls inside the card
+   instead of overflowing the bubble ("goes out of div" fix). */
+.kria-msg__result-detail {
+  margin-top: var(--space-2);
+}
+.kria-msg__result-detail > summary {
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  user-select: none;
+}
+.kria-msg__result-detail > summary:hover {
+  color: var(--color-text-primary);
+}
+.kria-msg__result-data {
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-1);
+  color: var(--color-text-secondary);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-micro);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+  max-height: 240px;
+  overflow-y: auto;
 }
 
 @media (prefers-reduced-motion: reduce) {

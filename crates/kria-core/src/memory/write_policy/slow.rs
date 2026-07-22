@@ -82,10 +82,18 @@ impl SlowPath {
     /// `enrich` is idempotent (content-hash dedup + cursor advance), so replays
     /// never duplicate or lose a memory. Per-event errors are dead-lettered; the
     /// loop never dies on a single bad event.
-    pub async fn run(&self, mut rx: Receiver<Uuid>, catchup_interval: Duration) {
-        // Crash-recovery sweep before serving live wakes.
-        if let Err(e) = self.enrich_pending(64).await {
-            tracing::warn!(error = %e, "slow-path startup catch-up failed (will retry on timer)");
+    pub async fn run(
+        &self,
+        mut rx: Receiver<Uuid>,
+        catchup_interval: Duration,
+        enabled: Arc<std::sync::atomic::AtomicBool>,
+    ) {
+        // Crash-recovery sweep before serving live wakes, unless startup has
+        // memory disabled. Durable events remain available for later catch-up.
+        if enabled.load(std::sync::atomic::Ordering::Acquire) {
+            if let Err(e) = self.enrich_pending(64).await {
+                tracing::warn!(error = %e, "slow-path startup catch-up failed (will retry on timer)");
+            }
         }
         let mut ticker = tokio::time::interval(catchup_interval);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -95,6 +103,9 @@ impl SlowPath {
             tokio::select! {
                 maybe = rx.recv() => match maybe {
                     Some(event_id) => {
+                        if !enabled.load(std::sync::atomic::Ordering::Acquire) {
+                            continue;
+                        }
                         if let Err(e) = self.enrich(event_id).await {
                             tracing::warn!(%event_id, error = %e, "slow-path enrichment failed; dead-lettering");
                             self.dead_letter(event_id, &e.to_string());
@@ -103,6 +114,9 @@ impl SlowPath {
                     None => break, // channel closed → shut down
                 },
                 _ = ticker.tick() => {
+                    if !enabled.load(std::sync::atomic::Ordering::Acquire) {
+                        continue;
+                    }
                     // Recover wakes dropped under backpressure (R1). Best-effort.
                     if let Err(e) = self.enrich_pending(64).await {
                         tracing::debug!(error = %e, "slow-path catch-up sweep incomplete");

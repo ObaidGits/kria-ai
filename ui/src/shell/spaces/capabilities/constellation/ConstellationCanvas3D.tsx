@@ -71,11 +71,18 @@ export function ConstellationCanvas3D(props: ConstellationCanvas3DProps) {
   function inspectIfDescriptor(id: string) {
     const m = constellationData.metaFor(id);
     if (m?.hasDescriptor && m.providerId && m.capabilityId) {
-      shellStore.openInspector("capability", id, {
-        providerId: m.providerId,
-        capabilityId: m.capabilityId,
-        name: m.name,
-      });
+      // Node click focus lands on the canvas, not a semantic control — hand the
+      // stable Capabilities region as the Focus_Return_Owner (§20.3/§20.4).
+      shellStore.openInspector(
+        "capability",
+        id,
+        {
+          providerId: m.providerId,
+          capabilityId: m.capabilityId,
+          name: m.name,
+        },
+        { regionSelector: '[data-space="capabilities"]' },
+      );
     }
   }
 

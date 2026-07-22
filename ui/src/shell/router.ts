@@ -98,14 +98,19 @@ export function parseRoute(path: string): Route | null {
   const parts = trimmed.split("/");
   if (parts.length === 0 || parts.length > 3) return null;
 
+  // Reject any empty internal component (e.g. "converse//abc"). An empty
+  // middle would otherwise let an entityId appear without a preceding segment,
+  // violating the `space[/segment][/entityId]` grammar (entity requires segment).
+  if (parts.some((p) => p === "")) return null;
+
   const space = parts[0];
   if (!isValidSpace(space)) return null;
 
   const route: Route = { space };
-  if (parts.length >= 2 && parts[1]) {
+  if (parts.length >= 2) {
     route.segment = parts[1];
   }
-  if (parts.length === 3 && parts[2]) {
+  if (parts.length === 3) {
     route.entityId = parts[2];
   }
   return route;

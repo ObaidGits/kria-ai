@@ -187,6 +187,9 @@ impl ToolHandler for ListRemembered {
     async fn execute(&self, _params: serde_json::Value) -> ToolResult {
         // Unified path: list recent cognitive memories via the research timeline.
         if let Some(ms) = &self.0.memory {
+            if let Err(error) = ms.ensure_enabled() {
+                return ToolResult::err(error.to_string());
+            }
             return match ms.research().timeline(200) {
                 Ok(entries) => {
                     let results: Vec<serde_json::Value> = entries

@@ -1,0 +1,22 @@
+{
+  "floor": {
+    "sheen": {
+      "alpha": {
+        "value": "0.10",
+        "comment": "Homepage presence redesign (design §3.1/§12.1): opacity of the Core-driven floor sheen radial in the lower third. Theme-independent scalar."
+      }
+    }
+  },
+  "particle": {
+    "alpha": {
+      "value": "0.12",
+      "comment": "Homepage presence redesign (design §3.1/§12.1): opacity of the emerald particle motes (8-15% range). Theme-independent scalar."
+    },
+    "count": {
+      "max": {
+        "value": "30",
+        "comment": "Homepage presence redesign (design §3.1/§12.1, Req 1.3): build-time cap on the particle field (<=30 transform-only motes)."
+      }
+    }
+  }
+}

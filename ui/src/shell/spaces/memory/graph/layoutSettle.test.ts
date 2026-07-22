@@ -1,7 +1,6 @@
 /**
- * layoutSettle tests (task 6.4) — the settle/stop decision for the layout
- * worker. §5.4 hard rule: the layout runs in a Worker and STOPS when settled →
- * the scene becomes static (no perpetual simulation). ngraph itself is
+ * Dormant layout settle/stop utility tests. They verify worker-protocol math,
+ * not active Memory Graph renderer integration. ngraph itself is
  * worker/browser-only; this verifies the stop decision in isolation.
  */
 import { describe, it, expect } from "vitest";

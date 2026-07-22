@@ -1,0 +1,84 @@
+/* "What KRIA can sense" panel (task 3.8, Req 25.5). Token-only styling,
+   mirrors the Settings feature-section conventions. */
+.kria-settings__sense {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-1);
+}
+.kria-settings__sense-status {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+.kria-settings__sense-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.kria-settings__sense-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  height: 100%;
+  padding: var(--space-3);
+}
+.kria-settings__sense-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.kria-settings__sense-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.kria-settings__sense-title strong { color: var(--color-text-primary); }
+.kria-settings__sense-purpose {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+}
+.kria-settings__sense-availability {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+.kria-settings__sense-controls {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-2);
+}
+.kria-settings__sense-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+}
+.kria-settings__sense-toggle--memory { color: var(--color-text-muted); }
+.kria-settings__sense-switch {
+  width: 2.5rem;
+  height: 1.375rem;
+  margin: 0;
+  accent-color: var(--color-accent-default);
+  cursor: inherit;
+}
+
+@media (max-width: 620px) {
+  .kria-settings__sense-list { grid-template-columns: minmax(0, 1fr); }
+  .kria-settings__sense-row { align-items: stretch; flex-direction: column; }
+  .kria-settings__sense-controls { align-items: stretch; flex-direction: row; }
+}

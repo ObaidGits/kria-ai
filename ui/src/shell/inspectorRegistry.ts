@@ -40,8 +40,20 @@ export interface InspectorContent {
   body: JSX.Element;
 }
 
-/** A renderer maps an inspector target to its titled body. */
-export type InspectorRenderer = (target: InspectorTarget) => InspectorContent;
+/**
+ * A renderer maps an inspector target to its titled body, OR returns `null` to
+ * signal that the target entity is no longer live (deleted/removed from its
+ * source store while the Inspector was open). Returning `null` is the
+ * decoupled removal signal the host uses to close the single Inspector exactly
+ * once and return focus via the §20.4 ladder (task 9.4, gap G6) — the host
+ * never imports a domain store to learn this. Renderers that read their source
+ * store reactively should return `null` once the target id is gone; a renderer
+ * that always has content simply never returns `null`. (An UNREGISTERED type is
+ * NOT a removal — the host shows a titled fallback so a lazily-loaded Space can
+ * still register — so removal is scoped to a REGISTERED renderer returning
+ * `null`.)
+ */
+export type InspectorRenderer = (target: InspectorTarget) => InspectorContent | null;
 
 // Module-level registry. Keyed by `target.type`. One renderer per type — the
 // last registration for a type wins (a Space owns its own type).

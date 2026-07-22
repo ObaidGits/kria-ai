@@ -24,6 +24,7 @@ export { registerSource, collectItems } from "./sources";
 export { searchItems, groupResults, flattenGroups } from "./search";
 export { fuzzyMatch, fuzzyScore } from "./fuzzy";
 export { recordUse, recencyBoost, recencyRank, getRecents, clearRecents } from "./recents";
+export { isPinned, pinItem, unpinItem, togglePin, clearPins } from "./pins";
 export { setAskHandler, setChangeHandler, dispatchAsk, dispatchChange } from "./dispatch";
 export { MODES, parseQuery, modeDef, nextMode } from "./modes";
 export type { ModeDef, ParsedQuery } from "./modes";

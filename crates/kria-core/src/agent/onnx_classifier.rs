@@ -118,8 +118,19 @@ impl std::fmt::Debug for OnnxClassifier {
 
 impl OnnxClassifier {
     pub fn new(queue_capacity: usize, timeout: Duration) -> Self {
+        Self::new_with_model_path(queue_capacity, timeout, None)
+    }
+
+    pub fn new_with_model_path(
+        queue_capacity: usize,
+        timeout: Duration,
+        model_path: Option<PathBuf>,
+    ) -> Self {
         let (tx, rx) = sync_channel::<ClassifierJob>(queue_capacity.max(1));
-        let settings = resolve_runtime_settings();
+        let mut settings = resolve_runtime_settings();
+        if let Some(model_path) = model_path.filter(|path| !path.as_os_str().is_empty()) {
+            settings.model_path = model_path;
+        }
         let (runtime, status) = OnnxRuntime::load(&settings).map_or_else(
             |error| {
                 tracing::warn!(

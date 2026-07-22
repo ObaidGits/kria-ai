@@ -84,15 +84,15 @@ describe("MemorySpace — landing + segments (task 6.1, Req 5.1)", () => {
     expect(screen.getByRole("heading", { name: "Goals & Plans" })).toBeInTheDocument();
   });
 
-  it("mounts the Knowledge Graph lens as its 2D representation (no WebGL under jsdom) (Req 5.4/5.5)", () => {
+  it("mounts the immersive Knowledge Graph without requiring WebGL (Req 5.4/5.5)", () => {
     render(() => <MemorySpace />);
     fireEvent.click(screen.getByRole("tab", { name: "Knowledge Graph" }));
     expect(currentRoute().segment).toBe("knowledgegraph");
-    // The lens mounts its mandatory 2D fallback, NOT a 3D canvas: jsdom has no
-    // WebGL so the capability gate keeps 2D (the accepted WebKitGTK outcome).
+    // Deterministic SVG universe is the primary renderer on every device;
+    // the accessible table remains available from its in-graph control.
     expect(document.querySelector("canvas")).toBeNull();
-    // The 2D representation shows an honest loading/empty/error state.
-    expect(document.querySelector(".kria-graph__fallback")).not.toBeNull();
+    expect(document.querySelector(".memory-universe")).not.toBeNull();
+    expect(document.querySelectorAll(".memory-universe__hub")).toHaveLength(8);
   });
 
   it("filters memories in Explorer by the header search (Req 5.1)", () => {

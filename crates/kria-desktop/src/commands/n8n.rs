@@ -1,4 +1,4 @@
-use crate::commands::AppStateCell;
+use crate::commands::{AppState, AppStateCell};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use kria_core::infra::ToolResult;
@@ -47,6 +47,24 @@ use tokio::process::Command;
 use tokio::sync::RwLock;
 
 static N8N_RUNNER_BROKER_PORT: AtomicU16 = AtomicU16::new(5680);
+
+async fn persist_n8n_config(state: &AppState, config: &N8nConfig) -> Result<(), String> {
+    let fields = serde_json::to_value(config)
+        .map_err(|error| format!("failed to serialize n8n config: {error}"))?
+        .as_object()
+        .cloned()
+        .ok_or_else(|| "n8n config did not serialize as an object".to_string())?;
+    let changes = fields
+        .into_iter()
+        .map(|(field, value)| kria_core::config::Change::new("n8n", field, value))
+        .collect();
+    state
+        .config_service
+        .patch_batch(changes, kria_core::config::ChangeSource::Ui, None)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -340,9 +358,10 @@ impl ToolHandler for N8nAdapterInvokeWorkflowHandler {
 
         let mut runtime = self.runtime.clone();
         if let Some(slot) = runtime.catalog_slot.as_ref() {
-            if let Some(latest_catalog) = slot.read().await.clone() {
-                runtime.catalog = latest_catalog;
-            }
+            let Some(latest_catalog) = slot.read().await.clone() else {
+                return ToolResult::err("n8n is disabled or has no valid workflow catalog");
+            };
+            runtime.catalog = latest_catalog;
         }
 
         match run_n8n_workflow_adapter(runtime, adapter_request).await {
@@ -380,7 +399,7 @@ pub(crate) fn register_n8n_adapter_tool_handler(
             name: "n8n_invoke_workflow".into(),
             description: "Invoke an approved n8n workflow through KRIA's shared execution adapter"
                 .into(),
-            category: "external_workflow".into(),
+            category: "n8n".into(),
             default_tier: RiskLevel::Yellow,
             min_tier: "lite",
             parameters: vec![
@@ -11326,7 +11345,9 @@ async fn test_connection_snapshot(config: &N8nConfig, callback: &str) -> serde_j
     })
 }
 
-async fn start_managed_n8n_from_config(config: N8nConfig) -> Result<serde_json::Value, String> {
+pub(super) async fn start_managed_n8n_from_config(
+    config: N8nConfig,
+) -> Result<serde_json::Value, String> {
     if config.mode != N8nRuntimeMode::ManagedDocker {
         return Err("n8n mode is not managed_docker".into());
     }
@@ -11526,17 +11547,14 @@ pub async fn get_n8n_runtime_status(
     let app_state = state
         .get()
         .ok_or_else(|| "runtime still initializing".to_string())?;
-    let mut config = app_state.config.write().await;
+    let mut config = app_state.config.read().await.clone();
     let migrated_api_key = migrate_literal_n8n_api_key_to_file(&mut config.n8n)
         .map_err(|error| format!("failed to migrate n8n API key: {error}"))?;
     if migrated_api_key.is_some() {
-        config
-            .save()
-            .map_err(|error| format!("failed to save migrated n8n API key config: {error}"))?;
+        persist_n8n_config(app_state, &config.n8n).await?;
     }
     let callback = callback_url(&config);
     let n8n = config.n8n.clone();
-    drop(config);
     if migrated_api_key.is_some() {
         *app_state.n8n_catalog.write().await = rebuild_catalog(&n8n);
     }
@@ -11591,13 +11609,14 @@ pub async fn get_n8n_runtime_status(
 pub async fn save_n8n_settings(
     request: SaveN8nSettingsRequest,
     state: State<'_, AppStateCell>,
+    app: AppHandle,
 ) -> Result<serde_json::Value, String> {
     let mode = parse_runtime_mode(&request.mode)?;
     let app_state = state
         .get()
         .ok_or_else(|| "runtime still initializing".to_string())?;
 
-    let mut config = app_state.config.write().await;
+    let mut config = app_state.config.read().await.clone();
     config.n8n.config_version = 2;
     config.n8n.enabled = request.enabled;
     config.n8n.mode = mode;
@@ -11644,16 +11663,14 @@ pub async fn save_n8n_settings(
         .n8n
         .migrate_literal_signing_secret_to_file()
         .map_err(|error| format!("failed to migrate n8n signing secret: {error}"))?;
-    config
-        .save()
-        .map_err(|error| format!("failed to save KRIA config: {error}"))?;
+    persist_n8n_config(app_state, &config.n8n).await?;
     let rebuilt = rebuild_catalog(&config.n8n);
     let response_config = sanitized_n8n_config(&config.n8n);
     let mode = config.n8n.mode.as_str().to_string();
     let base_url = config.n8n.base_url.clone();
     let dashboard_url = config.n8n.dashboard_url.clone();
-    drop(config);
     *app_state.n8n_catalog.write().await = rebuilt;
+    reconcile_n8n_feature(app_state, config.n8n.enabled, &app).await?;
 
     tracing::info!(
         target: "n8n_config",
@@ -11673,11 +11690,12 @@ pub async fn save_n8n_settings(
 pub async fn save_n8n_api_key_secret(
     request: SaveN8nApiKeySecretRequest,
     state: State<'_, AppStateCell>,
+    app: AppHandle,
 ) -> Result<serde_json::Value, String> {
     let app_state = state
         .get()
         .ok_or_else(|| "runtime still initializing".to_string())?;
-    let mut config = app_state.config.write().await;
+    let mut config = app_state.config.read().await.clone();
     let path = write_n8n_api_key_to_configured_file(
         &mut config.n8n,
         &request.api_key,
@@ -11695,13 +11713,11 @@ pub async fn save_n8n_api_key_secret(
                 .map(|value| !value.trim().is_empty())
                 .unwrap_or(false)
         });
-    config
-        .save()
-        .map_err(|error| format!("failed to save n8n API key secret config: {error}"))?;
+    persist_n8n_config(app_state, &config.n8n).await?;
     let rebuilt = rebuild_catalog(&config.n8n);
     let response_config = sanitized_n8n_config(&config.n8n);
-    drop(config);
     *app_state.n8n_catalog.write().await = rebuilt;
+    reconcile_n8n_feature(app_state, true, &app).await?;
 
     tracing::info!(
         target: "n8n_config",
@@ -11928,14 +11944,31 @@ pub async fn test_n8n_connection_profile(
         .unwrap_or("Check n8n settings.")
         .to_string();
 
-    let mut config = app_state.config.write().await;
-    config.n8n.last_connection_status = setup_status.clone();
-    config.n8n.last_connection_message = message.clone();
-    config.n8n.last_connection_checked_at_ms = current_unix_ms();
-    config
-        .save()
-        .map_err(|error| format!("failed to save n8n connection profile status: {error}"))?;
-    drop(config);
+    app_state
+        .config_service
+        .patch_batch(
+            vec![
+                kria_core::config::Change::new(
+                    "n8n",
+                    "last_connection_status",
+                    serde_json::json!(setup_status.clone()),
+                ),
+                kria_core::config::Change::new(
+                    "n8n",
+                    "last_connection_message",
+                    serde_json::json!(message.clone()),
+                ),
+                kria_core::config::Change::new(
+                    "n8n",
+                    "last_connection_checked_at_ms",
+                    serde_json::json!(current_unix_ms()),
+                ),
+            ],
+            kria_core::config::ChangeSource::Ui,
+            None,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
 
     emit_n8n_event(
         &app,
@@ -12038,7 +12071,7 @@ pub async fn start_or_prepare_managed_n8n(
 
     let mut generated = Vec::<serde_json::Value>::new();
     let n8n = {
-        let mut config = app_state.config.write().await;
+        let mut config = app_state.config.read().await.clone();
         config.n8n.enabled = true;
         config.n8n.mode = N8nRuntimeMode::ManagedDocker;
         if config.n8n.base_url.trim().is_empty() {
@@ -12085,17 +12118,16 @@ pub async fn start_or_prepare_managed_n8n(
             .n8n
             .migrate_literal_signing_secret_to_file()
             .map_err(|error| format!("failed to migrate n8n signing secret: {error}"))?;
-        config
-            .save()
-            .map_err(|error| format!("failed to save managed n8n preparation config: {error}"))?;
+        persist_n8n_config(app_state, &config.n8n).await?;
         let rebuilt = rebuild_catalog(&config.n8n);
         let n8n = config.n8n.clone();
-        drop(config);
         *app_state.n8n_catalog.write().await = rebuilt;
         n8n
     };
 
-    let start_result = start_managed_n8n_from_config(n8n).await?;
+    let container_name = n8n.managed_docker.container_name.clone();
+    reconcile_n8n_feature(app_state, true, &app).await?;
+    let start_result = docker_container_status(&container_name).await;
     let response = serde_json::json!({
         "status": "prepared_started",
         "generated_secrets": generated,
@@ -12132,14 +12164,31 @@ pub async fn test_n8n_connection(
         .unwrap_or("")
         .to_string();
 
-    let mut config = app_state.config.write().await;
-    config.n8n.last_connection_status = status.clone();
-    config.n8n.last_connection_message = message.clone();
-    config.n8n.last_connection_checked_at_ms = current_unix_ms();
-    config
-        .save()
-        .map_err(|error| format!("failed to save n8n connection status: {error}"))?;
-    drop(config);
+    app_state
+        .config_service
+        .patch_batch(
+            vec![
+                kria_core::config::Change::new(
+                    "n8n",
+                    "last_connection_status",
+                    serde_json::json!(status.clone()),
+                ),
+                kria_core::config::Change::new(
+                    "n8n",
+                    "last_connection_message",
+                    serde_json::json!(message.clone()),
+                ),
+                kria_core::config::Change::new(
+                    "n8n",
+                    "last_connection_checked_at_ms",
+                    serde_json::json!(current_unix_ms()),
+                ),
+            ],
+            kria_core::config::ChangeSource::Ui,
+            None,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
 
     tracing::info!(
         target: "n8n_runtime",
@@ -12160,6 +12209,140 @@ pub async fn test_n8n_connection(
     );
 
     Ok(result)
+}
+
+pub(super) async fn start_n8n_maintenance(state: &AppState, app: &AppHandle) {
+    let mut task = state.n8n_maintenance.lock().await;
+    if task
+        .as_ref()
+        .map(|handle| !handle.is_finished())
+        .unwrap_or(false)
+    {
+        return;
+    }
+
+    let state_store = state.n8n_state_store.clone();
+    let hitl_responses = state.n8n_hitl_responses.clone();
+    let app = app.clone();
+    *task = Some(tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(30));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            interval.tick().await;
+
+            let timed_out = state_store.check_timeouts(300_000);
+            if !timed_out.is_empty() {
+                tracing::warn!(
+                    target: "n8n_maintenance",
+                    count = timed_out.len(),
+                    "Marked n8n runs as timed out (no callback within deadline)"
+                );
+                for run in &timed_out {
+                    let _ = app.emit(
+                        "n8n:workflow_timeout",
+                        serde_json::json!({
+                            "event_type": "n8n:workflow_timeout",
+                            "workflow_id": run.workflow_id,
+                            "workflow_version": run.workflow_version,
+                            "correlation_id": run.correlation_id,
+                            "status": "timed_out",
+                            "timestamp_ms": current_unix_ms(),
+                            "user_visible_summary": "Workflow timed out while waiting for an n8n terminal callback.",
+                        }),
+                    );
+                }
+            }
+
+            let now_ms = current_unix_ms();
+            let mut responses = hitl_responses.write().await;
+            let before = responses.len();
+            responses.retain(|_, value| {
+                value
+                    .get("decided_at_unix_ms")
+                    .and_then(serde_json::Value::as_u64)
+                    .map(|timestamp| now_ms.saturating_sub(timestamp) < 600_000)
+                    .unwrap_or(true)
+            });
+            let removed = before - responses.len();
+            drop(responses);
+            if removed > 0 {
+                tracing::debug!(target: "n8n_maintenance", removed, "Expired old HITL responses");
+            }
+
+            let evicted = state_store.evict_old_runs(3_600_000);
+            if evicted > 0 {
+                tracing::debug!(target: "n8n_maintenance", evicted, "Evicted old completed n8n runs");
+            }
+        }
+    }));
+    tracing::info!("[n8n] background maintenance task started");
+}
+
+pub(super) async fn stop_n8n_maintenance(state: &AppState) {
+    if let Some(task) = state.n8n_maintenance.lock().await.take() {
+        task.abort();
+        tracing::info!("[n8n] background maintenance task stopped");
+    }
+}
+
+pub(super) async fn reconcile_n8n_feature(
+    state: &AppState,
+    enabled: bool,
+    app: &AppHandle,
+) -> Result<(), String> {
+    let config = state.config.read().await.n8n.clone();
+    let catalog = if enabled {
+        rebuild_catalog(&config)
+    } else {
+        None
+    };
+    *state.n8n_catalog.write().await = catalog.clone();
+
+    if enabled {
+        start_n8n_maintenance(state, app).await;
+        if let Some(catalog) = catalog {
+            register_n8n_adapter_tool_handler(
+                &state.tool_registry,
+                N8nAdapterRuntime {
+                    catalog,
+                    catalog_slot: Some(state.n8n_catalog.clone()),
+                    n8n_state_store: state.n8n_state_store.clone(),
+                    n8n_inbox_path: state.n8n_inbox_path.clone(),
+                    n8n_audit_path: state.n8n_audit_path.clone(),
+                    n8n_governance_log: state.n8n_governance_log.clone(),
+                    app_handle: Some(app.clone()),
+                    fleet_control_runtime: Some(state.fleet_control_runtime.clone()),
+                },
+            );
+        }
+    } else {
+        stop_n8n_maintenance(state).await;
+    }
+
+    if config.mode != N8nRuntimeMode::ManagedDocker {
+        return Ok(());
+    }
+    let container_name = config.managed_docker.container_name.trim().to_string();
+    if enabled {
+        let result = start_managed_n8n_from_config(config).await?;
+        emit_n8n_event(app, "n8n:runtime_status", result);
+        return Ok(());
+    }
+
+    let status = docker_container_status(&container_name).await;
+    if status["running"].as_bool().unwrap_or(false) {
+        let args = vec!["stop".to_string(), container_name.clone()];
+        let output = docker_output(&args).await?;
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+        }
+    }
+    emit_n8n_event(
+        app,
+        "n8n:runtime_status",
+        serde_json::json!({ "status": "stopped", "container": container_name }),
+    );
+    Ok(())
 }
 
 #[tauri::command]
@@ -14236,12 +14419,10 @@ pub async fn repair_n8n_audit_finding(
             }))
         }
         "move_literal_api_key_to_secret_file" => {
-            let mut config = app_state.config.write().await;
+            let mut config = app_state.config.read().await.clone();
             let moved = migrate_literal_n8n_api_key_to_file(&mut config.n8n)?;
             if moved.is_some() {
-                config
-                    .save()
-                    .map_err(|error| format!("failed to save KRIA config: {error}"))?;
+                persist_n8n_config(app_state, &config.n8n).await?;
             }
             Ok(serde_json::json!({
                 "status": if moved.is_some() { "repaired" } else { "not_needed" },
@@ -14251,15 +14432,13 @@ pub async fn repair_n8n_audit_finding(
             }))
         }
         "move_literal_signing_secret_to_secret_file" => {
-            let mut config = app_state.config.write().await;
+            let mut config = app_state.config.read().await.clone();
             let moved = config
                 .n8n
                 .migrate_literal_signing_secret_to_file()
                 .map_err(|error| format!("failed to migrate n8n signing secret: {error}"))?;
             if moved.is_some() {
-                config
-                    .save()
-                    .map_err(|error| format!("failed to save KRIA config: {error}"))?;
+                persist_n8n_config(app_state, &config.n8n).await?;
             }
             Ok(serde_json::json!({
                 "status": if moved.is_some() { "repaired" } else { "not_needed" },
@@ -14337,7 +14516,7 @@ pub async fn archive_legacy_n8n_toml_workflows(
     let app_state = state
         .get()
         .ok_or_else(|| "runtime still initializing".to_string())?;
-    let mut config = app_state.config.write().await;
+    let mut config = app_state.config.read().await.clone();
     let legacy_workflows = config.n8n.workflows.clone();
     let mut store = load_workflow_registry_store()?;
 
@@ -14365,11 +14544,8 @@ pub async fn archive_legacy_n8n_toml_workflows(
 
     let archived = legacy_workflows.len();
     config.n8n.workflows.clear();
-    config.save().map_err(|error| {
-        format!("failed to save KRIA config after archiving legacy workflows: {error}")
-    })?;
+    persist_n8n_config(app_state, &config.n8n).await?;
     let rebuilt = rebuild_catalog_from_workflows(&config.n8n, workflow_registry_workflows(&store));
-    drop(config);
     *app_state.n8n_catalog.write().await = rebuilt;
 
     tracing::info!(

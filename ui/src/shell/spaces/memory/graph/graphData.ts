@@ -1,16 +1,18 @@
 /**
- * graphData — the typed knowledge-graph read-model slice (task 6.4, Req 5.4).
+ * graphData — current Memory Graph v1 presentation read-model.
  *
- * A minimal, feature-scoped reactive store that feeds the Knowledge Graph lens
- * (3D) and its 2D fallback from the EXISTING `memory_graph_*` Tauri commands via
+ * A minimal, feature-scoped reactive store feeding shipped 2D SVG and semantic
+ * table from the existing `memory_graph_*` Tauri commands. Dormant GL files may
+ * also consume it in isolated tests, but that is not a shipped renderer path. Via
  * the graceful bridge. It holds the capped node/edge model, per-focus predicted
  * links, and honest loading/error/"showing N of M" state.
  *
  * ARCHITECTURE (KRIA runtime authority): pure read-model + view-state.
  *   • load / expand only READ backend graph data (centrality, communities,
  *     relationships, predictions).
- *   • focus/expand/pin/hide are VIEW state (pinned/hidden id sets) — they never
- *     mutate memory.
+ *   • focus/expand/hide are active 2D VIEW state and never mutate memory.
+ *   • pinned ids remain for dormant Phase-7 GL experiments only; shipped 2D/table
+ *     expose no pin action because deterministic positions do not consume them.
  *   • materializePrediction dispatches the EXISTING
  *     `memory_graph_create_relationship` command (the backend performs the
  *     write); the view then REFLECTS the now-real relationship. The lens never
@@ -62,7 +64,7 @@ const [capped, setCapped] = createSignal<CappedNodes | null>(null);
 const [loading, setLoading] = createSignal(false);
 const [error, setError] = createSignal<string | null>(null);
 const [focusedId, setFocusedId] = createSignal<string | null>(null);
-/** View-state: pinned node ids (layout must not move these). */
+/** Dormant GL-only view state. Active deterministic 2D/table expose no pin action. */
 const [pinned, setPinned] = createSignal<ReadonlySet<string>>(new Set());
 /** View-state: hidden node ids (removed from the rendered set). */
 const [hidden, setHidden] = createSignal<ReadonlySet<string>>(new Set());

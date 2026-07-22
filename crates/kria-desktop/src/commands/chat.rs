@@ -322,6 +322,7 @@ mod chat_verdict_tests {
 async fn send_message_with_profile(
     message: String,
     execution_profile: TurnExecutionProfile,
+    requested_session_id: Option<String>,
     state: State<'_, AppStateCell>,
     app: AppHandle,
 ) -> Result<serde_json::Value, String> {
@@ -585,8 +586,16 @@ async fn send_message_with_profile(
 
     drop(config);
 
-    // Use the persistent session ID from AppState
-    let session_id = state.current_session_id.read().await.clone();
+    // Bind this turn to the session selected by its caller. Falling back keeps
+    // non-UI callers compatible, while explicit UI session IDs prevent a
+    // concurrent session switch from mis-tagging streamed token/done events.
+    let session_id = match requested_session_id
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        Some(session_id) => session_id,
+        None => state.current_session_id.read().await.clone(),
+    };
     let memory_writer: Arc<dyn MemoryManager> = memory_store.clone();
 
     // Chat-management gates (flag-gated, default ON; falsy env ⇒ legacy persist-always).
@@ -1663,15 +1672,24 @@ impl ManualToolProfileInput {
 #[tauri::command]
 pub async fn send_message(
     message: String,
+    session_id: Option<String>,
     state: State<'_, AppStateCell>,
     app: AppHandle,
 ) -> Result<serde_json::Value, String> {
-    send_message_with_profile(message, TurnExecutionProfile::assistant(), state, app).await
+    send_message_with_profile(
+        message,
+        TurnExecutionProfile::assistant(),
+        session_id,
+        state,
+        app,
+    )
+    .await
 }
 
 #[tauri::command]
 pub async fn send_manual_tool_message(
     message: String,
+    session_id: Option<String>,
     profile: ManualToolProfileInput,
     state: State<'_, AppStateCell>,
     app: AppHandle,
@@ -1680,8 +1698,14 @@ pub async fn send_manual_tool_message(
         || (profile.app_lock.as_deref().unwrap_or("").trim().is_empty()
             && profile.tool_lock.as_deref().unwrap_or("").trim().is_empty())
     {
-        return send_message_with_profile(message, TurnExecutionProfile::assistant(), state, app)
-            .await;
+        return send_message_with_profile(
+            message,
+            TurnExecutionProfile::assistant(),
+            session_id,
+            state,
+            app,
+        )
+        .await;
     }
 
     let execution_profile = profile.to_core_profile();
@@ -1744,12 +1768,13 @@ pub async fn send_manual_tool_message(
         Some(telemetry),
     );
 
-    send_message_with_profile(message, execution_profile, state, app).await
+    send_message_with_profile(message, execution_profile, session_id, state, app).await
 }
 
 #[tauri::command]
 pub async fn send_lab_message(
     message: String,
+    session_id: Option<String>,
     profile: Option<LabExecutionProfileInput>,
     state: State<'_, AppStateCell>,
     app: AppHandle,
@@ -1763,5 +1788,5 @@ pub async fn send_lab_message(
                 PromptLabToolSelectionStrategy::RoutedWithinLock,
             )
         });
-    send_message_with_profile(message, execution_profile, state, app).await
+    send_message_with_profile(message, execution_profile, session_id, state, app).await
 }

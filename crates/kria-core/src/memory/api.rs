@@ -9,6 +9,7 @@
 //! version module that coexists with this one (design §40 / R25).
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
@@ -37,6 +38,9 @@ pub const API_VERSION: &str = "1.0.0";
 /// Bootstrap configuration for the memory system.
 #[derive(Clone, Debug)]
 pub struct MemoryConfig {
+    /// Initial master gate state. Disabled startup keeps enrichment paused while
+    /// retaining the authority DB for instant hot enable.
+    pub enabled: bool,
     /// Authority DB path. Use `":memory:"` for an ephemeral instance.
     pub db_path: String,
     pub device_id: String,
@@ -60,6 +64,7 @@ pub struct MemoryConfig {
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             db_path: ":memory:".to_string(),
             device_id: "local-dev".to_string(),
             default_mode: MemoryMode::Permanent,
@@ -164,6 +169,9 @@ pub struct MemoryChange {
 
 /// The memory system composition root and public API.
 pub struct MemorySystem {
+    /// Hot master gate. Storage remains open so re-enable is instant, while
+    /// writes, retrieval, and background cognition stop immediately.
+    enabled: Arc<std::sync::atomic::AtomicBool>,
     db: Arc<Database>,
     write_policy: Arc<WritePolicy>,
     retriever: Arc<Retriever>,
@@ -176,6 +184,9 @@ pub struct MemorySystem {
     vectors: Arc<dyn VectorStore>,
     default_token_budget: u32,
     worker: std::sync::Mutex<Option<JoinHandle<()>>>,
+    worker_runtime_enabled: bool,
+    enrichment_queue_capacity: usize,
+    enrichment_catchup_interval: Duration,
     changes: broadcast::Sender<MemoryChange>,
     /// M5 tool-outcome write telemetry (seen / persisted / gated).
     outcome_stats: ToolOutcomeStats,
@@ -268,8 +279,15 @@ impl MemorySystem {
         let (changes_tx, _changes_rx) =
             broadcast::channel::<MemoryChange>(config.change_channel_capacity.max(1));
 
-        let (tx, rx) = mpsc::channel::<Uuid>(config.enrichment_queue_capacity.max(1));
+        let enrichment_queue_capacity = config.enrichment_queue_capacity.max(1);
         let catchup_interval = config.enrichment_catchup_interval;
+        let worker_should_start = spawn_worker && config.enabled;
+        let (slow_tx, slow_rx) = if worker_should_start {
+            let (tx, rx) = mpsc::channel::<Uuid>(enrichment_queue_capacity);
+            (Some(tx), Some(rx))
+        } else {
+            (None, None)
+        };
         let notifier_tx = changes_tx.clone();
         let write_policy = Arc::new(
             WritePolicy::new(
@@ -279,7 +297,7 @@ impl MemorySystem {
                 modes.clone(),
                 admission,
                 config.device_id.clone(),
-                Some(tx),
+                slow_tx,
             )
             .with_change_notifier(Arc::new(move |kind: &str| {
                 // Best-effort: no subscribers is fine (send returns Err, ignored).
@@ -309,17 +327,15 @@ impl MemorySystem {
             ),
         );
 
-        let worker = if spawn_worker {
+        let enabled = Arc::new(std::sync::atomic::AtomicBool::new(config.enabled));
+        let worker = slow_rx.map(|rx| {
             let sp = slow.clone();
-            Some(tokio::spawn(
-                async move { sp.run(rx, catchup_interval).await },
-            ))
-        } else {
-            drop(rx); // fast-path sends become no-ops; use flush() instead
-            None
-        };
+            let worker_enabled = enabled.clone();
+            tokio::spawn(async move { sp.run(rx, catchup_interval, worker_enabled).await })
+        });
 
         Ok(Arc::new(Self {
+            enabled,
             db,
             write_policy,
             retriever,
@@ -329,9 +345,72 @@ impl MemorySystem {
             vectors,
             default_token_budget: config.default_token_budget,
             worker: std::sync::Mutex::new(worker),
+            worker_runtime_enabled: spawn_worker,
+            enrichment_queue_capacity,
+            enrichment_catchup_interval: catchup_interval,
             changes: changes_tx,
             outcome_stats: ToolOutcomeStats::default(),
         }))
+    }
+
+    /// Change persistent-memory availability without closing its authority DB.
+    /// Existing data stays intact. Disable detaches the wake channel and aborts
+    /// enrichment; enable creates one fresh bounded channel/worker whose startup
+    /// catch-up recovers durable events written before the worker was available.
+    pub fn set_enabled(&self, enabled: bool) {
+        self.enabled
+            .store(enabled, std::sync::atomic::Ordering::Release);
+        if !self.worker_runtime_enabled {
+            return;
+        }
+
+        let mut worker = self
+            .worker
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !enabled {
+            self.write_policy.set_slow_sender(None);
+            if let Some(handle) = worker.take() {
+                handle.abort();
+            }
+            return;
+        }
+
+        let needs_start = worker.as_ref().map(JoinHandle::is_finished).unwrap_or(true);
+        if needs_start {
+            if let Some(stale) = worker.take() {
+                stale.abort();
+            }
+            let (tx, rx) = mpsc::channel::<Uuid>(self.enrichment_queue_capacity);
+            self.write_policy.set_slow_sender(Some(tx));
+            let slow = self.slow.clone();
+            let worker_enabled = self.enabled.clone();
+            let catchup_interval = self.enrichment_catchup_interval;
+            *worker = Some(tokio::spawn(async move {
+                slow.run(rx, catchup_interval, worker_enabled).await
+            }));
+        }
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        self.enabled.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    pub fn enrichment_worker_running(&self) -> bool {
+        self.worker
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_ref()
+            .map(|worker| !worker.is_finished())
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn ensure_enabled(&self) -> MemoryResult<()> {
+        if self.is_enabled() {
+            Ok(())
+        } else {
+            Err(crate::memory::error::MemoryError::Disabled)
+        }
     }
 
     // ── Write surface (design §10) ──
@@ -339,12 +418,14 @@ impl MemorySystem {
     /// Explicit store request: governs, persists the raw event, queues
     /// enrichment. Fast (<2ms), synchronous (L3).
     pub fn remember(&self, candidate: WriteCandidate) -> MemoryResult<WriteDecision> {
+        self.ensure_enabled()?;
         self.write_policy.submit(candidate)
     }
 
     /// Raw perception → event log. Alias of [`Self::remember`] at the API level;
     /// callers set the appropriate `Source` on the candidate.
     pub fn observe(&self, candidate: WriteCandidate) -> MemoryResult<WriteDecision> {
+        self.ensure_enabled()?;
         self.write_policy.submit(candidate)
     }
 
@@ -374,6 +455,7 @@ impl MemorySystem {
         path: &str,
         content: &str,
     ) -> MemoryResult<(Uuid, usize, usize)> {
+        self.ensure_enabled()?;
         let (item_id, chunk_count, created) =
             self.library().ingest(title, author, path, content)?;
         // Re-ingesting identical bytes is a SHA dedup at the Library layer: the
@@ -407,6 +489,7 @@ impl MemorySystem {
         query: &str,
         ctx: Option<RetrievalCtx>,
     ) -> MemoryResult<RetrievalResult> {
+        self.ensure_enabled()?;
         let ctx = ctx.unwrap_or_else(|| RetrievalCtx {
             token_budget: self.default_token_budget,
             ..RetrievalCtx::default()
@@ -436,6 +519,7 @@ impl MemorySystem {
         source: crate::memory::types::Source,
         content: impl Into<String>,
     ) -> MemoryResult<WriteDecision> {
+        self.ensure_enabled()?;
         use std::sync::atomic::Ordering;
         self.outcome_stats.seen.fetch_add(1, Ordering::Relaxed);
         let content = content.into();
@@ -472,6 +556,7 @@ impl MemorySystem {
         success: bool,
         detail: impl Into<String>,
     ) -> MemoryResult<WriteDecision> {
+        self.ensure_enabled()?;
         self.write_policy
             .submit(crate::memory::integration::capability_candidate(
                 session_id, source, success, detail,
@@ -512,11 +597,34 @@ impl MemorySystem {
     }
 
     /// The consent-gated cold-start engine (privacy-first onboarding, Task 35 /
-    /// R8). Every fs/git/workspace/shell scanner must pass its
-    /// [`ColdStartConsent::gate`](crate::memory::cold_start::ColdStartConsent::gate)
-    /// before scanning; deny-by-default.
+    /// R8). Host command boundaries must check the MemorySystem master gate
+    /// before using this low-level consent store.
     pub fn cold_start(&self) -> crate::memory::cold_start::ColdStartConsent {
         crate::memory::cold_start::ColdStartConsent::new(self.db.clone())
+    }
+
+    /// Read cold-start consent through the live memory master gate.
+    pub fn cold_start_status(
+        &self,
+    ) -> MemoryResult<(bool, Vec<crate::memory::cold_start::ScanSource>)> {
+        self.ensure_enabled()?;
+        let consent = self.cold_start();
+        Ok((consent.onboarding_complete()?, consent.granted_sources()?))
+    }
+
+    /// Grant or revoke one cold-start source through the live memory master gate.
+    pub fn set_cold_start_consent(
+        &self,
+        source: crate::memory::cold_start::ScanSource,
+        granted: bool,
+    ) -> MemoryResult<()> {
+        self.ensure_enabled()?;
+        let consent = self.cold_start();
+        if granted {
+            consent.grant(source)
+        } else {
+            consent.revoke(source)
+        }
     }
 
     /// Consent-gated cold-start preview: scan `source` and return previewable
@@ -528,6 +636,7 @@ impl MemorySystem {
         root: Option<&str>,
         limit: usize,
     ) -> MemoryResult<Vec<crate::memory::cold_start::ScanCandidate>> {
+        self.ensure_enabled()?;
         crate::memory::cold_start_scan::ColdStartScanner::new(self.db.clone())
             .preview(source, root, limit)
     }
@@ -560,6 +669,7 @@ impl MemorySystem {
         candidates: &[crate::memory::cold_start::ScanCandidate],
         cancel: &tokio_util::sync::CancellationToken,
     ) -> MemoryResult<usize> {
+        self.ensure_enabled()?;
         self.cold_start().gate(source)?; // re-gate at import time
         let mut imported = 0usize;
         for c in candidates {
@@ -661,6 +771,7 @@ impl MemorySystem {
         root: Uuid,
         max_hops: u8,
     ) -> MemoryResult<Vec<crate::memory::types::GraphHit>> {
+        self.ensure_enabled()?;
         use crate::memory::stores::ports::GraphStore;
         SqliteGraphStore::new(self.db.clone()).neighbors(root, max_hops)
     }
@@ -670,6 +781,7 @@ impl MemorySystem {
         &self,
         entity: Uuid,
     ) -> MemoryResult<Vec<crate::memory::types::Relationship>> {
+        self.ensure_enabled()?;
         use crate::memory::stores::ports::GraphStore;
         SqliteGraphStore::new(self.db.clone()).relationships_for(entity)
     }
@@ -679,6 +791,7 @@ impl MemorySystem {
         &self,
         query: &str,
     ) -> MemoryResult<Vec<crate::memory::types::Entity>> {
+        self.ensure_enabled()?;
         use crate::memory::stores::ports::GraphStore;
         SqliteGraphStore::new(self.db.clone()).search_entities(query)
     }
@@ -690,6 +803,7 @@ impl MemorySystem {
         entity: Uuid,
         limit: usize,
     ) -> MemoryResult<Vec<crate::memory::graph_intel::LinkPrediction>> {
+        self.ensure_enabled()?;
         self.graph_intelligence().predict_links(entity, limit)
     }
 
@@ -702,6 +816,7 @@ impl MemorySystem {
         rel_type: &str,
         strength: f32,
     ) -> MemoryResult<Uuid> {
+        self.ensure_enabled()?;
         use crate::memory::stores::ports::GraphStore;
         let graph = SqliteGraphStore::new(self.db.clone());
         let rel = crate::memory::types::Relationship {
@@ -736,6 +851,7 @@ impl MemorySystem {
         &self,
         id: Uuid,
     ) -> MemoryResult<Option<crate::memory::observability::MemoryExplanation>> {
+        self.ensure_enabled()?;
         self.observability().explain_memory(id)
     }
 
@@ -744,6 +860,7 @@ impl MemorySystem {
     pub fn memory_health_report(
         &self,
     ) -> MemoryResult<crate::memory::observability::MemoryHealthReport> {
+        self.ensure_enabled()?;
         self.observability().health_report()
     }
 
@@ -753,11 +870,12 @@ impl MemorySystem {
         &self,
         session: &str,
     ) -> MemoryResult<Vec<crate::memory::reasoning::ReasoningTrace>> {
+        self.ensure_enabled()?;
         self.reasoning().replay(session)
     }
 
     /// The entity-extraction pipeline (observation → NER → resolution → graph).
-    pub fn entity_extraction(&self) -> crate::memory::extraction::EntityExtractionPipeline {
+    pub(crate) fn entity_extraction(&self) -> crate::memory::extraction::EntityExtractionPipeline {
         crate::memory::extraction::EntityExtractionPipeline::new(self.db.clone())
     }
 
@@ -765,6 +883,7 @@ impl MemorySystem {
     /// populates entities/relationships from real memory content. Returns
     /// `(memories_processed, entities_linked)`.
     pub fn run_entity_extraction(&self, limit: usize) -> MemoryResult<(usize, usize)> {
+        self.ensure_enabled()?;
         let (processed, linked) = self.entity_extraction().process_pending(limit)?;
         if linked > 0 {
             self.notify_change(
@@ -778,6 +897,7 @@ impl MemorySystem {
     /// Run one Dream pass. Returns
     /// `(procedures_synthesized, goals_merged, worth_recalibrated)`.
     pub fn run_dream(&self, max_procedures: usize) -> MemoryResult<(usize, usize, usize)> {
+        self.ensure_enabled()?;
         let out = self.dream_engine().run_all(max_procedures)?;
         self.notify_change(
             "dream",
@@ -787,7 +907,7 @@ impl MemorySystem {
     }
 
     /// The adaptive retrieval-weight store (self-optimizing RRF, Priority 1).
-    pub fn retrieval_weights(&self) -> crate::memory::retrieval_opt::RetrievalWeightStore {
+    pub(crate) fn retrieval_weights(&self) -> crate::memory::retrieval_opt::RetrievalWeightStore {
         crate::memory::retrieval_opt::RetrievalWeightStore::new(self.db.clone())
     }
 
@@ -798,13 +918,16 @@ impl MemorySystem {
         class: crate::memory::retriever::QueryClass,
         strategy: crate::memory::retrieval_opt::Strategy,
     ) {
+        if !self.is_enabled() {
+            return;
+        }
         if let Err(e) = self.retrieval_weights().record_win(class, strategy) {
             tracing::debug!(error = %e, "reinforce_retrieval skipped");
         }
     }
 
     /// The Active-Learning engine (knowledge gaps → learning goals, Priority 3).
-    pub fn active_learning(&self) -> crate::memory::active_learning::ActiveLearning {
+    pub(crate) fn active_learning(&self) -> crate::memory::active_learning::ActiveLearning {
         crate::memory::active_learning::ActiveLearning::new(self.db.clone())
     }
 
@@ -812,6 +935,7 @@ impl MemorySystem {
     /// goals (Active Learning). The retriever/agent calls this when a query
     /// returns nothing useful.
     pub fn record_knowledge_gap(&self, query: &str, domain: Option<&str>) -> MemoryResult<()> {
+        self.ensure_enabled()?;
         crate::memory::knowledge_gap::KnowledgeGapEngine::new(self.db.clone())
             .record_miss(query, domain)
     }
@@ -819,6 +943,7 @@ impl MemorySystem {
     /// Run one Active-Learning pass: promote recurring knowledge gaps into
     /// learning goals. Returns the number of new goals created.
     pub fn run_active_learning(&self, min_misses: u32, max_new: usize) -> MemoryResult<usize> {
+        self.ensure_enabled()?;
         let n = self
             .active_learning()
             .promote_gaps(min_misses, max_new)?
@@ -833,13 +958,14 @@ impl MemorySystem {
     }
 
     /// The Self-Improvement engine (failing plans → improvement goals, Priority 7).
-    pub fn self_improvement(&self) -> crate::memory::self_improvement::SelfImprovement {
+    pub(crate) fn self_improvement(&self) -> crate::memory::self_improvement::SelfImprovement {
         crate::memory::self_improvement::SelfImprovement::new(self.db.clone())
     }
 
     /// Run one Self-Improvement pass: escalate chronically failing plans into
     /// improvement goals. Returns the number of new goals created.
     pub fn run_self_improvement(&self, max_new: usize) -> MemoryResult<usize> {
+        self.ensure_enabled()?;
         let n = self.self_improvement().promote_weak_plans(max_new)?.len();
         if n > 0 {
             self.notify_change(
@@ -856,7 +982,7 @@ impl MemorySystem {
     /// contributed to a turn outcome (credit assignment). Soft signal, min-
     /// sample gated in scoring, never a hard delete (D-8). Best-effort.
     pub fn reward_memories(&self, ids: &[Uuid], positive: bool) {
-        if ids.is_empty() {
+        if !self.is_enabled() || ids.is_empty() {
             return;
         }
         let fb = crate::memory::feedback::FeedbackService::new(self.db.clone());
@@ -882,6 +1008,7 @@ impl MemorySystem {
         signal: crate::memory::feedback::FeedbackSignal,
         context: Option<&str>,
     ) -> MemoryResult<()> {
+        self.ensure_enabled()?;
         if matches!(
             &signal,
             crate::memory::feedback::FeedbackSignal::Correction(_)
@@ -909,6 +1036,7 @@ impl MemorySystem {
         corrected_content: impl Into<String>,
         context: Option<&str>,
     ) -> MemoryResult<()> {
+        self.ensure_enabled()?;
         use crate::memory::stores::sqlite_search::index_fts_in_tx;
         use crate::memory::types::{MemoryState, MemoryWorth, Sensitivity, VectorPayload};
         use rusqlite::params;
@@ -1054,6 +1182,7 @@ impl MemorySystem {
     /// Restore a tombstoned memory with the same identity. Only a `Forgotten`
     /// memory can be restored; hard-deleted or superseded rows stay immutable.
     pub fn restore_forgotten(&self, memory_id: Uuid) -> MemoryResult<()> {
+        self.ensure_enabled()?;
         self.lifecycle().restore(memory_id)?;
         self.notify_change(
             "updated",
@@ -1067,7 +1196,7 @@ impl MemorySystem {
     /// Build the cognition engine (consolidation / reflection / dreaming) over
     /// this system's authority + write policy. `llm` is optional (L8): without
     /// it, cognition uses the deterministic heuristic path.
-    pub fn cognition(&self, llm: Option<Arc<dyn LlmClient>>) -> Arc<Cognition> {
+    pub(crate) fn cognition(&self, llm: Option<Arc<dyn LlmClient>>) -> Arc<Cognition> {
         Arc::new(Cognition::new(
             self.db.clone(),
             self.write_policy.clone(),
@@ -1129,6 +1258,7 @@ impl MemorySystem {
     /// Force-drain the enrichment backlog (shutdown flush / tests). Returns the
     /// number of events processed.
     pub async fn flush(&self) -> MemoryResult<usize> {
+        self.ensure_enabled()?;
         self.slow.enrich_pending(1000).await
     }
 
@@ -1136,6 +1266,7 @@ impl MemorySystem {
     /// explainable snapshot for benchmarking + regression detection: memory
     /// volume, goal completion, plan success, and unresolved knowledge gaps.
     pub fn cognitive_report(&self) -> MemoryResult<CognitiveReport> {
+        self.ensure_enabled()?;
         let active_memories: i64 = self.db.with_read(|c| {
             Ok(c.query_row(
                 "SELECT COUNT(*) FROM memories WHERE state='active'",
@@ -1233,6 +1364,7 @@ impl MemorySystem {
     /// source (Truth Maintenance §22.4). `false` when the memory is missing or
     /// its source no longer validates (confidence is demoted as a side effect).
     pub fn verify(&self, memory_id: Uuid) -> MemoryResult<bool> {
+        self.ensure_enabled()?;
         match self.relational_store().get_memory(memory_id)? {
             Some(m) => self.truth().verify_against_source(&m),
             None => Ok(false),
@@ -1243,6 +1375,7 @@ impl MemorySystem {
     /// preserving version history (Truth Maintenance §22.3). This is the
     /// belief-`update` primitive.
     pub fn update(&self, winner: Uuid, loser: Uuid) -> MemoryResult<()> {
+        self.ensure_enabled()?;
         self.truth().supersede(winner, loser)?;
         self.notify_change(
             "updated",
@@ -1253,6 +1386,7 @@ impl MemorySystem {
 
     /// Forget a scope (tombstone, reversible 30 days — §21.1). Returns the count.
     pub fn forget(&self, scope: crate::memory::lifecycle::ForgetScope) -> MemoryResult<usize> {
+        self.ensure_enabled()?;
         let n = self.lifecycle().forget(&scope)?;
         self.notify_change("deleted", serde_json::json!({ "count": n, "hard": false }));
         Ok(n)
@@ -1264,6 +1398,7 @@ impl MemorySystem {
         &self,
         scope: crate::memory::lifecycle::ForgetScope,
     ) -> MemoryResult<usize> {
+        self.ensure_enabled()?;
         let n = self.lifecycle().hard_delete(&scope).await?;
         self.notify_change("deleted", serde_json::json!({ "count": n, "hard": true }));
         Ok(n)
@@ -1277,6 +1412,7 @@ impl MemorySystem {
         alias: &str,
         alias_type: crate::memory::entity_resolution::AliasType,
     ) -> MemoryResult<crate::memory::entity_resolution::Resolution> {
+        self.ensure_enabled()?;
         let res = self
             .entity_resolver()
             .resolve(display_name, entity_type, alias, alias_type)?;
@@ -1291,6 +1427,7 @@ impl MemorySystem {
     /// sessions (Cognition §20). Returns the number of insights accepted by the
     /// Write Policy.
     pub async fn reflect(&self) -> MemoryResult<usize> {
+        self.ensure_enabled()?;
         let (_sessions, accepted) = self
             .cognition(None)
             .consolidate_recent(
@@ -1306,6 +1443,7 @@ impl MemorySystem {
     /// Consolidate a single session's memories into reflections (Cognition §20,
     /// session-end trigger). Returns the number of insights accepted.
     pub async fn consolidate(&self, session_id: Uuid) -> MemoryResult<usize> {
+        self.ensure_enabled()?;
         let accepted = self
             .cognition(None)
             .consolidate(
@@ -1368,8 +1506,11 @@ impl MemorySystem {
     }
 
     /// Stop the background worker (best-effort). Enrichment can be resumed by
-    /// re-opening; the cursor makes it idempotent.
+    /// hot-enabling or re-opening; the durable cursor makes catch-up idempotent.
     pub fn shutdown(&self) {
+        self.enabled
+            .store(false, std::sync::atomic::Ordering::Release);
+        self.write_policy.set_slow_sender(None);
         if let Some(h) = self.worker.lock().unwrap_or_else(|p| p.into_inner()).take() {
             h.abort();
         }

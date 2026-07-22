@@ -87,6 +87,23 @@ describe("CommandPalette", () => {
     expect(run).toHaveBeenCalledOnce();
   });
 
+  it("opens directly in Do mode when requested (Ctrl+Shift+P path, §20.2)", () => {
+    const run = vi.fn();
+    registerCommand({ id: "cmd.domode", title: "Do mode command", run });
+    render(() => <CommandPalette />);
+    // Simulate the proven Ctrl+Shift+P chord → shellStore.setPaletteOpen(true, "do").
+    shellStore.setPaletteOpen(true, "do");
+    // Do tab is selected and Do-mode commands are listed without any prefix/click.
+    expect(screen.getByRole("tab", { name: /Do/ }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("option", { name: /Do mode command/ })).toBeInTheDocument();
+  });
+
+  it("defaults to Go mode on a plain open", () => {
+    render(() => <CommandPalette />);
+    openPalette();
+    expect(screen.getByRole("tab", { name: /Go/ }).getAttribute("aria-selected")).toBe("true");
+  });
+
   it("switches modes via a leading prefix token", () => {
     registerCommand({ id: "cmd.pref", title: "Prefixed command", run: () => {} });
     render(() => <CommandPalette />);
@@ -131,6 +148,44 @@ describe("CommandPalette", () => {
     expect(converseStore.composerDraft().text).toBe("what is my schedule");
     expect(currentRoute().space).toBe("converse");
     unsub();
+  });
+
+  it("closes on Escape and marks the event handled (one-layer peel, §20.3)", () => {
+    render(() => <CommandPalette />);
+    openPalette();
+    const dialog = screen.getByRole("dialog", { name: "Command palette" });
+    // The palette owns the Escape while open: it closes AND preventDefaults so a
+    // lower layer (e.g. Immersive window mode) cannot also peel on the same event.
+    const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    dialog.dispatchEvent(event);
+    expect(shellStore.paletteOpen()).toBe(false);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("does not submit an Ask message on Enter while composing (IME composition guard)", () => {
+    const handler = vi.fn();
+    const unsub = eventBus.on("palette:ask-submitted", handler);
+    render(() => <CommandPalette />);
+    openPalette();
+    fireEvent.click(screen.getByRole("tab", { name: /Ask/ }));
+    const input = screen.getByRole("combobox");
+    fireEvent.input(input, { target: { value: "still typing" } });
+    // Enter during composition confirms the IME candidate — it must NOT send.
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    expect(handler).not.toHaveBeenCalled();
+    expect(shellStore.paletteOpen()).toBe(true);
+    unsub();
+  });
+
+  it("does not select a Go result on Enter while composing (IME composition guard)", () => {
+    render(() => <CommandPalette />);
+    openPalette();
+    const input = screen.getByRole("combobox");
+    fireEvent.input(input, { target: { value: "memory" } });
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    // No navigation and the palette stays open mid-composition.
+    expect(currentRoute().space).toBe("converse");
+    expect(shellStore.paletteOpen()).toBe(true);
   });
 
   it("routes Change to the Settings NL path", () => {

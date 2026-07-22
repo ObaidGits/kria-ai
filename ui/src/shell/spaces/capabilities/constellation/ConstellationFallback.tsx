@@ -153,11 +153,18 @@ export function ConstellationFallback(props: ConstellationFallbackProps) {
     constellationData.focus(id);
     const m = constellationData.metaFor(id);
     if (m?.hasDescriptor && m.providerId && m.capabilityId) {
-      shellStore.openInspector("capability", id, {
-        providerId: m.providerId,
-        capabilityId: m.capabilityId,
-        name: m.name,
-      });
+      // Rows re-sort/filter, so hand the stable Capabilities region as the
+      // Focus_Return_Owner rather than a transient row (§20.3/§20.4).
+      shellStore.openInspector(
+        "capability",
+        id,
+        {
+          providerId: m.providerId,
+          capabilityId: m.capabilityId,
+          name: m.name,
+        },
+        { regionSelector: '[data-space="capabilities"]' },
+      );
     }
     const rels = focusEdges().length;
     setStatus(

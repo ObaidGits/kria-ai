@@ -67,8 +67,8 @@ pub struct AppState {
     #[allow(dead_code)]
     pub model_router: Arc<ModelRouter>,
     pub agent_loop: Arc<AgentLoop>,
-    /// Live ExecutiveController handle when enabled; owns cancellation + bounded snapshots.
-    pub executive_sender: Option<kria_core::agent::executive::ExecutiveSender>,
+    /// Hot-swappable ExecutiveController handle. None routes through AgentLoop.
+    pub executive_sender: Arc<RwLock<Option<kria_core::agent::executive::ExecutiveSender>>>,
     pub tool_registry: Arc<ToolRegistry>,
     /// Durable safety gate for generated/discovered tools awaiting review.
     pub quarantine_registry: Arc<kria_core::tools::quarantine::QuarantineRegistry>,
@@ -81,6 +81,8 @@ pub struct AppState {
     /// observations/outcomes and retrieves context through this, never bypassing
     /// the Write Policy. Shares the single authority DB with `conversation`.
     pub memory_system: Arc<kria_core::memory::api::MemorySystem>,
+    /// Desktop cognition scheduler/UI bridge. Absent while Memory is disabled.
+    pub memory_cognition_task: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// Active cold-start import cancellation handle (AUD-03 / L4). Set for the
     /// duration of an in-flight `memory_cold_start_import`; `memory_cold_start_cancel`
     /// cancels it. `None` when no import is running (single onboarding import at
@@ -119,11 +121,14 @@ pub struct AppState {
     pub macro_recorder: Arc<RwLock<MacroRecorder>>,
     pub started_at: std::time::Instant,
     pub hardware_info: Arc<HardwareInfo>,
+    pub gpu_lease: Arc<kria_core::resource::gpu_lease::GpuLeaseManager>,
     pub proactive: Arc<kria_core::automation::ProactiveEngine>,
     pub telegram_bridge: Arc<RwLock<Option<TelegramBridge>>>,
     /// MCP server manager — kept alive for background health monitoring + dynamic tool registration.
     #[allow(dead_code)]
     pub mcp_manager: Arc<tokio::sync::Mutex<McpServerManager>>,
+    /// Global MCP heartbeat task. Absent when MCP master switch is off.
+    pub mcp_heartbeat: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// Lazy Google Workspace MCP client reference used by gw_* tool handlers.
     pub gw_client_ref: gw::GwClientRef,
     /// Colab cloud-tier runtime status surface.
@@ -143,6 +148,9 @@ pub struct AppState {
     /// is set, keeping the main init path non-blocking.
     #[allow(dead_code)]
     pub orchestrator: Arc<tokio::sync::RwLock<Option<Arc<Orchestrator>>>>,
+    /// Startup, HRA, idle-release, and event-forwarder tasks owned by current
+    /// model orchestrator. Drained on hot disable and runtime shutdown.
+    pub orchestrator_tasks: Arc<tokio::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>,
     /// Serializes Settings-driven LLM provider/model apply operations.
     pub llm_runtime_apply_lock: Arc<tokio::sync::Mutex<()>>,
     /// Last known runtime apply/swap state, mirrored to the UI via events.
@@ -156,8 +164,14 @@ pub struct AppState {
     pub image_orchestrator: Arc<ImageOrchestrator>,
     /// OpenClaw skill registry — SQLite-backed, populated at boot.
     pub skill_registry: Arc<kria_core::openclaw::registry::SkillRegistry>,
-    /// OpenClaw container pool — None if Docker is unavailable (graceful degradation).
-    pub container_pool: Option<Arc<kria_core::openclaw::ContainerPool>>,
+    /// OpenClaw container pool. Hot-swappable so enable/disable never needs a
+    /// full KRIA restart and all consumers reuse the same owner.
+    pub container_pool: Arc<RwLock<Option<Arc<kria_core::openclaw::ContainerPool>>>>,
+    /// Serialized feature lifecycle transitions shared by Settings, prompt tools,
+    /// startup reconciliation, and generic config changes.
+    pub feature_controls: Arc<super::feature_controls::FeatureControlRuntime>,
+    /// n8n background timeout/cleanup task. Absent while n8n is disabled.
+    pub n8n_maintenance: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// n8n workflow catalog for callback validation and UI status.
     pub n8n_catalog: Arc<RwLock<Option<Arc<kria_core::n8n::N8nCatalog>>>>,
     /// n8n callback/run state. Durable replay is backed by the JSONL inbox path below.

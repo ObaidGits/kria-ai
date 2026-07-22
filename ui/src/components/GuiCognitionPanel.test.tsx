@@ -769,7 +769,7 @@ describe("GuiCognitionPanel", () => {
       />
     ));
 
-    const stop = screen.getByRole("button", { name: /stop the active gui cognition turn/i });
+    const stop = screen.getByRole("button", { name: /stop gui cognition/i });
     expect(stop).toBeInTheDocument();
     fireEvent.click(stop);
     expect(onStop).toHaveBeenCalledTimes(1);
@@ -784,7 +784,7 @@ describe("GuiCognitionPanel", () => {
     ));
 
     expect(
-      screen.queryByRole("button", { name: /stop the active gui cognition turn/i })
+      screen.queryByRole("button", { name: /stop gui cognition/i })
     ).not.toBeInTheDocument();
   });
 
@@ -804,7 +804,7 @@ describe("GuiCognitionPanel", () => {
     expect(screen.getByText(/Cancelled — Turn cancelled by you\./)).toBeInTheDocument();
     // Cancelled is terminal → the Stop control is no longer offered.
     expect(
-      screen.queryByRole("button", { name: /stop the active gui cognition turn/i })
+      screen.queryByRole("button", { name: /stop gui cognition/i })
     ).not.toBeInTheDocument();
   });
 

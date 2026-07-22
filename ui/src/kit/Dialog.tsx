@@ -3,12 +3,14 @@ import {
   createEffect,
   createSignal,
   createUniqueId,
+  onCleanup,
   splitProps,
   Show,
   type JSX,
 } from "solid-js";
 import { Portal } from "solid-js/web";
 import { Icon } from "../components/Icon";
+import { registerOverlaySurface } from "../shell/overlayLayers";
 import "./kit.base.css";
 import "./Dialog.css";
 
@@ -24,6 +26,13 @@ export interface DialogProps {
   onOpenChange?: (open: boolean) => void;
   hideClose?: boolean;
   triggerVariant?: "primary" | "secondary" | "ghost" | "danger";
+  /**
+   * Overlay layer for stacking/inertness (design §20.3). "modal" (default) sits
+   * at --z-modal, below the Approval Center; "approval-confirm" elevates to
+   * --z-approval-confirm so an approval confirmation renders ABOVE the pending
+   * Approval Center (Req 11.9). Also drives the background-inertness registry.
+   */
+  layer?: "modal" | "approval-confirm";
 }
 
 const FOCUSABLE =
@@ -32,7 +41,7 @@ const FOCUSABLE =
 export function Dialog(props: DialogProps) {
   const [local] = splitProps(props, [
     "triggerLabel", "triggerIcon", "title", "description", "children", "footer",
-    "open", "defaultOpen", "onOpenChange", "hideClose", "triggerVariant",
+    "open", "defaultOpen", "onOpenChange", "hideClose", "triggerVariant", "layer",
   ]);
   const [internalOpen, setInternalOpen] = createSignal(local.defaultOpen ?? false);
   const [hasOpened, setHasOpened] = createSignal(Boolean(local.open || local.defaultOpen));
@@ -41,6 +50,24 @@ export function Dialog(props: DialogProps) {
   const descriptionId = `dialog-description-${createUniqueId()}`;
   let triggerRef: HTMLButtonElement | undefined;
   let panelRef: HTMLDivElement | undefined;
+
+  // Overlay stacking + background inertness (design §20.3). Register the panel
+  // at its layer so lower surfaces are inerted while this modal is up, and so
+  // an approval confirmation ("approval-confirm") both paints above and inerts
+  // the pending Approval Center. Priority is explicit, never portal-mount order.
+  let unregisterSurface: (() => void) | undefined;
+  const bindPanel = (el: HTMLDivElement) => {
+    panelRef = el;
+    unregisterSurface?.();
+    unregisterSurface = registerOverlaySurface(el, local.layer ?? "modal");
+  };
+  onCleanup(() => unregisterSurface?.());
+
+  // Elevate the overlay/positioner z-index for an approval confirmation so it
+  // renders ABOVE the Approval Center (--z-approval). Expressed as a data-layer
+  // attribute so the z-index stays a pure design token in CSS. Default modals
+  // stay at --z-modal.
+  const layerAttr = () => local.layer ?? "modal";
 
   const focusables = () => Array.from(panelRef?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])
     .filter((element) => !element.hasAttribute("data-focus-trap"));
@@ -107,13 +134,14 @@ export function Dialog(props: DialogProps) {
         <Portal>
           <div
             class="kit-dialog__overlay"
+            data-layer={layerAttr()}
             hidden={!isOpen()}
             data-open={isOpen() ? "" : undefined}
             data-closed={!isOpen() ? "" : undefined}
           />
-          <div class="kit-dialog__positioner" hidden={!isOpen()}>
+          <div class="kit-dialog__positioner" data-layer={layerAttr()} hidden={!isOpen()}>
             <div
-              ref={panelRef}
+              ref={bindPanel}
               class="kit-dialog__panel"
               role="dialog"
               aria-modal="true"

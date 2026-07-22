@@ -16,6 +16,40 @@ import {
   type Space,
 } from "./router";
 
+// ─── Canonical Space identity/order (task 7.1, UIE-H-003) ────────────────────────
+
+describe("ALL_SPACES canonical pin", () => {
+  // The exact seven-tuple from design.md §12 (canonical navigation table).
+  // This test LOCKS identity and order; changing it requires a spec revision.
+  const CANONICAL_SPACES: readonly Space[] = [
+    "converse",
+    "memory",
+    "automations",
+    "capabilities",
+    "machines",
+    "observatory",
+    "settings",
+  ] as const;
+
+  it("equals the exact canonical 7-tuple in order", () => {
+    expect(ALL_SPACES).toEqual(CANONICAL_SPACES);
+  });
+
+  it("has exactly seven Spaces (no add/remove)", () => {
+    expect(ALL_SPACES).toHaveLength(7);
+  });
+
+  it("preserves each canonical ID at its canonical index", () => {
+    CANONICAL_SPACES.forEach((id, index) => {
+      expect(ALL_SPACES[index]).toBe(id);
+    });
+  });
+
+  it("contains no duplicate IDs", () => {
+    expect(new Set(ALL_SPACES).size).toBe(ALL_SPACES.length);
+  });
+});
+
 // ─── Route Parsing ─────────────────────────────────────────────────────────────
 
 describe("parseRoute", () => {
@@ -64,6 +98,83 @@ describe("parseRoute", () => {
 
   it("returns null for empty string", () => {
     expect(parseRoute("")).toBeNull();
+  });
+});
+
+// ─── Route grammar contract (task 7.2, Req 7.9) ──────────────────────────────
+// Grammar: `space[/segment][/entityId]`, ≤3 components, entity only after segment.
+
+describe("route grammar: space[/segment][/entityId]", () => {
+  // Valid forms for every canonical space
+  it("accepts a bare space for all 7 canonical spaces", () => {
+    for (const space of ALL_SPACES) {
+      expect(parseRoute(space)).toEqual({ space });
+    }
+  });
+
+  it("accepts space/segment (2 components) as a segment, never as an entity", () => {
+    const r = parseRoute("converse/thread");
+    expect(r).toEqual({ space: "converse", segment: "thread" });
+    // The 2nd component is the segment, and there is no entityId.
+    expect(r!.segment).toBe("thread");
+    expect(r!.entityId).toBeUndefined();
+  });
+
+  it("accepts space/segment/entityId (3 components)", () => {
+    expect(parseRoute("machines/ssh/server-1")).toEqual({
+      space: "machines",
+      segment: "ssh",
+      entityId: "server-1",
+    });
+  });
+
+  // Invalid forms
+  it("rejects an unknown space", () => {
+    expect(parseRoute("nope")).toBeNull();
+    expect(parseRoute("nope/segment")).toBeNull();
+    expect(parseRoute("nope/segment/entity")).toBeNull();
+  });
+
+  it("rejects more than three components", () => {
+    expect(parseRoute("converse/a/b/c")).toBeNull();
+    expect(parseRoute("converse/a/b/c/d")).toBeNull();
+  });
+
+  it("rejects empty / whitespace-only paths", () => {
+    expect(parseRoute("")).toBeNull();
+    expect(parseRoute("/")).toBeNull();
+    expect(parseRoute("///")).toBeNull();
+  });
+
+  // Entity-requires-segment invariant: no route can carry entityId without segment.
+  it("cannot produce an entityId without a segment (empty middle rejected)", () => {
+    expect(parseRoute("converse//abc")).toBeNull();
+    expect(parseRoute("machines//server-1")).toBeNull();
+  });
+
+  it("every parsed route with an entityId also has a segment", () => {
+    const paths = [
+      "converse",
+      "converse/thread",
+      "converse/thread/abc-123",
+      "memory/graph",
+      "machines/ssh/server-1",
+      "capabilities/installed/skill-abc",
+    ];
+    for (const p of paths) {
+      const r = parseRoute(p);
+      expect(r).not.toBeNull();
+      if (r!.entityId !== undefined) {
+        expect(r!.segment).toBeDefined();
+      }
+    }
+  });
+
+  // routeToPath enforces the same contract on serialization: entity dropped without segment.
+  it("routeToPath drops an entityId when there is no segment (round-trips to a valid route)", () => {
+    const path = routeToPath({ space: "settings", entityId: "orphan" } as Route);
+    expect(path).toBe("settings");
+    expect(parseRoute(path)).toEqual({ space: "settings" });
   });
 });
 
@@ -269,6 +380,101 @@ describe("hash synchronization", () => {
     const second = router.initHashSync();
     expect(second).toBe(first);
     first();
+  });
+
+  it("ignores an invalid hash and leaves the current route unchanged", async () => {
+    const router = await import("./router");
+    router.navigate("memory", "graph");
+    const before = router.currentRoute();
+
+    // Invalid hash: unknown space + too many components.
+    window.history.replaceState(null, "", "#/not-a-space/a/b/c");
+    const dispose = router.initHashSync();
+    // Route is not clobbered by the invalid hash.
+    expect(router.currentRoute()).toEqual(before);
+
+    // A later invalid hashchange is also ignored.
+    window.history.replaceState(null, "", "#/bogus/x/y/z");
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+    expect(router.currentRoute()).toEqual(before);
+    dispose();
+  });
+
+  it("route -> hash serialization round-trips through routeToPath/parseRoute", async () => {
+    const router = await import("./router");
+    const dispose = router.initHashSync();
+    router.navigate("capabilities", "installed", "skill-xyz");
+    await Promise.resolve();
+    expect(window.location.hash).toBe("#/capabilities/installed/skill-xyz");
+    // Parsing the serialized hash yields the same route.
+    expect(parseRoute(window.location.hash.replace(/^#\/?/, ""))).toEqual(
+      router.currentRoute()
+    );
+    dispose();
+  });
+});
+
+// ─── Restored path (loadSession at module init) ──────────────────────────────
+// loadSession runs once when the module is first imported, so these tests seed
+// localStorage BEFORE a fresh (isolated) module import via vi.resetModules().
+
+describe("restored path from persisted session", () => {
+  const STORAGE_KEY = "kria_router_session";
+
+  beforeEach(() => {
+    window.localStorage.removeItem(STORAGE_KEY);
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    window.localStorage.removeItem(STORAGE_KEY);
+    vi.resetModules();
+  });
+
+  it("restores a valid persisted route on load", async () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        route: { space: "machines", segment: "ssh", entityId: "server-1" },
+        spaceStates: {},
+        activeThreadId: null,
+      })
+    );
+    const router = await import("./router");
+    expect(router.currentRoute()).toEqual({
+      space: "machines",
+      segment: "ssh",
+      entityId: "server-1",
+    });
+  });
+
+  it("degrades a malformed persisted route to the default converse space", async () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ route: { space: "not-a-space" }, spaceStates: {} })
+    );
+    const router = await import("./router");
+    // Bad route dropped -> clean default, no crash.
+    expect(router.currentRoute()).toEqual({ space: "converse" });
+  });
+
+  it("degrades a non-JSON persisted blob to the default without crashing", async () => {
+    window.localStorage.setItem(STORAGE_KEY, "{not valid json");
+    const router = await import("./router");
+    expect(router.currentRoute()).toEqual({ space: "converse" });
+  });
+
+  it("restores the persisted active thread id", async () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        route: { space: "converse" },
+        spaceStates: {},
+        activeThreadId: "thread-99",
+      })
+    );
+    const router = await import("./router");
+    expect(router.getRestoredThreadId()).toBe("thread-99");
   });
 });
 

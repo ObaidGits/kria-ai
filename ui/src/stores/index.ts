@@ -20,6 +20,85 @@ export type {
 export { shellStore } from "./shellStore";
 export type { WindowMode, Theme, Density, InspectorTarget } from "./shellStore";
 
+export { homeStore, VALID_HOME_TRANSITIONS, HOME_FOCUS_TARGET } from "./homeStore";
+export type {
+  HomeState,
+  HomeFocusTarget,
+  HomeViewMode,
+  HomeRenderMode,
+  EdgeAnchor,
+  HomeSharedContext,
+} from "./homeStore";
+
+export {
+  homeFocusStore,
+  setAwarenessBridge,
+  clearAwarenessBridge,
+  deriveFocusFrame,
+  deriveGreeting,
+  personalizeFrame,
+  FOCUS_PRIORITY,
+  MAX_CHIPS as FOCUS_MAX_CHIPS,
+  GREETING_FULL_MAX_SESSIONS,
+  GREETING_SHORT_MAX_SESSIONS,
+  GREETING_MILESTONES,
+} from "./homeFocusStore";
+export type {
+  FocusFrame,
+  FocusGreeting,
+  FocusVoiceLine,
+  FocusAcs,
+  FocusAcsAction,
+  Chip,
+  OrbitPoint,
+  OrbitCapability,
+  FocusInputs,
+  GreetingInput,
+  AwarenessSignal,
+  DesktopAwarenessBridge,
+} from "./homeFocusStore";
+
+export {
+  homeGreetingStore,
+  readGreetingInput,
+  beginSession,
+  noteGreetingShown,
+  setUserName,
+  learnedFactAllowed,
+  noteLearnedFactShown,
+  resetGreetingState,
+  LEARNED_FACT_COOLDOWN_MS,
+} from "./homeGreetingStore";
+
+export {
+  RELATIONSHIP_STAGES,
+  deriveRelationshipStage,
+  stageRank,
+  relationshipContentScale,
+  contentScaleForSignals,
+  stageGreetingCeiling,
+  stageLearnedFactCap,
+  capLearnedFacts,
+  minVerbosity,
+  verbosityRank,
+  MAX_LEARNED_FACTS,
+  MANIPULATION_MARKERS,
+  FABRICATED_EMOTION_MARKERS,
+  findManipulationMarkers,
+  hasManipulation,
+  hasFabricatedEmotion,
+  isRelationshipContentSafe,
+  safeRelationshipContent,
+  STAGE_FIRST_WEEK_MAX_SESSIONS,
+  STAGE_FIRST_MONTH_MAX_SESSIONS,
+  STAGE_POWER_USER_MAX_SESSIONS,
+} from "./relationshipEvolution";
+export type {
+  RelationshipStage,
+  RelationshipSignals,
+  RelationshipContentScale,
+} from "./relationshipEvolution";
+
 export { coreStore, mapDomainEvent } from "./coreStore";
 export type { CoreState, CoreDomainEvent, CognitionJob, VoicePhase, ActivityOp } from "./coreStore";
 export { ACTIVE_STATES, ATTENTION_STATES, STATE_PRIORITY } from "./coreStore";

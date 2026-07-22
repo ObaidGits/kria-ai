@@ -187,7 +187,7 @@ describe("coreStore — domain-event mapping (mapDomainEvent)", () => {
   it("maps agent phases to thinking/planning/speaking/acting", () => {
     expect(mapDomainEvent({ kind: "agent", phase: "thinking" })).toMatchObject({ op: "begin", state: "thinking" });
     expect(mapDomainEvent({ kind: "agent", phase: "planning" })).toMatchObject({ op: "begin", state: "planning" });
-    expect(mapDomainEvent({ kind: "agent", phase: "streaming" })).toMatchObject({ op: "begin", state: "speaking" });
+    expect(mapDomainEvent({ kind: "agent", phase: "streaming" })).toMatchObject({ op: "begin", state: "responding" });
     expect(mapDomainEvent({ kind: "agent", phase: "done", sessionId: "s1" })).toMatchObject({ op: "end", source: "agent:s1" });
     expect(mapDomainEvent({ kind: "agent", phase: "error", message: "x" })).toMatchObject({ op: "begin", source: "error", state: "error" });
   });

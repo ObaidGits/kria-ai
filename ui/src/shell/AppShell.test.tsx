@@ -75,7 +75,7 @@ describe("AppShell (task 1.4)", () => {
     const main = await screen.findByRole("main");
     main.scrollTop = 73;
     const routeBefore = currentRoute();
-    shellStore.setWindowMode("compact");
+    shellStore.setWindowMode("mini");
     await Promise.resolve();
 
     expect(currentRoute()).toEqual(routeBefore);
@@ -85,13 +85,21 @@ describe("AppShell (task 1.4)", () => {
     expect(main.scrollTop).toBe(73);
   });
 
-  it("keeps approvals and Global Stop reachable in Immersive (Req 15.4)", async () => {
+  it("keeps approvals and the shell-level scoped Stop reachable in Immersive (Req 15.4)", async () => {
     coreStore.setState("acting");
     shellStore.setWindowMode("immersive");
     render(() => <AppShell />);
 
     expect(await screen.findByRole("button", { name: "Approvals" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Global Stop" })).toBeEnabled();
+    // The Immersive shell-level Stop shares the honest "Stop response" scope
+    // name with the Composer Stop (both invoke stopTurn), so it is selected by
+    // its stable class rather than an ambiguous accessible-name lookup.
+    const globalStop = document.querySelector<HTMLButtonElement>(
+      ".kria-presencebar__global-stop",
+    );
+    expect(globalStop).toBeTruthy();
+    expect(globalStop).toHaveAccessibleName("Stop response");
+    expect(globalStop).toBeEnabled();
   });
 });
 

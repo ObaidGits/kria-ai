@@ -232,6 +232,7 @@ enabled = false
         .unwrap();
 
         let cfg = load_config(f.path(), None).unwrap();
+        assert!(cfg.mcp.enabled); // Omitted global control remains backward-compatible.
         assert_eq!(cfg.mcp.servers.len(), 2);
 
         let fs = &cfg.mcp.servers[0];

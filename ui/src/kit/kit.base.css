@@ -14,6 +14,13 @@
   outline-offset: 2px;
 }
 
+/* Menu trigger accessible description — visible, low-emphasis helper text
+   wired to the trigger via aria-describedby (never hover-only). */
+.kit-menu-trigger-description {
+  font-size: var(--font-size-caption);
+  color: var(--color-text-muted);
+}
+
 /* Reduced-motion: no primitive animates transitions (Req 16.4 / 17.4). */
 @media (prefers-reduced-motion: reduce) {
   .kit-focusable,

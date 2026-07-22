@@ -17,12 +17,15 @@ docs/
     llm-orchestrator-runtime.md
     gui-cognition-runtime.md
     safety-hitl-runtime.md
+    presence-homepage-runtime.md
+    memory-graph-current-state.md
   orchestration/
     runtime-authority.md
     tool-system.md
     gui-execution.md
     opgraph-contract.md
   contracts/
+    memory-graph-current-contract.md
     hitl-mvp/
       01-boundary.md
       02-runtime-contracts.md
@@ -58,6 +61,12 @@ docs/
     adr/
       001-e2e-eval-harness.md
       002-tool-execution-overhaul.md
+      003-browser-page-content-scope.md
+      004-presence-first-homepage.md
+      005-hybrid-navigation.md
+      006-modal-vs-page-framework.md
+      007-view-modes-and-companion.md
+      008-3d-core-capability-gating.md
     rfc/
       007-gui-system-control.md
       008-recursive-intelligence.md
@@ -65,6 +74,11 @@ docs/
     overview.md
   reference/
     source-navigation.md
+    design-system.md
+    motion.md
+    accessibility.md
+    navigation.md
+    memory-graph-host-capabilities.md
 ```
 
 `docs/index.md` is the docs entry point. Do not create a parallel
@@ -74,6 +88,9 @@ docs/
 
 | Domain | Canonical document |
 |---|---|
+| Memory Graph shipped architecture | `architecture/memory-graph-current-state.md` |
+| Memory Graph current facade/renderer contract | `contracts/memory-graph-current-contract.md` |
+| Memory Graph host capabilities | `reference/memory-graph-host-capabilities.md` |
 | Platform overview | `architecture/overview.md` |
 | Core runtime | `architecture/core-runtime.md` |
 | Runtime flow | `architecture/overview.md` |
@@ -83,6 +100,7 @@ docs/
 | LLM orchestration | `architecture/llm-orchestrator-runtime.md` |
 | GUI cognition runtime | `architecture/gui-cognition-runtime.md` |
 | Safety + HITL runtime | `architecture/safety-hitl-runtime.md` |
+| Presence homepage runtime | `architecture/presence-homepage-runtime.md` |
 | Runtime authority | `orchestration/runtime-authority.md` |
 | Tool system | `orchestration/tool-system.md` |
 | GUI execution | `orchestration/gui-execution.md` |
@@ -100,6 +118,10 @@ docs/
 | OpenClaw integration | `integrations/openclaw.md` |
 | AI/LLM development context | `llm-context/index.md` |
 | Source navigation | `reference/source-navigation.md` |
+| Design system (homepage tokens/stories) | `reference/design-system.md` |
+| Motion system | `reference/motion.md` |
+| Accessibility contract (homepage) | `reference/accessibility.md` |
+| Navigation architecture | `reference/navigation.md` |
 
 ## Reading Order
 

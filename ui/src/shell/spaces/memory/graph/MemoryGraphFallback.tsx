@@ -1,25 +1,11 @@
 /**
- * MemoryGraphFallback — the mandatory, always-available 2D/keyboard
- * representation of the Knowledge Graph (Req 5.5 / 16.3 / 17.5).
+ * MemoryGraphFallback — mandatory, always-available semantic table for the
+ * current 2D Knowledge Graph view.
  *
- * This is what the lens yields to whenever 3D is NOT enabled (no WebGL,
- * reduced-motion, failing/absent G2 probe, auto-degrade under load, or the user
- * manually forcing 2D). It is a REAL accessible table of graph entities that is
- * fully keyboard-operable and exposes EVERYTHING the 3D lens can do:
- *   • sortable columns (entity / community / centrality / connections),
- *   • search / filter over entities,
- *   • arrow-key row navigation with a visible focus state (roving tabindex),
- *   • select → focus + expand (relationships + predicted links shown as rows),
- *   • per-node actions: focus/expand, pin, hide,
- *   • materialize a predicted link (routes through the SAME existing
- *     relationship command the 3D path uses — graphData.materializePrediction),
- *   • an honest "showing N of M" cap indicator,
- *   • a live region announcing load/focus/expand for assistive tech,
- *   • state conveyed by icon + text (never color alone — Req 17.3).
- *
- * ARCHITECTURE (KRIA runtime authority): pure read-model + existing-command
- * dispatch. Focus/expand/pin/hide are view state; materialize is a backend
- * write via the existing command. No orchestration, no memory mutation here.
+ * It provides sortable entity/component/centrality/connection columns,
+ * visible-label filtering, keyboard row navigation, focus expansion, and
+ * view-state actions. Predicted-link writes still route through
+ * graphData.materializePrediction; this component does not invent graph facts.
  */
 import { For, Show, createMemo, createSignal } from "solid-js";
 import { Badge, Button, EmptyState, Search } from "../../../../kit";
@@ -34,13 +20,13 @@ export interface MemoryGraphFallbackProps {
   reason?: string;
 }
 
-type SortKey = "label" | "community" | "centrality" | "connections";
+type SortKey = "label" | "component" | "centrality" | "connections";
 type SortDir = "asc" | "desc";
 
 interface FallbackRow {
   id: string;
   label: string;
-  community: number;
+  component: number;
   centrality: number;
   connections: number;
   size: number;
@@ -48,7 +34,7 @@ interface FallbackRow {
 
 const COLUMNS: ReadonlyArray<{ key: SortKey; header: string; numeric: boolean }> = [
   { key: "label", header: "Entity", numeric: false },
-  { key: "community", header: "Community", numeric: true },
+  { key: "component", header: "Component", numeric: true },
   { key: "centrality", header: "Centrality", numeric: true },
   { key: "connections", header: "Connections", numeric: true },
 ];
@@ -84,7 +70,7 @@ export function MemoryGraphFallback(props: MemoryGraphFallbackProps) {
     let list: FallbackRow[] = nodes().map((n) => ({
       id: n.id,
       label: n.label,
-      community: n.community,
+      component: n.community,
       centrality: n.centrality,
       connections: counts.get(n.id) ?? 0,
       size: nodeSizeForCentrality(n.centrality, max),
@@ -139,12 +125,6 @@ export function MemoryGraphFallback(props: MemoryGraphFallbackProps) {
     await graphData.expand(id);
     const rels = focusEdges().length;
     setStatus(`Focused ${labelFor(id)}. ${rels} relationship${rels === 1 ? "" : "s"} shown.`);
-  }
-
-  function togglePin(id: string) {
-    graphData.togglePin(id);
-    const pinned = graphData.pinned().has(id);
-    setStatus(`${labelFor(id)} ${pinned ? "pinned" : "unpinned"}.`);
   }
 
   function hideNode(id: string) {
@@ -295,7 +275,6 @@ export function MemoryGraphFallback(props: MemoryGraphFallbackProps) {
               <For each={rows()}>
                 {(row, index) => {
                   const isFocused = () => graphData.focusedId() === row.id;
-                  const isPinned = () => graphData.pinned().has(row.id);
                   return (
                     <tr data-focused={isFocused() ? "true" : "false"}>
                       <th scope="row" class="kria-graph__cell-entity">
@@ -320,8 +299,8 @@ export function MemoryGraphFallback(props: MemoryGraphFallbackProps) {
                         </button>
                       </th>
                       <td data-numeric="true">
-                        <Show when={row.community >= 0} fallback={<span class="kria-graph__muted">—</span>}>
-                          <Badge tone="info">community {row.community}</Badge>
+                        <Show when={row.component >= 0} fallback={<span class="kria-graph__muted">—</span>}>
+                          <Badge tone="info">component {row.component}</Badge>
                         </Show>
                       </td>
                       <td data-numeric="true">{row.centrality}</td>

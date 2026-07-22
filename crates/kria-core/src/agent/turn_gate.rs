@@ -177,7 +177,7 @@ pub struct TurnGatePlan {
 
 #[derive(Debug)]
 pub struct TurnGate {
-    onnx_classifier: Option<crate::agent::onnx_classifier::OnnxClassifier>,
+    onnx_classifier: std::sync::RwLock<Option<crate::agent::onnx_classifier::OnnxClassifier>>,
     /// New intent classifier (replaces regex + legacy ONNX when enabled).
     intent_classifier: Option<crate::routing::intent_classifier::IntentClassifier>,
     /// Conversation context for context-aware routing.
@@ -214,7 +214,7 @@ impl TurnGate {
         };
 
         Self {
-            onnx_classifier,
+            onnx_classifier: std::sync::RwLock::new(onnx_classifier),
             intent_classifier: None,
             context: RoutingContext::default(),
         }
@@ -225,10 +225,42 @@ impl TurnGate {
         onnx_classifier: Option<crate::agent::onnx_classifier::OnnxClassifier>,
     ) -> Self {
         Self {
-            onnx_classifier,
+            onnx_classifier: std::sync::RwLock::new(onnx_classifier),
             intent_classifier: None,
             context: RoutingContext::default(),
         }
+    }
+
+    /// Enable or disable legacy L0 classifier hints without rebuilding AgentLoop.
+    /// Dropping disabled classifier sender stops its worker after queued work drains.
+    pub fn set_onnx_classifier_enabled(&self, enabled: bool, model_path: Option<&str>) -> bool {
+        let mut slot = self
+            .onnx_classifier
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !enabled {
+            *slot = None;
+            return true;
+        }
+        if slot.is_none() {
+            let classifier = crate::agent::onnx_classifier::OnnxClassifier::new_with_model_path(
+                8,
+                Duration::from_millis(25),
+                model_path
+                    .map(str::trim)
+                    .filter(|path| !path.is_empty())
+                    .map(std::path::PathBuf::from),
+            );
+            let ready =
+                classifier.status() == crate::agent::onnx_classifier::OnnxClassifierStatus::Ready;
+            *slot = Some(classifier);
+            return ready;
+        }
+        slot.as_ref()
+            .map(|classifier| {
+                classifier.status() == crate::agent::onnx_classifier::OnnxClassifierStatus::Ready
+            })
+            .unwrap_or(false)
     }
 
     /// Get a reference to the current routing context.
@@ -474,7 +506,12 @@ impl TurnGate {
             );
         }
 
-        if let Some(classifier) = &self.onnx_classifier {
+        if let Some(classifier) = self
+            .onnx_classifier
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_ref()
+        {
             if let Some(hint) = classifier.classify(&lower) {
                 tracing::info!(
                     operation = ?hint.operation,

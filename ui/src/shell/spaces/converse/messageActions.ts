@@ -12,6 +12,7 @@
  */
 import { converseStore, shellStore, type Message } from "../../../stores";
 import { navigate } from "../../router";
+import { announceCopyOutcome } from "./copyAnnouncer";
 
 export interface MessageAction {
   id: string;
@@ -23,13 +24,32 @@ export interface MessageAction {
   children?: MessageAction[];
 }
 
-/** Write text to the clipboard (local UI action). Guarded for jsdom/test. */
-export async function copyToClipboard(text: string): Promise<void> {
+/**
+ * Write text to the clipboard (local UI action). Guarded for jsdom/test.
+ * Returns whether the write succeeded so callers can surface success/failure
+ * (Req 12.3). A missing Clipboard API or a rejected write both resolve to
+ * `false` — the copy did not happen, so it is a failure outcome, not success.
+ */
+export async function copyToClipboard(text: string): Promise<boolean> {
+  const clipboard = navigator.clipboard;
+  if (!clipboard) return false;
   try {
-    await navigator.clipboard?.writeText(text);
+    await clipboard.writeText(text);
+    return true;
   } catch {
-    /* clipboard denied/unavailable — a no-op is acceptable for a copy action */
+    /* clipboard denied/unavailable — reported as a failure outcome. */
+    return false;
   }
+}
+
+/**
+ * Copy a message's content and announce the concise outcome to the polite
+ * copy-status region without moving focus (Req 12.3, 12.5; UIE-M-009). Rapid
+ * identical outcomes are deduplicated by the announcer.
+ */
+export async function copyMessageContent(text: string): Promise<void> {
+  const ok = await copyToClipboard(text);
+  announceCopyOutcome(ok ? "success" : "failure");
 }
 
 /**
@@ -60,7 +80,11 @@ export function whyDidKriaAnswer(message: Message): void {
   // routed entityId to open the Inspector), and open the shared Inspector now
   // so the detail is visible immediately.
   navigate("memory", "explorer", memoryId);
-  shellStore.openInspector("memory", memoryId);
+  // This action ALSO changes route, so the invoking Converse control unmounts.
+  // Hand the stable primary-workspace landmark as the Focus_Return_Owner so a
+  // later close resolves via the §20.4 ladder to a stable region, not a stray
+  // element (task 9.3; target-removal specifics are task 9.4).
+  shellStore.openInspector("memory", memoryId, undefined, { regionSelector: "#space-root" });
 }
 
 /**
@@ -71,7 +95,7 @@ export function whyDidKriaAnswer(message: Message): void {
  */
 export function buildMessageActions(message: Message): MessageAction[] {
   const actions: MessageAction[] = [
-    { id: "copy", label: "Copy", icon: "copy", run: () => void copyToClipboard(message.content) },
+    { id: "copy", label: "Copy", icon: "copy", run: () => void copyMessageContent(message.content) },
     { id: "retry", label: "Retry", icon: "refresh-cw", run: () => void converseStore.retryMessage(message.id) },
     { id: "explain", label: "Explain", icon: "lightbulb", run: () => void converseStore.explainMessage(message.id) },
     { id: "remember", label: "Remember", icon: "brain", run: () => void converseStore.rememberMessage(message.id) },
@@ -82,7 +106,7 @@ export function buildMessageActions(message: Message): MessageAction[] {
       icon: "message-circle",
       children: [
         { id: "feedback-up", label: "Good response", icon: "star", run: () => void converseStore.submitFeedback(message.id, "up") },
-        { id: "feedback-down", label: "Poor response", icon: "triangle-alert", run: () => void converseStore.submitFeedback(message.id, "down") },
+        { id: "feedback-down", label: "Poor response", icon: "alert-triangle", run: () => void converseStore.submitFeedback(message.id, "down") },
       ],
     },
   ];

@@ -4,6 +4,7 @@
     "panel": { "value": "10" },
     "floating": { "value": "100" },
     "modal": { "value": "1000" },
-    "approval": { "value": "2000" }
+    "approval": { "value": "2000" },
+    "approval-confirm": { "value": "3000" }
   }
 }

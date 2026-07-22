@@ -40,12 +40,13 @@ export const SUMMON_EVENT = "app:summon";
  * unavailability, never throws); opening the palette is the guaranteed in-app
  * behaviour and happens regardless of OS window/focus support (Req 2.5).
  */
-export function summon(): void {
+export function summon(mode: "go" | "do" = "go"): void {
   // Best-effort window focus/raise. `bridgeInvokeOptional` never throws — a
   // missing backend/command (plain browser, restricted DE) degrades to null.
   void bridgeInvokeOptional(SUMMON_COMMAND);
-  // Guaranteed: open the palette regardless of OS-level support.
-  shellStore.setPaletteOpen(true);
+  // Guaranteed: open the palette regardless of OS-level support. `mode` selects
+  // the initial palette mode ("go" default; "do" for the Ctrl+Shift+P chord).
+  shellStore.setPaletteOpen(true, mode);
 }
 
 /**
@@ -57,6 +58,24 @@ export function isSummonHotkey(e: KeyboardEvent): boolean {
   if (e.altKey) return false;
   const mod = e.ctrlKey || e.metaKey;
   return mod && (e.key === "k" || e.key === "K");
+}
+
+/**
+ * True when the event is the "open palette in Do mode" chord: Ctrl/Cmd+Shift+P
+ * (no Alt). This is a PROVEN in-app binding wired to the palette's existing
+ * Do-mode path (`shellStore.setPaletteOpen(true, "do")` → CommandPalette reads
+ * `shellStore.paletteMode()`); it invents no new behavior — Do mode already
+ * exists via mode chips and the ">" prefix (design.md §20.2).
+ *
+ * Shift is REQUIRED here (unlike the Shift-agnostic K matcher), so Ctrl+Shift+K
+ * still summons Go mode and never collides with this chord.
+ *
+ * Pure matcher — exported so it can be unit-tested without the DOM listener.
+ */
+export function isPaletteDoHotkey(e: KeyboardEvent): boolean {
+  if (e.altKey) return false;
+  const mod = e.ctrlKey || e.metaKey;
+  return mod && e.shiftKey && (e.key === "p" || e.key === "P");
 }
 
 /**
@@ -88,11 +107,21 @@ export function initSummon(): () => void {
   // ── Guaranteed path: in-app webview hotkey (Cmd/Ctrl+K) ──
   if (typeof document !== "undefined" && keydownHandler === null) {
     keydownHandler = (e: KeyboardEvent) => {
-      if (!isSummonHotkey(e)) return;
-      // Guard: don't summon while the user is typing in a field.
-      if (isTypingTarget(e.target)) return;
-      e.preventDefault();
-      summon();
+      // Ctrl/Cmd+K → open palette (Go). Shift-agnostic (Ctrl+Shift+K still works).
+      if (isSummonHotkey(e)) {
+        // Guard: don't summon while the user is typing in a field.
+        if (isTypingTarget(e.target)) return;
+        e.preventDefault();
+        summon();
+        return;
+      }
+      // Ctrl/Cmd+Shift+P → open palette directly in Do mode (proven binding).
+      if (isPaletteDoHotkey(e)) {
+        if (isTypingTarget(e.target)) return;
+        e.preventDefault();
+        summon("do");
+        return;
+      }
     };
     document.addEventListener("keydown", keydownHandler);
   }

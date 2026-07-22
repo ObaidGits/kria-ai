@@ -14,7 +14,21 @@
  *   restorePlace(snap);           // focus + caret + scroll restored
  *
  * Pure DOM, no framework coupling; safe under jsdom (used in tests).
+ *
+ * SINGLE restoration path (design §21 IU-10 / UIE-M-005, task 9.3): the
+ * virtualized conversation viewport is NOT captured here. Raw `scrollTop` is the
+ * wrong unit for a dynamic-measure virtual list — it does not map back to the
+ * same message after a reversible transition. That viewport is owned by the
+ * anchor-based conversation owner (`conversationPlace.ts`); this helper still
+ * captures/restores focus + caret + every OTHER (non-virtualized) lane scroller
+ * (threads/Work/Context/Inspector), so mode (P-A) and approval (P-B) transitions
+ * keep those while deferring the stream to its single owner.
  */
+import {
+  CONVERSATION_SCROLL_OWNER_ATTR,
+  CONVERSATION_SCROLL_OWNER_VALUE,
+  CONVERSATION_VIEWPORT_CLASS,
+} from "./spaces/converse/conversationPlace";
 
 /** A restorable snapshot of the user's transient place. */
 export interface PlaceSnapshot {
@@ -44,12 +58,27 @@ function collectScrollables(root: ParentNode): Element[] {
   const out: Element[] = [];
   const candidates = root.querySelectorAll<HTMLElement>("*");
   candidates.forEach((el) => {
+    if (isConversationOwnedScroller(el)) return; // delegated to conversationPlace
     if (el.scrollTop > 0 || el.scrollLeft > 0) out.push(el);
   });
   if (typeof document !== "undefined" && document.scrollingElement) {
     out.push(document.scrollingElement);
   }
   return out;
+}
+
+/**
+ * Whether an element is the virtualized conversation viewport, whose scroll
+ * restoration is owned by `conversationPlace.ts` (anchor + offset, not raw px).
+ * Matched by the explicit scroll-owner marker or the viewport class.
+ */
+export function isConversationOwnedScroller(el: Element): boolean {
+  if (typeof (el as HTMLElement).getAttribute === "function") {
+    if (el.getAttribute(CONVERSATION_SCROLL_OWNER_ATTR) === CONVERSATION_SCROLL_OWNER_VALUE) {
+      return true;
+    }
+  }
+  return el.classList?.contains(CONVERSATION_VIEWPORT_CLASS) ?? false;
 }
 
 /**

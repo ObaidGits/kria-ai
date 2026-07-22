@@ -1,0 +1,1399 @@
+/**
+ * Command Center — bespoke HUD theme + layout (frontend-only demo).
+ *
+ * This file lives OUTSIDE the token-lint scan roots on purpose, so the HUD can
+ * carry its own palette. Theme = deep indigo base with cyan + violet accents
+ * (a distinct theme from the presence homepage's emerald). All motion honors
+ * reduced-motion.
+ */
+
+:root {
+  /* ── HUD theme — shared by Home, Command Deck, Developer Observatory so
+        relocated panels render identically on any surface. ── */
+  --cc-bg: #060a15;
+  --cc-bg-2: #0a1122;
+  --cc-panel: rgba(16, 26, 52, 0.55);
+  --cc-panel-2: rgba(12, 20, 42, 0.75);
+  --cc-border: rgba(94, 132, 220, 0.18);
+  --cc-border-strong: rgba(120, 170, 255, 0.4);
+  --cc-cyan: #38e0ff;
+  --cc-violet: #8b6dff;
+  --cc-text: #e9eefc;
+  --cc-dim: #93a6cf;
+  --cc-mute: #5c6f98;
+  --cc-online: #34d399;
+  --cc-active: #38e0ff;
+  --cc-standby: #7d8bb5;
+  --cc-warn: #f5b544;
+  --cc-danger: #fb7185;
+  --cc-info: #5cc8ff;
+  --cc-radius: 12px;
+  --cc-glow: 0 0 0 1px rgba(120, 170, 255, 0.12), 0 8px 30px rgba(4, 10, 28, 0.5);
+}
+
+.cc {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 12px;
+  box-sizing: border-box;
+  font-family: "IBM Plex Sans", "Inter", system-ui, sans-serif;
+  color: var(--cc-text);
+  background:
+    radial-gradient(1200px 700px at 50% -10%, rgba(60, 90, 180, 0.18), transparent 60%),
+    radial-gradient(900px 600px at 80% 120%, rgba(120, 90, 220, 0.12), transparent 60%),
+    linear-gradient(180deg, var(--cc-bg-2), var(--cc-bg));
+  overflow: hidden;
+}
+
+.cc *,
+.cc *::before,
+.cc *::after { box-sizing: border-box; }
+
+.cc-icon { flex: none; }
+
+/* ── Dots ── */
+.cc-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; background: var(--cc-mute); flex: none; }
+.cc-dot--online, .cc-dot--active { background: var(--cc-active); box-shadow: 0 0 8px var(--cc-active); }
+.cc-dot--online { background: var(--cc-online); box-shadow: 0 0 8px var(--cc-online); }
+.cc-dot--standby, .cc-dot--idle { background: var(--cc-standby); }
+.cc-dot--warn { background: var(--cc-warn); box-shadow: 0 0 8px var(--cc-warn); }
+.cc-dot--offline { background: var(--cc-danger); }
+
+/* ══ Top bar ══ */
+.cc-topbar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 16px;
+  background: var(--cc-panel);
+  border: 1px solid var(--cc-border);
+  border-radius: var(--cc-radius);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--cc-glow);
+}
+.cc-topbar__brand { display: inline-flex; align-items: center; gap: 12px; justify-self: start; }
+.cc-emblem {
+  display: grid; place-items: center; width: 40px; height: 40px; border-radius: 10px;
+  color: var(--cc-cyan);
+  background: radial-gradient(circle, rgba(56, 224, 255, 0.22), transparent 70%);
+  border: 1px solid var(--cc-border-strong);
+  box-shadow: 0 0 18px rgba(56, 224, 255, 0.28);
+}
+.cc-brand-text { display: flex; flex-direction: column; line-height: 1.1; }
+.cc-brand-text strong { font-family: "Space Grotesk", sans-serif; letter-spacing: 0.22em; font-size: 16px; }
+.cc-brand-text span { font-size: 9px; letter-spacing: 0.34em; color: var(--cc-mute); }
+
+.cc-status-pill {
+  display: inline-flex; align-items: center; gap: 8px; justify-self: start;
+  padding: 6px 14px; border-radius: 999px; font-size: 11px; letter-spacing: 0.14em;
+  color: var(--cc-dim); background: var(--cc-panel-2); border: 1px solid var(--cc-border);
+}
+.cc-status-pill b { color: var(--cc-online); letter-spacing: 0.14em; }
+
+.cc-clock { text-align: center; justify-self: center; }
+.cc-clock__date { display: block; font-size: 11px; color: var(--cc-dim); letter-spacing: 0.08em; }
+.cc-clock__time { display: block; font-family: "JetBrains Mono", monospace; font-size: 22px; color: var(--cc-cyan); letter-spacing: 0.12em; text-shadow: 0 0 16px rgba(56, 224, 255, 0.5); }
+
+.cc-topbar__right { display: inline-flex; align-items: center; gap: 10px; justify-self: end; }
+.cc-search { display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 8px; background: var(--cc-panel-2); border: 1px solid var(--cc-border); color: var(--cc-mute); width: 210px; }
+.cc-search input { flex: 1; background: transparent; border: 0; outline: none; color: var(--cc-text); font: inherit; font-size: 12px; min-width: 0; }
+.cc-icon-btn { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 8px; background: var(--cc-panel-2); border: 1px solid var(--cc-border); color: var(--cc-dim); cursor: pointer; }
+.cc-icon-btn:hover { color: var(--cc-cyan); border-color: var(--cc-border-strong); }
+.cc-profile { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px 4px 4px; border-radius: 999px; background: var(--cc-panel-2); border: 1px solid var(--cc-border); color: var(--cc-text); cursor: pointer; }
+.cc-profile__avatar { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: radial-gradient(circle, rgba(139, 109, 255, 0.4), transparent 70%); border: 1px solid var(--cc-border-strong); color: var(--cc-violet); }
+.cc-profile__text { display: flex; flex-direction: column; line-height: 1.15; text-align: left; }
+.cc-profile__text b { font-size: 12px; }
+.cc-profile__text span { font-size: 10px; color: var(--cc-mute); }
+
+/* ══ Body ══ */
+.cc-body { display: grid; grid-template-columns: 232px minmax(0, 1fr); gap: 10px; min-height: 0; }
+
+/* ── Left rail ── */
+.cc-nav {
+  display: flex; flex-direction: column; gap: 12px; min-height: 0;
+  padding: 14px 12px; background: var(--cc-panel); border: 1px solid var(--cc-border);
+  border-radius: var(--cc-radius); backdrop-filter: blur(10px); box-shadow: var(--cc-glow); overflow: hidden;
+}
+.cc-nav__list { display: flex; flex-direction: column; gap: 3px; overflow-y: auto; min-height: 0; }
+.cc-nav__item { display: flex; align-items: center; gap: 11px; padding: 9px 11px; border-radius: 8px; background: transparent; border: 1px solid transparent; color: var(--cc-dim); cursor: pointer; font: inherit; font-size: 13px; text-align: left; }
+.cc-nav__item:hover { background: var(--cc-panel-2); color: var(--cc-text); }
+.cc-nav__item[aria-current="page"] { background: linear-gradient(90deg, rgba(56, 224, 255, 0.16), transparent); border-color: var(--cc-border-strong); color: var(--cc-text); box-shadow: inset 2px 0 0 var(--cc-cyan); }
+.cc-nav__icon { color: inherit; display: inline-flex; }
+.cc-nav__label { flex: 1; }
+.cc-nav__badge { min-width: 20px; height: 18px; padding: 0 6px; border-radius: 999px; background: rgba(56, 224, 255, 0.16); color: var(--cc-cyan); font-size: 11px; font-weight: 600; display: grid; place-items: center; }
+
+.cc-voice { margin-top: auto; padding: 12px; border-radius: 10px; background: var(--cc-panel-2); border: 1px solid var(--cc-border); }
+.cc-voice__head { display: flex; align-items: center; justify-content: space-between; font-size: 10px; letter-spacing: 0.2em; color: var(--cc-mute); }
+.cc-voice__wave { height: 30px; margin: 10px 0; }
+.cc-voice__orb { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.cc-orb {
+  display: grid; place-items: center; width: 64px; height: 64px; border-radius: 50%; cursor: pointer;
+  color: #041018; border: none;
+  background: radial-gradient(circle at 50% 40%, var(--cc-cyan), #1577a8 70%);
+  box-shadow: 0 0 0 6px rgba(56, 224, 255, 0.1), 0 0 28px rgba(56, 224, 255, 0.55);
+  animation: cc-orb-pulse 2.4s ease-in-out infinite;
+}
+.cc-voice__state { font-size: 12px; color: var(--cc-cyan); }
+.cc-voice__hint { font-size: 10px; color: var(--cc-mute); }
+
+.cc-focus-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 10px; border-radius: 8px; background: var(--cc-panel-2); border: 1px solid var(--cc-border); color: var(--cc-dim); cursor: pointer; font: inherit; font-size: 12px; }
+.cc-focus-btn:hover { color: var(--cc-cyan); border-color: var(--cc-border-strong); }
+
+/* ── Content (Phase 2) ──────────────────────────────────────────────────────
+   The homepage relocated its operational + diagnostic panels to the Command
+   Deck / Developer Observatory. Only the Core hero remains, centered with
+   generous breathing room. */
+.cc-content { display: grid; place-items: center; min-height: 0; overflow: hidden; }
+
+/* ── Panel ── */
+.cc-panel { display: flex; flex-direction: column; min-height: 0; padding: 12px 14px; background: var(--cc-panel); border: 1px solid var(--cc-border); border-radius: var(--cc-radius); backdrop-filter: blur(8px); box-shadow: var(--cc-glow); overflow: hidden; }
+.cc-panel__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.cc-panel__title { margin: 0; font-family: "Space Grotesk", sans-serif; font-size: 12px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--cc-cyan); }
+.cc-panel__action { display: inline-flex; align-items: center; gap: 4px; background: transparent; border: 0; color: var(--cc-mute); font: inherit; font-size: 11px; cursor: pointer; }
+.cc-panel__action:hover { color: var(--cc-cyan); }
+.cc-panel__body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.cc-panel__foot { margin-top: 8px; display: inline-flex; align-items: center; gap: 6px; background: transparent; border: 0; color: var(--cc-cyan); font: inherit; font-size: 12px; cursor: pointer; align-self: flex-start; }
+.cc-panel__foot--center { align-self: center; }
+
+/* ── AI Core Overview ── */
+.cc-ov-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.cc-ov-row { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; background: var(--cc-panel-2); border: 1px solid var(--cc-border); }
+.cc-ov-icon { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px; background: rgba(56, 224, 255, 0.1); color: var(--cc-cyan); }
+.cc-ov-label { flex: 1; font-size: 13px; }
+.cc-ov-detail { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--cc-dim); }
+
+/* ── Hero / globe ── */
+.cc-hero { position: relative; display: grid; place-items: center; width: min(760px, 72%); height: min(300px, 58%); border: 1px solid var(--cc-border); border-radius: var(--cc-radius); overflow: hidden; background: radial-gradient(circle at 50% 45%, rgba(30, 60, 130, 0.25), transparent 65%); }
+.cc-globe { position: absolute; inset: 0; }
+.cc-hero__label { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; pointer-events: none; text-align: center; }
+.cc-hero__title { font-family: "Space Grotesk", sans-serif; font-size: 46px; font-weight: 700; letter-spacing: 0.28em; color: var(--cc-cyan); text-shadow: 0 0 30px rgba(56, 224, 255, 0.6); }
+.cc-hero__sub { font-size: 13px; letter-spacing: 0.5em; color: var(--cc-violet); }
+.cc-hero__ver { font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--cc-mute); letter-spacing: 0.2em; }
+
+.cc-globe-fallback { position: absolute; inset: 0; display: grid; place-items: center; }
+.cc-globe-fallback__ring { position: absolute; width: 230px; height: 230px; border-radius: 50%; border: 1px solid rgba(56, 224, 255, 0.4); }
+.cc-globe-fallback__ring--2 { width: 300px; height: 300px; border-color: rgba(139, 109, 255, 0.3); transform: rotate(30deg); }
+.cc-globe-fallback__ring--3 { width: 160px; height: 160px; border-color: rgba(56, 224, 255, 0.25); }
+
+/* ── Live Intelligence Feed ── */
+.cc-feed-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; overflow-y: auto; min-height: 0; }
+.cc-feed-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; background: var(--cc-panel-2); border: 1px solid var(--cc-border); border-left: 2px solid var(--cc-border); }
+.cc-feed-row[data-tag="warn"], .cc-feed-row[data-tag="alert"] { border-left-color: var(--cc-warn); }
+.cc-feed-row[data-tag="alert"] { border-left-color: var(--cc-danger); }
+.cc-feed-row[data-tag="tip"] { border-left-color: var(--cc-info); }
+.cc-feed-row[data-tag="focus"] { border-left-color: var(--cc-violet); }
+.cc-feed-row[data-tag="live"] { border-left-color: var(--cc-online); }
+.cc-feed-icon { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px; background: rgba(120, 170, 255, 0.1); color: var(--cc-dim); flex: none; }
+.cc-feed-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.cc-feed-title { font-size: 12px; color: var(--cc-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cc-feed-sub { font-size: 10px; color: var(--cc-mute); }
+.cc-tag { font-size: 9px; font-weight: 700; letter-spacing: 0.08em; padding: 3px 6px; border-radius: 5px; color: var(--cc-info); background: rgba(92, 200, 255, 0.14); flex: none; }
+.cc-tag[data-tag="warn"] { color: var(--cc-warn); background: rgba(245, 181, 68, 0.14); }
+.cc-tag[data-tag="alert"] { color: var(--cc-danger); background: rgba(251, 113, 133, 0.14); }
+.cc-tag[data-tag="focus"] { color: var(--cc-violet); background: rgba(139, 109, 255, 0.14); }
+.cc-tag[data-tag="live"] { color: var(--cc-online); background: rgba(52, 211, 153, 0.14); }
+.cc-tag[data-tag="info"] { color: var(--cc-info); background: rgba(92, 200, 255, 0.14); }
+.cc-mini-btn { flex: none; font-size: 10px; padding: 5px 9px; border-radius: 6px; border: 1px solid var(--cc-border-strong); background: rgba(56, 224, 255, 0.12); color: var(--cc-cyan); cursor: pointer; }
+
+/* ── Active Agents ── */
+.cc-agent-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.cc-agent { position: relative; display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; gap: 2px 8px; padding: 10px; border-radius: 9px; background: var(--cc-panel-2); border: 1px solid var(--cc-border); }
+.cc-agent__icon { grid-row: 1 / 3; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: rgba(56, 224, 255, 0.1); color: var(--cc-cyan); align-self: center; }
+.cc-agent[data-tone="standby"] .cc-agent__icon { color: var(--cc-standby); background: rgba(125, 139, 181, 0.12); }
+.cc-agent__name { font-size: 12px; color: var(--cc-text); }
+.cc-agent__status { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; color: var(--cc-dim); }
+.cc-agent__wave { grid-column: 1 / 3; height: 16px; margin-top: 6px; }
+
+/* ── Mission Timeline ── */
+.cc-tl-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; min-height: 0; }
+.cc-tl-row { display: grid; grid-template-columns: 62px 16px 1fr; align-items: center; gap: 8px; padding: 6px 4px; }
+.cc-tl-time { font-family: "JetBrains Mono", monospace; font-size: 10px; color: var(--cc-mute); }
+.cc-tl-dot { display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; border: 1px solid var(--cc-border-strong); color: var(--cc-online); }
+.cc-tl-dot i { width: 6px; height: 6px; border-radius: 50%; background: var(--cc-cyan); box-shadow: 0 0 8px var(--cc-cyan); }
+.cc-tl-row[data-done="true"] .cc-tl-dot { background: rgba(52, 211, 153, 0.16); }
+.cc-tl-body { display: flex; flex-direction: column; }
+.cc-tl-title { font-size: 12px; color: var(--cc-text); }
+.cc-tl-meta { font-size: 10px; color: var(--cc-mute); }
+
+/* ── Quick Commands ── */
+.cc-quick-grid { display: flex; flex-direction: column; gap: 8px; }
+.cc-quick-btn { display: flex; align-items: center; gap: 10px; padding: 11px 12px; border-radius: 9px; background: var(--cc-panel-2); border: 1px solid var(--cc-border); color: var(--cc-text); cursor: pointer; font: inherit; font-size: 13px; text-align: left; }
+.cc-quick-btn:hover { border-color: var(--cc-border-strong); background: rgba(56, 224, 255, 0.08); }
+.cc-quick-icon { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px; background: rgba(56, 224, 255, 0.12); color: var(--cc-cyan); }
+
+/* ── System Monitor ── */
+.cc-gauges { display: flex; align-items: center; justify-content: space-around; height: 100%; }
+.cc-gauge { position: relative; width: 80px; height: 80px; display: grid; place-items: center; }
+.cc-gauge svg { position: absolute; inset: 0; }
+.cc-gauge__track { fill: none; stroke: rgba(120, 170, 255, 0.14); stroke-width: 6; }
+.cc-gauge__value { fill: none; stroke: var(--cc-cyan); stroke-width: 6; stroke-linecap: round; filter: drop-shadow(0 0 6px rgba(56, 224, 255, 0.6)); transition: stroke-dashoffset 0.6s ease; }
+.cc-gauge__center { display: flex; flex-direction: column; align-items: center; }
+.cc-gauge__label { font-size: 10px; color: var(--cc-mute); letter-spacing: 0.1em; }
+.cc-gauge__num { font-family: "JetBrains Mono", monospace; font-size: 15px; color: var(--cc-text); }
+
+/* ── Memory Insights ── */
+.cc-memory-grid { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; height: 100%; }
+.cc-constellation { width: 100%; height: auto; }
+.cc-constellation polyline { fill: none; stroke: rgba(139, 109, 255, 0.5); stroke-width: 1; }
+.cc-constellation circle { fill: var(--cc-cyan); filter: drop-shadow(0 0 4px var(--cc-cyan)); }
+.cc-memory-stats { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; text-align: right; }
+.cc-memory-num { display: block; font-family: "Space Grotesk", sans-serif; font-size: 20px; color: var(--cc-cyan); }
+.cc-memory-label { display: block; font-size: 10px; color: var(--cc-mute); }
+
+/* ── LLM Status ── */
+.cc-llm-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.cc-provider { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border-radius: 9px; background: var(--cc-panel-2); border: 1px solid var(--cc-border); }
+.cc-provider__icon { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; background: rgba(120, 170, 255, 0.1); color: var(--cc-dim); flex: none; }
+.cc-provider__name { flex: 1; font-size: 12px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-provider__state { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; color: var(--cc-mute); }
+.cc-provider__state .cc-dot { background: var(--cc-mute); }
+.cc-provider[data-state="connected"] .cc-provider__state { color: var(--cc-online); }
+.cc-provider[data-state="connected"] .cc-provider__state .cc-dot { background: var(--cc-online); box-shadow: 0 0 8px var(--cc-online); }
+.cc-provider[data-state="linked"] .cc-provider__state { color: var(--cc-cyan); }
+.cc-provider[data-state="linked"] .cc-provider__state .cc-dot { background: var(--cc-cyan); box-shadow: 0 0 8px var(--cc-cyan); }
+.cc-provider[data-state="no-models"] .cc-provider__state { color: var(--cc-warn); }
+
+/* ══ Bottom bar ══ */
+.cc-bottombar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 16px; padding: 8px 16px; background: var(--cc-panel); border: 1px solid var(--cc-border); border-radius: var(--cc-radius); backdrop-filter: blur(10px); box-shadow: var(--cc-glow); }
+.cc-bottombar__stats { display: inline-flex; align-items: center; gap: 18px; justify-self: start; }
+.cc-stat { display: inline-flex; flex-direction: column; line-height: 1.2; }
+.cc-stat__k { display: inline-flex; align-items: center; gap: 5px; font-size: 9px; letter-spacing: 0.1em; color: var(--cc-mute); text-transform: uppercase; }
+.cc-stat b { font-size: 12px; color: var(--cc-text); }
+.cc-brief { justify-self: end; display: inline-flex; align-items: center; gap: 8px; padding: 9px 16px; border-radius: 8px; background: var(--cc-panel-2); border: 1px solid var(--cc-border); color: var(--cc-dim); cursor: pointer; font: inherit; font-size: 12px; }
+.cc-brief:hover { color: var(--cc-cyan); border-color: var(--cc-border-strong); }
+
+/* ══ Waveform (decorative equaliser) ══ */
+.cc-wave { display: flex; align-items: center; justify-content: center; gap: 2px; }
+.cc-wave span {
+  flex: 1; max-width: 4px; min-width: 2px; height: 30%; border-radius: 2px;
+  background: linear-gradient(180deg, var(--cc-cyan), var(--cc-violet));
+  animation: cc-wave 1.2s ease-in-out infinite;
+  animation-delay: calc(var(--i) * 0.06s);
+}
+
+@keyframes cc-wave { 0%, 100% { height: 25%; opacity: 0.6; } 50% { height: 100%; opacity: 1; } }
+@keyframes cc-orb-pulse { 0%, 100% { box-shadow: 0 0 0 6px rgba(56, 224, 255, 0.1), 0 0 24px rgba(56, 224, 255, 0.45); } 50% { box-shadow: 0 0 0 10px rgba(56, 224, 255, 0.05), 0 0 38px rgba(56, 224, 255, 0.7); } }
+
+/* ══ Reduced motion ══ */
+.cc[data-reduced-motion="on"] .cc-wave span,
+.cc[data-reduced-motion="on"] .cc-orb { animation: none; }
+.cc[data-reduced-motion="on"] .cc-wave span { height: 55%; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cc-wave span, .cc-orb { animation: none; }
+  .cc-wave span { height: 55%; }
+}
+
+/* ══ Phase 3 — Core-forward hierarchy ═══════════════════════════════════════
+   The Core is the hero: it sits in the emotional upper-center, floats in open
+   room (no card frame), and carries the single brightest light. All chrome
+   recedes into the background plane (dimmer, quieter, one accent). Competing
+   motion is stilled so ONLY the Core breathes. No new features — hierarchy
+   only. Scoped to `.cc` so the Command Deck / Developer surfaces are untouched.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* 1–4. Compose the Core in the upper-center with protected whitespace below. */
+.cc-content {
+  align-content: start;
+  justify-items: center;
+  padding-top: clamp(24px, 9vh, 104px);
+}
+
+/* Core floats — drop the card frame; grow through light, not a box. */
+.cc-hero {
+  width: min(860px, 78%);
+  height: min(430px, 52vh);
+  border: 0;
+  background: none;
+  overflow: visible;
+}
+/* Soft Core aura — the depth/light layer that makes the Core read as closer
+   to the user than the surrounding interface (behind the globe + label). */
+.cc-hero::before {
+  content: "";
+  position: absolute;
+  inset: -18% -12%;
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    closest-side,
+    rgba(56, 224, 255, 0.16),
+    rgba(139, 109, 255, 0.08) 55%,
+    transparent 76%
+  );
+  filter: blur(40px);
+}
+.cc-hero .cc-globe { z-index: 1; }
+.cc-hero__label { z-index: 2; }
+
+/* 3 + 5. Recede the chrome into the background plane (lower contrast, no glow). */
+.cc-topbar,
+.cc-nav,
+.cc-bottombar {
+  background: rgba(12, 20, 42, 0.4);
+  border-color: rgba(94, 132, 220, 0.1);
+  box-shadow: none;
+}
+
+/* 6. One accent: the Core stays the brightest element; everything else quiets. */
+.cc-clock__time { color: var(--cc-dim); text-shadow: none; }
+.cc-emblem { box-shadow: none; }
+.cc-status-pill b { color: var(--cc-dim); }
+.cc-status-pill .cc-dot { background: var(--cc-mute); box-shadow: none; }
+.cc-nav__item[aria-current="page"] {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: inset 2px 0 0 rgba(120, 170, 255, 0.5);
+  color: var(--cc-text);
+}
+.cc-nav__badge { background: rgba(120, 170, 255, 0.1); color: var(--cc-dim); }
+
+/* Quiet competing motion — only the Core breathes (still honors reduced-motion). */
+.cc-orb {
+  animation: none;
+  box-shadow: 0 0 0 4px rgba(56, 224, 255, 0.06), 0 0 16px rgba(56, 224, 255, 0.3);
+}
+.cc-voice__state { color: var(--cc-dim); }
+.cc .cc-wave span {
+  opacity: 0.4;
+  background: linear-gradient(180deg, var(--cc-dim), var(--cc-mute));
+}
+
+/* ══ Phase 4 — Presence flow ════════════════════════════════════════════════
+   The homepage is now KRIA's resting state, not a dashboard. Everything sits on
+   ONE vertical axis: Core → Presence Line → Composer → Action Chips → one
+   Adaptive Context Surface. The Core stays dominant; the presence stack below
+   is calm and low-contrast so it supports the Core without competing. Scoped to
+   `.cc`. Only the Core breathes (Phase 3); the presence stack is still.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* Stack the presence flow vertically, centered on the Core's axis. */
+.cc-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: clamp(14px, 2.6vh, 28px);
+  padding-top: clamp(20px, 6vh, 72px);
+}
+
+/* The Core shrinks slightly to make room for the presence stack, yet stays the
+   largest, brightest thing on screen. */
+.cc-hero {
+  width: min(720px, 64%);
+  height: min(300px, 38vh);
+  flex: 0 0 auto;
+}
+
+/* The presence stack shares the Core's centre line; a single narrow column. */
+.cc-presence {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(14px, 2.4vh, 26px);
+  width: min(640px, 82%);
+}
+
+/* 1. Presence Line — one calm living sentence, gently faded in. */
+.cc-pline {
+  margin: 0;
+  text-align: center;
+  font-size: 15px;
+  letter-spacing: 0.01em;
+  color: var(--cc-dim);
+  animation: cc-presence-in 900ms ease both;
+}
+
+/* 2. Composer — the emotional centre; speaking with KRIA, not a chat box. */
+.cc-composer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 12px 12px 20px;
+  border-radius: 16px;
+  background: var(--cc-panel-2);
+  border: 1px solid var(--cc-border);
+  transition: border-color 200ms ease, box-shadow 200ms ease;
+}
+.cc-composer:focus-within {
+  border-color: var(--cc-border-strong);
+  box-shadow: 0 0 0 1px rgba(56, 224, 255, 0.25), 0 0 26px rgba(56, 224, 255, 0.16);
+}
+.cc-composer__field {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  outline: none;
+  color: var(--cc-text);
+  font: inherit;
+  font-size: 15px;
+}
+.cc-composer__field::placeholder { color: var(--cc-mute); }
+.cc-composer__kbd {
+  flex: 0 0 auto;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--cc-mute);
+  padding: 3px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--cc-border);
+  background: rgba(12, 20, 42, 0.5);
+}
+.cc-composer__mic {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  border: 1px solid var(--cc-border-strong);
+  background: linear-gradient(135deg, rgba(56, 224, 255, 0.14), rgba(139, 109, 255, 0.14));
+  color: var(--cc-cyan);
+  cursor: pointer;
+  transition: box-shadow 200ms ease;
+}
+.cc-composer__mic:hover { box-shadow: 0 0 18px rgba(56, 224, 255, 0.3); }
+
+/* 3. Action Chips — quiet, low-weight suggestions (not navigation). */
+.cc-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+.cc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 13px;
+  border-radius: 999px;
+  border: 1px solid var(--cc-border);
+  background: transparent;
+  color: var(--cc-dim);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+.cc-chip:hover {
+  color: var(--cc-text);
+  border-color: var(--cc-border-strong);
+  background: rgba(120, 170, 255, 0.06);
+}
+
+/* 4. Adaptive Context Surface — one card; absent entirely when nothing matters. */
+.cc-context {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: var(--cc-panel);
+  border: 1px solid var(--cc-border);
+  animation: cc-presence-in 900ms ease both;
+}
+.cc-context__icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: rgba(56, 224, 255, 0.08);
+  color: var(--cc-cyan);
+}
+.cc-context__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.cc-context__title { font-size: 13px; color: var(--cc-text); }
+.cc-context__line { font-size: 12px; color: var(--cc-mute); }
+.cc-context__action {
+  flex: 0 0 auto;
+  padding: 7px 14px;
+  border-radius: 9px;
+  border: 1px solid var(--cc-border-strong);
+  background: transparent;
+  color: var(--cc-cyan);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 160ms ease;
+}
+.cc-context__action:hover { background: rgba(56, 224, 255, 0.08); }
+
+/* Bottom bar now carries only ambient stats + Executive Briefing (talk pill
+   moved up into the on-axis Composer). */
+.cc-bottombar { display: flex; align-items: center; justify-content: space-between; }
+
+@keyframes cc-presence-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Presence stack stays still — motion communicates life, not activity. */
+.cc[data-reduced-motion="on"] .cc-pline,
+.cc[data-reduced-motion="on"] .cc-context {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cc-pline,
+  .cc-context { animation: none; }
+}
+
+/* ══ Phase 5 — AI navigation (Hidden Dock + Contextual Orbit) ════════════════
+   Navigation disappears until summoned. The permanent left rail is gone; the
+   Core becomes the navigation hub. Scoped to `.cc`. Reveal is CSS-driven
+   (:hover / :focus-within) so keyboard + reduced-motion get the same behaviour.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* Body is now a single content column — the dock overlays, never displaces. */
+.cc-body { grid-template-columns: minmax(0, 1fr); }
+
+/* ── Hidden Dock ─────────────────────────────────────────────────────────── */
+.cc-dock-edge { position: fixed; left: 0; top: 0; width: 12px; height: 100vh; z-index: 40; }
+.cc-dock {
+  position: fixed; left: 0; top: 0; height: 100vh; z-index: 41;
+  padding: 12px; display: flex;
+  transform: translateX(-114%);
+  transition: transform 260ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.cc-dock[data-open="true"],
+.cc-dock:focus-within { transform: none; }
+.cc-dock .cc-nav { width: 240px; height: 100%; }
+
+.cc-dock__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.cc-dock__title { font-size: 10px; letter-spacing: 0.24em; color: var(--cc-mute); }
+.cc-dock__pin {
+  display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px;
+  background: transparent; border: 1px solid var(--cc-border); color: var(--cc-mute); cursor: pointer;
+}
+.cc-dock__pin[aria-pressed="true"] { color: var(--cc-cyan); border-color: var(--cc-border-strong); background: rgba(56, 224, 255, 0.08); }
+.cc-dock__pin:hover { color: var(--cc-cyan); }
+
+/* ── Core zone + Contextual Orbit ────────────────────────────────────────── */
+.cc-corezone {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: min(760px, 70%);
+  min-height: clamp(340px, 44vh, 460px);
+  flex: 0 0 auto;
+}
+.cc-corezone .cc-hero { width: min(560px, 78%); height: min(280px, 34vh); }
+
+.cc-orbit {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  opacity: 0;
+  transform: scale(0.92);
+  transition: opacity 320ms ease, transform 320ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.cc-corezone:hover .cc-orbit,
+.cc-corezone:focus-within .cc-orbit {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+.cc-orbit__item {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 13px;
+  border-radius: 999px;
+  background: var(--cc-panel-2);
+  border: 1px solid var(--cc-border);
+  color: var(--cc-dim);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  transform: translate(-50%, -50%) rotate(var(--a)) translateY(-178px) rotate(calc(-1 * var(--a)));
+  transition: color 160ms ease, border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+.cc-orbit__item:hover,
+.cc-orbit__item:focus-visible {
+  color: var(--cc-text);
+  border-color: var(--cc-border-strong);
+  background: rgba(56, 224, 255, 0.1);
+  box-shadow: 0 0 18px rgba(56, 224, 255, 0.22);
+  outline: none;
+}
+.cc-orbit__item[aria-pressed="true"] { color: var(--cc-cyan); border-color: var(--cc-border-strong); }
+.cc-orbit__icon { display: inline-flex; color: var(--cc-cyan); }
+
+/* ── One contextual surface (emerges from the Core) ──────────────────────── */
+.cc-surface { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; }
+.cc-surface__backdrop { position: absolute; inset: 0; background: rgba(4, 8, 20, 0.42); backdrop-filter: blur(2px); }
+.cc-surface__panel {
+  position: relative;
+  width: min(560px, 86%);
+  max-height: 70vh;
+  overflow: auto;
+  padding: 18px;
+  border-radius: 16px;
+  background: var(--cc-panel);
+  border: 1px solid var(--cc-border-strong);
+  box-shadow: var(--cc-glow);
+  backdrop-filter: blur(14px);
+  transform-origin: center top;
+  animation: cc-emerge 280ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+.cc-surface__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.cc-surface__heading { display: flex; flex-direction: column; gap: 3px; }
+.cc-surface__title { margin: 0; font-family: "Space Grotesk", sans-serif; font-size: 18px; letter-spacing: 0.04em; color: var(--cc-text); }
+.cc-surface__summary { font-size: 12px; color: var(--cc-mute); }
+.cc-surface__close {
+  display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px;
+  background: var(--cc-panel-2); border: 1px solid var(--cc-border); color: var(--cc-dim); cursor: pointer;
+  transform: rotate(90deg);
+}
+.cc-surface__close:hover { color: var(--cc-cyan); border-color: var(--cc-border-strong); }
+.cc-surface__rows { display: flex; flex-direction: column; gap: 6px; }
+.cc-surface__row { display: flex; align-items: center; gap: 12px; padding: 11px 12px; border-radius: 10px; background: var(--cc-panel-2); border: 1px solid var(--cc-border); }
+.cc-surface__row-icon { display: inline-flex; color: var(--cc-cyan); }
+.cc-surface__row-label { flex: 1; font-size: 13px; color: var(--cc-text); }
+.cc-surface__row-detail { font-size: 12px; color: var(--cc-mute); }
+
+@keyframes cc-emerge {
+  from { opacity: 0; transform: translateY(-10px) scale(0.94); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Reduced-motion: reveal states without motion (equivalent behaviour). */
+.cc[data-reduced-motion="on"] .cc-dock { transition: none; }
+.cc[data-reduced-motion="on"] .cc-orbit { transition: opacity 1ms linear; transform: none; }
+.cc[data-reduced-motion="on"] .cc-surface__panel { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  .cc-dock { transition: none; }
+  .cc-orbit { transition: opacity 1ms linear; transform: none; }
+  .cc-surface__panel { animation: none; }
+}
+
+/* ══ Phase 6 — Context-aware navigation ═════════════════════════════════════
+   No new UI: the Orbit / Presence Line / Composer adapt to the Context Engine.
+   Additions here are only: a demo context control (repurposed status pill), the
+   lightweight Orbit preview, and the Context Surface action row. Scoped to `.cc`.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* Demo context signal — the status pill becomes a context indicator/cycler. */
+.cc-ctx { cursor: pointer; font: inherit; transition: color 160ms ease, border-color 160ms ease; }
+.cc-ctx b { color: var(--cc-cyan); }
+.cc-ctx:hover { border-color: var(--cc-border-strong); color: var(--cc-text); }
+.cc-ctx:focus-visible { outline: none; border-color: var(--cc-border-strong); box-shadow: 0 0 0 1px rgba(56, 224, 255, 0.3); }
+
+/* Lightweight Orbit preview — the capability's description, revealed only when
+   its item is hovered/focused (no screen-covering tooltip). The item wraps so
+   the description drops onto its own line beneath the icon + label. */
+.cc-orbit__item { flex-flow: row wrap; justify-content: center; text-align: center; max-width: 172px; }
+.cc-orbit__desc {
+  flex-basis: 100%;
+  max-width: 150px;
+  margin: 0 auto;
+  font-size: 10px;
+  line-height: 1.25;
+  color: var(--cc-mute);
+  opacity: 0;
+  max-height: 0;
+  overflow: hidden;
+  transition: opacity 160ms ease, max-height 160ms ease;
+}
+.cc-orbit__item:hover .cc-orbit__desc,
+.cc-orbit__item:focus-visible .cc-orbit__desc {
+  opacity: 1;
+  max-height: 34px;
+}
+
+/* Context Surface — capability action row. */
+.cc-surface__actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.cc-surface__action {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 8px 14px; border-radius: 9px;
+  background: linear-gradient(135deg, rgba(56, 224, 255, 0.12), rgba(139, 109, 255, 0.12));
+  border: 1px solid var(--cc-border-strong);
+  color: var(--cc-cyan); font: inherit; font-size: 12px; cursor: pointer;
+  transition: box-shadow 160ms ease;
+}
+.cc-surface__action:hover { box-shadow: 0 0 18px rgba(56, 224, 255, 0.24); }
+
+/* Context change: the Orbit set fades in smoothly. Opacity-only so it never
+   clobbers each item's ring-positioning `transform`. (Still-when-reduced.) */
+@keyframes cc-orbit-fade { from { opacity: 0; } to { opacity: 1; } }
+.cc-orbit__item { animation: cc-orbit-fade 300ms ease both; }
+.cc[data-reduced-motion="on"] .cc-orbit__item { animation: none; }
+@media (prefers-reduced-motion: reduce) { .cc-orbit__item { animation: none; } }
+
+/* ══ Phase 8 — polish: unified focus ring ═══════════════════════════════════
+   One consistent, visible keyboard focus indicator across every interactive
+   element on the homepage surface (components that already define a bespoke
+   focus style keep it; this is the shared default). Scoped to `.cc`. */
+.cc button:focus-visible,
+.cc input:focus-visible,
+.cc [tabindex]:focus-visible {
+  outline: 2px solid var(--cc-cyan);
+  outline-offset: 2px;
+}
+.cc-surface__panel:focus-visible { outline: none; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   VISUAL THEME OVERHAUL — cinematic AI-OS look (visual only; no structure/logic)
+   Deep-midnight environment, electric-blue + neon-violet + cyan bloom, premium
+   glass, volumetric glow. Appended last so it refines earlier rules via the
+   cascade. Redefines the shared HUD tokens on :root so the Command Deck and
+   Developer Observatory inherit the same language. All motion stays reduced-
+   motion gated. No external assets — the background is a self-contained CSS
+   environment (offline, royalty-free, watermark-free), so a local-first app
+   never hotlinks or leaks a network request.
+   ══════════════════════════════════════════════════════════════════════════ */
+:root {
+  --cc-bg: #04070f;
+  --cc-bg-2: #070d1c;
+  --cc-blue: #3b82ff;
+  --cc-cyan: #35e3ff;
+  --cc-violet: #9a7bff;
+  --cc-text: #eaf0ff;
+  --cc-dim: #9db0da;
+  --cc-mute: #5d6f9c;
+  --cc-panel: rgba(18, 30, 60, 0.5);
+  --cc-panel-2: rgba(12, 21, 46, 0.62);
+  --cc-border: rgba(120, 160, 240, 0.14);
+  --cc-border-strong: rgba(130, 180, 255, 0.42);
+  --cc-online: #43e0a0;
+  --cc-warn: #f5b451;
+  --cc-danger: #ff6b7f;
+  --cc-radius: 14px;
+  --cc-glow: 0 0 0 1px rgba(130, 180, 255, 0.08), 0 18px 50px rgba(2, 6, 20, 0.55);
+  --cc-glass-blur: 18px;
+}
+
+/* ── Cinematic environment ─────────────────────────────────────────────────
+   Layered atmosphere: a top bloom (blue→violet), a mid halo behind the Core, a
+   deep horizon glow, and a soft mountain silhouette + vignette. */
+.cc {
+  background:
+    radial-gradient(58% 42% at 50% 30%, rgba(80, 120, 255, 0.16), transparent 60%),
+    radial-gradient(46% 34% at 50% 40%, rgba(150, 110, 255, 0.12), transparent 62%),
+    radial-gradient(120% 70% at 50% 118%, rgba(30, 60, 140, 0.5), transparent 60%),
+    linear-gradient(180deg, #070d1c 0%, #04070f 58%, #02040a 100%);
+}
+.cc::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    /* faint starfield */
+    radial-gradient(1.4px 1.4px at 12% 22%, rgba(200, 220, 255, 0.35), transparent 60%),
+    radial-gradient(1.2px 1.2px at 78% 16%, rgba(190, 210, 255, 0.3), transparent 60%),
+    radial-gradient(1.2px 1.2px at 62% 30%, rgba(180, 210, 255, 0.28), transparent 60%),
+    radial-gradient(1.6px 1.6px at 34% 12%, rgba(200, 220, 255, 0.28), transparent 60%),
+    radial-gradient(1.2px 1.2px at 88% 40%, rgba(180, 200, 255, 0.22), transparent 60%);
+  opacity: 0.7;
+}
+.cc::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    /* soft mountain horizon */
+    radial-gradient(120% 60% at 20% 128%, rgba(46, 78, 150, 0.55), transparent 58%),
+    radial-gradient(120% 62% at 80% 132%, rgba(70, 60, 150, 0.45), transparent 58%),
+    /* cinematic vignette */
+    radial-gradient(140% 120% at 50% 45%, transparent 55%, rgba(2, 4, 10, 0.55) 100%);
+}
+.cc > * { position: relative; z-index: 1; }
+
+/* ── Premium glass for all chrome ──────────────────────────────────────────── */
+.cc-topbar,
+.cc-bottombar {
+  background: linear-gradient(180deg, rgba(20, 32, 64, 0.55), rgba(10, 18, 40, 0.5));
+  border: 1px solid var(--cc-border);
+  box-shadow: var(--cc-glow), inset 0 1px 0 rgba(160, 190, 255, 0.06);
+  backdrop-filter: blur(var(--cc-glass-blur));
+}
+.cc-emblem {
+  color: var(--cc-cyan);
+  border: 1px solid var(--cc-border-strong);
+  box-shadow: 0 0 22px rgba(53, 227, 255, 0.4), inset 0 0 18px rgba(53, 227, 255, 0.18);
+}
+.cc-clock__time { color: var(--cc-cyan); text-shadow: 0 0 18px rgba(53, 227, 255, 0.55); }
+.cc-search, .cc-icon-btn, .cc-profile {
+  background: rgba(12, 21, 46, 0.6);
+  border: 1px solid var(--cc-border);
+  box-shadow: inset 0 1px 0 rgba(160, 190, 255, 0.05);
+}
+.cc-status-pill { background: rgba(12, 21, 46, 0.6); border: 1px solid var(--cc-border); }
+
+/* ── Core hero — stronger volumetric bloom ─────────────────────────────────── */
+.cc-hero::before {
+  inset: -26% -20%;
+  background: radial-gradient(
+    closest-side,
+    rgba(53, 227, 255, 0.24),
+    rgba(120, 110, 255, 0.14) 46%,
+    rgba(60, 90, 255, 0.06) 68%,
+    transparent 80%
+  );
+  filter: blur(48px);
+}
+.cc-hero__title {
+  font-size: clamp(40px, 4.6vw, 60px);
+  letter-spacing: 0.26em;
+  color: #ffffff;
+  text-shadow: 0 0 34px rgba(53, 227, 255, 0.7), 0 0 70px rgba(120, 110, 255, 0.4);
+}
+.cc-hero__sub { color: var(--cc-cyan); letter-spacing: 0.52em; opacity: 0.85; }
+.cc-hero__ver { color: var(--cc-mute); }
+
+/* ── Orbit — symmetric ring with soft orbital paths + premium hover ────────── */
+.cc-orbit__path {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 372px;
+  height: 372px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 1px solid rgba(120, 170, 255, 0.14);
+  box-shadow: inset 0 0 40px rgba(80, 130, 255, 0.06);
+  pointer-events: none;
+}
+.cc-orbit__path--tilt {
+  width: 470px;
+  height: 300px;
+  border-color: rgba(150, 120, 255, 0.12);
+  transform: translate(-50%, -50%) rotate(-16deg);
+}
+.cc-orbit__item {
+  background: linear-gradient(180deg, rgba(18, 30, 60, 0.72), rgba(10, 18, 40, 0.66));
+  border: 1px solid var(--cc-border);
+  box-shadow: 0 6px 20px rgba(2, 6, 20, 0.4), inset 0 1px 0 rgba(160, 190, 255, 0.06);
+  backdrop-filter: blur(10px);
+  padding: 9px 15px;
+}
+.cc-orbit__icon {
+  color: var(--cc-cyan);
+  filter: drop-shadow(0 0 6px rgba(53, 227, 255, 0.5));
+}
+.cc-orbit__item:hover,
+.cc-orbit__item:focus-visible {
+  border-color: var(--cc-border-strong);
+  background: linear-gradient(180deg, rgba(30, 46, 88, 0.85), rgba(16, 26, 54, 0.8));
+  box-shadow: 0 0 26px rgba(53, 227, 255, 0.3), 0 8px 26px rgba(2, 6, 20, 0.5);
+  transform: translate(-50%, -50%) rotate(var(--a)) translateY(-178px) rotate(calc(-1 * var(--a))) scale(1.06);
+}
+
+/* ── Presence Line — brighter, larger, cinematic ───────────────────────────── */
+.cc-pline {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: clamp(19px, 2.1vw, 26px);
+  font-weight: 500;
+  color: var(--cc-text);
+  letter-spacing: 0.005em;
+  text-shadow: 0 0 22px rgba(80, 120, 255, 0.18);
+}
+
+/* ── Composer — premium floating glass ─────────────────────────────────────── */
+.cc-composer {
+  padding: 7px 7px 7px 22px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(20, 32, 64, 0.62), rgba(10, 18, 40, 0.58));
+  border: 1px solid var(--cc-border-strong);
+  box-shadow: 0 10px 34px rgba(2, 6, 20, 0.5), inset 0 1px 0 rgba(160, 190, 255, 0.06);
+  backdrop-filter: blur(var(--cc-glass-blur));
+}
+.cc-composer:focus-within {
+  border-color: rgba(53, 227, 255, 0.55);
+  box-shadow: 0 0 0 1px rgba(53, 227, 255, 0.3), 0 0 40px rgba(53, 227, 255, 0.18), 0 10px 34px rgba(2, 6, 20, 0.5);
+}
+.cc-composer__mic {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  border: 1px solid rgba(53, 227, 255, 0.5);
+  background: radial-gradient(circle at 50% 38%, var(--cc-cyan), #1478a6 72%);
+  color: #04121a;
+  box-shadow: 0 0 24px rgba(53, 227, 255, 0.55);
+}
+.cc-composer__mic:hover { box-shadow: 0 0 32px rgba(53, 227, 255, 0.75); }
+.cc-composer__kbd { background: rgba(10, 18, 40, 0.6); border-color: var(--cc-border); }
+
+/* ── Action Chips — subtle glass pills ─────────────────────────────────────── */
+.cc-chip {
+  background: rgba(14, 24, 50, 0.5);
+  border: 1px solid var(--cc-border);
+  box-shadow: inset 0 1px 0 rgba(160, 190, 255, 0.05);
+}
+.cc-chip:hover { background: rgba(30, 46, 88, 0.7); border-color: var(--cc-border-strong); color: var(--cc-text); }
+.cc-chip svg { color: var(--cc-cyan); }
+
+/* ── Adaptive Context Surface — premium card ───────────────────────────────── */
+.cc-context {
+  background: linear-gradient(180deg, rgba(20, 32, 64, 0.55), rgba(10, 18, 40, 0.5));
+  border: 1px solid var(--cc-border);
+  box-shadow: var(--cc-glow), inset 0 1px 0 rgba(160, 190, 255, 0.05);
+  backdrop-filter: blur(var(--cc-glass-blur));
+  border-radius: 16px;
+}
+.cc-context__icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: radial-gradient(circle at 50% 40%, rgba(140, 110, 255, 0.5), rgba(80, 90, 255, 0.18));
+  border: 1px solid rgba(150, 120, 255, 0.4);
+  color: #eae6ff;
+  box-shadow: 0 0 20px rgba(140, 110, 255, 0.3);
+}
+.cc-context__action {
+  border-color: var(--cc-border-strong);
+  background: linear-gradient(135deg, rgba(53, 227, 255, 0.16), rgba(140, 110, 255, 0.16));
+}
+
+/* ── Hidden Dock — premium floating control panel (solid glass) ────────────── */
+.cc-dock .cc-nav {
+  background: linear-gradient(180deg, rgba(16, 27, 56, 0.92), rgba(9, 16, 36, 0.9));
+  border: 1px solid var(--cc-border-strong);
+  border-radius: 18px;
+  box-shadow: 0 24px 60px rgba(2, 6, 20, 0.6), inset 0 1px 0 rgba(160, 190, 255, 0.08);
+  backdrop-filter: blur(26px) saturate(1.1);
+}
+.cc-nav__item:hover { background: rgba(30, 46, 88, 0.6); }
+.cc-nav__item[aria-current="page"] {
+  background: linear-gradient(90deg, rgba(70, 110, 255, 0.32), rgba(140, 110, 255, 0.14));
+  border-color: rgba(130, 180, 255, 0.45);
+  box-shadow: inset 3px 0 0 var(--cc-cyan), 0 0 20px rgba(70, 110, 255, 0.25);
+  color: #ffffff;
+}
+.cc-nav__badge { background: rgba(53, 227, 255, 0.16); color: var(--cc-cyan); }
+.cc-orb {
+  background: radial-gradient(circle at 50% 38%, var(--cc-cyan), #1478a6 72%);
+  box-shadow: 0 0 0 6px rgba(53, 227, 255, 0.1), 0 0 30px rgba(53, 227, 255, 0.6);
+}
+
+/* ── Contextual surface (Orbit → panel) — richer glass ─────────────────────── */
+.cc-surface__panel {
+  background: linear-gradient(180deg, rgba(20, 32, 64, 0.72), rgba(10, 18, 40, 0.7));
+  border: 1px solid var(--cc-border-strong);
+  box-shadow: 0 30px 70px rgba(2, 6, 20, 0.6), inset 0 1px 0 rgba(160, 190, 255, 0.08);
+  backdrop-filter: blur(28px) saturate(1.1);
+}
+.cc-surface__backdrop { background: rgba(3, 6, 16, 0.5); backdrop-filter: blur(3px); }
+
+/* ── Context pill (top bar) ─────────────────────────────────────────────────── */
+.cc-ctx b { color: var(--cc-violet); }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   FULL HUD HOMEPAGE LAYOUT — three columns (SideDock | Core | StatusRail)
+   framed by the top bar and bottom bar. Matches the command-center reference.
+   Appended last; scoped to `.cc--full` so nothing else is affected.
+   ══════════════════════════════════════════════════════════════════════════ */
+.cc--full {
+  grid-template-columns: 250px minmax(0, 1fr) 312px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 12px;
+}
+.cc--full .cc-topbar { grid-column: 1 / -1; grid-row: 1; }
+.cc--full .cc-sidedock { grid-column: 1; grid-row: 2; }
+.cc--full .cc-content { grid-column: 2; grid-row: 2; overflow: auto; }
+.cc--full .cc-rail { grid-column: 3; grid-row: 2; }
+.cc--full .cc-bottombar { grid-column: 1 / -1; grid-row: 3; }
+
+/* ── Top bar (brand · search · context · controls) ─────────────────────────── */
+.cc--full .cc-topbar {
+  grid-template-columns: 218px minmax(200px, 340px) 1fr auto;
+  align-items: center;
+  gap: 16px;
+}
+.cc--full .cc-search { width: 100%; }
+.cc-search__kbd {
+  font-family: "JetBrains Mono", monospace; font-size: 10px; letter-spacing: 0.06em;
+  color: var(--cc-mute); padding: 2px 6px; border-radius: 6px;
+  border: 1px solid var(--cc-border); background: rgba(10, 18, 40, 0.6);
+}
+.cc--full .cc-ctx {
+  justify-self: center;
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 7px 16px; border-radius: 999px; cursor: pointer; font: inherit;
+  font-size: 11px; letter-spacing: 0.14em; color: var(--cc-dim);
+  background: var(--cc-panel-2); border: 1px solid var(--cc-border);
+}
+.cc--full .cc-topbar__right { justify-self: end; }
+
+/* ── Left pinned dock ──────────────────────────────────────────────────────── */
+.cc-sidedock {
+  display: flex; flex-direction: column; gap: 12px; min-height: 0;
+  padding: 16px 12px; border-radius: 18px;
+  background: linear-gradient(180deg, rgba(16, 27, 56, 0.92), rgba(9, 16, 36, 0.9));
+  border: 1px solid var(--cc-border-strong);
+  box-shadow: 0 24px 60px rgba(2, 6, 20, 0.55), inset 0 1px 0 rgba(160, 190, 255, 0.08);
+  backdrop-filter: blur(24px) saturate(1.1);
+  overflow: hidden;
+}
+.cc-sidedock__label { font-size: 10px; letter-spacing: 0.24em; color: var(--cc-mute); padding-left: 4px; }
+.cc-sidedock .cc-nav__list { display: flex; flex-direction: column; gap: 3px; overflow-y: auto; min-height: 0; }
+.cc-sidedock .cc-voice { margin-top: auto; padding: 12px; border-radius: 12px; background: var(--cc-panel-2); border: 1px solid var(--cc-border); }
+.cc-sidedock__foot { display: flex; align-items: center; gap: 8px; padding-top: 2px; }
+
+/* ── Centre presence sub-line + focus badge ────────────────────────────────── */
+.cc-presence__sub {
+  display: flex; align-items: center; gap: 14px;
+  margin-top: -4px; font-size: 14px; color: var(--cc-dim);
+}
+.cc-focus-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--cc-online); }
+
+/* ── Right status rail ─────────────────────────────────────────────────────── */
+.cc-rail { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: auto; }
+.cc-rail__clock { text-align: right; padding: 2px 8px 6px; }
+.cc-rail__date { display: block; font-size: 10px; letter-spacing: 0.1em; color: var(--cc-dim); text-transform: uppercase; }
+.cc-rail__time { display: block; font-family: "JetBrains Mono", monospace; font-size: 26px; color: var(--cc-cyan); letter-spacing: 0.1em; text-shadow: 0 0 18px rgba(53, 227, 255, 0.5); }
+
+.cc-card {
+  padding: 14px; border-radius: 14px;
+  background: linear-gradient(180deg, rgba(20, 32, 64, 0.5), rgba(10, 18, 40, 0.46));
+  border: 1px solid var(--cc-border);
+  box-shadow: var(--cc-glow), inset 0 1px 0 rgba(160, 190, 255, 0.05);
+  backdrop-filter: blur(var(--cc-glass-blur));
+}
+.cc-card__title { margin: 0 0 10px; font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--cc-mute); }
+
+.cc-ctxcard { border: 1px solid var(--cc-border); border-radius: 12px; padding: 12px; background: rgba(12, 21, 46, 0.5); }
+.cc-ctxcard__head { display: inline-flex; align-items: center; gap: 8px; color: var(--cc-text); font-size: 13px; }
+.cc-ctxcard__icon { display: inline-flex; color: var(--cc-cyan); }
+.cc-ctxcard__desc { margin: 6px 0 10px; font-size: 12px; color: var(--cc-mute); }
+.cc-ctxcard__bars { display: flex; gap: 5px; }
+.cc-ctxcard__bars span { height: 4px; flex: 1; border-radius: 999px; background: rgba(120, 170, 255, 0.18); }
+.cc-ctxcard__bars span:nth-child(-n+3) { background: linear-gradient(90deg, var(--cc-cyan), var(--cc-violet)); }
+
+.cc-statlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 11px; }
+.cc-statlist__row { display: flex; align-items: center; gap: 10px; font-size: 12px; }
+.cc-statlist__icon { display: inline-flex; color: var(--cc-dim); }
+.cc-statlist__label { flex: 1; color: var(--cc-dim); }
+.cc-statlist__value { display: inline-flex; align-items: center; gap: 6px; color: var(--cc-online); }
+.cc-statlist__value[data-tone="active"] { color: var(--cc-cyan); }
+
+.cc-focus { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.cc-focus__text { display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+.cc-focus__text > b { font-size: 13px; color: var(--cc-text); }
+.cc-focus__text > span { color: var(--cc-mute); }
+.cc-focus__distract { margin-top: 6px; color: var(--cc-mute); }
+.cc-focus__distract b { color: var(--cc-dim); }
+
+.cc-activity { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 11px; }
+.cc-activity__row { display: flex; align-items: center; gap: 9px; font-size: 12px; }
+.cc-activity__label { flex: 1; color: var(--cc-dim); }
+.cc-activity__time { color: var(--cc-mute); font-size: 11px; }
+
+/* ── Bottom bar text stats ─────────────────────────────────────────────────── */
+.cc--full .cc-bottombar__stats { display: inline-flex; align-items: center; gap: 22px; }
+.cc--full .cc-stat__k { display: inline-flex; align-items: center; gap: 6px; font-size: 10px; letter-spacing: 0.08em; color: var(--cc-mute); text-transform: none; }
+
+/* Responsive: fold the rail under the centre on narrow laptops. */
+@media (max-width: 1180px) {
+  .cc--full { grid-template-columns: 220px minmax(0, 1fr); }
+  .cc--full .cc-rail { display: none; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   REFERENCE-EXACT DETAILS — 1:1 pass over the full HUD homepage.
+   ══════════════════════════════════════════════════════════════════════════ */
+/* Brand + profile */
+.cc-brand-text strong { letter-spacing: 0.18em; }
+.cc-emblem { color: var(--cc-violet); }
+.cc-profile__avatar { color: var(--cc-violet); background: radial-gradient(circle, rgba(154, 123, 255, 0.5), transparent 70%); }
+.cc-profile__chev { color: var(--cc-mute); margin-left: 2px; }
+.cc-icon-btn--notify { position: relative; }
+.cc-icon-btn--notify::after {
+  content: ""; position: absolute; top: 6px; right: 6px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: #ff5d7a; box-shadow: 0 0 8px rgba(255, 93, 122, 0.85);
+}
+
+/* Presence name accent + hero underline rule */
+.cc-pline__accent { color: var(--cc-violet); }
+.cc-hero__rule {
+  width: 54px; height: 2px; margin-top: 10px; border-radius: 2px;
+  background: linear-gradient(90deg, var(--cc-cyan), var(--cc-violet));
+  box-shadow: 0 0 12px rgba(53, 227, 255, 0.7);
+}
+
+/* Adaptive Context Surface — meta row (time + priority) + View Details */
+.cc-context__meta { display: flex; align-items: center; gap: 18px; margin-top: 8px; font-size: 11px; }
+.cc-context__time { display: inline-flex; align-items: center; gap: 5px; color: var(--cc-mute); }
+.cc-context__priority { display: inline-flex; align-items: center; gap: 6px; color: var(--cc-warn); }
+.cc-context__action { display: inline-flex; align-items: center; gap: 6px; align-self: center; }
+
+/* Recent-activity violet dot */
+.cc-dot--violet { background: var(--cc-violet); box-shadow: 0 0 8px rgba(154, 123, 255, 0.6); }
+
+/* Focus suggestion sparkline */
+.cc-focus__viz { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.cc-focus__spark { width: 82px; height: 24px; }
+.cc-focus__spark polyline { fill: none; stroke: var(--cc-cyan); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 0 4px rgba(53, 227, 255, 0.6)); }
+
+/* Right-rail clock small "PM" */
+.cc-rail__time small { font-size: 13px; color: var(--cc-cyan); margin-left: 3px; letter-spacing: 0.08em; }
+
+/* ── Orbit — flank the Core (always visible), vertical icon-circle + label ─── */
+.cc--full .cc-corezone { width: min(700px, 100%); min-height: clamp(430px, 60vh, 580px); }
+.cc--full .cc-corezone .cc-hero { width: min(520px, 74%); height: min(300px, 40vh); }
+.cc--full .cc-corezone .cc-orbit { opacity: 1; transform: none; pointer-events: auto; }
+
+.cc--full .cc-orbit__item {
+  flex-flow: column nowrap;
+  align-items: center;
+  gap: 9px;
+  width: 78px;
+  max-width: none;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  transform: translate(-50%, -50%) rotate(var(--a)) translateY(-236px) rotate(calc(-1 * var(--a)));
+}
+.cc--full .cc-orbit__item:hover,
+.cc--full .cc-orbit__item:focus-visible {
+  background: transparent;
+  box-shadow: none;
+  transform: translate(-50%, -50%) rotate(var(--a)) translateY(-236px) rotate(calc(-1 * var(--a)));
+}
+.cc--full .cc-orbit__icon {
+  width: 58px; height: 58px; border-radius: 50%;
+  display: grid; place-items: center;
+  color: var(--cc-cyan);
+  background: radial-gradient(circle at 50% 38%, rgba(22, 34, 68, 0.85), rgba(10, 18, 40, 0.72));
+  border: 1px solid var(--cc-border-strong);
+  box-shadow: 0 0 22px rgba(53, 227, 255, 0.14), inset 0 0 16px rgba(53, 227, 255, 0.06);
+  filter: none;
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+}
+.cc--full .cc-orbit__item:hover .cc-orbit__icon,
+.cc--full .cc-orbit__item:focus-visible .cc-orbit__icon {
+  border-color: var(--cc-cyan);
+  box-shadow: 0 0 30px rgba(53, 227, 255, 0.45), inset 0 0 18px rgba(53, 227, 255, 0.12);
+}
+.cc--full .cc-orbit__label { font-size: 12px; color: var(--cc-dim); }
+.cc--full .cc-orbit__desc { display: none; }
+.cc--full .cc-orbit__path { width: 520px; height: 452px; border-color: rgba(120, 170, 255, 0.12); }
+.cc--full .cc-orbit__path--tilt { width: 540px; height: 360px; border-color: rgba(150, 120, 255, 0.1); transform: translate(-50%, -50%) rotate(-14deg); }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   RESPONSIVE FIT — the full HUD homepage always fits one viewport, no scroll.
+   Fixed pixel sizes become viewport-relative clamps; the Core stays dominant;
+   whitespace is distributed by centering rather than fixed padding. Nothing
+   scrolls, nothing clips. Appended last so it governs the final sizing.
+   ══════════════════════════════════════════════════════════════════════════ */
+.cc--full {
+  gap: clamp(8px, 1vw, 12px);
+  padding: clamp(8px, 1vh, 12px);
+  /* the whole surface fills the viewport; rows never overflow */
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* Chrome: keep bars compact so the middle row gets the room. */
+.cc--full .cc-topbar { padding: clamp(6px, 0.8vh, 10px) 16px; }
+.cc--full .cc-bottombar { padding: clamp(5px, 0.7vh, 9px) 16px; }
+
+/* Centre column: fill the row, centre the flow, never scroll. */
+.cc--full .cc-content {
+  overflow: hidden;
+  justify-content: center;
+  padding-top: 0;
+  gap: clamp(8px, 1.6vh, 24px);
+}
+
+/* Core zone fills remaining centre space; the Orbit radius is viewport-relative
+   so the ring always sits inside the zone (no clipping) and outside the globe. */
+.cc--full .cc-corezone {
+  --orbit-r: clamp(104px, 14vh, 200px);
+  flex: 0 1 auto;
+  width: min(720px, 100%);
+  height: clamp(280px, 42vh, 470px);
+  min-height: 0;
+}
+.cc--full .cc-corezone .cc-hero {
+  width: min(520px, 70%);
+  height: clamp(150px, 24vh, 280px);
+}
+.cc--full .cc-orbit__item,
+.cc--full .cc-orbit__item:hover,
+.cc--full .cc-orbit__item:focus-visible {
+  transform: translate(-50%, -50%) rotate(var(--a)) translateY(calc(-1 * var(--orbit-r))) rotate(calc(-1 * var(--a)));
+}
+.cc--full .cc-orbit__icon {
+  width: clamp(42px, 6vh, 58px);
+  height: clamp(42px, 6vh, 58px);
+}
+.cc--full .cc-orbit__label { font-size: clamp(10px, 1.3vh, 12px); }
+.cc--full .cc-orbit__path { width: calc(var(--orbit-r) * 2.1); height: calc(var(--orbit-r) * 1.9); }
+.cc--full .cc-orbit__path--tilt { width: calc(var(--orbit-r) * 2.3); height: calc(var(--orbit-r) * 1.5); }
+
+/* Core title scales with the zone. */
+.cc-hero__title { font-size: clamp(34px, 5vh, 60px); }
+
+/* Presence flow: proportional gaps + typography, fixed (non-growing) block. */
+.cc--full .cc-presence { flex: 0 0 auto; gap: clamp(8px, 1.4vh, 22px); }
+.cc-pline { font-size: clamp(18px, 2.4vh, 26px); }
+.cc--full .cc-presence__sub { font-size: clamp(12px, 1.5vh, 14px); }
+.cc-composer { padding: clamp(5px, 0.7vh, 7px) 7px clamp(5px, 0.7vh, 7px) clamp(14px, 1.6vw, 22px); }
+.cc-composer__mic { width: clamp(36px, 4.4vh, 44px); height: clamp(36px, 4.4vh, 44px); }
+
+/* Right rail: compact, self-contained, no scroll. */
+.cc--full .cc-rail { overflow: hidden; gap: clamp(6px, 0.9vh, 10px); }
+.cc--full .cc-rail__clock { padding: clamp(2px, 0.4vh, 4px) 8px clamp(3px, 0.6vh, 6px); }
+.cc--full .cc-rail__time { font-size: clamp(20px, 2.6vh, 26px); }
+.cc--full .cc-card { padding: clamp(9px, 1.3vh, 14px); }
+.cc--full .cc-card__title { margin-bottom: clamp(5px, 0.9vh, 10px); }
+.cc--full .cc-statlist { gap: clamp(7px, 1.1vh, 11px); }
+.cc--full .cc-activity { gap: clamp(7px, 1.1vh, 11px); }
+
+/* Left dock: compact, self-contained, no scroll. */
+.cc--full .cc-sidedock { padding: clamp(10px, 1.3vh, 16px) 12px; gap: clamp(8px, 1.1vh, 12px); }
+.cc--full .cc-sidedock .cc-nav__list { gap: clamp(1px, 0.3vh, 3px); overflow: hidden; }
+.cc--full .cc-nav__item { padding: clamp(6px, 0.9vh, 9px) 11px; }
+.cc--full .cc-sidedock .cc-voice { padding: clamp(8px, 1.1vh, 12px); }
+.cc--full .cc-voice__wave { height: clamp(18px, 2.6vh, 30px); margin: clamp(6px, 0.9vh, 10px) 0; }
+.cc--full .cc-sidedock .cc-orb { width: clamp(44px, 6vh, 64px); height: clamp(44px, 6vh, 64px); }
+
+/* On tighter/shorter viewports the rail folds under the centre gracefully. */
+@media (max-width: 1180px) {
+  .cc--full { grid-template-columns: clamp(200px, 20vw, 236px) minmax(0, 1fr); }
+  .cc--full .cc-rail { display: none; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   CINEMATIC v2 — larger dominant Orb, layered mountain environment, global
+   lighting. Visual only; still fits one viewport (Orb sizing is vh-based so the
+   Orbit always sits outside the globe and inside the zone). Appended last.
+   ══════════════════════════════════════════════════════════════════════════ */
+/* Environment layer (behind everything) — compressed landscape photo, darkened
+   for legibility, with a soft core bloom over the centre. */
+.cc-env {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background-image:
+    radial-gradient(56% 46% at 50% 36%, rgba(60, 120, 255, 0.22), transparent 62%),
+    linear-gradient(180deg, rgba(4, 7, 15, 0.62), rgba(4, 7, 15, 0.34) 42%, rgba(2, 4, 10, 0.8)),
+    image-set(
+      url("/backgrounds/dark-theme-night.webp") type("image/webp"),
+      url("/backgrounds/dark-theme-night.jpg") type("image/jpeg")
+    );
+  background-repeat: no-repeat;
+  background-size: cover, cover, cover;
+  background-position: center, center, center;
+}
+.cc-env::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  /* cinematic vignette so edges recede behind the UI */
+  background: radial-gradient(130% 120% at 50% 44%, transparent 52%, rgba(2, 4, 10, 0.6) 100%);
+}
+
+/* Larger, dominant Core. Orbit radius + globe are both vh-scaled with a fixed
+   ratio, so the ring always clears the globe rim and never clips the zone. */
+.cc--full .cc-corezone {
+  --orbit-r: clamp(116px, 17vh, 226px);
+  height: clamp(292px, 46vh, 540px);
+  width: min(780px, 100%);
+}
+.cc--full .cc-corezone .cc-hero {
+  width: min(620px, 86%);
+  height: clamp(170px, 26vh, 320px);
+}
+.cc-hero::before {
+  inset: -34% -26%;
+  background: radial-gradient(
+    closest-side,
+    rgba(53, 227, 255, 0.3),
+    rgba(120, 110, 255, 0.18) 44%,
+    rgba(60, 90, 255, 0.08) 66%,
+    transparent 80%
+  );
+  filter: blur(54px);
+}
+.cc-hero__title { font-size: clamp(34px, 5.4vh, 64px); }
+
+/* Orbit — bigger premium icon circles with stronger edge glow. */
+.cc--full .cc-orbit__icon {
+  width: clamp(46px, 6.4vh, 64px);
+  height: clamp(46px, 6.4vh, 64px);
+  border: 1px solid rgba(120, 190, 255, 0.5);
+  box-shadow: 0 0 26px rgba(53, 227, 255, 0.22), inset 0 0 18px rgba(53, 227, 255, 0.1);
+}
+.cc--full .cc-orbit__icon .cc-icon { width: clamp(18px, 2.4vh, 22px); height: clamp(18px, 2.4vh, 22px); }
+.cc--full .cc-orbit__label { font-size: clamp(11px, 1.4vh, 13px); color: var(--cc-text); }
+.cc--full .cc-orbit__item:hover .cc-orbit__icon,
+.cc--full .cc-orbit__item:focus-visible .cc-orbit__icon {
+  box-shadow: 0 0 34px rgba(53, 227, 255, 0.55), inset 0 0 20px rgba(53, 227, 255, 0.16);
+}
+
+/* Compact presence flow so the bigger Orb still fits at 768px height. */
+.cc--full .cc-content { gap: clamp(6px, 1.2vh, 20px); }
+.cc--full .cc-presence { gap: clamp(6px, 1.1vh, 18px); width: min(660px, 86%); }
+.cc-composer { padding: clamp(5px, 0.7vh, 7px) 7px clamp(5px, 0.7vh, 7px) clamp(14px, 1.6vw, 22px); border-radius: clamp(14px, 1.6vh, 18px); }
+
+/* Sidebar — bright cyan right-edge light strip + integrated reveal arrow. */
+.cc-sidedock { position: relative; }
+.cc-sidedock__edge {
+  position: absolute;
+  right: -1px;
+  top: 8%;
+  bottom: 8%;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, transparent, var(--cc-cyan) 20%, var(--cc-cyan) 80%, transparent);
+  box-shadow: 0 0 16px rgba(53, 227, 255, 0.7), 0 0 34px rgba(53, 227, 255, 0.35);
+  pointer-events: none;
+}
+.cc-sidedock__reveal {
+  position: absolute;
+  right: -13px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 40px;
+  border-radius: 8px;
+  border: 1px solid var(--cc-border-strong);
+  background: linear-gradient(180deg, rgba(20, 32, 64, 0.95), rgba(9, 16, 36, 0.92));
+  color: var(--cc-cyan);
+  cursor: pointer;
+  box-shadow: 0 0 18px rgba(53, 227, 255, 0.4);
+  backdrop-filter: blur(10px);
+}
+.cc-sidedock__reveal:hover { box-shadow: 0 0 26px rgba(53, 227, 255, 0.6); }
+
+/* Global lighting — the Core casts a soft glow onto the presence flow. */
+.cc--full .cc-content::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: min(760px, 80%);
+  height: 60%;
+  transform: translate(-50%, -50%);
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(ellipse at 50% 40%, rgba(60, 120, 255, 0.1), transparent 68%);
+  filter: blur(30px);
+}

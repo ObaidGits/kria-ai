@@ -252,6 +252,27 @@ describe("initApprovalResolver (staged decision → runtime routing)", () => {
     expect(invokeMock).toHaveBeenCalledWith("approve_action", { requestId: "req-7" });
   });
 
+  it("keep-paused on a routed request stages the decision but calls NO runtime command (task 12.4)", async () => {
+    initApprovalResolver();
+    approvalStore.addFromEnvelope(envelope({ id: "req-kp", routing: { requestId: "req-kp" } }));
+    invokeMock.mockClear();
+
+    // Keep-paused through the Center path: store stages the typed decision and
+    // the resolver must not send a resolution command to the runtime.
+    approvalStore.keepPaused("req-kp");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(approvalStore.get("req-kp")?.status).toBe("kept-paused");
+    expect(invokeMock).not.toHaveBeenCalledWith("approve_action", expect.anything());
+    expect(invokeMock).not.toHaveBeenCalledWith("deny_action", expect.anything());
+    // Only presentation state is synchronized; no execution shortcut exists.
+    expect(invokeMock).toHaveBeenCalledWith("sync_approval_presentation", {
+      id: "req-kp",
+      status: "kept-paused",
+    });
+  });
+
   it("does not route a request without runtime routing; only syncs presentation", async () => {
     initApprovalResolver();
     approvalStore.addRequest({

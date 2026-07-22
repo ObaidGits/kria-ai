@@ -123,6 +123,9 @@ struct ListKnowledgeBase {
 #[async_trait]
 impl ToolHandler for ListKnowledgeBase {
     async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+        if let Err(error) = self.memory.ensure_enabled() {
+            return ToolResult::err(error.to_string());
+        }
         match self.memory.library().list_items() {
             Ok(items) => {
                 let docs: Vec<serde_json::Value> = items
@@ -153,6 +156,9 @@ struct DeleteKnowledgeItem {
 #[async_trait]
 impl ToolHandler for DeleteKnowledgeItem {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        if let Err(error) = self.memory.ensure_enabled() {
+            return ToolResult::err(error.to_string());
+        }
         let doc_id = params["doc_id"].as_str().unwrap_or("");
         if doc_id.is_empty() {
             return ToolResult::err("doc_id is required");

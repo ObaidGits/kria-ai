@@ -301,6 +301,18 @@ pub async fn set_gui_automation_enabled(
         );
     };
 
+    state
+        .config_service
+        .patch(
+            "gui_cognition",
+            "enabled",
+            serde_json::json!(enabled),
+            kria_core::config::ChangeSource::Ui,
+            None,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+
     orch.set_automation_enabled(enabled)
         .await
         .map_err(|e| format!("set_automation_enabled failed: {e}"))?;

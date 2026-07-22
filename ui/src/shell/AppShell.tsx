@@ -27,6 +27,7 @@ import {
   settingsStore,
   memoryStore,
   automationStore,
+  capabilityStore,
   provisioningStore,
   eventBus,
   initCoreTray,
@@ -48,17 +49,30 @@ import { InspectorHost } from "./InspectorHost";
 import { StatusLine } from "./StatusLine";
 import { ModalHost } from "./ModalHost";
 import { CommandPalette, initPaletteDefaults } from "../palette";
-import { ApprovalCenter } from "./approvals";
+import {
+  ApprovalCenter,
+  captureApprovalPlace,
+  restoreApprovalPlace,
+  type ApprovalPlaceSnapshot,
+} from "./approvals";
 import { NotificationCenter, NotificationAnnouncer } from "./notifications";
 import { VoiceSurface } from "./voice";
 import { approvalStore } from "../stores";
 import { capturePlace, restorePlace, type PlaceSnapshot } from "./placePreservation";
+import {
+  beginConversationPlace,
+  endConversationPlace,
+} from "./spaces/converse/conversationPlace";
+import { initOverlayInertness, registerOverlaySurface } from "./overlayLayers";
 import { initSummon } from "../summon";
 import { spaceComposition } from "./windowModePolicy";
 import { initWindowPresentation, disposeWindowPresentation } from "../windowing/detachableSurfaces";
 import { initWindowModeManager, disposeWindowModeManager } from "../windowing/windowModeManager";
 import { CompanionFallbackHost } from "../windowing/MiniCompanions";
+import { CompanionEmber } from "./spaces/home/CompanionEmber";
 import { SetupExperience } from "./setup/SetupExperience";
+import { isFeatureEnabled } from "../featureFlags";
+import SurfaceHost from "../app/SurfaceHost";
 import "./AppShell.css";
 
 export interface AppShellProps {
@@ -71,6 +85,15 @@ export interface AppShellProps {
 }
 
 export function AppShell(props: AppShellProps) {
+  // Command Center homepage (frontend-only, static demo) — full-screen HUD
+  // surface that replaces the standard shell when the flag is ON (default).
+  // Early return before any shell effects register so the demo surface is
+  // fully self-contained. Flip `home.command-center` OFF (localStorage/env) to
+  // restore the normal presence shell.
+  if (isFeatureEnabled("home.command-center")) {
+    return <SurfaceHost />;
+  }
+
   const [provisioningResolved, setProvisioningResolved] = createSignal(false);
 
   // Restore the last active Converse thread from the persisted session BEFORE
@@ -99,14 +122,25 @@ export function AppShell(props: AppShellProps) {
   // after the curated shell settles. Domain state is never copied/reset: route,
   // active thread, Inspector selection, and per-thread draft remain authoritative
   // in their existing stores (Req 15.3).
+  //
+  // The virtualized conversation viewport is DELEGATED to its single anchor
+  // owner (design §21 IU-10 / UIE-M-005, task 9.3): `capturePlace` excludes it,
+  // and the conversation coordinator (`beginConversationPlace`/
+  // `endConversationPlace`) captures its message anchor + offset once and
+  // restores it exactly once — even if this mode change coincides with a pending
+  // approval (P-B), which delegates to the SAME coordinator below.
   let modePlaceSnapshot: PlaceSnapshot | null = null;
   const stopCapturingModePlace = eventBus.on("shell:mode-changing", () => {
     modePlaceSnapshot = capturePlace();
+    beginConversationPlace();
   }, "none");
   const stopRestoringModePlace = eventBus.on("shell:mode-changed", () => {
     const snap = modePlaceSnapshot;
     modePlaceSnapshot = null;
-    queueMicrotask(() => restorePlace(snap));
+    queueMicrotask(() => {
+      restorePlace(snap);
+      endConversationPlace();
+    });
   }, "none");
   onCleanup(() => {
     stopCapturingModePlace();
@@ -140,6 +174,19 @@ export function AppShell(props: AppShellProps) {
   // is a backend enhancement; this in-app listener never depends on OS support.
   let disposePalette: (() => void) | undefined;
   let disposeSummonWiring: (() => void) | undefined;
+  let disposeRuntimeStatusStream: (() => void) | undefined;
+  // Overlay inertness controller (design §20.3): marks lower surfaces inert
+  // while a blocking layer (pending approval, its confirm, or a modal) is up.
+  const disposeOverlayInertness = initOverlayInertness();
+  onCleanup(disposeOverlayInertness);
+  // The shell background/regions are the lowest layer; register so they are
+  // inerted behind any blocking overlay (portaled overlays are unaffected).
+  let unregisterShell: (() => void) | undefined;
+  const bindShellRoot = (el: HTMLDivElement) => {
+    unregisterShell?.();
+    unregisterShell = registerOverlaySurface(el, "shell");
+  };
+  onCleanup(() => unregisterShell?.());
   onMount(() => {
     const installBrowserHarness =
       import.meta.env.DEV &&
@@ -151,6 +198,7 @@ export function AppShell(props: AppShellProps) {
       // stale local storage or legacy presentation state.
       await provisioningStore.loadState();
       setProvisioningResolved(true);
+      void capabilityStore.loadLlmRuntimeStatus();
       void converseStore.initialize();
       void settingsStore.initialize();
       const memoryInitialization = memoryStore.initialize();
@@ -168,6 +216,8 @@ export function AppShell(props: AppShellProps) {
     });
     void initWindowPresentation();
     initWindowModeManager();
+    // Live app/LLM lifecycle → footer (starting/initializing/ready/failed).
+    disposeRuntimeStatusStream = capabilityStore.initRuntimeStatusStream();
     coreStore.initCoreStateMachine();
     // Reflect the real backend voice pipeline (phase + barge-in/stop-phrase)
     // into voiceStore so the compact surface + Core stay truthful (Req 12.5).
@@ -179,6 +229,7 @@ export function AppShell(props: AppShellProps) {
   onCleanup(() => {
     disposeSummonWiring?.();
     disposePalette?.();
+    disposeRuntimeStatusStream?.();
     disposeCoreTray();
     disposeWindowModeManager();
     disposeWindowPresentation();
@@ -191,23 +242,35 @@ export function AppShell(props: AppShellProps) {
     tauriBridge.dispose();
   });
 
-  // Place preservation across the blocking interrupt (Req 13.4). The Approval
-  // Center is the only surface that seizes focus; when a decision becomes
-  // pending we snapshot the user's transient place (focused control, caret,
-  // scroll), and when the queue clears we restore it — so approving/denying
-  // returns focus exactly where it was. Drafts/session already persist content;
-  // this covers the in-flight place they don't.
-  let placeSnapshot: PlaceSnapshot | null = null;
+  // Approval place snapshot across the blocking interrupt (design §20.3
+  // Focus_Return_Owner, §20.4 focus fallback; Req 11.5/13.4). The Approval
+  // Center is the sole asynchronous Blocking_Interrupt and the only surface that
+  // seizes focus. AppShell owns the place snapshot "until the queue clears":
+  // when a decision becomes pending we capture the user's transient place
+  // (focused control + owning region, caret, scroll); when the queue fully
+  // clears we return focus following the §20.4 ladder (original invoker → owning
+  // region heading/container → #space-root → stable shell control), never onto
+  // an Approve/destructive control, and without resetting draft/route/selection/
+  // work state. Drafts/session already persist content; this covers the
+  // in-flight place they don't.
+  let placeSnapshot: ApprovalPlaceSnapshot | null = null;
   let wasPending = false;
   createEffect(() => {
     const pending = approvalStore.hasPending();
     if (pending && !wasPending) {
-      placeSnapshot = capturePlace();
+      placeSnapshot = captureApprovalPlace();
+      // Delegate the conversation viewport to its single anchor owner (§21
+      // IU-10): the coordinator dedupes with a coinciding mode change so the
+      // stream is restored exactly once, never in raw px by this path.
+      beginConversationPlace();
     } else if (!pending && wasPending) {
       const snap = placeSnapshot;
       placeSnapshot = null;
       // Restore after the overlay has torn down so focus lands on real content.
-      queueMicrotask(() => restorePlace(snap));
+      queueMicrotask(() => {
+        restoreApprovalPlace(snap);
+        endConversationPlace();
+      });
     }
     wasPending = pending;
   });
@@ -223,13 +286,28 @@ export function AppShell(props: AppShellProps) {
     <Show
       when={provisioningResolved()}
       fallback={
-        <main class="kria-shell-boot" role="status" aria-live="polite">
-          <span>Loading provisioning state…</span>
-        </main>
+        // The footer is ALWAYS present (Req: persistent status) — even before
+        // provisioning resolves — so the app/LLM lifecycle status is visible
+        // from the first paint.
+        <div class="kria-boot-shell">
+          <main class="kria-shell-boot" role="status" aria-live="polite">
+            <span>Loading provisioning state…</span>
+          </main>
+          <StatusLine />
+        </div>
       }
     >
-      <Show when={provisioningStore.isComplete()} fallback={<SetupExperience />}>
+      <Show
+        when={provisioningStore.isComplete()}
+        fallback={
+          <div class="kria-boot-shell">
+            <SetupExperience />
+            <StatusLine />
+          </div>
+        }
+      >
         <div
+      ref={bindShellRoot}
       class="kria-shell"
       data-window-mode={shellStore.windowMode()}
       data-space-composition={spaceComposition(shellStore.activeSpace(), shellStore.windowMode())}
@@ -237,7 +315,15 @@ export function AppShell(props: AppShellProps) {
       <a class="kria-skip-link" href="#space-root">Skip to workspace</a>
       <PresenceBar onOpenApprovals={openApprovals} onOpenNotifications={openNotifications} />
       <div class="kria-shell__body">
-        <Dock onSelect={(space) => shellStore.setActiveSpace(space)} />
+        {/* Router is the sole authority for the rendered Space (Req 7.10 /
+            design §9, §20.1). The Dock navigates via navigate(); the effect
+            above mirrors currentRoute().space into shellStore.activeSpace.
+
+            One unified, always-present sidebar across EVERY Space (matching the
+            homepage sidebar). The former hover-reveal HiddenDock on the Converse
+            home is retired so navigation is identical everywhere — no per-Space
+            reveal behaviour. Same canonical 7-Space Dock; routing unchanged. */}
+        <Dock />
         <SpaceRouter />
         <InspectorHost />
       </div>
@@ -259,6 +345,11 @@ export function AppShell(props: AppShellProps) {
       {/* Tauri multi-window is an enhancement. When unavailable, one bounded
           companion is hosted in-shell with identical dispatch-only controls. */}
       <CompanionFallbackHost />
+      {/* Companion Mode ember (task 8.3, Req 15): the floating cross-application
+          presence. Self-gates on Companion View Mode + the on-by-default opt-out,
+          mirrors the Core state read-only, and degrades to an in-app ember where
+          the compositor restricts always-on-top. */}
+      <CompanionEmber />
         </div>
       </Show>
     </Show>

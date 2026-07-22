@@ -19,8 +19,9 @@
 
 .kria-stream__sizer {
   position: relative;
-  width: min(720px, 100%);
-  margin: 0 auto;
+  width: calc(100% - var(--kria-conversation-inline-gutter) - var(--kria-conversation-inline-gutter));
+  max-width: var(--kria-conversation-reading-measure);
+  margin-inline: auto;
 }
 
 .kria-stream__row {

@@ -9,10 +9,20 @@
 import { createSignal, batch } from "solid-js";
 import { eventBus } from "./eventBus";
 import type { Space } from "../shell/router";
+import type { PaletteMode } from "../palette/types";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
-export type WindowMode = "compact" | "standard" | "immersive";
+/**
+ * Canonical View Mode axis (design.md §8; Requirements 13.1, 13.6).
+ * Exactly four modes — the prior Compact/Standard/Immersive naming is
+ * reconciled here: **Mini** replaces the former "compact" compact-companion
+ * window, and **Companion** (the detached cross-application ember, built in
+ * task 8.3) joins the set. `windowModeManager` owns the in-window geometry for
+ * Immersive/Standard/Mini; Companion's ember/window behaviour is owned by the
+ * companion subsystem (task 8.3) and its per-mode composition by task 8.7.
+ */
+export type WindowMode = "immersive" | "standard" | "mini" | "companion";
 export type Theme = "dark" | "light";
 export type Density = "calm" | "focused" | "dense";
 
@@ -20,6 +30,26 @@ export interface InspectorTarget {
   type: string;
   id: string;
   data?: unknown;
+}
+
+/**
+ * Focus-return ownership for an Inspector open (design §20.3 Focus_Return_Owner
+ * = "Invoking control, or nearest stable owning region if removed"; task 9.3).
+ * User-click callers pass an explicit `opener` (the invoking control, e.g. the
+ * card/row button); programmatic/route/reactive callers (deep-links,
+ * revealMemory, NodeBuilder, constellation) pass a stable `region`/
+ * `regionSelector` because `document.activeElement` is not the semantic control
+ * — so the §20.4 fallback resolves to a stable region rather than a stray
+ * element. Held transiently (never persisted, unlike `inspectorTarget`) and
+ * consumed by InspectorHost on the INITIAL open.
+ */
+export interface OpenInspectorOptions {
+  /** Explicit invoking control (user-click callers). */
+  opener?: HTMLElement | null;
+  /** Stable owning region element (programmatic callers). */
+  region?: HTMLElement | null;
+  /** Or a selector resolved to the owning region at capture time. */
+  regionSelector?: string;
 }
 
 // ─── Persistence Keys ──────────────────────────────────────────────────────────
@@ -63,7 +93,7 @@ function resolveDensity(): Density {
 
 function resolveWindowMode(): WindowMode {
   const saved = readStorage(STORAGE_KEYS.windowMode);
-  if (saved === "compact" || saved === "standard" || saved === "immersive") return saved;
+  if (saved === "mini" || saved === "standard" || saved === "immersive" || saved === "companion") return saved;
   return "standard";
 }
 
@@ -72,6 +102,9 @@ function resolveWindowMode(): WindowMode {
 const [activeSpace, setActiveSpaceSignal] = createSignal<Space>("converse");
 const [windowMode, setWindowModeSignal] = createSignal<WindowMode>(resolveWindowMode());
 const [paletteOpen, setPaletteOpenSignal] = createSignal(false);
+// Initial mode the palette should present on its next open. Defaults to "go";
+// the proven Ctrl+Shift+P chord opens it directly in "do" (design.md §20.2).
+const [paletteMode, setPaletteModeSignal] = createSignal<PaletteMode>("go");
 const [approvalsOpen, setApprovalsOpenSignal] = createSignal(false);
 const [notificationsOpen, setNotificationsOpenSignal] = createSignal(false);
 const [inspectorTarget, setInspectorTargetSignal] = createSignal<InspectorTarget | null>(null);
@@ -100,8 +133,17 @@ function setWindowMode(mode: WindowMode): void {
   eventBus.emit("shell:mode-changed", { mode, previous });
 }
 
-function setPaletteOpen(open: boolean): void {
-  setPaletteOpenSignal(open);
+/**
+ * Open/close the Command Palette. When opening, `mode` selects the initial
+ * palette mode (default "go"); this is how the proven Ctrl+Shift+P chord opens
+ * the palette directly in "do" mode via the existing Do-mode path (§20.2).
+ * Closing leaves the mode untouched (the palette resets it on next open).
+ */
+function setPaletteOpen(open: boolean, mode: PaletteMode = "go"): void {
+  batch(() => {
+    if (open) setPaletteModeSignal(mode);
+    setPaletteOpenSignal(open);
+  });
   eventBus.emit("shell:palette-toggled", { open });
 }
 
@@ -138,12 +180,40 @@ function setInspectorTarget(target: InspectorTarget | null): void {
 }
 
 /**
+ * Transient Focus_Return_Owner descriptor for the NEXT Inspector open. Set by
+ * `openInspector(…, opts)` and consumed once by InspectorHost when it captures
+ * the owner on the initial open. Not a signal / not persisted — it only bridges
+ * the caller's opts to the host's capture within the same tick (§20.3).
+ */
+let pendingInspectorOpener: OpenInspectorOptions | null = null;
+
+/**
  * Open the single shared Inspector on a typed target (Req 1.6 / 5.2 / 7.2).
  * Convenience over `setInspectorTarget`. Because there is only one inspector
  * signal, opening a new target REPLACES the current one (never stacks).
+ *
+ * `opts` supplies the Focus_Return_Owner (§20.3): an explicit `opener` for
+ * user-click callers, or a stable `region`/`regionSelector` for programmatic
+ * opens where `document.activeElement` is not the semantic invoking control.
  */
-function openInspector(type: string, id: string, data?: unknown): void {
+function openInspector(
+  type: string,
+  id: string,
+  data?: unknown,
+  opts?: OpenInspectorOptions,
+): void {
+  pendingInspectorOpener = opts ?? null;
   setInspectorTargetSignal({ type, id, data });
+}
+
+/**
+ * Consume (and clear) the pending Focus_Return_Owner descriptor. InspectorHost
+ * calls this on every target change; it USES the value only on an initial open.
+ */
+function consumeInspectorOpener(): OpenInspectorOptions | null {
+  const desc = pendingInspectorOpener;
+  pendingInspectorOpener = null;
+  return desc;
 }
 
 /** Close the shared Inspector (clears the target). */
@@ -177,6 +247,7 @@ export const shellStore = {
   activeSpace,
   windowMode,
   paletteOpen,
+  paletteMode,
   approvalsOpen,
   notificationsOpen,
   inspectorTarget,
@@ -193,6 +264,7 @@ export const shellStore = {
   toggleNotifications,
   setInspectorTarget,
   openInspector,
+  consumeInspectorOpener,
   closeInspector,
   setTheme,
   toggleTheme,

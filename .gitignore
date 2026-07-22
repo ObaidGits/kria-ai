@@ -96,10 +96,7 @@ test.png
 /kria_*.md
 /kria_*.txt
 
-# ── Graphify artifacts (generated) ───────────────────────────────
-/.graphify-cache/
-/.graphify-tmp/
-/graphify-out/
+
 
 # ── Rendered diagram artifacts (generated) ───────────────────────
 /diagrams/png/

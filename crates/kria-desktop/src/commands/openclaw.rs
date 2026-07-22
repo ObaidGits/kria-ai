@@ -1043,7 +1043,8 @@ pub async fn openclaw_substrate_status(
         });
     }
 
-    match &app.container_pool {
+    let pool = app.container_pool.read().await.clone();
+    match pool {
         Some(pool) => {
             let active = pool.active_count().await as u32;
             let warm = pool.warm_count_total().await as u32;
@@ -1075,7 +1076,7 @@ pub async fn openclaw_substrate_status(
 #[command]
 pub async fn openclaw_substrate_restart(state: State<'_, AppStateCell>) -> Result<(), String> {
     let app = state.get().ok_or("runtime not ready")?;
-    if let Some(pool) = &app.container_pool {
+    if let Some(pool) = app.container_pool.read().await.clone() {
         // Drain + re-warm without tearing down background health/recycle tasks.
         pool.rewarm().await.map_err(|e| e.to_string())?;
     }
@@ -1233,13 +1234,12 @@ pub async fn openclaw_get_settings(
         registry_index_url: cfg.registry.index_url,
         community_allows_network: cfg.trust.community_allows_network,
         verified_skips_hitl: cfg.trust.verified_skips_hitl,
-        runtime_active: app.container_pool.is_some(),
+        runtime_active: app.container_pool.read().await.is_some(),
     })
 }
 
-/// Persist OpenClaw settings from the Settings UI. Returns `true` when a change
-/// requires a KRIA restart to take effect (enabling/disabling the substrate or
-/// changing the container image — the container pool is wired at boot).
+/// Persist OpenClaw settings and reconcile the live substrate. The return value
+/// remains for frontend compatibility and is always `false`: restart is no longer required.
 #[command]
 pub async fn openclaw_update_settings(
     settings: OpenClawSettingsPayload,
@@ -1247,11 +1247,8 @@ pub async fn openclaw_update_settings(
 ) -> Result<bool, String> {
     let app = state.get().ok_or("runtime not ready")?;
 
-    // Clone the whole live config, replace ONLY the OpenClaw section, then persist
-    // and swap in-memory. This never disturbs live provider/model/runtime fields.
+    // Clone the whole live config and replace only the OpenClaw section.
     let mut next = app.config.read().await.clone();
-    let was_enabled = next.openclaw.enabled;
-    let was_image = next.openclaw.image.clone();
 
     next.openclaw.enabled = settings.enabled;
     next.openclaw.image = settings.image;
@@ -1273,18 +1270,16 @@ pub async fn openclaw_update_settings(
     // on every real execution — hot, no restart required (R14.3).
     kria_core::openclaw::trust_runtime::set_live_trust_config(next.openclaw.trust.clone());
 
-    next.save().map_err(|e| e.to_string())?;
-
-    let restart_required = (settings.enabled != was_enabled) || (was_image != next.openclaw.image);
-
-    *app.config.write().await = next;
+    app.config_service
+        .replace_all(next, kria_core::config::ChangeSource::Ui)
+        .await
+        .map_err(|error| error.to_string())?;
 
     tracing::info!(
         enabled = settings.enabled,
-        restart_required,
-        "[OpenClaw] settings updated from UI"
+        "[OpenClaw] settings updated and live reconciliation scheduled"
     );
-    Ok(restart_required)
+    Ok(false)
 }
 
 // ─── Phase D: capability recommendations (CIL Recommender, pure reads) ──────────

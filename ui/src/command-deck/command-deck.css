@@ -1,0 +1,110 @@
+/**
+ * Command Deck — Mission Control styling (Phase 7 · unified Phase 8).
+ *
+ * Homepage = presence; this = operations. A context-aware Mission Header sits
+ * over a designed operational flow (Current Activity → Running Operations →
+ * Mission Status → Upcoming) laid out with grid areas, not an equal-weight card
+ * grid. Colours, radii, glass, borders and dots all come from the shared HUD
+ * tokens (`--cc-*`, defined on :root in command-center.css and loaded globally),
+ * so the deck is visually identical to the homepage. Panel internals reuse the
+ * shared `.cc-*` panel chrome. Lives outside token-lint roots.
+ */
+.cd {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px;
+  box-sizing: border-box;
+  color: var(--cc-text);
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  background:
+    radial-gradient(1100px 620px at 50% -10%, rgba(60, 90, 180, 0.14), transparent 60%),
+    linear-gradient(180deg, var(--cc-bg-2), var(--cc-bg));
+}
+.cd * { box-sizing: border-box; }
+
+/* Unified focus ring across the deck (accessibility parity with the homepage). */
+.cd button:focus-visible,
+.cd [tabindex]:focus-visible {
+  outline: 2px solid var(--cc-cyan);
+  outline-offset: 2px;
+  border-radius: var(--cc-radius);
+}
+
+/* ── Top bar ── */
+.cd__bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 16px; border-radius: var(--cc-radius);
+  background: var(--cc-panel); border: 1px solid var(--cc-border);
+  backdrop-filter: blur(10px);
+}
+.cd__bar-lead { display: inline-flex; align-items: center; gap: 12px; }
+.cd__title { margin: 0; font-family: "Space Grotesk", sans-serif; font-size: 15px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--cc-cyan); }
+.cd__context { padding: 4px 12px; border-radius: 999px; font-size: 11px; letter-spacing: 0.12em; color: var(--cc-dim); background: var(--cc-panel-2); border: 1px solid var(--cc-border); }
+.cd__bar-actions { display: inline-flex; align-items: center; gap: 8px; }
+.cd__exit { padding: 8px 14px; border-radius: 8px; background: var(--cc-panel-2); border: 1px solid var(--cc-border); color: var(--cc-dim); font: inherit; font-size: 12px; cursor: pointer; transition: color 160ms ease, border-color 160ms ease; }
+.cd__exit:hover { color: var(--cc-cyan); border-color: var(--cc-border-strong); }
+
+/* ── Mission Header ── */
+.cd-mission {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  grid-template-areas: "lead stats" "actions actions";
+  gap: 14px 20px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(20, 32, 64, 0.6), var(--cc-panel));
+  border: 1px solid var(--cc-border-strong);
+  box-shadow: var(--cc-glow);
+}
+.cd-mission__lead { grid-area: lead; display: flex; flex-direction: column; gap: 8px; }
+.cd-mission__status { display: inline-flex; align-items: center; gap: 8px; font-size: 11px; letter-spacing: 0.16em; color: var(--cc-dim); }
+.cd-mission__status b { color: var(--cc-online); letter-spacing: 0.14em; }
+.cd-mission__objective { margin: 0; font-family: "Space Grotesk", sans-serif; font-size: 22px; line-height: 1.2; color: var(--cc-text); }
+
+.cd-mission__stats { grid-area: stats; display: flex; align-items: flex-start; justify-content: flex-end; gap: 26px; }
+.cd-mission__stat { display: flex; flex-direction: column; gap: 3px; }
+.cd-mission__stat-k { font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--cc-mute); }
+.cd-mission__stat b { font-size: 15px; color: var(--cc-text); font-weight: 600; }
+.cd-mission__health { display: inline-flex; align-items: center; gap: 7px; color: var(--cc-online); }
+
+.cd-mission__actions { grid-area: actions; display: flex; flex-wrap: wrap; gap: 8px; padding-top: 4px; border-top: 1px solid var(--cc-border); }
+.cd-op {
+  display: inline-flex; align-items: center; gap: 9px;
+  padding: 8px 13px; border-radius: 10px;
+  background: var(--cc-panel-2); border: 1px solid var(--cc-border);
+  color: var(--cc-text); font: inherit; font-size: 12px; cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+.cd-op:hover { border-color: var(--cc-border-strong); background: rgba(20, 32, 64, 0.7); }
+.cd-op__icon { display: inline-flex; color: var(--cc-cyan); }
+.cd-op__status { display: inline-flex; align-items: center; gap: 5px; padding-left: 9px; border-left: 1px solid var(--cc-border); }
+.cd-op__status-text { font-size: 10px; letter-spacing: 0.06em; color: var(--cc-dim); }
+.cd-op[data-status="attention"] .cd-op__status-text { color: var(--cc-warn); }
+
+/* ── Operational zones ── */
+.cd__zones {
+  min-height: 0; overflow: auto;
+  display: grid; gap: 12px;
+  grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+  grid-template-areas:
+    "activity status"
+    "operations upcoming";
+  align-content: start;
+}
+.cd__slot { min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+.cd__zone-cap { font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--cc-mute); padding-left: 2px; }
+.cd__empty {
+  grid-area: activity; display: grid; place-items: center;
+  color: var(--cc-mute); font-size: 13px; letter-spacing: 0.04em;
+  border: 1px dashed var(--cc-border); border-radius: var(--cc-radius);
+}
+
+@media (max-width: 940px) {
+  .cd-mission { grid-template-columns: 1fr; grid-template-areas: "lead" "stats" "actions"; }
+  .cd-mission__stats { justify-content: flex-start; gap: 20px; }
+  .cd__zones { grid-template-columns: minmax(0, 1fr); grid-template-areas: "activity" "operations" "status" "upcoming"; }
+}

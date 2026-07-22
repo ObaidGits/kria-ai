@@ -27,11 +27,12 @@
  *
  * Requirements: 11.1, 11.2, 11.3, 11.5, 17.6
  */
-import { For, Show, createEffect, createMemo } from "solid-js";
+import { For, Show, createEffect, createMemo, onCleanup } from "solid-js";
 import { Portal } from "solid-js/web";
 import { Icon } from "../../components/Icon";
 import { IconButton, EmptyState } from "../../kit";
 import { approvalStore, shellStore } from "../../stores";
+import { registerOverlaySurface } from "../overlayLayers";
 import { ApprovalCard } from "./ApprovalCard";
 import { openDetachedSurface, windowPresentation } from "../../windowing/detachableSurfaces";
 import "./ApprovalCenter.css";
@@ -41,6 +42,18 @@ const FOCUSABLE =
 
 export function ApprovalCenter() {
   let panelRef: HTMLDivElement | undefined;
+
+  // The pending Approval Center is the blocking layer above palette/notif/voice
+  // /inspector; register it so its nested confirmation ("approval-confirm")
+  // inerts it while confirming, but it is never inerted by lower surfaces
+  // (§20.3, Req 11.9/11.13).
+  let unregisterSurface: (() => void) | undefined;
+  const bindPanel = (el: HTMLDivElement) => {
+    panelRef = el;
+    unregisterSurface?.();
+    unregisterSurface = registerOverlaySurface(el, "approval");
+  };
+  onCleanup(() => unregisterSurface?.());
 
   const open = () => shellStore.approvalsOpen();
   const pending = createMemo(() =>
@@ -111,7 +124,7 @@ export function ApprovalCenter() {
         />
         <div class="kria-approvals__positioner">
           <div
-            ref={panelRef}
+            ref={bindPanel}
             class="kria-approvals"
             role="dialog"
             aria-modal="true"

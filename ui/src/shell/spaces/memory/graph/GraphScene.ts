@@ -1,8 +1,8 @@
 /**
- * GraphScene — the Three.js WebGL renderer for the Knowledge Graph lens
- * (task 6.4, Req 5.4 / 16.3). BROWSER-ONLY and isolated: it is constructed only
- * after the capability gate enables 3D (passing §11.3 G2 probe), so WebGL is
- * known-present. It is never imported by the pure logic modules and never runs
+ * GraphScene — dormant Three.js renderer candidate for MGR-030 Phase 7.
+ * BROWSER-ONLY and isolated. No shipped Memory Graph route imports it;
+ * `GraphCanvas3D` may construct it only in a future gated integration. It is
+ * never imported by pure logic modules and never runs
  * under jsdom (WebGL is unavailable there — the surrounding logic is what the
  * tests cover).
  *
@@ -142,13 +142,20 @@ export class GraphScene {
     this.camera = new PerspectiveCamera(55, w / h, 0.1, 2000);
     this.updateCamera();
 
-    // Single soft key light + ambient, matte materials (§5.4). White light is
-    // constructed numerically (no raw color literal → token-lint clean).
+    // Sci-fi lighting: a soft white key + cyan and violet rim fills (resolved
+    // from theme tokens) give the nodes a holographic edge glow without washing
+    // out their community-diffuse identity. White is numeric (token-lint clean).
     const white = new Color(1, 1, 1);
-    const key = new DirectionalLight(white, 1.1);
+    const key = new DirectionalLight(white, 1.0);
     key.position.set(1, 1.4, 1.2);
     this.scene.add(key);
-    this.scene.add(new AmbientLight(white, 0.55));
+    const cyanFill = new DirectionalLight(tokenColor(this.themeRoot, SELECTION_COLOR_TOKEN), 0.5);
+    cyanFill.position.set(-1.3, 0.4, 0.7);
+    this.scene.add(cyanFill);
+    const violetFill = new DirectionalLight(tokenColor(this.themeRoot, "--color-accent-secondary"), 0.42);
+    violetFill.position.set(0.6, -1.1, -0.9);
+    this.scene.add(violetFill);
+    this.scene.add(new AmbientLight(white, 0.5));
 
     this.attachPointer();
   }
@@ -182,8 +189,15 @@ export class GraphScene {
     this.idToIndex = new Map(nodes.map((n, i) => [n.id, i]));
     this.maxCent = Math.max(1, maxCentrality(nodes));
 
-    const geo = new SphereGeometry(1, 16, 12);
-    const mat = new MeshStandardMaterial({ roughness: 0.85, metalness: 0.0 });
+    const geo = new SphereGeometry(1, 24, 18);
+    // A faint cyan self-emission makes every node read as a lit "energy" body
+    // (holographic feel) while the per-instance diffuse keeps community colour.
+    const mat = new MeshStandardMaterial({
+      roughness: 0.55,
+      metalness: 0.0,
+      emissive: tokenColor(this.themeRoot, SELECTION_COLOR_TOKEN),
+      emissiveIntensity: 0.12,
+    });
     const mesh = new InstancedMesh(geo, mat, Math.max(1, nodes.length));
     mesh.instanceMatrix.setUsage(DynamicDrawUsage);
     const matrix = new Matrix4();
@@ -214,7 +228,7 @@ export class GraphScene {
     const material = new LineBasicMaterial({
       color,
       transparent,
-      opacity: transparent ? 0.5 : 0.8,
+      opacity: transparent ? 0.55 : 0.9,
     });
     const seg = new LineSegments(geometry, material);
     seg.frustumCulled = true;

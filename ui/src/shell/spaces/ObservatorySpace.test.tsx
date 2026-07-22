@@ -88,7 +88,9 @@ describe("ObservatorySpace — task 10.2, Requirements 9.1/9.3/9.4", () => {
     observatoryStore.setJobs([{ id: "j1", name: "Cognition pass", status: "running",
       progress: 25, startedAt: 1, cancelKind: "executive" }]);
     render(() => <ObservatorySpace />);
-    expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
+    // Full accessible scope name (UIE-M-015): visible "Cancel", accessible name
+    // states the exact job it cancels.
+    expect(screen.getByRole("button", { name: "Cancel Cognition pass" })).toBeEnabled();
   });
 
   it("revives live executive jobs and cognition in the Jobs segment", () => {

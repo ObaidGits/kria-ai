@@ -23,7 +23,7 @@ export const IconTrigger: Story = {
     <Menu
       label="Message actions"
       triggerLabel="Message actions"
-      triggerIcon="more-horizontal"
+      triggerIcon="ellipsis"
       items={items}
     />
   ),

@@ -101,12 +101,8 @@ async fn chat(
                     total_duration: started.elapsed(),
                 };
             };
-            let (reply, error) = run_agent_turn(
-                work_agent,
-                &work_session_id,
-                &work_message,
-                session_store,
-            ).await;
+            let (reply, error) =
+                run_agent_turn(work_agent, &work_session_id, &work_message, session_store).await;
             match error {
                 Some(reason) => TaskResult::Failed {
                     reason,
@@ -117,7 +113,8 @@ async fn chat(
                     output: Some(reply.chars().take(512).collect()),
                 },
             }
-        }).with_cancel_handler(move || {
+        })
+        .with_cancel_handler(move || {
             if let Some(agent) = cancel_agent {
                 agent.cancel_session(&cancel_session_id);
             }

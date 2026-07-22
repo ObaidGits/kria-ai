@@ -75,7 +75,10 @@ afterEach(() => {
 
 describe("old-to-new executable capability parity — Requirements 20.1, 20.4", () => {
   it("loads implementation evidence for every current capability and preserves execution guards", async () => {
-    const evidenceLoads = new Map<string, Promise<unknown>>();
+    // Collect the unique loader for every executable evidence path first, and
+    // assert each disposition's execution guard shape, WITHOUT firing any import
+    // yet. We deliberately do NOT eagerly kick off `load()` here.
+    const evidenceLoaders = new Map<string, () => Promise<unknown>>();
 
     for (const entry of currentCapabilityDispositions()) {
       const executableEvidence = entry.evidence.filter((path) => !path.includes(".test."));
@@ -84,7 +87,7 @@ describe("old-to-new executable capability parity — Requirements 20.1, 20.4", 
       for (const path of executableEvidence) {
         const load = implementationModules[implementationKey(path)];
         expect(load, `${entry.currentSurface}: ${path}`).toBeTypeOf("function");
-        if (load && !evidenceLoads.has(path)) evidenceLoads.set(path, load());
+        if (load && !evidenceLoaders.has(path)) evidenceLoaders.set(path, load);
       }
 
       if (entry.execution) {
@@ -96,9 +99,22 @@ describe("old-to-new executable capability parity — Requirements 20.1, 20.4", 
       }
     }
 
-    const loadedEvidence = await Promise.all(evidenceLoads.values());
-    for (const module of loadedEvidence) expect(module).toBeTypeOf("object");
-  }, 15_000);
+    // Import the evidence modules SEQUENTIALLY (not via a concurrent Promise.all).
+    // This union spans ~37 heavy, deeply-overlapping module trees — the entire
+    // presence-home tree (Room + 2D/3D Core + Focus engine + Focus UI + Composer),
+    // the AppShell/setup tree, and the Observatory/charts tree. Firing all of them
+    // as concurrent dynamic imports pushes the Vite/vitest dev module runner into a
+    // pathological path where the same imports that finish in ~6s serially take
+    // 90s+ concurrently (measured), which is what previously timed this case out.
+    // No module actually hangs — each resolves fine on its own — so importing them
+    // one at a time is both correct (still proves every evidence module is a real,
+    // loadable module) and fast. Await each in turn so at most one import is in
+    // flight.
+    for (const load of evidenceLoaders.values()) {
+      const module = await load();
+      expect(module).toBeTypeOf("object");
+    }
+  }, 60_000);
 
   it("keeps mapped optional command contracts unavailable rather than throwing", async () => {
     for (const entry of DISPOSITION_MAP.filter((item) => OPTIONAL_CONTRACTS.has(item.currentSurface))) {
@@ -123,5 +139,11 @@ describe("old-to-new executable capability parity — Requirements 20.1, 20.4", 
     expect(view.container.querySelector(`[data-space="${space}"]`)).not.toBeNull();
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     expect(view.container.querySelector(`[data-space="${space}"]`)).not.toBeNull();
-  });
+    // Transform-cost timeout (see the evidence-loading case above): each canonical
+    // Space mounts in ~1-2.5s in isolation with optional services absent — no Space
+    // hangs on mount. The failures were purely the default 5s timeout being smaller
+    // than the cold transform of each Space's tree when the whole file runs together
+    // (the presence-home + charts trees are large). 30s covers cold transform under
+    // load with wide margin while still catching a genuine mount hang.
+  }, 30_000);
 });

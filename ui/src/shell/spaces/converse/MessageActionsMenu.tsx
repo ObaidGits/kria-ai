@@ -3,8 +3,10 @@
  *
  *  • `MessageContextMenu` wraps the bubble so a RIGHT-CLICK opens the actions
  *    (Kobalte ContextMenu — also opens via the keyboard Menu key / Shift+F10).
- *  • `MessageActionsMenu` is an explicit, always-keyboard-reachable trigger
- *    button (Kobalte DropdownMenu) shown when a message is selected/hovered.
+ *  • `MessageActionsMenu` is one explicit, persistent, always-keyboard-reachable
+ *    trigger button (Kobalte DropdownMenu) that is visible at rest and merely
+ *    promoted in emphasis on selection/focus/hover (Req 12.2). It is a single
+ *    tab stop per message and opens the menu holding all six actions.
  *
  * Both are Kobalte-backed → correct menu/menuitem roles, arrow-key nav,
  * typeahead, focus return, and a focus-visible trigger (Req 17.1). Feedback is

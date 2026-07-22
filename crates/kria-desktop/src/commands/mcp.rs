@@ -304,7 +304,18 @@ pub(super) async fn update_mcp_health_status(state: &AppState, statuses: &[McpSe
 }
 
 pub(super) async fn apply_mcp_runtime_from_config(state: &AppState) -> serde_json::Value {
-    let desired = { state.config.read().await.mcp.servers.clone() };
+    let cfg = state.config.read().await.clone();
+    let mut desired = cfg.mcp.servers.clone();
+    for server in &mut desired {
+        let integration_enabled = if server.name.eq_ignore_ascii_case("telegram") {
+            cfg.telegram.enabled
+        } else if server.name == cfg.colab.mcp_server_name {
+            cfg.colab.enabled
+        } else {
+            true
+        };
+        server.enabled = server.enabled && cfg.mcp.enabled && integration_enabled;
+    }
 
     let mut manager = state.mcp_manager.lock().await;
     let report = manager.reconcile(desired, &state.tool_registry).await;
@@ -439,17 +450,23 @@ pub async fn add_mcp_server(
         tool_overrides: std::collections::HashMap::new(),
     };
 
-    let mut config = state.config.write().await;
-    // Prevent duplicate names
-    if config.mcp.servers.iter().any(|s| s.name == name) {
+    let mut servers = state.config.read().await.mcp.servers.clone();
+    if servers.iter().any(|configured| configured.name == name) {
         return Err(format!("MCP server '{}' already configured", name));
     }
-    config.mcp.servers.push(server);
-    config.save().map_err(|e| e.to_string())?;
-
-    drop(config);
+    servers.push(server);
+    state
+        .config_service
+        .patch(
+            "mcp",
+            "servers",
+            serde_json::json!(servers),
+            kria_core::config::ChangeSource::Ui,
+            None,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
     let _ = apply_mcp_runtime_from_config(state).await;
-
     Ok(())
 }
 
@@ -458,17 +475,24 @@ pub async fn remove_mcp_server(name: String, state: State<'_, AppStateCell>) -> 
     let state = state
         .get()
         .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
-    let mut config = state.config.write().await;
-    let before = config.mcp.servers.len();
-    config.mcp.servers.retain(|s| s.name != name);
-    if config.mcp.servers.len() == before {
+    let mut servers = state.config.read().await.mcp.servers.clone();
+    let before = servers.len();
+    servers.retain(|server| server.name != name);
+    if servers.len() == before {
         return Err(format!("MCP server '{}' not found", name));
     }
-    config.save().map_err(|e| e.to_string())?;
-
-    drop(config);
+    state
+        .config_service
+        .patch(
+            "mcp",
+            "servers",
+            serde_json::json!(servers),
+            kria_core::config::ChangeSource::Ui,
+            None,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
     let _ = apply_mcp_runtime_from_config(state).await;
-
     Ok(())
 }
 
@@ -481,20 +505,36 @@ pub async fn toggle_mcp_server(
     let state = state
         .get()
         .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
-    let mut config = state.config.write().await;
-    if let Some(server) = config.mcp.servers.iter_mut().find(|s| s.name == name) {
-        server.enabled = enabled;
-        if name.eq_ignore_ascii_case("telegram") {
-            config.telegram.enabled = enabled;
-            sync_telegram_mcp_server_config(&mut config);
-        }
-        config.save().map_err(|e| e.to_string())?;
+    let mut config = state.config.read().await.clone();
+    let server = config
+        .mcp
+        .servers
+        .iter_mut()
+        .find(|server| server.name == name)
+        .ok_or_else(|| format!("MCP server '{}' not found", name))?;
+    server.enabled = enabled;
 
-        drop(config);
-        let _ = apply_mcp_runtime_from_config(state).await;
-
-        Ok(())
-    } else {
-        Err(format!("MCP server '{}' not found", name))
+    let mut changes = vec![kria_core::config::Change::new(
+        "mcp",
+        "servers",
+        serde_json::json!(config.mcp.servers),
+    )];
+    if name.eq_ignore_ascii_case("telegram") {
+        config.telegram.enabled = enabled;
+        sync_telegram_mcp_server_config(&mut config);
+        changes[0] =
+            kria_core::config::Change::new("mcp", "servers", serde_json::json!(config.mcp.servers));
+        changes.push(kria_core::config::Change::new(
+            "telegram",
+            "enabled",
+            serde_json::json!(enabled),
+        ));
     }
+    state
+        .config_service
+        .patch_batch(changes, kria_core::config::ChangeSource::Ui, None)
+        .await
+        .map_err(|error| error.to_string())?;
+    let _ = apply_mcp_runtime_from_config(state).await;
+    Ok(())
 }

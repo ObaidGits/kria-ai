@@ -147,9 +147,12 @@ async fn quarantine_list(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let pending_approval = tools.iter().filter(|tool| {
-        tool.status == kria_core::tools::quarantine::QuarantineStatus::PendingApproval
-    }).count();
+    let pending_approval = tools
+        .iter()
+        .filter(|tool| {
+            tool.status == kria_core::tools::quarantine::QuarantineStatus::PendingApproval
+        })
+        .count();
     Ok(Json(serde_json::json!({
         "total": tools.len(),
         "pending_approval": pending_approval,

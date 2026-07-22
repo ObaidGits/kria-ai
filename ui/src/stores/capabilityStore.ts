@@ -28,8 +28,10 @@
  * Requirements: 7.1, 7.2, 20.4
  */
 import { createSignal } from "solid-js";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { eventBus } from "./eventBus";
 import { bridgeInvoke } from "../bridge/invoke";
+import { isTauriAvailable } from "../bridge/types";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -429,6 +431,17 @@ const [providerTypes, setProviderTypes] = createSignal<ProviderTypeInfo[]>([]);
 const [localModels, setLocalModels] = createSignal<LocalModelInfo[]>([]);
 const [activeLlmRuntime, setActiveLlmRuntime] = createSignal<ActiveLlmRuntime | null>(null);
 const [runtimeApplyStatus, setRuntimeApplyStatus] = createSignal<RuntimeApplyStatus | null>(null);
+const [llmRuntimeStatusLoading, setLlmRuntimeStatusLoading] = createSignal<boolean>(true);
+const [llmRuntimeStatusError, setLlmRuntimeStatusError] = createSignal<string | null>(null);
+/**
+ * Real local-runtime (orchestrator) lifecycle phase, fed live by the backend
+ * `orchestrator:*` events so the shell footer can show the honest app/LLM state
+ * at startup and during model swaps: booting/starting → "starting", up →
+ * "ready", crashed/failed swap → "failed". `null` = no signal yet.
+ */
+const [orchestratorPhase, setOrchestratorPhase] = createSignal<
+  "starting" | "ready" | "failed" | null
+>(null);
 const [models, setModels] = createSignal<ModelView[]>([]);
 const [openClawSettings, setOpenClawSettings] = createSignal<OpenClawSettings | null>(null);
 const [integrations, setIntegrations] = createSignal<IntegrationView[]>([]);
@@ -1166,6 +1179,75 @@ async function fetchRemoteSkills(
   }
 }
 
+/** Load only the active LLM source of truth for persistent shell status. */
+async function loadLlmRuntimeStatus(): Promise<CapabilityActionResult<ActiveLlmRuntime>> {
+  setLlmRuntimeStatusLoading(true);
+  setLlmRuntimeStatusError(null);
+  try {
+    const [runtimeRes, applyRes] = await Promise.all([
+      bridgeInvoke<RawActiveLlmRuntime>("get_active_llm_runtime"),
+      bridgeInvoke<RawRuntimeApplyStatus>("get_llm_runtime_apply_status"),
+    ]);
+    if (applyRes.ok) setRuntimeApplyStatus(normalizeRuntimeApplyStatus(applyRes.data ?? {}));
+    if (!runtimeRes.ok) {
+      setActiveLlmRuntime(null);
+      setLlmRuntimeStatusError(failText(runtimeRes.message, "get_active_llm_runtime"));
+      return { ok: false, message: failText(runtimeRes.message, "get_active_llm_runtime") };
+    }
+
+    const runtime = normalizeActiveLlmRuntime(runtimeRes.data ?? {});
+    setActiveLlmRuntime(runtime);
+    if (runtimeRes.data?.apply_status) {
+      setRuntimeApplyStatus(normalizeRuntimeApplyStatus(runtimeRes.data.apply_status));
+    }
+    return { ok: true, data: runtime };
+  } finally {
+    setLlmRuntimeStatusLoading(false);
+  }
+}
+
+/**
+ * Subscribe to the backend runtime lifecycle so the footer reflects the honest
+ * app/LLM state in real time — starting/initializing during boot + model swaps,
+ * ready when up, failed on error. Fed by:
+ *   • `llm-runtime:apply`        — provider/model apply phases (switching/ready/failed)
+ *   • `orchestrator:swap_started`— local model (re)starting
+ *   • `orchestrator:ready`       — local runtime is up
+ *   • `orchestrator:swap_failed` — local runtime start/swap failed
+ * Returns a synchronous dispose fn; a no-op outside the Tauri runtime.
+ */
+function initRuntimeStatusStream(): () => void {
+  if (!isTauriAvailable()) return () => undefined;
+  const pending: Array<Promise<UnlistenFn>> = [
+    listen<RawRuntimeApplyStatus>("llm-runtime:apply", (event) => {
+      setRuntimeApplyStatus(normalizeRuntimeApplyStatus(event.payload ?? {}));
+      const state = String(event.payload?.state ?? "");
+      if (state === "ready") void loadLlmRuntimeStatus();
+    }),
+    listen("orchestrator:swap_started", () => setOrchestratorPhase("starting")),
+    listen("orchestrator:ready", () => {
+      setOrchestratorPhase("ready");
+      void loadLlmRuntimeStatus();
+    }),
+    listen("orchestrator:swap_failed", () => setOrchestratorPhase("failed")),
+  ];
+  let disposed = false;
+  const unlisteners: UnlistenFn[] = [];
+  for (const p of pending) {
+    void p.then((un) => (disposed ? un() : unlisteners.push(un))).catch(() => undefined);
+  }
+  return () => {
+    disposed = true;
+    for (const un of unlisteners.splice(0)) {
+      try {
+        un();
+      } catch {
+        /* already disposed */
+      }
+    }
+  };
+}
+
 /** Load the complete provider/runtime/model source of truth. */
 async function loadModels(): Promise<CapabilityActionResult<ModelView[]>> {
   const [providerRes, typeRes, runtimeRes, modelRes, applyRes] = await Promise.all([
@@ -1188,9 +1270,14 @@ async function loadModels(): Promise<CapabilityActionResult<ModelView[]>> {
   }
   if (runtimeRes.ok) {
     setActiveLlmRuntime(normalizeActiveLlmRuntime(runtimeRes.data ?? {}));
+    setLlmRuntimeStatusError(null);
+    setLlmRuntimeStatusLoading(false);
     if (runtimeRes.data?.apply_status) {
       setRuntimeApplyStatus(normalizeRuntimeApplyStatus(runtimeRes.data.apply_status));
     }
+  } else {
+    setLlmRuntimeStatusError(failText(runtimeRes.message, "get_active_llm_runtime"));
+    setLlmRuntimeStatusLoading(false);
   }
   if (applyRes.ok) setRuntimeApplyStatus(normalizeRuntimeApplyStatus(applyRes.data ?? {}));
   if (!modelRes.ok) return { ok: false, message: failText(modelRes.message, "list_models") };
@@ -1549,6 +1636,9 @@ export const capabilityStore = {
   localModels,
   activeLlmRuntime,
   runtimeApplyStatus,
+  llmRuntimeStatusLoading,
+  llmRuntimeStatusError,
+  orchestratorPhase,
   models,
   openClawSettings,
   integrations,
@@ -1605,6 +1695,8 @@ export const capabilityStore = {
   recommendTools,
   loadSkills,
   fetchRemoteSkills,
+  loadLlmRuntimeStatus,
+  initRuntimeStatusStream,
   loadModels,
   loadOpenClawSettings,
   loadIntegrations,

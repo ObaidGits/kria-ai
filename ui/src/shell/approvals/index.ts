@@ -10,3 +10,9 @@
 export { ApprovalCenter } from "./ApprovalCenter";
 export { ApprovalCard } from "./ApprovalCard";
 export type { ApprovalCardProps } from "./ApprovalCard";
+export {
+  captureApprovalPlace,
+  restoreApprovalPlace,
+  isDestructiveTarget,
+} from "./approvalPlace";
+export type { ApprovalPlaceSnapshot } from "./approvalPlace";

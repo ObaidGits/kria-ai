@@ -82,6 +82,9 @@ const OPTIONAL_COMMANDS = new Set([
   "mirror_approval_presentation",
   "get_pending_approval_presentations",
   "sync_approval_presentation",
+  // Unified optional feature/service lifecycle controls.
+  "list_feature_controls",
+  "set_feature_enabled",
 ]);
 
 // ─── Core Invoke ───────────────────────────────────────────────────────────────

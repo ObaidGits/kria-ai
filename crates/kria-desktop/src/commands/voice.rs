@@ -25,18 +25,11 @@ pub async fn start_voice(state: State<'_, AppStateCell>, app: AppHandle) -> Resu
         return Err("Voice requires Piper TTS binary on your PATH. Install it from: https://github.com/rhasspy/piper/releases".into());
     }
 
-    // Refresh config from disk on every voice start so external edits in
-    // ~/.kria/config.toml are not stuck behind stale in-memory state.
-    let mut effective_config = match KriaConfig::load(None) {
-        Ok(cfg) => cfg,
-        Err(e) => {
-            tracing::warn!(error = %e, "failed to reload config from disk for voice start; using in-memory config");
-            state.config.read().await.clone()
-        }
-    };
-    {
-        let mut cfg_guard = state.config.write().await;
-        *cfg_guard = effective_config.clone();
+    // ConfigService is the runtime authority. Do not reload the TOML file here:
+    // that would overwrite hot Settings/prompt changes and bypass SQLite config.
+    let mut effective_config = state.config.read().await.clone();
+    if !effective_config.voice.enabled {
+        return Err("Voice is disabled in Settings".into());
     }
 
     // Resolve tier-aware defaults that init_runtime applies but are lost on reload.
@@ -612,21 +605,24 @@ pub async fn start_voice(state: State<'_, AppStateCell>, app: AppHandle) -> Resu
     Ok(())
 }
 
-#[tauri::command]
-pub async fn stop_voice(state: State<'_, AppStateCell>, app: AppHandle) -> Result<(), String> {
-    let state = state
-        .get()
-        .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
+pub(super) async fn stop_voice_runtime(state: &AppState, app: &AppHandle) {
     state
         .voice_active
         .store(false, std::sync::atomic::Ordering::Relaxed);
-    // Abort any in-flight v2 turn immediately so barge-in / stop is instant.
     if let Some(v2) = state.active_voice.read().await.streaming() {
         v2.force_abort().await;
     }
     let voice_pipeline = state.voice_pipeline.read().await.clone();
     voice_pipeline.stop().await;
     let _ = app.emit("voice:state", serde_json::json!({ "state": "idle" }));
+}
+
+#[tauri::command]
+pub async fn stop_voice(state: State<'_, AppStateCell>, app: AppHandle) -> Result<(), String> {
+    let state = state
+        .get()
+        .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
+    stop_voice_runtime(state, &app).await;
     Ok(())
 }
 
@@ -660,6 +656,9 @@ pub async fn voice_v2_speak(
     let state = state
         .get()
         .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
+    if !state.config.read().await.voice.enabled {
+        return Err("Voice is disabled in Settings".into());
+    }
 
     let v2 = {
         let active = state.active_voice.read().await;

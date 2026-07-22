@@ -370,7 +370,7 @@ pub async fn connect_colab_tier(
     let mut changed = false;
     let mut server_found = false;
     let resolved_server_name = {
-        let mut config = state.config.write().await;
+        let mut config = state.config.read().await.clone();
 
         if let Some(name) = server_name
             .as_deref()
@@ -411,7 +411,31 @@ pub async fn connect_colab_tier(
         }
 
         if changed {
-            config.save().map_err(|e| e.to_string())?;
+            state
+                .config_service
+                .patch_batch(
+                    vec![
+                        kria_core::config::Change::new(
+                            "colab",
+                            "enabled",
+                            serde_json::json!(config.colab.enabled),
+                        ),
+                        kria_core::config::Change::new(
+                            "colab",
+                            "mcp_server_name",
+                            serde_json::json!(config.colab.mcp_server_name),
+                        ),
+                        kria_core::config::Change::new(
+                            "mcp",
+                            "servers",
+                            serde_json::json!(config.mcp.servers),
+                        ),
+                    ],
+                    kria_core::config::ChangeSource::Ui,
+                    None,
+                )
+                .await
+                .map_err(|error| error.to_string())?;
         }
 
         server_name
@@ -461,7 +485,7 @@ pub async fn disconnect_colab_tier(
 
     let mut changed = false;
     {
-        let mut config = state.config.write().await;
+        let mut config = state.config.read().await.clone();
         if config.colab.enabled {
             config.colab.enabled = false;
             changed = true;
@@ -481,7 +505,26 @@ pub async fn disconnect_colab_tier(
         }
 
         if changed {
-            config.save().map_err(|e| e.to_string())?;
+            state
+                .config_service
+                .patch_batch(
+                    vec![
+                        kria_core::config::Change::new(
+                            "colab",
+                            "enabled",
+                            serde_json::json!(false),
+                        ),
+                        kria_core::config::Change::new(
+                            "mcp",
+                            "servers",
+                            serde_json::json!(config.mcp.servers),
+                        ),
+                    ],
+                    kria_core::config::ChangeSource::Ui,
+                    None,
+                )
+                .await
+                .map_err(|error| error.to_string())?;
         }
     }
 

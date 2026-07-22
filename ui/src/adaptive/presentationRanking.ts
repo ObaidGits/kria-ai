@@ -252,6 +252,12 @@ export function isAdaptiveDismissed(zone: AdaptiveZone, id: string): boolean {
   return state.preferences[zone].dismissed[id] === true;
 }
 
+/** List every id the user has dismissed in a zone (bounded preference read). */
+export function listAdaptiveDismissed(zone: AdaptiveZone): string[] {
+  adaptiveRevision();
+  return Object.keys(state.preferences[zone].dismissed);
+}
+
 /** Plain-language reason shown beside every adaptive suggestion. */
 export function explainAdaptiveSuggestion(zone: AdaptiveZone, id: string): string {
   adaptiveRevision();

@@ -13,7 +13,8 @@
  * region:
  *   • MemoryCard + Inspector detail ............... task 6.2
  *   • Cognition controls + result panel ........... task 6.3
- *   • 3D Knowledge Graph lens + 2D fallback ....... tasks 6.4 / 6.5
+ *   • Memory Graph: shipped 2D SVG + user-opened semantic table
+ *     (`GraphCanvas3D` remains dormant pending MGR-030 Phase 7)
  * Here each segment is a labelled region with a heading and either a basic list
  * (where the store already holds data) or an honest placeholder.
  *
@@ -82,7 +83,7 @@ export default function MemorySpace() {
   // via the typed router below, keeping the route the single address for the
   // active segment.
   const initialSegment = routedSegment();
-  const isCompact = createMemo(() => shellStore.windowMode() === "compact");
+  const isMini = createMemo(() => shellStore.windowMode() === "mini");
 
   // Mirror the routed segment into the store so downstream lens tasks (6.2–6.5)
   // read a single source of truth.
@@ -106,7 +107,12 @@ export default function MemorySpace() {
     if (lastDeepLinkId === id) return;
     lastDeepLinkId = id;
     const fact = memoryStore.facts().find((f) => f.id === id);
-    shellStore.openInspector("memory", id, fact);
+    // Programmatic (route/deep-link) open: activeElement is not the semantic
+    // control, so hand the stable Memory region as the Focus_Return_Owner
+    // (§20.3/§20.4) — close returns focus to the region, not a stray element.
+    shellStore.openInspector("memory", id, fact, {
+      regionSelector: '[data-space="memory"]',
+    });
   }
 
   const mountRoute = currentRoute();
@@ -154,7 +160,7 @@ export default function MemorySpace() {
       </header>
 
       <Show
-        when={isCompact()}
+        when={isMini()}
         fallback={
           <Tabs
             class="kria-memory__segments"

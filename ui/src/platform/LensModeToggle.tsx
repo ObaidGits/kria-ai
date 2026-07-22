@@ -16,7 +16,12 @@
  */
 import { Show, createMemo, type JSX } from "solid-js";
 import { SegmentBar, type SegmentOption } from "../kit";
-import { lensRenderMode, preferTwoD, setPreferTwoD } from "./renderMode";
+import {
+  lensRenderMode,
+  preferTwoD,
+  setPreferThreeD,
+  setPreferTwoD,
+} from "./renderMode";
 import "./LensModeToggle.css";
 
 export interface LensModeToggleProps {
@@ -33,7 +38,7 @@ export function LensModeToggle(props: LensModeToggleProps): JSX.Element {
   const canDo3D = createMemo(
     () => lensRenderMode().snapshot.hasWebGL && !lensRenderMode().snapshot.prefersReducedMotion,
   );
-  const selected = () => (preferTwoD() ? "2d" : "3d");
+  const selected = () => (lensRenderMode().enable3D && !preferTwoD() ? "3d" : "2d");
   // Options identity stays stable across selection changes (it depends only on
   // `canDo3D`), so the underlying ToggleGroup never recreates its items while
   // handling a selection.
@@ -47,10 +52,13 @@ export function LensModeToggle(props: LensModeToggleProps): JSX.Element {
       <SegmentBar
         label={props.label ?? "Graph view mode"}
         value={selected()}
-        onChange={(value) => setPreferTwoD(value === "2d")}
+        onChange={(value) => {
+          if (value === "2d") setPreferTwoD(true);
+          else setPreferThreeD();
+        }}
         options={options()}
       />
-      <Show when={!canDo3D()}>
+      <Show when={!lensRenderMode().enable3D}>
         <span class="kria-lens-mode__note" role="note">
           3D unavailable on this device — {lensRenderMode().reason}
         </span>

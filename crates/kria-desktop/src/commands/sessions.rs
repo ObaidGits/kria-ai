@@ -643,14 +643,7 @@ pub async fn get_memory_enabled(state: State<'_, AppStateCell>) -> Result<bool, 
     let state = state
         .get()
         .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
-    // Default ON: only an explicit "0" disables long-term memory writes.
-    let enabled = state
-        .memory_store
-        .get_preference("memory_enabled")
-        .map_err(|e| e.to_string())?
-        .as_deref()
-        != Some("0");
-    Ok(enabled)
+    Ok(state.config.read().await.memory.enabled)
 }
 
 #[tauri::command]
@@ -661,13 +654,17 @@ pub async fn set_memory_enabled(
     let state = state
         .get()
         .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
-    let memory_writer: Arc<dyn MemoryManager> = state.memory_store.clone();
-    memory_writer
-        .set_preference(&preference_record(
-            "memory_enabled",
-            if enabled { "1" } else { "0" },
-        ))
-        .map_err(|e| e.to_string())?;
+    state
+        .config_service
+        .patch(
+            "memory",
+            "enabled",
+            serde_json::json!(enabled),
+            kria_core::config::ChangeSource::Ui,
+            None,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 

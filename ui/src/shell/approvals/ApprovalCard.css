@@ -84,10 +84,12 @@
   color: var(--color-text-primary);
   line-height: 1.3;
 }
+/* Section eyebrow labels the sustained/actionable approval content beneath it;
+   promoted off micro to the minimum readable size (caption). Task 13.2. */
 .kria-approval-card__sectionlabel {
   display: block;
   margin-bottom: var(--space-1);
-  font-size: var(--font-size-micro);
+  font-size: var(--font-size-caption);
   font-weight: var(--font-weight-semibold);
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -165,10 +167,13 @@
   font-size: var(--font-size-caption);
   font-weight: var(--font-weight-semibold);
 }
+/* Scope hint is actionable safety copy (explains the consequence of each scope
+   choice); promoted off micro/muted to the minimum readable size (caption) and
+   the secondary text token for legibility. Task 13.2. */
 .kria-approval-card__scopehint {
   grid-column: 2;
-  font-size: var(--font-size-micro);
-  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+  color: var(--color-text-secondary);
 }
 
 /* ── Actions ────────────────────────────────────────────────────────────── */

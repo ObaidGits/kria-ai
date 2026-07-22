@@ -6,6 +6,7 @@ export {
   getAdaptiveUsage,
   isAdaptiveDismissed,
   isAdaptivePinned,
+  listAdaptiveDismissed,
   rankAdaptiveCandidates,
   rankAdaptiveSuggestions,
   rankEmptyStateCandidates,

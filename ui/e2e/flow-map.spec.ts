@@ -88,7 +88,7 @@ test.describe("deterministic authoritative flow maps", () => {
     })).toBeVisible();
   });
 
-  test("memory correction dispatches feedback through memory authority", async ({ page }) => {
+  test("memory correction dispatches dedicated mutation through memory authority", async ({ page }) => {
     await page.evaluate(() => (window as any).__KRIA_E2E__.seedMemoryCorrection());
     await openSpace(page, "Memory", "memory");
     await page.getByRole("tab", { name: "Explorer" }).click();
@@ -99,9 +99,9 @@ test.describe("deterministic authoritative flow maps", () => {
 
     await expect.poll(() => page.evaluate(() =>
       (window as any).__KRIA_E2E__.backendCalls().some((call: any) =>
-        call.command === "memory_record_feedback" &&
-        call.args?.signal === "correction" &&
-        call.args?.detail === "Project Atlas launches on Tuesday"))).toBe(true);
+        call.command === "memory_correct" &&
+        call.args?.memoryId === "e2e-memory-correction" &&
+        call.args?.content === "Project Atlas launches on Tuesday"))).toBe(true);
   });
 
   test("capability install requires trust review then dispatches install", async ({ page }) => {

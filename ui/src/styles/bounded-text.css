@@ -1,0 +1,47 @@
+/* Shared bounded-text utility (task 10.7, IU-07; UIE-H-002, UIE-M-011, UIE-M-018).
+ *
+ * Truthful BOUNDED presentation: long model / provider / source / detail / label
+ * values (and localization-expanded copy) truncate VISIBLY without breaking the
+ * layout or causing horizontal overflow — upholding the Task-8 no-horizontal-
+ * overflow invariant across every Task-10 surface (Homepage/current-work summary,
+ * ContextRail item, background chip, capability disclosure, fact-link labels).
+ *
+ * The full value is NEVER discarded: the complete string stays in the DOM (so
+ * assistive tech reads it in full) and consuming surfaces attach it via
+ * `boundedTitle(...)` (a `title`, and/or the control's accessible name) so a
+ * sighted user can recover the whole value on hover. Truncation is purely
+ * presentational — it never fabricates, replaces, or elides the underlying fact.
+ *
+ * Token-only; no motion (respects prefers-reduced-motion by having none).
+ *
+ *   .kria-bounded      — single line, ellipsis (labels, source values, chips).
+ *   .kria-bounded--2   — clamp to 2 lines (concise multi-word labels).
+ *   .kria-bounded--3   — clamp to 3 lines (concise detail text).
+ */
+.kria-bounded {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kria-bounded--2,
+.kria-bounded--3 {
+  min-width: 0;
+  max-width: 100%;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  /* Break long unbroken tokens (e.g. a long model id) so they clamp instead of
+   * forcing horizontal overflow. */
+  overflow-wrap: anywhere;
+}
+
+.kria-bounded--2 {
+  -webkit-line-clamp: 2;
+}
+
+.kria-bounded--3 {
+  -webkit-line-clamp: 3;
+}

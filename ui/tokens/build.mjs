@@ -48,8 +48,17 @@ async function buildThemeFile({ source, destination, selector, filter }) {
   await sd.buildAllPlatforms();
 }
 
-/** Only color-category tokens (used for the light overrides file). */
-const colorOnly = (token) => token.path[0] === "color";
+// Namespaces whose values differ between themes (dark/light parity). Tokens in
+// these groups are emitted into the [data-theme="light"] overrides file; every
+// other (theme-independent) group lives only in :root. `color` is the original
+// palette; the presence-redesign adds shared-light (`core`), environmental room
+// gradient (`room`), the Reading Mode near-solid backing + hard-dim (`reading`),
+// glass/material (`glass`), and presence-state hues (`presence`) — all of which
+// resolve to theme-specific color values.
+const THEME_NAMESPACES = new Set(["color", "core", "room", "reading", "glass", "presence"]);
+
+/** Theme-scoped tokens (used for the light overrides file). */
+const themeScoped = (token) => THEME_NAMESPACES.has(token.path[0]);
 
 async function main() {
   mkdirSync(tmpDir, { recursive: true });
@@ -66,7 +75,7 @@ async function main() {
     source: [BASE_GLOB, themeFile("light")],
     destination: "light.css",
     selector: '[data-theme="light"]',
-    filter: colorOnly,
+    filter: themeScoped,
   });
 
   const header =

@@ -1,7 +1,7 @@
 /**
- * graphModel tests (task 6.4) — the non-GL maths the 3D lens + 2D fallback rely
- * on. WebGL cannot run under jsdom, so this is where the §5.4 governance rules
- * are verified: data→graph mapping, the node cap "showing N of M", centrality
+ * graphModel helper tests. Core mapping/cap assertions support shipped 2D;
+ * GL-specific LOD/culling/degrade assertions cover dormant utilities only and
+ * do not prove a 3D renderer is integrated.
  * sizing, community coloring (accent excluded), LOD + label selection, frustum
  * culling, and the auto-degrade decision.
  */

@@ -109,3 +109,77 @@
   flex: 0 0 auto;
   color: var(--color-text-muted);
 }
+
+/* Secondary disclosure (UIE-H-004): the "Customize suggestions" trigger is a
+   quiet, secondary control below the primary starters/Composer. Its panel holds
+   the coach hint, per-suggestion adaptive controls, and reset — deferred, not
+   deleted. Token-only, no ambient motion of its own. */
+.kria-converse-empty__customize {
+  display: flex;
+  justify-content: center;
+}
+
+.kria-converse-empty__customize-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 240px;
+  max-width: 360px;
+}
+
+.kria-converse-empty__customize-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.kria-converse-empty__customize-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  text-align: left;
+}
+
+.kria-converse-empty__customize-label {
+  font-size: var(--font-size-body);
+  color: var(--color-text-primary);
+}
+
+/* Read-only capability disclosure (task 10.6, UIE-M-019): a quiet row of
+   informational capability cues (F6 tools / F7 skills), grounded in global
+   enabled/available state. A "show" cue is a read-only deep-link; an
+   "unavailable" cue is a muted, non-actionable label. Token-only, no motion. */
+.kria-converse-empty__capabilities {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
+  width: 100%;
+  max-width: 480px;
+}
+
+.kria-converse-empty__capability {
+  appearance: none;
+  border: 0;
+  border-radius: var(--radius-md);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--font-size-caption);
+  cursor: pointer;
+}
+
+.kria-converse-empty__capability--unavailable {
+  color: var(--color-text-muted);
+  cursor: default;
+}

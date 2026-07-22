@@ -15,6 +15,9 @@ import {
   type SettingMeta,
 } from "../../stores/settingsStore";
 import { currentRoute } from "../router";
+import { FeatureControlsSection } from "./settings/FeatureControlsSection";
+import { AwarenessPanel } from "./settings/AwarenessPanel";
+import { PresencePreferencesPanel } from "./settings/PresencePreferencesPanel";
 import "./SettingsSpace.css";
 
 function displayValue(value: unknown, secret: boolean): string {
@@ -236,6 +239,12 @@ export default function SettingsSpace() {
           class="kria-settings__search"
         />
       </header>
+
+      <FeatureControlsSection />
+
+      <PresencePreferencesPanel />
+
+      <AwarenessPanel />
 
       <form class="kria-settings__nl" aria-labelledby="settings-change-title" onSubmit={submit}>
         <span class="kria-settings__nl-icon" aria-hidden="true"><Icon name="sparkles" size={18} /></span>

@@ -5,6 +5,12 @@ export type FontScaleStep = (typeof FONT_SCALE_STEPS)[number];
 export interface AccessibilityPreferences {
   highContrast: boolean;
   reducedMotion: boolean;
+  /**
+   * Steady-lighting preference (Req 1.4 / 21.4). When on, the homepage disables
+   * the time-of-day undertone shift so the Room's ambient tone never drifts.
+   * Purely a mood/atmosphere control — it carries no data meaning.
+   */
+  steadyLighting: boolean;
   fontScale: FontScaleStep;
 }
 
@@ -25,6 +31,7 @@ export function accessibilityPreferences(settings: Record<string, unknown>): Acc
   return {
     highContrast: ui.high_contrast === true,
     reducedMotion: ui.reduce_motion === true,
+    steadyLighting: ui.steady_lighting === true,
     fontScale: normalizeFontScale(ui.font_scale),
   };
 }
@@ -42,5 +49,8 @@ export function applyAccessibilityPreferences(
   root.dataset.fontScale = preferences.fontScale;
   root.dataset.reduceMotion = String(preferences.reducedMotion);
   root.dataset.reducedMotion = preferences.reducedMotion || osReduced ? "on" : "off";
+  // Homepage time-of-day undertone reads this attribute to disable itself
+  // (Req 1.4 / 21.4). Mirrors the `data-high-contrast` boolean convention.
+  root.dataset.steadyLighting = String(preferences.steadyLighting);
   return preferences;
 }

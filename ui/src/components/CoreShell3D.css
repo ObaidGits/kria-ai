@@ -1,0 +1,25 @@
+/**
+ * CoreShell3D styles — the ONE WebGL surface for the capability-gated 3D Core
+ * (task 7.1, design §4.3 / §13.2). Token-only: the canvas is transparent and
+ * ALL colour lives in the shader (uColor = the `--presence-<state>` token), so
+ * there is zero raw colour here. Sizing reuses the shared `.kria-core` box
+ * (`--core-size`), keeping the 3D Core the same footprint as the 2D Core.
+ */
+
+.kria-core3d {
+  position: relative;
+  display: inline-flex;
+  isolation: isolate;
+}
+
+/* The single WebGL surface fills the Core box. Slightly overscanned so the
+ * shader's soft aura/rim can bleed to the edge without a hard clip. */
+.kria-core3d__canvas {
+  position: absolute;
+  inset: -18%;
+  width: 136%;
+  height: 136%;
+  display: block;
+  pointer-events: none;
+  border-radius: var(--radius-full);
+}

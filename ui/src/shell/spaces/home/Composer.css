@@ -1,0 +1,131 @@
+/**
+ * Composer (homepage) — vertical-axis presence layer (design.md §2 / §3.2,
+ * Requirement 4.1 / 4.2 / 4.3). Token-only (Req 16.2, zero raw color).
+ *
+ * This file styles ONLY the homepage-presence wrapper: the vertical-axis
+ * placement, the shared-light rim, and the ⌘K hint. The input chrome itself
+ * (textarea, tools, Send⇄Stop) is the Converse Composer and keeps its own CSS.
+ *
+ * The rim-light reads the shared-light `--core-*` variables the Core publishes
+ * (design §3.2) so the Composer glows with the ONE Core light. On focus the rim
+ * STRENGTHENS (Req 4.3): `data-composer-focused="true"` raises its opacity and
+ * lifts the border to the accent — focus is a meaningful state change, so the
+ * accent is earned here (L4). Motion is opacity/tint only and freezes under
+ * reduced motion.
+ */
+
+/* Vertical center axis: the single symmetrical anchor (design §2). Centered in
+ * the Room's content plane with a bounded reading measure — never full-bleed
+ * (empty stretched space reads broken; bounded space reads premium). */
+.kria-home-composer {
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--font-measure);
+  margin-inline: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* Shared-light rim (design §3.2): a soft ring tinted by the live Core hue and
+ * intensity, sitting just outside the field. At rest it is barely-there; on
+ * focus it strengthens. Rendered on a pseudo-element so it never intercepts
+ * pointer/keyboard interaction with the field. */
+.kria-home-composer__field {
+  position: relative;
+  border-radius: var(--radius-lg);
+}
+
+.kria-home-composer__field::before {
+  content: "";
+  position: absolute;
+  inset: calc(-1 * var(--space-1));
+  border-radius: var(--radius-xl);
+  pointer-events: none;
+  /* Tint by the shared Core light; strength scales with the Core intensity.
+   * color-mix keeps this token-driven (no raw color). */
+  background: radial-gradient(
+    120% 120% at 50% 0%,
+    color-mix(
+      in oklab,
+      var(--core-hue) calc(var(--core-intensity, 0.55) * 18%),
+      transparent
+    ),
+    transparent 70%
+  );
+  opacity: 0.35;
+  transition:
+    opacity var(--motion-duration-recede) var(--motion-easing-presence);
+}
+
+/* Focus strengthens the light (Req 4.3): the rim brightens as the Core leans. */
+.kria-home-composer[data-composer-focused="true"] .kria-home-composer__field::before {
+  opacity: 0.9;
+}
+
+/* The wrapped Converse Composer already carries a focus-within accent border;
+ * strengthen it a touch more when the homepage focus reaction is active so the
+ * "light strengthens" reads on the field edge as well as the rim. */
+.kria-home-composer[data-composer-focused="true"] .kria-home-composer__field .kria-composer[data-primary-entry="true"] {
+  border-color: var(--color-accent-border);
+}
+
+/* ── ⌘K / Ctrl K command hint (Req 4.2) ──────────────────────────────────── */
+/* A quiet, discoverable affordance beneath the field. Muted at rest so it never
+ * competes with the field as a second task-entry; it is a hint + palette entry,
+ * not an ask-field. Icon-free text + a kbd chord, so meaning is never by color
+ * alone. */
+.kria-home-composer__palette-hint {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+  cursor: pointer;
+  transition:
+    color var(--motion-duration-fast) var(--motion-easing-standard),
+    background-color var(--motion-duration-fast) var(--motion-easing-standard),
+    border-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.kria-home-composer__palette-hint:hover,
+.kria-home-composer__palette-hint:focus-visible {
+  color: var(--color-text-secondary);
+  background: var(--glass-fill-active);
+  border-color: var(--glass-border);
+}
+
+.kria-home-composer__hint-text {
+  font-family: var(--font-family-text);
+}
+
+.kria-home-composer__kbd {
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-caption);
+  color: var(--color-text-secondary);
+  background: var(--glass-fill-rest);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-1);
+}
+
+/* ── Reduced motion / kill-switch ─────────────────────────────────────────── */
+/* Freeze the rim + hint transitions to a static frame (Req 17.4 / 21.4). The
+ * rim still shows its resting/focused strength — only the animation is removed. */
+[data-reduced-motion="on"] .kria-home-composer__field::before,
+[data-reduced-motion="on"] .kria-home-composer__palette-hint {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kria-home-composer__field::before,
+  .kria-home-composer__palette-hint {
+    transition: none;
+  }
+}

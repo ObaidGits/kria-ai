@@ -1,7 +1,7 @@
 /**
- * layout.worker — the graph force-layout Web Worker (task 6.4, Req 5.4 / 16.3).
+ * layout.worker — dormant Phase 7 graph-layout worker candidate.
  *
- * Runs ngraph.forcelayout OFF the main thread (design.md §1.9) so layout physics
+ * No shipped Memory Graph route starts this worker. It remains isolated for
  * never block the UI (Req 16). It streams node positions as it converges, then
  * STOPS when the layout settles (SettleTracker) → the scene becomes static with
  * NO perpetual simulation (§5.4 hard rule). The main thread (GraphScene) applies

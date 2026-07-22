@@ -148,6 +148,8 @@ Ownership examples:
 | OpenClaw | `openclaw/*`, desktop OpenClaw commands. |
 | n8n | `n8n/*`, desktop n8n commands, local API. |
 | HITL | `agent/collaborative_decision.rs`, execution gate, desktop app commands. |
+| Presence homepage (Room/Core/Focus/nav) | `ui/src/shell/spaces/home/*`, `ui/src/stores/homeFocusStore.ts`, `ui/src/shell/HiddenDock.tsx`, behind `home.presence.v2`. See `../architecture/presence-homepage-runtime.md`. |
+| Homepage render mode (2D/3D Core) | `ui/src/platform/coreRenderMode.ts`, `renderMode.ts`, `ui/src/components/CorePresence.tsx`. See `../decisions/adr/008-3d-core-capability-gating.md`. |
 
 ## Documentation Rules
 

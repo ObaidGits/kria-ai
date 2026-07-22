@@ -41,3 +41,34 @@
   :root { --color-border-default: CanvasText; --color-text-muted: CanvasText; --blur-floating: 0px; }
   :where(button, input, select, textarea, [role="dialog"], table) { border-color: CanvasText; }
 }
+
+/* Non-color state cues (design §13 surface roles; Req 16.4–16.5, 19.1–19.7).
+   Selection is drawn today with an accent box-shadow ring and disabled is drawn
+   with opacity alone — both cues that forced-colors mode discards (box-shadow is
+   suppressed, opacity carries no semantic). Restore a system-color, non-color
+   equivalent so selection and unavailable state stay distinguishable. Task 13.4. */
+@media (forced-colors: active) {
+  [data-selected="true"],
+  [aria-selected="true"] {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+  :disabled,
+  [data-disabled],
+  [aria-disabled="true"] {
+    color: GrayText;
+    border-color: GrayText;
+    -webkit-text-fill-color: GrayText;
+  }
+}
+
+/* The app-level high-contrast toggle flattens the same accent/opacity cues; give
+   disabled controls the system disabled color there too (selection keeps its
+   Highlight box-shadow, which renders under the token remap). Task 13.4. */
+[data-high-contrast="true"] :disabled,
+[data-high-contrast="true"] [data-disabled],
+[data-high-contrast="true"] [aria-disabled="true"] {
+  color: GrayText;
+  border-color: GrayText;
+  -webkit-text-fill-color: GrayText;
+}

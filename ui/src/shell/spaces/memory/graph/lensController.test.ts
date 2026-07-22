@@ -1,7 +1,6 @@
 /**
- * lensController tests (task 6.4) — the §5.4 render-governance lifecycle:
- * freeze-on-idle, resume-on-interaction, layout-settle → static, reduced-motion
- * still frames, and unload-on-exit. Uses a fake scheduler + clock so the loop
+ * Dormant lens-controller utility tests. They verify lifecycle mechanics only;
+ * they do not prove a Memory Graph renderer mount or shipped 3D capability.
  * behavior is deterministic without WebGL or real rAF.
  */
 import { describe, it, expect, beforeEach } from "vitest";

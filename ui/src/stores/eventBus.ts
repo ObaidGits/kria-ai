@@ -135,6 +135,15 @@ export interface EventMap {
   // Core state
   "core:state-changed": { state: string; previous: string };
 
+  /**
+   * Homepage macro state machine transition (Req 30.1). Emitted by `homeStore`
+   * on every actual transition of the presence state machine
+   * (rest ↔ engaged ↔ reading ↔ mode-transition ↔ companion ↔ blocked).
+   * Presentation-only: consumers react to the homepage UI state; homeStore never
+   * writes another store (authority invariant, Req 29/30.3).
+   */
+  "home:state-changed": { state: string; previous: string };
+
   // Converse (high-frequency)
   "converse:token": { sessionId: string; token: string };
   "converse:message-added": { sessionId: string; messageId: string };

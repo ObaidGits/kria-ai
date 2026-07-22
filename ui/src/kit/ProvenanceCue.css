@@ -1,15 +1,27 @@
+/* Authorship provenance is sustained/actionable identity copy, not a brief
+   badge (Req 12.7 / design §13). Rendered at the minimum readable size
+   (caption, 12px) with the minimum readable line-height, off the muted token
+   for legibility. Task 13.2. */
 .kit-provenance {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  color: var(--color-text-muted);
-  font-size: var(--font-size-micro);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+  line-height: var(--font-line-height-normal);
   font-weight: var(--font-weight-semibold);
   letter-spacing: 0.02em;
 }
 
+/* KRIA authorship uses the text-safe accent token, not accent-default: the
+   13.4 audit proved accent-default fails WCAG AA >=4.5 as caption text on the
+   worst provenance surface (surface-2 over surface-2) in both themes, and no
+   existing token fit. --color-accent-text is the one new semantic token added
+   for accent-colored text (Task 13.6 / design §13); accent-default stays for
+   fills/borders/focus/Core (UIE-L-003). Authorship remains conveyed non-color
+   via icon + label + aria-label. */
 .kit-provenance[data-provenance-cue="kria"] {
-  color: var(--color-accent-default);
+  color: var(--color-accent-text);
 }
 
 .kit-provenance[data-provenance-cue="user"] {

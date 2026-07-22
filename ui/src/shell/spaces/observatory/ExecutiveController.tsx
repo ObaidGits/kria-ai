@@ -70,7 +70,20 @@ function ExecutiveTaskRow(props: {
         <StatusDot tone={stateTone(props.task.state)} label={props.task.state} />
       </div>
       <Show when={props.task.state === "Running" && props.onCancel}>
-        <Button variant="secondary" size="sm" disabled={cancelRequested()} onClick={requestCancel}>
+        {/* Full accessible scope name (UIE-M-015): concise visible label, but
+            the accessible name states the exact controller task this cancels.
+            Invokes only the existing `onCancel` handler. */}
+        <Button
+          variant="secondary"
+          size="sm"
+          aria-label={
+            cancelRequested()
+              ? `Cancel requested for ${props.task.description}`
+              : `Cancel ${props.task.description}`
+          }
+          disabled={cancelRequested()}
+          onClick={requestCancel}
+        >
           {cancelRequested() ? "Cancel requested" : "Cancel"}
         </Button>
       </Show>

@@ -22,6 +22,7 @@ pub mod disk;
 pub mod documents;
 pub mod dynamic_gen;
 pub mod exec;
+pub mod feature_control;
 pub mod file_ops;
 pub mod google_workspace;
 pub mod google_workspace_contract;
@@ -78,6 +79,8 @@ pub struct ToolContext {
     /// Provenance of the triggering content (injection wall — see
     /// [`TriggerProvenance`]). Defaults to `User`.
     pub provenance: TriggerProvenance,
+    /// Optional runtime adapter for prompt-accessible feature status/control.
+    pub feature_control_backend: Option<Arc<dyn feature_control::FeatureControlBackend>>,
     /// Optional handle to the live `ConfigService` (settings-config-revamp).
     /// `None` for tool calls that don't need config access; the `config_patch`
     /// tool (Task 13) requires it. Defaults to `None`.
@@ -100,6 +103,7 @@ impl ToolContext {
             shell_state,
             cancellation,
             provenance: TriggerProvenance::User,
+            feature_control_backend: None,
             config: None,
             request_override: None,
         }
@@ -109,6 +113,15 @@ impl ToolContext {
     /// this to mark tool calls that act on external/tool-derived content.
     pub fn with_provenance(mut self, provenance: TriggerProvenance) -> Self {
         self.provenance = provenance;
+        self
+    }
+
+    /// Attach a runtime feature-control backend (builder-style).
+    pub fn with_feature_control_backend(
+        mut self,
+        backend: Arc<dyn feature_control::FeatureControlBackend>,
+    ) -> Self {
+        self.feature_control_backend = Some(backend);
         self
     }
 

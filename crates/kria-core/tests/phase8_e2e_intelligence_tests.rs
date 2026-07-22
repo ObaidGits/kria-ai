@@ -372,7 +372,10 @@ fn voice_task(text: &str) -> TaskRequest {
         TaskPayload::new(description.clone(), async move {
             let start = Instant::now();
             tokio::time::sleep(Duration::from_millis(10)).await;
-            TaskResult::Success { total_duration: start.elapsed(), output: Some(description) }
+            TaskResult::Success {
+                total_duration: start.elapsed(),
+                output: Some(description),
+            }
         }),
     )
 }
@@ -387,7 +390,10 @@ fn interactive_task(text: &str) -> TaskRequest {
         TaskPayload::new(description.clone(), async move {
             let start = Instant::now();
             tokio::time::sleep(Duration::from_millis(100)).await;
-            TaskResult::Success { total_duration: start.elapsed(), output: Some(description) }
+            TaskResult::Success {
+                total_duration: start.elapsed(),
+                output: Some(description),
+            }
         }),
     )
 }
@@ -402,7 +408,10 @@ fn background_task(description: &str) -> TaskRequest {
         TaskPayload::new(description.clone(), async move {
             let start = Instant::now();
             tokio::time::sleep(Duration::from_millis(50)).await;
-            TaskResult::Success { total_duration: start.elapsed(), output: Some(description) }
+            TaskResult::Success {
+                total_duration: start.elapsed(),
+                output: Some(description),
+            }
         }),
     )
 }
@@ -416,7 +425,10 @@ fn maintenance_task(description: &str) -> TaskRequest {
         false,
         TaskPayload::new(description.clone(), async move {
             let start = Instant::now();
-            TaskResult::Success { total_duration: start.elapsed(), output: Some(description) }
+            TaskResult::Success {
+                total_duration: start.elapsed(),
+                output: Some(description),
+            }
         }),
     )
 }
@@ -500,13 +512,17 @@ async fn executive_snapshot_and_broadcast_events_are_authoritative() {
 
     sender.submit(task).expect("submit task");
     let started = tokio::time::timeout(Duration::from_secs(1), events.recv())
-        .await.expect("started timeout").expect("started event");
+        .await
+        .expect("started timeout")
+        .expect("started event");
     assert!(matches!(started, ControllerEvent::TaskStarted {
         task_id: id, ref description, ..
     } if id == task_id && description == "Observe this task"));
 
     let completed = tokio::time::timeout(Duration::from_secs(1), events.recv())
-        .await.expect("completed timeout").expect("completed event");
+        .await
+        .expect("completed timeout")
+        .expect("completed event");
     assert!(matches!(completed, ControllerEvent::TaskCompleted {
         task_id: id, success: true, ..
     } if id == task_id));
@@ -514,12 +530,16 @@ async fn executive_snapshot_and_broadcast_events_are_authoritative() {
         while sender.snapshot().total_completed == 0 {
             tokio::task::yield_now().await;
         }
-    }).await.expect("snapshot update timeout");
+    })
+    .await
+    .expect("snapshot update timeout");
     assert!(sender.snapshot().active_foreground.is_none());
 
     sender.shutdown();
     tokio::time::timeout(Duration::from_secs(1), controller_handle)
-        .await.expect("shutdown timeout").expect("controller join");
+        .await
+        .expect("shutdown timeout")
+        .expect("controller join");
 }
 
 #[tokio::test]
@@ -539,11 +559,15 @@ async fn executive_cancel_stops_real_work_and_runs_cancel_handler() {
     let controller_handle = tokio::spawn(async move { controller.run().await });
     sender.submit(task).expect("submit task");
     let _ = tokio::time::timeout(Duration::from_secs(1), events.recv())
-        .await.expect("started timeout").expect("started event");
+        .await
+        .expect("started timeout")
+        .expect("started event");
 
     sender.cancel_task(task_id).expect("cancel task");
     let completed = tokio::time::timeout(Duration::from_secs(1), events.recv())
-        .await.expect("completion timeout").expect("completion event");
+        .await
+        .expect("completion timeout")
+        .expect("completion event");
     assert!(matches!(completed, ControllerEvent::TaskCompleted {
         task_id: id, success: false, ..
     } if id == task_id));
@@ -551,7 +575,9 @@ async fn executive_cancel_stops_real_work_and_runs_cancel_handler() {
 
     sender.shutdown();
     tokio::time::timeout(Duration::from_secs(1), controller_handle)
-        .await.expect("shutdown timeout").expect("controller join");
+        .await
+        .expect("shutdown timeout")
+        .expect("controller join");
 }
 
 /// Verify that voice tasks are always scheduled before background tasks,

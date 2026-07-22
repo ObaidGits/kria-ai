@@ -279,7 +279,7 @@ export function MemoryInspector(props: MemoryInspectorProps) {
             {/* Conflicts / contradictions (Req 5.2). */}
             <section class="kria-mem-insp__section" aria-label="Conflicts">
               <h3 class="kria-mem-insp__section-title">
-                <Icon name="triangle-alert" size={14} aria-hidden /> Conflicts
+                <Icon name="alert-triangle" size={14} aria-hidden /> Conflicts
               </h3>
               <Show
                 when={d().contradicts.length > 0}
@@ -336,7 +336,7 @@ export function MemoryInspector(props: MemoryInspectorProps) {
                 <Icon name="star" size={14} /> Reinforce
               </Button>
               <Button variant="secondary" size="sm" disabled={busy() === "penalize"} onClick={() => void run("penalize", () => memoryStore.penalize(memoryId()), "Memory penalized")}>
-                <Icon name="triangle-alert" size={14} /> Penalize
+                <Icon name="alert-triangle" size={14} /> Penalize
               </Button>
               <Button variant="ghost" size="sm" disabled={busy() === "forget"} onClick={() => void doForget()}>
                 <Icon name="eye-off" size={14} /> Forget

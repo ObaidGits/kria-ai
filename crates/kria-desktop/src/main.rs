@@ -68,7 +68,8 @@ fn main() {
             // finishes will get a clean "still initializing" error instead.
             app.handle().manage(commands::AppStateCell::new());
             app.handle().manage(tray::TrayPresentationState::default());
-            app.handle().manage(windows::WindowPresentationState::default());
+            app.handle()
+                .manage(windows::WindowPresentationState::default());
 
             // Tray is an enhancement, never a startup dependency. GNOME/KDE
             // Wayland sessions may have no StatusNotifier/AppIndicator host;
@@ -201,6 +202,8 @@ fn main() {
             commands::app_commands::get_health,
             commands::app_commands::get_runtime_diagnostics,
             commands::app_commands::get_settings,
+            commands::feature_controls::list_feature_controls,
+            commands::feature_controls::set_feature_enabled,
             commands::app_commands::patch_config,
             commands::app_commands::get_config_schema,
             commands::app_commands::get_config_history,

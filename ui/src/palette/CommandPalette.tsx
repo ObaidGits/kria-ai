@@ -38,6 +38,9 @@ import { searchItems, groupResults, flattenGroups } from "./search";
 import { clearRecents, recordUse } from "./recents";
 import { dispatchAsk, dispatchChange } from "./dispatch";
 import type { PaletteItem, PaletteMode } from "./types";
+import { registerOverlaySurface } from "../shell/overlayLayers";
+import { captureFocusOwner, returnFocus, type FocusReturnOwner } from "../shell/focusReturn";
+import { onCleanup } from "solid-js";
 import "./CommandPalette.css";
 import "../adaptive/adaptive.css";
 
@@ -57,7 +60,24 @@ export function CommandPalette() {
   let listRef: HTMLDivElement | undefined;
   let panelRef: HTMLDivElement | undefined;
 
+  // Non-blocking overlay: register so a pending approval (or modal) inerts the
+  // palette (§20.3, Req 11.13). It never outranks the Approval Center.
+  let unregisterSurface: (() => void) | undefined;
+  const bindPanel = (el: HTMLDivElement) => {
+    panelRef = el;
+    unregisterSurface?.();
+    unregisterSurface = registerOverlaySurface(el, "palette");
+  };
+  onCleanup(() => unregisterSurface?.());
+
   const open = () => shellStore.paletteOpen();
+
+  // §20.3 Command Palette Focus_Return_Owner = "Invoking button or pre-summon
+  // active element". Captured on the OPEN transition (before the input steals
+  // focus) and restored via the §20.4 ladder on close (G5, task 8.9). The
+  // palette is externally controlled, so we detect the open/close edge here.
+  let focusOwner: FocusReturnOwner | null = null;
+  let wasOpen = false;
 
   const parsed = createMemo<ParsedQuery>(() => parseQuery(rawInput(), baseMode()));
   const mode = () => parsed().mode;
@@ -79,14 +99,27 @@ export function CommandPalette() {
   // Reset transient state each time the palette opens, and focus the input so
   // the user can type immediately (Req 2.1 keyboard-first).
   createEffect(() => {
-    if (open()) {
+    const isOpen = open();
+    if (isOpen && !wasOpen) {
+      // OPEN edge: capture the invoking/pre-summon element BEFORE the input
+      // auto-focus below moves focus, so the owner is the opener, not the input.
+      focusOwner = captureFocusOwner();
       batch(() => {
         setRawInput("");
-        setBaseMode("go");
+        // Honour the requested initial mode (default "go"); Ctrl+Shift+P opens
+        // directly in "do" via shellStore.paletteMode() (design.md §20.2).
+        setBaseMode(shellStore.paletteMode());
         setActiveIndex(0);
       });
       queueMicrotask(() => inputRef?.focus());
+    } else if (!isOpen && wasOpen) {
+      // CLOSE edge: return focus to the opener via the §20.4 fallback ladder
+      // (opener → owning region → #space-root → stable shell), never a
+      // destructive control, without resetting draft/route/selection/scroll.
+      returnFocus(focusOwner);
+      focusOwner = null;
     }
+    wasOpen = isOpen;
   });
 
   // Scroll the active option into view on keyboard navigation.
@@ -127,6 +160,10 @@ export function CommandPalette() {
   }
 
   function onInputKeyDown(e: KeyboardEvent): void {
+    // Never act on an IME composition keystroke: Enter confirms the candidate
+    // and must not submit/select mid-composition (Req 2.x composition guard,
+    // design §20.2 repeat/composition behavior).
+    if (e.isComposing) return;
     if (isTextMode(mode())) {
       if (e.key === "Enter") {
         e.preventDefault();
@@ -196,7 +233,7 @@ export function CommandPalette() {
         <div class="kria-palette__overlay" aria-hidden={true} onClick={close} />
         <div class="kria-palette__positioner">
           <div
-            ref={panelRef}
+            ref={bindPanel}
             class="kria-palette"
             role="dialog"
             aria-modal="true"

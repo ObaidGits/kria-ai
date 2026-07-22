@@ -1,0 +1,195 @@
+/**
+ * PermissionSurface — risk-tiered Permission UX styling (design.md §10.4, Req 10).
+ *
+ * Token-only (Req 16.2 — zero raw color). Three calm presence presentations:
+ *   • report   (GREEN)  — a quiet line + an inline Undo link. Non-blocking.
+ *   • intent   (YELLOW) — an intent line + a Stop control (warning-toned).
+ *   • decision (RED)    — a single-line allow/deny (danger-toned Deny, accent
+ *                         Allow), what/why visible, plus a routing "Review" link.
+ *
+ * Motion is opacity-only (entrance fade) and token-driven; under reduced motion /
+ * the global kill-switch it collapses to no animation (Req 17.4 / 21.4). This
+ * file styles `.kria-permission*` only — it never touches the Room base, so it
+ * stays clear of the accent-on-room-base guardrail. The emerald accent appears
+ * ONLY on the Allow verb + focus rings (earn-the-accent, L4); attention hues
+ * (amber/red) are reserved for the YELLOW/RED asks (design §2 color usage).
+ */
+
+.kria-permission {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 100%;
+  max-width: 32rem;
+  margin: 0 auto;
+  animation: kria-permission-in var(--motion-duration-recede) var(--motion-easing-presence) both;
+}
+
+.kria-permission__report,
+.kria-permission__intent {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  justify-content: center;
+}
+
+.kria-permission__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.kria-permission__what {
+  font-family: var(--font-family-text);
+  font-size: var(--font-size-body);
+  line-height: 1.5;
+  color: var(--color-text-primary);
+}
+
+.kria-permission__why {
+  font-family: var(--font-family-text);
+  font-size: var(--font-size-caption);
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+/* ── Shared control base ── */
+.kria-permission__undo,
+.kria-permission__stop,
+.kria-permission__allow,
+.kria-permission__deny,
+.kria-permission__review {
+  appearance: none;
+  margin: 0;
+  font-family: var(--font-family-text);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  border-radius: var(--radius-md);
+}
+
+/* GREEN Undo — an inline routing-style link (no fill, muted). */
+.kria-permission__undo {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-text-muted);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.kria-permission__undo:hover {
+  color: var(--color-text-secondary);
+}
+
+/* YELLOW Stop — warning-toned soft control. */
+.kria-permission__stop {
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-warning-solid);
+  background-color: var(--color-warning-soft);
+  color: var(--color-warning-text);
+}
+
+.kria-permission__stop:hover {
+  background-color: var(--glass-fill-active);
+}
+
+/* ── RED decision — single-line allow/deny (living-glass panel) ── */
+.kria-permission__decision {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background-color: var(--glass-fill-rest);
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
+}
+
+.kria-permission__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* Allow — meaningful emerald accent (earn-the-accent, L4). */
+.kria-permission__allow {
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-accent-border);
+  background-color: var(--color-accent-soft);
+  color: var(--color-accent-text);
+}
+
+.kria-permission__allow:hover {
+  background-color: var(--glass-fill-active);
+  color: var(--color-accent-hover);
+}
+
+/* Deny — danger-toned soft control. */
+.kria-permission__deny {
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-danger-solid);
+  background-color: var(--color-danger-soft);
+  color: var(--color-danger-text);
+}
+
+.kria-permission__deny:hover {
+  background-color: var(--glass-fill-active);
+}
+
+/* Review — inline routing link to the Approval Center (no fill, muted). */
+.kria-permission__review {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-text-muted);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.kria-permission__review:hover {
+  color: var(--color-text-secondary);
+}
+
+/* Visible focus on every control (Req 21.1). */
+.kria-permission__undo:focus-visible,
+.kria-permission__stop:focus-visible,
+.kria-permission__allow:focus-visible,
+.kria-permission__deny:focus-visible,
+.kria-permission__review:focus-visible {
+  outline: 2px solid var(--color-accent-border);
+  outline-offset: var(--space-1);
+  border-radius: var(--radius-sm);
+}
+
+/* Interruptibility-blocked RED posture: stay quiet/dim (via the ember, never
+   audio — Req 26.3). No new color; only lowers presence emphasis. */
+.kria-permission[data-blocked-context="true"] .kria-permission__decision {
+  opacity: 0.85;
+}
+
+@keyframes kria-permission-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* ── Reduced-motion / kill-switch (Req 17.4 / 21.4): freeze the entrance. ── */
+.kria-permission[data-motion="static"] {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kria-permission {
+    animation: none;
+  }
+}

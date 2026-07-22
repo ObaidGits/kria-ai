@@ -4884,6 +4884,12 @@ pub struct AgentLoop {
 }
 
 impl AgentLoop {
+    /// Hot-toggle TurnGate's optional L0 ONNX classifier worker.
+    pub fn set_classifier_enabled(&self, enabled: bool, model_path: Option<&str>) -> bool {
+        self.turn_gate
+            .set_onnx_classifier_enabled(enabled, model_path)
+    }
+
     pub fn new(
         model_router: Arc<ModelRouter>,
         tool_registry: Arc<ToolRegistry>,
@@ -5024,6 +5030,9 @@ impl AgentLoop {
     /// goals exist. Best-effort.
     pub fn active_goal_context(&self) -> Option<String> {
         let ms = self.memory_system.as_ref()?;
+        if !ms.is_enabled() {
+            return None;
+        }
         match ms.goals().planner_context(5) {
             Ok(ctx) => ctx,
             Err(e) => {
@@ -5038,6 +5047,9 @@ impl AgentLoop {
     /// confident history. Best-effort.
     pub fn plan_recommendation(&self, task: &str) -> Option<String> {
         let ms = self.memory_system.as_ref()?;
+        if !ms.is_enabled() {
+            return None;
+        }
         match ms.plans().recommend(task) {
             Ok(rec) => rec,
             Err(e) => {
@@ -5051,6 +5063,9 @@ impl AgentLoop {
     /// loop, Priority 1). Best-effort; no-op without a memory system.
     fn record_plan_step(&self, task: &str, tool: &str, success: bool) {
         if let Some(ms) = self.memory_system.as_ref() {
+            if !ms.is_enabled() {
+                return;
+            }
             let _ =
                 ms.plans()
                     .record_outcome(task, std::slice::from_ref(&tool.to_string()), success);
@@ -5061,6 +5076,9 @@ impl AgentLoop {
     /// refuted approaches (Priority 2). Best-effort.
     pub fn reasoning_context(&self, task: &str) -> Option<String> {
         let ms = self.memory_system.as_ref()?;
+        if !ms.is_enabled() {
+            return None;
+        }
         match ms.reasoning().reasoning_context(task, 3) {
             Ok(ctx) => ctx,
             Err(e) => {
@@ -5075,6 +5093,9 @@ impl AgentLoop {
     /// (hallucination/error signal). Best-effort.
     fn record_reasoning(&self, session: &str, task: &str, content: &str, success: bool) {
         if let Some(ms) = self.memory_system.as_ref() {
+            if !ms.is_enabled() {
+                return;
+            }
             let r = ms.reasoning();
             let _ = if success {
                 r.record_chain(Some(session), task, content, 0.7, true)

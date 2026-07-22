@@ -11,6 +11,14 @@ use uuid::Uuid;
 
 const INIT_MSG: &str = "KRIA is still initializing — please try again in a moment";
 
+fn require_memory_enabled(state: &AppState) -> Result<(), String> {
+    if state.memory_system.is_enabled() {
+        Ok(())
+    } else {
+        Err("memory feature is disabled".to_string())
+    }
+}
+
 fn parse_uuid(s: &str) -> Result<Uuid, String> {
     Uuid::parse_str(s).map_err(|_| format!("invalid uuid: {s}"))
 }
@@ -388,6 +396,7 @@ pub async fn memory_library_list(
     state: State<'_, AppStateCell>,
 ) -> Result<serde_json::Value, String> {
     let st = state.get().ok_or_else(|| INIT_MSG.to_string())?;
+    require_memory_enabled(st)?;
     let items = st
         .memory_system
         .library()
@@ -455,6 +464,7 @@ pub async fn memory_library_delete(
     state: State<'_, AppStateCell>,
 ) -> Result<usize, String> {
     let st = state.get().ok_or_else(|| INIT_MSG.to_string())?;
+    require_memory_enabled(st)?;
     let item_id = parse_uuid(&doc_id)?;
     st.memory_system
         .library()
@@ -476,6 +486,7 @@ pub async fn memory_timeline(
     state: State<'_, AppStateCell>,
 ) -> Result<serde_json::Value, String> {
     let st = state.get().ok_or_else(|| INIT_MSG.to_string())?;
+    require_memory_enabled(st)?;
     let entries = st
         .memory_system
         .research()
@@ -496,6 +507,7 @@ pub async fn memory_timeline(
 #[tauri::command]
 pub async fn memory_meta(state: State<'_, AppStateCell>) -> Result<serde_json::Value, String> {
     let st = state.get().ok_or_else(|| INIT_MSG.to_string())?;
+    require_memory_enabled(st)?;
     let m = st
         .memory_system
         .research()
@@ -524,6 +536,7 @@ pub async fn memory_goals_list(
     state: State<'_, AppStateCell>,
 ) -> Result<serde_json::Value, String> {
     let st = state.get().ok_or_else(|| INIT_MSG.to_string())?;
+    require_memory_enabled(st)?;
     let goals = st
         .memory_system
         .goals()
@@ -540,6 +553,7 @@ pub async fn memory_goal_create(
 ) -> Result<String, String> {
     use kria_core::memory::goals::NewGoal;
     let st = state.get().ok_or_else(|| INIT_MSG.to_string())?;
+    require_memory_enabled(st)?;
     let id = st
         .memory_system
         .goals()
@@ -560,6 +574,7 @@ pub async fn memory_goal_set_status(
 ) -> Result<(), String> {
     use kria_core::memory::goals::GoalStatus;
     let st = state.get().ok_or_else(|| INIT_MSG.to_string())?;
+    require_memory_enabled(st)?;
     st.memory_system
         .goals()
         .set_status(parse_uuid(&goal_id)?, GoalStatus::from_str(&status))
@@ -578,6 +593,7 @@ pub async fn memory_plans_analytics(
     state: State<'_, AppStateCell>,
 ) -> Result<serde_json::Value, String> {
     let st = state.get().ok_or_else(|| INIT_MSG.to_string())?;
+    require_memory_enabled(st)?;
     let a = st
         .memory_system
         .plans()
@@ -595,6 +611,7 @@ pub async fn memory_plans_for(
     state: State<'_, AppStateCell>,
 ) -> Result<serde_json::Value, String> {
     let st = state.get().ok_or_else(|| INIT_MSG.to_string())?;
+    require_memory_enabled(st)?;
     let plans = st
         .memory_system
         .plans()
@@ -620,6 +637,7 @@ pub async fn memory_reasoning_analytics(
     state: State<'_, AppStateCell>,
 ) -> Result<serde_json::Value, String> {
     let st = state.get().ok_or_else(|| INIT_MSG.to_string())?;
+    require_memory_enabled(st)?;
     let a = st
         .memory_system
         .reasoning()
@@ -639,6 +657,7 @@ pub async fn memory_reasoning_history(
     state: State<'_, AppStateCell>,
 ) -> Result<serde_json::Value, String> {
     let st = state.get().ok_or_else(|| INIT_MSG.to_string())?;
+    require_memory_enabled(st)?;
     let traces = st
         .memory_system
         .reasoning()
@@ -678,6 +697,7 @@ pub async fn memory_causal_effects_of(
     state: State<'_, AppStateCell>,
 ) -> Result<serde_json::Value, String> {
     let st = state.get().ok_or_else(|| INIT_MSG.to_string())?;
+    require_memory_enabled(st)?;
     let links = st
         .memory_system
         .causal()
@@ -692,6 +712,7 @@ pub async fn memory_causal_causes_of(
     state: State<'_, AppStateCell>,
 ) -> Result<serde_json::Value, String> {
     let st = state.get().ok_or_else(|| INIT_MSG.to_string())?;
+    require_memory_enabled(st)?;
     let links = st
         .memory_system
         .causal()
@@ -707,6 +728,7 @@ pub async fn memory_causal_chains(
     state: State<'_, AppStateCell>,
 ) -> Result<serde_json::Value, String> {
     let st = state.get().ok_or_else(|| INIT_MSG.to_string())?;
+    require_memory_enabled(st)?;
     let chains = st
         .memory_system
         .causal()
@@ -727,6 +749,7 @@ pub async fn memory_graph_centrality(
     state: State<'_, AppStateCell>,
 ) -> Result<serde_json::Value, String> {
     let st = state.get().ok_or_else(|| INIT_MSG.to_string())?;
+    require_memory_enabled(st)?;
     let hits = st
         .memory_system
         .graph_intelligence()
@@ -748,6 +771,7 @@ pub async fn memory_graph_communities(
     state: State<'_, AppStateCell>,
 ) -> Result<serde_json::Value, String> {
     let st = state.get().ok_or_else(|| INIT_MSG.to_string())?;
+    require_memory_enabled(st)?;
     let comms = st
         .memory_system
         .graph_intelligence()
@@ -818,9 +842,10 @@ pub async fn memory_cold_start_status(
     state: State<'_, AppStateCell>,
 ) -> Result<serde_json::Value, String> {
     let st = state.get().ok_or_else(|| INIT_MSG.to_string())?;
-    let cs = st.memory_system.cold_start();
-    let granted = cs.granted_sources().map_err(|e| e.to_string())?;
-    let onboarding = cs.onboarding_complete().map_err(|e| e.to_string())?;
+    let (onboarding, granted) = st
+        .memory_system
+        .cold_start_status()
+        .map_err(|e| e.to_string())?;
     let granted_str: Vec<&str> = granted.iter().map(|s| s.as_str()).collect();
     Ok(serde_json::json!({ "onboarding_complete": onboarding, "granted": granted_str }))
 }
@@ -833,12 +858,9 @@ pub async fn memory_cold_start_set(
 ) -> Result<(), String> {
     let st = state.get().ok_or_else(|| INIT_MSG.to_string())?;
     let src = scan_source(&source)?;
-    let cs = st.memory_system.cold_start();
-    if granted {
-        cs.grant(src).map_err(|e| e.to_string())
-    } else {
-        cs.revoke(src).map_err(|e| e.to_string())
-    }
+    st.memory_system
+        .set_cold_start_consent(src, granted)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -930,6 +952,7 @@ pub async fn memory_cold_start_cancel(state: State<'_, AppStateCell>) -> Result<
 #[tauri::command]
 pub async fn memory_cold_start_complete(state: State<'_, AppStateCell>) -> Result<(), String> {
     let st = state.get().ok_or_else(|| INIT_MSG.to_string())?;
+    require_memory_enabled(st)?;
     st.memory_system
         .cold_start()
         .complete_onboarding()

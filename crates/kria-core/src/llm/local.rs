@@ -138,6 +138,13 @@ impl LocalBackend {
         }
     }
 
+    /// Detach a stopped managed runtime so requests cannot retain its lifecycle owner.
+    pub fn detach_server_manager(&self) {
+        if let Ok(mut guard) = self.server_manager.write() {
+            *guard = None;
+        }
+    }
+
     /// Returns the attached orchestrator server manager, if any.
     pub fn server_manager(&self) -> Option<Arc<LlamaServerManager>> {
         self.server_manager
