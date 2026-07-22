@@ -1,3 +1,7 @@
+---
+inclusion: always
+---
+
 # K.R.I.A. Product Overview
 
 ## What is K.R.I.A.?

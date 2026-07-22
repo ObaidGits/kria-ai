@@ -1,4 +1,10 @@
+---
+inclusion: manual
+---
+
 # Technology Stack & Build System
+
+> Summon with `#tech` when working on build, dependencies, or stack details. Core essentials are always-on in `core.md`.
 
 ## Core Tech Stack
 

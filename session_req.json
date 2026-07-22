@@ -1,7 +1,0 @@
-{
-  "capabilities": {
-    "alwaysMatch": {
-      "tauri:options": { "application": "/media/obaid/SSD/KRIA/target/debug/kria-desktop" }
-    }
-  }
-}

@@ -107,6 +107,9 @@ test.png
 /target/quality-report.json
 /target-tests/
 /testing/eval_reports/
+/eval_reports/
+!/eval_reports/gui_cog/preflight_latest.json
+/tests/gui-cognition-e2e/reports/
 
 # ── IDE ──────────────────────────────────────────────────────────
 .idea/

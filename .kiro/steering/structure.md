@@ -1,4 +1,10 @@
+---
+inclusion: manual
+---
+
 # Project Structure & Organization
+
+> Summon with `#structure` when navigating the repo layout or module ownership. Core essentials are always-on in `core.md`.
 
 ## Top-Level Directory Layout
 

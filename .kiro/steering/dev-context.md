@@ -1,3 +1,7 @@
+---
+inclusion: always
+---
+
 # KRIA Development Context (Permanent)
 
 ## Project stage
